@@ -929,28 +929,50 @@ function modelFake(user: string, answers: Record<string, Partial<RunResult>> = L
 }
 const snapshot = (f: Fake) => new Map([...f.files].filter(([path]) => path.startsWith(installTargets(f.ports.env).unitDir) || path.startsWith(installTargets(f.ports.env).binDir) || path === configFile(f)));
 
-test("install, fresh and prompting: one model question for both sessions; empty takes the recommendation, a number or a listed ref picks, none pins nothing, anything else fails and writes nothing", async (t) => {
-	for (const [reply, want] of [["", "anthropic/claude-opus-5-5"], ["2", "openai/gpt-6.1-sol"], ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6.1-sol"]] as const) {
+test("install, fresh and prompting: the parent's question, then the operator's from the same list defaulting to the parent's pick; empty takes it, a number or a listed ref picks, none pins nothing, anything else fails and writes nothing", async (t) => {
+	for (const [replies, parent, operator, enter] of [
+		[[""], "anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5", "1"],
+		[["2"], "openai/gpt-6.1-sol", "openai/gpt-6.1-sol", "2"],
+		[["openai-codex/gpt-6.1-sol"], "openai-codex/gpt-6.1-sol", "openai-codex/gpt-6.1-sol", "openai-codex/gpt-6.1-sol"],
+		[["2", "1"], "openai/gpt-6.1-sol", "anthropic/claude-opus-5-5", "2"],
+	] as const) {
 		const user = scratch(t);
 		const f = modelFake(user);
-		f.replies.push(reply);
+		f.replies.push(...replies);
 		assert.equal(await install(flags(user), f.ports), 0, f.lines.join("\n"));
 		const asked = modelQuestions(f);
-		assert.equal(asked.length, 1, f.questions.join("\n---\n"));
-		assert.match(asked[0]!, /^Model for the parent and the operator session/);
+		assert.equal(asked.length, 2, f.questions.join("\n---\n"));
+		assert.match(asked[0]!, /^Model for the parent — /);
+		assert.match(asked[1]!, /^Model for the operator session — /);
+		assert.equal(asked[0]!.split("\n").slice(1, -1).join("\n"), asked[1]!.split("\n").slice(1, -1).join("\n"), "the same numbered list");
 		assert.match(asked[0]!, /\n {2}1\) anthropic\/claude-opus-5-5 +recommended: in the routing rubric\n/);
-		assert.ok(pinsParent(f, want), configText(f));
-		assert.ok(exportsOf(f).endsWith(` CP_PARENT_MODEL='${want}' CP_OPERATOR_MODEL='${want}'`), exportsOf(f));
+		assert.match(asked[0]!, /none \[1\]: $/);
+		assert.ok(asked[1]!.endsWith(`none [${enter}]: `), asked[1]);
+		assert.ok(pinsParent(f, parent), configText(f));
+		assert.ok(exportsOf(f).endsWith(` CP_PARENT_MODEL='${parent}' CP_OPERATOR_MODEL='${operator}'`), exportsOf(f));
 	}
+	const enterTwice = modelFake(scratch(t));
+	enterTwice.replies.push("", "");
+	assert.equal(await install(flags(enterTwice.ports.env.HOME!), enterTwice.ports), 0);
+	assert.deepEqual(enterTwice.lines.filter((line) => line.includes(": model:")), [
+		"changed: model: parent anthropic/claude-opus-5-5 (recommended: in the routing rubric; --parent-model overrides)",
+		"changed: model: operator anthropic/claude-opus-5-5 (recommended: in the routing rubric; --operator-model overrides)",
+	]);
 	const none = modelFake(scratch(t));
 	none.replies.push("none");
 	assert.equal(await install(flags(none.ports.env.HOME!), none.ports), 0, none.lines.join("\n"));
+	assert.ok(modelQuestions(none)[1]?.endsWith("none [none]: "), "the operator inherits none");
 	assert.doesNotMatch(configText(none) + wrapperOf(none), /parent_model|CP_PARENT_MODEL|CP_OPERATOR_MODEL/);
 	const bad = modelFake(scratch(t));
 	bad.replies.push("x/y");
 	assert.equal(await install(flags(bad.ports.env.HOME!), bad.ports), 1);
-	assert.ok(bad.lines.some((line) => line.startsWith("fail: model: x/y is not a model pi can use")), bad.lines.join("\n"));
+	assert.ok(bad.lines.some((line) => line.startsWith("fail: model: x/y is not a model pi can use") && line.endsWith("rerun with --parent-model <provider/model>")), bad.lines.join("\n"));
 	assert.equal(configText(bad) + wrapperOf(bad), "", "no data/daemon.json, no wrapper");
+	const badOperator = modelFake(scratch(t));
+	badOperator.replies.push("", "7");
+	assert.equal(await install(flags(badOperator.ports.env.HOME!), badOperator.ports), 1);
+	assert.ok(badOperator.lines.some((line) => line.startsWith("fail: model: 7 is not one of the choices") && line.endsWith("rerun with --operator-model <provider/model>")), badOperator.lines.join("\n"));
+	assert.equal(configText(badOperator) + wrapperOf(badOperator), "", "an operator failure writes nothing either");
 });
 
 test("install: the parent's own default model is recommended ahead of the rubric when pi lists it; the listing runs with cp-daemon's env", async (t) => {
@@ -979,7 +1001,7 @@ test("install: the parent's own default model is recommended ahead of the rubric
 	assert.ok(pinsParent(unlisted, "anthropic/claude-opus-5-5"), "an unlisted default is never recommended; the rubric follows");
 });
 
-test("install --parent-model / --operator-model win; on a fresh install one flag sets both; an unlisted flag fails; an empty listing writes the flag with a note", async (t) => {
+test("install --parent-model / --operator-model win; each sets only its own target, except a lone --parent-model on a fresh install sets both; an unlisted flag fails; an empty listing writes the flag with a note", async (t) => {
 	const one = modelFake(scratch(t));
 	assert.equal(await install(flags(one.ports.env.HOME!, { "parent-model": "openai/gpt-6.1-sol" }), one.ports), 0, one.lines.join("\n"));
 	assert.deepEqual(modelQuestions(one), []);
@@ -991,6 +1013,16 @@ test("install --parent-model / --operator-model win; on a fresh install one flag
 	assert.ok(pinsParent(two, "openai/gpt-6.1-sol"));
 	assert.ok(exportsOf(two).endsWith(" CP_PARENT_MODEL='openai/gpt-6.1-sol' CP_OPERATOR_MODEL='anthropic/claude-opus-5-5'"), exportsOf(two));
 
+	const lone = modelFake(scratch(t));
+	lone.replies.push("2");
+	assert.equal(await install(flags(lone.ports.env.HOME!, { "operator-model": "openai-codex/gpt-6.1-sol" }), lone.ports), 0, lone.lines.join("\n"));
+	assert.deepEqual(modelQuestions(lone).map((q) => q.split(" — ")[0]), ["Model for the parent"], "a lone --operator-model sets only the operator; the parent is still asked");
+	assert.ok(pinsParent(lone, "openai/gpt-6.1-sol"));
+	assert.ok(exportsOf(lone).endsWith(" CP_PARENT_MODEL='openai/gpt-6.1-sol' CP_OPERATOR_MODEL='openai-codex/gpt-6.1-sol'"), exportsOf(lone));
+	const loneQuiet = modelFake(scratch(t));
+	assert.equal(await install(flags(loneQuiet.ports.env.HOME!, { "operator-model": "openai-codex/gpt-6.1-sol", yes: true }), loneQuiet.ports), 0);
+	assert.ok(pinsParent(loneQuiet, "anthropic/claude-opus-5-5"), "--yes takes the recommendation for the parent");
+	assert.ok(exportsOf(loneQuiet).endsWith(" CP_PARENT_MODEL='anthropic/claude-opus-5-5' CP_OPERATOR_MODEL='openai-codex/gpt-6.1-sol'"), exportsOf(loneQuiet));
 	const unlisted = modelFake(scratch(t));
 	assert.equal(await install(flags(unlisted.ports.env.HOME!, { "operator-model": "x/y" }), unlisted.ports), 1);
 	assert.ok(unlisted.lines.some((line) => line.startsWith("fail: model: x/y (--operator-model) is not a model pi can use")), unlisted.lines.join("\n"));

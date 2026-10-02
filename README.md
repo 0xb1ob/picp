@@ -97,8 +97,8 @@ The flags you are most likely to need:
 | Flag | What it does |
 |---|---|
 | `--viewer-host <ip>` | the address the dashboard listens on. Without it a fresh install asks, recommending this machine's Tailscale address. A LAN address means anyone on that network can use the dashboard's controls; public, wildcard and link-local addresses are refused. |
-| `--parent-model <provider/model>` | the parent's model. Without it a fresh install lists the models pi can use and asks once. On a fresh install it also sets the operator's model. |
-| `--operator-model <provider/model>` | the operator session's model. |
+| `--parent-model <provider/model>` | the parent's model. Without it a fresh install lists the models pi can use and asks. On a fresh install without `--operator-model` it also sets the operator's model. |
+| `--operator-model <provider/model>` | the operator session's model; sets only that one. Without it a fresh install asks from the same list, defaulting to the parent's pick (Enter twice uses one model for both). |
 | `--gateway-url https://<gateway> --gateway-key-file <file>` | **optional**: a sub2api gateway the parent consults for capacity when routing work. The key is read from the first line of the file, never from the command line, and stored in `~/.config/pi-command-post/gateway.env` (0600). Without these flags the step is skipped. |
 | `--push-origin <https-url>` | optional phone notifications (needs an HTTPS proxy in front of the dashboard; see [docs/viewer-app.md](docs/viewer-app.md#web-push)). |
 | `--dry-run` | show what would change, change nothing. |

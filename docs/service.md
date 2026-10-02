@@ -147,7 +147,7 @@ bind, `data/dashboard-control.json` `{"enabled": false}` stays the kill switch.
 
 ### 3c. The models
 
-One choice for the parent (`parent_model` in `data/daemon.json`, `CP_PARENT_MODEL` in the
+Two choices from one list: the parent (`parent_model` in `data/daemon.json`, `CP_PARENT_MODEL` in the
 wrapper) and the operator session (`CP_OPERATOR_MODEL` in the wrapper, which
 `bin/cp-operator` turns into pi's `--model`). The candidates are what
 `pi --no-extensions --list-models` lists, run with the environment cp-daemon's children
@@ -155,21 +155,22 @@ have (`HOME`, `USER`, `LOGNAME`, the installing `PATH`): a provider key exported
 in your shell never reaches the service, so it is never offered. Per target,
 first match wins:
 
-1. `--parent-model M` / `--operator-model M` — on a fresh install one flag sets
-   both. A value pi does not list is `fail: model:`; with an empty or unreadable
+1. `--parent-model M` / `--operator-model M` — each sets only its own target,
+   except a lone `--parent-model` on a fresh install, which sets both. A value pi does not list is `fail: model:`; with an empty or unreadable
    listing it is written with a `skip: model: … written unchecked` note.
 2. An existing install keeps what it pins (`data/daemon.json`, a legacy `cp-parent.service`, the wrapper: `ok: model: … kept`);
    an unpinned one stays unpinned (`skip`) unless `--force`, which re-opens only
    unpinned choices. A pinned choice is never re-asked.
-3. A fresh install asks once, numbered (at most 9): the parent's own default
+3. A fresh install asks the parent's model, then the operator's, from the same numbered list (at most 9): the parent's own default
    first (`CP_PARENT_MODEL`/`PI_PROVIDER`+`PI_MODEL` in the installing env, then the
    saved `cp-parent-control.json` model), then the routing rubric's models
    (`data/routing.json`, else `defaults/routing.default.json`), then pi's saved
    default (`settings.json` `defaultProvider/defaultModel`), else the first
-   listed — each only when pi lists it; the first is recommended. Enter takes it,
-   a number or a listed `provider/model` picks, `none` pins nothing, anything
+   listed — each only when pi lists it; the first is recommended. Enter takes it
+   for the parent; the operator's question defaults to the parent's pick, so Enter twice
+   pins one model for both. A number or a listed `provider/model` picks, `none` pins nothing, anything
    else fails and writes nothing. `--yes`, `--no-prompt` or no terminal take the
-   recommendation (`changed: model: parent <m> (recommended: …; --parent-model overrides)`).
+   recommendation for both (`changed: model: parent <m> (recommended: …; --parent-model overrides)`).
 
 No listed model prints "run `pi`, then /login, then rerun cp-install" and pins
 nothing. Changing a pin needs the flag and `--force`; it applies at the next
