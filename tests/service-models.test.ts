@@ -42,12 +42,16 @@ test("modelShortlist: listed only, deduped, in preference order, at most 9; noth
 	assert.equal(modelShortlist(many, []).length, 9);
 });
 
-test("modelPrompt: numbered, the first marked recommended, default [1]", () => {
-	const text = modelPrompt([{ model: "openai/gpt-6.1-sol", why: "the parent's default" }, { model: "anthropic/claude-opus-5-5", why: "in the routing rubric" }], 5);
-	assert.match(text, /^Model for the parent and the operator session — .*\(5 available/);
+test("modelPrompt: one target, numbered, the first marked recommended, default [1]; a fallback shows as its number, its ref or none", () => {
+	const shortlist = [{ model: "openai/gpt-6.1-sol", why: "the parent's default" }, { model: "anthropic/claude-opus-5-5", why: "in the routing rubric" }];
+	const text = modelPrompt(shortlist, 5, "parent");
+	assert.match(text, /^Model for the parent — .*\(5 available/);
 	assert.match(text, /\n {2}1\) openai\/gpt-6\.1-sol {9}recommended: the parent's default\n/);
 	assert.match(text, /\n {2}2\) anthropic\/claude-opus-5-5 {2}in the routing rubric\n/);
 	assert.match(text, /Choose 1-2, type a provider\/model, or none \[1\]: $/);
+	assert.match(modelPrompt(shortlist, 5, "operator", "anthropic/claude-opus-5-5"), /^Model for the operator session — [^]*none \[2\]: $/);
+	assert.match(modelPrompt(shortlist, 5, "operator", "c/3"), /none \[c\/3\]: $/);
+	assert.match(modelPrompt(shortlist, 5, "operator", null), /none \[none\]: $/);
 });
 
 test("pickModelReply: empty, a number, a listed ref and none pick; out of range and unlisted refs are errors", () => {

@@ -12,9 +12,10 @@
  *   --app DIR           the checkout cp-daemon runs (default: this one)
  *   --port N            the viewer port (default 8766)
  *   --parent-model M    data/daemon.json parent_model and the wrapper's CP_PARENT_MODEL (on a fresh install
- *                       the operator's too); default: the kept pin, else one prompt over the models
- *                       `pi --no-extensions --list-models` lists as the daemon sees them
- *   --operator-model M  CP_OPERATOR_MODEL in the wrapper: the operator session's --model (fresh: the parent's too)
+ *                       the operator's too, when --operator-model is absent); default: the kept pin, else a
+ *                       prompt over the models `pi --no-extensions --list-models` lists as the daemon sees them
+ *   --operator-model M  CP_OPERATOR_MODEL in the wrapper: the operator session's --model (its own prompt
+ *                       defaults to the parent's pick)
  *   --gateway-url URL   the optional sub2api gateway (https origin): data/capacity.json, written once
  *   --gateway-key-file PATH  its admin key (first line), copied to ~/.config/pi-command-post/gateway.env (0600)
  *   --viewer-host IP    pin the dashboard's bind address (data/daemon.json viewer_host): a Tailscale,

@@ -1,5 +1,5 @@
 /**
- * cp-install step 3c (cp-er76): one model question for the parent and the operator session. The
+ * cp-install step 3c (cp-er76): a model question for the parent, then the operator session (defaulting to the parent's pick). The
  * choices are what `pi --no-extensions --list-models` reports usable with the environment cp-daemon
  * will give the parent; the answer is pinned as `parent_model` in data/daemon.json and as
  * `CP_PARENT_MODEL`/`CP_OPERATOR_MODEL` in the cp-operator wrapper. `~/.pi/agent/settings.json` is
@@ -58,10 +58,13 @@ export function modelShortlist(available: readonly string[], preferred: readonly
 	return (out.length > 0 ? out : available.map((model) => ({ model, why: "listed by pi" }))).slice(0, SHORTLIST_MAX);
 }
 
-export function modelPrompt(shortlist: readonly ModelChoice[], total: number, targets: readonly Target[] = TARGETS): string {
+/** One target's question; Enter takes `fallback` (the recommendation, or for the operator the parent's pick), shown in brackets. */
+export function modelPrompt(shortlist: readonly ModelChoice[], total: number, target: Target, fallback: string | null = shortlist[0]?.model ?? null): string {
 	const width = Math.max(...shortlist.map((choice) => choice.model.length));
 	const lines = shortlist.map((choice, n) => `  ${n + 1}) ${choice.model.padEnd(width)}  ${n === 0 ? `recommended: ${choice.why}` : choice.why}`);
-	return `Model for ${targets.map((target) => LABEL[target]).join(" and ")} — models pi can use as the service sees them (${total} available; pi --list-models lists them):\n${lines.join("\n")}\nChoose 1-${shortlist.length}, type a provider/model, or none [1]: `;
+	const at = shortlist.findIndex((choice) => choice.model === fallback);
+	const enter = fallback === null ? "none" : at >= 0 ? String(at + 1) : fallback;
+	return `Model for ${LABEL[target]} — models pi can use as the service sees them (${total} available; pi --list-models lists them):\n${lines.join("\n")}\nChoose 1-${shortlist.length}, type a provider/model, or none [${enter}]: `;
 }
 
 /** `""` → the recommendation, a number → that entry, a listed ref → it, `none` → null; anything else is an error. */
@@ -116,8 +119,8 @@ export interface ModelContext {
 }
 
 /**
- * Per target: `--parent-model`/`--operator-model` (on a fresh install one sets both), else the kept pin
- * (an unpinned one stays so unless `--force`), else one prompt / the recommendation. "fail" writes nothing.
+ * Per target: `--parent-model`/`--operator-model` (on a fresh install a lone `--parent-model` sets both), else
+ * the kept pin (an unpinned one stays so unless `--force`), else one prompt per target / the recommendation. "fail" writes nothing.
  */
 export function chooseModels(ctx: ModelContext): Models | "fail" {
 	const { flags, ports, kept, step } = ctx;
@@ -126,10 +129,8 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 		const value = flags[`${target}-model`]?.trim();
 		if (value) explicit[target] = value;
 	}
-	if (ctx.fresh) {
-		explicit.parent ??= explicit.operator;
-		explicit.operator ??= explicit.parent;
-	}
+	// A lone --parent-model on a fresh install still sets both; --operator-model sets only its own.
+	if (ctx.fresh) explicit.operator ??= explicit.parent;
 	const open = TARGETS.filter((target) => explicit[target] === undefined && (ctx.fresh || (ctx.force && kept[target] === undefined)));
 	let listed: string[] | undefined;
 	if (open.length > 0 || explicit.parent !== undefined || explicit.operator !== undefined) {
@@ -176,19 +177,24 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 		...rubricModels(routing).map((model) => ({ model, why: "in the routing rubric" })),
 		...(piDefault ? [{ model: piDefault, why: "your pi default" }] : []),
 	]);
-	const reply = ctx.prompting ? ctx.answer(modelPrompt(shortlist, listed.length, open)) : "";
-	const picked = pickModelReply(reply, shortlist, listed);
-	if (picked.error !== undefined) {
-		step("fail", "model", `${picked.error}; rerun with --parent-model <provider/model>`);
-		return "fail";
-	}
+	// One question per target, the same list; the operator's Enter takes the parent's pick from this run.
+	let parentPick: { model: string | null; how: string } | undefined;
 	for (const target of open) {
+		const inherited = target === "operator" ? parentPick : undefined;
+		const fallback = inherited ? inherited.model : shortlist[0]?.model ?? null;
+		const reply = ctx.prompting ? ctx.answer(modelPrompt(shortlist, listed.length, target, fallback)) : "";
+		const picked: { model?: string | null; error?: string } = reply === "" ? { model: fallback } : pickModelReply(reply, shortlist, listed);
+		if (picked.error !== undefined) {
+			step("fail", "model", `${picked.error}; rerun with --${target}-model <provider/model>`);
+			return "fail";
+		}
+		const how = reply !== "" ? "chosen at the prompt" : inherited ? inherited.how : `recommended: ${shortlist[0]?.why}`;
+		if (target === "parent") parentPick = { model: picked.model ?? null, how };
 		if (!picked.model) {
 			step("skip", "model", `${target}: none chosen; --${target}-model <provider/model> --force pins one`);
 			continue;
 		}
 		models[target] = picked.model;
-		const how = reply === "" ? `recommended: ${shortlist[0]?.why}` : "chosen at the prompt";
 		step("changed", "model", `${target} ${picked.model} (${how}; --${target}-model overrides)`);
 	}
 	return models;
