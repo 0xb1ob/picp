@@ -867,7 +867,7 @@ test("bin/cp-bootstrap --dry-run in a scratch HOME clones nothing; old node and 
 	const dry = spawnSync("sh", ["-c", `cat ${JSON.stringify(BOOTSTRAP)} | sh -s -- --dry-run`], { env, encoding: "utf8" });
 	assert.equal(dry.status, 0, dry.stdout + dry.stderr);
 	assert.match(dry.stdout, /^ok: bootstrap: git and node v\d+/m);
-	assert.match(dry.stdout, /changed: bootstrap: would git clone --branch main https:\/\/github\.com\/0xb1ob\/pi-command-post\.git .*\/\.pi-command-post\/app, npm ci, then bin\/cp-install \(dry-run\)/);
+	assert.match(dry.stdout, /changed: bootstrap: would git clone --branch main https:\/\/github\.com\/0xb1ob\/picp\.git .*\/\.pi-command-post\/app, npm ci, then bin\/cp-install \(dry-run\)/);
 	assert.equal(existsSync(join(dir, ".pi-command-post")), false, "nothing written");
 
 	const bin = join(dir, "oldnode");
