@@ -1,0 +1,309 @@
+/**
+ * cp-daemon's health job (a oneshot child, every 5 min; cp-daemon v1 P3): the watchdog. It pushes
+ * once when a check breaks, once when it recovers, and once for every distinct updater failure — nothing else.
+ *
+ *   parent      no responsive host, `hello.parent` null, or the lock not held by a live pid (2 runs in a row;
+ *               never while `state/update.json` `phase` is not idle, a `held` rollback excepted) → `health: parent down`
+ *   viewer      `/api/identity` not 200 for this home within 3 s (2 runs; never mid-update) → `health: viewer down`
+ *   supervisor  cp-daemon's parent supervisor `failed` (`state/daemon-runtime.json`) → `health: crash-looping`
+ *   disk        free < 5 GiB or < 10 % of the home's filesystem                → `health: disk low`
+ *   git         `git ls-remote --exit-code origin HEAD` in the app fails (hourly) → `health: git credential`
+ *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
+ *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to`, so a new failure pushes
+ *               again                                                          → `health: update failed`
+ *
+ * Its record is `state/health.json` (this unit is its only writer). It reads `data/push/` (the VAPID key and the
+ * subscriptions) and sends directly; it never writes `state/push-deliveries.json` (the parent sweep's ledger) and
+ * never deletes a subscription, even on 404/410 (the sweep does that). A failed push is retried on the next ≤ 3
+ * runs, then logged and given up. No authority: it reads, probes and pushes; it never starts or stops anything.
+ */
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statfsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { configureLayout, isoTimestamp, layoutForHome } from "../contracts.ts";
+import { isPidAlive } from "../fleet.ts";
+import { PACKAGE_ROOT, resolveHome } from "../home.ts";
+import { atomicWriteJson } from "../json-store.ts";
+import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
+import { readVapidKeys } from "../push/keys.ts";
+import { deliver, encryptPayload, type PushFetch, vapidAuthorization } from "../push/webpush.ts";
+import { hostHeaderFor } from "../viewer/server.ts";
+import { viewerAddress } from "../viewer/cli.ts";
+import { listSubscriptions, pushServiceAllowed } from "../viewer/push-files.ts";
+import { daemonPaths } from "./daemon-files.ts";
+
+export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update"] as const;
+export type HealthCheck = (typeof HEALTH_CHECKS)[number];
+const KIND: Record<HealthCheck, string> = { parent: "parent down", viewer: "viewer down", supervisor: "crash-looping", disk: "disk low", git: "git credential", gh: "gh credential", update: "update failed" };
+/** Runs in a row a failure must last before it counts (a restart blip is not an outage). */
+const CONSECUTIVE: Partial<Record<HealthCheck, number>> = { parent: 2, viewer: 2 };
+export const HEALTH_PUSH_RETRIES = 3;
+export const UPDATE_FAILURES = ["failed", "drain_timeout", "rolled_back", "rollback_failed", "config_invalid", "migration_required"];
+const DETAIL_MAX = 200;
+const HEADLINE_MAX = 100;
+
+/** One probe's answer: ok, failing (with its dedupe key), or no signal this run (the check keeps its state). */
+export type Observation = { ok: true } | { ok: false; key: string; detail: string } | { skip: string };
+
+export interface CheckRecord {
+	status: "ok" | "fail";
+	key: string | null;
+	since: string;
+	detail: string;
+	fails: number;
+	notified_key: string | null;
+	notified_state: "ok" | "fail";
+	push_attempts: number;
+	checked_at: string;
+}
+export interface HealthRecord { schema_version: 1; last_run_at: string; checks: Partial<Record<HealthCheck, CheckRecord>> }
+
+export const healthFile = (stateDir: string): string => join(stateDir, "health.json");
+
+/** The record, or undefined when absent or unreadable (a fresh start: nothing was promised). */
+export function readHealth(stateDir: string): HealthRecord | undefined {
+	try {
+		const raw = JSON.parse(readFileSync(healthFile(stateDir), "utf8")) as HealthRecord;
+		return raw?.schema_version === 1 && raw.checks && typeof raw.checks === "object" ? raw : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const clip = (text: string, max: number) => {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
+
+/** Fold one observation into a check's record (pure). */
+export function observe(name: HealthCheck, prior: CheckRecord | undefined, seen: Observation, at: string): CheckRecord | undefined {
+	if ("skip" in seen) return prior;
+	const base: CheckRecord = prior ?? { status: "ok", key: null, since: at, detail: "ok", fails: 0, notified_key: null, notified_state: "ok", push_attempts: 0, checked_at: at };
+	if (seen.ok) return { ...base, status: "ok", key: null, detail: "ok", fails: 0, since: base.status === "ok" ? base.since : at, checked_at: at, push_attempts: base.status === "ok" ? base.push_attempts : 0 };
+	const fails = base.fails + 1;
+	if (fails < (CONSECUTIVE[name] ?? 1)) return { ...base, fails, checked_at: at };
+	const same = base.status === "fail" && base.key === seen.key;
+	return { ...base, status: "fail", key: seen.key, detail: clip(seen.detail, DETAIL_MAX), fails, since: base.status === "fail" ? base.since : at, checked_at: at, push_attempts: same ? base.push_attempts : 0 };
+}
+
+/** The push a check owes, if any: a failure not yet notified under its key, or a recovery from a notified failure. */
+export function owed(name: HealthCheck, check: CheckRecord | undefined): { state: "fail" | "recovered"; payload: string } | undefined {
+	if (!check) return undefined;
+	const payload = (kind: string, headline: string) => JSON.stringify({ project: "command-post", kind, headline: clip(headline, HEADLINE_MAX) });
+	if (check.status === "fail" && (check.notified_state !== "fail" || check.notified_key !== check.key)) return { state: "fail", payload: payload(`health: ${KIND[name]}`, check.detail) };
+	if (check.status === "ok" && check.notified_state === "fail") return { state: "recovered", payload: payload(`health: ${name} recovered`, `${name} ok again`) };
+	return undefined;
+}
+
+export type HealthProbes = Record<HealthCheck, (prior: CheckRecord | undefined) => Promise<Observation> | Observation>;
+export type HealthPush = (payload: string) => Promise<{ ok: boolean; reason: string }>;
+
+export interface HealthRunOptions {
+	stateDir: string;
+	probes: HealthProbes;
+	push: HealthPush;
+	now?: () => Date;
+	log?: (line: string) => void;
+}
+
+/** One watchdog run: probe every check, write `state/health.json`, send what is owed, write again. */
+export async function runHealth(options: HealthRunOptions): Promise<HealthRecord> {
+	const log = options.log ?? ((line: string) => console.error(`health: ${line}`));
+	const at = isoTimestamp((options.now ?? (() => new Date()))());
+	const prior = readHealth(options.stateDir);
+	const record: HealthRecord = { schema_version: 1, last_run_at: at, checks: { ...prior?.checks } };
+	for (const name of HEALTH_CHECKS) {
+		let seen: Observation;
+		try {
+			seen = await options.probes[name](record.checks[name]);
+		} catch (error) {
+			seen = { skip: `probe failed: ${(error as Error).message}` };
+		}
+		if ("skip" in seen && record.checks[name] === undefined) continue;
+		if ("skip" in seen) log(`${name}: skipped (${seen.skip})`);
+		const next = observe(name, record.checks[name], seen, at);
+		if (next) record.checks[name] = next;
+	}
+	atomicWriteJson(healthFile(options.stateDir), record);
+	let changed = false;
+	for (const name of HEALTH_CHECKS) {
+		const check = record.checks[name];
+		const due = owed(name, check);
+		if (!check || !due) continue;
+		changed = true;
+		const sent = await options.push(due.payload).catch((error: Error) => ({ ok: false, reason: error.message }));
+		const settle = () => {
+			check.notified_state = due.state === "fail" ? "fail" : "ok";
+			check.notified_key = due.state === "fail" ? check.key : null;
+			check.push_attempts = 0;
+		};
+		if (sent.ok) {
+			log(`${name}: pushed ${due.state} (${sent.reason})`);
+			settle();
+		} else if (check.push_attempts >= HEALTH_PUSH_RETRIES) {
+			log(`${name}: push ${due.state} given up after ${check.push_attempts + 1} attempts (${sent.reason})`);
+			settle();
+		} else {
+			check.push_attempts += 1;
+			log(`${name}: push ${due.state} not sent, retrying next run (${sent.reason})`);
+		}
+	}
+	if (changed) atomicWriteJson(healthFile(options.stateDir), record);
+	return record;
+}
+
+/** Send one payload to every subscribed device; never writes the push ledger, never deletes a subscription. */
+export function directPush(dataDir: string, fetch?: PushFetch): HealthPush {
+	return async (payload) => {
+		const keys = readVapidKeys(dataDir);
+		if (!keys) return { ok: false, reason: "push is not set up (no data/push/config.json)" };
+		const devices = listSubscriptions(dataDir).items.filter((item) => pushServiceAllowed(item.endpoint));
+		if (devices.length === 0) return { ok: false, reason: "no subscribed device" };
+		const now = new Date();
+		const outcomes = await Promise.all(devices.map(async (device) => {
+			try {
+				return await deliver({ endpoint: device.endpoint, body: encryptPayload(payload, device.keys), authorization: vapidAuthorization({ endpoint: device.endpoint, keys, now }), ...(fetch ? { fetch } : {}) });
+			} catch (error) {
+				return { kind: "rejected" as const, reason: (error as Error).message };
+			}
+		}));
+		const delivered = outcomes.filter((outcome) => outcome.kind === "delivered").length;
+		const reasons = outcomes.filter((outcome) => outcome.kind !== "delivered").map((outcome) => ("reason" in outcome ? outcome.reason : `HTTP ${outcome.status}`));
+		return { ok: delivered > 0, reason: `${delivered}/${devices.length} device(s)${reasons.length ? `; ${reasons.join("; ")}` : ""}` };
+	};
+}
+
+export interface HostProbeOptions {
+	home: string;
+	app?: string;
+	env?: NodeJS.ProcessEnv;
+	/** Test seams. */
+	run?: (command: string, args: readonly string[], timeoutMs: number) => { status: number; stdout: string };
+	fetch?: (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{ status: number; json(): Promise<unknown> }>;
+	now?: () => Date;
+}
+
+/** The production probes for `home` (multi mode). */
+export function hostProbes(options: HostProbeOptions): HealthProbes {
+	const home = resolve(options.home);
+	const env = options.env ?? process.env;
+	const layout = layoutForHome("multi", home);
+	const stateDir = join(home, layout.state);
+	const run = options.run ?? ((command, args, timeoutMs) => {
+		const out = spawnSync(command, [...args], { encoding: "utf8", timeout: timeoutMs, env: { ...env, GIT_TERMINAL_PROMPT: "0" } });
+		return { status: out.status ?? 1, stdout: out.stdout ?? "" };
+	});
+	const fetcher = options.fetch ?? ((url, init) => fetch(url, init));
+	const now = options.now ?? (() => new Date());
+	const midUpdate = (): string | undefined => {
+		const update = readJson(join(stateDir, "update.json"));
+		// A rollback held back by a live worker (`held`) has no run in flight: the fleet runs on, so it is watched.
+		return typeof update?.phase === "string" && update.phase !== "idle" && update.held !== true ? `update phase ${update.phase}` : undefined;
+	};
+	const hourly = (prior: CheckRecord | undefined) => prior !== undefined && now().getTime() - Date.parse(prior.checked_at) < 3_600_000;
+	const failed = (detail: string): Observation => ({ ok: false, key: "down", detail });
+	return {
+		parent: async () => {
+			const updating = midUpdate();
+			if (updating) return { skip: updating };
+			const { record } = currentHost(parentHostPaths(home, "multi"));
+			if (!record || !isPidAlive(record.pid)) return failed("no parent host is running");
+			const client = await ParentHostClient.connect(record, 3_000).catch(() => undefined);
+			if (!client) return failed(`parent host pid ${record.pid} does not answer`);
+			const parentPid = client.parentPid;
+			client.disconnect();
+			if (parentPid === undefined) return failed(`parent host pid ${record.pid} runs no parent`);
+			const lock = readJson(join(home, layout.parentLock))?.pid;
+			if (typeof lock !== "number" || !isPidAlive(lock)) return failed("state/parent.lock is not held by a live pid");
+			return { ok: true };
+		},
+		viewer: async () => {
+			const updating = midUpdate();
+			if (updating) return { skip: updating };
+			const down = await viewerDown(home, env, fetcher);
+			return down ? failed(down) : { ok: true };
+		},
+		supervisor: () => {
+			const units = readJson(daemonPaths(home).runtime)?.units as { parent?: { state?: string; result?: string } } | undefined;
+			if (!units?.parent) return { skip: "no cp-daemon runtime record (state/daemon-runtime.json)" };
+			const { state, result } = units.parent;
+			return state === "failed" ? { ok: false, key: result || "failed", detail: `cp-daemon's parent supervisor is failed (${result ?? "failed"}); cp-daemon log` } : { ok: true };
+		},
+		disk: () => {
+			const fs = statfsSync(home);
+			const free = fs.bavail * fs.bsize;
+			const share = fs.blocks > 0 ? fs.bavail / fs.blocks : 1;
+			return free < 5 * 1024 ** 3 || share < 0.1 ? { ok: false, key: "low", detail: `${(free / 1024 ** 3).toFixed(1)} GiB free (${Math.round(share * 100)} %) under ${home}` } : { ok: true };
+		},
+		git: (prior) => {
+			if (hourly(prior)) return { skip: "checked within the hour" };
+			return run("git", ["-C", options.app ?? PACKAGE_ROOT, "ls-remote", "--exit-code", "origin", "HEAD"], 20_000).status === 0 ? { ok: true } : { ok: false, key: "failed", detail: `git ls-remote origin fails in ${options.app ?? PACKAGE_ROOT}: the updater cannot fetch` };
+		},
+		gh: (prior) => {
+			if (hourly(prior)) return { skip: "checked within the hour" };
+			return ghLoggedIn((...args) => run("gh", args, 10_000).status === 0) ? { ok: true } : { ok: false, key: "failed", detail: "gh auth status --active fails: run gh auth login" };
+		},
+		update: () => {
+			const update = readJson(join(stateDir, "update.json"));
+			const result = typeof update?.last_result === "string" ? update.last_result : undefined;
+			if (!result) return { skip: "no update result recorded" };
+			const to = typeof update?.to === "string" ? update.to : "";
+			if (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && Number(update?.fetch_failures) >= 3)) return { ok: false, key: `${result}:${to}`, detail: `auto-update ${result}${to ? ` (${to.slice(0, 12)})` : ""}; see state/update.json and cp-daemon log` };
+			return result === "updated" || result === "up_to_date" ? { ok: true } : { skip: `update ${result}` };
+		},
+	};
+}
+
+/**
+ * Is gh logged in for the *active* account? The one probe the watchdog and the installer share.
+ * Plain `gh auth status` exits 1 when any stored account is invalid; only the active one matters.
+ * A gh without `--active` refuses the flag, and `gh api user` answers for the active account instead.
+ */
+export function ghLoggedIn(ok: (...args: string[]) => boolean): boolean {
+	return ok("auth", "status", "--active") || ok("api", "user", "--jq", ".login");
+}
+
+/** Why this home's viewer does not answer `/api/identity` for it within 3 s; undefined when it does. */
+export async function viewerDown(home: string, env: NodeJS.ProcessEnv, fetcher: NonNullable<HostProbeOptions["fetch"]> = (url, init) => fetch(url, init)): Promise<string | undefined> {
+	let address: { host: string; port: number };
+	try {
+		address = viewerAddress(env, true);
+	} catch (error) {
+		return (error as Error).message;
+	}
+	const url = `http://${hostHeaderFor(address.host, address.port)}/api/identity`;
+	try {
+		const reply = await fetcher(url, { headers: { host: hostHeaderFor(address.host, address.port) }, signal: AbortSignal.timeout(3_000) });
+		const body = reply.status === 200 ? (await reply.json()) as { home?: unknown } : undefined;
+		return body?.home === home ? undefined : `${url} answered ${reply.status}${body ? ` for home ${String(body.home)}` : ""}`;
+	} catch (error) {
+		return `${url} did not answer: ${(error as Error).message}`;
+	}
+}
+
+function readJson(file: string): Record<string, unknown> | undefined {
+	if (!existsSync(file)) return undefined;
+	try {
+		const value = JSON.parse(readFileSync(file, "utf8")) as unknown;
+		return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+if (import.meta.main) {
+	const home = resolveHome();
+	configureLayout("multi", home);
+	const layout = layoutForHome("multi", home);
+	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }), push: directPush(join(home, layout.data)) }).then(
+		(record) => {
+			const failing = HEALTH_CHECKS.filter((name) => record.checks[name]?.status === "fail");
+			console.error(`health: ${failing.length ? `failing: ${failing.join(", ")}` : "all ok"}`);
+			process.exit(0);
+		},
+		(error: Error) => {
+			console.error(`health: failed: ${error.stack ?? error.message}`);
+			process.exit(1);
+		},
+	);
+}

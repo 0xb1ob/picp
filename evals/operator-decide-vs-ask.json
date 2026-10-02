@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "operator-plan-approval-in-scope",
+      "kind": "plan_approval",
+      "in_scope": true,
+      "expect": "decide",
+      "why": "A plan-approval escalation the active mandate already covers is the operator's to approve; interrupting the human for it is the failure mode this note exists to prevent."
+    },
+    {
+      "id": "operator-plan-approval-out-of-scope",
+      "kind": "plan_approval",
+      "in_scope": false,
+      "expect": "ask",
+      "why": "No mandate covers this plan, so it is product ambiguity in effect: the operator asks."
+    },
+    {
+      "id": "operator-risk-high",
+      "kind": "risk_high_irreversible",
+      "expect": "ask",
+      "why": "risk:high is never auto-permitted (AGENTS.md Mandate); it is always an ask regardless of mandate."
+    },
+    {
+      "id": "operator-loop-exhausted",
+      "kind": "loop_exhausted",
+      "expect": "ask",
+      "why": "A capped revision ladder is an operational fault, not a call the operator can make on the parent's behalf."
+    },
+    {
+      "id": "operator-budget-exhausted",
+      "kind": "budget_exhausted",
+      "expect": "ask",
+      "why": "A USD cap (or a token cap at the ceiling) pauses the mandate; resuming spend is the human's money to authorize again."
+    },
+    {
+      "id": "operator-merge-refused",
+      "kind": "merge_refused",
+      "expect": "ask",
+      "why": "Merge permission is the repository's; a refusal is relayed, not resolved by the operator."
+    },
+    {
+      "id": "operator-mission-end",
+      "kind": "mission_end",
+      "expect": "ask",
+      "why": "Ending the mission is a human call, never a bounded-authority default."
+    },
+    {
+      "id": "operator-scope-expansion",
+      "kind": "scope_expansion",
+      "expect": "ask",
+      "why": "Work outside what the mandate named is exactly what scope expansion means."
+    }
+  ]
+}

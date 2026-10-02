@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "live_trials": {
+    "status": "pending_operator_approval",
+    "reason": "Measuring what a parent model passes to cp_dispatch/cp_pipeline needs paid trials (routing T6 §7). The operator declined paid live trials for the change that built this corpus, so no parent-model quality claim exists yet: the labels below are human ground truth and `deterministic` is this repository's own code, not a model. docs/evals.md §Parent classification cases has the trial protocol to run once it is approved."
+  },
+  "cases": [
+    {
+      "id": "parent-ordinary-qa",
+      "scenario": "ordinary-qa",
+      "task": "Where does the lease file live in this home?",
+      "labels": {
+        "workflow": ["qa"],
+        "scope": ["S"],
+        "risk": ["low"],
+        "why": "The deliverable is an answer a human reads once, so it is cp_ask (kind:research, delivery:answer) and the smallest resources there are."
+      },
+      "deterministic": {
+        "mode": "qa",
+        "scope": "S",
+        "risk": "low",
+        "provenance": { "scope": "defaulted", "risk": "defaulted" }
+      }
+    },
+    {
+      "id": "parent-auth-comment-qa",
+      "scenario": "auth-comment-qa",
+      "task": "Which module resolves the auth token a worker runs with?",
+      "labels": {
+        "workflow": ["qa"],
+        "scope": ["S"],
+        "risk": ["low"],
+        "why": "A question about credential handling changes nothing, so its impact is a read: cp_ask pins scope S and risk low itself, which is what makes this the right shape rather than a judgement the parent re-takes."
+      },
+      "deterministic": {
+        "mode": "qa",
+        "scope": "S",
+        "risk": "high",
+        "provenance": { "scope": "defaulted", "risk": "inferred" }
+      },
+      "divergence": "The word `auth` raises the inferred risk even though the deliverable is an answer: keyword assessment cannot see that nothing will be changed. Harmless in practice — cp_ask passes scope S and risk low explicitly — and it is the reason risk inference is advisory rather than a verdict."
+    },
+    {
+      "id": "parent-typo-in-auth-comment",
+      "scenario": "typo-in-auth-comment",
+      "task": "Fix the typo 'recieve' in the comment above the auth token helper in src/worker-process.ts.",
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["S"],
+        "risk": ["low"],
+        "why": "A comment near authentication code is not authentication work: bounded, named file, nothing a rerun cannot undo."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "S",
+        "risk": "high",
+        "provenance": { "scope": "defaulted", "risk": "inferred" }
+      },
+      "divergence": "`auth` in the task text infers risk high for a comment typo. The parent may pass risk low here — an explicit axis wins, and is recorded as `explicit` so the override is legible afterwards."
+    },
+    {
+      "id": "parent-scope-only-production-credentials",
+      "scenario": "scope-only-production-credentials",
+      "task": "Rotate the production database credentials used by the two deploy scripts.",
+      "given": { "scope": "M" },
+      "labels": {
+        "workflow": ["single", "pipeline"],
+        "scope": ["M"],
+        "risk": ["high"],
+        "why": "The operator sized it M; the impact is production credentials, and naming scope must not lower that. Either workflow is defensible — the change is known, but a plan first is a reasonable call on credential rotation."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "M",
+        "risk": "high",
+        "provenance": { "scope": "explicit", "risk": "inferred" }
+      }
+    },
+    {
+      "id": "parent-risk-only-refactor",
+      "scenario": "risk-only-refactor",
+      "task": "Refactor the retry ladder in src/failures.ts into one table.",
+      "given": { "risk": "high" },
+      "labels": {
+        "workflow": ["single", "pipeline"],
+        "scope": ["S", "M"],
+        "risk": ["high"],
+        "why": "The operator named the impact and said nothing about size, so scope stays the task's own to assess: one named file argues S, structural wording argues M, and both are honest."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "M",
+        "risk": "high",
+        "provenance": { "scope": "inferred", "risk": "explicit" }
+      }
+    },
+    {
+      "id": "parent-short-but-deep-concurrency-bug",
+      "scenario": "short-but-deep-concurrency-bug",
+      "task": "The lease file is occasionally written twice under concurrent dispatch; locate the race in src/leases.ts and fix it.",
+      "labels": {
+        "workflow": ["single", "pipeline"],
+        "scope": ["M"],
+        "risk": ["low"],
+        "why": "Scope is not a file count: a one-file race needs cross-component reasoning about ordering, so it is M even though the diff will be small."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "S",
+        "risk": "low",
+        "provenance": { "scope": "defaulted", "risk": "defaulted" }
+      },
+      "divergence": "Nothing in the words says `deep`, so the deterministic assessment defaults to S. This is the case the parent's own judgement exists for — and the one where planner evidence, not a keyword, is the way to size it."
+    },
+    {
+      "id": "parent-long-mechanical-rename",
+      "scenario": "long-mechanical-rename",
+      "task": "Rename the br_id field to job_id across every module, test and doc that mentions it.",
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["M", "L"],
+        "risk": ["low"],
+        "why": "Long is not ambiguous: the change is fully specified and mechanical, so it wants a capable worker (M or L), not a plan it does not need."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "M",
+        "risk": "low",
+        "provenance": { "scope": "inferred", "risk": "defaulted" }
+      },
+      "divergence": "Cross-cutting wording recommends a pipeline. That recommendation is advisory and this is exactly where the parent declines it: breadth is a resource-routing signal, not a reason to insert a research stage."
+    },
+    {
+      "id": "parent-broad-audit",
+      "scenario": "broad-audit",
+      "task": "Audit the extension for tool descriptions that no longer match the code, and report what needs changing.",
+      "labels": {
+        "workflow": ["pipeline", "single"],
+        "scope": ["M", "L"],
+        "risk": ["low"],
+        "why": "The deliverable is findings, not a change: one research job is enough when nothing will be implemented from it, and a pipeline is right when it will."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "M",
+        "risk": "low",
+        "provenance": { "scope": "inferred", "risk": "defaulted" }
+      }
+    },
+    {
+      "id": "parent-standalone-research",
+      "scenario": "standalone-research",
+      "task": "Investigate why the gate reviewer occasionally reports an operational fault, and write up the options.",
+      "given": { "kind": "research" },
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["M"],
+        "risk": ["low"],
+        "why": "Research the operator asked for as research is one job. Without the kind pass-through the investigation wording alone reads as a pipeline, which is the intent this case exists to preserve."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "M",
+        "risk": "low",
+        "provenance": { "scope": "inferred", "risk": "defaulted" }
+      }
+    },
+    {
+      "id": "parent-fully-specified-high-risk-change",
+      "scenario": "fully-specified-high-risk-change",
+      "task": "Apply the migration named in the ticket to drop the unused pins column; the exact SQL is in the ticket.",
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["S", "M"],
+        "risk": ["high"],
+        "why": "Nothing is unknown — the SQL is written — so there is no plan to make; the impact is irreversible, which is a model decision, not a workflow one."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "M",
+        "risk": "high",
+        "provenance": { "scope": "inferred", "risk": "inferred" }
+      },
+      "divergence": "`migration` fires both the structural signal and the destructive one. The impact reading is right; the pipeline recommendation is the advisory half the parent overrides for a fully specified change."
+    },
+    {
+      "id": "parent-ambiguous-low-risk-work",
+      "scenario": "ambiguous-low-risk-work",
+      "task": "Something in the status widget shows a stale age and I am not sure where it comes from.",
+      "labels": {
+        "workflow": ["pipeline", "single"],
+        "scope": ["S", "M"],
+        "risk": ["low"],
+        "why": "Genuine ambiguity about where the defect lives is the argument for a plan first; a confident implementer finding it in one file is also a defensible call. Uncertainty is not impact, so risk stays low."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "M",
+        "risk": "low",
+        "provenance": { "scope": "inferred", "risk": "defaulted" }
+      }
+    },
+    {
+      "id": "parent-pipeline-confidence-downgrade",
+      "scenario": "pipeline-confidence-downgrade",
+      "task": "Rotate the production API tokens the deploy workflow uses.",
+      "labels": {
+        "workflow": ["pipeline", "single"],
+        "scope": ["S", "M"],
+        "risk": ["high"],
+        "why": "The task's impact belongs to the task, not to the plan written for it: a confident, non-destructive, unblocked plan never lowers this to low (composeImplementationRouting, routing T2)."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "S",
+        "risk": "high",
+        "provenance": { "scope": "defaulted", "risk": "inferred" }
+      }
+    },
+    {
+      "id": "parent-narrowed-scope-retained-impact",
+      "scenario": "narrowed-scope-retained-impact",
+      "task": "Per the gated plan, change one line in src/merge-permission.ts so an unreadable check rollup is treated as not permitted, keeping production merges from landing unauthorized.",
+      "given": { "scope": "S" },
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["S"],
+        "risk": ["high"],
+        "why": "A plan that narrows a broad task to one line is exactly the evidence scope is for, and it narrows scope only: the production impact it found is still there. In a pipeline this scope arrives as `assessed` rather than `explicit`; the axis and the rule are the same either way."
+      },
+      "deterministic": {
+        "mode": "pipeline",
+        "scope": "S",
+        "risk": "high",
+        "provenance": { "scope": "explicit", "risk": "inferred" }
+      },
+      "divergence": "The word `plan` in the task text recommends a pipeline for a task that already has a gated plan. The impact and the narrowed scope are read correctly; the workflow half is the advisory one, and here the plan stage is already behind it."
+    },
+    {
+      "id": "parent-model-override",
+      "scenario": "model-override",
+      "task": "Bump the pinned pi version in package.json to 0.86.0.",
+      "given": { "model": "anthropic/claude-haiku-4-5" },
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["S"],
+        "risk": ["low"],
+        "why": "A named model is authorization for this one dispatch and nothing else: it decides resources, leaves the workflow alone, and the axes stay what the task says they are."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "S",
+        "risk": "low",
+        "provenance": { "scope": "defaulted", "risk": "defaulted" }
+      }
+    },
+    {
+      "id": "parent-no-signal-defaults",
+      "scenario": "no-signal-defaults",
+      "task": "Add a one-line note to README.md pointing at the eval commands.",
+      "labels": {
+        "workflow": ["single"],
+        "scope": ["S"],
+        "risk": ["low"],
+        "why": "Nothing in the words argues for more, so the standing defaults apply — and they are recorded as `defaulted`, never as a measurement somebody made."
+      },
+      "deterministic": {
+        "mode": "single",
+        "scope": "S",
+        "risk": "low",
+        "provenance": { "scope": "defaulted", "risk": "defaulted" }
+      }
+    }
+  ]
+}

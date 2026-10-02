@@ -1,0 +1,14 @@
+FLEET 3 jobs · 1 waiting, 1 held, 1 failed · of which 2 live, 1 working (active, at 2026-08-27T12:00:00Z)
+
+JOB                      PROJECT        KIND     MODEL            SCOPE/RISK  THINK    PHASE    RUN      TOOL       AGE   TOKENS  COST    TITLE
+[demo]
+cp-ship-a1               demo           ship     claude-sonnet-5  S/low       medium   waiting  working  bash       4m    12.3k   $0.04   Add the retry ladder
+cp-ship-c3               demo           ship     claude-sonnet-5  —           —        failed   exited   -          3h    3.2k    $0.01   Migrate the config loader
+  ! crash: pid no longer exists
+[atlas]
+cp-research-b2           atlas          research claude-sonnet-5  M?/high?    high     held     idle     -          29m   249.0k  $1.20   Investigate the flaky import
+
+TOTAL 264.5k tokens $1.25
+
+UNCLAIMED (ledger says in_progress; this fleet has no record)
+  cp-ghost-e5              demo           3h    Someone else claimed this

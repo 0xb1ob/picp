@@ -1,0 +1,46 @@
+.decided-screen { display: flex; flex-direction: column; gap: 24px; }
+.decided-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.decided-filter-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 8px; }
+.decided-range { display: flex; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.decided-range button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 7px; font-size: 13px; background: transparent; color: var(--muted); }
+.decided-range button[aria-pressed=true] { background: var(--toggle); color: var(--text); }
+.decided-worth { min-height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; background: transparent; color: var(--muted); }
+.decided-worth[aria-pressed=true] { background: var(--toggle); color: var(--text); border-color: var(--faint); }
+.decided-filter-bar > p { width: 100%; font-size: 12px; color: var(--dim); }
+.decided-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--divider); }
+.decided-time { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); }
+.decided-flag { display: flex; align-items: center; gap: 6px; color: var(--subtle); border: 1px solid var(--worth-border); border-radius: 999px; padding: 2px 9px; }
+.decided-job { min-width: 0; display: flex; flex-direction: column; gap: 3px; align-items: flex-end; font-size: 12px; }
+.decided-job a { min-height: 44px; display: flex; align-items: center; text-decoration: none; }
+.decided-id { font-size: 11px; color: var(--dim); }
+.decided-source { font-size: 12px; color: var(--muted); }
+.decided-question { grid-column: 1 / -1; font-size: 15px; line-height: 1.4; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.decided-answer { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 10px 12px 0; background: var(--surface); border-radius: 10px 10px 0 0; font-size: 14px; }
+.decided-answer span { color: var(--muted); }
+.decided-rule { grid-column: 1 / -1; margin-top: -8px; padding: 4px 12px 10px; background: var(--surface); border-radius: 0 0 10px 10px; color: var(--subtle); font-size: 12px; line-height: 1.45; }
+.decided-rule > span { color: var(--dim); }
+.decided-evidence { grid-column: 1 / -1; text-align: right; color: var(--subtle); font-size: 12px; }
+.decided-evidence a { min-height: 44px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+.decided-empty { padding: 24px 0; font-size: 14px; color: var(--muted); }
+.decided-closes { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 0; border-bottom: 1px solid var(--divider); font-size: 13px; color: var(--muted); }
+.decided-closes button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; background: transparent; color: var(--muted); }
+@media (min-width: 900px) {
+ .decided-main { gap: 20px; }
+ .decided-filter-bar { justify-content: flex-start; gap: 12px; }
+ .decided-range button { padding: 0 16px; }
+ .decided-worth { padding: 0 14px; }
+ .decided-filter-bar > p { width: auto; margin-left: auto; font-size: 13px; color: var(--muted); }
+ .decided-columns, .decided-row { display: grid; grid-template-columns: minmax(0,96fr) minmax(0,150fr) minmax(0,240fr) minmax(0,200fr) minmax(0,190fr) 76px; gap: 16px; }
+ .decided-columns { padding: 8px 0; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--border); }
+ .decided-columns > span:last-child { text-align: right; }
+ .decided-rows { margin-top: -20px; }
+ .decided-row { align-items: start; padding: 14px 0; font-size: 13px; }
+ .decided-time { flex-direction: column; align-items: flex-start; gap: 6px; color: var(--muted); }
+ .decided-flag { border: 0; padding: 0; border-radius: 0; gap: 5px; font-size: 11px; }
+ .decided-job { align-items: flex-start; }
+ .decided-question { grid-column: auto; font-size: 13px; line-height: 1.45; color: var(--objective); }
+ .decided-answer { grid-column: auto; display: flex; flex-direction: column; gap: 3px; padding: 0; background: none; border-radius: 0; font-size: 13px; }
+ .decided-answer span { line-height: 1.4; }
+ .decided-rule { grid-column: auto; padding: 0; margin: 0; background: none; border-radius: 0; }
+ .decided-evidence { grid-column: auto; }
+}

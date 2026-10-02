@@ -1,0 +1,11 @@
+# Everything home-local (data, state, projects, operator) lives here (docs/storage.md).
+.pi-command-post/
+# br's frozen archive; read-only to command-post.
+.beads/
+node_modules/
+dist/
+.DS_Store
+*.log
+# USER.md is optional, machine-local operator context beside AGENTS.md.
+# It is never versioned and nothing in this repo creates or edits it.
+/USER.md

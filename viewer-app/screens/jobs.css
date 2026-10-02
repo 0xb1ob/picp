@@ -1,0 +1,87 @@
+.jobs-screen, .job-detail { max-width: 358px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.jobs-screen h1 { font-size: 28px; }
+.jobs-heading { display: flex; flex-direction: column; gap: 4px; }
+.jobs-heading p { font-size: 13px; color: var(--muted); }
+/* The List | Board | Map toggle (audit P4 #23), shared by all three Jobs views. */
+.board-view { display: flex; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; flex-shrink: 0; }
+.board-view > * { display: flex; align-items: center; min-height: 44px; padding: 0 10px; border-radius: 7px; text-decoration: none; font-size: 12px; color: var(--muted); }
+.board-view [aria-current=page] { background: var(--toggle); color: var(--text); }
+.jobs-heading > .jobs-views { align-self: flex-start; margin-top: 8px; }
+.jobs-segments { display: flex; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.jobs-segments button { flex: 1; min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.jobs-segments button[aria-pressed=true] { background: var(--toggle); color: var(--text); }
+.jobs-segments button span { font-size: 11px; opacity: 0.7; }
+.jobs-group > header { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.jobs-group h2 { font-size: 15px; color: var(--text); }
+.jobs-group header p, .jobs-older { font-size: 12px; color: var(--dim); }
+.jobs-project h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; padding-top: 6px; }
+.job-row { padding: 14px 0; border-bottom: 1px solid var(--divider); }
+.job-row-link { display: flex; flex-direction: column; gap: 8px; color: inherit; text-decoration: none; }
+.job-row-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.job-row-id { display: contents; }
+.job-row-id > code { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.jobs-columns, .job-cols { display: none; }
+.job-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; border: 1.5px dashed var(--board-dim); }
+.job-dot-working { border: 0; background: var(--green); }
+.job-dot-launching { border: 1.5px solid var(--green); }
+.job-dot-held { border: 1.5px solid var(--blue); }
+.job-dot-done { border: 0; background: var(--faint); }
+.job-dot-failed { border: 0; border-radius: 2px; background: var(--muted); }
+.job-phase { margin-left: auto; font-size: 12px; }
+.job-title { font-size: 14px; line-height: 1.4; color: var(--secondary); }
+.job-signals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 14px; font-size: 12px; color: var(--muted); }
+.job-signals code { font-size: 11px; color: var(--subtle); align-self: center; }
+.job-clock { display: flex; flex-direction: column; gap: 4px; }
+.job-clock progress, .board-spend progress { appearance: none; width: 100%; height: 3px; border: 0; border-radius: 2px; background: var(--border); overflow: hidden; }
+.job-clock progress::-webkit-progress-bar, .board-spend progress::-webkit-progress-bar { background: var(--border); }
+.job-clock progress::-webkit-progress-value { background: var(--dim); }
+.job-clock progress::-moz-progress-bar { background: var(--dim); }
+.job-ci { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.job-ci > span { width: 6px; height: 6px; border-radius: 50%; border: 1.5px dashed var(--faint); }
+.job-ci-green > span { border: 0; background: var(--green); }
+.job-ci-red { color: var(--coral) !important; }
+.job-ci-red > span { border: 0; background: var(--coral); }
+.job-ci-running > span { border: 1.5px solid var(--muted); }
+.job-note { font-size: 12px; color: var(--subtle); }
+.job-note, .board-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.job-meta, .job-pr { font-size: 12px; color: var(--muted); }
+.job-pr { display: flex; align-items: center; min-height: 44px; text-decoration: none; overflow-wrap: anywhere; }
+.job-ledger { font-size: 11px; color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 1px 7px; }
+.jobs-empty { font-size: 13px; padding: 12px 0; color: var(--muted); }
+.jobs-older { padding-top: 12px; }
+@media (min-width: 900px) {
+ .jobs-screen, .job-detail { max-width: none; margin: 0; }
+ .jobs-segments { align-self: flex-start; width: min(100%,420px); }
+ .jobs-columns, .job-row-link { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,2.4fr) 5rem minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.1fr) 4.5rem 5.5rem; column-gap: 16px; }
+ .jobs-columns { margin-bottom: -12px; font-size: 12px; color: var(--dim); }
+ .job-row-link { row-gap: 6px; align-items: start; }
+ .job-row-link > .job-row-heading, .job-cols { display: contents; }
+ .job-row-id { grid-area: 1 / 1 / span 3 / 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+ .job-row-id > code { flex: 1 1 5rem; }
+ .job-row-link > .job-title { grid-area: 1 / 2; min-width: 0; }
+ .job-row-link .job-phase { grid-area: 1 / 3; margin-left: 0; }
+ .job-cols > * { grid-row: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+ .job-cols > code { grid-column: 4; font-size: 11px; color: var(--subtle); }
+ .job-cols > .job-ctx { grid-column: 5; }
+ .job-cols > .job-ci { grid-column: 6; }
+ .job-cols > :nth-child(4) { grid-column: 7; }
+ .job-cols > :nth-child(5) { grid-column: 8; }
+ .job-row-link > .job-row-ctx { display: none; }
+ .job-row-link > .job-signals, .job-row-link > .job-meta, .job-row-link > .job-note { grid-column: 2 / -1; }
+ .job-row-link > .job-signals { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; }
+ .job-signals > .job-clock { flex-direction: row; align-items: center; gap: 8px; }
+ .job-signals progress { width: 80px; }
+ .job-signals > .job-ci, .job-signals > code, .job-meta-cols { display: none; }
+ .reports-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,20rem),1fr)); gap: 16px; padding-top: 16px; }
+ .reports-grid > .job-row { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; }
+ .reports-grid .decided-job { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0 14px; }
+}
+/* 900-1199px: too narrow for seven columns; model and time fold back into the row's detail line. */
+@media (min-width: 900px) and (max-width: 1199px) {
+ .jobs-columns, .job-row-link { grid-template-columns: minmax(0,1.3fr) minmax(0,2.4fr) 4.5rem minmax(0,1.2fr) 4rem; }
+ .jobs-columns > :nth-child(4), .jobs-columns > :nth-child(5), .jobs-columns > :nth-child(8), .job-cols > code, .job-cols > .job-ctx, .job-cols > :nth-child(5) { display: none; }
+ .job-cols > .job-ci { grid-column: 4; }
+ .job-cols > :nth-child(4) { grid-column: 5; }
+ .job-row-link > .job-row-ctx { display: flex; grid-column: 2 / -1; }
+ .job-signals > code, .job-meta-cols { display: inline; }
+}

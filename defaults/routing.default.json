@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "allow": ["*/*"],
+  "rubric": [
+    { "id": "risky-any", "role": "planner", "risk": "high", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "xhigh" },
+    { "id": "risky-ship", "role": "implementer", "risk": "high", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
+    { "id": "reviews", "role": "gate-reviewer", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
+    { "id": "research-big", "role": "planner", "scope": ["L"], "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
+    { "id": "big-ship", "role": "implementer", "scope": ["M", "L"], "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "medium" },
+    { "id": "small-ship", "role": "implementer", "scope": ["S"], "model": "anthropic/claude-sonnet-5-5", "fallbacks": ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"], "thinking": "high" }
+  ]
+}

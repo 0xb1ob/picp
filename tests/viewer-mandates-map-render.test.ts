@@ -1,0 +1,104 @@
+import assert from "node:assert/strict";
+import { build } from "esbuild";
+import { test } from "node:test";
+import { parseHTML } from "linkedom";
+import { dependencyMap } from "../src/viewer/mandates-map-view.ts";
+import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
+import { join } from "node:path";
+import { LAYOUT } from "../src/contracts.ts";
+import { mapQaFixture, mapTitle, mapObjective } from "./fixtures/viewer-mandates-map.ts";
+
+async function renderer() {
+ const result=await build({stdin:{contents:'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {DependencyMap} from "./viewer-app/screens/DependencyMap.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const mount=(root,data)=>domRender(h(DependencyMap,{data}),root); export const unmount=root=>domRender(null,root); export const screen=(data)=>render(h(DependencyMap,{data})); export const shell=(screen)=>render(h(Shell,{current:{screen,section:null,classic:null},awaiting:0,status:"live",updated:null}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+}
+test("map renders empty, failed, stranded and selected states without inline styles",async t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
+ const {screen}=await renderer();
+ const data=dependencyMap(state);assert.match(screen(data,true),/No jobs recorded/);
+ data.nodes=[{id:"cp-failed",title:"<script>bad</script>",project:"demo",mandate_id:null,phase:"failed",ledger_status:"in_progress",model:"model",cost_usd:2,pr_url:null,ci:null}];
+ data.edges=[{from:"cp-failed",to:"cp-failed",kind:"stranded"}];data.stranded_count=1;
+ const html=screen(data,true);assert.match(html,/1 stranded dependency/);assert.match(html,/failed/);assert.match(html,/aria-label="Selection"/);assert.match(html,/&lt;script>/);assert.match(html,/Mandate and job graph/);assert.doesNotMatch(html,/<script>|style=|onclick=/i);
+ data.availability.mandates="unavailable";data.stranded_count=null;
+ assert.match(screen(data,true),/Dependency status unavailable/);assert.doesNotMatch(screen(data,true),/No stranded dependencies/);
+ data.nodes.push({...data.nodes[0]!,id:"cp-right"});
+ data.edges=[{from:"cp-right",to:"cp-failed",kind:"open"}];
+ assert.match(screen(data,true),/d="M380 80L351 80"/,"a right-to-left dependency connects the facing node edges, not through the nodes");
+});
+
+test("Map shows today's revoked mission closures and toggles older history in the browser's local day",async t=>{
+ const {mount,unmount,act}=await renderer();const data=mapQaFixture();
+ // The day boundary is the browser's own zone: 23:00Z on the 25th and 02:00Z on the 26th are both Sep 25 in Los Angeles.
+ const zone=process.env.TZ;process.env.TZ="America/Los_Angeles";t.after(()=>{if(zone===undefined) delete process.env.TZ;else process.env.TZ=zone;});
+ data.generated_at="2026-09-26T02:00:00Z";
+ const recent=data.items.find(m=>m.id==="md-revoked")!;recent.closed_at="2026-09-25T23:00:00Z";
+ data.items.push({...recent,id:"md-history",closed_at:"2026-09-25T01:00:00Z"});
+ data.nodes.push({...data.nodes[0]!,id:"cp-recent",project:recent.projects[0]!,mandate_id:recent.id});
+ const {window,document}=parseHTML("<html><body><main></main></body></html>");
+ const originals=["window","document"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ Object.defineProperty(globalThis,"window",{configurable:true,value:window});
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ t.after(()=>{for(const [key,descriptor] of originals) {if(descriptor) Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
+ const root=document.querySelector("main")!;
+ {
+  await act(()=>mount(root,data));
+  assert.match(root.textContent!,/md-revoked/);
+  assert.match(root.textContent!,/cp-recent/);
+  assert.doesNotMatch(root.textContent!,/md-history|md-old/);
+  assert.match(root.textContent!,/Show 2 expired or revoked/);
+  const toggle=root.querySelector<HTMLInputElement>('.mandate-history-toggle input')!;
+  await act(()=>{toggle.checked=true;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
+  assert.match(root.textContent!,/md-history/);assert.match(root.textContent!,/md-old/);
+  await act(()=>{toggle.checked=false;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
+  assert.match(root.textContent!,/md-revoked/);assert.doesNotMatch(root.textContent!,/md-history|md-old/);
+  await act(()=>unmount(root));
+ }
+});
+
+test("map prioritizes active projects and working selection, preserves all six jobs and unmodified titles",async()=>{
+ const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
+ assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked/);assert.ok(html.includes(`title="${mapObjective}"`));
+ assert.match(html,/<h1>Map<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
+ assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
+ assert.match(html,/job · cp-job-2/);assert.ok(html.includes(`>${mapTitle}</h2>`));
+ assert.match(html,/<svg width="1144"/);assert.match(html,/foreignObject x="1020"[^>]*width="124"/);
+ assert.match(html,/d="M282 108L282 123L602 123L602 115"/,"the skipped middle node cannot obscure the dependency endpoints");
+ for(let i=0;i<6;i++) assert.ok(html.includes(`title="cp-job-${i}:`));
+ assert.match(html,/href="https:\/\/github.com\/acme\/repo\/pull\/265"[^>]*>#265 · CI running<\/a>/);
+ assert.doesNotMatch(html,/>https:\/\/github/);
+ for(const label of ["working","not dispatched","held","failed","launching","done","blocked by · open","blocked by · satisfied","pipeline"]) assert.ok(html.includes(`>${label}<`),label);
+ data.nodes[2]!.pr_status="merged";assert.match(screen(data,true),/>#265 · merged<\/a>/);
+ data.nodes.unshift({...data.nodes[2]!,id:"cp-old-working",mandate_id:"md-old"});assert.match(screen(data,true),/job · cp-job-2/);data.nodes.shift();
+ data.nodes[2]!.phase="done";assert.match(screen(data,true),/job · cp-job-1/);
+ data.nodes[1]!.phase="done";assert.match(screen(data,true),/Select a mandate or job/);
+});
+
+test("More's views keep the phone sub-page header with search, the local clock and no live status",async()=>{
+ const {shell}=await renderer();
+ for(const screen of ["files","schedules","reports"]) {
+  const header=/<header[^>]*>(.*?)<\/header>/.exec(shell(screen))?.[1] ?? "";
+  assert.match(header,/href="#more".*aria-label="Back to More"/,screen);
+  assert.match(header,/command-post/);assert.doesNotMatch(header,/read-only|shell-badge/,"the dashboard acts: no read-only badge");assert.doesNotMatch(header,/shell-live/);
+  assert.match(header,/<time class="shell-clock"[^>]*>\d\d:\d\d\b[^<]*<\/time>/,"the local clock sits in the phone header");
+  const search=parseHTML(header).document.querySelector("button.shell-search");
+  assert.ok(search);assert.equal(search.getAttribute("aria-haspopup"),"dialog");
+  assert.match(search.getAttribute("aria-label") ?? "",/Search/);
+  assert.equal(search.hasAttribute("disabled"),false);assert.notEqual(search.getAttribute("aria-disabled"),"true");
+ }
+ // Audit P4: Map and Board are Jobs views and Decisions a tab, so they take the plain header with the live status.
+ for(const screen of ["map","board","decisions"]) {
+  const header=/<header[^>]*>(.*?)<\/header>/.exec(shell(screen))?.[1] ?? "";
+  assert.doesNotMatch(header,/Back to More/,screen);assert.match(header,/shell-live/,screen);assert.ok(parseHTML(header).document.querySelector("button.shell-search"),screen);
+ }
+});
+test("audit P4 #23 #25 #26: Map carries the List | Board | Map toggle; the sidebar has six items, the tab bar five, with Jobs lit on Map",async()=>{
+ const {screen,shell}=await renderer();
+ const map=parseHTML(screen(mapQaFixture())).document;
+ const views=map.querySelector('nav[aria-label="Jobs view"]')!;
+ assert.deepEqual([...views.querySelectorAll("a")].map(a=>[a.getAttribute("href"),a.textContent,a.getAttribute("aria-current")]),[["#jobs","List",null],["#board","Board",null],["#map","Map","page"]]);
+ const doc=parseHTML(shell("map")).document;
+ const links=(label:string)=>[...doc.querySelectorAll(`nav[aria-label="${label}"] a`)];
+ assert.deepEqual(links("Desktop primary").map(a=>a.getAttribute("href")),["#overview","#decisions","#jobs","#sessions","#reports","#more"]);
+ assert.deepEqual(links("Primary").map(a=>a.getAttribute("href")),["#overview","#decisions","#jobs","#sessions","#more"]);
+ for(const label of ["Desktop primary","Primary"]) assert.deepEqual(links(label).filter(a=>a.getAttribute("aria-current")==="page").map(a=>a.getAttribute("href")),["#jobs"],label);
+});

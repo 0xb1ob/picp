@@ -1,0 +1,85 @@
+* { box-sizing: border-box; letter-spacing: 0; }
+body { margin: 0; color-scheme: dark; scrollbar-color: var(--faint) var(--background); background: var(--page); font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+/* No zooming (operator 2026-09-27): no double-tap zoom anywhere in the app. */
+html, body { touch-action: manipulation; }
+a { color: inherit; }
+a:hover { color: var(--hover); }
+code, pre { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+button { font: inherit; color: inherit; }
+button, a, [role=link] { -webkit-tap-highlight-color: transparent; }
+button:not([aria-disabled=true]):not(:disabled), a { cursor: pointer; }
+[aria-disabled=true] { opacity: 0.6; cursor: default; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+svg { flex-shrink: 0; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 28px; font-weight: 600; }
+h2 { font-size: 13px; font-weight: 600; color: var(--muted); }
+h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
+.shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: var(--background); overflow: hidden; }
+.shell-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 56px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; }
+.shell-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.shell-brand code { font-size: 13px; font-weight: 500; }
+.shell-header .shell-brand { min-width: 0; flex-shrink: 1; }
+.shell-header .shell-brand code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-header-right { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.shell-live { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.shell-header .shell-live { flex-wrap: nowrap; white-space: nowrap; }
+.shell-live > span { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+.shell-live-live > span { background: var(--green); }
+.shell-live-stale > span, .shell-live-offline > span { background: var(--coral); }
+.shell-search, .shell-back { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 10px; }
+.shell-clock { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.shell-corner { display: none; }
+.shell-main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 16px 40px; overflow-wrap: anywhere; }
+.shell-header-subpage { padding: 0 8px; justify-content: flex-start; }
+.shell-header-subpage .shell-brand { flex: 1; }
+.shell-sidebar { display: none; }
+.shell-tabs { display: flex; padding: 6px 8px 22px; padding-bottom: max(22px,env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--nav); flex-shrink: 0; }
+.shell-tabs a { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; padding-top: 4px; text-decoration: none; font-size: 11px; font-weight: 500; color: var(--muted); }
+.shell-nav-icon { position: relative; display: flex; padding: 4px 14px; border-radius: 999px; }
+.shell-tabs a[aria-current=page] { color: var(--text); }
+.shell-tabs a[aria-current=page] .shell-nav-icon { background: var(--tab-selected); }
+.shell-count { position: absolute; top: -2px; right: 4px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--amber); color: var(--badge-text); font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+/* iOS zooms into any focused field under 16px; every field on mobile stays at 16px or more. */
+@media (max-width: 899px) {
+ input, textarea, select { font-size: 16px !important; }
+}
+/* The session screen owns its own compact top bar and composer on mobile: no global header, no bottom nav. */
+.shell:has(> .shell-main > .sessions) > .shell-header, .shell:has(> .shell-main > .sessions) > .shell-tabs { display: none; }
+/*
+ * The on-screen keyboard never resizes the layout viewport on iOS; it pans the *visual* one, and the page
+ * scrolls under a shell pinned to the layout viewport. So on mobile the shell is fixed to the visual viewport
+ * itself: `--cp-viewport-height` (visualViewport.height) tall, pushed down by `--cp-viewport-offset`
+ * (visualViewport.offsetTop, JS in viewer-app/viewport-fit.ts). The composer then sits right above the
+ * keyboard with the transcript between the top bar and it, instead of riding to the top of the screen.
+ * Desktop keeps the plain flex shell: the offset variable is unset there and the fallback is 0.
+ */
+@property --cp-viewport-offset { syntax: "<length>"; inherits: true; initial-value: 0px; }
+.shell:has(> .shell-main > .sessions) { height: var(--cp-viewport-height, 100dvh); }
+/* The page itself must never scroll in the chat view: only the transcript scroller does. */
+@media (max-width: 899px) {
+ html:has(.shell > .shell-main > .sessions), html:has(.shell > .shell-main > .sessions) > body { overflow: hidden; overscroll-behavior: none; }
+ .shell:has(> .shell-main > .sessions) { position: fixed; inset: 0 auto auto 0; width: 100%; transform: translateY(var(--cp-viewport-offset, 0px)); }
+}
+@media (max-width: 359px) {
+ .shell-header { padding-left: 8px; }
+ .shell-brand { gap: 4px; }
+ .shell-live { font-size: 11px; gap: 4px; }
+ .shell-nav-icon { padding: 4px 10px; }
+}
+@media (min-width: 900px) {
+ h1 { font-size: 32px; }
+ .shell { flex-direction: row; }
+ .shell-header, .shell-tabs { display: none; }
+ .shell-sidebar { display: flex; flex-direction: column; gap: 24px; padding: 20px 12px; width: 232px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
+ .shell-sidebar .shell-brand { padding: 0 8px; height: 32px; }
+ .shell-desktop-search { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; }
+ .shell-sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+ .shell-sidebar-nav > a, .shell-sidebar-nav > span { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 10px; border-radius: 10px; text-decoration: none; font-size: 14px; color: var(--muted); }
+ .shell-sidebar-nav [aria-current=page] { background: var(--nav-selected); color: var(--text); }
+ .shell-sidebar-nav .shell-nav-icon { padding: 0; }
+ .shell-sidebar-nav .shell-count { left: 130px; right: auto; }
+ .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
+ .shell-main { min-width: 0; padding: 32px 40px 48px; }
+ .shell-corner { display: block; position: fixed; top: 8px; right: 24px; z-index: 1; padding: 2px 8px; border-radius: 8px; background: var(--background); }
+}

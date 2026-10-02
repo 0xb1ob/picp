@@ -1,0 +1,966 @@
+{
+  "version": 1,
+  "mode": "contract",
+  "trials": 1,
+  "versions": {
+    "arm": "candidate",
+    "model": "anthropic/claude-sonnet-5",
+    "package_version": "0.1.0",
+    "prompts": {
+      "profiles/gate-reviewer.md": "sha256:c828de343344fdd30f4e31b164959a3cea119572245b32f5200627eb4bcef830",
+      "profiles/implementer.md": "sha256:6c63fd2e6047e092d7707e917081e1c9c8ba4aa75ebb82da5b495a8ebcda91bf",
+      "profiles/planner.md": "sha256:a529c803fae58859bc1e7e5a6dbc906062bb77ccfdfa24762c95514cad35923f",
+      "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
+      "prompts/briefs/brief-qa.md": "sha256:3abe3a39b49f70c1f50d6eca6a39fb17d296782b7d5bd70eaaa8615a34e7a04f",
+      "prompts/briefs/brief-research.md": "sha256:f42fd7c834a85ab6b4cf02ae3c595be53604c4d4e70d1323816e3db212cc14ae",
+      "prompts/briefs/brief-ship.md": "sha256:f8bd63267bc1d7df0d6b725befef3d5639d1bb72de8a2db71e1b21c3a347bbcf",
+      "prompts/briefs/diff-review-rubric.md": "sha256:766b4b93f35e2c1de080bdf46dc4134344c832ac3007a083510025f86e5ceea7",
+      "prompts/briefs/gate-rubric.md": "sha256:908ba286759f2ab16dd55e180be93004bf9be5cc839407141c6d64b16ed33431",
+      "prompts/briefs/quality-completeness.md": "sha256:ab88d30ce35a3e261d0171307a5b91734fbb0bc3f43324b6e48a408782fd79c8",
+      "prompts/briefs/quality-verify.md": "sha256:b77bc3e5a72e083be1af72c3284dec2c83c8e4ddcd17085aa312196b593591da"
+    }
+  },
+  "corpus": {
+    "version": 1,
+    "cases": 50,
+    "sha": "sha256:8cb8df0e0dd131f6ec3579d1c22d3360cba6471a25a3e6994269e7c32d0e98f4"
+  },
+  "metrics": {
+    "cases_scored": 27,
+    "cases_passed": 27,
+    "quality_skipped": 23,
+    "contract_compliance": 1,
+    "terminal_report": null,
+    "task_coverage": null,
+    "grounded_evidence": null,
+    "plan_first_pass": null,
+    "implementation_verification": null,
+    "reviewer_precision": null,
+    "reviewer_recall": null,
+    "reviewer_severity_accuracy": null,
+    "median_tokens": null,
+    "median_tool_calls": null
+  },
+  "by_role": {
+    "implementer": {
+      "cases_scored": 10,
+      "cases_passed": 10,
+      "quality_skipped": 8,
+      "contract_compliance": 1,
+      "terminal_report": null,
+      "task_coverage": null,
+      "grounded_evidence": null,
+      "plan_first_pass": null,
+      "implementation_verification": null,
+      "reviewer_precision": null,
+      "reviewer_recall": null,
+      "reviewer_severity_accuracy": null,
+      "median_tokens": null,
+      "median_tool_calls": null
+    },
+    "planner": {
+      "cases_scored": 9,
+      "cases_passed": 9,
+      "quality_skipped": 6,
+      "contract_compliance": 1,
+      "terminal_report": null,
+      "task_coverage": null,
+      "grounded_evidence": null,
+      "plan_first_pass": null,
+      "implementation_verification": null,
+      "reviewer_precision": null,
+      "reviewer_recall": null,
+      "reviewer_severity_accuracy": null,
+      "median_tokens": null,
+      "median_tool_calls": null
+    },
+    "reviewer": {
+      "cases_scored": 8,
+      "cases_passed": 8,
+      "quality_skipped": 9,
+      "contract_compliance": 1,
+      "terminal_report": null,
+      "task_coverage": null,
+      "grounded_evidence": null,
+      "plan_first_pass": null,
+      "implementation_verification": null,
+      "reviewer_precision": null,
+      "reviewer_recall": null,
+      "reviewer_severity_accuracy": null,
+      "median_tokens": null,
+      "median_tool_calls": null
+    }
+  },
+  "cases": [
+    {
+      "case_id": "implementer-blocked-evidence",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-brief-blocked-evidence",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Dirty, detached or unpushed is `status: \\\"blocked\\\"`\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"blocked` report is a successful\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-brief-clean-pushed-delivery",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"git push --force-with-lease\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"an unpushed branch is lost work\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Do not wait for CI\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"gh run watch --exit-status\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-brief-exactly-once",
+      "role": "implementer",
+      "scenario": "exactly-once-report",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Call `report_result`, exactly once, as your very next action\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Prose at\\n   the end of a turn reaches nobody.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-brief-resolved-base",
+      "role": "implementer",
+      "scenario": "non-main-base",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"git rebase origin/trunk\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"<git rev-parse origin/trunk>\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"--branch cp-eval-1\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"origin/main\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-brief-test-cadence",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"exactly once\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"npm run test:one -- tests/<x>.test.ts\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"timeout-only failure under load is not evidence\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-bug-regression",
+      "role": "implementer",
+      "scenario": "bug-regression",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-clean-pushed-delivery",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-docs-only",
+      "role": "implementer",
+      "scenario": "docs-only",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-exactly-once-report",
+      "role": "implementer",
+      "scenario": "exactly-once-report",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-non-main-base",
+      "role": "implementer",
+      "scenario": "non-main-base",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-profile-bounded-search-tools",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Search and read with the `grep`, `find`, `ls` and `read` tools\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"through `bash` to look at source\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-profile-root-cause",
+      "role": "implementer",
+      "scenario": "bug-regression",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"For a bug: reproduce it first, locate the root cause, and fix it there\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"regression coverage that fails without your fix\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Review feedback is a claim to verify, not an instruction to obey.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-profile-task-file",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"the task file it names in\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"A plan is intent, not fact.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Reuse what is there instead of inventing a parallel way.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "implementer-review-revision",
+      "role": "implementer",
+      "scenario": "review-revision",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "implementer-task-file-handoff",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-brief-runnable-test-plan",
+      "role": "planner",
+      "scenario": "invented-test-command",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"the behavior each one proves\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"npm test -- tests/leases.test.ts\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Guessing is forbidden. An unknown stays listed as an unknown.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "planner-brief-scope-fenced",
+      "role": "planner",
+      "scenario": "excessive-scope",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Prefer the smallest existing pattern that satisfies the task.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"abstraction is a finding you must justify, not a default.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "planner-complete-executable-plan",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-excessive-scope",
+      "role": "planner",
+      "scenario": "excessive-scope",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-genuine-unknown",
+      "role": "planner",
+      "scenario": "genuine-unknown",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-invented-test-command",
+      "role": "planner",
+      "scenario": "invented-test-command",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-omitted-requirement",
+      "role": "planner",
+      "scenario": "omitted-requirement",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "planner-profile-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Search and read with the `grep`, `find`, `ls` and `read` tools\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"through `bash` to look at source\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "planner-profile-executable-plan",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"A plan is executable or it is not a plan.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Check every requirement of the task against your artifact before reporting.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Every File list entry names an exact path and the exact change\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "planner-profile-unknowns-honest",
+      "role": "planner",
+      "scenario": "genuine-unknown",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Guessing is forbidden. An unknown stays listed as an unknown.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"never for permission to proceed\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "planner-stale-path",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "qa-brief-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Search and read with the `grep`, `find`, `ls` and `read` tools\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"through `bash` to look at source\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "qa-brief-envelope-bounds",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"at most 3 lines and at most 600 characters\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"required and non-empty when\\n     status is `blocked`\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "research-brief-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Search and read with the `grep`, `find`, `ls` and `read` tools\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"through `bash` to look at source\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "research-brief-envelope-bounds",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"at most 3 lines and at most 600 characters\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"exactly these keys, no others\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"required and non-empty when\\n     status is `blocked`\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-clean-diff",
+      "role": "reviewer",
+      "scenario": "clean-diff",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-diff-rubric-finding-shape",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"[severity: high|medium|low] [confidence: high|medium|low] path:line\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"trigger → impact → required change\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"you have no plan to compare against here\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-diff-rubric-no-style-nits",
+      "role": "reviewer",
+      "scenario": "style-only",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"No praise, no style nits, no speculation\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"speculate about files you cannot see.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-diff-rubric-verdict-bounds",
+      "role": "reviewer",
+      "scenario": "clean-diff",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"each item ≤ 400 characters (about three lines), max 10 items.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"**only when `verdict` is `revise`**\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-false-positive-trap",
+      "role": "reviewer",
+      "scenario": "false-positive-trap",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-gate-rubric-unscorable",
+      "role": "reviewer",
+      "scenario": "unscorable-input",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"the artifact is unreadable, fundamentally unscorable\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"the verdict is `escalate`\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-gate-rubric-verdict-bounds",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"each item ≤ 400 characters (about three lines), max 10 items.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"**only when `verdict` is `revise`**\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`, `decision_summary`.\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-gate-rubric-verdict-ladder",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"A missing required section is normally `revise`\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Still `pass` when flags are true\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-missing-section",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-pass-with-flag",
+      "role": "reviewer",
+      "scenario": "pass-with-flag",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-profile-flags-independent",
+      "role": "reviewer",
+      "scenario": "pass-with-flag",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Score quality independently of the flags.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"the parent owns flag policy\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"escalate whenever\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"escalate if any flag\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-profile-grep-locates",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"grepping tells you where, `read` tells you what\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Do not open the repository\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"do not grep\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"you have no search tool\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "reviewer-seeded-p0",
+      "role": "reviewer",
+      "scenario": "seeded-p0",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-seeded-p1",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-seeded-p2",
+      "role": "reviewer",
+      "scenario": "seeded-p2",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-style-only",
+      "role": "reviewer",
+      "scenario": "style-only",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-unscorable-input",
+      "role": "reviewer",
+      "scenario": "unscorable-input",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "ship-brief-bounded-search-tools",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"Search with grep/anchor_grep, find/ls and read\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Edit with read anchors + replace/insert; no shell apply_patch; find/ls before reading a guessed path.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"through `bash` to look at source\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "case_id": "ship-brief-envelope-bounds",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "contract",
+      "trial": 1,
+      "status": "passed",
+      "checks": [
+        {
+          "name": "includes \"at most 3 lines and at most 600 characters\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"full 40-char sha (`git rev-parse HEAD`), never abbreviated\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"# when blocked, required and non-empty:\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"blockers: [\\\"<exact path or command that failed, one per item>\\\"]\"",
+          "bucket": "contract",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+#!/bin/sh
+# cp-daemon: one always-on process per home (parent supervisor, viewer,
+# health, update). See src/service/daemon.ts for the verbs.
+# CP_HOME unset and this checkout sits in an installed home (<home>/app, beside
+# <home>/data/daemon.json): that enclosing home. --home still wins in daemon.ts.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ -z "${CP_HOME:-}" ] && [ -f "$ROOT/../data/daemon.json" ]; then
+	CP_HOME=$(CDPATH= cd -- "$ROOT/.." && pwd)
+	export CP_HOME
+fi
+exec node "$ROOT/src/service/daemon.ts" "$@"

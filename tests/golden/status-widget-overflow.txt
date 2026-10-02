@@ -1,0 +1,10 @@
+⧗ 1 decision awaiting you — /cp-awaiting
+command post · 12 jobs · $2.52
+NEEDS YOU (1)
+  ? cp-job-04  asked 6m ago: Rebase or merge the base branch?
+ATTENTION (1)
+  ✗ cp-job-11  failed 1m ago · budget_exceeded · /watch cp-job-11
+RUNNING (10)
+  ▶ cp-job-01  claude-sonnet-5  M/low/medium  read  11m  311.0k  $0.21
+  ▶ cp-job-02  claude-sonnet-5  M/low/medium  read  10m  312.0k  $0.21
+  … 8 more running (/status)

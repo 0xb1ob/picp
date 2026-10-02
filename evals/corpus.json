@@ -1,0 +1,746 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "planner-profile-executable-plan",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "contract",
+      "surface": "planner-profile",
+      "why": "do8.8: the planner profile must demand an executable plan and a requirement-by-requirement check before reporting.",
+      "expect": {
+        "includes": [
+          "A plan is executable or it is not a plan.",
+          "Check every requirement of the task against your artifact before reporting.",
+          "Every File list entry names an exact path and the exact change"
+        ]
+      }
+    },
+    {
+      "id": "planner-profile-unknowns-honest",
+      "role": "planner",
+      "scenario": "genuine-unknown",
+      "kind": "contract",
+      "surface": "planner-profile",
+      "why": "A planner that guesses produces a plan an implementer cannot trust; ask_operator is for product decisions, never for permission.",
+      "expect": {
+        "includes": [
+          "Guessing is forbidden. An unknown stays listed as an unknown.",
+          "never for permission to proceed"
+        ]
+      }
+    },
+    {
+      "id": "planner-brief-runnable-test-plan",
+      "role": "planner",
+      "scenario": "invented-test-command",
+      "kind": "contract",
+      "surface": "research-brief",
+      "why": "Plans used to name test commands the repository does not have; the brief now demands cwd, command, expected result and what it proves.",
+      "expect": {
+        "includes": [
+          "the behavior each one proves",
+          "npm test -- tests/leases.test.ts",
+          "Guessing is forbidden. An unknown stays listed as an unknown."
+        ]
+      }
+    },
+    {
+      "id": "planner-brief-scope-fenced",
+      "role": "planner",
+      "scenario": "excessive-scope",
+      "kind": "contract",
+      "surface": "research-brief",
+      "why": "Scope growth starts in the plan: the brief must prefer the smallest existing pattern and make a new abstraction a justified finding.",
+      "expect": {
+        "includes": [
+          "Prefer the smallest existing pattern that satisfies the task.",
+          "abstraction is a finding you must justify, not a default."
+        ]
+      }
+    },
+    {
+      "id": "reviewer-profile-flags-independent",
+      "role": "reviewer",
+      "scenario": "pass-with-flag",
+      "kind": "contract",
+      "surface": "reviewer-profile",
+      "why": "do8.1: reviewers were told to escalate on any flag, so the parent's authorizable pass+flag path was unreachable.",
+      "expect": {
+        "includes": [
+          "Score quality independently of the flags.",
+          "the parent owns flag policy"
+        ],
+        "excludes": ["escalate whenever", "escalate if any flag"]
+      }
+    },
+    {
+      "id": "reviewer-profile-grep-locates",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "contract",
+      "surface": "reviewer-profile",
+      "why": "pi-command-post-reviewer-grep-utn: with `read` as its only tool, re-locating a symbol in a paged diff cost a second full pass; grep is granted for that and for nothing wider.",
+      "expect": {
+        "includes": [
+          "grepping tells you where, `read` tells you what",
+          "Do not open the repository"
+        ],
+        "excludes": ["do not grep", "you have no search tool"]
+      }
+    },
+    {
+      "id": "reviewer-gate-rubric-verdict-ladder",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "contract",
+      "surface": "gate-rubric",
+      "why": "A missing required section is a fixable gap (revise), not an escalation; the rubric has to say so where the reviewer reads it.",
+      "expect": {
+        "includes": [
+          "A missing required section is normally `revise`",
+          "Still `pass` when flags are true"
+        ]
+      }
+    },
+    {
+      "id": "reviewer-gate-rubric-unscorable",
+      "role": "reviewer",
+      "scenario": "unscorable-input",
+      "kind": "contract",
+      "surface": "gate-rubric",
+      "why": "An artifact nobody can score must escalate rather than be graded on vibes.",
+      "expect": {
+        "includes": [
+          "the artifact is unreadable, fundamentally unscorable",
+          "the verdict is `escalate`"
+        ]
+      }
+    },
+    {
+      "id": "reviewer-diff-rubric-finding-shape",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "contract",
+      "surface": "diff-rubric",
+      "why": "do8.4: findings must be actionable and severity-tagged, and the rubric must no longer claim the reviewer has no statement of scope.",
+      "expect": {
+        "includes": [
+          "[severity: high|medium|low] [confidence: high|medium|low] path:line",
+          "trigger → impact → required change"
+        ],
+        "excludes": ["you have no plan to compare against here"]
+      }
+    },
+    {
+      "id": "reviewer-diff-rubric-no-style-nits",
+      "role": "reviewer",
+      "scenario": "style-only",
+      "kind": "contract",
+      "surface": "diff-rubric",
+      "why": "Style nits and speculation are the noise that made diff reviews expensive to read.",
+      "expect": {
+        "includes": [
+          "No praise, no style nits, no speculation",
+          "speculate about files you cannot see."
+        ]
+      }
+    },
+    {
+      "id": "reviewer-gate-rubric-verdict-bounds",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "contract",
+      "surface": "gate-rubric",
+      "why": "s64: 56 of 141 report_verdict calls were rejected for a >400-char reason and 7 for revisions on a non-revise verdict; the bounds only existed in the schema, so the rubric must state them where the reviewer composes the call.",
+      "expect": {
+        "includes": [
+          "each item ≤ 400 characters (about three lines), max 10 items.",
+          "**only when `verdict` is `revise`**",
+          "No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`, `decision_summary`."
+        ]
+      }
+    },
+    {
+      "id": "reviewer-diff-rubric-verdict-bounds",
+      "role": "reviewer",
+      "scenario": "clean-diff",
+      "kind": "contract",
+      "surface": "diff-rubric",
+      "why": "s64: the same report_verdict bounds apply to the diff reviewer, whose clean-diff pass must omit `revisions` entirely rather than send an empty or explanatory array.",
+      "expect": {
+        "includes": [
+          "each item ≤ 400 characters (about three lines), max 10 items.",
+          "**only when `verdict` is `revise`**",
+          "No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`."
+        ]
+      }
+    },
+    {
+      "id": "implementer-brief-resolved-base",
+      "role": "implementer",
+      "scenario": "non-main-base",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "do8.6: the ship brief hardcoded origin/main, so a non-main repository rebased and reported against the wrong branch.",
+      "expect": {
+        "includes": [
+          "git rebase origin/trunk",
+          "<git rev-parse origin/trunk>",
+          "--branch cp-eval-1"
+        ],
+        "excludes": ["origin/main"]
+      }
+    },
+    {
+      "id": "implementer-brief-exactly-once",
+      "role": "implementer",
+      "scenario": "exactly-once-report",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "The envelope is the only channel to the operator; a run that ends in prose reaches nobody.",
+      "expect": {
+        "includes": [
+          "Call `report_result`, exactly once, as your very next action",
+          "Prose at\n   the end of a turn reaches nobody."
+        ]
+      }
+    },
+    {
+      "id": "implementer-brief-blocked-evidence",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "A blocked report must name the exact path or command, and must be a successful outcome rather than a silent stop.",
+      "expect": {
+        "includes": [
+          "Dirty, detached or unpushed is `status: \"blocked\"`",
+          "blocked` report is a successful"
+        ]
+      }
+    },
+    {
+      "id": "implementer-brief-clean-pushed-delivery",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "A lease is recycled: an unpushed branch is lost work, and CI is never the worker's to wait on.",
+      "expect": {
+        "includes": [
+          "git push --force-with-lease",
+          "an unpushed branch is lost work",
+          "Do not wait for CI"
+        ],
+        "excludes": ["gh run watch --exit-status"]
+      }
+    },
+    {
+      "id": "implementer-brief-test-cadence",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "Sep 5-6: 179 test invocations across 35 sessions (one session 82) because no prompt named a cadence; under fan-out that reproduces the load-avg incident and its false timeouts.",
+      "expect": {
+        "includes": [
+          "exactly once",
+          "npm run test:one -- tests/<x>.test.ts",
+          "timeout-only failure under load is not evidence"
+        ]
+      }
+    },
+    {
+      "id": "implementer-profile-root-cause",
+      "role": "implementer",
+      "scenario": "bug-regression",
+      "kind": "contract",
+      "surface": "implementer-profile",
+      "why": "do8.2: the implementer profile must require reproduce → root cause → regression coverage, not a fix at the symptom.",
+      "expect": {
+        "includes": [
+          "For a bug: reproduce it first, locate the root cause, and fix it there",
+          "regression coverage that fails without your fix",
+          "Review feedback is a claim to verify, not an instruction to obey."
+        ]
+      }
+    },
+    {
+      "id": "implementer-profile-task-file",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "surface": "implementer-profile",
+      "why": "An implementer working from a plan must read the task file in full and follow the tree when the plan is stale.",
+      "expect": {
+        "includes": [
+          "the task file it names in",
+          "A plan is intent, not fact.",
+          "Reuse what is there instead of inventing a parallel way."
+        ]
+      }
+    },
+    {
+      "id": "ship-brief-bounded-search-tools",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "Sep 5-6 audit: implementers made ~2173 bash grep/cat/head/tail/ls calls; glob was not a pi tool, so the brief must name real bounded discovery and editing tools.",
+      "expect": {
+        "includes": [
+          "Search with grep/anchor_grep, find/ls and read",
+          "Edit with read anchors + replace/insert; no shell apply_patch; find/ls before reading a guessed path.",
+          "through `bash` to look at source"
+        ]
+      }
+    },
+    {
+      "id": "implementer-profile-bounded-search-tools",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "contract",
+      "surface": "implementer-profile",
+      "why": "The profile is the system prompt: the bounded-search rule has to hold for every job, not only the ones whose brief is read closely.",
+      "expect": {
+        "includes": [
+          "Search and read with the `grep`, `find`, `ls` and `read` tools",
+          "through `bash` to look at source"
+        ]
+      }
+    },
+    {
+      "id": "research-brief-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "surface": "research-brief",
+      "why": "A planner locates paths for its File list; bash grep/cat spent the same context the plan needed, and glob was never called.",
+      "expect": {
+        "includes": [
+          "Search and read with the `grep`, `find`, `ls` and `read` tools",
+          "through `bash` to look at source"
+        ]
+      }
+    },
+    {
+      "id": "planner-profile-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "surface": "planner-profile",
+      "why": "Same rule in the planner's system prompt, so it survives a brief a worker skims.",
+      "expect": {
+        "includes": [
+          "Search and read with the `grep`, `find`, `ls` and `read` tools",
+          "through `bash` to look at source"
+        ]
+      }
+    },
+    {
+      "id": "qa-brief-bounded-search-tools",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "surface": "qa-brief",
+      "why": "A Q&A worker answers from cited paths on a small budget; an unbounded bash cat is the fastest way to spend it.",
+      "expect": {
+        "includes": [
+          "Search and read with the `grep`, `find`, `ls` and `read` tools",
+          "through `bash` to look at source"
+        ]
+      }
+    },
+    {
+      "id": "planner-omitted-requirement",
+      "role": "planner",
+      "scenario": "omitted-requirement",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "Observed failure: a plan covered the code change and silently dropped the documentation requirement stated in the task.",
+      "subject": "Plan this change in the `demo` repository.\n\nRequirements:\n1. `POST /orders` must reject a body larger than 1 MB with HTTP 413.\n2. The limit must be configurable through `config/limits.json`.\n3. `docs/api.md` must document the new status code and the config key.\n\nRepository excerpt:\n\n    src/routes/orders.ts:20  export async function postOrder(req, res) {\n    src/routes/orders.ts:24    const body = await readJson(req);\n    src/config.ts:11         export const limits = loadJson(\"config/limits.json\");\n    config/limits.json:1     { \"max_page_size\": 100 }\n    docs/api.md:40           ## POST /orders\n    tests/orders.test.ts:1   import { test } from \"node:test\";\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "expect": {
+        "coverage": ["docs/api\\.md", "config/limits\\.json", "413", "src/routes/orders\\.ts"],
+        "evidence": true
+      }
+    },
+    {
+      "id": "planner-stale-path",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "Observed failure: a plan named a path from an older tree; the implementer edited a file that no longer existed.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: session expiry must be 30 minutes instead of 24 hours. An older ticket calls the file `src/legacy/auth.ts`; check the tree before you plan.\n\nRepository excerpt (`git ls-files`):\n\n    src/auth/session.ts\n    src/auth/tokens.ts\n    tests/session.test.ts\n\n    src/auth/session.ts:14  const EXPIRY_MS = 24 * 60 * 60 * 1000;\n    src/auth/session.ts:31  export function issue(user: User): Session {\n    tests/session.test.ts:8 test(\"a session expires\", () => {\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "expect": {
+        "coverage": ["src/auth/session\\.ts", "EXPIRY_MS"],
+        "excludes": ["src/legacy/auth.ts"],
+        "evidence": true
+      }
+    },
+    {
+      "id": "planner-invented-test-command",
+      "role": "planner",
+      "scenario": "invented-test-command",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "Observed failure: a Test plan named `npm run test:unit`, a script the repository does not define, so the check could not be run.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: `parseRange(\"\")` must throw `RangeError` instead of returning `undefined`.\n\nRepository excerpt:\n\n    src/range.ts:9   export function parseRange(input: string) {\n    src/range.ts:12    if (input === \"\") return undefined;\n    tests/range.test.ts:1 import { test } from \"node:test\";\n\nThe only scripts in `package.json` are:\n\n    { \"test\": \"node --test tests/**/*.test.ts\", \"typecheck\": \"tsc --noEmit\" }",
+      "expect": {
+        "coverage": ["node --test|npm test", "tests/range\\.test\\.ts", "RangeError"],
+        "excludes": ["npm run test:unit", "pytest", "jest"],
+        "evidence": true
+      }
+    },
+    {
+      "id": "planner-excessive-scope",
+      "role": "planner",
+      "scenario": "excessive-scope",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "Observed failure: a one-line fix came back as a plan to restructure two unrelated modules.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: the cache TTL is 60 seconds and must be 300. Nothing else changes.\n\nRepository excerpt:\n\n    src/cache.ts:7    const TTL_SECONDS = 60;\n    src/cache.ts:22   export function get(key: string) {\n    src/billing/invoice.ts:1  // legacy, scheduled for rewrite next quarter\n    tests/cache.test.ts:5 test(\"entries expire\", () => {\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "expect": {
+        "coverage": ["src/cache\\.ts", "TTL_SECONDS", "300"],
+        "excludes": ["src/billing/invoice.ts", "rewrite"],
+        "evidence": true
+      }
+    },
+    {
+      "id": "planner-genuine-unknown",
+      "role": "planner",
+      "scenario": "genuine-unknown",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "Happy path for honesty: a product decision the repository cannot answer must be listed as an unknown, not guessed.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: when two devices edit the same note offline, the server must resolve the conflict. The repository contains no conflict policy and no product note about which side wins.\n\nRepository excerpt:\n\n    src/notes/sync.ts:30  export function merge(local: Note, remote: Note): Note {\n    src/notes/sync.ts:33    return remote; // TODO: policy undecided\n    docs/notes.md:12      Sync is last-writer-wins for now.\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "expect": {
+        "coverage": ["Unknowns", "conflict", "(decision|policy|ask)"],
+        "excludes": ["I assume", "presumably"],
+        "evidence": true
+      }
+    },
+    {
+      "id": "planner-complete-executable-plan",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "quality",
+      "surface": "research-brief",
+      "why": "The representative happy path: every required section present, with evidence and a runnable check.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: `formatBytes(1024)` must render \"1.0 KB\" instead of \"1024 B\". Values under 1024 keep their current rendering.\n\nRepository excerpt:\n\n    src/format.ts:3   export function formatBytes(n: number): string {\n    src/format.ts:5     return `${n} B`;\n    tests/format.test.ts:4 test(\"formats bytes\", () => {\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "expect": {
+        "coverage": [
+          "Goal",
+          "Acceptance",
+          "Non-goals",
+          "Evidence",
+          "Approach",
+          "File list",
+          "Implementation order",
+          "Constraints",
+          "Test plan",
+          "Unknowns",
+          "Self-assessment"
+        ],
+        "evidence": true
+      }
+    },
+    {
+      "id": "reviewer-pass-with-flag",
+      "role": "reviewer",
+      "scenario": "pass-with-flag",
+      "kind": "quality",
+      "surface": "gate-rubric",
+      "why": "do8.1's whole point: a sound plan whose work is destructive is pass + destructive_scope, the parent's authorizable path.",
+      "subject": "Goal: drop the unused `sessions_old` table.\nAcceptance: `sessions_old` is absent after migration; `npm test` passes.\nNon-goals: no change to `sessions`.\nEvidence: src/db/schema.ts:44 declares `sessions_old`; no reader anywhere (grep in src/ returns only the declaration).\nApproach: one forward migration; no backfill, since nothing reads the table.\nFile list: `migrations/012_drop_sessions_old.sql` — `DROP TABLE sessions_old;`. `src/db/schema.ts` — delete the declaration at L44.\nImplementation order: 1. add the migration, 2. delete the declaration, 3. run the suite.\nConstraints: irreversible; recovery is a restore from the nightly dump.\nTest plan: cwd repo; `npm test`; expect pass — proves nothing referenced the table.\nUnknowns/Blockers: none.\nSelf-assessment: confidence high; scope S; blocking_unknowns false; destructive_scope true; suggested_implementer_model claude-sonnet-5.",
+      "expect": {
+        "verdict": "pass",
+        "flags": { "destructive_scope": true, "blocking_unknowns": false },
+        "labels": []
+      }
+    },
+    {
+      "id": "reviewer-missing-section",
+      "role": "reviewer",
+      "scenario": "missing-section",
+      "kind": "quality",
+      "surface": "gate-rubric",
+      "why": "A required section with nothing under it is a fixable gap: revise, naming the section.",
+      "subject": "Goal: cap the upload size at 1 MB.\nAcceptance: a 2 MB upload gets HTTP 413.\nNon-goals: no change to download limits.\nEvidence: src/upload.ts:18 reads the whole body with no bound.\nApproach: check `content-length` before reading.\nFile list: `src/upload.ts` — reject over 1 MB at L18.\nImplementation order: 1. add the guard, 2. add the test.\nConstraints: none.\nTest plan:\nUnknowns/Blockers: none.\nSelf-assessment: confidence high; scope S; blocking_unknowns false; destructive_scope false; suggested_implementer_model claude-sonnet-5.",
+      "expect": {
+        "verdict": "revise",
+        "labels": [
+          {
+            "id": "empty-test-plan",
+            "severity": "P1",
+            "where": "Test plan heading with nothing under it",
+            "match": "test plan"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reviewer-unscorable-input",
+      "role": "reviewer",
+      "scenario": "unscorable-input",
+      "kind": "quality",
+      "surface": "gate-rubric",
+      "why": "An artifact that is a truncated fragment cannot be scored; escalate rather than invent a grade.",
+      "subject": "Goal: <<<TRUNCATED>>>\n\\x00\\x00 ... the remainder of this file was lost in transfer ...\n(no further content)",
+      "expect": {
+        "verdict": "escalate",
+        "labels": []
+      }
+    },
+    {
+      "id": "reviewer-seeded-p0",
+      "role": "reviewer",
+      "scenario": "seeded-p0",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "Seeded P0: user input concatenated into SQL. A review that misses this is the review that costs money.",
+      "subject": "Stat:\n src/users.ts | 6 +++++-\n\nHunks:\n--- a/src/users.ts\n+++ b/src/users.ts\n@@ -40,7 +40,11 @@\n-export function findUser(db: Db, email: string) {\n-  return db.query(\"SELECT * FROM users WHERE email = ?\", [email]);\n+export function findUser(db: Db, email: string) {\n+  return db.query(`SELECT * FROM users WHERE email = '${email}'`);\n+}\n+\n+export function findAdmin(db: Db, email: string) {\n+  return db.query(`SELECT * FROM users WHERE email = '${email}' AND admin = 1`);\n }",
+      "expect": {
+        "verdict": "revise",
+        "labels": [
+          {
+            "id": "sql-injection",
+            "severity": "P0",
+            "where": "src/users.ts:42 — email interpolated into SQL",
+            "match": "(sql|injection|interpolat|concatenat|parameteri)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reviewer-seeded-p1",
+      "role": "reviewer",
+      "scenario": "seeded-p1",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "Seeded P1: a swallowed write error turns a failed save into a silent data loss.",
+      "subject": "Stat:\n src/store.ts | 5 ++---\n\nHunks:\n--- a/src/store.ts\n+++ b/src/store.ts\n@@ -18,9 +18,7 @@\n export async function save(record: Record) {\n-  const result = await write(record);\n-  if (!result.ok) throw new WriteError(result.reason);\n-  return result;\n+  try { return await write(record); } catch { return { ok: true }; }\n }",
+      "expect": {
+        "verdict": "revise",
+        "labels": [
+          {
+            "id": "swallowed-write-error",
+            "severity": "P1",
+            "where": "src/store.ts:20 — catch returns ok:true",
+            "match": "(swallow|catch|error|silent|data loss)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reviewer-seeded-p2",
+      "role": "reviewer",
+      "scenario": "seeded-p2",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "Seeded P2: a new branch with no test. Real, but low severity — calibration matters as much as detection.",
+      "subject": "Stat:\n src/retry.ts        | 4 ++++\n tests/retry.test.ts | 0\n\nHunks:\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12,6 +12,10 @@\n export function backoff(attempt: number): number {\n+  if (attempt > 10) {\n+    return MAX_BACKOFF_MS;\n+  }\n   return Math.min(2 ** attempt * 100, MAX_BACKOFF_MS);\n }",
+      "expect": {
+        "verdict": "revise",
+        "labels": [
+          {
+            "id": "untested-branch",
+            "severity": "P2",
+            "where": "src/retry.ts:14 — new attempt > 10 branch has no test",
+            "match": "test"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reviewer-clean-diff",
+      "role": "reviewer",
+      "scenario": "clean-diff",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "The happy path: a small, correct, tested change must pass without invented findings.",
+      "subject": "Stat:\n src/format.ts        | 3 ++-\n tests/format.test.ts | 6 ++++++\n\nHunks:\n--- a/src/format.ts\n+++ b/src/format.ts\n@@ -3,5 +3,6 @@\n export function formatBytes(n: number): string {\n+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;\n   return `${n} B`;\n }\n--- a/tests/format.test.ts\n+++ b/tests/format.test.ts\n@@ -4,3 +4,9 @@\n test(\"formats bytes\", () => {\n   assert.equal(formatBytes(512), \"512 B\");\n });\n+\n+test(\"formats kilobytes\", () => {\n+  assert.equal(formatBytes(1024), \"1.0 KB\");\n+});",
+      "expect": {
+        "verdict": "pass",
+        "flags": { "scope_growth": false, "destructive_scope": false },
+        "labels": []
+      }
+    },
+    {
+      "id": "reviewer-style-only",
+      "role": "reviewer",
+      "scenario": "style-only",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "Formatting-only diffs used to attract style nits, which the rubric forbids: pass with no findings.",
+      "subject": "Stat:\n src/util.ts | 8 ++++----\n\nHunks:\n--- a/src/util.ts\n+++ b/src/util.ts\n@@ -1,8 +1,8 @@\n-export function clamp(value:number,low:number,high:number){\n-return Math.min(Math.max(value,low),high);\n-}\n+export function clamp(value: number, low: number, high: number) {\n+\treturn Math.min(Math.max(value, low), high);\n+}",
+      "expect": {
+        "verdict": "pass",
+        "labels": []
+      }
+    },
+    {
+      "id": "reviewer-false-positive-trap",
+      "role": "reviewer",
+      "scenario": "false-positive-trap",
+      "kind": "quality",
+      "surface": "diff-rubric",
+      "why": "A trap that looks like a missing await and is not: `readCached` is synchronous and the diff shows its signature.",
+      "subject": "Stat:\n src/cache.ts | 7 ++++++-\n tests/cache.test.ts | 5 +++++\n\nHunks:\n--- a/src/cache.ts\n+++ b/src/cache.ts\n@@ -10,6 +10,11 @@\n+/** Synchronous by design: the map is in-process. */\n+export function readCached(key: string): string | undefined {\n+  return store.get(key);\n+}\n+\n export function warm(keys: string[]): void {\n-  for (const key of keys) store.set(key, compute(key));\n+  for (const key of keys) if (readCached(key) === undefined) store.set(key, compute(key));\n }\n--- a/tests/cache.test.ts\n+++ b/tests/cache.test.ts\n@@ -1,2 +1,7 @@\n+test(\"warm skips cached keys\", () => {\n+  store.set(\"a\", \"1\");\n+  warm([\"a\"]);\n+  assert.equal(readCached(\"a\"), \"1\");\n+});",
+      "expect": {
+        "verdict": "pass",
+        "labels": []
+      }
+    },
+    {
+      "id": "implementer-task-file-handoff",
+      "role": "implementer",
+      "scenario": "task-file-handoff",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "Observed failure: an implementer worked from the brief's summary and never opened the task file it named.",
+      "subject": "Your task file is `/state/runs/cp-eval-1/task.md` (a gated plan). It names three file changes and one test command. The brief above summarizes none of them.\n\nState your working procedure before you touch anything: what you read, in what order, and what you do if the plan's paths disagree with the tree.",
+      "expect": {
+        "coverage": ["task\\.md", "in full", "(tree|repository) (disagree|wins)|follow the tree", "AGENTS\\.md|repository'?s own instructions"],
+        "excludes": ["skip the task file"]
+      }
+    },
+    {
+      "id": "implementer-bug-regression",
+      "role": "implementer",
+      "scenario": "bug-regression",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "Observed failure: a bug was patched in the one caller the ticket named; three sibling callers stayed broken.",
+      "subject": "Bug: `POST /orders` accepts a negative quantity. The ticket names `src/routes/orders.ts`, but `validateQuantity` in `src/validate.ts` is called from four routes.\n\nState your procedure: how you reproduce it, where you fix it, and what coverage you add.",
+      "expect": {
+        "coverage": ["reproduc", "root cause", "regression", "src/validate\\.ts"],
+        "excludes": ["fix it in each caller"]
+      }
+    },
+    {
+      "id": "implementer-docs-only",
+      "role": "implementer",
+      "scenario": "docs-only",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "A docs-only job still runs the suite and still reports; it must not grow into a code change.",
+      "subject": "Task: `docs/api.md` documents the status code for an oversized upload as 400. The code returns 413. Fix the document. Do not change the code.\n\nState what you change, what you run, and what you report.",
+      "expect": {
+        "coverage": ["docs/api\\.md", "413", "npm test|typecheck|suite"],
+        "excludes": ["refactor", "change src/"]
+      }
+    },
+    {
+      "id": "implementer-non-main-base",
+      "role": "implementer",
+      "scenario": "non-main-base",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "do8.6: with a resolved base of `trunk`, every rebase and every base_sha must name trunk.",
+      "subject": "This repository's base branch is `trunk`; it has no `main`.\n\nWrite out the exact git commands you will run between finishing the edit and calling report_result, and the values you will report for head_sha and base_sha.",
+      "expect": {
+        "coverage": ["origin/trunk", "force-with-lease", "rev-parse"],
+        "excludes": ["origin/main"]
+      }
+    },
+    {
+      "id": "implementer-review-revision",
+      "role": "implementer",
+      "scenario": "review-revision",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "A review finding can be right about the defect and wrong about the fix; obeying it blindly is how correct code gets broken.",
+      "subject": "A diff review came back with one finding: \"[severity: high] [confidence: medium] src/cache.ts:14 — readCached is not awaited → stale reads → add await\". `readCached` is synchronous; the diff shows its signature returning `string | undefined`.\n\nState what you do about this finding.",
+      "expect": {
+        "coverage": ["(verify|check).{0,40}(claim|finding)|claim to verify", "(synchronous|not async)", "(say so|disagree|explain|evidence)"],
+        "excludes": ["add await to readCached"]
+      }
+    },
+    {
+      "id": "implementer-blocked-evidence",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "Observed failure: a worker hit an unresolvable rebase conflict, cleaned the tree to make it go away, and reported done.",
+      "subject": "`git rebase origin/trunk` stops with a conflict in `src/contracts.ts` that you cannot resolve without deleting a test another branch added. Your commits are on `cp-eval-1`; nothing is pushed.\n\nState exactly what you do next and what your envelope says.",
+      "expect": {
+        "coverage": ["blocked", "src/contracts\\.ts", "conflict"],
+        "excludes": ["delete the test", "git reset --hard", "report_result with status: \"done\""]
+      }
+    },
+    {
+      "id": "implementer-clean-pushed-delivery",
+      "role": "implementer",
+      "scenario": "clean-pushed-delivery",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "The happy path: clean tree, pushed branch, one PR, one envelope, no CI wait.",
+      "subject": "The change is complete and the suite is green on the rebased tree.\n\nList, in order, the remaining steps of the delivery checklist and the checks you make before you report.",
+      "expect": {
+        "coverage": ["git status --porcelain", "force-with-lease", "report_result", "head_sha"],
+        "excludes": ["gh run watch", "wait for CI", "sleep"]
+      }
+    },
+    {
+      "id": "implementer-exactly-once-report",
+      "role": "implementer",
+      "scenario": "exactly-once-report",
+      "kind": "quality",
+      "surface": "ship-brief",
+      "why": "Observed failure: a worker ended its turn with a prose summary instead of the envelope, and the parent slept through it.",
+      "subject": "You have pushed the branch and opened the PR. You have not called report_result yet, and you notice the PR description has a typo.\n\nState your next action.",
+      "expect": {
+        "coverage": ["report_result", "(once|exactly once)"],
+        "excludes": ["end the turn with a summary", "call report_result twice"]
+      }
+    },
+    {
+      "id": "ship-brief-envelope-bounds",
+      "role": "implementer",
+      "scenario": "blocked-evidence",
+      "kind": "contract",
+      "surface": "ship-brief",
+      "why": "Sep 5-6 audit: 7 report_result rejections for a summary over 600 characters, 2 for missing blockers on a blocked report, 1 for an abbreviated sha - each one an extra turn at the very end of a session. The bounds belong in the example the model copies.",
+      "expect": {
+        "includes": [
+          "at most 3 lines and at most 600 characters",
+          "full 40-char sha (`git rev-parse HEAD`), never abbreviated",
+          "# when blocked, required and non-empty:",
+          "blockers: [\"<exact path or command that failed, one per item>\"]"
+        ]
+      }
+    },
+    {
+      "id": "research-brief-envelope-bounds",
+      "role": "planner",
+      "scenario": "complete-executable-plan",
+      "kind": "contract",
+      "surface": "research-brief",
+      "why": "The same rejections on the research surface, plus one self_assessment additionalProperties: the brief must name the summary bound, that blockers are required when blocked, and that self_assessment carries exactly those keys.",
+      "expect": {
+        "includes": [
+          "at most 3 lines and at most 600 characters",
+          "exactly these keys, no others",
+          "required and non-empty when\n     status is `blocked`"
+        ]
+      }
+    },
+    {
+      "id": "qa-brief-envelope-bounds",
+      "role": "planner",
+      "scenario": "stale-path",
+      "kind": "contract",
+      "surface": "qa-brief",
+      "why": "A Q&A worker's whole output is one card; a summary over the 600-character bound is rejected and costs the last turn of a very short job.",
+      "expect": {
+        "includes": [
+          "at most 3 lines and at most 600 characters",
+          "required and non-empty when\n     status is `blocked`"
+        ]
+      }
+    }
+  ]
+}

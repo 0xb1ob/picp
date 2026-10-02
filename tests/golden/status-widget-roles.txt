@@ -1,0 +1,10 @@
+marker        ⧗ 2 decisions awaiting you — /cp-awaiting
+headline      command post · 5 jobs · $3.28
+section       NEEDS YOU (2)
+row-alert       ? cp-qzs                       asked 2m ago: Postgres or SQLite for the cache?
+row             ◆ cp-research-b2               research held 29m: ship, drop or follow-up?
+section-alert ATTENTION (2)
+row-alert       ! cp-held-cannot-report-nu2    bash running 7m · /watch cp-held-cannot-report-nu2
+row-alert       ✗ cp-ship-c3                   failed 3h ago · crash · /watch cp-ship-c3
+section       RUNNING (1)
+row             ▶ cp-rebase-before-report-jue  claude-haiku-4-5  S/low/low  bash  3m  1.21M  $0.24

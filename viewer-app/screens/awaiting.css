@@ -1,0 +1,42 @@
+.awaiting-screen, .awaiting-primary, .awaiting-aside { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.awaiting-card { display: flex; flex-direction: column; gap: 18px; padding: 18px 16px; background: var(--ask-background); border: 1px solid var(--ask-border); border-radius: 18px; min-width: 0; }
+.awaiting-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--muted); }
+.awaiting-index { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--amber); }
+.awaiting-reason { align-self: flex-start; font-size: 12px; color: var(--secondary); border: 1px solid var(--ask-border); border-radius: 999px; padding: 2px 10px; overflow-wrap: anywhere; }
+.awaiting-origin h3 { color: var(--muted); }
+.awaiting-origin { display: flex; flex-direction: column; gap: 10px; }
+.awaiting-origin ol { list-style: none; padding: 0; margin: 0; }
+.awaiting-origin li { position: relative; display: grid; grid-template-columns: 40px minmax(0,1fr); column-gap: 34px; padding-bottom: 10px; }
+.awaiting-origin li::before { content: ''; position: absolute; top: 0; bottom: 0; left: 56px; width: 1px; background: var(--trail-line); }
+.awaiting-origin li:first-child::before { top: 8px; }
+.awaiting-origin li:last-child::before { height: 8px; }
+.awaiting-origin li::after { content: ''; position: absolute; top: 4px; left: 52px; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--dim); background: var(--ask-background); }
+.awaiting-origin li.awaiting-origin-now::after { background: var(--amber); border-color: var(--amber); }
+.awaiting-origin li > code:first-child { font-size: 11px; color: var(--dim); padding-top: 2px; grid-column: 1; grid-row: 1 / 3; }
+.awaiting-origin li > span { font-size: 13px; grid-column: 2; }
+.awaiting-origin li > a, .awaiting-origin li > code:not(:first-child), .awaiting-origin li > .awaiting-origin-link { grid-column: 2; font-size: 12px; color: var(--muted); text-decoration: none; min-height: 24px; display: flex; align-items: center; }
+.awaiting-origin li > a { min-height: 44px; }
+.awaiting-empty { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 44px 20px; text-align: center; background: var(--empty-background); border: 1px solid var(--empty-border); border-radius: 20px; }
+.awaiting-empty-icon { width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--check-border); background: var(--check-background); color: var(--green); }
+.awaiting-empty h2 { font-size: 24px; color: var(--text); }
+.awaiting-empty p { font-size: 14px; line-height: 1.55; color: var(--empty-text); max-width: 300px; }
+.awaiting-empty > a { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid var(--check-border); border-radius: 999px; text-decoration: none; font-size: 14px; }
+@media (min-width: 900px) {
+ .awaiting-screen { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,min(320px,28%)); gap: 32px; }
+ .awaiting-aside { gap: 28px; padding-top: 84px; }
+ .awaiting-card { gap: 22px; padding: 26px 28px; border-radius: 20px; }
+ .awaiting-meta { gap: 16px; font-size: 13px; }
+ .awaiting-origin ol { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
+ .awaiting-origin li { display: flex; flex-direction: column; gap: 8px; padding: 17px 16px 0 0; }
+ .awaiting-origin li::before, .awaiting-origin li:first-child::before { top: 4px; left: 17px; right: 16px; width: auto; height: 1px; }
+ .awaiting-origin li:last-child::before { visibility: hidden; }
+ .awaiting-origin li::after { top: 0; left: 0; width: 9px; height: 9px; }
+ .awaiting-empty { gap: 18px; padding: 80px 40px; border-radius: 22px; }
+ .awaiting-empty-icon { width: 76px; height: 76px; }
+ .awaiting-empty h2 { font-size: 30px; }
+ .awaiting-empty p { font-size: 15px; max-width: 480px; }
+}
+@media (min-width: 900px) and (max-width: 1150px) {
+ .awaiting-screen { grid-template-columns: minmax(0,1fr); }
+ .awaiting-aside { padding-top: 0; }
+}

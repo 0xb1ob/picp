@@ -1,0 +1,18 @@
+import { render } from "preact";
+import { App } from "./app.tsx";
+import "./styles/tokens.css";
+import "./styles/fonts.css";
+import "./styles/shell.css";
+import "./components/search.css";
+import "./components/context.css";
+import "./components/control.css";
+import "./screens/overview.css";
+import "./screens/overview-decisions.css";
+import "./screens/more.css";
+import "./screens/decision-context.css";
+import "./screens/awaiting.css";
+import "./screens/decided.css";
+import "./screens/sessions.css";
+import "./screens/files.css";
+import "./screens/map.css";
+render(<App/>, document.getElementById("app")!);

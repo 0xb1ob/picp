@@ -1,0 +1,13 @@
+.overview-square { width: 8px; height: 8px; border-radius: 2px; background: var(--amber); }
+.overview-rec-badge { font-size: 11px; color: var(--background); background: var(--secondary); border-radius: 999px; padding: 2px 8px; }
+.overview-reply { display: flex; align-items: center; gap: 8px; padding: 3px 3px 3px 10px; background: var(--surface); border-radius: 9px; }
+.overview-reply code { flex-grow: 1; min-width: 0; font-size: 12px; color: var(--secondary); overflow-wrap: anywhere; }
+.overview-reply button { flex-shrink: 0; min-width: 80px; height: 36px; padding: 0 10px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--button); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.overview-copy-status { font-size: 12px; color: var(--coral); }
+.overview-copy-status:empty { display: none; }
+.overview-question-ring { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; flex-shrink: 0; border: 1.5px dashed var(--dim); }
+.overview-amber .overview-question-ring { border: 1.5px solid var(--amber); }
+@media (min-width: 900px) {
+ .overview-reply { padding-left: 12px; border-radius: 10px; }
+ .overview-reply code { font-size: 13px; }
+}

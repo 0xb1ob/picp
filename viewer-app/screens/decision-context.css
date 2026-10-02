@@ -1,0 +1,41 @@
+.decision-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.decision-heading > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.decision-heading p { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.decision-heading > span { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.decision-desktop { display: none; }
+.decision-kinds { display: flex; flex-direction: column; gap: 10px; }
+.decision-kinds ul { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.decision-kinds li { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 14px; color: var(--subtle); }
+.decision-kinds li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+.decision-kinds p { font-size: 12px; line-height: 1.5; color: var(--dim); }
+.decision-kinds a { color: var(--subtle); }
+.decision-parent { display: flex; flex-direction: column; gap: 4px; }
+.decision-parent-intro { font-size: 12px; line-height: 1.4; color: var(--dim); }
+.decision-parent-item { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--questions-background); border: 1px solid var(--nav-selected); border-radius: 12px; }
+.decision-parent-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.decision-parent-meta > span:last-child { margin-left: auto; }
+.decision-parent-item p { font-size: 14px; line-height: 1.4; color: var(--secondary); }
+.decision-parent-note { font-size: 12px; color: var(--dim); }
+.decision-job-links { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.decision-job-links a { min-height: 44px; display: inline-flex; align-items: center; }
+.decision-overdue { border-color: var(--ask-border); }
+.decision-overdue .overview-question-ring { border: 1.5px solid var(--amber); }
+.decision-overdue .decision-parent-note, .decision-overdue .decision-parent-meta > span:last-child { color: var(--amber); }
+.decision-diamond { width: 8px; height: 8px; transform: rotate(45deg); border: 1.5px solid currentColor; flex-shrink: 0; }
+/* The one Decisions page (audit P4 #24): Awaiting, a collapsed Being handled line, then Decided; each section a heading. */
+.decisions { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.decisions > section { min-width: 0; outline: none; }
+.decision-heading h2 { font-size: 20px; color: var(--text); }
+.decisions-handled { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.decisions-handled > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 44px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.decisions-handled-overdue { border-color: var(--ask-border); }
+.decisions-handled-overdue > summary { color: var(--amber); }
+.decisions-handled > .decision-parent { padding: 0 14px 14px; }
+@media (min-width: 900px) {
+ .decision-desktop { display: initial; }
+ .decision-phone { display: none !important; }
+ .decision-heading p { font-size: 14px; }
+ .decision-kinds li { min-height: 0; }
+ .decision-parent { gap: 12px; }
+ .decision-parent-item { padding: 14px; background: var(--background); }
+}

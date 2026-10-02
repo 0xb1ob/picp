@@ -1,0 +1,17 @@
+run cp-watch-demo · job held · demo/research · model scripted · run exited · turns 1 · tools 2 · 9.8k $0.03 · events 16 · last activity 9m ago · exited 2026-08-27T11:00:16Z (code 0)
+
+11:00:01 + spawned planner pid=5150 model=mock/scripted
+11:00:02 → prompt sent (delivered)
+11:00:03 ▶ agent start
+11:00:04 ⚙ read: src/import.ts
+11:00:06 ⚙ bash: npm test -- import
+11:00:07 ✗ bash failed: 1 failing import order
+11:00:08 💬 The import cycle is in src/import.ts. I will write it up.
+11:00:09 ⤶ turn 1 end
+11:00:10 $ budget warning: 82% of 400000 tokens
+11:00:11 ✓ envelope done: Found the cycle; fix is one import move.
+11:00:12 ⚑ gate attempt 1: pass
+11:00:13 ⚑ review attempt 1: pass
+11:00:14 ■ settled
+11:00:15 ↓ shutdown requested
+11:00:16 × process exit code=0

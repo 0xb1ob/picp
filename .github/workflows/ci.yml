@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test
+    # GitHub-hosted ubuntu-latest, except while this repository is private:
+    # then the operator's ephemeral self-hosted runner keeps gating PRs. A
+    # public repository never selects the privileged self-hosted runner.
+    # See docs/development.md "CI".
+    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run suite (typecheck + tests)
+        run: npm test
+        env:
+          # Never set CP_LIVE_TESTS here: the live suites hit real models,
+          # cost money and need credentials. They self-skip without it.
+          CP_LIVE_TESTS: ""

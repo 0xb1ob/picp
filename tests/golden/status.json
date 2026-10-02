@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-27T12:00:00Z",
+  "home": "/home/operator/pi-command-post",
+  "filter": {
+    "include": "active",
+    "project": null
+  },
+  "counts": {
+    "jobs": 3,
+    "launching": 0,
+    "waiting": 1,
+    "held": 1,
+    "done": 0,
+    "failed": 1,
+    "live": 2,
+    "working": 1
+  },
+  "usage": {
+    "input": 254000,
+    "output": 10500,
+    "cache_read": 0,
+    "cache_write": 0,
+    "total_tokens": 264500,
+    "cost_usd": 1.252
+  },
+  "ledger": {
+    "ok": true,
+    "queried": true
+  },
+  "jobs": [
+    {
+      "job_id": "cp-ship-a1",
+      "project": "demo",
+      "kind": "ship",
+      "delivery": "pr",
+      "origin": "terminal",
+      "phase": "waiting",
+      "title": "Add the retry ladder",
+      "br_status": "in_progress",
+      "profile": "implementer",
+      "role": "implementer",
+      "model": "anthropic/claude-sonnet-5",
+      "run_phase": "working",
+      "current_tool": "bash",
+      "current_tool_seconds": 10,
+      "current_tool_idle_seconds": 10,
+      "turns": 3,
+      "tool_calls": 7,
+      "alive": true,
+      "pid": 4242,
+      "session_id": "sess-cp-ship-a1",
+      "worktree": "/home/operator/.treehouse/demo/cp-ship-a1",
+      "branch": "cp-ship-a1",
+      "timestamp": "2026-08-27T11:56:00Z",
+      "time_source": "dispatched_at",
+      "age_seconds": 240,
+      "last_activity_at": "2026-08-27T11:59:50Z",
+      "usage": {
+        "input": 11000,
+        "output": 1300,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 12300,
+        "cost_usd": 0.042
+      },
+      "routing": {
+        "scope": "S",
+        "risk": "low",
+        "thinking": "medium",
+        "inferred": false
+      }
+    },
+    {
+      "job_id": "cp-research-b2",
+      "project": "atlas",
+      "kind": "research",
+      "delivery": "pipeline",
+      "origin": "terminal",
+      "phase": "held",
+      "title": "Investigate the flaky import",
+      "br_status": "in_progress",
+      "profile": "planner",
+      "role": "planner",
+      "model": "anthropic/claude-sonnet-5",
+      "run_phase": "idle",
+      "current_tool": null,
+      "current_tool_seconds": null,
+      "current_tool_idle_seconds": null,
+      "turns": 9,
+      "tool_calls": 31,
+      "alive": true,
+      "pid": 4243,
+      "session_id": "sess-b2",
+      "worktree": "/home/operator/.treehouse/demo/cp-research-b2",
+      "branch": "cp-research-b2",
+      "timestamp": "2026-08-27T11:31:00Z",
+      "time_source": "dispatched_at",
+      "age_seconds": 1740,
+      "last_activity_at": "2026-08-27T11:58:30Z",
+      "usage": {
+        "input": 240000,
+        "output": 9000,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 249000,
+        "cost_usd": 1.2
+      },
+      "reported_at": "2026-08-27T11:58:30Z",
+      "receipts": [
+        {
+          "kind": "artifact",
+          "status": "stored",
+          "title": "report.md"
+        }
+      ],
+      "routing": {
+        "scope": "M",
+        "risk": "high",
+        "thinking": "high",
+        "inferred": true
+      }
+    },
+    {
+      "job_id": "cp-ship-c3",
+      "project": "demo",
+      "kind": "ship",
+      "delivery": "pr",
+      "origin": "terminal",
+      "phase": "failed",
+      "title": "Migrate the config loader",
+      "br_status": "in_progress",
+      "profile": "implementer",
+      "role": "implementer",
+      "model": "anthropic/claude-sonnet-5",
+      "run_phase": "exited",
+      "current_tool": null,
+      "current_tool_seconds": null,
+      "current_tool_idle_seconds": null,
+      "turns": 1,
+      "tool_calls": 2,
+      "alive": false,
+      "pid": 4244,
+      "session_id": "sess-c3",
+      "worktree": "/home/operator/.treehouse/demo/cp-ship-c3",
+      "branch": "cp-ship-c3",
+      "timestamp": "2026-08-27T09:00:00Z",
+      "time_source": "dispatched_at",
+      "age_seconds": 10800,
+      "last_activity_at": "2026-08-27T10:02:00Z",
+      "usage": {
+        "input": 3000,
+        "output": 200,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 3200,
+        "cost_usd": 0.01
+      },
+      "failure": {
+        "class": "crash",
+        "message": "pid no longer exists",
+        "at": "2026-08-27T10:02:00Z"
+      }
+    }
+  ],
+  "unclaimed": [
+    {
+      "job_id": "cp-ghost-e5",
+      "title": "Someone else claimed this",
+      "br_status": "in_progress",
+      "project": "demo",
+      "timestamp": "2026-08-27T08:15:00Z",
+      "time_source": "br_updated_at",
+      "age_seconds": 13500
+    }
+  ]
+}

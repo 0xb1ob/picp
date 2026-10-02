@@ -1,0 +1,4 @@
+#!/bin/sh
+# One-command install from a checkout (docs/service.md): scripts/install.sh with the same flags.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+exec sh "$ROOT/scripts/install.sh" "$@"

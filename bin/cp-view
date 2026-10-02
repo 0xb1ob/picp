@@ -1,0 +1,5 @@
+#!/bin/sh
+# Read-only live session viewer (web). Standalone: never talks to the parent
+# or a worker, only reads state/. See README "Session viewer".
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+exec node "$ROOT/src/viewer/cli.ts" "$@"

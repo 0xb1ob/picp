@@ -1,0 +1,53 @@
+.job-detail { gap: 24px; }
+.job-detail-main, .job-detail-side { display: contents; }
+.job-facts > .job-fact-desktop { display: none; }
+.job-detail-heading { display: flex; flex-direction: column; gap: 12px; }
+.job-detail h1 { font-size: 22px; line-height: 1.3; }
+.job-detail-heading > p { font-size: 13px; color: var(--dim); }
+.job-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.job-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--subtle); border: 1px solid var(--tag-border); border-radius: 999px; padding: 3px 10px; }
+.job-badge-held { color: var(--blue); border-color: var(--held-border); }
+.job-badge.job-ci-red { border-color: var(--error-border); }
+.job-question { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--questions-background); border: 1px solid var(--nav-selected); border-radius: 14px; }
+.job-question h2 { font-size: 14px; color: var(--text); }
+.job-question p { font-size: 13px; line-height: 1.45; color: var(--subtle); }
+.job-question-awaiting { background: var(--ask-background); border-color: var(--ask-border); }
+.job-question-awaiting h2 { color: var(--amber); }
+.job-failure { color: var(--coral); font-size: 13px; }
+.job-facts { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px 12px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+.job-facts > div { display: flex; flex-direction: column; gap: 4px; }
+.job-facts dt { font-size: 12px; color: var(--muted); }
+.job-facts dd { margin: 0; font-size: 15px; }
+.job-facts dd code { font-size: 13px; }
+.job-facts a { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; text-decoration: none; }
+.job-fact-wide { grid-column: span 2; }
+.job-fact-wide dd { font-size: 13px; color: var(--secondary); }
+.job-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.job-links > * { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; font-size: 13px; color: var(--secondary); text-align: center; }
+.job-links > span { color: var(--dim); }
+.job-timeline h2 { margin-bottom: 8px; }
+.job-event { display: grid; grid-template-columns: 44px 16px minmax(0,1fr); gap: 10px; }
+.job-event > code { font-size: 11px; color: var(--dim); padding-top: 2px; }
+.job-event-stem { position: relative; display: flex; justify-content: center; }
+.job-event-stem::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.job-event:first-of-type .job-event-stem::before { top: 8px; }
+.job-event:last-child .job-event-stem::before { bottom: auto; height: 8px; }
+.job-event-stem > span { position: relative; margin-top: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--background); border: 1.5px solid var(--dim); }
+.job-event > div { display: flex; flex-direction: column; gap: 2px; padding-bottom: 16px; font-size: 14px; }
+.job-event p { font-size: 12px; color: var(--dim); }
+.job-event-red { color: var(--coral); }
+.job-event-red .job-event-stem > span { background: var(--coral); border-color: var(--coral); }
+.job-event-green .job-event-stem > span { background: var(--green); border-color: var(--green); }
+.job-event-pending { color: var(--dim); }
+.job-event-pending .job-event-stem > span { border-style: dashed; }
+.shell-back { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; }
+.shell-detail-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+@media (min-width: 900px) {
+ .job-detail { display: grid; grid-template-columns: minmax(0,1fr) minmax(18rem,24rem); grid-template-rows: auto 1fr; gap: 24px 40px; align-items: start; }
+ .job-detail-main { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+ .job-detail-side { grid-area: 1 / 2 / 3 / 3; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+ .job-timeline { grid-area: 2 / 1; min-width: 0; }
+ .job-detail h1 { font-size: 26px; }
+ .job-facts > .job-fact-desktop { display: flex; }
+ .job-badges > .job-ci, .job-badges > .job-badge-review { display: none; }
+}

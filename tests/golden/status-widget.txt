@@ -1,0 +1,7 @@
+command post · 3 jobs · $1.25
+ATTENTION (2)
+  ✗ cp-ship-c3      failed 3h ago · crash · /watch cp-ship-c3
+  ! 1 unclaimed in the ledger (/status)
+RUNNING (2)
+  ▶ cp-ship-a1      claude-sonnet-5  S/low/medium   bash      4m   12.3k  $0.04
+  ○ cp-research-b2  claude-sonnet-5  M?/high?/high  idle 1m  29m  249.0k  $1.20

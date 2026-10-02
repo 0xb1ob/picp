@@ -1,0 +1,16 @@
+/* Search field: screen 11; menu rows: screen 05. No separate search design was supplied. */
+.search-dialog { width: calc(100% - 32px); max-width: 390px; max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.search-dialog::backdrop { background: var(--page); opacity: 0.8; }
+.search-dialog[open] { display: flex; flex-direction: column; }
+.search-header { display: flex; align-items: center; gap: 10px; padding: 12px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.search-field { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; min-height: 40px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
+.search-field input { min-width: 0; width: 100%; min-height: 38px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.search-header button { min-height: 44px; padding: 0 4px; border: 0; background: none; font-size: 13px; }
+.search-results { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.search-results a { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px; border-bottom: 1px solid var(--nav-selected); text-decoration: none; }
+.search-results a:focus-visible { outline-offset: -3px; background: var(--nav-selected); }
+.search-results a:hover { background: var(--nav-selected); }
+.search-results svg, .search-results a > span:last-child { color: var(--muted); }
+.search-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 15px; overflow-wrap: anywhere; }
+.search-label code { font-size: 12px; color: var(--dim); }
+.search-results p { padding: 12px 16px; font-size: 12px; color: var(--muted); }

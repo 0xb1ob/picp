@@ -1,0 +1,3 @@
+command post · 1 job · $0.37
+RUNNING (1)
+  ▶ cp-8km  claude-sonnet-5  L?/low?/medium  read  1m  558.0k  $0.37

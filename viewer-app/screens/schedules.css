@@ -1,0 +1,11 @@
+.schedule-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.schedule-card summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.schedule-history { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.schedule-summary { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.schedule-answer { margin: 6px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; background: var(--surface); border-radius: 8px; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.schedule-control { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.schedule-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.schedule-controls button { min-height: 44px; padding: 0 16px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.schedule-controls button:disabled { opacity: 0.5; }
+.schedule-controls .schedule-remove { background: none; color: var(--text); box-shadow: inset 0 0 0 1px currentColor; }
+.schedule-add { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; }

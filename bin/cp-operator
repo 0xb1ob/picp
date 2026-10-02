@@ -1,0 +1,5 @@
+#!/bin/sh
+# Main session launcher. Loads only the bridge extension (operatorPiArgs) and
+# runs the read-only viewer for this session's lifetime: src/viewer/operator.ts.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+exec node "$ROOT/src/viewer/operator.ts" "$@"

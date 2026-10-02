@@ -1,0 +1,54 @@
+:root {
+ --page: #0b0b0a;
+ --background: #111110;
+ --nav: #141413;
+ --surface: #191917;
+ --divider: #1f1f1d;
+ --nav-selected: #22221f;
+ --border: #2a2926;
+ --toggle: #2c2b27;
+ --text: #eceae4;
+ --secondary: #d6d4cd;
+ --subtle: #c9c7bf;
+ --muted: #a3a198;
+ --dim: #8a887f;
+ --faint: #55544e;
+ --green: #7fd49b;
+ --amber: #f0b35a;
+ --ask-background: #1c1810;
+ --ask-border: #4d3b1f;
+ --blue: #93b4f5;
+ --coral: #f2917f;
+ --error-border: #5a2f28;
+ --hover: #ffffff;
+ --button: #20201d;
+ --empty-background: #131613;
+ --empty-border: #243027;
+ --check-border: #2f4a37;
+ --check-background: #17201a;
+ --empty-text: #b9b7b0;
+ --objective: #e2e0d9;
+ --tab-selected: #262521;
+ --badge-text: #1a1408;
+ --questions-background: #161615;
+ --tag-border: #34332f;
+ /* Awaiting trail (09/15), Decided worth badge (01). */
+ --trail-line: #3a3322;
+ --worth-border: #3a3935;
+ /* Screens 02/13 transcript separators and 08 Files states. */
+ --transcript-divider: #1a1a18;
+ --paused-border: #3a3935;
+ --disabled-text: #6b6a64;
+ /* Map desktop (14): bands, nodes, dependency strokes and stranded borders. */
+ --map-band: #151514;
+ --map-node: #1b1b19;
+ --map-satisfied: #6f6e67;
+ --map-undispatched: #6b6a64;
+ --map-stranded-border: #8a6a33;
+ /* Design screens 03/04/10/16: ledger badge, held badge and board surfaces. */
+ --ledger-border: #3a3935;
+ --held-border: #34425e;
+ --board-lane: #151514;
+ --board-card: #1b1b19;
+ --board-dim: #6b6a64;
+}

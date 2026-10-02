@@ -1,0 +1,36 @@
+.shell-files-header { padding: 0 8px; justify-content: flex-start; }
+.shell-files-header .shell-brand { flex: 1; justify-content: space-between; margin-right: 8px; }
+.files { display: flex; flex-direction: column; gap: 24px; max-width: 390px; margin: 0 auto; }
+.files h1 { font-size: 28px; }
+.files-subtitle { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.files h2 { margin-bottom: 4px; }
+.file-project { display: flex; align-items: center; gap: 12px; min-height: 56px; border-bottom: 1px solid var(--divider); }
+.file-project > svg { color: var(--muted); }
+.file-root { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; text-decoration: none; min-height: 44px; font-size: 14px; }
+.file-root > span { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.file-root small { font-size: 12px; color: var(--dim); }
+.file-paused { font-size: 11px; color: var(--muted); border: 1px solid var(--paused-border); border-radius: 999px; padding: 1px 8px; }
+.file-worktree { display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--divider); }
+.file-worktree-title { display: flex; align-items: center; gap: 10px; }
+.file-worktree-title > a { text-decoration: none; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 44px; display: flex; align-items: center; }
+.file-worktree-title code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-worktree-title > span:last-child { flex-shrink: 0; white-space: nowrap; margin-left: auto; font-size: 12px; color: var(--muted); }
+.file-worktree-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--dim); }
+.file-worktree-meta code { font-size: 11px; color: var(--subtle); }
+.file-actions { display: flex; gap: 8px; }
+.file-actions > * { flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 9px; font-size: 12px; text-decoration: none; color: var(--secondary); }
+.file-actions > span { color: var(--disabled-text); border-style: dashed; }
+.file-entry { display: flex; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--transcript-divider); text-decoration: none; font-size: 13px; }
+.file-entry svg { color: var(--dim); }
+.file-policy, .files-policy { font-size: 12px; line-height: 1.5; color: var(--dim); }
+.files-empty { padding: 14px 0; font-size: 13px; color: var(--muted); }
+.file-text { margin-top: 12px; }
+@media (min-width: 900px) {
+ .files { max-width: 760px; margin: 0; }
+ /* An open listing takes the right column; the roots stay a readable list on the left. */
+ .files-open { max-width: none; display: grid; grid-template-columns: minmax(0,380px) minmax(0,1fr); grid-template-rows: auto auto 1fr auto; gap: 24px 40px; align-items: start; }
+ .files-open > div:first-child, .files-open > .files-policy { grid-column: 1 / -1; }
+ .files-open > section { grid-column: 1; min-width: 0; }
+ .files-open .file-text { overflow-x: auto; }
+ .files-open > section[aria-labelledby=file-listing] { grid-area: 2 / 2 / 4 / 3; }
+}

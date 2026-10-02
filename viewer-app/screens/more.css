@@ -1,0 +1,18 @@
+.more { display: flex; flex-direction: column; gap: 24px; max-width: 390px; margin: 0 auto; }
+.more-menu { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.more-menu > a, .more-menu > span { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px; border-bottom: 1px solid var(--nav-selected); text-decoration: none; }
+.more-menu > :last-child { border-bottom: 0; }
+.more-menu svg { color: var(--muted); }
+.more-menu > a > span:last-child, .more-menu > span > span:last-child { color: var(--dim); }
+.more-label { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
+.more-meta { font-size: 12px; color: var(--dim); }
+.more-push { display: flex; flex-direction: column; gap: 8px; padding: 8px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+.more-push h2 { margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--muted); }
+.more-push-row { display: flex; align-items: center; gap: 14px; min-height: 64px; }
+.more-push-row svg { flex-shrink: 0; color: var(--muted); }
+.more-push button { flex-shrink: 0; min-width: 80px; min-height: 44px; padding: 0 10px; background: var(--button); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.more-push button:disabled { color: var(--disabled-text); }
+.more-push a { color: var(--blue); font-size: 13px; }
+.more-push-steps { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--secondary); }
+.more-push > p { margin: 0 0 8px; }
+@media (min-width: 900px) { .more h1 { font-size: 28px; } .more-menu > .more-phone { display: none; } }

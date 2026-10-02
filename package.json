@@ -1,0 +1,60 @@
+{
+	"name": "pi-command-post",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Agentic fleet control for pi: headless RPC workers, structured envelopes, leases, gates.",
+	"keywords": [
+		"pi-package"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": "24.x"
+	},
+	"pi": {
+		"extensions": [
+			"./extensions/command-post/index.ts"
+		],
+		"skills": [
+			"./skills"
+		],
+		"prompts": [
+			"./prompts/*.md"
+		]
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"build:viewer": "node scripts/build-viewer.ts",
+		"doctor:install": "node scripts/install-tools.ts",
+		"doctor:preflight": "node scripts/install-tools.ts --dry-run",
+		"push:init": "node scripts/push-init.ts",
+		"test": "npm run typecheck && node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-file-guard.ts --test-reporter-destination=stdout \"tests/**/*.test.ts\"",
+		"test:one": "node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit",
+		"eval": "node scripts/eval.ts",
+		"eval:contract": "node scripts/eval.ts --out evals/results/contract.json",
+		"eval:check": "node scripts/eval.ts --out evals/results/contract.json --check",
+		"e2e:phase1": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase1.test.ts",
+		"e2e:phase2": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase2.test.ts",
+		"smoke:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live-smoke.test.ts",
+		"e2e:phase3": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase3.test.ts",
+		"e2e:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live.test.ts"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-agent-core": "*",
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "^0.99.1",
+		"@earendil-works/pi-server": "^0.99.1",
+		"@types/node": "^24.3.0",
+		"linkedom": "^0.18.13",
+		"preact-render-to-string": "^6.7.0",
+		"typescript": "^5.9.2"
+	},
+	"dependencies": {
+		"esbuild": "^0.28.2",
+		"preact": "^10.29.8"
+	}
+}

@@ -1,0 +1,68 @@
+DOCTOR BROKEN · 3 error · 6 warn · 30 ok (at 2026-08-27T12:00:00Z)
+home: <HOME>
+package: <PKG>
+
+✗ [host.treehouse] treehouse is not on PATH
+    fix: install treehouse (`node scripts/install-tools.ts treehouse`): worktrees come from treehouse and only from treehouse (there is no `git worktree add` fallback, by contract)
+✗ [host.pi] pi is not on PATH
+    fix: install pi and put it on PATH (`node scripts/install-tools.ts pi`): every worker is a `pi --mode rpc` child
+✗ [ledger.file] no jobs document in this home
+    <HOME>/.pi-command-post/jobs.json
+    fix: start a pi session in this home: session_start scaffolds an empty ledger (dispatch needs one)
+
+! [host.gh] gh is not on PATH
+    fix: install the GitHub CLI (`node scripts/install-tools.ts gh`): merge receipts and cp_integrate read the PR and its CI from `gh`, and without it a landed job can only be closed with force
+! [pi-lens.tools] pi-lens implementer tools missing from PATH: typescript-language-server, ast-grep
+    fix: npm i -g typescript-language-server@5.3.0 typescript @ast-grep/cli
+! [scaffold.data] .pi-command-post/data/ does not exist yet
+    <HOME>/.pi-command-post/data
+    fix: start a pi session in this home: session_start scaffolds it (idempotently)
+! [scaffold.state] .pi-command-post/state/ does not exist yet
+    <HOME>/.pi-command-post/state
+    fix: start a pi session in this home: session_start scaffolds it (idempotently)
+! [scaffold.projects] .pi-command-post/projects/ does not exist yet
+    <HOME>/.pi-command-post/projects
+    fix: start a pi session in this home: session_start scaffolds it (idempotently)
+! [parent.standing_orders] standing orders absent
+    fix: add home-local preferences to <HOME>/.pi-command-post/data/standing-orders.md; AGENTS.md remains binding
+
+✓ [host.git] git git 1.2.3
+    /usr/bin/git
+✓ [host.br] br (optional) is not on PATH: only beads-backed projects need the beads CLI
+    fix: install br (beads_rust) with the method its own repository README documents; no URL is guessed or run here
+✓ [host.tmux] tmux (optional) is not on PATH: only a remote operator seat uses it (ssh or tmux onto the session)
+    fix: install tmux with your package manager (e.g. `sudo apt-get install -y tmux`, `brew install tmux`); sudo is never run here
+✓ [web.search] web search: unavailable (pi-web-access is not installed or not enabled in pi settings)
+    fix: pi install npm:pi-web-access, then restart the parent (optional)
+✓ [session.tools] parent session tools not recorded (not a live parent)
+✓ [package.worker_reporter] worker-reporter extension present
+✓ [package.profiles] 4 profile(s) load and validate
+    gate-reviewer (gate-reviewer), implementer (implementer), planner (planner), qa (planner)
+✓ [package.briefs] every profile's brief template exists
+✓ [config.routing] no .pi-command-post/data/routing.json (profile defaults only)
+✓ [config.budgets] no .pi-command-post/data/budgets.json (defaults)
+✓ [config.projects] no .pi-command-post/data/projects.json (defaults)
+✓ [config.budget.gate-reviewer] gate-reviewer effective budget: 10000000 tokens / $50 (not clamped)
+✓ [config.budget.implementer] implementer effective budget: 50000000 tokens / $50 (not clamped)
+✓ [config.budget.planner] planner effective budget: 50000000 tokens / $50 (not clamped)
+✓ [config.budget.qa] qa effective budget: 4000000 tokens / $50 (not clamped)
+✓ [config.gate] no .pi-command-post/data/gate.json (defaults)
+✓ [config.gate.review_timeout_ms] gate reviewer timeout: 300000ms (default)
+✓ [config.bounds.wall_clock] per-job wall-clock cap: 5400s
+✓ [config.bounds.tool_call_cap] per-job tool-call cap: 900 starts
+✓ [models.probe] model availability not probed (no live model registry in this context)
+    gate-reviewer: anthropic/claude-opus-5-5, implementer: anthropic/claude-opus-5-5, planner: anthropic/claude-opus-5-5, qa: anthropic/claude-opus-5-5
+✓ [mode] multi-project mode, home <HOME> (source: checkout; no runtime supplied; multi mode on the given home)
+✓ [home.location] home (checkout): <HOME>
+    running from a source checkout; the package root is the home
+✓ [parent.lock] no parent lock held for this home
+    <HOME>/.pi-command-post/state/parent.lock
+✓ [parent.compact_threshold] no parent.json; parent compacts at default 200000 context tokens
+✓ [parent.context] parent context tokens: unknown; last turn cost: unknown; last compact: never; last rotate: never
+✓ [state.job_id_migration] no state files carry the pre-rename br_id key
+✓ [fleet.file] fleet: 0 record(s)
+✓ [viewer] session viewer not running (no operator session up; bin/cp-operator starts it)
+✓ [dashboard-control] dashboard control: on (on by default (no data/dashboard-control.json); no operator session serving it; the dashboard says session not running)
+✓ [storage] home-local files are under the runtime root, .pi-command-post/ (docs/storage.md)
+
+this home cannot dispatch until the errors above are fixed

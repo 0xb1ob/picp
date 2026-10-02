@@ -1,0 +1,55 @@
+#!/bin/sh
+# Fresh-machine one-liner (cp-daemon v1 P2i; docs/service.md). POSIX sh, never sudo.
+#   curl -fsSL https://raw.githubusercontent.com/0xb1ob/picp/main/bin/cp-bootstrap | sh
+#   curl -fsSL .../bin/cp-bootstrap | sh -s -- --yes --parent-model <provider/model>
+# Checks git and node 24+, clones or fast-forwards $CP_APP (default ~/.pi-command-post/app),
+# runs npm ci when node_modules is absent (install.ts compares it with the lockfile after), then
+# execs bin/cp-install with every flag. A dirty or ahead checkout is refused.
+set -eu
+APP=${CP_APP:-$HOME/.pi-command-post/app}
+URL=${CP_REPO_URL:-https://github.com/0xb1ob/picp.git}
+DRY=0
+for arg in "$@"; do
+	case "$arg" in --dry-run) DRY=1 ;; esac
+done
+say() { printf '%s: bootstrap: %s\n' "$1" "$2"; }
+die() {
+	say fail "$1"
+	exit 1
+}
+command -v git >/dev/null 2>&1 || die "git is not on PATH; install it (e.g. sudo apt-get install -y git, or xcode-select --install), then rerun"
+command -v node >/dev/null 2>&1 || die "node is not on PATH; install node 24 or newer (nodejs.org, fnm or nvm), then rerun"
+major=$(node -p 'process.versions.node.split(".")[0]')
+[ "$major" -ge 24 ] 2>/dev/null || die "node $(node --version) is older than 24; install node 24 or newer (e.g. fnm install 24), then rerun"
+say ok "git and node $(node --version)"
+if [ ! -e "$APP/.git" ]; then
+	if [ "$DRY" = 1 ]; then
+		say changed "would git clone --branch main $URL $APP, npm ci, then bin/cp-install (dry-run)"
+		exit 0
+	fi
+	mkdir -p "$(dirname -- "$APP")"
+	git clone --quiet --branch main "$URL" "$APP"
+	say changed "cloned $URL into $APP"
+else
+	[ -z "$(git -C "$APP" status --porcelain)" ] || die "$APP has uncommitted changes; commit or stash them, then rerun"
+	[ "$(git -C "$APP" rev-parse --abbrev-ref HEAD)" = main ] || die "$APP is not on main; check out main, then rerun"
+	git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
+	[ "$(git -C "$APP" rev-list --count origin/main..HEAD)" = 0 ] || die "$APP has commits not on origin/main; push or drop them, then rerun"
+	if [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
+		say ok "$APP is at origin/main"
+	elif [ "$DRY" = 1 ]; then
+		say changed "would fast-forward $APP to origin/main (dry-run)"
+	else
+		git -C "$APP" merge --quiet --ff-only origin/main
+		say changed "fast-forwarded $APP to origin/main"
+	fi
+fi
+if [ -f "$APP/node_modules/.package-lock.json" ]; then
+	say ok "$APP/node_modules present; cp-install re-checks it against package-lock.json"
+elif [ "$DRY" = 1 ]; then
+	say changed "would run npm ci in $APP (dry-run)"
+else
+	(cd "$APP" && npm ci --no-audit --no-fund --loglevel=error) || die "npm ci failed in $APP; run it there and read its error"
+	say changed "npm ci in $APP"
+fi
+exec sh "$APP/bin/cp-install" --app "$APP" "$@"

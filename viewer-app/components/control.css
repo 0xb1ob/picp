@@ -1,0 +1,88 @@
+.session-ask { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; min-width: 0; }
+.session-ask-pointer, .session-ask-settled { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.session-ask-settled { color: var(--secondary); }
+.session-oneline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-pinned { display: flex; flex-direction: column; gap: 10px; max-height: 45vh; overflow-y: auto; padding: 10px 16px; border-top: 1px solid var(--ask-border); background: var(--ask-background); min-width: 0; flex-shrink: 1; }
+.session-pinned > h2 { font-size: 13px; font-weight: 600; color: var(--amber); }
+.session-pinned > h2 > button { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 40px; padding: 0; background: none; border: 0; font: inherit; color: inherit; text-align: left; }
+.session-pinned .decision-card { padding: 12px; background: var(--background); border: 1px solid var(--ask-border); border-radius: 14px; }
+/* Mobile: one compact bar above the composer; tapped open, a sheet of the full cards that never pushes the composer off. */
+@media (max-width: 899px) {
+ .session-pinned { padding: 0 16px; gap: 8px; }
+ .session-pinned:not(.session-pinned-open) > :not(h2) { display: none; }
+ .session-pinned-open { max-height: 60dvh; padding-bottom: 10px; }
+ .session-pinned-open > h2 { position: sticky; top: 0; z-index: 1; background: var(--ask-background); }
+}
+.decision-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+.decision-card-question { display: flex; flex-direction: column; gap: 8px; }
+.decision-card-question h2 { font-size: 19px; line-height: 1.35; font-weight: 600; color: var(--text); text-wrap: pretty; }
+.decision-card-question h3 { font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--text); }
+.decision-card-context > summary, .decision-card-facts > summary { padding: 13px 0; cursor: pointer; font-size: 13px; color: var(--muted); }
+.decision-card-context p, .decision-card-context li { font-size: 14px; line-height: 1.5; color: var(--subtle); white-space: pre-line; }
+.decision-card-context > summary + *, .decision-card-context > p + *, .decision-card-context > ul + * { margin-top: 8px; }
+.decision-card-context ul, .decision-card-jobs, .decision-card-evidence { padding-left: 18px; }
+.decision-card-jobs, .decision-card-evidence { margin: 0; }
+.decision-card-options { display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.decision-card-option { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-height: 44px; padding: 12px 14px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 12px; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; min-width: 0; }
+.decision-card-option.decision-card-recommended { border-color: var(--ask-border); box-shadow: inset 3px 0 0 var(--amber); }
+.decision-card-option:disabled { cursor: default; opacity: 0.6; }
+.decision-card-option-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
+.decision-card-consequence { font-size: 13px; line-height: 1.45; color: var(--subtle); }
+.decision-card-recommendation, .decision-card-disabled, .decision-card-delivery { font-size: 13px; color: var(--muted); }
+.decision-card-differs, .decision-card-failed { font-size: 13px; color: var(--coral); }
+.decision-card-other { display: flex; gap: 8px; min-width: 0; }
+.decision-card-other input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 14px; }
+.decision-card-other button { min-height: 44px; padding: 0 16px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; }
+.decision-card-other button:disabled, .decision-card-other input:disabled { opacity: 0.5; }
+.decision-card-facts { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.decision-card-facts[open] > summary { margin-bottom: 6px; }
+.decision-card-dl { margin: 0 0 10px; display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.decision-card-dl dt { font-size: 11px; color: var(--dim); }
+.decision-card-dl dd { margin: 0; }
+.decision-card-objective { display: block; color: var(--subtle); }
+.decision-card-jobs li, .decision-card-evidence li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 32px; }
+.decision-card-jobs small, .decision-card-escalation small { color: var(--muted); }
+.decision-card-escalation { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.decision-card a { overflow-wrap: anywhere; }
+/* One row (mobile-chat-layout): auto-growing field, ⋯ steer/abort while busy, round send. ≤ 64 px collapsed, above the safe area. */
+.operator-composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--background); min-width: 0; flex-shrink: 0; }
+.operator-composer-state, .operator-composer-delivery { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.operator-composer-failed { color: var(--coral); }
+.operator-composer-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.operator-composer textarea { flex: 1; min-width: 0; display: block; min-height: 42px; max-height: 122px; resize: none; overflow-y: auto; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 21px; font: inherit; font-size: 15px; line-height: 20px; overflow-wrap: anywhere; }
+.operator-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.operator-composer-send, .operator-composer-more > summary { width: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
+.operator-composer-send { padding: 0; background: var(--text); color: var(--background); border: 0; }
+.operator-composer-send:disabled { opacity: 0.4; }
+.operator-composer-more { position: relative; flex-shrink: 0; }
+.operator-composer-more > summary { list-style: none; cursor: pointer; color: var(--muted); }
+.operator-composer-more > summary::-webkit-details-marker { display: none; }
+.operator-composer-more[open] > summary { background: var(--surface); color: var(--text); }
+.operator-composer-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; display: flex; flex-direction: column; gap: 6px; min-width: 190px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 32px var(--page); }
+.operator-composer-menu button { min-height: 44px; padding: 0 16px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.operator-composer-menu button:disabled { opacity: 0.5; }
+.operator-composer-menu .operator-composer-abort { background: var(--background); color: var(--coral); border: 1px solid var(--coral); }
+/* Start session (cp-daemon P3): offline only; wraps at 390 px, one row with its lines at 1440 px. */
+.start-session { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.start-session-button { min-height: 44px; padding: 0 18px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.start-session-button:disabled { opacity: 0.5; }
+.start-session-line { flex: 1 1 220px; min-width: 0; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.start-session-failed { color: var(--coral); }
+.overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
+.overview-services-line { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 899px) {
+ /* The status and file name live in the top bar (chip and ⋯ sheet); only a failure or an unready session speaks here. */
+ .operator-composer-state-ready, .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
+}
+@media (min-width: 900px) {
+ .operator-composer { padding: 12px 40px 16px; }
+ .operator-composer > * { max-width: 780px; }
+ .session-pinned { padding: 12px 40px; }
+ .session-pinned > * { max-width: 780px; }
+ /* Desktop always shows the cards: the heading is only a heading. */
+ .session-pinned > h2 > button { pointer-events: none; min-height: 0; }
+ .session-pinned > h2 > button > span { display: none; }
+ .decision-card-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .decision-card-question h2 { font-size: 26px; line-height: 1.3; max-width: 760px; }
+ .awaiting-card .decision-card-dl { grid-template-columns: minmax(0,1fr) minmax(0,3fr); }
+}

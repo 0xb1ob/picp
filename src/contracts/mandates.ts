@@ -1,0 +1,188 @@
+/** Mandates — operator-issued bounded authority and its home defaults. Import via src/contracts.ts. */
+
+import { StringEnum } from "@earendil-works/pi-ai";
+import { type Static, Type } from "typebox";
+import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema } from "./core.ts";
+import { type CheckpointKind, CheckpointKindSchema } from "./escalations.ts";
+import type { Replace } from "./internal.ts";
+
+// ---------------------------------------------------------------------------
+// Mandate — operator-issued bounded authority (autonomy-programme-cur.2.1)
+// ---------------------------------------------------------------------------
+
+export const MANDATE_ID_PATTERN = "^md-[a-z0-9]{4,16}$";
+const MANDATE_ID_RE = new RegExp(MANDATE_ID_PATTERN);
+export const MandateIdSchema = Type.String({ pattern: MANDATE_ID_PATTERN });
+export function isSafeMandateId(value: string): boolean {
+	return MANDATE_ID_RE.test(value);
+}
+
+export const MANDATE_STATUSES = ["active", "paused", "revoked", "expired"] as const;
+export type MandateStatus = (typeof MANDATE_STATUSES)[number];
+export const MandateStatusSchema = StringEnum([...MANDATE_STATUSES]);
+
+export const MANDATE_CHANNELS = ["operator_chat", "bridge"] as const;
+export type MandateChannel = (typeof MANDATE_CHANNELS)[number];
+export const MandateChannelSchema = StringEnum([...MANDATE_CHANNELS]);
+
+export const MANDATE_ACTIONS = ["plan", "implement", "review", "repair", "merge"] as const;
+export type MandateAction = (typeof MANDATE_ACTIONS)[number];
+export const MandateActionSchema = StringEnum([...MANDATE_ACTIONS]);
+
+export const MANDATE_ASK_ON = ["plan_approval", "merge", "risk:high"] as const;
+export type MandateAskOn = (typeof MANDATE_ASK_ON)[number];
+export const MandateAskOnSchema = StringEnum([...MANDATE_ASK_ON]);
+
+/**
+ * Mandate defaults (autonomy-programme-cur.2.5): the fields `cp_mandate issue`
+ * resolves through the home -> project -> explicit ladder instead of asking a
+ * human to name them. Keyed by the `data/mandate-defaults.json` / project
+ * `mandate` override field name, not the stored `Mandate` field name (e.g.
+ * `expiry_hours` resolves into `expiry`, `exclude_paths` into
+ * `exclusions.paths`).
+ */
+export const MANDATE_DEFAULTABLE_FIELDS = [
+	"expiry_hours",
+	"spend_usd",
+	"spend_tokens",
+	"job_cap",
+	"dispatch_parallelism",
+	"allowed_actions",
+	"ask_on",
+	"exclude_paths",
+] as const;
+export type MandateDefaultableField = (typeof MANDATE_DEFAULTABLE_FIELDS)[number];
+
+export const MANDATE_FIELD_SOURCES = ["explicit", "project", "home"] as const;
+export type MandateFieldSource = (typeof MANDATE_FIELD_SOURCES)[number];
+export const MandateFieldSourceSchema = StringEnum([...MANDATE_FIELD_SOURCES]);
+export type MandateProvenance = Partial<Record<MandateDefaultableField, MandateFieldSource>>;
+
+export const MandateDecisionRecordSchema = Type.Object(
+	{
+		at: IsoTimestampSchema,
+		job_id: JobIdSchema,
+		kind: CheckpointKindSchema,
+		clause: Type.String({ minLength: 1, maxLength: 400 }),
+		checkpoint: Type.String({ minLength: 1, maxLength: 200 }),
+	},
+	{ additionalProperties: false },
+);
+export type MandateDecisionRecord = Replace<
+	Static<typeof MandateDecisionRecordSchema>,
+	{ kind: CheckpointKind }
+>;
+
+export const MandateEscalationSchema = Type.Object(
+	{
+		at: IsoTimestampSchema,
+		kind: Type.String({ minLength: 1, maxLength: 40 }),
+		reason: Type.String({ minLength: 1, maxLength: 400 }),
+	},
+	{ additionalProperties: false },
+);
+export type MandateEscalation = Static<typeof MandateEscalationSchema>;
+
+export const MandateSchema = Type.Object(
+	{
+		schema_version: Type.Integer({ minimum: 1 }),
+		id: MandateIdSchema,
+		issued_by: Type.Object({ channel: MandateChannelSchema }, { additionalProperties: false }),
+		issued_at: IsoTimestampSchema,
+		expiry: IsoTimestampSchema,
+		projects: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { minItems: 1, maxItems: 32 }),
+		objective: Type.String({ minLength: 1, maxLength: 2000 }),
+		job_ids: Type.Optional(Type.Array(JobIdSchema, { maxItems: 64 })),
+		/** A schedule-only grant (schedlater S3): covers only the jobs of the one schedule naming it; a grant without it covers no scheduled job. */
+		schedule_grant: Type.Optional(Type.Literal(true)),
+		allowed_actions: Type.Array(MandateActionSchema, { minItems: 1, maxItems: 8 }),
+		dispatch_parallelism: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
+		exclusions: Type.Optional(
+			Type.Object(
+				{
+					paths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 32 })),
+					subsystems: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { maxItems: 32 })),
+					job_kinds: Type.Optional(Type.Array(JobKindSchema, { maxItems: 4 })),
+				},
+				{ additionalProperties: false },
+			),
+		),
+		/** `tokens` counts non-cached tokens only (`mandateTokens`, src/mandate.ts). */
+		spend_cap: Type.Object({ usd: Type.Number({ minimum: 0 }), tokens: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
+		job_cap: Type.Integer({ minimum: 1 }),
+		ask_on: Type.Array(MandateAskOnSchema, { maxItems: 16 }),
+		status: MandateStatusSchema,
+		paused_at: Type.Optional(IsoTimestampSchema),
+		revoked_at: Type.Optional(IsoTimestampSchema),
+		pause_reason: Type.Optional(Type.String({ maxLength: 400 })),
+		decisions: Type.Array(MandateDecisionRecordSchema, { maxItems: 500 }),
+		escalations: Type.Array(MandateEscalationSchema, { maxItems: 32 }),
+		/** Parent-side token-cap raises (`cp_mandate raise_tokens`), each journaled with its reason; the USD cap has no such path. */
+		token_raises: Type.Optional(Type.Array(Type.Object({ at: IsoTimestampSchema, from: Type.Integer({ minimum: 0 }), to: Type.Integer({ minimum: 0 }), reason: Type.String({ minLength: 1, maxLength: 400 }) }, { additionalProperties: false }), { maxItems: 64 })),
+		/** Each covered fleet job's usage at issue (`usageBaseline`, src/mandate-accounting.ts): the grant counts only what
+		 * accrues past it. Absent on grants issued before it existed, which count lifetime usage. */
+		usage_baseline: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						job_id: JobIdSchema,
+						usd: Type.Number({ minimum: 0 }),
+						tokens: Type.Integer({ minimum: 0 }),
+						reviewer_usd: Type.Optional(Type.Number({ minimum: 0 })),
+						reviewer_tokens: Type.Optional(Type.Integer({ minimum: 0 })),
+					},
+					{ additionalProperties: false },
+				),
+			),
+		),
+		/** Which of `explicit` (the `cp_mandate issue` call), `project` (data/projects.json's `mandate`
+		 * override) or `home` (data/mandate-defaults.json) each defaultable field came from (cur.2.5). */
+		provenance: Type.Optional(
+			Type.Object(
+				Object.fromEntries(MANDATE_DEFAULTABLE_FIELDS.map((field) => [field, Type.Optional(MandateFieldSourceSchema)])),
+				{ additionalProperties: false },
+			),
+		),
+	},
+	{ additionalProperties: false },
+);
+export type Mandate = Replace<
+	Static<typeof MandateSchema>,
+	{
+		issued_by: { channel: MandateChannel };
+		allowed_actions: MandateAction[];
+		ask_on: MandateAskOn[];
+		status: MandateStatus;
+		decisions: MandateDecisionRecord[];
+		exclusions?: { paths?: string[]; subsystems?: string[]; job_kinds?: JobKind[] };
+		provenance?: MandateProvenance;
+	}
+>;
+
+/**
+ * `data/mandate-defaults.json` (autonomy-programme-cur.2.5): the home-level
+ * knobs `cp_mandate issue` falls back to when the operator names only a
+ * project and an objective. Scaffolded once with conservative values
+ * (`src/mandate-defaults.ts`); an existing file is never rewritten.
+ */
+export const MandateDefaultsSchema = Type.Object(
+	{
+		schema_version: Type.Integer({ minimum: 1 }),
+		expiry_hours: Type.Number({ minimum: 0.1, maximum: 24 * 30 }),
+		spend_usd: Type.Number({ minimum: 0 }),
+		spend_tokens: Type.Integer({ minimum: 0 }),
+		token_ceiling: Type.Optional(Type.Integer({ minimum: 0 })), // the parent's own raise_tokens bound; absent = 100M
+		job_cap: Type.Integer({ minimum: 1 }),
+		dispatch_parallelism: Type.Integer({ minimum: 1, maximum: 32 }),
+		allowed_actions: Type.Array(MandateActionSchema, { minItems: 1, maxItems: 8 }),
+		ask_on: Type.Array(MandateAskOnSchema, { maxItems: 16 }),
+		exclude_paths: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 32 }),
+		/** One line per field above, explaining why it defaults the way it does \u2014 the comment JSON has no room for. */
+		notes: Type.Record(Type.String(), Type.String({ maxLength: 400 })),
+	},
+	{ additionalProperties: false },
+);
+export type MandateDefaults = Replace<
+	Static<typeof MandateDefaultsSchema>,
+	{ allowed_actions: MandateAction[]; ask_on: MandateAskOn[] }
+>;

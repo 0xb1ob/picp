@@ -1,0 +1,12 @@
+.ctx-chip { display: inline-flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; font-size: 11px; color: var(--muted); }
+.ctx-chip .ctx-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-chip:not(.ctx-compact) .ctx-text { white-space: normal; overflow-wrap: anywhere; }
+.ctx-chip small { font-size: inherit; color: var(--dim); }
+.ctx-chip progress { appearance: none; width: 100%; min-width: 4rem; max-width: 16rem; height: 3px; border: 0; border-radius: 2px; background: var(--border); overflow: hidden; }
+.ctx-chip progress::-webkit-progress-bar { background: var(--border); }
+.ctx-chip progress::-webkit-progress-value { background: var(--dim); }
+.ctx-chip progress::-moz-progress-bar { background: var(--dim); }
+.ctx-warn progress::-webkit-progress-value { background: var(--amber); }
+.ctx-warn progress::-moz-progress-bar { background: var(--amber); }
+.ctx-high progress::-webkit-progress-value { background: var(--coral); }
+.ctx-high progress::-moz-progress-bar { background: var(--coral); }

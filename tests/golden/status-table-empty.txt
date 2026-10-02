@@ -1,0 +1,4 @@
+FLEET 0 jobs (active, at 2026-08-27T12:00:00Z)
+LEDGER degraded (br: command not found) -- titles unavailable; worker rows are still facts
+
+no jobs (active)

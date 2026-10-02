@@ -1,0 +1,24 @@
+import type { DecisionsResponse } from "../../src/viewer/api-types.ts";
+import type { ControlView } from "../control.ts";
+import { elapsed } from "../format.ts";
+import { AwaitingScreen } from "./Awaiting.tsx";
+import { DecidedScreen } from "./Decided.tsx";
+import { ParentQuestions } from "./DecisionContext.tsx";
+
+/**
+ * Audit P4 #24: Awaiting and Decided as one page. Awaiting's one-click cards on top (`#awaiting`), then the parent's
+ * questions the operator session is handling, collapsed to one line, then the Decided log (`#decided`).
+ */
+export function Decisions({data,control}: {data:DecisionsResponse;control?:ControlView | undefined}) {
+ const questions = data.parent_questions, unavailable = data.availability.escalations === "unavailable";
+ const oldest = Math.max(0,...questions.map(q => q.age_seconds));
+ return <div class="decisions">
+  <h1>Decisions</h1>
+  <section id="awaiting" tabIndex={-1} aria-label="Awaiting you"><AwaitingScreen data={data} control={control}/></section>
+  {(unavailable || questions.length > 0) && <details class={`decisions-handled${oldest >= 600 ? " decisions-handled-overdue" : ""}`}>
+   <summary>Being handled &middot; {unavailable ? "-" : questions.length}{questions.length > 0 && <span> (oldest {elapsed(oldest)})</span>}</summary>
+   <ParentQuestions items={questions} availability={data.availability.escalations}/>
+  </details>}
+  <section id="decided" tabIndex={-1} aria-label="Decided for you"><DecidedScreen data={{...data,items:data.decided}}/></section>
+ </div>;
+}
