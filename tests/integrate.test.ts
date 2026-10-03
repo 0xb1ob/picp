@@ -2624,6 +2624,33 @@ test("human_handoff hands a reviewed, green PR to a human: CLEAN, BEHIND, review
 	}
 });
 
+test("human_handoff with a strict up-to-date rule: no handoff until CI is green and cp_review passed on the current head", async (t) => {
+	// BLOCKED on a stale base under strict_required_status_checks_policy: the rule-required update counts as behind.
+	const strict = { ancestor: false, pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" }, rules: STRICT_RULES } as const;
+	const pendingCi = { runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] };
+	const b = await benchOf(t, {}, { reviewHead: HEAD_B });
+	const pending = await b.integrator({ ...strict, ...pendingCi }, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([pending.step, pending.next], ["ci", "wait"], "pending CI under a strict rule waits");
+	assert.equal(handoffRows(b).length, 0, "pending CI: no handoff row");
+	const unreviewed = await b.integrator(strict, HANDOFF).advance({ jobId: BR });
+	assert.equal(unreviewed.next, "review", "green CI with a pass only on a superseded head is a review hold");
+	assert.equal(handoffRows(b).length, 0, "no current-head pass: no handoff row");
+	assert.deepEqual(mutations(b), [], "never merged or update-branched while held");
+
+	writeReviewPass(b.home, HEAD_A, { attempt: 2 });
+	const handed = await b.integrator(strict, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([handed.step, handed.next, handed.head_sha], ["permit", "surface", HEAD_A]);
+	assert.equal(handoffRows(b).length, 1, "handed off once CI is green and the current head passed");
+	assert.deepEqual(mutations(b), [], "handed off, never update-branched or merged");
+
+	// Same strict rule on a current base: GitHub holds on checks, which never hands off.
+	const current = await benchOf(t);
+	const held = await current.integrator({ ...strict, ancestor: true }, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([held.step, held.next], ["permit", "surface"]);
+	assert.equal(handoffRows(current).length, 0, "a checks hold under a strict rule is not handed off");
+	assert.deepEqual(mutations(current), []);
+});
+
 test("human_handoff: no pass is a review hold, a draft is readied first, and repo policy is argv-identical", async (t) => {
 	const unreviewed = await benchOf(t, {}, { reviewHead: false });
 	const review = await unreviewed.integrator({}, HANDOFF).advance({ jobId: BR });

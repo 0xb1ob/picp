@@ -57,6 +57,7 @@ export interface HandoffInput {
 	write: (input: HandoffWrite) => IntegrateResult;
 }
 
+/** The Integrator's `handoff` option: a result stops the step before any update or merge; absent or `undefined` changes nothing. */
 export type HandoffPort = (input: HandoffInput) => Promise<IntegrateResult | undefined>;
 
 /** Absent means `repo`. Throws when the registry cannot be read. */
@@ -68,6 +69,16 @@ export function mergePolicyOf(registry: MergePolicyRegistry, project: string): M
 export function handOffDecision(verdict: Pick<MergePermissionVerdict, "permission" | "cause"> | undefined): "handoff" | "default" {
 	if (verdict?.permission === "permitted") return "handoff";
 	return verdict?.permission === "pending" && verdict.cause !== undefined && HANDOFF_PENDING_CAUSES.includes(verdict.cause) ? "handoff" : "default";
+}
+
+/**
+ * The Integrator's #fallback hold: the review gate first, then the handoff port (absent → no-op).
+ * Review always runs, whatever the policy; human_handoff never mints a merge checkpoint.
+ */
+export async function reviewThenHandoff(review: () => Promise<IntegrateResult | undefined>, port: HandoffPort | undefined, input: HandoffInput): Promise<IntegrateResult | undefined> {
+	const blocked = await review();
+	if (blocked) return blocked;
+	return port?.(input);
 }
 
 const bounded = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
