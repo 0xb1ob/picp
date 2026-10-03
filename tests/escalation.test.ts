@@ -20,6 +20,7 @@ import {
 	raisePlanApproval,
 } from "../src/escalation.ts";
 import { queued } from "../src/json-store.ts";
+import type { AwaitingStore } from "../src/awaiting.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExtensionDeps } from "../extensions/command-post/shared.ts";
 import { registerMandateTools } from "../extensions/command-post/tools-mandate.ts";
@@ -289,6 +290,30 @@ test("two contrary answers racing on a linked plan approval: the checkpoint hold
 	const winner = answers[settled.findIndex((entry) => entry.status === "fulfilled")];
 	assert.equal(checkpoints.get("cp-synth-ship")?.decision, winner === "approve" ? "approved" : "declined");
 	assert.equal(store.get(raised.id)?.answer, winner);
+});
+
+test("a linked awaiting follow-up that failed after the claim is completed by an identical retry; a contrary retry is still refused", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const calls: Array<{ id: string; answer: string }> = [];
+	let failures = 1;
+	const awaiting = {
+		answer: async (id: string, options: { answer: string }) => {
+			calls.push({ id, answer: options.answer });
+			if (failures-- > 0) throw new Error("synthetic awaiting write failure");
+			return {};
+		},
+	} as unknown as AwaitingStore;
+	const store = new EscalationStore({ home: home.path, awaiting: () => awaiting });
+	const raised = await store.raise({ job_ids: ["cp-synth1"], kind: "product_ambiguity", question: "which copy?", options: OPTIONS, recommended: "approve", awaiting_id: "aw-synth-0a0a0a" });
+	await store.answer(raised.id, { answer: "approve", by: "operator command" });
+	assert.equal(store.get(raised.id)?.status, "answered", "the claim stands though the follow-up failed");
+	assert.equal(calls.length, 1);
+	await store.answer(raised.id, { answer: "approve", by: "operator command" });
+	assert.deepEqual(calls, [{ id: "aw-synth-0a0a0a", answer: "approve" }, { id: "aw-synth-0a0a0a", answer: "approve" }], "the retry re-runs the follow-up");
+	await assert.rejects(() => store.answer(raised.id, { answer: "decline", by: "operator command" }), /already answered/);
+	assert.equal(calls.length, 2, "a contrary retry never reaches the awaiting row");
+	assert.equal(store.get(raised.id)?.answer, "approve");
 });
 
 test("cp_escalate action withdraw: needs an id and a reason, withdraws by id, carries the reason in its result only", async (t) => {

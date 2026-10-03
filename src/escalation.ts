@@ -206,23 +206,23 @@ export class EscalationStore {
 		if (existing.status === "withdrawn" || existing.status === "superseded") {
 			throw new EscalationError(`escalation ${id} was ${existing.status} — nothing to answer`);
 		}
-		if (existing.status === "answered") {
-			if (existing.answer === options.answer) {
-				await this.#resolveDependency(existing);
-				return existing;
-			}
+		// An identical answer to an answered record is a retry: it skips the preflight below and
+		// reaches the queued claim, which returns the record as is, so the awaiting follow-up
+		// re-runs and converges one a failure or crash after the claim left unfinished.
+		const retry = existing.status === "answered";
+		if (retry && existing.answer !== options.answer) {
 			throw new EscalationError(
 				`escalation ${id} is already answered ("${existing.answer}" by ${existing.answered_by ?? "?"})`,
 			);
 		}
 
-		if (existing.dropped_dependency && !["proceed", "drop", "reopen"].includes(options.answer)) {
+		if (!retry && existing.dropped_dependency && !["proceed", "drop", "reopen"].includes(options.answer)) {
 			throw new EscalationError(`${id}: choose proceed, drop or reopen`);
 		}
 		const planRevise = existing.kind === "plan_approval" && /^revise\b/i.test(options.answer.trim());
 		const decidesCheckpoint = Boolean(existing.checkpoint_job_id) && !planRevise;
 		let target: CheckpointStore | undefined;
-		if (decidesCheckpoint) {
+		if (decidesCheckpoint && !retry) {
 			const store = this.#checkpoints?.();
 			if (!store) {
 				throw new EscalationError(
@@ -277,13 +277,15 @@ export class EscalationStore {
 		if (!result) throw new EscalationError(`no escalation ${id}`);
 		const answered: Escalation = result;
 
-		// The record is final; a linked awaiting row converges after it, never authorizes.
+		// The record is final; a linked awaiting row converges after it, never authorizes. It runs
+		// on an identical retry too (the awaiting store is idempotent for the same answer), so a
+		// follow-up that failed after the claim is completed by retrying the answer.
 		let awaitingReported = false;
-		if (recordedNow && answered.awaiting_id) {
+		if (answered.awaiting_id) {
 			const awaiting = this.#awaiting?.();
 			if (awaiting) {
 				try {
-					await awaiting.answer(answered.awaiting_id, { ...options, at });
+					await awaiting.answer(answered.awaiting_id, { ...options, at: recordedNow ? at : (answered.answered_at ?? at) });
 					awaitingReported = true;
 				} catch {
 					// Linked awaiting may already be answered or derived; the escalation still journals.
