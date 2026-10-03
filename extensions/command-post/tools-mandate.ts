@@ -24,6 +24,7 @@ import { cpNext, dedupeNext, formatNext } from "../../src/next.ts";
 import { homeMandateProjects } from "../../src/project-report.ts";
 import { decide, DecideError, operatorTextsFromEntries } from "../../src/decide.ts";
 import { EscalationError } from "../../src/escalation.ts";
+import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
@@ -285,9 +286,10 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"When you cannot decide under the mandate, call cp_escalate. Do not write should I… or waiting for you to…",
 			"Relay an open escalation; do not reword it. The operator (or parent with a valid basis) answers with cp_decide.",
 			"When an open escalation's question became moot, cp_escalate action withdraw escalation_id reason \u2014 never an answer, never authorization; an answered record is never withdrawn.",
+			"Several risk:high jobs refused under one asking mandate: cp_escalate action batch_risk_high job_ids [2..16] files one approve/drop record and withdraws their per-job rows \u2014 still cp_decide with an operator quote, never auto-permitted.",
 		],
 		parameters: Type.Object({
-			action: Type.Optional(StringEnum(["raise", "withdraw"], { description: "raise (default) a new escalation, or withdraw a moot open one by id" })),
+			action: Type.Optional(StringEnum(["raise", "withdraw", "batch_risk_high"], { description: "raise (default) a new escalation, withdraw a moot open one by id, or batch_risk_high: one approve/drop record for 2..16 risk:high-gated job_ids" })),
 			escalation_id: Type.Optional(Type.String({ description: "withdraw: the es-\u2026 id" })),
 			reason: Type.Optional(Type.String({ description: "withdraw: why the question is moot (required)" })),
 			job_ids: Type.Optional(Type.Array(Type.String(), { description: "raise: job id(s) this decision is about" })),
@@ -322,6 +324,15 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				return {
 					content: [{ type: "text", text: `${withdrawn.id} withdrawn: ${reason} \u2014 not an answer; no linked checkpoint was decided` }],
 					details: { escalation: withdrawn, reason },
+				};
+			}
+			if (params.action === "batch_risk_high") {
+				if (!params.job_ids) throw new EscalationError("cp_escalate batch_risk_high needs job_ids");
+				const { escalation, withdrawn } = await batchRiskHigh({ escalations: post.escalations, mandates: post.mandates, ledger: post.ledger() }, { jobIds: params.job_ids, ...(params.mandate_id ? { mandateId: params.mandate_id } : {}) });
+				refreshWidget(ctx);
+				return {
+					content: [{ type: "text", text: `${escalation.id} batch risk:high: ${escalation.job_ids.length} jobs (${escalation.job_ids.join(", ")}); withdrew ${withdrawn.length} per-job rows \u2014 cp_decide it with an operator quote` }],
+					details: { escalation, withdrawn },
 				};
 			}
 			const { job_ids, kind, question, options, recommended } = params;

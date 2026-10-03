@@ -576,6 +576,9 @@ export function raiseRiskHigh(
 	store: EscalationStore,
 	input: { jobId: string; evidence: readonly string[]; mandateId?: string },
 ): Promise<Escalation> {
+	// An open batch (src/risk-batch.ts) already asks about this job: name it, never mint a duplicate per-job row.
+	const batch = store.list({ jobId: input.jobId, kind: "risk_high_irreversible", status: "open" }).find((item) => item.job_ids.length > 1);
+	if (batch) return Promise.resolve(batch);
 	const words = input.evidence.length > 0 ? input.evidence.join("; ") : "risk:high";
 	return store.raise({
 		...(input.mandateId ? { mandate_id: input.mandateId, mandate_clause: `${input.mandateId}: ask_on includes risk:high` } : {}),
