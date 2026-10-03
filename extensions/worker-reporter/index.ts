@@ -32,7 +32,7 @@ import { dirname, join, resolve } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait } from "../../src/ci-wait.ts";
+import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import {
 	ANSWER_MAX_BYTES,
@@ -595,6 +595,7 @@ export default function (pi: ExtensionAPI): void {
 			const command = (event.input as { command?: unknown } | undefined)?.command;
 			const finding = typeof command === "string" ? detectCiWait(command) : undefined;
 			if (finding) return { block: true, reason: ciWaitRefusal(finding) };
+			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
 			// One CI status snapshot per worker process (revive = new process = one more).
 			if (typeof command === "string" && ciStatusQuery(command)) {
 				if (ciStatusQueries++ >= 1) return { block: true, reason: ciStatusRepeatRefusal() };

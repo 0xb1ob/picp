@@ -192,3 +192,22 @@ export function ciStatusRepeatRefusal(): string {
 		"`head_sha`; the parent re-verifies CI itself. Failure logs (`gh run view <id> --log-failed`) are still allowed.",
 	].join("\n");
 }
+
+const HEREDOC_BODY_RE = /(?<!<)(<<-?\s*(['"]?)(\w+)\2[^\n]*\n)[\s\S]*?(?:\n[ \t]*\3[ \t]*(?=\n|$)|$)/g;
+
+/**
+ * True when `apply_patch` runs as a command in `command` (command position, so
+ * `grep apply_patch`, `echo apply_patch` and heredoc bodies such as commit
+ * messages are prose, not a call). `apply_patch` is not a shell command here:
+ * the run logs show it dying with "command not found". `git apply` is not
+ * refused: the audit has no evidence for it, and `git apply --check` is legitimate.
+ */
+export function shellPatchCommand(command: string): boolean {
+	if (typeof command !== "string") return false;
+	return atCommandPosition("apply_patch\\b").test(command.replace(HEREDOC_BODY_RE, "$1"));
+}
+
+/** Refusal for a shell `apply_patch`. */
+export function shellPatchRefusal(): string {
+	return "Refused: `apply_patch` is not a shell command in this environment. Edit files with the `replace` or `insert` tool (or `write` for a new file).";
+}
