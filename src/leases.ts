@@ -209,19 +209,20 @@ export class LeaseManager {
 	 * Return a lease. Runs `treehouse return --force` from the home, refuses to
 	 * run from inside the worktree, and — when we know the lease identity —
 	 * refuses to return a worktree that has since been leased by somebody else.
+	 * Throws on failure unless `ignoreErrors`; either way the result says whether
+	 * treehouse confirmed the return, so a caller never claims one it did not get.
 	 */
-	async release(lease: Lease, options: { ignoreErrors?: boolean } = {}): Promise<void> {
+	async release(lease: Lease, options: { ignoreErrors?: boolean } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
 		this.#assertOutside(lease.path);
 		const args = ["return", "--force"];
 		if (lease.lease_id) args.push("--if-lease-id", lease.lease_id);
 		// Verbatim: treehouse looks this worktree up by the path it handed out.
 		args.push(lease.path);
 		const result = await this.#treehouse(args, this.home);
-		if (result.status !== 0 && !options.ignoreErrors) {
-			throw new LeaseError(
-				`treehouse return --force failed for ${lease.path} (exit ${result.status ?? "null"}): ${firstLine(result.stderr) || firstLine(result.stdout) || "no output"} — the lease may still be held; retry from ${this.home}`,
-			);
-		}
+		if (result.status === 0) return { ok: true };
+		const error = `treehouse return --force failed for ${lease.path} (exit ${result.status ?? "null"}): ${firstLine(result.stderr) || firstLine(result.stdout) || "no output"} — the lease may still be held; retry from ${this.home}`;
+		if (!options.ignoreErrors) throw new LeaseError(error);
+		return { ok: false, error };
 	}
 
 	/** Is this path still a worktree of that clone? (cheap teardown pre-check) */

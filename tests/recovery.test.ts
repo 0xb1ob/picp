@@ -27,6 +27,7 @@ import {
 } from "../src/contracts.ts";
 import { BOUND_SPENT_PHRASE, type FailRecoveryFact, recoveryLine } from "../src/failure-announcer.ts";
 import { EscalationStore } from "../src/escalation.ts";
+import type { JobClaims } from "../src/job-claims.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { loadProfile } from "../src/profiles.ts";
 import { Reviver } from "../src/revive.ts";
@@ -239,6 +240,27 @@ test("a risk:high job never auto-recovers, even a transient class", async (t) =>
 	const outcome = await b.recovery.onDeath(JOB_ID, CRASH());
 	assert.equal(outcome.action, "escalated");
 	assert.equal(b.reviver.plans, 0);
+});
+
+test("cp-a9fq: a teardown in flight wins; recovery stands down without spending an attempt, and owns the job while it runs", async (t) => {
+	const b = await bench(t);
+	const claims: JobClaims = new Map([[JOB_ID, "teardown"]]);
+	const recovery = new BoundedRecovery({ home: b.home.path, fleet: b.fleet, runs: b.runs, escalations: b.escalations, reviver: () => b.reviver, sender: b.sender, claims });
+	const outcome = await recovery.onDeath(JOB_ID, CRASH());
+	assert.equal(outcome.action, "revive_refused");
+	assert.match(outcome.action === "revive_refused" ? outcome.reason : "", /teardown is in flight/);
+	assert.equal(b.reviver.plans, 0, "nothing was attempted beside the teardown");
+	assert.equal(readRecoveryAttempts(b.home.path, JOB_ID, "crash"), 0, "no attempt spent");
+	assert.equal(b.escalations.list().length, 0);
+	const logged = readRunEvents(b.home.path, JOB_ID).find((event) => event.type === "recovery_failed");
+	assert.equal((logged?.payload as { stage?: string } | undefined)?.stage, "claim", "the stand-down is in the run log");
+	assert.equal(claims.get(JOB_ID), "teardown", "the stand-down never takes the teardown's claim");
+
+	claims.delete(JOB_ID);
+	const running = recovery.onDeath(JOB_ID, CRASH());
+	assert.equal(claims.get(JOB_ID), "recovery", "claimed synchronously, before the first await");
+	assert.equal((await running).action, "revived");
+	assert.equal(claims.has(JOB_ID), false, "released once settled");
 });
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,7 +17,8 @@ import {
 import { isPidAlive, readRunObservation } from "./fleet.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
-import type { GateFailure } from "./teardown.ts";
+import type { JobOwner } from "./job-claims.ts";
+import type { GateFailure, TeardownResult } from "./teardown.ts";
 import { boundedWakeupId, type DurableWakeupInput, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 
 export interface TeardownCallOptions {
@@ -45,6 +47,49 @@ export function unmanagedLiveWorker(home: string, record: FleetRecord, managed: 
 		message: `${id}: its worker (pid ${pid}) is alive but no session here owns it; returning the lease would hand its worktree to the next job while it can still write there`,
 		fix: `keep the lease. Confirm pid ${pid} is this job's worker (its cwd is ${record.worktree}), end it deliberately or let it exit, then re-run cp_teardown ${id}. force, operator_quote and the pipeline hand-off do not skip this gate — nothing here can observe that worker's close`,
 	};
+}
+
+/** cp-a9fq: another owner holds this job's in-flight state; tearing down beside it is the hazard, so refuse. */
+export function jobInFlight(jobId: string, holder: JobOwner): GateFailure {
+	const what = holder === "recovery" ? "automatic recovery (a revive or redispatch in this worktree)" : "another teardown";
+	return {
+		code: "job_in_flight",
+		message: `${jobId}: ${what} is in flight; a teardown beside it could return a worktree a revived worker stands in, or close the job under it`,
+		fix: `keep the lease; wait for that outcome (/watch ${jobId}: recovery_attempted or recovery_escalated, or the cp-death/cp-bound wake-up), then re-run cp_teardown ${jobId}`,
+	};
+}
+
+/** cp-a9fq: treehouse refused or failed the return — the lease is still held, so the job is not done. */
+export function leaseReturnFailed(jobId: string, error: string): GateFailure {
+	return {
+		code: "lease_return_failed",
+		message: `${jobId}: ${error}`,
+		fix: `the job stays open and keeps its lease: find what still holds the worktree (a live process in it, or a lease id that moved), then re-run cp_teardown ${jobId}`,
+	};
+}
+
+export function defaultGit(cwd: string, args: readonly string[]) {
+	return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolvePromise) => {
+		execFile("git", [...args], { cwd, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+			const code = (error as NodeJS.ErrnoException | null)?.code;
+			const status = typeof code === "number" ? code : error ? 1 : 0;
+			resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+		});
+	});
+}
+
+/** One operator line; on refusal it says what is kept and what to do. */
+export function formatTeardown(result: TeardownResult): string {
+	if (result.torn_down) {
+		const why = result.killed_unreported ? "killed_unreported" : result.reason ?? "forced";
+		const note = result.unreported ? ` — no report was filed for ${result.job_id}: relay "no report", never a result` : "";
+		const ledger = result.ledger_close_error ? ` — ledger close failed (${result.ledger_close_error}); re-run cp_teardown ${result.job_id} to retry` : "";
+		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}${ledger}`;
+	}
+	if (result.failure) {
+		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
+	}
+	return `${result.job_id}: already torn down${result.ledger_closed ? "; its ledger close was retried and the job is now closed" : ""}${result.ledger_close_error ? `; ledger close still failing (${result.ledger_close_error})` : ""}`;
 }
 
 export interface LedgerCloseOutcome {

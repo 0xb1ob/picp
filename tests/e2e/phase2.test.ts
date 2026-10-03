@@ -459,6 +459,45 @@ test("m2: an unspent crash is revived once, in place, on the same lease", { skip
 	assert.ok(kinds.includes("recovery_attempted"));
 });
 
+test("m2: a forced teardown racing an automatic revive never claims a lease it did not return (cp-a9fq)", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t);
+	const jobId = await f.intake("tear down mid-revive", { delivery: "local", slug: "raced" });
+	const model = f.script("m2-race", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
+		...shipSteps(jobId, { push: false }),
+	]);
+	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
+	const managed = f.post.manager.get(jobId);
+	assert.ok(managed, "the manager owns the worker it spawned");
+	await waitFor(() => readRunStatus(f.home, jobId), (status) => status.phase === "working", { timeoutMs: 60_000, what: "the worker to start working" });
+	await managed.worker.kill("SIGKILL");
+
+	// onFailure and BoundedRecovery.onDeath run in one synchronous step, so once
+	// onFailure has fired the revive owns the job: this is the cp-aqzo overlap.
+	await waitFor(() => f.failures, (list) => list.length > 0, { timeoutMs: 60_000, what: "onFailure to be called" });
+	const raced = await f.post.tearDown(jobId, { force: true });
+	if (raced.torn_down) {
+		// The revive finished first; teardown then ended the revived worker itself.
+		assert.equal(raced.lease_returned, true);
+	} else {
+		assert.equal(raced.failure?.code, "job_in_flight", JSON.stringify(raced));
+		assert.equal(raced.lease_returned, false);
+		assert.notEqual(readFleet(f.home).jobs[0]?.phase, "done", "a refusal never closes the job beside the revive");
+		assert.ok(/leased/.test(treehouse(f.clone, "status")), "the lease is kept");
+		// The revive runs to its outcome undisturbed; then the operator's teardown goes through.
+		await waitFor(() => readFleet(f.home).jobs[0], (record) => record?.phase === "held", { timeoutMs: 60_000, what: "the revived worker to report" });
+		const torn = await f.post.tearDown(jobId, { force: true });
+		assert.equal(torn.torn_down, true, JSON.stringify(torn));
+		assert.equal(torn.lease_returned, true);
+		const kinds = readEventLog(f.home, jobId).map((event) => event.type);
+		assert.equal(kinds.filter((kind) => kind === "worker_revived").length, 1, "the revive was not cut short");
+	}
+	// Whichever won, lease_returned:true is a treehouse fact, and nothing is left running in the worktree.
+	assert.equal(readFleet(f.home).jobs[0]?.phase, "done");
+	assert.ok(!/leased/.test(treehouse(f.clone, "status")), "the pool has its worktree back");
+	assert.equal(f.post.manager.get(jobId), undefined, "no worker survives the teardown");
+});
+
 // ---------------------------------------------------------------------------
 // budgets: escalate, never kill
 // ---------------------------------------------------------------------------

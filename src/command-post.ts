@@ -129,6 +129,7 @@ import { SUGGEST_DEFAULT_MODEL, type SuggestConfig } from "./contracts.ts";
 import { type Asker, QuestionRelay } from "./questions.ts";
 import { type PlanTarget, type ResolvePlanOptions, resolvePlanTarget } from "./plan-view.ts";
 import { BoundedRecovery } from "./recovery.ts";
+import type { JobClaims } from "./job-claims.ts";
 import { RunRegistry } from "./runs.ts";
 import { Sender, type SendRequest, type SendResult } from "./send.ts";
 import { SettleWatcher, type SettleOutcome } from "./settle.ts";
@@ -319,6 +320,7 @@ export class CommandPost {
 	readonly shippedSeen: ShippedSeenStore;
 	readonly #options: CommandPostOptions;
 	readonly #announcer: FailureAnnouncer;
+	readonly #claims: JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
 
 	constructor(options: CommandPostOptions) {
 		this.#options = options;
@@ -442,7 +444,7 @@ export class CommandPost {
 			manager: this.manager,
 			runs: this.runs,
 			ledger: () => this.ledger(),
-			journal: (input) => this.#journalDurable(input),
+			journal: (input) => this.#journalDurable(input), claims: this.#claims,
 		});
 		// cp-vk1: `cp_merged` writes here and the ship gate reads it, which is how
 		// "confirm the PR merged" stopped being advice with no mechanism behind it.
@@ -542,7 +544,7 @@ export class CommandPost {
 				},
 			},
 			manager: this.manager,
-			profilesDir: this.profilesDir,
+			profilesDir: this.profilesDir, claims: this.#claims,
 			...this.#observers(),
 		});
 		// An artifact may only be filed against a job this home actually knows —
