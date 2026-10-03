@@ -101,7 +101,7 @@ The flags you are most likely to need:
 | `--operator-model <provider/model>` | the operator session's model; sets only that one. Without it a fresh install asks from the same list, defaulting to the parent's pick (Enter twice uses one model for both). |
 | `--gateway-url https://<gateway> --gateway-key-file <file>` | **optional**: a sub2api gateway the parent consults for capacity when routing work. The key is read from the first line of the file, never from the command line, and stored in `~/.config/pi-command-post/gateway.env` (0600). Without these flags the step is skipped. |
 | `--push-origin <https-url>` | optional phone notifications (needs an HTTPS proxy in front of the dashboard; see [docs/viewer-app.md](docs/viewer-app.md#web-push)). |
-| `--dry-run` | show what would change, change nothing. |
+| `--dry-run` | show what would change, change nothing (no `git fetch`; gh login and pi's model list are not checked). |
 | `--force` | replace `data/daemon.json`, a unit or the wrapper that changed, or change a pinned choice (for example `--parent-model X --force`). |
 | `--uninstall` | remove the services and the wrapper (see below). |
 

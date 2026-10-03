@@ -111,6 +111,8 @@ export interface ModelContext {
 	/** No generated data/daemon.json, cp-parent.service or wrapper: a first install. */
 	fresh: boolean;
 	force: boolean;
+	/** --dry-run: pi is never run (it writes its auth/model state under HOME), so nothing is listed or checked. */
+	dry?: boolean;
 	prompting: boolean;
 	answer: (question: string) => string;
 	step: (status: StepStatus, name: string, detail: string) => void;
@@ -133,7 +135,7 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 	if (ctx.fresh) explicit.operator ??= explicit.parent;
 	const open = TARGETS.filter((target) => explicit[target] === undefined && (ctx.fresh || (ctx.force && kept[target] === undefined)));
 	let listed: string[] | undefined;
-	if (open.length > 0 || explicit.parent !== undefined || explicit.operator !== undefined) {
+	if (!ctx.dry && (open.length > 0 || explicit.parent !== undefined || explicit.operator !== undefined)) {
 		// cp-daemon runs the parent with the unit-style env on either backend: list the models as it sees them.
 		const result = ports.run("pi", ["--no-extensions", "--list-models"], ports.exists(ctx.home) ? ctx.home : undefined, serviceListEnv(ports.env, ports.node.path));
 		listed = result.status === 0 ? parseModelList(result.stdout) : undefined;
@@ -151,7 +153,7 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 			step("fail", "model", `${value} (${flag}) is not a model pi can use as the service sees it (pi --no-extensions --list-models lists them)`);
 			return "fail";
 		}
-		if (listed === undefined || listed.length === 0) step("skip", "model", `${target} ${value} (${flag}) written unchecked: pi's model list is ${listed === undefined ? "unreadable" : "empty"}`);
+		if (listed === undefined || listed.length === 0) step("skip", "model", `${target} ${value} (${flag}) written unchecked: ${ctx.dry ? "a dry-run never runs pi --list-models" : `pi's model list is ${listed === undefined ? "unreadable" : "empty"}`}`);
 		models[target] = value;
 		step(kept[target] === value ? "ok" : "changed", "model", `${target} ${value} (${flag})`);
 	}
@@ -165,6 +167,10 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 		}
 	}
 	if (open.length === 0) return models;
+	if (ctx.dry) {
+		step("skip", "model", `${open.join(", ")}: not listed in a dry-run (pi writes its state under HOME); a real run asks or recommends, --${open[0]}-model <provider/model> pins one`);
+		return models;
+	}
 	if (listed === undefined || listed.length === 0) {
 		const why = listed === undefined ? "pi --no-extensions --list-models gave no model table" : `no model pi can use as the service sees it (${join(ctx.agentDir, "auth.json")} and ambient credentials; a key exported only in this shell does not reach the units)`;
 		step("skip", "model", `${why}: run \`pi\`, then /login, then rerun cp-install; nothing pinned`);

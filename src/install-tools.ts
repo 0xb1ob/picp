@@ -182,6 +182,15 @@ export function planOrInstall(options: InstallerOptions): InstallReport {
 	return { os: options.os, dryRun: options.dryRun, ...(piSession ? { piSession } : {}), outcomes, ok };
 }
 
+/** The dry-run exit when nothing is wrong but tools a real run would install (`planned`): cp-install's dry-run goes on past it. */
+export const DRY_RUN_PLANNED_EXIT = 3;
+
+/** 0 nothing left; 3 a dry run that only planned installs; 1 anything a human must resolve. */
+export function installExitCode(report: InstallReport): number {
+	if (report.ok) return 0;
+	return report.dryRun && report.outcomes.every((outcome) => outcome.kind === "ok" || outcome.kind === "planned") ? DRY_RUN_PLANNED_EXIT : 1;
+}
+
 const GLYPH: Readonly<Record<ToolOutcomeKind, string>> = Object.freeze({
 	ok: "✓",
 	installed: "✓",

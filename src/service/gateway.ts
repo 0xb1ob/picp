@@ -35,15 +35,18 @@ export interface GatewayContext {
 	step: (status: StepStatus, name: string, detail: string) => void;
 }
 
-/** Kept → ok; the flags add, or with --force replace; every refusal comes before any write. */
-export function gatewayStep(ctx: GatewayContext): void {
+/**
+ * Kept → ok; the flags add, or with --force replace. Validation runs now: a refusal is logged and returns
+ * undefined, before cp-install writes anything at all; otherwise the returned step does the writes (step 7b).
+ */
+export function gatewayStep(ctx: GatewayContext): (() => void) | undefined {
 	const { flags, ports, keyFile, step } = ctx;
 	const capacityFile = join(ctx.dataDir, "capacity.json");
 	const capacityText = ports.read(capacityFile);
 	const keyText = keyFile ? ports.read(keyFile) : undefined;
 	const urlFlag = flags["gateway-url"];
 	const keyFlag = flags["gateway-key-file"];
-	const fail = (detail: string) => step("fail", "gateway", `${detail}; nothing written`);
+	const fail = (detail: string): undefined => void step("fail", "gateway", `${detail}; nothing written`);
 	/** A kept key file: ok when 0600, else rewritten 0600 (parentGatewayKey refuses group/other bits). */
 	const keepKey = () => {
 		if (!keyFile || keyText === undefined) return;
@@ -52,12 +55,12 @@ export function gatewayStep(ctx: GatewayContext): void {
 		return step("changed", "gateway-key", `tightened ${keyFile} to 0600`);
 	};
 
-	if (urlFlag === undefined && keyFlag === undefined) {
+	if (urlFlag === undefined && keyFlag === undefined) return () => {
 		if (capacityText === undefined) return step("skip", "gateway", `not set up (optional: capacity-aware routing through a sub2api gateway); add it later: ${ADD_LATER}`);
 		step("ok", "gateway", `${capacityFile} kept`);
 		if (!keyFile || keyText === undefined) return step("skip", "gateway-key", `${keyFile ?? "no HOME"}: absent, so no parent has the admin key (quota=off:no admin key); add it: cp-install --gateway-key-file <file>`);
 		return keepKey();
-	}
+	};
 	if (!keyFile) return fail("no XDG_CONFIG_HOME or HOME: nowhere to keep the admin key");
 	let url: string | undefined;
 	if (urlFlag !== undefined) {
@@ -93,14 +96,16 @@ export function gatewayStep(ctx: GatewayContext): void {
 	const keyChanged = key !== undefined && (keyText === undefined ? true : gatewayKeyFrom(keyText) !== key);
 	if (keyChanged && keyText !== undefined && !ctx.force) return fail(`${keyFile} holds another key; rerun with --force to replace it`);
 
-	if (capacityNext === undefined) step("ok", "gateway", `${capacityFile} kept`);
-	else {
-		if (!ctx.dry) ports.write(capacityFile, capacityNext, 0o600);
-		step("changed", "gateway", `${capacityText === undefined ? "wrote" : "replaced the url in"} ${capacityFile} (${url}); read live at each capacity check`);
-	}
-	if (!keyChanged) keepKey();
-	else {
-		if (!ctx.dry) ports.writeSecret(keyFile, renderGatewayKeyFile(key as string));
-		step("changed", "gateway-key", `${keyText === undefined ? "wrote" : "replaced"} ${keyFile} (0600, dir 0700; never printed); the parent loads it at its next start (cp_parent stop + start, a relaunch or an update restart)`);
-	}
+	return () => {
+		if (capacityNext === undefined) step("ok", "gateway", `${capacityFile} kept`);
+		else {
+			if (!ctx.dry) ports.write(capacityFile, capacityNext, 0o600);
+			step("changed", "gateway", `${capacityText === undefined ? "wrote" : "replaced the url in"} ${capacityFile} (${url}); read live at each capacity check`);
+		}
+		if (!keyChanged) keepKey();
+		else {
+			if (!ctx.dry) ports.writeSecret(keyFile, renderGatewayKeyFile(key as string));
+			step("changed", "gateway-key", `${keyText === undefined ? "wrote" : "replaced"} ${keyFile} (0600, dir 0700; never printed); the parent loads it at its next start (cp_parent stop + start, a relaunch or an update restart)`);
+		}
+	};
 }

@@ -15,7 +15,9 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import {
 	describeStep,
+	DRY_RUN_PLANNED_EXIT,
 	formatInstallReport,
+	installExitCode,
 	type InstallerOptions,
 	planOrInstall,
 	runningUnderPi,
@@ -121,6 +123,17 @@ test("planOrInstall: dry run plans without mutating and fails preflight when som
 	assert.equal(report.outcomes[0]?.kind, "planned");
 	assert.equal(report.ok, false, "a dry run with a missing tool must report not-ok, so it can gate a preflight");
 	assert.equal(ran, false, "dry run must never call the runner");
+});
+
+test("installExitCode: 0 when ok, 3 for a dry run that only planned installs, 1 when a human must act", () => {
+	const ok = planOrInstall(baseOptions({ dryRun: true, which: () => ["/usr/local/bin/tool"] }));
+	assert.equal(installExitCode(ok), 0);
+	const planned = planOrInstall(baseOptions({ dryRun: true, only: ["treehouse", "git"], which: (tool) => (tool === "git" ? ["/usr/bin/git"] : []) }));
+	assert.deepEqual(planned.outcomes.map((outcome) => outcome.kind), ["planned", "ok"]);
+	assert.equal(installExitCode(planned), DRY_RUN_PLANNED_EXIT);
+	assert.equal(installExitCode(planOrInstall(baseOptions({ dryRun: true, os: "linux", only: ["git"], which: () => [] }))), 1, "manual is never planned");
+	assert.equal(installExitCode(planOrInstall(baseOptions({ dryRun: true, only: ["git"], which: () => ["/a/git", "/b/git"] }))), 1, "a conflict is never planned");
+	assert.equal(installExitCode(planOrInstall(baseOptions({ only: ["treehouse"], which: () => [], run: () => {} }))), 1, "a real run that did not land the tool fails");
 });
 
 test("planOrInstall: dry run with everything present reports ok and mutates nothing", () => {
