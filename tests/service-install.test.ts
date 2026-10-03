@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { type NetworkInterfaceInfo, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -162,6 +162,44 @@ test("install --dry-run changes nothing and runs no mutating command", async (t)
 	assert.deepEqual([...f.files.keys()], [join(user, ".pi-command-post/app/package-lock.json")]);
 	assert.ok(!f.calls.some((call) => /^(npm ci|systemctl --user (enable|daemon-reload)|loginctl enable)/.test(call)), f.calls.join("\n"));
 	assert.ok(f.calls.some((call) => call.includes("install-tools.ts --dry-run")));
+});
+
+test("install --dry-run never runs gh or pi (both write state under HOME); a required tool a real run would install is planned and the plan goes on", async (t) => {
+	const user = scratch(t);
+	const tools = `/opt/node/bin/node ${join(user, ".pi-command-post/app")}/scripts/install-tools.ts`;
+	const f = fake(user, { [tools]: { status: 3, stdout: "… treehouse: missing — would run: curl\n" } });
+	assert.equal(await install(flags(user, { "dry-run": true, yes: true, "parent-model": "openai/gpt-6.1-sol" }), f.ports), 0, f.lines.join("\n"));
+	assert.ok(!f.calls.some((call) => /^(gh|pi) /.test(call)), f.calls.join("\n"));
+	assert.ok(f.lines.some((line) => line.startsWith("changed: tools: a real run installs the missing required tools first:") && line.includes("treehouse")), f.lines.join("\n"));
+	assert.ok(f.lines.includes("skip: gh: login not checked in a dry-run (gh writes state under HOME); a real run checks it"), f.lines.join("\n"));
+	assert.ok(f.lines.includes("skip: model: parent openai/gpt-6.1-sol (--parent-model) written unchecked: a dry-run never runs pi --list-models"), f.lines.join("\n"));
+	assert.ok(f.lines.some((line) => line.startsWith("changed: daemon: would run cp-daemon start") || line.startsWith("changed: enable: would run")), "the plan reaches activation");
+	assert.deepEqual([...f.files.keys()], [join(user, ".pi-command-post/app/package-lock.json")]);
+
+	const fresh = fake(scratch(t));
+	assert.equal(await install(flags(fresh.ports.env.HOME!, { "dry-run": true }), fresh.ports), 0, fresh.lines.join("\n"));
+	assert.ok(fresh.lines.includes("skip: model: parent, operator: not listed in a dry-run (pi writes its state under HOME); a real run asks or recommends, --parent-model <provider/model> pins one"), fresh.lines.join("\n"));
+
+	const human = scratch(t);
+	const blocked = fake(human, { [`/opt/node/bin/node ${join(human, ".pi-command-post/app")}/scripts/install-tools.ts`]: { status: 1 } });
+	assert.equal(await install(flags(human, { "dry-run": true }), blocked.ports), 1, "a tool a human must resolve still stops the dry-run");
+	assert.ok(blocked.lines.some((line) => line.startsWith("fail: tools: scripts/install-tools.ts exited 1")), blocked.lines.join("\n"));
+});
+
+test("install --dry-run as a real subprocess leaves an absent HOME absent: gh and pi are never run", (t) => {
+	const dir = scratch(t);
+	const bin = join(dir, "bin");
+	mkdirSync(bin);
+	const marker = (name: string) => `#!/bin/sh\nmkdir -p "$HOME" && : > "$HOME/${name}-ran"\n`;
+	for (const name of ["pi", "gh", "treehouse"]) writeFileSync(join(bin, name), marker(name), { mode: 0o755 });
+	for (const name of PI_LENS_TOOLS.commands) writeFileSync(join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	symlinkSync(execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(), join(bin, "git"));
+	const home = join(dir, "home");
+	const run = spawnSync(process.execPath, [join(REPO_ROOT, "src/service/install.ts"), "--dry-run", "--yes", "--viewer-host", "127.0.0.1", "--app", REPO_ROOT, "--home", join(dir, "cp-home")], { env: { HOME: home, PATH: bin }, encoding: "utf8", timeout: 60_000 });
+	assert.equal(run.status, 0, run.stdout + run.stderr);
+	assert.match(run.stdout, /^skip: gh: login not checked in a dry-run/m);
+	assert.equal(existsSync(home), false, `HOME was written: ${run.stdout}`);
+	assert.equal(existsSync(join(dir, "cp-home")), false, "the home was written");
 });
 
 test("install: no systemd --user runs cp-daemon detached and prints the reboot command; refused linger prints the sudo line and runs nothing; bad node stops", async (t) => {
@@ -735,6 +773,10 @@ test("install: the pi-lens tools are tool-manifest's list, shared with doctor; a
 	assert.ok(!locked.calls.some((call) => call.startsWith("npm i ")), "not run");
 	assert.ok(locked.lines.some((line) => line.startsWith("fail: pi-lens: npm's global prefix /usr needs sudo") && line.includes("npm config set prefix")));
 	assert.ok(locked.calls.every((call) => !/\bsudo\b/.test(call)));
+	// A failed prerequisite stops the install: no home, config, unit or wrapper, and cp-daemon never starts.
+	assert.ok(!locked.files.has(configFile(locked)) && !locked.files.has(thinUnit(locked)) && !locked.files.has(join(installTargets(locked.ports.env).binDir, "cp-operator")), [...locked.files.keys()].join("\n"));
+	assert.ok(locked.writes.length === 0 && !locked.files.has(join(homeOf(locked), ".dir")), locked.writes.join("\n"));
+	assert.ok(!locked.calls.some((call) => call.includes(DAEMON_UNIT) || /\/daemon\.ts /.test(call)), locked.calls.join("\n"));
 });
 
 test("install: node 24 or newer passes, older prints the fix", async (t) => {
@@ -798,6 +840,20 @@ test("install.sh: an existing checkout with another origin is refused; --dry-run
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /changed: code: would git clone .* \(dry-run\)/);
 	assert.equal(existsSync(app), false);
+});
+
+test("install.sh --dry-run on an existing checkout never runs git fetch (it writes FETCH_HEAD, refs and objects)", (t) => {
+	const dir = scratch(t);
+	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
+	const app = join(dir, ".pi-command-post/app");
+	mkdirSync(join(app, ".git"), { recursive: true });
+	mkdirSync(join(app, "src/service"), { recursive: true });
+	writeFileSync(join(app, "src/service/install.ts"), `import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+	const dry = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--dry-run"], { env, encoding: "utf8" });
+	assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+	assert.match(dry.stdout, /changed: code: would fetch origin main and fast-forward .* \(dry-run: nothing fetched\)/);
+	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8"), /\bfetch\b|\bmerge\b/);
+	assert.deepEqual(JSON.parse(readFileSync(argvFile, "utf8")), ["--dry-run"]);
 });
 
 test("install.sh: a checkout with no node_modules runs npm ci before install.ts imports a package; a current one is left alone", (t) => {
@@ -886,6 +942,44 @@ test("bin/cp-bootstrap --dry-run in a scratch HOME clones nothing; old node and 
 	assert.equal(dirty.status, 1);
 	assert.match(dirty.stdout, /fail: bootstrap: .*app has uncommitted changes/);
 	assert.deepEqual(readFileSync(join(app, "dirty"), "utf8"), "x", "left as is");
+});
+
+test("bin/cp-bootstrap honours --app DIR and --app=DIR over CP_APP, and a dry run never fetches an existing checkout", (t) => {
+	const dir = scratch(t);
+	const { env } = fakeGit(dir, "https://example.invalid/cp.git");
+	const fresh = join(dir, "custom-app");
+	for (const args of [["--dry-run", "--app", fresh], ["--dry-run", `--app=${fresh}`]]) {
+		const dry = spawnSync("sh", [BOOTSTRAP, ...args], { env: { ...env, CP_APP: join(dir, "elsewhere") }, encoding: "utf8" });
+		assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+		assert.ok(dry.stdout.includes(`would git clone --branch main https://example.invalid/cp.git ${fresh}, npm ci`), dry.stdout);
+		assert.equal(existsSync(fresh), false);
+	}
+	const app = join(dir, "app");
+	mkdirSync(join(app, ".git"), { recursive: true });
+	mkdirSync(join(app, "bin"));
+	writeFileSync(join(app, "bin/cp-install"), `#!/bin/sh\necho "cp-install $*"\n`);
+	for (const flag of [["--app", app], [`--app=${app}`]]) {
+		const dry = spawnSync("sh", [BOOTSTRAP, "--dry-run", ...flag], { env, encoding: "utf8" });
+		assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+		assert.ok(dry.stdout.includes(`changed: bootstrap: would fetch origin main and fast-forward ${app} when behind (dry-run: nothing fetched; not ahead of the local origin/main)`), dry.stdout);
+		assert.ok(dry.stdout.includes(`cp-install --app ${app} --dry-run ${flag.join(" ")}`), dry.stdout);
+	}
+	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8"), /\bfetch\b|\bmerge\b/);
+
+	// A checkout ahead of its local origin/main is refused in a dry run as in a real one, still without a fetch.
+	const genv = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, GIT_CONFIG_NOSYSTEM: "1" };
+	const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env: genv, encoding: "utf8" });
+	const seed = join(dir, "seed");
+	mkdirSync(seed);
+	git(dir, "init", "-q", "-b", "main", seed);
+	git(seed, "commit", "-q", "--allow-empty", "-m", "seed");
+	const ahead = join(dir, "ahead");
+	git(dir, "clone", "-q", "--branch", "main", seed, ahead);
+	git(ahead, "commit", "-q", "--allow-empty", "-m", "local");
+	const refused = spawnSync("sh", [BOOTSTRAP, "--dry-run", "--app", ahead], { env: genv, encoding: "utf8" });
+	assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+	assert.ok(refused.stdout.includes(`fail: bootstrap: ${ahead} has commits not on origin/main; push or drop them, then rerun`), refused.stdout);
+	assert.equal(existsSync(join(ahead, ".git/FETCH_HEAD")), false, "a dry run never fetches");
 });
 
 test("bin/cp-bootstrap: a second run on an up-to-date checkout is all ok and never reruns npm ci", (t) => {
@@ -1139,6 +1233,8 @@ test("install --gateway-url: not https, userinfo, a path or a query fail; no obt
 		assert.equal(await install(flags(user, { yes: true, "gateway-url": url, "gateway-key-file": join(user, "gw-key") }), f.ports), 1, url);
 		assert.ok(f.lines.some((line) => line.startsWith("fail: gateway: ") && line.endsWith("; nothing written")), f.lines.join("\n"));
 		assert.ok(!f.files.has(capacityOf(f)) && f.secrets.length === 0, url);
+		assert.deepEqual(f.writes, [], `a refused gateway writes nothing at all (${url})`);
+		assert.ok(!f.calls.some((call) => call.includes(DAEMON_UNIT) || /\/daemon\.ts /.test(call)), `a refused gateway starts nothing (${url})`);
 	}
 	const user = scratch(t);
 	const f = gatewayFake(user);

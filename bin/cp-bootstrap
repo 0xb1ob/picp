@@ -2,15 +2,17 @@
 # Fresh-machine one-liner (cp-daemon v1 P2i; docs/service.md). POSIX sh, never sudo.
 #   curl -fsSL https://raw.githubusercontent.com/0xb1ob/picp/main/bin/cp-bootstrap | sh
 #   curl -fsSL .../bin/cp-bootstrap | sh -s -- --yes --parent-model <provider/model>
-# Checks git and node 24+, clones or fast-forwards $CP_APP (default ~/.pi-command-post/app),
+# Checks git and node 24+, clones or fast-forwards --app DIR, else $CP_APP (default ~/.pi-command-post/app),
 # runs npm ci when node_modules is absent (install.ts compares it with the lockfile after), then
 # execs bin/cp-install with every flag. A dirty or ahead checkout is refused.
 set -eu
 APP=${CP_APP:-$HOME/.pi-command-post/app}
 URL=${CP_REPO_URL:-https://github.com/0xb1ob/picp.git}
-DRY=0
+DRY=0 prev=
 for arg in "$@"; do
-	case "$arg" in --dry-run) DRY=1 ;; esac
+	case "$prev" in --app) APP=$arg ;; esac
+	case "$arg" in --app=*) APP=${arg#--app=} ;; --dry-run) DRY=1 ;; esac
+	prev=$arg
 done
 say() { printf '%s: bootstrap: %s\n' "$1" "$2"; }
 die() {
@@ -33,12 +35,13 @@ if [ ! -e "$APP/.git" ]; then
 else
 	[ -z "$(git -C "$APP" status --porcelain)" ] || die "$APP has uncommitted changes; commit or stash them, then rerun"
 	[ "$(git -C "$APP" rev-parse --abbrev-ref HEAD)" = main ] || die "$APP is not on main; check out main, then rerun"
-	git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
+	# git fetch writes refs and objects: a dry run never fetches and compares with the local origin/main
+	[ "$DRY" = 1 ] || git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
 	[ "$(git -C "$APP" rev-list --count origin/main..HEAD)" = 0 ] || die "$APP has commits not on origin/main; push or drop them, then rerun"
-	if [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
+	if [ "$DRY" = 1 ]; then
+		say changed "would fetch origin main and fast-forward $APP when behind (dry-run: nothing fetched; not ahead of the local origin/main)"
+	elif [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
 		say ok "$APP is at origin/main"
-	elif [ "$DRY" = 1 ]; then
-		say changed "would fast-forward $APP to origin/main (dry-run)"
 	else
 		git -C "$APP" merge --quiet --ff-only origin/main
 		say changed "fast-forwarded $APP to origin/main"

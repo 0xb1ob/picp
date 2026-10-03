@@ -47,6 +47,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { layoutForHome } from "../contracts.ts";
 import { PACKAGE_ROOT, standardHome } from "../home.ts";
+import { DRY_RUN_PLANNED_EXIT } from "../install-tools.ts";
 import { OPTIONAL_TOOL_INFO, PI_LENS_TOOLS, REQUIRED_TOOLS } from "../tool-manifest.ts";
 import { DEFAULT_PORT } from "../viewer/cli.ts";
 import { ROLE_PACKAGES } from "../worker-packages.ts";
@@ -222,11 +223,12 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 
 	// 3. Tools.
 	const tools = ports.run(ports.node.path, [join(app, "scripts/install-tools.ts"), ...(dry ? ["--dry-run"] : [])], app);
-	if (!ok(tools)) {
+	// A dry run goes on past tools a real run would install, so the rest of the plan still prints.
+	if (dry && tools.status === DRY_RUN_PLANNED_EXIT) step("changed", "tools", `a real run installs the missing required tools first:\n${tools.stdout}`);
+	else if (!ok(tools)) {
 		step("fail", "tools", `scripts/install-tools.ts exited ${tools.status}:\n${tools.stdout}${tools.stderr}`);
 		return 1;
-	}
-	step("ok", "tools", `required tools on PATH: ${REQUIRED_TOOLS.map((tool) => (tool === "treehouse" ? "treehouse (required, not optional: every dispatch leases a treehouse worktree)" : tool)).join(", ")}`);
+	} else step("ok", "tools", `required tools on PATH: ${REQUIRED_TOOLS.map((tool) => (tool === "treehouse" ? "treehouse (required, not optional: every dispatch leases a treehouse worktree)" : tool)).join(", ")}`);
 	const prompting = !dry && flags.yes !== true && flags["no-prompt"] !== true;
 	const answer = (question: string): string => (prompting ? ports.ask(question)?.trim() ?? "" : "");
 	const yes = (question: string, fallback: boolean): boolean => {
@@ -234,6 +236,10 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 		return reply === "" ? fallback : reply.startsWith("y");
 	};
 	extras(flags, ports, app, home, step, yes);
+	// 7b's refusals before anything is written; a failed prerequisite or a refused gateway writes and starts nothing.
+	const dataDir = join(home, layoutForHome("multi", home).data);
+	const gateway = gatewayStep({ flags, ports, dataDir, keyFile: gatewayKeyFile(ports.env), force, dry, step });
+	if (failed || !gateway) return 1;
 
 	// 3b. The dashboard's bind host: --viewer-host, else the previous install's (data/daemon.json, else a legacy
 	// cp-view.service, else the wrapper), else discovery (cp-5smb). A legacy drop-in is M1's preflight report.
@@ -251,7 +257,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	const wrapped = wrapperModels(wrapperText);
 	const kept = { parent: previousConfig ? previousConfig.parent_model : unitModel.generated ? unitModel.model : wrapped.parent, operator: wrapped.operator };
 	const agentDir = ports.env.PI_CODING_AGENT_DIR ?? join(ports.env.HOME ?? "", ".pi/agent");
-	const models = chooseModels({ flags, ports, home, app, agentDir, fresh: !previousConfig && !unitModel.generated && !wrapped.generated, force, prompting, answer, step, kept });
+	const models = chooseModels({ flags, ports, home, app, agentDir, fresh: !previousConfig && !unitModel.generated && !wrapped.generated, force, dry, prompting, answer, step, kept });
 	if (models === "fail") return 1;
 	// A kept parent pin leaves the wrapper's own export as it was (an older wrapper carries none): byte-identical.
 	const wrapperParent = models.parent === kept.parent ? wrapped.parent : models.parent;
@@ -316,7 +322,6 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (herdr && !herdrPiIntegrated(ports.run(herdr, ["integration", "status"]).stdout)) step("skip", "herdr", "pi integration not installed; for herdr's sidebar agent state and session resume run yourself: herdr integration install pi");
 
 	// 7. Auto-update config (read by cp-daemon's updater); written only when absent.
-	const dataDir = join(home, layoutForHome("multi", home).data);
 	const updateFile = join(dataDir, "update.json");
 	if (ports.exists(updateFile)) step("ok", "update", `${updateFile} kept as is`);
 	else {
@@ -325,10 +330,12 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	}
 
 	// 7b. The optional sub2api gateway (cp-er76): flags only; no unit changes, the parent host loads the key.
-	gatewayStep({ flags, ports, dataDir, keyFile: gatewayKeyFile(ports.env), force, dry, step });
+	gateway();
 
 	// 9. Start cp-daemon (daemon-backend.ts): migrate a legacy home (M1) or enable cp-daemon.service on
 	// systemd; `cp-daemon start` and the reboot command when detached. Either waits until the daemon is ready.
+	// Only after every earlier step succeeded: a failed install never leaves a runtime running.
+	if (failed) return 1;
 	await activate(ctx);
 
 	// 10. Web Push, once: --push-origin, or an origin typed at the prompt.
@@ -468,7 +475,9 @@ function extras(flags: InstallFlags, ports: InstallPorts, app: string, home: str
 		else step("fail", name, `${line} failed; run it by hand to read why`);
 	};
 
-	if (ghLoggedIn((...args) => ok("gh", ...args))) step("ok", "gh", "logged in");
+	// gh writes its own state under HOME even for `auth status`: a dry run never runs it.
+	if (flags["dry-run"]) step("skip", "gh", "login not checked in a dry-run (gh writes state under HOME); a real run checks it");
+	else if (ghLoggedIn((...args) => ok("gh", ...args))) step("ok", "gh", "logged in");
 	else step("skip", "gh", "not logged in; run `gh auth login` yourself (cp_integrate reads PRs and CI through gh)");
 
 	const lens = ["i", "-g", ...PI_LENS_TOOLS.packages];

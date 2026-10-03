@@ -41,14 +41,15 @@ else
 		say skip "$APP has uncommitted changes; left as is"
 	elif [ "$branch" != main ]; then
 		say skip "$APP is on $branch, not main; left as is"
+	elif [ "$DRY" = 1 ]; then
+		# git fetch writes FETCH_HEAD, refs and objects: a dry run never fetches.
+		say changed "would fetch origin main and fast-forward $APP when behind and not ahead (dry-run: nothing fetched)"
 	elif ! git -C "$APP" fetch --quiet origin main; then
 		say skip "git fetch origin main failed in $APP; left as is"
 	elif [ "$(git -C "$APP" rev-list --count origin/main..HEAD)" != 0 ]; then
 		say skip "$APP has commits not on origin/main; left as is"
 	elif [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
 		say ok "$APP is at origin/main"
-	elif [ "$DRY" = 1 ]; then
-		say changed "would fast-forward $APP to origin/main (dry-run)"
 	else
 		git -C "$APP" merge --quiet --ff-only origin/main
 		say changed "fast-forwarded $APP to origin/main"

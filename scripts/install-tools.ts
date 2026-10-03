@@ -14,13 +14,14 @@
  *   git / treehouse / pi   restrict to one or more tools
  *
  * Exit codes: 0 everything on PATH (or, in dry-run, would already pass);
- * 1 something still needs attention; 2 bad arguments.
+ * 1 something still needs attention; 2 bad arguments; 3 dry-run: only tools
+ * a real run would install are missing (still a failed preflight).
  */
 
 import { execFileSync } from "node:child_process";
 import { platform } from "node:os";
 import { whichAll } from "../src/doctor.ts";
-import { formatInstallReport, type InstallerOS, planOrInstall } from "../src/install-tools.ts";
+import { formatInstallReport, installExitCode, type InstallerOS, planOrInstall } from "../src/install-tools.ts";
 import { type InstallStep, REQUIRED_TOOLS, type RequiredTool } from "../src/tool-manifest.ts";
 
 function detectOS(): InstallerOS {
@@ -75,7 +76,7 @@ function main(): number {
 		env: process.env,
 	});
 	console.log(formatInstallReport(report));
-	return report.ok ? 0 : 1;
+	return installExitCode(report);
 }
 
 process.exit(main());

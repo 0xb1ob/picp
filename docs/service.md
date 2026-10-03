@@ -51,7 +51,7 @@ bin/cp-install [flags]
 sh scripts/install.sh [flags]
 ```
 
-`bin/cp-bootstrap` (POSIX sh) clones or fast-forwards `$CP_APP` (default
+`bin/cp-bootstrap` (POSIX sh) clones or fast-forwards `--app DIR` (or `--app=DIR`), else `$CP_APP` (default
 `~/.pi-command-post/app`), refuses a dirty, off-`main` or ahead checkout, runs
 `npm ci` there and execs `bin/cp-install --app <app>` with every flag.
 
@@ -106,7 +106,11 @@ Flags: `--home --app --port --parent-model --operator-model --viewer-host --gate
 --no-pi-packages --no-self-package` (`--no-self-package` is accepted and has no effect: the self-package step went with single-project mode). Prompts read `/dev/tty`, so `curl | sh`
 still asks; with no terminal, `--yes`, `--no-prompt` or `--dry-run` every prompt
 takes its default. `--dry-run` probes and prints and changes nothing (the code
-step too). A second run reports every step `ok`/`skip`. Never `sudo`: a step that
+step too: it never runs `git fetch`, so an existing checkout prints "would fetch"; it never runs `gh` or `pi`,
+which write their own state under `HOME`, so gh login and the model list are reported unchecked; a required
+tool a real run would install is printed and the plan goes on). cp-daemon is started (step 9) only when no
+earlier step failed, and a failed step-3 prerequisite or a refused gateway (7b) stops the install before
+step 4, leaving no `data/daemon.json`, unit or wrapper behind. A second run reports every step `ok`/`skip`. Never `sudo`: a step that
 needs it prints the line for you.
 
 ### 3b. The viewer host
