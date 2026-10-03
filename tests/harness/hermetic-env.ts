@@ -34,8 +34,10 @@ const SESSION_ENV_KEYS: readonly string[] = [
 for (const key of SESSION_ENV_KEYS) delete process.env[key];
 
 // A CI runner has no global git identity, and scripted workers commit in leased
-// worktrees of plain clones. Default one (never override a host's own) so every
-// spawned child can commit.
+// worktrees of plain clones. GIT_AUTHOR_*/GIT_COMMITTER_* take precedence over
+// any gitconfig user.name/user.email, so every test child commits as this one
+// isolated test identity, whatever the host's gitconfig says. `??=` only keeps
+// an identity a caller exported in these env vars on purpose.
 process.env.GIT_AUTHOR_NAME ??= "cp test";
 process.env.GIT_AUTHOR_EMAIL ??= "cp@test.invalid";
 process.env.GIT_COMMITTER_NAME ??= "cp test";
