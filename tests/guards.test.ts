@@ -289,12 +289,24 @@ test("a real read of a review path is still refused, including through indirecti
 
 test("parent reads of the checks API are refused and point at cp_integrate", (t) => {
 	const b = bench(t);
-	for (const command of ["gh pr checks 12", "gh pr view 12 --json statusCheckRollup", "cd x && gh pr checks 12"]) {
+	const refused = [
+		"gh pr checks 12",
+		"gh pr view 12 --json statusCheckRollup",
+		"gh pr view 12 --json=number,statusCheckRollup",
+		"cd x && gh pr checks 12",
+		"gh --repo acme/demo pr checks 12",
+		"gh -R acme/demo pr checks 12",
+		"gh pr -R acme/demo checks 12",
+		"gh api graphql -f query='{ pr { statusCheckRollup } }'",
+	];
+	for (const command of refused) {
 		const decision = b.bash(command);
 		assert.equal(decision?.code, "ci_checks_read", `${command} was allowed`);
 		assert.match(decision.reason, /cp_integrate <job-id>/);
 	}
 	assert.equal(b.bash("gh run list --branch cp-a1"), undefined);
+	assert.equal(b.bash('gh issue create --body "document statusCheckRollup"'), undefined);
+	assert.equal(b.bash("gh --repo acme/demo pr view 12 --json number"), undefined);
 });
 
 // -- diff-review bodies ------------------------------------------------------

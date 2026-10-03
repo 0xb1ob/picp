@@ -191,8 +191,31 @@ function isReviewPathString(path: string): boolean {
 /** git subcommands that can put a path into a commit or send one to a remote. */
 const GIT_PUBLISHING_SUBCOMMANDS = new Set(["add", "stage", "commit", "rm", "stash", "push"]);
 
-/** The checks API: `gh pr checks` or any `gh` call asking for `statusCheckRollup`. */
-const CI_CHECKS_READ_RE = /\bgh\s+pr\s+checks\b|statusCheckRollup/;
+/** gh flags that take a separate value, so the value is not mistaken for `pr`/`checks`. */
+const GH_VALUE_FLAGS = new Set(["-R", "--repo", "--hostname"]);
+
+/**
+ * The checks API from tokenized gh argv: `gh [flags] pr [flags] checks`, or a
+ * `--json …statusCheckRollup` or any `gh api` argument naming `statusCheckRollup`.
+ * A body or title that merely mentions the field is prose, not a read.
+ */
+function ghReadsChecks(argv: readonly string[]): boolean {
+	const positional: string[] = [];
+	for (let i = 1; i < argv.length; i++) {
+		const token = argv[i] ?? "";
+		if (token.startsWith("-")) {
+			if (GH_VALUE_FLAGS.has(token)) i += 1;
+			else if (token === "--json" || token.startsWith("--json=")) {
+				const value = token === "--json" ? (argv[i + 1] ?? "") : token.slice("--json=".length);
+				if (value.includes("statusCheckRollup")) return true;
+			}
+			continue;
+		}
+		if (positional.length < 2) positional.push(token);
+		if (positional[0] === "api" && token.includes("statusCheckRollup")) return true;
+	}
+	return positional[0] === "pr" && positional[1] === "checks";
+}
 const CI_CHECKS_READ_REASON =
 	"blocked: the checks API is refused in this home; CI is read from the Actions runs API by cp_integrate and " +
 	"the cp-ci wake-up — call cp_integrate <job-id>";
@@ -271,7 +294,7 @@ export class ContextGuard {
 					const decision = this.#checkGit(argv, stage, shellCwd, uncertainCwd);
 					if (decision) return decision;
 				}
-				if (program === "gh" && CI_CHECKS_READ_RE.test(stage)) {
+				if (program === "gh" && ghReadsChecks(argv)) {
 					return { code: "ci_checks_read", subject: stage.trim(), reason: CI_CHECKS_READ_REASON };
 				}
 
