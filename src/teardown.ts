@@ -59,7 +59,6 @@
  * worktree has nothing left in it to terminate.
  */
 
-import { execFile } from "node:child_process";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -78,18 +77,20 @@ import { resolveDefaultBase } from "./default-base.ts";
 import { isPidAlive, type FleetStore } from "./fleet.ts";
 import { resolveFinalFix } from "./final-fix.ts";
 import { readReviewPassVerdict } from "./merge-ask.ts";
+import { type JobClaims, type JobOwner, withJobClaim } from "./job-claims.ts";
 import { type Lease, leaseFromRecord, type LeaseManager } from "./leases.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
-	acceptedHeadFailure, closeResearchLedgers, forcedShutdownFacts, killedUnreportedWakeup, type LedgerCloseOutcome,
+	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, jobInFlight, killedUnreportedWakeup, leaseReturnFailed, type LedgerCloseOutcome,
 	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { DurableWakeupInput } from "./wakeup-outbox.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
+export { formatTeardown } from "./teardown-head.ts";
 export type { TeardownCallOptions, TeardownLedger } from "./teardown-head.ts";
 
 export class TeardownError extends Error {}
@@ -122,6 +123,10 @@ export const GATE_CODES = [
 	 * stale-ref false pass this code exists to prevent.
 	 */
 	"remote_unverified",
+	/** cp-a9fq: automatic recovery (or another teardown) owns this job right now. */
+	"job_in_flight",
+	/** cp-a9fq: treehouse did not confirm the return; the lease is kept and the job is not done. */
+	"lease_return_failed",
 ] as const;
 export type GateCode = (typeof GATE_CODES)[number];
 
@@ -176,6 +181,8 @@ export interface TeardownOptions {
 	ledger?: () => TeardownLedger;
 	/** Durable wake-up port (CommandPost#journalDurable); absent in gate-only tests. */
 	journal?: (input: DurableWakeupInput) => void;
+	/** cp-a9fq: shared with BoundedRecovery so a teardown and a revive never interleave on one job. */
+	claims?: JobClaims;
 }
 
 export type GitRunner = (cwd: string, args: readonly string[]) => Promise<{ status: number | null; stdout: string; stderr: string }>;
@@ -187,7 +194,11 @@ export class Teardown {
 		this.#options = options;
 	}
 
-	async teardown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
+	teardown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
+		return withJobClaim(this.#options.claims, jobId, "teardown", () => this.#teardown(jobId, options), (holder) => this.#teardown(jobId, options, holder));
+	}
+
+	async #teardown(jobId: string, options: TeardownCallOptions, holder?: JobOwner): Promise<TeardownResult> {
 		const { fleet, leases, manager, runs } = this.#options;
 		const now = this.#options.now ?? (() => new Date());
 		const record = fleet.get(jobId);
@@ -214,6 +225,11 @@ export class Teardown {
 			lease_returned: false,
 			artifacts_removed: false,
 		};
+		const inFlight = holder ? jobInFlight(jobId, holder) : undefined;
+		if (inFlight) {
+			runs.open(jobId).cp("teardown_refused", { ...inFlight });
+			return { ...base, failure: inFlight };
+		}
 		if (isScriptFleetRecord(record) && !record.script_process?.exited_at && !record.script_observed_exit?.exited_at) {
 			if (record.script_process && isPidAlive(record.script_process.pid)) throw new TeardownError(`${jobId}: script pid ${record.script_process.pid} is still alive with no observed exit; keep the lease and inspect it before teardown`);
 			if (!options.force) throw new TeardownError(`${jobId}: script exit is unknown; keep the lease, inspect the worktree, then use --force to close it deliberately`);
@@ -275,7 +291,13 @@ export class Teardown {
 			project: record.project,
 			...(record.lease_id ? { lease_id: record.lease_id } : {}),
 		});
-		await leases.release(lease, options.force ? { ignoreErrors: true } : {});
+		// cp-a9fq: lease_returned is what treehouse confirmed, never assumed; a failed return (forced or not) keeps the job open.
+		const released = await leases.release(lease, { ignoreErrors: true });
+		if (!released.ok) {
+			const failure = leaseReturnFailed(jobId, released.error);
+			runs.open(jobId).cp("teardown_refused", { ...failure });
+			return { ...base, failure, ...(exitCode !== undefined ? { exit_code: exitCode } : {}) };
+		}
 
 		// --- state last -----------------------------------------------------
 		const closedAt = isoTimestamp(now());
@@ -772,28 +794,4 @@ function isDirectory(path: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function defaultGit(cwd: string, args: readonly string[]) {
-	return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolvePromise) => {
-		execFile("git", [...args], { cwd, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-			const code = (error as NodeJS.ErrnoException | null)?.code;
-			const status = typeof code === "number" ? code : error ? 1 : 0;
-			resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-		});
-	});
-}
-
-/** One operator line; on refusal it says what is kept and what to do. */
-export function formatTeardown(result: TeardownResult): string {
-	if (result.torn_down) {
-		const why = result.killed_unreported ? "killed_unreported" : result.reason ?? "forced";
-		const note = result.unreported ? ` — no report was filed for ${result.job_id}: relay "no report", never a result` : "";
-		const ledger = result.ledger_close_error ? ` — ledger close failed (${result.ledger_close_error}); re-run cp_teardown ${result.job_id} to retry` : "";
-		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}${ledger}`;
-	}
-	if (result.failure) {
-		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
-	}
-	return `${result.job_id}: already torn down${result.ledger_closed ? "; its ledger close was retried and the job is now closed" : ""}${result.ledger_close_error ? `; ledger close still failing (${result.ledger_close_error})` : ""}`;
 }

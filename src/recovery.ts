@@ -51,6 +51,7 @@ import {
 	type UnreportedWork,
 } from "./contracts.ts";
 import { atomicWriteJson } from "./json-store.ts";
+import { type JobClaims, withJobClaim } from "./job-claims.ts";
 import { assertNotDraining } from "./drain.ts";
 import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
@@ -227,6 +228,8 @@ export interface BoundedRecoveryOptions {
 	bounds?: WorkerObserverOptions["bounds"];
 	onUsage?: WorkerObserverOptions["onUsage"];
 	now?: () => Date;
+	/** cp-a9fq: shared with Teardown so a revive and a teardown never interleave on one job. */
+	claims?: JobClaims;
 	/** Bounded wait for a hard-bound shutdown to finish before planning a revive. Test hook. */
 	sleep?: (ms: number) => Promise<void>;
 }
@@ -330,14 +333,31 @@ export class BoundedRecovery {
 	}
 
 	/** A worker died (crash, timeout, provider_limit, agent_empty_output, settled_without_report, ...). */
-	async onDeath(jobId: string, failure: Failure): Promise<RecoveryOutcome> {
-		return this.#recover(jobId, failure, () => recoveryReviveBriefText(jobId, failure));
+	onDeath(jobId: string, failure: Failure): Promise<RecoveryOutcome> {
+		return this.#claimed(jobId, failure, () => this.#recover(jobId, failure, () => recoveryReviveBriefText(jobId, failure)));
 	}
 
 	/** A worker hit its wall-clock or tool-call cap. The worktree is intact; the process is already gone. */
-	async onBound(jobId: string, failure: Failure, work: UnreportedWork): Promise<RecoveryOutcome> {
-		await this.#waitForDeregistration(jobId);
-		return this.#recover(jobId, failure, () => recoveryRedispatchBriefText(jobId, failure, work));
+	onBound(jobId: string, failure: Failure, work: UnreportedWork): Promise<RecoveryOutcome> {
+		return this.#claimed(jobId, failure, async () => {
+			await this.#waitForDeregistration(jobId);
+			return this.#recover(jobId, failure, () => recoveryRedispatchBriefText(jobId, failure, work));
+		});
+	}
+
+	/**
+	 * cp-a9fq: recovery owns the job's in-flight state for its whole attempt, taken
+	 * synchronously on entry. A teardown already in flight wins: recovery stands
+	 * down without spending an attempt, and says so in the run log. Nothing
+	 * retries it: if that teardown refuses, the job stays dead until an operator
+	 * revives or re-dispatches it (the reason says so).
+	 */
+	#claimed(jobId: string, failure: Failure, work: () => Promise<RecoveryOutcome>): Promise<RecoveryOutcome> {
+		return withJobClaim(this.#options.claims, jobId, "recovery", work, async (holder) => {
+			const reason = `automatic recovery of ${jobId} stood down: a ${holder} is in flight for this job. Nothing retries it automatically — if that ${holder} does not close the job, cp_revive ${jobId} (or re-dispatch) once it finishes`;
+			this.#options.runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "claim", error: reason });
+			return { action: "revive_refused", reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - readRecoveryAttempts(this.#options.home, jobId, failure.class), 0) };
+		});
 	}
 
 	async #recover(jobId: string, failure: Failure, brief: () => string): Promise<RecoveryOutcome> {

@@ -2567,6 +2567,22 @@ first): the worker's cwd *is* the worktree and `treehouse return` terminates
 lingering processes inside it, so returning first would have treehouse kill our
 child and turn an observed shutdown into a race.
 
+**`lease_returned` is a treehouse fact (cp-a9fq).** `LeaseManager.release` returns
+whether `treehouse return --force` succeeded; teardown never assumes it. A
+failed return — forced or not — refuses with `lease_return_failed`: the lease
+is kept, the fleet record is not marked `done`, and a re-run `cp_teardown`
+retries. A teardown and an automatic recovery (`BoundedRecovery.onDeath` /
+`onBound`) never interleave on one job: each claims the job synchronously on
+entry (`src/job-claims.ts`, one map per parent), and the loser refuses rather
+than waits or cancels — a teardown that finds recovery in flight is
+`job_in_flight` (retry after `recovery_attempted`/`recovery_escalated`), and a
+recovery that finds a teardown in flight stands down without spending an
+attempt (`cp:recovery_failed`, `stage: "claim"`). The stand-down is final:
+nothing retries recovery once the teardown finishes. If that teardown refuses
+(a gate held, or `lease_return_failed`), the job stays dead with its lease, and
+the operator acts on it after the holder finishes: `cp_revive <job>` or a
+re-dispatch. No automatic retry is assumed.
+
 `force` is operator authorization, not a shortcut: it exists so a job whose
 worktree vanished can still be closed, it is recorded in the run log, and it
 reports **no** pass reason — nothing was proven, so nothing is claimed. A
