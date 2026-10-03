@@ -1,7 +1,13 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { SourceAvailability } from "./api-types.ts";
+import type { JobStatus } from "../contracts.ts";
 import { obj, type Json } from "./sessions.ts";
 import { fileCache } from "./file-cache.ts";
+// Not imported from the contract on purpose: tests/viewer-workbench.test.ts allows only node:, ./ and ../home.ts runtime imports
+// in src/viewer (contracts/jobs.ts pulls in typebox + pi-ai), and fails with "imports ../contracts.ts" otherwise.
+// A type-only import is allowed, so the Record<JobStatus, true> keys fail typecheck if JOB_STATUSES gains or loses a status.
+const STATUS_KEYS: Record<JobStatus, true> = {open: true, in_progress: true, deferred: true, closed: true};
+export const LEDGER_STATUSES: readonly string[] = Object.keys(STATUS_KEYS);
 export interface Source<T> { availability: SourceAvailability; value: T }
 export const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 export const text = (v: unknown): v is string => typeof v === "string" && /\S/.test(v);

@@ -7,13 +7,13 @@ import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerStat
 import { decisions } from "./overview-decisions.ts";
 import { blocked, closedToday, failedJobs, flights, shipped } from "./overview-jobs.ts";
 import { health, quota } from "./overview-health.ts";
-import { nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp } from "./overview-read.ts";
+import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp } from "./overview-read.ts";
 import { operatorSession, readInbox } from "./control-inbox.ts";
 
 export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: number) => boolean): OverviewResponse {
  const decision = decisions(state, now);
  const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs", j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","done","failed","launching"].includes(String(j.phase)));
- const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && ["open","in_progress","closed"].includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
+ const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
  const grants = source<Json[]>(() => readdirSync(join(state.stateDir,"mandates")).filter(n => /^md-[A-Za-z0-9_-]+\.json$/.test(n)).map(name => {
   const grant = parseObject(readBounded(join(state.stateDir,"mandates",name)));
   if (!grant || !text(grant.id) || !["active","paused","revoked","expired"].includes(String(grant.status)) || !timestamp(grant.expiry) || !timestamp(grant.issued_at) || !Array.isArray(grant.projects) || !grant.projects.every(text) || !obj(grant.spend_cap)) throw new Error("invalid mandate");

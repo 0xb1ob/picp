@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { JOB_STATUSES } from "../src/contracts.ts";
+import { LEDGER_STATUSES } from "../src/viewer/overview-read.ts";
 import { overview } from "../src/viewer/overview-view.ts";
 import { boardView } from "../src/viewer/jobs-view.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -204,4 +206,16 @@ test("malformed optional status, routing timestamps and receipts stay unknown wi
  put(join(LAYOUT.runs, "cp-a/merge.json"),{job_id:"cp-a",pr_url:invalid,merge_commit_sha:invalid});
  const data = overview(state,now);
  assert.equal(data.fleet.workers.unknown,2);assert.equal(data.in_flight[0]?.elapsed_seconds,null);assert.deepEqual(data.shipped_today,[]);assert.equal(data.quota,null);
+});
+
+test("the viewer's dependency-free ledger status list matches the contract's JOB_STATUSES", () => {
+ assert.deepEqual([...LEDGER_STATUSES], [...JOB_STATUSES]);
+});
+
+test("a deferred ledger job is a valid status: the ledger stays available instead of being rejected whole", t => {
+ const {state, put} = fixture(t); const at = "2026-09-26T10:00:00Z";
+ put(".pi-command-post/jobs.json", {jobs:[{id:"cp-later",title:"Later",status:"deferred",labels:["project:demo"]}, {id:"cp-done",title:"Done",status:"closed",closed_at:at,labels:["project:demo"]}]});
+ put(LAYOUT.fleetFile, {jobs:[]});
+ assert.equal(overview(state, now).closed_today, 1, "a deferred row must not make the whole ledger unavailable");
+ assert.ok(boardView(state, now).jobs.some(j => j.id === "cp-later"), "the deferred job is listed");
 });
