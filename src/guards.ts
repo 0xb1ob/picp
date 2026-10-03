@@ -203,6 +203,8 @@ function ghReadsChecks(argv: readonly string[]): boolean {
 	const positional: string[] = [];
 	for (let i = 1; i < argv.length; i++) {
 		const token = argv[i] ?? "";
+		// Dash tokens too: `--field=query=…`, `--raw-field=…`, `-fquery=…` carry the query inline.
+		if (positional[0] === "api" && token.includes("statusCheckRollup")) return true;
 		if (token.startsWith("-")) {
 			if (GH_VALUE_FLAGS.has(token)) i += 1;
 			else if (token === "--json" || token.startsWith("--json=")) {
@@ -212,7 +214,6 @@ function ghReadsChecks(argv: readonly string[]): boolean {
 			continue;
 		}
 		if (positional.length < 2) positional.push(token);
-		if (positional[0] === "api" && token.includes("statusCheckRollup")) return true;
 	}
 	return positional[0] === "pr" && positional[1] === "checks";
 }
