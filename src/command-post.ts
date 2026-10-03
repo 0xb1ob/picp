@@ -704,6 +704,7 @@ export class CommandPost {
 			}
 		}
 		this.#journalRecovery(report);
+		await this.teardown.retryLedgerCloses();
 		this.drain.startup();
 		return { report, intake: results };
 	}

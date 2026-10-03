@@ -491,7 +491,7 @@ export class FleetStore {
 				resumable: sessionPresent,
 				detail: ownedHere
 					? `pid ${pid} is alive and owned by this session`
-					: `pid ${pid} is alive but unreachable from this session (no stdio); left untouched — tear it down or kill it deliberately`,
+					: `pid ${pid} is alive but unreachable from this session (no stdio); left untouched — end it deliberately, then cp_teardown (teardown refuses while it lives)`,
 			};
 		}
 

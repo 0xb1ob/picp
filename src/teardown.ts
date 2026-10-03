@@ -83,14 +83,14 @@ import { readMergeReceipt } from "./merges.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
-	acceptedHeadFailure, derivedCloseReason, forcedShutdownFacts, killedUnreportedWakeup, latestGateVerdict,
-	readFiledEnvelope, type TeardownCallOptions, unreportedLiveWorker,
+	acceptedHeadFailure, closeResearchLedgers, forcedShutdownFacts, killedUnreportedWakeup, type LedgerCloseOutcome,
+	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { DurableWakeupInput } from "./wakeup-outbox.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
-export type { TeardownCallOptions } from "./teardown-head.ts";
+export type { TeardownCallOptions, TeardownLedger } from "./teardown-head.ts";
 
 export class TeardownError extends Error {}
 
@@ -113,6 +113,8 @@ export const GATE_CODES = [
 	"unreported_head",
 	/** issue #2: a live or mid-turn worker with no report for this generation. */
 	"unreported_live_worker",
+	/** An unowned worker with a live pid: nothing here can observe its close (cp-t9yr F1). */
+	"unmanaged_live_worker",
 	/**
 	 * cp-vk1: origin could not be asked at all (no remote, no network, no
 	 * permission), so nothing is known about whether this work is off the machine.
@@ -154,12 +156,10 @@ export interface TeardownResult {
 	killed_unreported?: true;
 	/** No report was ever filed: a pass reason proves the tree, not a result. */
 	unreported?: true;
-}
-
-/** Just enough of `Ledger` to close a research/answer job after a successful teardown. */
-export interface TeardownLedger {
-	show(id: string): Promise<{ status: string }>;
-	close(id: string, reason: string): Promise<unknown>;
+	/** The research/answer ledger close failed; a re-run teardown retries it. */
+	ledger_close_error?: string;
+	/** A re-run teardown of a done job closed its ledger row. */
+	ledger_closed?: true;
 }
 
 export interface TeardownOptions {
@@ -193,6 +193,7 @@ export class Teardown {
 		const record = fleet.get(jobId);
 		if (!record) throw new TeardownError(`no fleet record for ${jobId} — nothing to tear down`);
 		if (record.phase === "done") {
+			const retry = await closeResearchLedgers(this.#options.home, [record], this.#options.ledger, this.#options.journal);
 			return {
 				job_id: jobId,
 				torn_down: false,
@@ -200,6 +201,8 @@ export class Teardown {
 				branch: record.branch,
 				lease_returned: false,
 				artifacts_removed: false,
+				...(retry.closed.length ? { ledger_closed: true as const } : {}),
+				...(retry.failed[0] ? { ledger_close_error: retry.failed[0].error } : {}),
 			};
 		}
 
@@ -214,6 +217,11 @@ export class Teardown {
 		if (isScriptFleetRecord(record) && !record.script_process?.exited_at && !record.script_observed_exit?.exited_at) {
 			if (record.script_process && isPidAlive(record.script_process.pid)) throw new TeardownError(`${jobId}: script pid ${record.script_process.pid} is still alive with no observed exit; keep the lease and inspect it before teardown`);
 			if (!options.force) throw new TeardownError(`${jobId}: script exit is unknown; keep the lease, inspect the worktree, then use --force to close it deliberately`);
+		}
+		const unowned = unmanagedLiveWorker(this.#options.home, record, manager.get(jobId));
+		if (unowned) {
+			runs.open(jobId).cp("teardown_refused", { code: unowned.code, message: unowned.message, fix: unowned.fix });
+			return { ...base, failure: unowned };
 		}
 		// issue #2: a live worker with no report is not finished work; force past it is killed_unreported.
 		const unreported = options.acceptUnreported ? undefined : unreportedLiveWorker(this.#options.home, record, manager.get(jobId));
@@ -273,7 +281,7 @@ export class Teardown {
 		const closedAt = isoTimestamp(now());
 		// Populate the fleet record's usage from the run status before closing the run.
 		const runStatus = readStatusFile(this.#options.home, jobId);
-		await fleet.patch(jobId, {
+		const closedRecord = await fleet.patch(jobId, {
 			phase: "done",
 			closed_at: closedAt,
 			// cp-8km: a `force` teardown skipped the gates above, so nothing was
@@ -290,7 +298,7 @@ export class Teardown {
 		});
 		if (unreported) this.#options.journal?.(killedUnreportedWakeup(this.#options.home, record, closedAt, options.authorization));
 		runs.close(jobId);
-		await this.#closeLedger(jobId, record);
+		const ledgerClose = await closeResearchLedgers(this.#options.home, [closedRecord], this.#options.ledger, this.#options.journal);
 
 		let artifactsRemoved = false;
 		if (this.#options.removeArtifacts) {
@@ -307,6 +315,7 @@ export class Teardown {
 			...(outcome?.ok ? { reason: outcome.reason } : {}),
 			...(unreported ? { killed_unreported: true as const } : {}),
 			...(!isScriptFleetRecord(record) && record.reported_at === undefined ? { unreported: true as const } : {}),
+			...(ledgerClose.failed[0] ? { ledger_close_error: ledgerClose.failed[0].error } : {}),
 			...(exitCode !== undefined ? { exit_code: exitCode } : {}),
 			lease_returned: true,
 			artifacts_removed: artifactsRemoved,
@@ -743,24 +752,16 @@ export class Teardown {
 		return defaultGit(cwd, args);
 	}
 
-	/**
-	 * Research and Q&A close here so the parent never types `cp_job close` after
-	 * teardown. Ship jobs are `cp_integrate`'s. Already-closed is a no-op. A
-	 * missing ledger row is not a teardown failure — the lease is already back.
-	 */
-	async #closeLedger(jobId: string, record: FleetRecord): Promise<void> {
-		if (record.kind !== "research") return;
-		const getLedger = this.#options.ledger;
-		if (!getLedger) return;
-		const envelope = readFiledEnvelope(this.#options.home, jobId);
-		if (!envelope) return;
+	/** Startup retry (CommandPost.reconcile) of research ledger closes a crash or a failure left open; never throws. */
+	async retryLedgerCloses(): Promise<LedgerCloseOutcome> {
 		try {
-			const ledger = getLedger();
-			const job = await ledger.show(jobId);
-			if (job.status === "closed") return;
-			await ledger.close(jobId, derivedCloseReason(record, envelope, latestGateVerdict(this.#options.home, jobId)).slice(0, 900));
-		} catch {
-			// ponytail: lease already returned; a missing/refused ledger close is not a gate.
+			const done = this.#options.fleet.list({ phase: "done", kind: "research" });
+			return await closeResearchLedgers(this.#options.home, done, this.#options.ledger, this.#options.journal);
+		} catch (error) {
+			const detail = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+			this.#options.journal?.({ id: "ledger-close-failed:startup", kind: "recovery",
+				content: `startup ledger-close retry failed — ${detail}\n  next: cp_teardown <job> retries one job's close, or cp_job close <job> with a reason.` });
+			return { closed: [], failed: [] };
 		}
 	}
 }
@@ -788,10 +789,11 @@ export function formatTeardown(result: TeardownResult): string {
 	if (result.torn_down) {
 		const why = result.killed_unreported ? "killed_unreported" : result.reason ?? "forced";
 		const note = result.unreported ? ` — no report was filed for ${result.job_id}: relay "no report", never a result` : "";
-		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}`;
+		const ledger = result.ledger_close_error ? ` — ledger close failed (${result.ledger_close_error}); re-run cp_teardown ${result.job_id} to retry` : "";
+		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}${ledger}`;
 	}
 	if (result.failure) {
 		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
 	}
-	return `${result.job_id}: already torn down`;
+	return `${result.job_id}: already torn down${result.ledger_closed ? "; its ledger close was retried and the job is now closed" : ""}${result.ledger_close_error ? `; ledger close still failing (${result.ledger_close_error})` : ""}`;
 }

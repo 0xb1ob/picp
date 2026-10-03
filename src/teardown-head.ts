@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type Envelope,
+	type JobStatus,
 	type EnvelopeRecord,
 	EnvelopeRecordSchema,
 	type FleetRecord,
@@ -26,6 +27,85 @@ export interface TeardownCallOptions {
 	requireAuthorization?: boolean;
 	/** Pipeline hand-off only: the planner's artifact passed the gate and the plan is authorized. Recorded; no wake-up. */
 	acceptUnreported?: string;
+}
+
+/** Just enough of `Ledger` to close a research/answer job after a successful teardown. */
+export interface TeardownLedger {
+	list(filter: { status: readonly JobStatus[] }): Promise<ReadonlyArray<{ id: string; status: string; updated_at: string }>>;
+	close(id: string, reason: string): Promise<unknown>;
+}
+
+/** cp-t9yr F1: an unowned worker with a live pid — nothing here can observe its close, so no option skips this. */
+export function unmanagedLiveWorker(home: string, record: FleetRecord, managed: unknown): GateFailure | undefined {
+	if (managed !== undefined || isScriptFleetRecord(record) || record.worker.exited_at !== undefined) return undefined;
+	if (readRunObservation(home, record.job_id)?.closed === true || !isPidAlive(record.worker.pid)) return undefined;
+	const { job_id: id, worker: { pid } } = record;
+	return {
+		code: "unmanaged_live_worker",
+		message: `${id}: its worker (pid ${pid}) is alive but no session here owns it; returning the lease would hand its worktree to the next job while it can still write there`,
+		fix: `keep the lease. Confirm pid ${pid} is this job's worker (its cwd is ${record.worktree}), end it deliberately or let it exit, then re-run cp_teardown ${id}. force, operator_quote and the pipeline hand-off do not skip this gate — nothing here can observe that worker's close`,
+	};
+}
+
+export interface LedgerCloseOutcome {
+	closed: string[];
+	failed: Array<{ job_id: string; error: string }>;
+}
+
+function firstLine(error: unknown): string {
+	const text = error instanceof Error ? error.message : String(error);
+	return (text.trim().split("\n")[0] ?? "").slice(0, 300) || "unknown error";
+}
+
+/**
+ * Research/answer ledger close for torn-down (`done`) records: reported, a filed
+ * envelope, and an open row not edited since the fleet `closed_at`. Failures are
+ * returned and journaled as one `recovery` wake-up — a re-run teardown or the next
+ * parent startup retries them.
+ */
+export async function closeResearchLedgers(home: string, records: readonly FleetRecord[],
+	getLedger: (() => TeardownLedger) | undefined, journal?: (input: DurableWakeupInput) => void): Promise<LedgerCloseOutcome> {
+	const outcome: LedgerCloseOutcome = { closed: [], failed: [] };
+	const due = records.filter((r) => r.kind === "research" && !isScriptFleetRecord(r) && r.phase === "done" &&
+		r.reported_at !== undefined && r.closed_at !== undefined);
+	if (due.length === 0 || !getLedger) return outcome;
+	let ledger: TeardownLedger | undefined;
+	let rows = new Map<string, { updated_at: string }>();
+	try {
+		ledger = getLedger();
+		rows = new Map((await ledger.list({ status: ["open", "in_progress"] })).map((row) => [row.id, row]));
+	} catch (error) {
+		for (const r of due) if (readFiledEnvelope(home, r.job_id)) outcome.failed.push({ job_id: r.job_id, error: firstLine(error) });
+	}
+	for (const r of ledger && outcome.failed.length === 0 ? due : []) {
+		const row = rows.get(r.job_id);
+		if (!row || Date.parse(row.updated_at) > Date.parse(r.closed_at ?? "")) continue;
+		const envelope = readFiledEnvelope(home, r.job_id);
+		if (!envelope) continue;
+		try {
+			await ledger?.close(r.job_id, derivedCloseReason(r, envelope, latestGateVerdict(home, r.job_id)).slice(0, 900));
+			outcome.closed.push(r.job_id);
+		} catch (error) {
+			outcome.failed.push({ job_id: r.job_id, error: firstLine(error) });
+		}
+	}
+	if (outcome.failed.length > 0) journal?.(ledgerCloseFailedWakeup(records, outcome.failed));
+	return outcome;
+}
+
+function ledgerCloseFailedWakeup(records: readonly FleetRecord[], failed: LedgerCloseOutcome["failed"]): DurableWakeupInput {
+	const project = (id: string) => records.find((r) => r.job_id === id)?.project ?? "?";
+	const lines = failed.slice(0, 20).flatMap(({ job_id, error }) => [
+		`[${project(job_id)}] ${job_id}: torn down, but its ledger close failed — ${error}`,
+		`  next: cp_teardown ${job_id} retries the close (no lease or worker is touched), or cp_job close ${job_id} with a reason.`,
+	]);
+	if (failed.length > 20) lines.push(`… and ${failed.length - 20} more`);
+	return {
+		id: boundedWakeupId(`ledger-close-failed:${failed.map((f) => f.job_id).sort().join(",")}`),
+		kind: "recovery",
+		...(failed.length === 1 ? { job_id: failed[0]?.job_id } : {}),
+		content: lines.join("\n"),
+	};
 }
 
 /**
