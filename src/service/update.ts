@@ -405,7 +405,8 @@ export async function verifyRestart(ports: VerifyPorts, timeoutMs: number, settl
 	let parentOk = false;
 	let lastBusy = false;
 	let why = "no parent host answered";
-	const deadline = () => (!parentOk && lastBusy ? hard : base);
+	let viewerBad = false;
+	const deadline = () => (!parentOk && lastBusy && !viewerBad ? hard : base);
 	for (;;) {
 		if (!parentOk) {
 			const probe = await ports.probeParent(Math.min(DOCTOR_PROBE_MS, Math.max(1_000, deadline() - ports.now())));
@@ -417,13 +418,18 @@ export async function verifyRestart(ports: VerifyPorts, timeoutMs: number, settl
 				why = "busy" in probe ? probe.busy : probe.down;
 			}
 		}
-		if (parentOk) {
+		// A busy parent is extended only while the viewer is probed healthy; a down viewer keeps the base deadline.
+		viewerBad = false;
+		if (parentOk || lastBusy) {
 			const down = await ports.viewerDown();
-			if (!down) return undefined;
-			why = `viewer: ${down}`;
+			if (!down && parentOk) return undefined;
+			if (down) {
+				viewerBad = true;
+				why = `viewer: ${down}`;
+			}
 		}
 		if (ports.now() >= deadline()) {
-			if (parentOk || !lastBusy) return `not healthy within ${Math.round(timeoutMs / 1000)}s: ${why}`;
+			if (parentOk || !lastBusy || viewerBad) return `not healthy within ${Math.round(timeoutMs / 1000)}s: ${why}`;
 			const note = `doctor deferred: parent busy ${Math.round((timeoutMs + settleMs) / 1000)}s`;
 			ports.log(note);
 			const down = await ports.viewerDown();
