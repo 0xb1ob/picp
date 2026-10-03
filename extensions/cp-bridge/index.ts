@@ -18,6 +18,8 @@ import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from
 import { CpBridgeError, formatBridgeRelay, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
 import { currentEscalationRelay } from "../../src/escalation-relay.ts";
 import { OperatorRelayQueue } from "../../src/operator-relays.ts";
+import { EscalationStore } from "../../src/escalation.ts";
+import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
@@ -220,6 +222,14 @@ export default function (pi: ExtensionAPI): void {
 		const stubs = observedSendStubs(messages);
 		if (client && stubs.length) void client.request("observe", stubs).catch(() => undefined);
 	};
+	// The home the escalation backstop and its ledger read: the connected target, else the runtime's own.
+	const backstopTarget = (): { home: string; mode: Mode } => {
+		let target: { home: string; mode: Mode };
+		try { target = connectedTarget ?? resolveOperatorTarget(); }
+		catch { target = resolveRuntime({ cwd: process.cwd(), env: process.env, packageRoot: PACKAGE_ROOT }); }
+		configureLayout(target.mode, target.home);
+		return target;
+	};
 	// Coordinator busy: followUp waits out the current turn, then triggers. A turn started while
 	// compaction runs would race the summarizer, so wakes wait for it to end.
 	const relays = new OperatorRelayQueue((relay) => compaction.whenIdle(() => pi.sendMessage(
@@ -234,6 +244,15 @@ export default function (pi: ExtensionAPI): void {
 		const identity = relay.sendId ? `send:${relay.sendId}` : relay.escalationId ? `escalation:${relay.escalationId}` : undefined;
 		if (identity && seenRelays.has(identity)) return;
 		if (identity) seenRelays.add(identity);
+		// Recorded so the escalation backstop never relays this id again; a failed write still delivers.
+		if (relay.kind === "escalation" && relay.escalationId) {
+			try {
+				const target = backstopTarget();
+				noteBridgeRelay(target.home, target.mode, relay);
+			} catch (error) {
+				setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: ledger write failed (${(error as Error).message})`);
+			}
+		}
 		relays.push(relay);
 	};
 
@@ -262,6 +281,27 @@ export default function (pi: ExtensionAPI): void {
 	// arrives now; a closed connection re-attaches after 5, 15 and 45 s, then waits for the next cp_parent call.
 	let attachTimer: NodeJS.Timeout | undefined;
 	let shuttingDown = false;
+	// cp-gb8d: an escalation open 10 min with no open ask that never reached this session is relayed once.
+	let backstopTimer: NodeJS.Timeout | undefined;
+	let backstopRunning = false;
+	const backstopTick = (): void => {
+		if (backstopRunning || shuttingDown) return;
+		backstopRunning = true;
+		try {
+			const target = backstopTarget();
+			runEscalationBackstop({
+				home: target.home,
+				open: () => new EscalationStore({ home: target.home }).open(),
+				asks: () => operatorAsks().list(),
+				ledger: new EscalationRelayLedger(escalationRelayLedgerFile(target.home, target.mode)),
+				relay: (relay) => { seenRelays.add(`escalation:${relay.escalationId}`); relays.push(relay, true); },
+			});
+		} catch (error) {
+			setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: paused (${(error as Error).message})`);
+		} finally {
+			backstopRunning = false;
+		}
+	};
 	let watched: ParentHostClient | undefined;
 	const attachReadOnly = async (say: (line: string) => void, delays: readonly number[]): Promise<void> => {
 		if (shuttingDown) return;
@@ -288,6 +328,8 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async () => {
 		shuttingDown = true;
 		clearTimeout(attachTimer);
+		clearInterval(backstopTimer);
+		backstopTimer = undefined;
 		control?.stop();
 		control = undefined;
 		client?.disconnect();
@@ -356,6 +398,10 @@ export default function (pi: ExtensionAPI): void {
 		}
 		shuttingDown = false;
 		await attachReadOnly(sayParent, []);
+		clearInterval(backstopTimer);
+		backstopTick();
+		backstopTimer = setInterval(backstopTick, ESCALATION_BACKSTOP_TICK_MS);
+		backstopTimer.unref();
 		if (process.env.CP_OPERATOR_WEB_STATUS) setStatusLine(ctx, "operator-web", process.env.CP_OPERATOR_WEB_STATUS);
 	});
 

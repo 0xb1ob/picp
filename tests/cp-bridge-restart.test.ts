@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import bridgeExtension from "../extensions/cp-bridge/index.ts";
+import { isoTimestamp } from "../src/contracts.ts";
 import { CpBridgeError } from "../src/cp-bridge.ts";
+import { EscalationStore } from "../src/escalation.ts";
+import { escalationRelayLedgerFile } from "../src/escalation-backstop.ts";
 import { isPidAlive } from "../src/fleet.ts";
 import { attachParentHost, currentHost, ParentHostClient, parentHostPaths } from "../src/parent-host.ts";
 import { acquireParentLock } from "../src/parent-lock.ts";
@@ -152,6 +155,94 @@ test("session_start attaches read-only: the host's relay backlog arrives with no
 	for (const handler of idleHandlers.get("session_start") ?? []) await handler({}, ctx);
 	for (const handler of idleHandlers.get("session_shutdown") ?? []) await handler({}, ctx);
 	assert.equal(currentHost(parentHostPaths(idle.path, "multi")).gen, 0, "no host was spawned for a home that had none");
+});
+
+test("a cp_escalate relay through the bridge is recorded, so the backstop never relays that id again", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const paths = parentHostPaths(home.path, "multi");
+	const env = { PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" };
+	const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+	Object.assign(process.env, env);
+	const shutdowns: Array<() => Promise<void>> = [];
+	t.after(async () => {
+		for (const shutdown of shutdowns) await shutdown();
+		const { record } = currentHost(paths);
+		if (record && isPidAlive(record.pid)) {
+			const client = await ParentHostClient.connect(record, 5_000).catch(() => undefined);
+			await client?.request("stop").catch(() => undefined);
+			if (client) await client.closed;
+			if (isPidAlive(record.pid)) process.kill(record.pid, "SIGKILL");
+		}
+		for (const [key, value] of Object.entries(previous)) {
+			if (value === undefined) delete process.env[key]; else process.env[key] = value;
+		}
+		home.cleanup();
+	});
+	const store = new EscalationStore({ home: home.path });
+	await store.raise({
+		job_ids: ["cp-job"], kind: "product_ambiguity", question: "ship?",
+		options: [{ id: "hold", label: "Hold", consequence: "No merge", cost: "none" }],
+		recommended: "hold", evidence_paths: [],
+	});
+	const data = store.read();
+	data.items[0]!.id = "es-0001";
+	writeFileSync(store.file, JSON.stringify(data));
+	const host = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+	await host.request("start", { home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
+	await host.request("send", "ESCALATE");
+	host.disconnect(); // nobody subscribed: the cp_escalate relay waits in the host's backlog
+	await host.closed;
+
+	const ctx = { hasUI: false, isIdle: () => true, abort: () => {}, hasPendingMessages: () => false, sessionManager: { getSessionFile: () => join(home.path, "operator.jsonl"), getEntries: () => [{ type: "message" }] } };
+	const instance = () => {
+		const handlers = new Map<string, Array<(event: unknown, ctx?: unknown) => unknown>>();
+		const messages: string[] = [];
+		const emit = async (event: string, ctx?: unknown) => { for (const handler of handlers.get(event) ?? []) await handler({}, ctx); };
+		bridgeExtension({
+			registerTool: () => {},
+			registerCommand: () => {},
+			on: (event: string, handler: (event: unknown, ctx?: unknown) => unknown) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
+			sendMessage: (message: { content: string }) => void messages.push(message.content),
+			sendUserMessage: () => {},
+		} as never);
+		let down = false;
+		const shutdown = async () => { if (!down) { down = true; await emit("session_shutdown"); } };
+		shutdowns.push(shutdown);
+		return { messages, start: () => emit("session_start", ctx), shutdown };
+	};
+	const mentions = (messages: string[]) => messages.filter((text) => text.includes("id=es-0001"));
+
+	const a = instance();
+	await a.start();
+	const deadline = Date.now() + 30_000;
+	while (!a.messages.some((text) => text.includes("[cp-bridge escalation") && text.includes("id=es-0001"))) {
+		if (Date.now() > deadline) throw new Error(`no bridge escalation relay at session start: ${JSON.stringify(a.messages)}`);
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	const ledgerFile = escalationRelayLedgerFile(home.path, "multi");
+	const ledger = JSON.parse(readFileSync(ledgerFile, "utf8")) as { items: Array<{ id: string; via: string }> };
+	assert.ok(ledger.items.some((item) => item.id === "es-0001" && item.via === "bridge"), JSON.stringify(ledger));
+	assert.equal(mentions(a.messages).length, 1, "the bridge relay reached the session once");
+	await a.shutdown();
+
+	// Now due by age, with no open ask: only the ledger's bridge entry keeps the backstop quiet.
+	const aged = store.read();
+	aged.items[0]!.created_at = isoTimestamp(new Date(Date.now() - 11 * 60_000));
+	writeFileSync(store.file, JSON.stringify(aged));
+	const b = instance();
+	await b.start();
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	assert.equal(mentions(b.messages).length, 0, "the backstop does not repeat a bridge relay");
+	await b.shutdown();
+
+	// Control: without the ledger entry the backstop does relay it.
+	rmSync(ledgerFile);
+	const c = instance();
+	await c.start();
+	const relayed = mentions(c.messages);
+	assert.equal(relayed.length, 1);
+	assert.match(relayed[0]!, /never relayed to this session/);
+	await c.shutdown();
 });
 
 test("a failed session_start attach, then a successful cp_parent start, refreshes the cp-parent status line; a stop clears it", { timeout: 120_000 }, async (t) => {

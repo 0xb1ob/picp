@@ -13,11 +13,10 @@ import { ciKeysFromMessage, type CiObservation, formatCiNotice } from "../../src
 import { runMainCiTick } from "../../src/main-ci.ts";
 import type { CommandRunner } from "../../src/merge-ask.ts";
 import type { CommandPost } from "../../src/command-post.ts";
-import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AnswerCardRecord, type AwaitingItem, DiffVerdictSchema, LAYOUT, paths, type StatusSnapshot } from "../../src/contracts.ts";
+import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AnswerCardRecord, type AwaitingItem, DiffVerdictSchema, isSafeJobId, LAYOUT, paths, type StatusSnapshot } from "../../src/contracts.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { type DeferredRecheckTrigger, formatRaisedNotice, recheckDeferredBounded } from "../../src/deferred-recheck.ts";
 import { readPriorAttempts, reviewCapExhausted } from "../../src/gate.ts";
-import { resolveHome } from "../../src/home.ts";
 import { operatorNotify } from "../../src/parent-session.ts";
 import { durableWakeupProjects, homeMandateProjects, homeProjectResolver, type ProjectOf, projectsOf } from "../../src/project-report.ts";
 import { scheduledJobIds } from "../../src/relay-scope.ts";
@@ -103,7 +102,7 @@ export function createWakeupSurfaces(
 			review: (jobId, surface) => {
 				try {
 					const pending = post.reviewRuns.pending(jobId, surface);
-					const home = resolveHome();
+					const home = post.home;
 					const decided =
 						surface === "gate"
 							? readPriorAttempts(home, jobId).decisions.map((decision) => decision.attempt)
@@ -154,21 +153,26 @@ export function createWakeupSurfaces(
 		verdict: { delay_seconds: number; reason?: string },
 		stage: "send" | "delivery",
 	): void => {
-		if (!stamp.job_id) return;
-		const key = `${stage}:${stamp.kind}:${stamp.job_id}:${stamp.generation ?? ""}:${stamp.issued_at}`;
+		// A jobless stamp (a `recovery` listing torn-down candidates) lands in each listed job's log.
+		const targets = stamp.job_id ? [stamp.job_id] : (stamp.keys ?? []).filter(isSafeJobId).slice(0, 8);
+		if (targets.length === 0) return;
+		const key = `${stage}:${stamp.kind}:${stamp.job_id ?? "-"}:${stamp.generation ?? ""}:${stamp.issued_at}`;
 		if (!staleWakeupUnseen(key)) return;
-		try {
-			if (!existsSync(join(currentRuntime().home, paths.runDir(stamp.job_id)))) return;
-			commandPost().runs.open(stamp.job_id).cp("wakeup_suppressed", {
-				kind: stamp.kind,
-				...(stamp.generation !== undefined ? { generation: stamp.generation } : {}),
-				issued_at: stamp.issued_at,
-				delay_seconds: verdict.delay_seconds,
-				reason: verdict.reason ?? "",
-				stage,
-			});
-		} catch {
-			// A run log that cannot be written must never resurrect a stale message.
+		for (const jobId of targets) {
+			try {
+				if (!existsSync(join(currentRuntime().home, paths.runDir(jobId)))) continue;
+				commandPost().runs.open(jobId).cp("wakeup_suppressed", {
+					kind: stamp.kind,
+					...(stamp.generation !== undefined ? { generation: stamp.generation } : {}),
+					issued_at: stamp.issued_at,
+					delay_seconds: verdict.delay_seconds,
+					reason: verdict.reason ?? "",
+					stage,
+					...(stamp.keys?.length ? { keys: stamp.keys.slice(0, 8) } : {}),
+				});
+			} catch {
+				// A run log that cannot be written must never resurrect a stale message.
+			}
 		}
 	};
 

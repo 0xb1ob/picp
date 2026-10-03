@@ -34,6 +34,20 @@ test("mz0: relays during the operator's turn wait for settle, then drop answered
 	assert.deepEqual(delivered.slice(3), ["reply: es-cccc33 is open"], "a queued send reply naming the id drops its escalation");
 });
 
+test("cp-gb8d: an overdue backstop relay survives a send-reply mention, never the answered recheck", () => {
+	const delivered: string[] = [];
+	const answered = new Set<string>();
+	const queue = new OperatorRelayQueue((r) => delivered.push(r.escalationId ?? r.text), (r) => r.escalationId && answered.has(r.escalationId) ? undefined : r);
+	queue.replied("reply: es-dddd44 was mentioned in prose");
+	queue.push(relay({ kind: "escalation", escalationId: "es-dddd44" }));
+	assert.deepEqual(delivered, [], "an ordinary relay of a mentioned id is dropped, as before");
+	queue.push(relay({ kind: "escalation", escalationId: "es-dddd44" }), true);
+	assert.deepEqual(delivered, ["es-dddd44"], "an overdue relay is delivered despite the mention");
+	answered.add("es-dddd44");
+	queue.push(relay({ kind: "escalation", escalationId: "es-dddd44" }), true);
+	assert.deepEqual(delivered, ["es-dddd44"], "the recheck still drops an answered id");
+});
+
 test("cp-hhuf P1: a wake about scheduled jobs only is not relayed; escalations, errors and mixed turns still are", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

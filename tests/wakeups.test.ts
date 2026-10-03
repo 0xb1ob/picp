@@ -63,6 +63,7 @@ import {
 	type WakeupReplayMemory,
 	type WakeupStamp,
 	WAKEUP_SOURCE_FAILURE_MEMORY,
+	WAKEUP_WITHHELD_REASON_MAX_CHARS,
 	WakeupNotifier,
 	wakeupFacts,
 	wakeupStampOf,
@@ -1352,6 +1353,30 @@ test("verdict: stale when the decision is missing, superseded by a later attempt
 	assert.match(over.reason ?? "", /already done/);
 });
 
+test("cp-gjva: a decided gate verdict is fresh while waiting and 'already done' after teardown, never 'no decision on disk'", async (t) => {
+	const b = benchOf(t);
+	assert.equal(process.env.CP_HOME, undefined, "hermetic: CP_HOME differs from the CommandPost home");
+	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
+	t.after(() => post.shutdown());
+	await b.fleet.add(jobRecord(b.home.path, "cp-gjva", "pipeline"));
+	mkdirSync(join(b.home.path, paths.runDir("cp-gjva")), { recursive: true });
+	writeFileSync(join(b.home.path, paths.gateFile("cp-gjva", 1)), JSON.stringify({
+		schema_version: SCHEMA_VERSION, job_id: "cp-gjva", attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["conflicting acceptance"], revisions: [], model: "mock/one", decided_at: isoTimestamp(),
+	}));
+	const surface = createWakeupSurfaces({} as ExtensionAPI, createSessionState(), { commandPost: () => post, repaintWidget: () => {} });
+	const message: WakeupCarrier = {
+		role: "custom", customType: VERDICT_MESSAGE_TYPE, content: "VERDICT escalate — cp-gjva gate 1", timestamp: 1_000,
+		details: { cp_wakeup: { kind: "verdict", job_id: "cp-gjva", keys: ["gate", "1"], issued_at: isoTimestamp() } },
+	};
+	assert.equal(surface.reviewWakeupsInContext([message]), undefined, "a decided attempt on a waiting job is fresh");
+	await b.fleet.patch("cp-gjva", { phase: "done", closed_at: isoTimestamp() });
+	const after = surface.reviewWakeupsInContext([message])?.[0]?.content as string;
+	assert.match(after, /is already done: the review it describes is history/);
+	assert.doesNotMatch(after, /no decision on disk/);
+});
+
 test("verdict: a diff review is a claim about one head; a moved head makes it stale", async (t) => {
 	const b = benchOf(t);
 	await b.fleet.add(jobRecord(b.home.path, "cp-v", "pr"));
@@ -1676,13 +1701,35 @@ test("Rank 3: extension reload and parent restart retain replay identity but del
 	const stale: WakeupCarrier = { role: "custom", customType: "cp-envelope", content: "Archived report body", details: {
 		cp_wakeup: { kind: "envelope", job_id: jobId, generation: 1, issued_at: "2026-09-26T08:34:00Z" },
 	} };
-	assert.match(open().reviewWakeupsInContext([stale])?.[0]?.content as string, /STALE WAKE-UP/);
+	const firstPass = open().reviewWakeupsInContext([stale])?.[0]?.content as string;
+	assert.match(firstPass, /STALE WAKE-UP/);
+	const firstReason = /superseded before you read it: (.*)\.\n/.exec(firstPass)?.[1];
+	assert.ok(firstReason, "the first pass names its reason");
 	await b.fleet.patch(jobId, { reported_at: "2026-09-26T08:36:00Z" });
 	const stillWithheld = open().reviewWakeupsInContext([stale]);
-	assert.match(stillWithheld?.[0]?.content as string, /already withheld/);
+	assert.ok((stillWithheld?.[0]?.content as string).includes(`already withheld in an earlier context: ${firstReason}`), "a later context says why");
 	assert.doesNotMatch(stillWithheld?.[0]?.content as string, /Archived report body/);
 	const persisted = readFileSync(join(b.home.path, LAYOUT.state, "wakeup-replay.json"), "utf8");
 	assert.doesNotMatch(persisted, /CI green: act|Archived report body/, "only identities persist, never bodies");
+});
+
+test("withheld identity keeps its first reason across contexts", () => {
+	const message: WakeupCarrier = {
+		role: "custom", customType: "cp-envelope", content: "Archived report body", timestamp: 1_000,
+		details: { cp_wakeup: { kind: "envelope", job_id: "cp-gjva", issued_at: "2026-10-02T15:41:47Z" } },
+	};
+	const done = wakeupFacts({ record: () => ({ phase: "done", reported_at: "2026-10-02T15:41:40Z" }) });
+	const memory: WakeupReplayMemory = new Map();
+	assert.match(reviewWakeups([message], done, new Date(), memory).messages[0]?.content as string, /STALE WAKE-UP/);
+	const stored = [...memory].find(([key]) => key.startsWith("withheld:"))?.[1] ?? "";
+	assert.match(stored, /already done/);
+	assert.ok(stored.length <= WAKEUP_WITHHELD_REASON_MAX_CHARS);
+	const restored: WakeupReplayMemory = new Map(JSON.parse(JSON.stringify([...memory])));
+	const later = reviewWakeups([message], done, new Date(), restored);
+	assert.match(later.superseded[0]?.verdict.reason ?? "", /already withheld in an earlier context: .*already done/);
+	assert.match(later.messages[0]?.content as string, /already withheld in an earlier context: .*already done/);
+	const legacy: WakeupReplayMemory = new Map([...memory].map(([key]) => [key, ""]));
+	assert.match(reviewWakeups([message], done, new Date(), legacy).messages[0]?.content as string, /\(original reason not recorded\)/);
 });
 
 test("Rank 3: replay persistence failures are visible and never restore a stale body", async (t) => {

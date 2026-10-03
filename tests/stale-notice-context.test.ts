@@ -71,12 +71,24 @@ test("qra: stale and replayed notices stay journaled, not in the parent's model 
 	};
 	assert.deepEqual(await context({ messages: [user, landed, landedCopy] }), { messages: [user, landed] }, "one landing notice reaches the model");
 	assert.deepEqual(await open()({ messages: [user, landed, landedCopy] }), { messages: [user, landed] }, "reload keeps the first landing copy and drops the re-send");
+	// A jobless recovery stamp lists its candidates in `keys`; its marker lands in each listed job's log.
+	const jobless: WakeupCarrier = {
+		role: "custom", customType: "cp-recovery", content: "Revive the listed jobs", timestamp: 5_000,
+		details: { cp_wakeup: { kind: "recovery", keys: ["cp-gone"], issued_at: "2026-09-26T08:05:00Z" } },
+	};
+	assert.deepEqual(await context({ messages: [user, jobless] }), { messages: [user] }, "a recovery whose candidates are gone is withheld");
 	post.runs.closeAll();
 	const suppressed = readRunEvents(home.path, "cp-gone").filter((event) => event.type === "wakeup_suppressed");
 	assert.ok(suppressed.length >= 4, "suppression remains observable in the run journal");
-	const payloads = suppressed.map((event) => event.payload as { kind: string; stage: string; reason: string });
+	const payloads = suppressed.map((event) => event.payload as { kind: string; stage: string; reason: string; issued_at: string; keys?: string[] });
 	for (const kind of ["envelope", "ci", "verdict", "answered", "recovery"]) {
 		assert.ok(payloads.some((entry) => entry.kind === kind && entry.stage === "delivery" && entry.reason.length > 0));
 	}
+	assert.deepEqual(payloads.find((entry) => entry.kind === "answered")?.keys, ["aw-new"], "markers carry the stamp's keys");
+	const joblessMarker = payloads.find((entry) => entry.issued_at === "2026-09-26T08:05:00Z");
+	assert.equal(joblessMarker?.kind, "recovery");
+	assert.equal(joblessMarker?.stage, "delivery");
+	assert.deepEqual(joblessMarker?.keys, ["cp-gone"]);
+	assert.match(joblessMarker?.reason ?? "", /every candidate it listed has been torn down/);
 	assert.doesNotMatch(JSON.stringify(suppressed), /Obsolete .* instructions|A new operator decision|HELD PR LANDED/, "journal records reasons, not message bodies");
 });

@@ -1039,8 +1039,9 @@ function answeredWakeupIds(stamp: WakeupStamp, message: WakeupCarrier): string[]
 	return answeredIdsFromMessage(message);
 }
 
-/** Bounded CI/verdict delivery tokens and identities of notices already withheld, kept across contexts. */
+/** Bounded CI/verdict delivery tokens and identities of notices already withheld, kept across contexts. A `withheld:` value is the first withhold reason (capped); `""` is a legacy entry. */
 export type WakeupReplayMemory = Map<string, string>;
+export const WAKEUP_WITHHELD_REASON_MAX_CHARS = 300;
 
 export interface WakeupReview<T> {
 	messages: T[];
@@ -1146,17 +1147,18 @@ export function reviewWakeups<T extends WakeupCarrier>(
 		// A later phase read must not resurrect a notice already withheld. A new
 		// issue time is a new notice; the key stores no body or project prose.
 		const withheldKey = `withheld:${JSON.stringify([stamp.kind, stamp.job_id, stamp.generation, stamp.reported_at, stamp.keys, stamp.issued_at])}`;
-		if (memory.has(withheldKey)) {
+		const withheldBefore = memory.get(withheldKey);
+		if (withheldBefore !== undefined) {
 			verdict.state = "superseded";
-			verdict.reason = "this notice was already withheld in an earlier context";
+			verdict.reason = withheldBefore ? `this notice was already withheld in an earlier context: ${withheldBefore}` : "this notice was already withheld in an earlier context (original reason not recorded)";
 		}
 		if (verdict.state !== "superseded") {
 			reviewed.push(message);
 			continue;
 		}
-		if (!memory.has(withheldKey)) {
+		if (withheldBefore === undefined) {
 			if (memory.size >= WAKEUP_SOURCE_FAILURE_MEMORY) memory.delete(memory.keys().next().value!);
-			memory.set(withheldKey, "");
+			memory.set(withheldKey, (verdict.reason ?? "").slice(0, WAKEUP_WITHHELD_REASON_MAX_CHARS));
 		}
 		changed = true;
 		superseded.push({ stamp, verdict });

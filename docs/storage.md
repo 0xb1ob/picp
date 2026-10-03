@@ -68,7 +68,7 @@ and names the parent to use instead.
 `state/`", task-reference snapshots skip it, and its records are facts written
 by tools. The operator session's own notes are authored material, so they get
 their own sibling. `state/operator/` keeps only what code writes on the
-operator session's behalf (the ask journal and `self_compact` handoffs).
+operator session's behalf (the ask journal, the escalation-relay ledger and `self_compact` handoffs).
 
 ## Inventory
 
@@ -124,7 +124,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `pipelines/ checkpoints/ mandates/` | `src/pipeline.ts`, `src/checkpoint.ts`, `src/mandate.ts` | links, authorizations, mandates | H | code (parent tools) |
 | `sessions/` (worker transcripts, `cp-parent.jsonl`, `cp-parent-control.json`, `cp-parent-context.json`, `cp-parent.sends.json`, `operator-sessions.jsonl`) | pi via `--session-dir` (`src/dispatch.ts`, `src/gate.ts`, `src/diff-review.ts`, `src/quality.ts`); `src/cp-bridge.ts`; `src/parent-context.ts`; the operator session record (`extensions/cp-bridge/index.ts` writes it through `src/operator-session-log.ts`, `src/viewer/operator-sessions.ts` reads it) | transcripts, bridge control | H | pi and code |
 | `model-windows.json` | `src/model-windows.ts` (parent session start, from pi's model registry); `src/viewer/context-usage.ts` reads it | model-window snapshot for the viewer's context chips | H | code only |
-| `operator/asks.jsonl`, `operator/compact-<iso>.md` | `extensions/cp-bridge/index.ts`; `src/operator-compact.ts` | operator-ask journal, compaction handoffs | H | code running in the operator session; never hand-written |
+| `operator/asks.jsonl`, `operator/compact-<iso>.md`, `operator/escalation-relays.json` | `extensions/cp-bridge/index.ts`; `src/operator-compact.ts`; `src/escalation-backstop.ts` (called from `extensions/cp-bridge/index.ts`) | operator-ask journal, compaction handoffs, the escalation ids relayed to the operator session (bridge or backstop) | H | code running in the operator session; never hand-written |
 | `operator/dashboard.json` (0600), `operator/dashboard.sock` (0600) | `src/dashboard-control.ts` (in the operator session, at `session_start`) | the dashboard-control record (pid, socket token, CSRF token) and socket | H | code running in the operator session; removed at its shutdown |
 | `operator/dashboard.jsonl` (0600) | `src/dashboard-control.ts` (request/outcome lines) and the **viewer**: `src/viewer/control-audit.ts` (refused and Start-session `start` lines), both through one `O_APPEND` write per line | the dashboard-control audit journal, append-only; no rotation yet (bounded by the 20-per-minute rate limit) | H | code only |
 | `operator/inbox.jsonl` (0600) | the **viewer** (`held` lines, `src/viewer/control-audit.ts`) and the operator session (`delivered`/`dropped`, `src/dashboard-control.ts`), one `O_APPEND` write per line | composer messages held while no operator session runs (at most 20 waiting), delivered once at the next `session_start`; older than 24 h dropped, never injected | H | code only |

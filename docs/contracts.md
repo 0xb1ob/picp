@@ -687,9 +687,15 @@ property of the notification path — not a prompt for more parent diligence.
   that is still readable is a summary somebody still acts on.
 - **Silence is recorded.** Every withheld or rewritten wake-up appends a
   `cp:wakeup_suppressed` marker (kind, generation, `issued_at`, delay, reason,
-  and which stage caught it) to the job's run log. Never a body. **A marker is
+  the stamp's `keys` (at most 8), and which stage caught it) to the job's run
+  log. A jobless `cp-recovery` marker lands in the run log of each listed job
+  that has one. Never a body. **A marker is
   not activity**: it records a message the parent declined to send, so it
   advances `event_count` but never `last_activity_at` (see Run artifacts).
+  The replay memory (`state/wakeup-replay.json`) keeps the first withhold
+  reason (at most `WAKEUP_WITHHELD_REASON_MAX_CHARS`, 300) as the `withheld:`
+  value, so a later context says *why* ("already withheld in an earlier
+  context: …"); a legacy entry says "original reason not recorded".
 - **Age is never evidence of staleness.** Staleness is decided from facts (a
   generation, a `reported_at`, a phase, an open tool call). `WAKEUP_LATE_SECONDS`
   only adds a line saying how late a still-true wake-up was — `stalled` stays
@@ -1103,6 +1109,19 @@ Turns the parent takes that were not caused by `send`, and `cp_escalate`
 calls on the stream, become messages in the main session, tagged with kind
 and job id. Escalation duplicates are suppressed by id. A parent message that
 carries `STALE WAKE-UP — do not act on this` is marked stale.
+
+**Escalation backstop** ([`src/escalation-backstop.ts`](../src/escalation-backstop.ts)).
+The operator session relays, once per id, any escalation open at least
+`ESCALATION_BACKSTOP_SECONDS` (600, the dashboard's amber threshold) that no
+open operator ask represents and that never reached the session as a relay —
+a gate-raised escalation has no `cp_escalate` relay path. Bridge escalation
+relays are recorded too, in the same ledger, `state/operator/escalation-relays.json`,
+so neither path repeats the other, across restarts. It runs at `session_start`
+and on a 60 s tick; a send-reply mention of the id does not swallow it. It is
+not a parent wake and never authorization. An unreadable ledger or store sets
+the `escalation-backstop` status line and relays nothing. Two edges are
+accepted: the ledger is claimed before the push, so a session that dies in
+between loses that one relay; two operator sessions on one home can both relay.
 A `wake` whose stamped job ids (wake-up stamps, and a `cp-schedule` fire
 message's `details.job_id`) are all scheduled jobs (ledger label
 `schedule:<id>`) is not relayed: scheduled jobs are independent jobs, and their
