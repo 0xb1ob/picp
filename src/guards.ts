@@ -42,6 +42,8 @@ export const GUARD_CODES = [
 	"leased_git_mutation",
 	/** A tool call that would put a diff-review body into the parent's context. */
 	"diff_body_read",
+	/** A parent read of the checks API (`gh pr checks`, `statusCheckRollup`), refused in this home. */
+	"ci_checks_read",
 ] as const;
 export type GuardCode = (typeof GUARD_CODES)[number];
 
@@ -189,6 +191,12 @@ function isReviewPathString(path: string): boolean {
 /** git subcommands that can put a path into a commit or send one to a remote. */
 const GIT_PUBLISHING_SUBCOMMANDS = new Set(["add", "stage", "commit", "rm", "stash", "push"]);
 
+/** The checks API: `gh pr checks` or any `gh` call asking for `statusCheckRollup`. */
+const CI_CHECKS_READ_RE = /\bgh\s+pr\s+checks\b|statusCheckRollup/;
+const CI_CHECKS_READ_REASON =
+	"blocked: the checks API is refused in this home; CI is read from the Actions runs API by cp_integrate and " +
+	"the cp-ci wake-up — call cp_integrate <job-id>";
+
 export class ContextGuard {
 	readonly #home: string;
 	readonly #canonicalHome: string;
@@ -262,6 +270,9 @@ export class ContextGuard {
 				if (program === "git") {
 					const decision = this.#checkGit(argv, stage, shellCwd, uncertainCwd);
 					if (decision) return decision;
+				}
+				if (program === "gh" && CI_CHECKS_READ_RE.test(stage)) {
+					return { code: "ci_checks_read", subject: stage.trim(), reason: CI_CHECKS_READ_REASON };
 				}
 
 				// T31: the question journal is the operator's record, not the parent's

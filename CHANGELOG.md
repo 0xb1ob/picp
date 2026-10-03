@@ -6,9 +6,17 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Parent guard refuses checks-API reads (cp-taoi)
+
+`ContextGuard` gains the `ci_checks_read` code: parent bash `gh pr checks` or any `gh` call naming `statusCheckRollup` is blocked, and the reason points at `cp_integrate <job-id>`. CI is already read from the Actions runs API (`gh run list`) by `cp_integrate` and the `cp-ci` wake-up; no new fallback is added. `gh run list` stays allowed. Migration: none.
+
 ### Operator sends steer ahead of queued wake-ups (cp-1dkr)
 
 Every parent injection from `src/parent-delivery.ts` (the operator send, the resume nudge and the post-relaunch resume) is now an RPC `prompt` with `streamingBehavior: "steer"` instead of `"followUp"`. A busy parent takes an operator send after its current tool batch instead of after every fleet wake-up already queued; wake-ups stay triggering follow-ups. Trade-off: an operator send can land between the tool batches of a wake-up the parent is working on — that wake-up stays in context, durable wake-ups are re-sent until arrival is confirmed, and an envelope wake-up (one-shot) is finished after the answer. Migration: none.
+
+### cp_next waits at the spawn cap (cp-j13p)
+
+`cp_next` no longer recommends a `dispatch` the worker manager would refuse: when live worker processes (held authors and reviewers included, as the manager counts them) reach `spawn_cap`, every grant's `dispatch` (primary and `others`) becomes `wait`, naming the cap, the live count and up to three held job ids. A `pipeline` recommendation stands, since `cp_pipeline advance` spawns a gate-reviewer inside the manager's review reserve. Nothing is queued; held workers keep their process. `NextPorts` gains an optional `capacity` port. Migration: none.
 
 ### Fresh homes dispatch three jobs at once (cp-z03i)
 

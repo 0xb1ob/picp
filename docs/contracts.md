@@ -2967,6 +2967,7 @@ move is the right one.
 | `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`, and `.beads/` in multi mode) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
+| `ci_checks_read` | parent bash `gh pr checks` or any `gh` call naming `statusCheckRollup` (the checks API is refused in this home) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
 
 The bash rule is an allowlist, because that is the only shape that fails
 closed: a command that mentions an artifact path is refused unless it is a
@@ -3602,6 +3603,7 @@ recommendation:
 | every job the mandate names (`job_ids`) is closed | `mission_end` — raises one `mission_end` escalation (`landed`, `dropped`, `cost`); a repeat call returns the same escalation id, never a second one. A clean finish (nothing dropped, no fleet record `failed`) closes itself: the escalation is answered `close` by `mandate:<id>` (basis `{mandate, clause}` on the record) and the grant is revoked, so Map and Board show it closed; a messy one stays open and the bridge relays it to the main session as an escalation. Once that grant's mission end is answered (`close` or `extend`) the call returns the answered id, reason `already answered … not re-asked`, and raises nothing — a replacement grant has its own id and its own mission end |
 | nothing is ready under the mandate | `wait` |
 | live workers already meet `dispatch_parallelism` | `wait` |
+| live worker processes (every manager-owned process, held authors and reviewers included) ≥ `spawn_cap` | `wait` for every grant's `dispatch`, `others` included — names the cap, the live count and up to three held job ids; nothing is queued, the job dispatches on a later `cp_next` once one tears down. A `pipeline` recommendation stands: `cp_pipeline advance` spawns a gate-reviewer (inside the manager's review reserve) or nothing, and its implementer dispatch meets the manager's own refusal |
 | every ready job is new and the job cap is reached | `wait` \u2014 no new dispatch; the grant stays active for the jobs it counts |
 | a ready job has a `PipelineStore` record | `pipeline` \u2014 `cp_pipeline advance <id>` |
 | otherwise, the first ready job | `dispatch` \u2014 `cp_dispatch <id>` |
