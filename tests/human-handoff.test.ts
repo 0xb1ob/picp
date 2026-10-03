@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AwaitingStore } from "../src/awaiting.ts";
-import { HANDOFF_PENDING_CAUSES, type HandoffInput, type HandoffWrite, handOffDecision, makeHandoff, mergePolicyOf } from "../src/human-handoff.ts";
+import { HANDOFF_PENDING_CAUSES, type HandoffInput, type HandoffWrite, handOffDecision, makeHandoff, mergePolicyOf, reviewThenHandoff } from "../src/human-handoff.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 import type { MergePermissionVerdict } from "../src/merge-permission.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -118,4 +118,19 @@ test("the port: an unreadable registry fails closed — surface, nothing handed 
 	const result = await port(call);
 	assert.equal(result?.next, "surface");
 	assert.match(call.written[0]?.reason ?? "", /could not be read.*Nothing was merged/);
+});
+
+test("reviewThenHandoff: a review hold wins and the port never runs; otherwise the port decides, absent is a no-op", async () => {
+	const hold = { next: "review" } as unknown as IntegrateResult;
+	const handed = { next: "surface" } as unknown as IntegrateResult;
+	let portCalls = 0;
+	const port = async () => {
+		portCalls += 1;
+		return handed;
+	};
+	assert.equal(await reviewThenHandoff(async () => hold, port, input({ at: "fallback" })), hold);
+	assert.equal(portCalls, 0, "review gate first: the port is not consulted while review holds");
+	assert.equal(await reviewThenHandoff(async () => undefined, port, input({ at: "fallback" })), handed);
+	assert.equal(portCalls, 1);
+	assert.equal(await reviewThenHandoff(async () => undefined, undefined, input({ at: "fallback" })), undefined, "no port wired: nothing changes");
 });
