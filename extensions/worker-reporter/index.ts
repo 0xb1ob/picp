@@ -34,7 +34,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait } from "../../src/ci-wait.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
-import { classifyEditFailure, createMissCounter, enrichAnchorEditFailure, enrichEditFailure, enrichSilentBashFailure } from "./edit-failures.ts";
+import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 export {
 	BASH_COMMAND_ECHO_MAX,
 	classifyEditFailure,
@@ -442,7 +442,7 @@ export default function (pi: ExtensionAPI): void {
 	const context = loadJobContext();
 	const state: ReporterState = { attempts: 0, reported: false };
 	let ciStatusQueries = 0;
-	const misses = createMissCounter();
+	const enrichEdits = createEditResultEnricher((path) => readFileSync(resolve(process.cwd(), path), "utf8"));
 
 	// Recursion guard: a worker never dispatches, gates, or tears down.
 	// Same hook, second guard (cp-kzc): a worker never waits for CI either. The
@@ -481,32 +481,8 @@ export default function (pi: ExtensionAPI): void {
 			const enriched = enrichSilentBashFailure(text, event.input);
 			return enriched === text ? undefined : { content: [{ type: "text" as const, text: enriched }] };
 		}
-		const edits = ["edit", "replace", "insert"];
-		const inputPath = typeof event.input?.path === "string" ? event.input.path : undefined;
-		if (!event.isError) {
-			// Progress: a read or successful edit of a path clears its miss run;
-			// replace/insert inputs name no path, so their success clears all.
-			if ((event.toolName === "read" || event.toolName === "edit") && inputPath) misses.reset(inputPath);
-			else if (edits.includes(event.toolName)) misses.reset();
-			return undefined;
-		}
-		if (!edits.includes(event.toolName)) return undefined;
-		const text = event.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
-		let enriched: string;
-		let cause: string | undefined;
-		let path = inputPath;
-		if (event.toolName === "edit") {
-			cause = classifyEditFailure(text)?.cause;
-			enriched = enrichEditFailure(text, event.input, (path) => readFileSync(resolve(process.cwd(), path), "utf8"));
-		} else {
-			const anchor = enrichAnchorEditFailure(text);
-			cause = anchor?.cause;
-			path = anchor?.path;
-			enriched = anchor?.text ?? text;
-		}
-		if (!cause) return undefined;
-		const reread = misses.miss(path, cause);
-		return { content: [{ type: "text" as const, text: reread ? `${enriched}\n\n${reread}` : enriched }] };
+		const text = enrichEdits(event);
+		return text === undefined ? undefined : { content: [{ type: "text" as const, text }] };
 	});
 
 	// T31: a planner may ask the operator one bounded question at a time. Not a

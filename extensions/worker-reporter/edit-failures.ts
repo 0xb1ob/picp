@@ -183,26 +183,90 @@ export function enrichAnchorEditFailure(errorText: string): { text: string; caus
 /** Identical misses on one path before the worker is told to stop and re-read. */
 export const REREAD_AFTER_MISSES = 3;
 
+/** Where a miss is tallied: the file when known, else the first anchor of the call. */
+export interface MissScope {
+	path?: string;
+	anchor?: string;
+}
+
 /**
- * Per-process count of consecutive identical (same path, same cause) edit
- * misses. A different cause restarts the count; a success on a path — or any
- * replace/insert success, whose input names no path — clears it.
+ * Per-process count of consecutive identical edit misses. "Identical" is a
+ * same-scope, same-cause run — NOT the same call input: three different
+ * oldTexts/anchors that all miss on one file are the stuck loop this catches.
+ * Scope is the file; replace/insert inputs may not name one (their schema is
+ * anchors only), so the anchor stands in — misses on different files are never
+ * pooled, and a miss with neither scope is not counted. A different cause
+ * restarts the run. reset(path) (a read or successful edit of that file) also
+ * clears every anchor-scoped run, since those anchors are stale after a
+ * re-read; reset() clears everything.
  */
 export function createMissCounter() {
 	const counts = new Map<string, { cause: string; n: number }>();
+	const pathKey = (path: string) => `p:${resolve(process.cwd(), path)}`;
 	return {
 		/** Record a miss; returns the re-read instruction once it is the 3rd identical one. */
-		miss(path: string | undefined, cause: string): string | undefined {
-			const key = path ? resolve(process.cwd(), path) : "";
+		miss(scope: MissScope, cause: string): string | undefined {
+			const key = scope.path ? pathKey(scope.path) : scope.anchor ? `a:${scope.anchor}` : undefined;
+			if (!key) return undefined;
 			const prev = counts.get(key);
 			const n = prev?.cause === cause ? prev.n + 1 : 1;
 			counts.set(key, { cause, n });
 			if (n < REREAD_AFTER_MISSES) return undefined;
-			return `Identical ${cause} failure #${n} on ${path ?? "this file"}. Stop retrying the same text: read ${path ?? "the target file"} again and rebuild the call from what it returns now.`;
+			const label = scope.path ?? "the target file";
+			return `Identical ${cause} failure #${n} on ${label}. Stop retrying: read ${label} again and rebuild the call from what it returns now.`;
 		},
 		reset(path?: string): void {
-			if (path === undefined) counts.clear();
-			else counts.delete(resolve(process.cwd(), path));
+			if (path === undefined) return counts.clear();
+			counts.delete(pathKey(path));
+			for (const key of [...counts.keys()]) if (key.startsWith("a:")) counts.delete(key);
 		},
+	};
+}
+
+export interface EditResultEvent {
+	toolName: string;
+	input?: Record<string, unknown>;
+	isError?: boolean;
+	content: ReadonlyArray<{ type: string; text?: string }>;
+}
+
+const EDIT_TOOLS = ["edit", "replace", "insert"];
+
+/**
+ * The tool_result policy for edit/replace/insert (and read, for resets).
+ * Returns replacement text for an enriched failure, else undefined (leave the
+ * result alone).
+ */
+export function createEditResultEnricher(readFile: (path: string) => string) {
+	const misses = createMissCounter();
+	return (event: EditResultEvent): string | undefined => {
+		const input = event.input ?? {};
+		const inputPath = typeof input.path === "string" ? input.path : undefined;
+		if (!event.isError) {
+			// Progress: a read or successful edit clears that file's run; a successful
+			// replace/insert may not name a file, so it clears all.
+			if ((event.toolName === "read" || event.toolName === "edit") && inputPath) misses.reset(inputPath);
+			else if (EDIT_TOOLS.includes(event.toolName)) misses.reset();
+			return undefined;
+		}
+		if (!EDIT_TOOLS.includes(event.toolName)) return undefined;
+		const text = event.content.map((block) => (block.type === "text" ? (block.text ?? "") : "")).join("\n");
+		let enriched = text;
+		let cause: string | undefined;
+		const scope: MissScope = { path: inputPath };
+		if (event.toolName === "edit") {
+			cause = classifyEditFailure(text)?.cause;
+			enriched = enrichEditFailure(text, input, readFile);
+		} else {
+			const anchor = enrichAnchorEditFailure(text);
+			cause = anchor?.cause;
+			enriched = anchor?.text ?? text;
+			scope.path ??= anchor?.path;
+			const first = input.remove_from ?? input.anchor;
+			if (typeof first === "string") scope.anchor = first;
+		}
+		if (!cause) return undefined;
+		const reread = misses.miss(scope, cause);
+		return reread ? `${enriched}\n\n${reread}` : enriched;
 	};
 }
