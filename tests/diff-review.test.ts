@@ -1389,6 +1389,91 @@ test("a rebase-with-edit onto a base that grew a huge file is reviewed on its ow
 	assert.doesNotMatch(readFileSync(join(b.home, paths.reviewScratchDir(jobId, 2), "diff.md"), "utf8"), /upstream\/big\.csv/);
 });
 
+test("a merge of a base that grew a huge file is reviewed on its own three-dot subject, not a polluted delta", { timeout: 180_000 }, async (t) => {
+	const b = await reviewBenchOf(t);
+	const jobId = "cp-review-merge-base";
+	b.pushJobBranch(jobId);
+	await b.shipRecord(jobId);
+	const first = b.script("review-merge-base-1", [verdictCall(jobId)]);
+	const second = b.script("review-merge-base-2", [verdictCall(jobId)]);
+	b.seal();
+	await b.review.reviewAndWait({ jobId, model: first });
+
+	b.repo.git("checkout", "--quiet", b.repo.branch);
+	b.repo.write("upstream/big.csv", bigCsv(DIFF_REVIEW_MAX_BYTES + 10_000));
+	b.repo.commitAll("a data batch lands on the base");
+	b.repo.git("push", "--quiet", "origin", b.repo.branch);
+	b.repo.git("checkout", "--quiet", jobId);
+	b.repo.git("merge", "--quiet", "--no-edit", b.repo.branch);
+	b.repo.write("src/app.ts", "export const x = 2;\n");
+	b.repo.commitAll("a small branch-own edit");
+	b.repo.git("push", "--quiet", "origin", jobId);
+	b.repo.git("checkout", "--quiet", b.repo.branch);
+
+	const result = await b.review.reviewAndWait({ jobId, model: second });
+	assert.equal(result.verdict.verdict, "pass", result.verdict.reasons.join(" | "));
+	assert.equal(result.verdict.delta_from, undefined, "the fork point moved: no tree-diff delta");
+	assert.equal(result.verdict.diff_stat.truncated, false);
+	const diff = readFileSync(join(b.home, paths.reviewScratchDir(jobId, 2), "diff.md"), "utf8");
+	assert.doesNotMatch(diff, /upstream\/big\.csv/);
+	assert.match(diff, /src\/app\.ts/);
+});
+
+test("a base that advanced without being merged keeps the delta", { timeout: 180_000 }, async (t) => {
+	const b = await reviewBenchOf(t);
+	const jobId = "cp-review-base-advanced";
+	b.pushJobBranch(jobId);
+	await b.shipRecord(jobId);
+	const first = b.script("review-base-advanced-1", [verdictCall(jobId)]);
+	const second = b.script("review-base-advanced-2", [verdictCall(jobId)]);
+	b.seal();
+	const firstResult = await b.review.reviewAndWait({ jobId, model: first });
+
+	b.repo.git("checkout", "--quiet", b.repo.branch);
+	b.repo.write("upstream/other.ts", "export const other = 1;\n");
+	b.repo.commitAll("the base advances");
+	b.repo.git("push", "--quiet", "origin", b.repo.branch);
+	b.repo.git("checkout", "--quiet", jobId);
+	b.repo.write("src/fix.ts", "export const fix = 1;\n");
+	b.repo.commitAll("a fix commit");
+	b.repo.git("push", "--quiet", "origin", jobId);
+	b.repo.git("checkout", "--quiet", b.repo.branch);
+
+	const result = await b.review.reviewAndWait({ jobId, model: second });
+	assert.equal(result.verdict.delta_from, firstResult.verdict.head_sha);
+	const diff = readFileSync(join(b.home, paths.reviewScratchDir(jobId, 2), "diff.md"), "utf8");
+	assert.match(diff, /src\/fix\.ts/);
+	assert.doesNotMatch(diff, /upstream\/other\.ts/);
+});
+
+for (const [label, badHead] of [
+	["an unknown", "0".repeat(40)],
+	["a malformed", "--not-a-sha"],
+] as const) {
+	test(`${label} prior head is no delta baseline`, { timeout: 180_000 }, async (t) => {
+		const b = await reviewBenchOf(t);
+		const jobId = `cp-review-bad-head-${label.split(" ")[1]}`;
+		b.pushJobBranch(jobId);
+		await b.shipRecord(jobId);
+		const first = b.script(`${jobId}-1`, [verdictCall(jobId)]);
+		const second = b.script(`${jobId}-2`, [verdictCall(jobId)]);
+		b.seal();
+		await b.review.reviewAndWait({ jobId, model: first });
+		const file = join(b.home, paths.reviewFile(jobId, 1));
+		writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), head_sha: badHead }));
+
+		b.repo.git("checkout", "--quiet", jobId);
+		b.repo.write("src/fix.ts", "export const fix = 1;\n");
+		b.repo.commitAll("a fix commit");
+		b.repo.git("push", "--quiet", "origin", jobId);
+		b.repo.git("checkout", "--quiet", b.repo.branch);
+
+		const result = await b.review.reviewAndWait({ jobId, model: second });
+		assert.equal(result.verdict.delta_from, undefined);
+		assert.match(readFileSync(join(b.home, paths.reviewScratchDir(jobId, 2), "diff.md"), "utf8"), /src\/app\.ts/);
+	});
+}
+
 test("operational ladder: no verdict -> retry -> surface, bounded at two", { timeout: 120_000 }, async (t) => {
 	const b = await reviewBenchOf(t);
 	const jobId = "cp-review-op";
