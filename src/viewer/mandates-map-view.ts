@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { MandatesResponse, MapResponse, MapNode } from "./api-types.ts";
+import { JOB_STATUSES } from "../contracts.ts";
 import { jobRow, mandateSpend, spendJobs } from "./fleet-view.ts";
 import { grantFor } from "./overview-jobs.ts";
 import { nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp, today } from "./overview-read.ts";
@@ -13,7 +14,7 @@ function sources(state: ViewerState) {
   if (!m || !text(m.id) || !isSafeId(m.id) || !["active","paused","revoked","expired"].includes(str(m.status) ?? "") || !timestamp(m.expiry) || !timestamp(m.issued_at) || !Array.isArray(m.projects) || !m.projects.every(text) || !obj(m.spend_cap)) throw new Error("invalid mandate");
   return m;
  }).sort((a,b) => String(a.issued_at).localeCompare(String(b.issued_at)) || String(a.id).localeCompare(String(b.id))), []);
- const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j => typeof j.id === "string" && isSafeId(j.id) && ["open","in_progress","closed"].includes(str(j.status) ?? "") && (j.blocked_by === undefined || Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id))));
+ const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j => typeof j.id === "string" && isSafeId(j.id) && (JOB_STATUSES as readonly string[]).includes(str(j.status) ?? "") && (j.blocked_by === undefined || Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id))));
  const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs",j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","done","failed","launching"].includes(str(j.phase) ?? ""));
  return {grants,ledger,fleet,escalations:mandateEscalations(state)};
 }

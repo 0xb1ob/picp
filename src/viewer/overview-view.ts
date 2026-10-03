@@ -1,3 +1,4 @@
+import { JOB_STATUSES } from "../contracts.ts";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { OverviewResponse } from "./api-types.ts";
@@ -13,7 +14,7 @@ import { operatorSession, readInbox } from "./control-inbox.ts";
 export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: number) => boolean): OverviewResponse {
  const decision = decisions(state, now);
  const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs", j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","done","failed","launching"].includes(String(j.phase)));
- const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && ["open","in_progress","closed"].includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
+ const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && (JOB_STATUSES as readonly string[]).includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
  const grants = source<Json[]>(() => readdirSync(join(state.stateDir,"mandates")).filter(n => /^md-[A-Za-z0-9_-]+\.json$/.test(n)).map(name => {
   const grant = parseObject(readBounded(join(state.stateDir,"mandates",name)));
   if (!grant || !text(grant.id) || !["active","paused","revoked","expired"].includes(String(grant.status)) || !timestamp(grant.expiry) || !timestamp(grant.issued_at) || !Array.isArray(grant.projects) || !grant.projects.every(text) || !obj(grant.spend_cap)) throw new Error("invalid mandate");

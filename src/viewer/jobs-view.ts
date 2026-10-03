@@ -1,3 +1,4 @@
+import { JOB_STATUSES } from "../contracts.ts";
 import { realpathSync, statSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import type { BoardResponse, JobResponse, JobsResponse, ViewerJob, JobPhase } from "./api-types.ts";
@@ -15,7 +16,7 @@ import { readLines, startOffset } from "./tail.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
- const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && ["open","in_progress","closed"].includes(str(j.status) ?? ""));
+ const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && (JOB_STATUSES as readonly string[]).includes(str(j.status) ?? ""));
  return {fleet:fleet.value,ledger:ledger.value,grants:readMandates(state)};
 }
 function dispatchMandate(state:ViewerState,id:string,entry:Json | undefined,status:Json | undefined):string | null {
