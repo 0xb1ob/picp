@@ -30,6 +30,10 @@ Every parent injection from `src/parent-delivery.ts` (the operator send, the res
 
 Values only. `SCAFFOLD_MANDATE_DEFAULTS.dispatch_parallelism` is now 3 (was 1), and its note reads "jobs under the grant that may run at once; set 1 for serial". This is what a fresh home's `data/mandate-defaults.json` gets and what a home without that file resolves to. Migration: none; the file is copied once, so an existing home keeps its configured value (set it with `cp_mandate defaults_set dispatch_parallelism <n>`). A grant issued without `dispatch_parallelism` stays serial.
 
+### `cp_next` renders waiting grants in `others` as one line each (cp-ju20)
+
+`formatNext` renders an `others` grant in full only when the parent must act on it: `dispatch`, `pipeline` or `mission_end`, an `escalation_id`, a `warning`, or a blocked row carrying a `cp_decide` id. Every other grant (waiting, paused) is one line: `<id>: <status> <live>/<parallelism>, jobs <used>/<cap> — <kind>: <reason>`. 18 waiting grants now render in at most 25 lines instead of about 100. `NextResult` is unchanged. Migration: none.
+
 ### Operator note: one mandate may name several projects (cp-doc3)
 
 The operator note's mandate template now says the human names a project "(or the several projects one topic spans)" and that a topic spanning repos is one mandate naming each project — `Mandate.projects` already accepts several. `docs/contracts.md` (Operator note, Mandate defaults) says the same. Wording only; the note stays within its 60-line cap. Migration: none.

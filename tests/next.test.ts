@@ -489,6 +489,19 @@ test("two mandates on one project: each is evaluated, and each mission end is ra
 	assert.match(formatNext(result), new RegExp(`${first.id}: every named job is closed[\\s\\S]*${second.id}: every named job is closed`));
 });
 
+test("18 waiting grants on one project: each other grant is one line, the whole answer stays within 25 lines", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	for (let i = 0; i < 18; i++) ports.mandates.issue({ projects: ["demo"], objective: `topic ${i}`, expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, at: isoTimestamp(new Date(Date.now() - 60_000 + i * 1_000)) });
+	const result = await cpNext(ports, "demo");
+	assert.equal(result.others?.length, 17);
+	const text = formatNext(result);
+	assert.ok(text.split("\n").length <= 25, text);
+	const other = result.others![0]!;
+	assert.match(text, new RegExp(`^${other.mandate!.id}: active 0/1, jobs 0/10 \u2014 wait: nothing ready under this mandate$`, "m"));
+});
+
 test("a re-raised mission end refreshes its cost on the same open record", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
