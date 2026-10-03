@@ -41,7 +41,16 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          PATH="$HOME/.local/bin:$PATH" node scripts/install-tools.ts treehouse
+          # ponytail: the upstream script asks api.github.com anonymously for the
+          # latest tag, and a shared runner IP can get a 403 (rate limit). Up to
+          # 3 tries, 30s then 60s apart. Still fails the step after that. Upgrade
+          # path: a pinned or authenticated release download in install-tools.
+          for attempt in 1 2 3; do
+            PATH="$HOME/.local/bin:$PATH" node scripts/install-tools.ts treehouse && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "treehouse install attempt $attempt failed; retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
           PATH="$HOME/.local/bin:$PATH" treehouse --version
 
       - name: Run suite (typecheck + tests)
