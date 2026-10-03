@@ -483,7 +483,7 @@ export function createWakeupSurfaces(
 		try {
 			await (late.mainCi?.tick ?? runMainCiTick)({
 				home: post.home,
-				projects: post.registry.names(),
+				projects: post.registry.activeNames(),
 				pathOf: (project) => post.registry.pathOf(project),
 				...(late.mainCi?.exec ? { exec: late.mainCi.exec } : {}),
 				onError: (project, message) => post.ciWatchFailed(new Error(`main CI (${project}): ${message}`)),

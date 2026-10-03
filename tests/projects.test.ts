@@ -19,7 +19,8 @@ import {
 	renderRegistry,
 	sameRemote,
 } from "../src/projects.ts";
-import { createScratchHome, createScratchRepo, git, type ScratchHome, type ScratchRepo } from "./harness/index.ts";
+import { Ledger } from "../src/ledger.ts";
+import { createScratchHome, createScratchLedger, createScratchRepo, git, type ScratchHome, type ScratchRepo } from "./harness/index.ts";
 
 function withHome(t: { after(fn: () => void): void }): ScratchHome {
 	const home = createScratchHome();
@@ -308,4 +309,37 @@ test("assertCanonicalRepo passes the main worktree and refuses a linked worktree
 	assert.equal(assertCanonicalRepo(nested), realpathSync(nested));
 	mkdirSync(join(nestedParent.path, "src"), { recursive: true });
 	assert.throws(() => assertCanonicalRepo(join(nestedParent.path, "src")), /nested wrong git/);
+});
+
+// ---------------------------------------------------------------------------
+// archive flag
+// ---------------------------------------------------------------------------
+
+test("an old registry without archived still validates; archive/unarchive round-trips and keeps names()", async (t) => {
+	const home = withHome(t);
+	const registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "alpha", clone_url: "https://example.invalid/alpha.git" });
+	await registry.register({ name: "beta", clone_url: "https://example.invalid/beta.git" });
+	assert.ok(!("archived" in registry.require("alpha")), "absent means false");
+	assert.deepEqual(registry.activeNames(), ["alpha", "beta"]);
+
+	const archived = await registry.setArchived("alpha", true);
+	assert.equal(archived.archived, true);
+	assert.deepEqual(registry.activeNames(), ["beta"]);
+	assert.deepEqual(registry.names(), ["alpha", "beta"], "lookups still see the archived registration");
+	assert.deepEqual(registry.archivedNames(), ["alpha"]);
+	assert.match(formatProjects(registry.list()), /alpha \[archived\]/);
+
+	const restored = await registry.setArchived("alpha", false);
+	assert.ok(!("archived" in restored), "unarchive drops the key");
+	assert.deepEqual(registry.activeNames(), ["alpha", "beta"]);
+	await assert.rejects(() => registry.setArchived("ghost", true), /unknown project "ghost"/);
+});
+
+test("the ledger refuses a job in an archived project with a clear message", async (t) => {
+	const home = withHome(t);
+	createScratchLedger({ home: home.path });
+	const ledger = new Ledger({ home: home.path, knownProjects: ["alpha", "beta"], archivedProjects: ["alpha"] });
+	await assert.rejects(() => ledger.create({ title: "t", project: "alpha", delivery: "pr" }), /project "alpha" is archived.*cp_project unarchive/);
+	await ledger.create({ title: "t", project: "beta", delivery: "pr" });
 });

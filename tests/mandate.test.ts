@@ -841,6 +841,25 @@ test("cp_mandate issue: an objective issue ref that gh reports as a PR refuses b
 	assert.deepEqual(escalations.open().map((item) => item.kind), ["conflicting_acceptance"]);
 });
 
+test("cp_mandate issue refuses an archived project before any grant is written", async () => {
+	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	const pi = { on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) };
+	const issued: unknown[] = [];
+	const post = {
+		home: "/nonexistent-cp-home",
+		fleet: { read: () => ({ jobs: [] }) },
+		registry: { get: () => ({ clone_url: "https://example.invalid/demo.git", archived: true }) },
+		mandates: { issue: (input: unknown) => (issued.push(input), { id: "md-1", expiry: "2099-01-01T00:00:00Z" }) },
+	};
+	registerMandateTools(pi as never, { commandPost: () => post, setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined, createdThisTurn: [] } as never);
+	await assert.rejects(
+		() => tools.get("cp_mandate")!.execute("c", { action: "issue", projects: ["demo"], objective: "ship the backlog" }, undefined, undefined, {}),
+		(error: Error) => error instanceof MandateError && /archived project\(s\) demo/.test(error.message),
+	);
+	assert.deepEqual(issued, []);
+});
+
 test("a revoked grant that was cap-paused never refuses dispatch; the newer active grant covering the job decides", async (t) => {
 	// The incident: md-7852fe was paused (spend_cap), then revoked \u2014 status revoked, pause_reason still spend_cap \u2014
 	// and cp_pipeline start / cp_dispatch were refused in its name although newer active grants covered the job.

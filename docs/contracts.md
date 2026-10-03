@@ -2180,7 +2180,7 @@ The parent's no-bodies rule applies: `ContextGuard` blocks `read`/`grep`/`cat` o
 `data/projects.md` is a **rendered view** written on every mutation and never
 read back. Implemented in [`src/projects.ts`](../src/projects.ts) (T10).
 
-A record is `{name, clone_url, delivery, notes?, base_branch?, mandate?,
+A record is `{name, clone_url, delivery, notes?, base_branch?, mandate?, archived?,
 registered_at}`. Invariants, all enforced by `validateProjectRegistry` or at
 registration:
 
@@ -2223,6 +2223,12 @@ registry and refuses a name it does not know; before the tool, the only cure was
 hand-editing `data/projects.json`, whose schema is strict on purpose. A worker
 may **never** call it (`WORKER_FORBIDDEN_TOOLS`): choosing what to clone is
 choosing your own scope.
+
+`cp_project archive <name>` / `unarchive <name>` set `archived` (absent means
+false; the clone, records and history are untouched). An archived project is
+skipped by the periodic all-project pollers (`ProjectRegistry.activeNames()`, e.g.
+the main-CI watch) but stays in `names()` for lookups, history and the viewer;
+new jobs, mandates and dispatch into it refuse until it is unarchived.
 
 ## Dispatch (`cp_dispatch`)
 

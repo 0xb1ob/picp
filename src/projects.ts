@@ -183,9 +183,30 @@ export class ProjectRegistry {
 		return project;
 	}
 
-	/** Names for the ledger's `knownProjects` gate (T9). */
+	/** Names for the ledger's `knownProjects` gate (T9): every registration, archived included. */
 	names(): string[] {
 		return this.list().map((project) => project.name);
+	}
+
+	/** Names a periodic poller should visit: archived registrations are skipped. */
+	activeNames(): string[] {
+		return this.list().filter((project) => !project.archived).map((project) => project.name);
+	}
+
+	/** Names refused for new work (jobs, mandates, dispatch). */
+	archivedNames(): string[] {
+		return this.list().filter((project) => project.archived).map((project) => project.name);
+	}
+
+	/** Archive or unarchive; the clone, records and history are untouched. */
+	async setArchived(name: string, archived: boolean): Promise<Project> {
+		await this.mutate((projects) => {
+			const index = projects.findIndex((entry) => entry.name === name);
+			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
+			const { archived: _drop, ...rest } = projects[index] as Project;
+			projects[index] = archived ? { ...rest, archived: true } : rest;
+		});
+		return this.require(name);
 	}
 
 	/** Absolute path of the canonical clone (whether or not it exists yet). */
@@ -443,7 +464,7 @@ export function formatProjects(
 	for (const project of projects) {
 		const clone = options.cloneExists ? (options.cloneExists(project) ? "cloned" : "not cloned yet") : "";
 		lines.push(
-			`  ${project.name}  delivery:${project.delivery}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
+			`  ${project.name}${project.archived ? " [archived]" : ""}  delivery:${project.delivery}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
 			`    ${project.clone_url}${project.base_branch ? `  base=${project.base_branch}` : ""}`,
 		);
 	}

@@ -1866,3 +1866,20 @@ test("k52: a throwing main tick never blocks the held-PR wake, and is journaled 
 	assert.equal(failed.length, 1);
 	assert.match(String((failed[0] as Error).message), /main boom/);
 });
+
+test("archived projects are skipped by the main-CI watcher and come back after unarchive", async (t) => {
+	const { post, pi } = await mainCiPost(t);
+	await post.registry.register({ name: "retired", clone_url: "https://example.invalid/retired.git" });
+	await post.registry.setArchived("retired", true);
+	post.ciTick = async (): Promise<CiWatchTick> => ({ observations: [], checked: [], skipped: [], errors: [] });
+	const seen: string[][] = [];
+	const surface = createWakeupSurfaces(pi, createSessionState(), {
+		commandPost: () => post,
+		repaintWidget: () => {},
+		mainCi: { tick: async (input) => (seen.push([...input.projects]), []) },
+	});
+	await surface.surfaceCi();
+	await post.registry.setArchived("retired", false);
+	await surface.surfaceCi();
+	assert.deepEqual(seen, [["demo"], ["demo", "retired"]]);
+});

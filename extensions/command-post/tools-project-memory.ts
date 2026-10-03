@@ -30,8 +30,8 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "add", "show"], { description: "list registered projects, add one, or show one" }),
-			name: Type.Optional(Type.String({ description: "Project name; required for add and show" })),
+			action: StringEnum(["list", "add", "show", "archive", "unarchive"], { description: "list registered projects, add one, show one, or archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept)" }),
+			name: Type.Optional(Type.String({ description: "Project name; required for add, show, archive and unarchive" })),
 			clone_url: Type.Optional(Type.String({ description: "git remote to clone/fetch from; required for add" })),
 			delivery: Type.Optional(
 				StringEnum(["pr", "local"], { description: "Default delivery for jobs in this repo (default: pr)" }),
@@ -65,6 +65,13 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 							text: formatProjects([project], { cloneExists: () => existsSync(registry.pathOf(project.name)), pathOf: () => registry.pathOf(project.name) }),
 						},
 					],
+					details: { project } as unknown as Record<string, unknown>,
+				};
+			}
+			if (params.action === "archive" || params.action === "unarchive") {
+				const project = await registry.setArchived(params.name, params.action === "archive");
+				return {
+					content: [{ type: "text", text: `${project.name} ${project.archived ? "archived" : "unarchived"}` }],
 					details: { project } as unknown as Record<string, unknown>,
 				};
 			}

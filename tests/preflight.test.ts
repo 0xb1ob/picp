@@ -205,6 +205,17 @@ test("an unregistered project fails before anything else runs", { timeout: 60_00
 	assert.match(formatPreflight(result), /fix: register the project/);
 });
 
+test("an archived project is refused for dispatch until it is unarchived", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t);
+	await f.registry.setArchived("demo", true);
+	const result = await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" });
+	assert.equal(result.status, "fail");
+	assert.deepEqual(codes(result), ["project_archived"]);
+	assert.match(formatPreflight(result), /fix: cp_project unarchive demo/);
+	await f.registry.setArchived("demo", false);
+	assert.equal((await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" })).status, "ok");
+});
+
 test("git preflight catches a leftover branch, a wrong base and a detached primary", { timeout: 60_000 }, async (t) => {
 	const f = await fixture(t);
 
