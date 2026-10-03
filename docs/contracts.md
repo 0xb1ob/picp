@@ -7384,8 +7384,8 @@ unrecognized noun coordination may conservatively warn.
 Markdown sections headed `Constraints`, `Non-goals`, `Test plan`, `Evidence`, `Unknowns`
 (`Unknowns/Blockers`), `Self-assessment` or `Acceptance` are excluded, including
 subsections, until the next same-level or higher heading (bead dbn, cp-wkv1); the
-dispatch joins the job title as a `#` heading, so a task's last section never
-swallows the job description.
+dispatch joins the job title as a `# Job: <title>` heading, so neither a task's last
+section nor a title such as "Evidence" swallows the job description.
 Access wording means access work (`auth`,
 `authentication`, `authorization`, `credentials`, …), never `authority` or
 `author`. Explicit/assessed highs and the H6 recorded-low rule are unchanged.
@@ -7402,8 +7402,11 @@ after a mention verb (`calls it 'safe to delete'`) is reported speech. R2, R3 an
 the quoted-span rule stay limited to those two words. cp-wkv1 adds three more:
 R1 also covers spend tokens (`estimate the tokens`, `context-tokens`, `noncached`,
 and `tokens` coordinated with `usd`/`cost`/`spend`/a bare `$`); R5 `migration`
-followed by `: none` or `: n/a`; R6 a history rewrite offered as one option of a
-slash-list fix (`delete/redact/rewrite history`) in a text that says `read-only`.
+followed by `: none` or `: n/a`; R6 a history rewrite named only as one option of
+a remedy list right after `fix`/`remedy`/`recommend…` (`fix (delete/redact/rewrite
+history)`) in a text that declares a read-only audit, review, answer or report;
+a bare `read-only` elsewhere ("keep backups read-only; run squash/rewrite history")
+is not enough.
 Approval-sense `authorization` ("applicable risk
 authorization") is still evidence: record `risk: low` on the job instead.
 Explicit values always win, and the run log records which it was:

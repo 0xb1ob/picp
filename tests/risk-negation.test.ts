@@ -201,6 +201,7 @@ test("cp-wkv1: no-migration notes, plan evidence sections, spend tokens and audi
 		"Report estimated waste, in minutes, tokens and $ where computable.",
 		"Add a context-tokens status line that counts noncached tokens.",
 		"Read-only audit of the repository history. For each finding name the fix: delete/redact/rewrite history.",
+		"Read-only reviewer audit, answer deliverable. Severity per finding, and fix (delete/redact/rewrite history).",
 	]) {
 		assert.equal(inferScopeAndRisk(text).risk, undefined, text);
 		assert.deepEqual(riskKeywords(text), [], text);
@@ -220,6 +221,8 @@ test("cp-wkv1: real operational risk stays high next to the new benign senses", 
 		["Migration: none of the old rows are kept", ["migration"]],
 		["Fix: delete/redact/rewrite history", ["rewrite history"]],
 		["Read-only audit first, then rewrite history on main", ["rewrite history"]],
+		["keep backups read-only; run squash/rewrite history on main", ["rewrite history"]],
+		["Read-only audit of the backups. Then run squash/rewrite history on main.", ["rewrite history"]],
 		["Store API tokens, usd limits included", ["tokens"]],
 		["Print the tokens and $GH_PAT", ["tokens"]],
 	] as const) {
@@ -228,10 +231,14 @@ test("cp-wkv1: real operational risk stays high next to the new benign senses", 
 	}
 });
 
-test("cp-wkv1: an excluded section at the end of the task never swallows the job description", () => {
+test("cp-wkv1: neither an excluded section at the end of the task nor an excluded-heading title swallows the job description", () => {
 	const task = "## Goal\nAdd a report view.\n## Self-assessment\n- confidence: high";
 	const issue = { id: "cp-test", title: "Add a report view", description: "Delete the production database", labels: [] } as unknown as Job;
 	const inputs = composeRoutingInputs({} as DispatchRequest, issue, { forBrief: task, forInference: task });
 	assert.equal(inputs.risk, "high");
 	assert.equal(composeRoutingInputs({} as DispatchRequest, { ...issue, description: "Render it." }, { forBrief: task, forInference: task }).risk, "low");
+	for (const title of ["Evidence", "Acceptance", "Test plan", "Unknowns/Blockers", "Self-assessment", "Constraints", "Non-goals"]) {
+		const titled = { ...issue, title };
+		assert.equal(composeRoutingInputs({} as DispatchRequest, titled, { forBrief: "Add a report view.", forInference: "Add a report view." }).risk, "high", title);
+	}
 });
