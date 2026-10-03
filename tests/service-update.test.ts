@@ -505,9 +505,18 @@ test("verifyRestart: busy for the whole window (a queued doctor) is accepted wit
 	assert.ok(v.now() >= 420_000 && v.now() < 425_000, `ended at ${v.now()}`);
 });
 
-test("verifyRestart: busy throughout with the viewer down is unhealthy", async () => {
-	const v = verifyBench(() => ({ busy: PARENT_UNSETTLED }), () => "connection refused");
-	assert.match(String(await v.verify()), /^viewer: connection refused/);
+test("verifyRestart: busy throughout with the viewer down fails within the base window, probing the viewer before any extension", async () => {
+	let viewerProbes = 0;
+	const v = verifyBench(() => ({ busy: PARENT_UNSETTLED }), () => (viewerProbes++, "connection refused"));
+	assert.match(String(await v.verify()), /^not healthy within 120s: viewer: connection refused/);
+	assert.ok(v.now() <= 122_000, `not extended: ${v.now()}`);
+	assert.ok(viewerProbes > 1, `viewer probed within the window: ${viewerProbes}`);
+});
+
+test("verifyRestart: a viewer that goes down during the busy extension fails at once", async () => {
+	const v = verifyBench(() => ({ busy: PARENT_UNSETTLED }), (t) => (t < 150_000 ? undefined : "connection refused"));
+	assert.match(String(await v.verify()), /^not healthy within 120s: viewer: connection refused/);
+	assert.ok(v.now() >= 150_000 && v.now() < 155_000, `ended at ${v.now()}`);
 });
 
 test("verifyRestart: an absent parent, or busy then down, fails at the base deadline; a doctor error fails at once", async () => {
