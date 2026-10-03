@@ -1,4 +1,3 @@
-import { JOB_STATUSES } from "../contracts.ts";
 import { realpathSync, statSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import type { BoardResponse, JobResponse, JobsResponse, ViewerJob, JobPhase } from "./api-types.ts";
@@ -9,14 +8,14 @@ import { decisions } from "./overview-decisions.ts";
 import { SHA } from "./git-read.ts";
 import { recordedEvents, routingText } from "./overview-health.ts";
 import { mandateDisplay, mandateEscalations } from "./mandates-map-view.ts";
-import { objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded } from "./overview-read.ts";
+import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded } from "./overview-read.ts";
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
- const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && (JOB_STATUSES as readonly string[]).includes(str(j.status) ?? ""));
+ const ledger=objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j=>typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(str(j.status) ?? ""));
  return {fleet:fleet.value,ledger:ledger.value,grants:readMandates(state)};
 }
 function dispatchMandate(state:ViewerState,id:string,entry:Json | undefined,status:Json | undefined):string | null {
