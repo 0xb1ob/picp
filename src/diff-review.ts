@@ -281,6 +281,25 @@ function latestContentReview(home: string, jobId: string, decisions: readonly un
 		.at(-1);
 }
 
+const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/** A prior head is a delta baseline only along the branch's own history: an ancestor of the
+ * pushed head with the same fork point from the base. A rebase breaks ancestry; merging the base
+ * moves the fork point, and either would put upstream changes in a two-dot delta. Any git failure
+ * or malformed sha means no delta: the full three-dot subject is reviewed. */
+async function deltaBaselineHolds(git: GitRunner, cwd: string, base: string, branch: string, previousHead: string): Promise<boolean> {
+	if (!SHA.test(previousHead)) return false;
+	const head = `refs/remotes/origin/${branch}`;
+	if ((await git(cwd, ["merge-base", "--is-ancestor", previousHead, head])).status !== 0) return false;
+	const forkPoint = async (rev: string): Promise<string | undefined> => {
+		const result = await git(cwd, ["merge-base", "--all", `refs/remotes/origin/${base}`, rev]);
+		const shas = result.stdout.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).sort();
+		return result.status === 0 && shas.length > 0 && shas.every((sha) => SHA.test(sha)) ? shas.join(" ") : undefined;
+	};
+	const before = await forkPoint(previousHead);
+	return before !== undefined && before === (await forkPoint(head));
+}
+
 async function patchId(cwd: string, diff: string): Promise<string> {
 	return new Promise((resolvePromise, reject) => {
 		const child = spawn("git", ["patch-id", "--stable"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
@@ -556,10 +575,10 @@ export class DiffReview {
 		if (this.#options.mandates) assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
 
 		const previous = latestContentReview(home, jobId, prior.decisions);
-		// Delta only along the branch's own history: after a rebase it would carry upstream changes.
-		const ancestor = ["merge-base", "--is-ancestor", previous?.head_sha ?? "", `refs/remotes/origin/${branch}`];
-		const previousExists = previous && previous.head_sha !== headSha ? await git(clone, ancestor) : undefined;
-		const deltaFrom = previousExists?.status === 0 ? previous?.head_sha : undefined;
+		// Delta only along the branch's own history: a rebase or a merge of the base would carry upstream changes.
+		const deltaFrom = previous && previous.head_sha !== headSha && (await deltaBaselineHolds(git, clone, base, branch, previous.head_sha))
+			? previous.head_sha
+			: undefined;
 		const runDir = join(home, paths.reviewRunDir(jobId, attempt));
 		const scratch = join(home, paths.reviewScratchDir(jobId, attempt));
 		mkdirSync(scratch, { recursive: true });
