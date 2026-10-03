@@ -993,6 +993,27 @@ it is never dropped. `sendUserMessage` is that same `sendMessage` path.
 An operator send through the bridge is a `prompt` with `streamingBehavior:
 "steer"`, so it does not wait behind wake-ups already queued (see Bridge).
 
+**Busy-wake gate (cp-vy73).** While the parent's run is busy (`agent_start` to
+`agent_settled`) and one triggering wake-up already went out in that run, later
+wake-ups are sent with `{ triggerTurn: false }`: they ride into the next
+request instead of queueing one follow-up turn each. `cp-answered` always
+triggers, and an idle parent never gets a non-triggering send (pi would append
+it with no turn), so `agent_settled` clears busy before anything else runs.
+A non-triggering notice that no later request carried (the run's last turn was
+text-only) would be stranded, so `agent_settled` sends one triggering
+`cp-wakeup-nudge` ("N fleet notice(s) arrived while you were busy; they are
+above.") when more were sent than the last `before_provider_request` had seen.
+After an operator abort (the run's last assistant message is `aborted`) no
+nudge is sent, so the gate never starts a turn after an Esc; those notices
+reach the model with the next prompt (outboxes still re-send unconfirmed facts
+under their own rules). Two consequences:
+- **Arrival of a non-triggering notice is confirmed by the `context` hook**, at
+  the next model request, never by `message_start` — pi's flush does not emit
+  extension `message_start`/`message_end` for it.
+- **Notice order is not send order.** A non-triggering notice lands at the next
+  `turn_end` flush, ahead of an earlier triggering follow-up that pi drains only
+  after the current turn.
+
 **`ctx.ui.*` audit** (headless path produces the same information as a plain
 message):
 

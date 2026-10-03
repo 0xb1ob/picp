@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Busy parents batch wake-ups, with one nudge for stranded notices (cp-vy73)
+
+`sendWakeup` (`extensions/command-post/wakeup-surfaces.ts`) now sends a wake-up with `{ triggerTurn: false }` when the parent's run is busy and a triggering wake-up already went out in that run; otherwise it stays `{ deliverAs: "followUp", triggerTurn: true }`, and `cp-answered` always triggers. A counter snapshotted at `before_provider_request` tells `agent_settled` whether a non-triggering notice arrived after the last request; if so, after clearing busy, it sends one triggering `cp-wakeup-nudge` naming the count. An operator-aborted run gets no nudge; its notices reach the model with the next prompt. Arrival of a non-triggering notice is confirmed by the `context` hook at the next request (not by `message_start`), and notice order is no longer send order. Migration: none; reverting `sendWakeup` to always-triggering restores the old behaviour.
+
 ### Parent replies and wake relays settle per segment (cp-rf1a)
 
 A clean parent `turn_end` (no tool results, `stopReason` not `error`/`aborted`/`length`) now ends a segment (`src/bridge-segments.ts`): each landed send whose span holds an answer settles there with its own reply — the `cp_parent send` waiter returns `owner_observed`, or its one `send` relay goes out — and the parent's own text since the last segment relays as one `wake`, instead of both waiting for `agent_settled`, which never comes while follow-up wake-ups keep arriving. `agent_settled` handles only what is left (open sends, the transient resume ladder, the remaining wake text, the model error when no send is open, refused escalations, automatic context control). A send settles and counts toward the relaunch cap exactly once (`LandedMark.settled`). A model error after an already-answered send now relays as kind `error` instead of failing that send. Migration: none.

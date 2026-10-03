@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerSessionHooks } from "../extensions/command-post/session-hooks.ts";
 import { createSessionPost } from "../extensions/command-post/session-post.ts";
 import { createSessionState } from "../extensions/command-post/shared.ts";
-import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
+import { createWakeupSurfaces, WAKEUP_NUDGE_TYPE } from "../extensions/command-post/wakeup-surfaces.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
 import type { WakeupCarrier } from "../src/wakeups.ts";
@@ -12,7 +12,7 @@ import { createScratchHome, readRunEvents } from "./harness/index.ts";
 
 type ContextHook = (event: { messages: WakeupCarrier[] }) => Promise<{ messages: WakeupCarrier[] } | undefined>;
 
-test("qra: stale and replayed notices stay journaled, not in the parent's model context", async (t) => {
+function scratchPost(t: { after(fn: () => void | Promise<void>): void }): CommandPost {
 	const home = createScratchHome();
 	const previousHome = process.env.CP_HOME;
 	const previousMode = process.env.CP_MODE;
@@ -27,6 +27,12 @@ test("qra: stale and replayed notices stay journaled, not in the parent's model 
 		else process.env.CP_MODE = previousMode;
 		home.cleanup();
 	});
+	return post;
+}
+
+test("qra: stale and replayed notices stay journaled, not in the parent's model context", async (t) => {
+	const post = scratchPost(t);
+	const home = { path: post.home };
 	post.runs.open("cp-gone");
 	const open = (): ContextHook => {
 		let context: ContextHook | undefined;
@@ -91,4 +97,76 @@ test("qra: stale and replayed notices stay journaled, not in the parent's model 
 	assert.deepEqual(joblessMarker?.keys, ["cp-gone"]);
 	assert.match(joblessMarker?.reason ?? "", /every candidate it listed has been torn down/);
 	assert.doesNotMatch(JSON.stringify(suppressed), /Obsolete .* instructions|A new operator decision|HELD PR LANDED/, "journal records reasons, not message bodies");
+});
+
+// cp-vy73 (PR-3, cp-cc45 F3/F6): the busy-wake gate through the real hook wiring.
+test("cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges once for a stranded one", async (t) => {
+	const post = scratchPost(t);
+	const handlers = new Map<string, (event?: unknown) => unknown>();
+	const sent: Array<{ message: WakeupCarrier & { content: string }; options: { triggerTurn?: boolean; deliverAs?: string } }> = [];
+	const pi = {
+		on(name: string, handler: (event?: unknown) => unknown) { handlers.set(name, handler); },
+		registerEntryRenderer() {},
+		sendMessage(message: WakeupCarrier & { content: string }, options: { triggerTurn?: boolean; deliverAs?: string }) { sent.push({ message, options }); },
+	} as unknown as ExtensionAPI;
+	const state = createSessionState();
+	state.post = post;
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
+	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
+	const fire = (name: string, event: unknown = {}) => handlers.get(name)?.(event);
+	const wake = (tag: string) => wakeups.sendWakeup({ kind: "ci" }, `SYNTH-NOTICE ${tag}`, {});
+	const nudges = () => sent.filter((entry) => entry.message.customType === WAKEUP_NUDGE_TYPE);
+	const triggering = { deliverAs: "followUp", triggerTurn: true };
+
+	// Case 1: the first wake-up of a busy run triggers; the 2nd and 3rd ride along.
+	fire("agent_start");
+	fire("before_provider_request");
+	for (const tag of ["W1", "W2", "W3"]) assert.ok(wake(tag));
+	assert.deepEqual(sent.map((entry) => entry.options), [triggering, { triggerTurn: false }, { triggerTurn: false }]);
+	// `answered` stays triggering while busy.
+	wakeups.sendWakeup({ kind: "answered", keys: ["aw-synth"] }, "SYNTH-ANSWER", { answered: [] });
+	assert.deepEqual(sent.at(-1)?.options, triggering, "answered is never non-triggering");
+
+	// Case 2: a request carried W2/W3; W4 arrives after it, so settle nudges exactly once with N=1.
+	fire("before_provider_request");
+	assert.ok(wake("W4-late"));
+	assert.equal(sent.at(-1)?.options.triggerTurn, false);
+	fire("agent_settled");
+	assert.equal(nudges().length, 1);
+	assert.deepEqual(nudges()[0]?.options, triggering);
+	assert.match(nudges()[0]?.message.content ?? "", /^1 fleet notice\(s\) arrived while you were busy/);
+
+	// Case 4: a wake-up after agent_settled is triggering (idle, F6).
+	assert.ok(wake("after-settle"));
+	assert.deepEqual(sent.at(-1)?.options, triggering);
+
+	// Case 3: every non-triggering wake-up was carried by a later request — no nudge.
+	fire("agent_start");
+	assert.ok(wake("X1"));
+	assert.ok(wake("X2"));
+	assert.equal(sent.at(-1)?.options.triggerTurn, false);
+	fire("before_provider_request");
+	fire("agent_settled");
+	assert.equal(nudges().length, 1, "no new nudge without a wake-up after the last request");
+
+	// Abort regression: after an operator abort, a stranded notice starts no turn — not at
+	// settle, and not at the next settle either; it reaches the model with the next prompt.
+	fire("agent_start");
+	assert.ok(wake("Y1"));
+	fire("before_provider_request");
+	assert.ok(wake("Y2-late"));
+	assert.equal(sent.at(-1)?.options.triggerTurn, false);
+	fire("agent_end", { messages: [{ role: "user", content: "go" }, { role: "assistant", content: [], stopReason: "aborted" }] });
+	fire("agent_settled");
+	assert.equal(nudges().length, 1, "an aborted run is not nudged");
+	fire("agent_start");
+	fire("before_provider_request");
+	fire("agent_end", { messages: [{ role: "assistant", content: [], stopReason: "stop" }] });
+	fire("agent_settled");
+	assert.equal(nudges().length, 1, "the aborted run's notice is not nudged later either");
+
+	// The nudge carries no stamp, so the delivery-time review leaves it untouched.
+	const context = handlers.get("context") as unknown as ContextHook;
+	const nudge: WakeupCarrier = { ...nudges()[0]!.message, role: "custom" };
+	assert.equal(await context({ messages: [{ role: "user", content: "go" }, nudge] }), undefined);
 });
