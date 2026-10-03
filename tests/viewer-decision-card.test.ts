@@ -77,7 +77,8 @@ test("component: Awaiting renders option buttons, never CopyReply; disabled with
 	assert.match(ready, /class="decision-card-option decision-card-recommended"><span class="decision-card-option-heading"><strong>Keep<\/strong><span class="overview-rec-badge">recommended<\/span><\/span><span class="decision-card-consequence">Work stays paused/);
 	assert.match(ready, /<li>Keep: nothing more is spent<\/li><li>Raise: \$5 more, finishes today<\/li>/, "context bullets");
 	assert.match(ready, /<p>Risk: low\.<\/p>/, "context paragraphs");
-	assert.match(ready, /the parent recommends Drop the job/, "the parent's differing recommendation is flagged");
+	assert.equal(ready.match(/automatic default: Drop the job/g)?.length, 2, "the escalation's differing built-in recommendation reads as an automatic default, in the note and the context");
+	assert.doesNotMatch(ready, /parent recommends/, "no competing recommendation label");
 	assert.match(ready, /Ship the demo dashboard/);
 	assert.match(ready, /href="#job\/cp-demo"><code>cp-demo<\/code><\/a><span>Demo dashboard job<\/span><small>held · anthropic\/claude-demo · \$1\.50<\/small><a href="https:\/\/github\.com\/acme\/repo\/pull\/7">https:\/\/github\.com\/acme\/repo\/pull\/7<\/a>/);
 	assert.match(ready, /<a href="#files\?root=project%3Ademo&amp;path=README\.md">README\.md<\/a>/);
