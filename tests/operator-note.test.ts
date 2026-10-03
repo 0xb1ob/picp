@@ -61,7 +61,7 @@ test("the note never mentions fleet tools or state/ as things to call or touch",
 // caps/expiry, and must pin the operator's exact mandate-template sentence.
 test("the mandate template tells the main LLM not to ask for caps, expiry or actions", () => {
 	const sentence =
-		"The human names a project and an objective; that is the whole mandate. Do not " +
+		"The human names a project (or the several projects one topic spans) and an objective; that is the whole mandate. Do not " +
 		"ask for caps, expiry or actions \u2014 they come from the home's defaults. Issue " +
 		"it, then echo the effective grant in one line (fields and their sources) and " +
 		"say `stop` revokes it. Ask only if the objective is genuinely ambiguous about " +
