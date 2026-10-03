@@ -46,6 +46,8 @@ export interface LandedTurn {
 	assistantCount: number;
 	error?: { message: string };
 	landed: LandedMark[];
+	/** assistantCount at each clean turn_end (segmentEnd) this run. */
+	answers: number[];
 }
 
 type SendOutcome = { failed: boolean; reply: string; error: string };
@@ -137,8 +139,10 @@ export class ParentDelivery {
 	 * A clean `turn_end` (`cleanSegmentEnd`): every landed send not yet settled
 	 * whose span holds an answer is final now, not at `agent_settled` — its
 	 * waiter, relay and turn count happen here, once. A failed span waits for the settle.
+	 * A send whose span had no finished answer before the next landing rides on to this one.
 	 */
 	segmentEnd(turn: LandedTurn): void {
+		turn.answers.push(turn.assistantCount);
 		for (const { id, ...outcome } of landedOutcomes(turn)) {
 			const mark = turn.landed.find((each) => each.id === id) as LandedMark;
 			if (mark.settled || outcome.failed) continue;
@@ -233,6 +237,7 @@ export class ParentDelivery {
 	 * the parent's own transcript (`ParentSendOutbox.reconcile`); landed-unanswered
 	 * ones get one resume nudge, never the body; then the queue drains. An
 	 * unreadable transcript re-injects nothing and is retried on the next settle.
+	 * A call whose process was superseded meanwhile stops.
 	 */
 	async afterReady(proc: WorkerProcess): Promise<void> {
 		this.#reconcilePending = false;
@@ -245,6 +250,7 @@ export class ParentDelivery {
 			const landed = crossed("landed");
 			if (injected.size > 0) {
 				const transcript = await proc.getEntries(undefined, this.#host.requestTimeoutMs);
+				if (this.#host.liveProc() !== proc) return; // superseded: the new process reconciles from disk
 				for (const entry of this.outbox.reconcile(transcript, injected)) this.relay(entry);
 			}
 			const resume = this.outbox
@@ -252,11 +258,12 @@ export class ParentDelivery {
 				.filter((entry) => entry.state === "landed" && (landed.has(entry.id) || injected.has(entry.id)) && !this.#live.has(entry.id))
 				.map((entry) => entry.id);
 			if (resume.length > 0) {
+				if (this.#host.liveProc() !== proc) return;
 				const sent = await proc.send(frameResume(resume), "prompt", PARENT_STREAMING);
 				if (sent.receipt === "failed") throw new Error(sent.error ?? "resume failed");
 			}
 		} catch {
-			this.#reconcilePending = true;
+			if (this.#host.liveProc() === proc) this.#reconcilePending = true;
 			return;
 		}
 		this.#drain(proc);

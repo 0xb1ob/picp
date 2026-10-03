@@ -1120,7 +1120,9 @@ relaunch the bridge reads the parent's own `get_entries` transcript — an
 `injected` send whose marker is there is `landed` and never re-injected (a
 landed send with no reply gets one resume nudge, never the body); one that is
 absent is requeued; one the 400-entry window cannot prove is `undeliverable`,
-relayed, rather than risk a duplicate. Ceilings: `PARENT_SEND_MAX_ATTEMPTS`
+relayed, rather than risk a duplicate. A reconcile whose parent process was
+superseded mid-read stops there; the new process reconciles from disk.
+Ceilings: `PARENT_SEND_MAX_ATTEMPTS`
 (5) injections, `PARENT_SEND_MAX_AGE_HOURS` (24) queued. A fresh bridge (an
 operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
@@ -1145,7 +1147,9 @@ parent stopped and a backup, never by erasing counters on a running home.
 settles late, so a clean `turn_end` — no tool results, `stopReason` not
 `error`/`aborted`/`length` — ends a segment. There each landed, unsettled send
 whose span holds an assistant answer settles with the text from its landing to
-the segment end (or the next landing): its waiter returns `owner_observed`, or
+the segment end, or to the next landing that follows a finished answer: a send
+whose span holds only tool calls when another send steers in shares the next
+finished answer. Its waiter returns `owner_observed`, or
 its one `send` relay goes out, and it counts once toward the relaunch cap. The
 parent's own text since the last segment that no send's span covers relays as
 one `wake` with the jobs stamped since the last wake relay. `agent_settled`

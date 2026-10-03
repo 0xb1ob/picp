@@ -129,6 +129,7 @@ interface TurnBuf {
 	error?: ModelCallError;
 	/** Sends whose marker landed in this run. */
 	landed: LandedMark[];
+	answers: number[];
 	/** Refused cp_escalate calls, relayed at settle unless a later call in this run succeeds. */
 	refused: BridgeRelay[];
 	/** Accepted cp-envelope wake-ups seen this run (issue #2); appended verbatim to the wake relay. */
@@ -138,7 +139,7 @@ interface TurnBuf {
 	segJobIds: string[];
 }
 
-const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], refused: [], envelopes: [], relayed: 0, segJobIds: [] });
+const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], answers: [], refused: [], envelopes: [], relayed: 0, segJobIds: [] });
 
 const emptyReceipt = (): BridgeReceipt => ({ level: null, reached: [] });
 

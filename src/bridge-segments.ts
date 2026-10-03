@@ -17,7 +17,7 @@ export function cleanSegmentEnd(event: { type: string; [key: string]: unknown })
 }
 
 /** The texts from `from` on that no landed send's reply span covers: the parent's own (wake) text. */
-export function wakeSpans(turn: Pick<LandedTurn, "texts" | "assistantCount" | "landed">, from: number): string[] {
+export function wakeSpans(turn: Pick<LandedTurn, "texts" | "assistantCount" | "landed" | "answers">, from: number): string[] {
 	const spans = turn.landed.map((mark) => [mark.index, markSpan(turn, mark).end] as const);
 	return turn.texts.slice(from).filter((_, offset) => !spans.some(([start, end]) => start <= from + offset && from + offset < end));
 }
