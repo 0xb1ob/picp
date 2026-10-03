@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Keyword risk skips plan evidence sections, spend tokens and "Migration: none" (cp-wkv1)
+
+`acceptedRiskMatches` now also excludes Markdown sections headed `Test plan`, `Evidence`, `Unknowns` (`Unknowns/Blockers`), `Self-assessment` and `Acceptance`, beside `Constraints`/`Non-goals`. `benignSenseAt` drops `tokens` as spend (`estimate the tokens`, `context-tokens`, `noncached tokens`, `usd, tokens`, `cost/tokens`, `spend.tokens`, `tokens and $`), `migration` followed by `: none`/`: n/a`, and `rewrite history` offered as a slash-list fix (`delete/redact/rewrite history`) in a text that says `read-only`. The dispatch joins the job title as a `#` heading, so a task's final excluded section no longer swallows the job description. `RISK_SIGNALS` is unchanged; credential, destructive, history and production wording outside those senses still infers high. Migration: none.
+
 ### Withheld wake-ups keep their reason; overdue escalations reach the main session (cp-dt3p)
 
 A withheld wake-up's replay-memory entry (`state/wakeup-replay.json`, `withheld:` key) now stores its first withhold reason (at most 300 chars), so a later context reads "already withheld in an earlier context: <reason>" instead of losing it; a legacy entry reads "(original reason not recorded)". `cp:wakeup_suppressed` markers carry the stamp's `keys`, and a jobless `cp-recovery` marker lands in each listed job's run log. The wake-up `review` fact source reads the CommandPost's own home instead of `CP_HOME`, so a decided gate attempt can no longer read "no decision on disk". The operator session relays, once per id, any escalation open at least 10 minutes that no open operator ask represents and that never reached it as a relay (ledger `state/operator/escalation-relays.json`; `session_start` plus a 60 s tick). Migration: none. The first tick after deploy relays any already-overdue, unrelayed open escalation once.

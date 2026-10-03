@@ -34,8 +34,9 @@ export function composeRoutingInputs(
 	});
 }
 
-/** Everything a job says about itself: the words routing and the H6 risk warning both read. */
-const jobText = (issue: Job, task: ResolvedTask): string => [task.forInference, issue.title, issue.description ?? ""].join("\n");
+/** Everything a job says about itself: the words routing and the H6 risk warning both read. The title is a level-1
+ * heading so an excluded section at the end of the task (`## Self-assessment`) never swallows the description (cp-wkv1). */
+const jobText = (issue: Job, task: ResolvedTask): string => [task.forInference, `# ${issue.title}`, issue.description ?? ""].join("\n");
 
 /** H6: the gate's risk, from routing's axis and a risk a parent (`risk`, a `risk:` label, a header) or planner (`recordedRisk`) recorded. */
 export function riskGate(mandates: MandateStore | undefined, request: DispatchRequest, issue: Job, task: ResolvedTask, job: { jobId: string; project: string; kind: JobKind }, inputs: ReturnType<typeof resolveRoutingInputs>) {
