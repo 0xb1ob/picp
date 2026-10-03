@@ -8,9 +8,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { layoutForHome } from "../src/contracts.ts";
+import { CpBridgeError } from "../src/cp-bridge.ts";
 import type { DrainRecord } from "../src/drain.ts";
+import { PARENT_UNSETTLED } from "../src/parent-diagnostics.ts";
 import { serviceFindings } from "../src/service/status.ts";
-import { readUpdateState, runUpdate, type UpdateState, updateStateFile } from "../src/service/update.ts";
+import { DOCTOR_PROBE_MS, type ParentProbe, probeDoctor, readUpdateState, runUpdate, type UpdateState, updateStateFile, type VerifyResult, verifyRestart } from "../src/service/update.ts";
 import { advanceBase, createScratchRepo } from "./harness/scratch-repo.ts";
 
 const GIT_ENV = { GIT_AUTHOR_NAME: "cp test", GIT_AUTHOR_EMAIL: "cp@test.invalid", GIT_COMMITTER_NAME: "cp test", GIT_COMMITTER_EMAIL: "cp@test.invalid", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
@@ -27,7 +29,7 @@ function bench(t: import("node:test").TestContext, config: unknown = { enabled: 
 	let clock = Date.parse("2026-09-28T10:00:00Z");
 	const calls: string[] = [];
 	const lines: string[] = [];
-	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, verify: [] as Array<string | undefined | (() => string | undefined)>, failing: new Set<string>() };
+	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, verify: [] as Array<VerifyResult | (() => VerifyResult)>, failing: new Set<string>() };
 	// cp-daemon's control socket: each op is recorded as `daemon <op>`; a failing one answers like daemonControl.
 	const daemonCall = (op: string): string | undefined => {
 		calls.push(`daemon ${op}`);
@@ -311,6 +313,7 @@ test("rollback after a restarted parent reopened dispatch: it drains first and n
 	assert.equal(held?.last_result, "rollback_failed", b.lines.join("\n"));
 	assert.equal(held?.phase, "rolling_back", "kept for a retry, not sticky");
 	assert.equal(held?.held, true, "no run in flight: cp-health keeps watching (tests/service-health.test.ts)");
+	assert.equal(held?.bad_sha, undefined, "rollback_failed never stamps bad_sha: only a verified rollback does");
 	assert.equal(b.hostCalls().filter((call) => call === "host stop [{}]").length, 1, "only the forward stop: the rollback stopped nothing");
 	assert.deepEqual(b.hostCalls().slice(-2), ["host drain [600]", "host drainCancel"], "the rollback drained, timed out, cancelled");
 	assert.equal(b.repo.head(), bad, "no reset under a live worker");
@@ -393,4 +396,131 @@ test("dry-run: probes, records nothing, drains nothing", async (t) => {
 	assert.match(b.lines.at(-1) ?? "", /^dry-run: would drain, then update/);
 	assert.equal(readUpdateState(b.stateDir), undefined);
 	assert.equal(b.repo.head(), head);
+});
+
+const NOTE = "doctor deferred: parent busy 420s";
+
+test("a deferred doctor note on the forward verify is healthy: updated, the note ends the detail", async (t) => {
+	const b = bench(t);
+	const to = advanceBase(b.repo, "note.txt", "note\n");
+	b.fake.verify = [{ note: NOTE }];
+	const state = await b.run();
+	assert.equal(state?.last_result, "updated", b.lines.join("\n"));
+	assert.equal(b.repo.head(), to);
+	assert.match(state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
+	assert.match(readUpdateState(b.stateDir)?.detail ?? "", /; doctor deferred: parent busy 420s$/);
+});
+
+test("a deferred doctor note on the rollback verify is not a failure: rolled_back, bad_sha stamped, the note in the detail", async (t) => {
+	const b = bench(t);
+	const bad = advanceBase(b.repo, "b.txt", "b\n");
+	b.fake.verify = ["DOCTOR broken", { note: NOTE }];
+	const state = await b.run();
+	assert.equal(state?.last_result, "rolled_back", b.lines.join("\n"));
+	assert.equal(state?.bad_sha, bad);
+	assert.match(state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
+});
+
+test("rollback_failed keeps the prior bad_sha: a failure it cannot attribute never marks the target bad", async (t) => {
+	const b = bench(t);
+	writeFileSync(updateStateFile(b.stateDir), JSON.stringify({ schema_version: 1, phase: "idle", fetch_failures: 0, bad_sha: "a".repeat(40) }));
+	advanceBase(b.repo, "r.txt", "r\n");
+	b.fake.verify = ["doctor error", "still broken"];
+	const state = await b.run();
+	assert.equal(state?.last_result, "rollback_failed", b.lines.join("\n"));
+	assert.equal(state?.bad_sha, "a".repeat(40));
+	assert.equal(readUpdateState(b.stateDir)?.bad_sha, "a".repeat(40));
+});
+
+const never = (): Promise<never> => new Promise<never>(() => {});
+
+test("probeDoctor: an explicit rejection is busy only for the exact PARENT_UNSETTLED; an observed failure is never masked as busy", async () => {
+	let statusCalls = 0;
+	const alive = async () => {
+		statusCalls++;
+		return { alive: true, pid: 42 };
+	};
+	const rejects = (message: string) => () => Promise.reject(new CpBridgeError(message));
+	assert.deepEqual(await probeDoctor(rejects(PARENT_UNSETTLED), alive, 42, 1_000), { busy: PARENT_UNSETTLED });
+	assert.deepEqual(await probeDoctor(rejects("parent is not running; call cp_parent start"), alive, 42, 1_000), { down: "parent is not running; call cp_parent start" });
+	assert.deepEqual(await probeDoctor(rejects(`${PARENT_UNSETTLED} (x)`), alive, 42, 1_000), { down: `${PARENT_UNSETTLED} (x)` }, "exact match only");
+	assert.deepEqual(await probeDoctor(rejects("Timeout waiting for get_commands"), alive, 42, 1_000), { down: "Timeout waiting for get_commands" });
+	assert.deepEqual(await probeDoctor(async () => ({ level: "error", text: "DOCTOR broken" }), alive, 42, 1_000), { error: "DOCTOR broken" });
+	assert.deepEqual(await probeDoctor(async () => ({ level: "info", text: "DOCTOR ok" }), alive, 42, 1_000), { ok: true });
+	assert.equal(statusCalls, 0, "an answered doctor never consults status");
+});
+
+test("probeDoctor: a doctor queued behind the host queue is busy only while status confirms the same live parent pid", async () => {
+	const queued = await probeDoctor(never, async () => ({ alive: true, pid: 42 }), 42, 20);
+	assert.match("busy" in queued ? queued.busy : JSON.stringify(queued), /queued behind the host queue/);
+	const statuses: Array<[string, () => Promise<unknown>]> = [
+		["dead", async () => ({ alive: false })],
+		["replaced", async () => ({ alive: true, pid: 43 })],
+		["rejects", () => Promise.reject(new CpBridgeError("parent host connection closed"))],
+		["silent", never],
+	];
+	for (const [label, status] of statuses) {
+		const probe = await probeDoctor(never, status, 42, 20, 20);
+		assert.ok("down" in probe, `${label}: ${JSON.stringify(probe)}`);
+	}
+});
+
+/** verifyRestart on a fake clock: `probe(t)` answers each doctor probe; a queued busy probe spends its whole budget. */
+function verifyBench(probe: (t: number) => ParentProbe, viewer: (t: number) => string | undefined = () => undefined) {
+	let clock = 0;
+	const probes: Array<{ at: number; budget: number }> = [];
+	const lines: string[] = [];
+	const ports = {
+		probeParent: async (budget: number) => {
+			probes.push({ at: clock, budget });
+			const answer = probe(clock);
+			if ("busy" in answer && /queued/.test(answer.busy)) clock += budget;
+			return answer;
+		},
+		viewerDown: async () => viewer(clock),
+		now: () => clock,
+		sleep: async (ms: number) => void (clock += ms),
+		log: (line: string) => lines.push(line),
+	};
+	return { verify: () => verifyRestart(ports, 120_000), probes, lines, now: () => clock };
+}
+const QUEUED: ParentProbe = { busy: "doctor queued behind the host queue for 1ms; parent pid 42 alive" };
+
+test("verifyRestart: busy extends past 120 s; a doctor that then passes is healthy with no note", async () => {
+	const v = verifyBench((t) => (t < 200_000 ? { busy: PARENT_UNSETTLED } : { ok: true }));
+	assert.equal(await v.verify(), undefined);
+	assert.ok(v.now() >= 200_000, "waited past the base deadline");
+	assert.deepEqual(v.lines, []);
+});
+
+test("verifyRestart: busy for the whole window (a queued doctor) is accepted with the doctor deferred note; probe budgets stay bounded", async () => {
+	const v = verifyBench(() => QUEUED);
+	assert.deepEqual(await v.verify(), { note: NOTE });
+	assert.deepEqual(v.lines, [NOTE]);
+	assert.equal(v.probes[0]?.budget, 120_000, "the first probe is capped at the base deadline");
+	assert.ok(v.probes.some((entry) => entry.budget === DOCTOR_PROBE_MS), "a busy parent gets the full probe budget");
+	for (const { at, budget } of v.probes) {
+		assert.ok(budget <= DOCTOR_PROBE_MS && budget <= Math.max(1_000, 420_000 - at), `budget ${budget} at ${at}`);
+	}
+	assert.ok(v.now() >= 420_000 && v.now() < 425_000, `ended at ${v.now()}`);
+});
+
+test("verifyRestart: busy throughout with the viewer down is unhealthy", async () => {
+	const v = verifyBench(() => ({ busy: PARENT_UNSETTLED }), () => "connection refused");
+	assert.match(String(await v.verify()), /^viewer: connection refused/);
+});
+
+test("verifyRestart: an absent parent, or busy then down, fails at the base deadline; a doctor error fails at once", async () => {
+	const absent = verifyBench(() => ({ down: "no parent host answered" }));
+	assert.match(String(await absent.verify()), /^not healthy within 120s: no parent host answered/);
+	assert.ok(absent.now() <= 122_000, `never extended: ${absent.now()}`);
+	assert.ok(absent.probes.every(({ at, budget }) => budget <= Math.max(1_000, 120_000 - at)));
+
+	const died = verifyBench((t) => (t < 60_000 ? { busy: PARENT_UNSETTLED } : { down: "parent is not running; call cp_parent start" }));
+	assert.match(String(await died.verify()), /^not healthy within 120s: parent is not running/);
+	assert.ok(died.now() <= 122_000, `a down after a busy falls back to the base deadline: ${died.now()}`);
+
+	const broken = verifyBench(() => ({ error: "DOCTOR broken" }));
+	assert.match(String(await broken.verify()), /reports an error: DOCTOR broken/);
+	assert.equal(broken.probes.length, 1);
 });
