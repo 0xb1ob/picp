@@ -118,7 +118,7 @@ import {
 } from "./curation.ts";
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
-import { HeldContinuation } from "./held-continuation.ts";
+import { HeldContinuation } from "./held-continuation.ts"; import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
 import { ProjectRegistry } from "./projects.ts";
@@ -599,6 +599,7 @@ export class CommandPost {
 				return { receipt: result.receipt, ...(result.error ? { error: result.error } : {}) };
 			},
 			awaiting: () => this.awaiting,
+			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs }), // merge_policy by record.project through this registry; no fleet lookup
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(),
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.

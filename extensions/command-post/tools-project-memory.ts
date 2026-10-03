@@ -30,8 +30,9 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "add", "show", "archive", "unarchive"], { description: "list registered projects, add one, show one, or archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept)" }),
-			name: Type.Optional(Type.String({ description: "Project name; required for add, show, archive and unarchive" })),
+			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), or set its merge_policy" }),
+			name: Type.Optional(Type.String({ description: "Project name; required for add, show, archive, unarchive and merge_policy" })),
+			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy: repo (default; cp_integrate merges when the repository permits) or human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post)" })),
 			clone_url: Type.Optional(Type.String({ description: "git remote to clone/fetch from; required for add" })),
 			delivery: Type.Optional(
 				StringEnum(["pr", "local"], { description: "Default delivery for jobs in this repo (default: pr)" }),
@@ -72,6 +73,14 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 				const project = await registry.setArchived(params.name, params.action === "archive");
 				return {
 					content: [{ type: "text", text: `${project.name} ${project.archived ? "archived" : "unarchived"}` }],
+					details: { project } as unknown as Record<string, unknown>,
+				};
+			}
+			if (params.action === "merge_policy") {
+				if (!params.policy) throw new Error("cp_project merge_policy needs a policy: repo or human_handoff");
+				const project = await registry.setMergePolicy(params.name, params.policy as "repo" | "human_handoff");
+				return {
+					content: [{ type: "text", text: `${project.name} merge_policy: ${project.merge_policy ?? "repo"}` }],
 					details: { project } as unknown as Record<string, unknown>,
 				};
 			}
