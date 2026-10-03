@@ -30,7 +30,8 @@ import { CheckpointStore } from "../src/checkpoint.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { acquireParentLock, holdsParentLock } from "../src/parent-lock.ts";
 import type { AnsweredDecision, FleetRecord, RunStatus, StatusJob } from "../src/contracts.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, SCHEMA_VERSION, validateAnsweredOutboxFile } from "../src/contracts.ts";
+import { checkpointAwaitingId, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, SCHEMA_VERSION, validateAnsweredOutboxFile } from "../src/contracts.ts";
+import { raisePlanApproval } from "../src/escalation.ts";
 import { initialStatus } from "../src/run-artifacts.ts";
 import { assembleStatus } from "../src/status.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -1545,6 +1546,69 @@ test("a ResolvedAwaitingItem's id is what the wake-up carries, even for a long d
 		};
 		await parent.post.awaiting.answerResolved(row, { answer: "follow-up", by: "operator dialog (tui)" });
 		assert.equal(flat(parent.sent)[0]?.id, row.id);
+	} finally {
+		home.cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Escalation answers wake the parent
+// ---------------------------------------------------------------------------
+
+const ESC_OPTIONS = [
+	{ id: "approve", label: "approve", consequence: "proceed", cost: "none" },
+	{ id: "decline", label: "decline", consequence: "hold", cost: "wait" },
+];
+
+test("an unlinked escalation answer queues one es- wake, once, and a restart never replays it", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const raised = await parent.post.escalations.raise({ job_ids: ["cp-synth1"], kind: "product_ambiguity", question: "which copy?", options: ESC_OPTIONS, recommended: "approve" });
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator command" });
+		const delivered = flat(parent.sent);
+		assert.equal(delivered.length, 1, "one delivery");
+		assert.deepEqual([delivered[0]?.id, delivered[0]?.type, delivered[0]?.job_id, delivered[0]?.answer], [raised.id, "escalation", "cp-synth1", "approve"]);
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator command" });
+		assert.equal(flat(parent.sent).length, 1, "an identical repeat wakes nobody");
+		const restarted = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+		assert.deepEqual(restarted.answered.pending(), [], "delivered is history, not news");
+	} finally {
+		home.cleanup();
+	}
+});
+
+test("a plan approval linked to a ship checkpoint wakes once, under the checkpoint row id, with no es- duplicate", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		parent.post.checkpoints.request({ jobId: "cp-synth-ship", question: "ship the plan?" });
+		const raised = await raisePlanApproval(parent.post.escalations, { researchId: "cp-synth-res", shipId: "cp-synth-ship", question: "ship the plan?", evidence_paths: [] });
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator command" });
+		assert.deepEqual(flat(parent.sent).map((decision) => decision.id), ["aw-checkpoint-cp-synth-ship"]);
+	} finally {
+		home.cleanup();
+	}
+});
+
+test("an es- id is confirmable from the notice text alone", () => {
+	const decision = answeredDecision({ id: "es-0a0a0a", type: "escalation", job_id: "cp-synth1", decision: "which copy?", answer: "approve", answered_by: "operator command" });
+	assert.deepEqual(answeredIdsFromMessage({ customType: "cp-answered", content: formatAnsweredNotice([decision]) }), ["es-0a0a0a"]);
+});
+
+test("an alternate-kind (merge) linked checkpoint answered through the escalation wakes once, under its own row id", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const sha = "0123456789abcdef0123456789abcdef01234567";
+		parent.post.mergeCheckpoints.request({ jobId: "cp-synth-merge", scope: sha, question: "merge cp-synth-merge?" });
+		const raised = await parent.post.escalations.raise({
+			job_ids: ["cp-synth-merge"], kind: "merge_refused", question: "merge?", options: ESC_OPTIONS, recommended: "approve",
+			checkpoint_job_id: "cp-synth-merge", checkpoint_kind: "merge", checkpoint_scope: sha,
+		});
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator command" });
+		assert.equal(parent.post.mergeCheckpoints.get("cp-synth-merge", { scope: sha })?.decision, "approved");
+		assert.deepEqual(flat(parent.sent).map((decision) => decision.id), [checkpointAwaitingId("cp-synth-merge", "merge", sha)]);
 	} finally {
 		home.cleanup();
 	}
