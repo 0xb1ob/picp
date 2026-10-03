@@ -16,6 +16,10 @@ is picked up by that one invocation and the per-gate scripts exist only to run
 one of them alone. It also *collects* the live suites and skips them (they print
 their skip reason), so `npm test` stays free.
 
+m1 always runs. m2, m3 and the `tests/pipeline.test.ts` lease tests self-skip
+unless `treehouse` is on `PATH`; CI installs it, and `tests/ci-host-tools.test.ts`
+fails the run if the install did not land on `PATH`.
+
 ## The live suite (T29) — operator-run
 
 `tests/e2e/live.test.ts` is the release suite: five scenarios against a **real

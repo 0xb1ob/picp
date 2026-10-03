@@ -29,7 +29,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { DoctorReport } from "../../src/contracts.ts";
 import { describeHome } from "../../src/home.ts";
-import { hostPiVersionConflict, REPO_ROOT, startRpc, treehouseAvailable } from "../harness/index.ts";
+import { hostPiVersionConflict, noModelAuthFinding, REPO_ROOT, startRpc, treehouseAvailable } from "../harness/index.ts";
 import { LAYOUT } from "../../src/contracts.ts";
 
 interface CleanMachine {
@@ -175,15 +175,20 @@ test("clean machine: a fresh clone loads, scaffolds its home and is dispatchable
 	if (piConflict) {
 		console.log(`packaging: tolerating host.pi.conflict — more than one pi version on PATH (${piConflict})`);
 	}
-	const errors = report.findings.filter(
-		(finding) => finding.severity === "error" && !(piConflict && finding.check === "host.pi.conflict"),
-	);
+	// CI installs treehouse but has no model credentials (`CP_LIVE_TESTS` stays
+	// empty, no `pi auth`). There, tolerate only the findings that say no model
+	// is authenticated at all. Every other error still fails.
+	const noModelAuth = process.env.GITHUB_ACTIONS === "true";
+	const tolerated = (finding: (typeof report.findings)[number]) =>
+		(piConflict && finding.check === "host.pi.conflict") || (noModelAuth && noModelAuthFinding(finding));
+	const errors = report.findings.filter((finding) => finding.severity === "error" && !tolerated(finding));
+	if (noModelAuth) {
+		console.log(`packaging: CI has no pi auth — tolerating ${report.findings.filter((f) => noModelAuthFinding(f)).length} no-model-auth finding(s)`);
+	}
 	// "Dispatchable" is a claim about a host that actually has treehouse and
-	// authenticated models — CI (ubuntu-latest, `npm ci` only, no `pi auth`) is
-	// deliberately not that host, the same way it was never a `br` host before
-	// this build dropped br. Assert the strict "zero errors" claim only where it
-	// can be true; every other assertion in this test (scaffold, registration,
-	// idempotence) still runs unconditionally on every machine, CI included.
+	// authenticated models. Assert the strict "zero errors" claim only where
+	// treehouse is present; every other assertion in this test (scaffold,
+	// registration, idempotence) still runs unconditionally on every machine.
 	if (treehouseAvailable()) {
 		assert.deepEqual(
 			errors.map((finding) => finding.check),

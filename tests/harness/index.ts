@@ -33,7 +33,7 @@ export {
 } from "./pi-child.ts";
 export { assertGolden, GOLDEN_DIR, goldenPath, UPDATE_GOLDEN } from "./golden.ts";
 export { argOf, type CapturedSpawn, captureSpawns } from "./spawns.ts";
-export { hostPiVersionConflict } from "./host-pi.ts";
+export { hostPiVersionConflict, noModelAuthFinding } from "./host-pi.ts";
 export { type RpcRecord, type RpcSession, startRpc } from "./rpc.ts";
 export {
 	enableTreehouse,

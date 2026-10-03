@@ -51,6 +51,17 @@ Docker-in-Docker runner per job). The choice keys on
 `github.event.repository.private`, so a public repository, and therefore any
 fork PR, never reaches a privileged self-hosted runner.
 
+The m2, m3 and `tests/pipeline.test.ts` lease suites (and the other
+lease-backed tests) need a real `treehouse` on `PATH`; without it they
+self-skip and `node --test` still exits 0. So before `npm test` the job prepends
+`$HOME/.local/bin` via `GITHUB_PATH`, installs treehouse with
+`node scripts/install-tools.ts treehouse` (ordinary privileges, no sudo) and
+prints `treehouse --version` into the log; the installer tracks upstream
+latest, so that line is the version record. The sentinel
+`tests/ci-host-tools.test.ts` fails the run when `GITHUB_ACTIONS=true` and
+treehouse is not on `PATH`. Off CI a missing treehouse still only skips. The
+live suites stay skipped (`CP_LIVE_TESTS` is empty).
+
 ## Several homes on one machine
 
 Only needed when you run more than one home; both default to normal behaviour

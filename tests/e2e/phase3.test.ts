@@ -517,11 +517,16 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	for (const control of [paths.statusFile(researchId), paths.envelopeFile(researchId), paths.gateFile(researchId, 2)]) {
 		assert.equal(f.post.checkToolCall({ toolName: "read", input: { path: join(f.home, control) }, cwd: f.home }), undefined);
 	}
-	// Runtime state is never committed.
+	// Runtime state is never committed. The guard matches NEVER_COMMIT_PATHS, and
+	// since cp-u3i2 every runtime file lives under `.pi-command-post/`. So the
+	// fleet file this home actually writes (LAYOUT.fleetFile) is blocked, and a
+	// bare top-level `state/` path is ordinary source that may be staged.
+	assert.equal(LAYOUT.fleetFile, ".pi-command-post/state/fleet.json");
 	assert.equal(
-		f.post.checkToolCall({ toolName: "bash", input: { command: "git add state/fleet.json" }, cwd: f.home })?.code,
+		f.post.checkToolCall({ toolName: "bash", input: { command: `git add ${LAYOUT.fleetFile}` }, cwd: f.home })?.code,
 		"never_commit_path",
 	);
+	assert.equal(f.post.checkToolCall({ toolName: "bash", input: { command: "git add state/fleet.json" }, cwd: f.home }), undefined);
 
 	// Nothing the PARENT writes carries the body: the fleet, the gate decisions
 	// and the checkpoint are all headlines and facts. (The worker's own event log
