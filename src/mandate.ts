@@ -646,7 +646,7 @@ export class MandateStore {
 				const asking = speaking.find((mandate) => mandate.ask_on.includes("risk:high"));
 				const raised = await raiseRiskHigh(escalations, { jobId: job.jobId, evidence: job.evidence ?? [], ...(asking ? { mandateId: asking.id } : {}) });
 				throw new MandateError(
-					`${job.jobId}: risk:high under ask_on \u2014 refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize this job`,
+					`${job.jobId}: risk:high under ask_on \u2014 refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it`,
 				);
 			}
 		}

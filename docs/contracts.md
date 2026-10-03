@@ -3558,11 +3558,26 @@ operator quote (never a mandate basis — `risk:high` never auto-permits) —
 a structured escalation is never a checkpoint or a declared Awaiting-you row,
 so `decide()` answers it through `EscalationStore.answer` and never through
 `CheckpointStore`/`AwaitingStore`. The record: a **decided, approving**
-`risk_high_irreversible` escalation naming a job id is permission for that job
-id only; a new job id needs a new decision, and an escalation answered `drop`
+`risk_high_irreversible` escalation naming a job id is permission for the job
+ids it names only; a new job id needs a new decision, and an escalation answered `drop`
 leaves the job refused. `cp_dispatch dry_run` reports `mandate_gate: "would ask:
 risk:high"` from the same predicate (`MandateStore.wouldAskRiskHigh`), with
 nothing escalated.
+
+**Batch approval** (`cp_escalate action:"batch_risk_high" job_ids:[2..16]`,
+`batchRiskHigh` in `src/risk-batch.ts`): one `risk_high_irreversible` record
+listing every id (sorted), options exactly `approve`/`drop`, recommended `drop`,
+under the one asking mandate's clause; then each job's open per-job row is
+withdrawn (raise first, so a crash leaves a duplicate, never a lost question).
+Every id is validated before any write — unknown, ungated (no open per-job row
+and no `risk:high` label), not covered by exactly one active mandate asking on
+`risk:high` (mixed or none), already approved, duplicated, fewer than 2 or more
+than 16 — and a refusal leaves `escalations.json` byte-identical. One `cp_decide
+<es-id> approve` with an operator quote authorizes every listed job at
+`cp_dispatch`, the `cp_send` promotion and the pipeline implementer; `drop`
+refuses them all; there is no partial answer. While the batch is open, a refused
+dispatch of a listed job raises nothing new and names the batch
+(`raiseRiskHigh` returns it).
 
 **H6: an inferred risk:high warns; an assessed risk:high gates** (`src/risk-warning.ts`).
 `inferScopeAndRisk` is a keyword heuristic. When routing's risk is `high` only

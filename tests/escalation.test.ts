@@ -21,7 +21,9 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExtensionDeps } from "../extensions/command-post/shared.ts";
 import { registerMandateTools } from "../extensions/command-post/tools-mandate.ts";
-import { createScratchHome } from "./harness/index.ts";
+import { createScratchHome, createScratchLedger } from "./harness/index.ts";
+import { MandateStore } from "../src/mandate.ts";
+import { readFileSync } from "node:fs";
 
 const OPTIONS = [
 	{ id: "approve", label: "approve", consequence: "proceed", cost: "none" },
@@ -248,6 +250,54 @@ test("cp_escalate action withdraw: needs an id and a reason, withdraws by id, ca
 	assert.equal(store.get(raised.id)?.status, "withdrawn");
 	assert.equal(refreshed, 1);
 	await assert.rejects(() => escalate({ action: "raise", job_ids: ["cp-a"] }), /raise needs job_ids, kind, question, options and recommended/);
+});
+
+test("cp_escalate action batch_risk_high (6B-T2): every refusal writes nothing and refreshes nothing; a valid batch withdraws the per-job rows", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new EscalationStore({ home: home.path });
+	const mandates = new MandateStore(home.path);
+	const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["example-app"] });
+	mandates.issue({ projects: ["example-app"], objective: "ship the example change", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const ids: string[] = [];
+	for (const slug of ["aaa1", "aaa2", "aaa3"]) ids.push((await ledger.create({ title: `example ${slug}`, project: "example-app", delivery: "pr", kind: "ship", slug, ...(slug === "aaa1" ? { risk: "high" as const } : {}) })).id);
+	const [a1, a2, a3] = ids as [string, string, string];
+	for (const jobId of [a2, a3]) {
+		await assert.rejects(() => mandates.assertDispatchAllowed({ jobId, project: "example-app", kind: "ship", risk: "high", evidence: ["risk high: production"] }), /risk:high under ask_on/);
+	}
+	const tools = new Map<string, { parameters: unknown; execute: (...args: unknown[]) => Promise<{ content: { text: string }[]; details: Record<string, unknown> }> }>();
+	const pi = { on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<never> }) => tools.set(tool.name, tool as never) };
+	let refreshed = 0;
+	const deps = {
+		commandPost: () => ({ escalations: store, mandates, ledger: () => ledger }),
+		setLive: () => {},
+		refreshWidget: () => {
+			refreshed += 1;
+		},
+		projectOf: () => () => undefined,
+		createdThisTurn: [],
+	} as unknown as ExtensionDeps;
+	registerMandateTools(pi as unknown as ExtensionAPI, deps);
+	assert.match(JSON.stringify(tools.get("cp_escalate")!.parameters), /batch_risk_high/);
+	const escalate = (params: Record<string, unknown>) => tools.get("cp_escalate")!.execute("call-1", params, undefined, undefined, {});
+
+	const before = readFileSync(store.file, "utf8");
+	for (const [params, pattern] of [
+		[{ action: "batch_risk_high" }, /needs job_ids/],
+		[{ action: "batch_risk_high", job_ids: [a1] }, /got 1/],
+		[{ action: "batch_risk_high", job_ids: [a1, "cp-zzz9"] }, /unknown job ids/],
+		[{ action: "batch_risk_high", job_ids: [a1, a1] }, /duplicate job ids/],
+	] as const) {
+		await assert.rejects(() => escalate(params), pattern);
+		assert.equal(readFileSync(store.file, "utf8"), before, `${pattern} wrote nothing`);
+	}
+	assert.equal(refreshed, 0);
+
+	const result = await escalate({ action: "batch_risk_high", job_ids: ids });
+	const batch = store.open();
+	assert.equal(batch.length, 1);
+	assert.match(result.content[0]!.text, new RegExp(`^${batch[0]!.id} batch risk:high: 3 jobs .*withdrew 2 per-job rows`));
+	assert.equal(refreshed, 1);
 });
 
 test("a gate escalate/policy verdict produces an escalation without the parent composing one", async (t) => {
