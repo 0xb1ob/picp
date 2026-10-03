@@ -49,7 +49,18 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		confirmVerdictArrival,
 		confirmDurableArrival,
 		reviewWakeupsInContext,
+		wakeGate,
 	} = wakeups;
+
+	// cp-vy73: the busy-wake gate's run boundaries (wakeup-surfaces.ts). Synchronous, and
+	// registered before awaiting-command's `agent_settled`, so busy clears before anything
+	// that handler sends.
+	pi.on("agent_start", () => wakeGate.agentStart());
+	pi.on("before_provider_request", () => {
+		wakeGate.providerRequest();
+	});
+	pi.on("agent_end", (event) => wakeGate.agentEnd(event.messages));
+	pi.on("agent_settled", () => wakeGate.agentSettled());
 
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
 		try {

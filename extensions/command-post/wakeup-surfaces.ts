@@ -27,6 +27,8 @@ import { currentRuntime, sourceFailureRecorder, wakeupHeadSources } from "./help
 import type { SessionState } from "./shared.ts";
 
 export type WakeupSurfaces = ReturnType<typeof createWakeupSurfaces>;
+/** cp-vy73: the busy-wake gate's one triggering line after a run whose late notices no request carried. Unstamped. */
+export const WAKEUP_NUDGE_TYPE = "cp-wakeup-nudge";
 
 /**
  * Where the answer-card sink shows a card. cp-hhuf P1: a scheduled job's answer goes to the
@@ -180,6 +182,44 @@ export function createWakeupSurfaces(
 	const projectOf = (): ProjectOf => homeProjectResolver(currentRuntime().home);
 	const projectsFor = (jobIds: readonly (string | undefined)[]): string[] => projectsOf(projectOf(), jobIds);
 	let suppressionReason = "stale";
+	/**
+	 * cp-vy73 (PR-3): the busy-wake gate. While a run is busy and one triggering
+	 * wake-up already guarantees it another request, later wake-ups ride along
+	 * with `triggerTurn: false` instead of queueing one follow-up turn each.
+	 * `answered` always triggers, and an idle session never gets a
+	 * non-triggering send: pi would append it with no turn (cp-cc45 F6).
+	 * A non-triggering notice that no later request carried (the run's last
+	 * turn was text-only) is stranded, so `agent_settled` sends one triggering
+	 * nudge for it (F3: counted against the last provider request) — except
+	 * after an operator abort, where the notices wait for the next prompt.
+	 */
+	const gate = { busy: false, triggered: false, aborted: false, nonTriggeringSent: 0, seenUpTo: 0 };
+	const wakeGate = {
+		agentStart: (): void => {
+			gate.busy = true;
+			gate.triggered = false;
+			gate.aborted = false;
+		},
+		providerRequest: (): void => {
+			gate.seenUpTo = gate.nonTriggeringSent;
+		},
+		agentEnd: (messages: readonly unknown[]): void => {
+			const last = [...messages].reverse().find((m) => (m as { role?: unknown } | null)?.role === "assistant");
+			if ((last as { stopReason?: unknown } | undefined)?.stopReason === "aborted") gate.aborted = true;
+		},
+		agentSettled: (): void => {
+			// Idle first (F6): anything sent from here on triggers its own turn.
+			gate.busy = false;
+			gate.triggered = false;
+			const unseen = gate.nonTriggeringSent - gate.seenUpTo;
+			gate.seenUpTo = gate.nonTriggeringSent;
+			if (unseen <= 0 || gate.aborted) return;
+			pi.sendMessage(
+				{ customType: WAKEUP_NUDGE_TYPE, content: `${unseen} fleet notice(s) arrived while you were busy; they are above.`, display: true },
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
+		},
+	};
 	const sendWakeup = (
 		stamp: Omit<WakeupStamp, "issued_at">,
 		content: string,
@@ -188,6 +228,7 @@ export function createWakeupSurfaces(
 		const notifier = new WakeupNotifier({
 			facts: wakeupFactsNow(),
 			send: (message: WakeupMessage) => {
+				const quiet = gate.busy && gate.triggered && stamp.kind !== "answered";
 				pi.sendMessage(
 					{
 						customType: message.customType,
@@ -196,8 +237,10 @@ export function createWakeupSurfaces(
 						// SAFETY: WakeupMessage.details is already a string-keyed record.
 						details: message.details as unknown as Record<string, unknown>,
 					},
-					{ deliverAs: "followUp", triggerTurn: true },
+					quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
 				);
+				if (quiet) gate.nonTriggeringSent++;
+				else if (gate.busy) gate.triggered = true;
 			},
 			onSuppressed: (suppressed, verdict) => recordStaleWakeup(suppressed, verdict, "send"),
 			projectOf: projectOf(),
@@ -671,6 +714,7 @@ export function createWakeupSurfaces(
 	return {
 		projectOf,
 		sendWakeup,
+		wakeGate,
 		surfaceAnswerCards,
 		surfaceDurableWakeups,
 		confirmDurableArrival,
