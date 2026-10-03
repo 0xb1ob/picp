@@ -10,6 +10,8 @@ import { test } from "node:test";
 import {
 	clampVerdictItems,
 	classifyEditFailure,
+	createMissCounter,
+	enrichAnchorEditFailure,
 	enrichEditFailure,
 	enrichSilentBashFailure,
 	ENVELOPE_FILE,
@@ -149,6 +151,39 @@ test("an unreadable file still gets the cause and hint, just no near-miss line",
 	);
 	assert.match(error, /cause: no_match/);
 	assert.doesNotMatch(error, /Nearest line/);
+});
+
+test("replace/insert failures get a cause and next move, like edit", () => {
+	const stale = enrichAnchorEditFailure(
+		'[E_STALE_ANCHOR] 1 stale anchor in README.md: "ReUA". The file changed since read. Call read() on README.md for fresh anchors.',
+	);
+	assert.equal(stale?.cause, "stale_anchor");
+	assert.equal(stale?.path, "README.md");
+	assert.match(stale?.text ?? "", /cause: stale_anchor — .*Call read/);
+	assert.equal(enrichAnchorEditFailure('[E_BAD_REF] Invalid anchor "x".')?.cause, "bad_anchor");
+	const invalid = enrichAnchorEditFailure('Validation failed for tool "insert":\n  - lines: required');
+	assert.equal(invalid?.cause, "bad_arguments");
+	assert.equal(invalid?.path, undefined);
+	assert.equal(enrichAnchorEditFailure("Operation aborted"), undefined);
+});
+
+test("the third identical miss on one path says re-read; other paths, causes and successes reset it", () => {
+	const counter = createMissCounter();
+	assert.equal(counter.miss("a.ts", "no_match"), undefined);
+	assert.equal(counter.miss("b.ts", "no_match"), undefined); // other path has its own count
+	assert.equal(counter.miss("a.ts", "no_match"), undefined);
+	assert.match(counter.miss("a.ts", "no_match") ?? "", /Identical no_match failure #3 on a\.ts.*read a\.ts again/);
+	assert.equal(counter.miss("b.ts", "no_match"), undefined);
+	// a different cause restarts the run
+	assert.equal(counter.miss("a.ts", "not_unique"), undefined);
+	// a reset (read/successful edit) restarts it too
+	counter.miss("a.ts", "not_unique");
+	counter.reset("a.ts");
+	assert.equal(counter.miss("a.ts", "not_unique"), undefined);
+	// reset() with no path clears everything (replace/insert success names no path)
+	counter.miss("b.ts", "no_match");
+	counter.reset();
+	assert.equal(counter.miss("b.ts", "no_match"), undefined);
 });
 
 test("a bash non-zero exit with no output names the command that failed", () => {
