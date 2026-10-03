@@ -17,7 +17,6 @@ import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AnswerCardRecord, type 
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { type DeferredRecheckTrigger, formatRaisedNotice, recheckDeferredBounded } from "../../src/deferred-recheck.ts";
 import { readPriorAttempts, reviewCapExhausted } from "../../src/gate.ts";
-import { resolveHome } from "../../src/home.ts";
 import { operatorNotify } from "../../src/parent-session.ts";
 import { durableWakeupProjects, homeMandateProjects, homeProjectResolver, type ProjectOf, projectsOf } from "../../src/project-report.ts";
 import { scheduledJobIds } from "../../src/relay-scope.ts";
@@ -103,7 +102,7 @@ export function createWakeupSurfaces(
 			review: (jobId, surface) => {
 				try {
 					const pending = post.reviewRuns.pending(jobId, surface);
-					const home = resolveHome();
+					const home = post.home;
 					const decided =
 						surface === "gate"
 							? readPriorAttempts(home, jobId).decisions.map((decision) => decision.attempt)
