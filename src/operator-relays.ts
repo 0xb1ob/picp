@@ -5,12 +5,14 @@ const ESCALATION_ID = /\bes-[a-z0-9]{4,16}\b/g;
 /**
  * Operator-side relay gate. Relays that arrive while the operator's own turn runs are held
  * and delivered on settle, rechecked then: an escalation answered meanwhile, or one whose id
- * the operator already read in a send reply, is dropped.
+ * the operator already read in a send reply, is dropped. An `overdue` (backstop) relay is about
+ * an id never shown to the session as a relay, so a prose mention does not satisfy it.
  */
 export class OperatorRelayQueue {
 	#running = false;
 	readonly #queued: BridgeRelay[] = [];
 	readonly #replied = new Set<string>();
+	readonly #overdue = new WeakSet<BridgeRelay>();
 
 	readonly #deliver: (relay: BridgeRelay) => void;
 	readonly #recheck: (relay: BridgeRelay) => BridgeRelay | undefined;
@@ -27,7 +29,8 @@ export class OperatorRelayQueue {
 
 	started(): void { this.#running = true; }
 
-	push(relay: BridgeRelay): void {
+	push(relay: BridgeRelay, overdue = false): void {
+		if (overdue) this.#overdue.add(relay);
 		if (this.#running) this.#queued.push(relay);
 		else this.#flush([relay]);
 	}
@@ -41,7 +44,7 @@ export class OperatorRelayQueue {
 		// A send reply settles after the escalations raised in its turn: read it first.
 		for (const relay of relays) if (relay.kind === "send") this.replied(relay.text);
 		for (const relay of relays) {
-			if (relay.escalationId && this.#replied.has(relay.escalationId)) continue;
+			if (relay.escalationId && this.#replied.has(relay.escalationId) && !this.#overdue.has(relay)) continue;
 			const current = this.#recheck(relay);
 			if (current) this.#deliver(current);
 		}
