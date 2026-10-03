@@ -261,26 +261,36 @@ export function sendRelay(entry: ParentSendEntry, file: string) {
 	return { kind: "send" as const, sendId: entry.id, stale: false, text: sendRelayText(entry, file), receipt: receiptOf(entry), paths: [] };
 }
 
+type SpanMark = { id: string; index: number; assistants: number; end?: number; endAssistants?: number };
+type SpanTurn = { texts: readonly string[]; assistantCount: number; landed: ReadonlyArray<SpanMark> };
+
 /**
- * Each landed send's reply is the assistant text from its landing to the next
- * landing (or the settle). No assistant message in that span, or a last one that
- * errored, is a failed turn.
+ * Where a landed send's reply stops: the segment end it was settled at, else
+ * the next landing, else the run so far (`last`: the run's error is its own).
  */
-export function landedOutcomes(turn: {
-	texts: readonly string[];
-	assistantCount: number;
-	error?: { message: string };
-	landed: ReadonlyArray<{ id: string; index: number; assistants: number }>;
-}): Array<{ id: string; failed: boolean; reply: string; error: string }> {
+export function markSpan(turn: SpanTurn, mark: SpanMark): { end: number; endAssistants: number; last: boolean } {
+	const next = turn.landed.find((other) => other.assistants > mark.assistants);
+	return {
+		end: mark.end ?? next?.index ?? turn.texts.length,
+		endAssistants: mark.endAssistants ?? next?.assistants ?? turn.assistantCount,
+		last: next === undefined && mark.end === undefined,
+	};
+}
+
+/**
+ * Each landed send's reply is the assistant text from its landing to the end
+ * of its span (`markSpan`). No assistant message in that span, or a last one
+ * that errored, is a failed turn.
+ */
+export function landedOutcomes(turn: SpanTurn & { error?: { message: string } }): Array<{ id: string; failed: boolean; reply: string; error: string }> {
 	return turn.landed.map((mark) => {
-		const next = turn.landed.find((other) => other.assistants > mark.assistants);
-		const assistants = (next?.assistants ?? turn.assistantCount) - mark.assistants;
-		const modelError = next ? undefined : turn.error;
-		const failed = assistants === 0 || modelError !== undefined;
+		const span = markSpan(turn, mark);
+		const modelError = span.last ? turn.error : undefined;
+		const failed = span.endAssistants - mark.assistants === 0 || modelError !== undefined;
 		return {
 			id: mark.id,
 			failed,
-			reply: failed ? "" : turn.texts.slice(mark.index, next?.index ?? turn.texts.length).join("\n"),
+			reply: failed ? "" : turn.texts.slice(mark.index, span.end).join("\n"),
 			error: failed ? (modelError?.message ?? "parent settled without an assistant message") : "",
 		};
 	});

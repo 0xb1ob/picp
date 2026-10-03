@@ -23,6 +23,7 @@ import { parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
 import { durableIdsFromMessage, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
+import { cleanSegmentEnd, wakeSpans } from "./bridge-segments.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { parentGatewayKey } from "./gateway-key.ts";
@@ -132,9 +133,12 @@ interface TurnBuf {
 	refused: BridgeRelay[];
 	/** Accepted cp-envelope wake-ups seen this run (issue #2); appended verbatim to the wake relay. */
 	envelopes: EnvelopeSummary[];
+	/** Segment cursor (bridge-segments.ts): `texts` before it already relayed; jobs stamped since the last wake relay. */
+	relayed: number;
+	segJobIds: string[];
 }
 
-const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], refused: [], envelopes: [] });
+const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], refused: [], envelopes: [], relayed: 0, segJobIds: [] });
 
 const emptyReceipt = (): BridgeReceipt => ({ level: null, reached: [] });
 
@@ -638,7 +642,7 @@ export class CpBridge {
 			const directWake = durableIdsFromMessage(message).some((id) => id.startsWith("drain:") || id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
 			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
-			if (stamped) { this.#turn.jobId = stamped; if (!this.#turn.jobIds.includes(stamped)) this.#turn.jobIds.push(stamped); }
+			if (stamped) { this.#turn.jobId = stamped; for (const ids of [this.#turn.jobIds, this.#turn.segJobIds]) if (!ids.includes(stamped)) ids.push(stamped); }
 			const envelope = envelopeSummaryOf(message);
 			if (envelope) this.#turn.envelopes.push(envelope);
 			if (message?.role === "user") this.#delivery?.landed(textOf(message), this.#turn);
@@ -675,44 +679,24 @@ export class CpBridge {
 			this.#missionEnd = missionEndOf(event.result) ?? this.#missionEnd;
 			if (this.#home) for (const item of openMissionEnds(this.#home, event.result)) this.#onEscalation({ ...event, result: { details: item } });
 		}
+		if (cleanSegmentEnd(event)) {
+			// A finished text answer: replies and wake text go out now, not when the run settles.
+			this.#delivery?.segmentEnd(this.#turn);
+			this.#lastReplyAt = new Date().toISOString();
+			this.#relayWake(this.#turn);
+			return;
+		}
 		if (event.type === "agent_settled") {
 			this.#runOpen = false;
 			const turn = this.#turn;
 			for (const refused of turn.refused.splice(0)) this.#emit(refused);
-			const first = turn.landed[0];
-			// Text before the first landed send is the parent's own turn: a wake, as ever.
-			const text = (first ? turn.texts.slice(0, first.index) : turn.texts).join("\n");
-			const modelError = first ? undefined : turn.error;
-			if (first) {
-				// H1 review (finding 3): `#consecutiveTurnFailed`/the relaunch cap are
-				// not accounted here \u2014 `send`'s `#finishSend` does that exactly once
-				// per `send()` call, from the FINAL receipt.
+			// A send still open owns the run's error; the relaunch cap counts once per send, in the delivery.
+			const open = turn.landed.some((mark) => !mark.settled);
+			if (open) {
 				this.#delivery?.settle(turn);
 				this.#lastReplyAt = new Date().toISOString();
 			}
-			if (modelError) {
-				this.#lastReplyAt = new Date().toISOString();
-				const home = this.#home;
-				this.#emit({
-					kind: "error",
-					...(this.#turn.jobId ? { jobId: this.#turn.jobId } : {}),
-					stale: this.#turn.stale,
-					text: modelError.message,
-					receipt: climb(emptyReceipt(), "turn_settled"),
-					paths: home && this.#turn.jobId ? bridgePaths(home, [this.#turn.jobId]) : [],
-				});
-			} else if (text.trim().length > 0) {
-				this.#lastReplyAt = new Date().toISOString();
-				const home = this.#home;
-				this.#emit({
-					kind: "wake",
-					...(this.#turn.jobId ? { jobId: this.#turn.jobId, jobIds: [...this.#turn.jobIds] } : {}),
-					stale: this.#turn.stale,
-					text: withEnvelopeSummaries(text, turn.envelopes),
-					receipt: climb(climb(emptyReceipt(), "turn_settled"), "owner_observed"),
-					paths: home && this.#turn.jobId ? bridgePaths(home, [this.#turn.jobId]) : [],
-				});
-			}
+			this.#relayWake(turn, open ? undefined : turn.error);
 			this.#delivery?.afterSettle();
 			if (this.#home && !this.#autoControl) {
 				try {
@@ -726,6 +710,24 @@ export class CpBridge {
 				} catch { /* a queued send or open turn owns the parent */ }
 			}
 		}
+	}
+
+	/** The parent's own text since `turn.relayed` that no send owns (`wakeSpans`) as one wake, or the run's model error as one error relay. */
+	#relayWake(turn: TurnBuf, modelError?: ModelCallError): void {
+		const text = wakeSpans(turn, turn.relayed).join("\n");
+		turn.relayed = turn.texts.length;
+		if (!modelError && text.trim().length === 0) return;
+		this.#lastReplyAt = new Date().toISOString();
+		const jobIds = turn.segJobIds.length > 0 ? turn.segJobIds.splice(0) : [...turn.jobIds];
+		const home = this.#home;
+		this.#emit({
+			kind: modelError ? "error" : "wake",
+			...(turn.jobId ? { jobId: turn.jobId, ...(modelError ? {} : { jobIds }) } : {}),
+			stale: turn.stale,
+			text: modelError ? modelError.message : withEnvelopeSummaries(text, turn.envelopes.splice(0)),
+			receipt: modelError ? climb(emptyReceipt(), "turn_settled") : climb(climb(emptyReceipt(), "turn_settled"), "owner_observed"),
+			paths: home && turn.jobId ? bridgePaths(home, [turn.jobId]) : [],
+		});
 	}
 
 	#onEscalation(event: WorkerEvent): void {
