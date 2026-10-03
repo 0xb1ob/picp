@@ -6,13 +6,17 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Parent replies and wake relays settle per segment (cp-rf1a)
+
+A clean parent `turn_end` (no tool results, `stopReason` not `error`/`aborted`/`length`) now ends a segment (`src/bridge-segments.ts`): each landed send whose span holds an answer settles there with its own reply — the `cp_parent send` waiter returns `owner_observed`, or its one `send` relay goes out — and the parent's own text since the last segment relays as one `wake`, instead of both waiting for `agent_settled`, which never comes while follow-up wake-ups keep arriving. `agent_settled` handles only what is left (open sends, the transient resume ladder, the remaining wake text, the model error when no send is open, refused escalations, automatic context control). A send settles and counts toward the relaunch cap exactly once (`LandedMark.settled`). A model error after an already-answered send now relays as kind `error` instead of failing that send. Migration: none.
+
 ### Parent guard refuses checks-API reads (cp-taoi)
 
 `ContextGuard` gains the `ci_checks_read` code: parent bash `gh pr checks` or any `gh` call naming `statusCheckRollup` is blocked, and the reason points at `cp_integrate <job-id>`. CI is already read from the Actions runs API (`gh run list`) by `cp_integrate` and the `cp-ci` wake-up; no new fallback is added. `gh run list` stays allowed. Migration: none.
 
 ### Operator sends steer ahead of queued wake-ups (cp-1dkr)
 
-Every parent injection from `src/parent-delivery.ts` (the operator send, the resume nudge and the post-relaunch resume) is now an RPC `prompt` with `streamingBehavior: "steer"` instead of `"followUp"`. A busy parent takes an operator send after its current tool batch instead of after every fleet wake-up already queued; wake-ups stay triggering follow-ups. Trade-off: an operator send can land between the tool batches of a wake-up the parent is working on — that wake-up stays in context, durable wake-ups are re-sent until arrival is confirmed, and an envelope wake-up (one-shot) is finished after the answer. Migration: none.
+Every parent injection from `src/parent-delivery.ts` (the operator send, the resume nudge and the post-relaunch resume) is now an RPC `prompt` with `streamingBehavior: "steer"` instead of `"followUp"`. A busy parent takes an operator send after its current tool batch instead of after every fleet wake-up already queued; wake-ups stay triggering follow-ups. The installed pi (0.99.1 and 1.0.0) polls steering only once every tool call of the current assistant message has run: a steer skips none of the pending calls, it only lands before the next model call. Trade-off: an operator send can land between the tool batches of a wake-up the parent is working on — that wake-up stays in context, durable wake-ups are re-sent until arrival is confirmed, and an envelope wake-up (one-shot) is finished after the answer. Migration: none.
 
 ### Fresh homes dispatch three jobs at once (cp-z03i)
 

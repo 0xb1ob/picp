@@ -9,6 +9,7 @@ import {
 	frameBatch,
 	frameResume,
 	landedOutcomes,
+	markSpan,
 	type ParentSendEntry,
 	type ParentSendDelegation,
 	type ParentSendOutbox,
@@ -29,6 +30,10 @@ export interface LandedMark {
 	/** `texts.length` and `assistantCount` of the run when the marker landed. */
 	index: number;
 	assistants: number;
+	/** Set by `segmentEnd`: where its reply stopped, and that its outcome is already final. */
+	end?: number;
+	endAssistants?: number;
+	settled?: boolean;
 }
 
 export interface LandedTurn {
@@ -125,12 +130,29 @@ export class ParentDelivery {
 	}
 
 	/**
+	 * A clean `turn_end` (`cleanSegmentEnd`): every landed send not yet settled
+	 * whose span holds an answer is final now, not at `agent_settled` — its
+	 * waiter, relay and turn count happen here, once. A failed span waits for the settle.
+	 */
+	segmentEnd(turn: LandedTurn): void {
+		for (const { id, ...outcome } of landedOutcomes(turn)) {
+			const mark = turn.landed.find((each) => each.id === id) as LandedMark;
+			if (mark.settled || outcome.failed) continue;
+			const { end, endAssistants } = markSpan(turn, mark);
+			Object.assign(mark, { end, endAssistants, settled: true });
+			this.#finish(id, outcome);
+		}
+	}
+
+	/**
 	 * The run settled: a transient failure is resumed under the same id (the
 	 * entry stays `landed`, its waiter keeps waiting); every final outcome goes
 	 * to its waiter, or out as one relay, and counts once toward the relaunch cap.
+	 * A send `segmentEnd` already settled is skipped.
 	 */
 	settle(turn: LandedTurn): void {
 		for (const { id, ...outcome } of landedOutcomes(turn)) {
+			if (turn.landed.some((mark) => mark.id === id && mark.settled)) continue;
 			if (outcome.failed && this.#scheduleResume(id, outcome.error)) continue;
 			this.#finish(id, outcome);
 		}

@@ -8,6 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
 import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText } from "../src/parent-outbox.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
@@ -56,6 +57,55 @@ test("every parent injection is one prompt with streamingBehavior steer, busy or
 		["prompt", "steer"],
 		["prompt", "steer"],
 	]);
+});
+
+test("segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again", async () => {
+	const ctx = scripted();
+	const a = ctx.delivery.send("A", 60_000);
+	const b = ctx.delivery.send("B", 60_000);
+	await flush();
+	const turn = ctx.turn();
+	const say = (text: string) => {
+		turn.texts.push(text);
+		turn.assistantCount += 1;
+	};
+	ctx.delivery.landed(ctx.sent[0] as string, turn);
+	say("answer A");
+	ctx.delivery.segmentEnd(turn);
+	const first = await a;
+	assert.equal(first.level, "owner_observed");
+	assert.equal(first.reply, "answer A", "the first waiter gets only its own segment");
+	assert.deepEqual(ctx.counted, [false]);
+	say("parent's own wake text");
+	ctx.delivery.landed(ctx.sent[1] as string, turn);
+	say("answer B");
+	assert.deepEqual(wakeSpans(turn, 0), ["parent's own wake text"], "text between segments belongs to no send");
+	ctx.delivery.settle(turn);
+	assert.equal((await b).reply, "answer B");
+	assert.deepEqual(ctx.counted, [false, false], "countTurn exactly once per send");
+	assert.equal(ctx.box.get(first.send_id as string)?.reply, "answer A");
+
+	// A drained send has no waiter: its relay goes out at the segment end, and not again at the settle.
+	const drained = ctx.box.enqueue("C");
+	ctx.delivery.afterSettle();
+	await flush();
+	const next = ctx.turn();
+	ctx.delivery.landed(ctx.sent[2] as string, next);
+	next.texts.push("answer C");
+	next.assistantCount += 1;
+	ctx.delivery.segmentEnd(next);
+	ctx.delivery.segmentEnd(next);
+	ctx.delivery.settle(next);
+	assert.deepEqual(ctx.relays.map((relay) => [relay.sendId, relay.text]), [[drained.id, "answer C"]]);
+	assert.deepEqual(ctx.counted, [false, false, false]);
+});
+
+test("cleanSegmentEnd: only a text-only turn_end that did not fail or get cut off", () => {
+	const end = (stopReason: string | undefined, toolResults: unknown[] = []) => ({ type: "turn_end", message: { role: "assistant", stopReason }, toolResults });
+	assert.equal(cleanSegmentEnd(end("stop")), true);
+	for (const stop of ["error", "aborted", "length", undefined]) assert.equal(cleanSegmentEnd(end(stop)), false, String(stop));
+	assert.equal(cleanSegmentEnd(end("toolUse", [{ role: "toolResult" }])), false);
+	assert.equal(cleanSegmentEnd({ type: "agent_settled" }), false);
 });
 
 test("a send injected or landed while the restart reconcile reads the transcript is never requeued nor nudged", async () => {

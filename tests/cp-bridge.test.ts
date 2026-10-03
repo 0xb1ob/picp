@@ -1180,6 +1180,39 @@ test("a send that outlasts the wait returns pending, then relays its reply once 
 	assert.equal(bridge.status().sends.find((row) => row.id === id)?.level, "owner_observed");
 });
 
+test("a send is answered at its clean turn_end, before the run settles, and never relayed again", async (t) => {
+	const ctx = await outboxBridge(t);
+	const bridge = await ctx.open();
+	const segment = await bridge.send("SEGMENT x", 2_000);
+	assert.equal(segment.level, "owner_observed", JSON.stringify(segment));
+	assert.equal(segment.reply, "reply: SEGMENT x");
+	assert.equal(segment.pending, undefined);
+	const release = await bridge.send("RELEASE");
+	assert.equal(release.reply, "reply: RELEASE");
+	assert.equal(ctx.sendRelays(segment.send_id).length, 0, JSON.stringify(ctx.relays));
+	assert.equal(ctx.relays.some((relay) => relay.kind === "wake"), false, JSON.stringify(ctx.relays));
+});
+
+test("a wake answered at a clean turn_end relays before the run settles", async (t) => {
+	const home = createScratchHome();
+	Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_SEGMENT: "1", FAKE_PARENT_WAKE_JOB: "cp-a1", FAKE_PARENT_WAKE_TEXT: "[demo-app] cp-a1: CI green" });
+	const bridge = new CpBridge();
+	const relays: BridgeRelay[] = [];
+	bridge.onRelay((relay) => relays.push(relay));
+	t.after(async () => {
+		for (const key of ["FAKE_PARENT_WAKE", "FAKE_PARENT_WAKE_SEGMENT", "FAKE_PARENT_WAKE_JOB", "FAKE_PARENT_WAKE_TEXT"]) delete process.env[key];
+		await bridge.stop();
+		home.cleanup();
+	});
+	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
+	await until(() => relays.some((relay) => relay.kind === "wake"), "the segment's wake relay");
+	const wakes = relays.filter((relay) => relay.kind === "wake");
+	assert.equal(wakes.length, 1, JSON.stringify(relays));
+	assert.equal(wakes[0]?.text, "[demo-app] cp-a1: CI green");
+	assert.deepEqual(wakes[0]?.jobIds, ["cp-a1"]);
+	assert.equal(bridge.status().lastReplyAt !== undefined, true);
+});
+
 test("a follow-up lost with the parent is delivered once after relaunch", async (t) => {
 	const ctx = await outboxBridge(t);
 	const bridge = await ctx.open();

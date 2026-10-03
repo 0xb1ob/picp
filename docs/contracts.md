@@ -1067,8 +1067,10 @@ Home-local `data/standing-orders.md` is ignored by git. The first `session_start
 `parentSendFile(<session file>)` — `state/sessions/cp-parent.sends.json`,
 validated by `ParentSendOutboxFileSchema`, written only by the bridge — before
 its RPC `prompt` with `streamingBehavior: "steer"` (pi starts a turn when
-idle and, when busy, lands it after the current tool batch — ahead of queued
-fleet wake-up follow-ups; the bridge does not read busy). The resume nudge and
+idle and, when busy, lands it once every tool call of the current assistant
+message has run — pi 0.99.1 and 1.0.0 poll steering only after the whole tool
+batch, skipping none of its calls — before the next model call and ahead of
+queued fleet wake-up follow-ups; the bridge does not read busy). The resume nudge and
 the post-relaunch resume use the same steer. Trade-off: an operator send can
 land between the tool batches of a wake-up the parent is working on; that
 wake-up stays in context and the parent finishes it after answering (durable
@@ -1081,7 +1083,7 @@ one-shot). Its body carries one trailing marker line,
 | `queued` | on disk, in no channel |
 | `injected` | RPC write done (reserved before the write, rolled back if refused) |
 | `landed` | marker seen in a parent `role: "user"` message — the body is in its context |
-| `settled` / `failed` | the run it landed in settled; reply stored, or `turn_failed` |
+| `settled` / `failed` | its reply ended at a clean `turn_end`, or the run it landed in settled; reply stored, or `turn_failed` |
 | `undeliverable` | attempt ceiling, age ceiling, unprovable landing, or `cp_parent stop` |
 
 A send that outlasts the wait returns `level: injected` with `pending: <id>`
@@ -1098,6 +1100,19 @@ relayed, rather than risk a duplicate. Ceilings: `PARENT_SEND_MAX_ATTEMPTS`
 operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
 corrupt outbox refuses `cp_parent start`, naming the file.
+
+**Segments** (`src/bridge-segments.ts`). A run that keeps taking follow-ups
+settles late, so a clean `turn_end` — no tool results, `stopReason` not
+`error`/`aborted`/`length` — ends a segment. There each landed, unsettled send
+whose span holds an assistant answer settles with the text from its landing to
+the segment end (or the next landing): its waiter returns `owner_observed`, or
+its one `send` relay goes out, and it counts once toward the relaunch cap. The
+parent's own text since the last segment that no send's span covers relays as
+one `wake` with the jobs stamped since the last wake relay. `agent_settled`
+handles only what is left: sends still open (a failed span, or the transient
+resume ladder), the remaining wake text, the run's model error when no send is
+open, refused escalations and automatic context control. No send settles or
+counts twice.
 
 Receipts are `injected | turn_settled | http_accepted | owner_observed |
 turn_failed`. Never overload those as `accepted`. This channel is RPC, so
