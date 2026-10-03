@@ -94,6 +94,8 @@ export interface JobPorts {
 	operatorTexts?: readonly string[];
 	/** True when fleet.json has a record for the job in phase `waiting` or `held`. */
 	hasLiveWorker: (jobId: string) => boolean;
+	/** dep_remove: has this job's worker filed a report? "none" = never dispatched; absent port reads "none". */
+	reportState?: (jobId: string) => "reported" | "unreported" | "none";
 	/** Intake: record an id `cp_job create` returned this parent turn. */
 	noteCreated?: (jobId: string) => void;
 	/**
@@ -319,9 +321,19 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 		}
 		case "dep_remove": {
 			const id = need(params, "job_id");
-			await ledger.removeDep(id, need(params, "blocker_id"));
+			const blockerId = need(params, "blocker_id");
+			// issue #2: a blocker whose worker never reported has produced nothing to depend on or to skip.
+			const blocker = await ledger.show(blockerId).catch(() => undefined); // unknown blockers stay removable (doctor.ts)
+			const report = ports.reportState?.(blockerId) ?? "none";
+			if (blocker && blocker.status !== "closed" && report === "unreported") {
+				throw new Error(`cp_job dep_remove refused: ${blockerId} is ${blocker.status} and its worker has filed no report — nothing it was to produce exists; relay "no report" for it. Wait for its envelope, or to go on without it: cp_job drop ${blockerId} with a reason (cp_teardown first if a worker holds it), and the operator answers the dropped-dependency question cp_next raises for ${id}.`);
+			}
+			await ledger.removeDep(id, blockerId);
 			const job = await ledger.show(id);
-			return { text: `${id} is blocked by ${job.blocked_by.length === 0 ? "nothing" : job.blocked_by.join(", ")}`, details: { job } };
+			const warning = blocker && blocker.status !== "closed"
+				? `warning: ${blockerId} is still ${blocker.status}${report === "none" ? " and was never dispatched" : ""}; ${id} no longer waits for it, and nothing of ${blockerId}'s may be relayed as done`
+				: undefined;
+			return { text: `${id} is blocked by ${job.blocked_by.length === 0 ? "nothing" : job.blocked_by.join(", ")}${warning ? `\n  ${warning}` : ""}`, details: { job, ...(warning ? { warning } : {}) } };
 		}
 		case "close":
 		case "drop": {
@@ -416,6 +428,15 @@ export function portsFor(post: CommandPost, runtime: Runtime): JobPorts {
 				return phase === "waiting" || phase === "held";
 			} catch {
 				return false;
+			}
+		},
+		// An unreadable fleet cannot prove a report, so it fails closed.
+		reportState: (jobId) => {
+			try {
+				const record = post.fleet.get(jobId);
+				return !record ? "none" : record.reported_at !== undefined ? "reported" : "unreported";
+			} catch {
+				return "unreported";
 			}
 		},
 	};

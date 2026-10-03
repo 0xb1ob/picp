@@ -31,6 +31,9 @@ import { initialStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { formatTeardown, type GitRunner, Teardown } from "../src/teardown.ts";
+import { unreportedLiveWorker } from "../src/teardown-head.ts";
+import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
+import { registerIntegrateTools } from "../extensions/command-post/tools-integrate.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
 import {
 	advanceBase,
@@ -65,6 +68,7 @@ interface Bench {
 	/** The same stores, with git injected — used to record or bend single commands. */
 	teardownWith(git: GitRunner): Teardown;
 	withLedger(ledger: Ledger): Teardown;
+	withJournal(journal: (input: DurableWakeupInput) => void): Teardown;
 	/** A linked worktree on the job branch, standing in for a lease. */
 	worktree(jobId: string, options?: { base?: string }): string;
 	addJob(jobId: string, worktree: string, kind?: JobKind, delivery?: Delivery): Promise<FleetRecord>;
@@ -111,6 +115,9 @@ function benchOf(t: { after(fn: () => void | Promise<void>): void }): Bench {
 		},
 		withLedger(ledger) {
 			return new Teardown({ home: home.path, fleet, leases, manager, runs, ledger: () => ledger });
+		},
+		withJournal(journal) {
+			return new Teardown({ home: home.path, fleet, leases, manager, runs, journal });
 		},
 		worktree(jobId, options = {}) {
 			const path = join(home.path, "worktrees", jobId);
@@ -699,6 +706,142 @@ test("research: clean and commit-free passes; a local commit is refused", { time
 	assert.equal(committed.torn_down, false);
 	assert.equal(committed.failure?.code, "research_commits");
 	assert.match(committed.failure?.fix ?? "", /research changes nothing/);
+});
+
+// ---------------------------------------------------------------------------
+// issue #2: a live worker with no report
+// ---------------------------------------------------------------------------
+
+async function addLiveUnreported(b: Bench, jobId: string): Promise<string> {
+	const worktree = b.worktree(jobId);
+	await b.addJob(jobId, worktree, "research");
+	// The bench pid is process.pid: alive, and owned by no manager here.
+	await b.fleet.mutate((jobs) => {
+		const job = jobs.find((entry) => entry.job_id === jobId)!;
+		delete job.reported_at;
+		job.phase = "waiting";
+	});
+	return worktree;
+}
+
+test("issue #2: a live worker with no report is refused; force needs an operator quote and ends killed_unreported", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-live-unreported";
+	await addLiveUnreported(b, jobId);
+	const journaled: DurableWakeupInput[] = [];
+	const teardown = b.withJournal((input) => journaled.push(input));
+
+	const refused = await teardown.teardown(jobId);
+	assert.equal(refused.failure?.code, "unreported_live_worker");
+	assert.equal(refused.lease_returned, false);
+	assert.equal(b.fleet.require(jobId).phase, "waiting");
+	assert.ok(readRunEvents(b.home, jobId).some((event) => event.type === "teardown_refused"));
+
+	const unauthorized = await teardown.teardown(jobId, { force: true, requireAuthorization: true });
+	assert.equal(unauthorized.failure?.code, "unreported_live_worker");
+	assert.match(unauthorized.failure?.fix ?? "", /operator_quote/);
+	assert.equal(b.fleet.require(jobId).phase, "waiting");
+	assert.equal(journaled.length, 0);
+
+	const quote = "Kill cp-live-unreported now.";
+	const killed = await teardown.teardown(jobId, { force: true, requireAuthorization: true, authorization: { by: "operator-quote", quote } });
+	assert.equal(killed.torn_down, true, formatTeardown(killed));
+	assert.equal(killed.killed_unreported, true);
+	assert.equal(killed.reason, undefined);
+	assert.equal(b.fleet.require(jobId).closed_reason, "forced");
+	assert.match(formatTeardown(killed), /killed_unreported/);
+	const marker = readRunEvents(b.home, jobId).filter((event) => event.type === "shutdown_requested").at(-1)?.payload as Record<string, unknown>;
+	assert.equal(marker.killed_unreported, true);
+	assert.equal(marker.operator_quote, quote);
+	assert.equal(marker.authorized_by, "operator-quote");
+	assert.equal(journaled.length, 1);
+	const wake = journaled[0]!;
+	assert.equal(wake.kind, "recovery");
+	assert.ok(wake.id.startsWith(`killed-unreported:${jobId}:`), wake.id);
+	assert.equal(wake.job_id, jobId);
+	assert.equal(wake.keys, undefined);
+	assert.match(wake.content, new RegExp(`^\\[demo\\] ${jobId}: killed_unreported`));
+	assert.match(wake.content, /no report/);
+});
+
+test("issue #2: direct API force still records killed_unreported", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-live-forced";
+	await addLiveUnreported(b, jobId);
+	const journaled: DurableWakeupInput[] = [];
+	const forced = await b.withJournal((input) => journaled.push(input)).teardown(jobId, { force: true });
+	assert.equal(forced.torn_down, true);
+	assert.equal(forced.killed_unreported, true);
+	assert.equal(journaled.length, 1);
+	assert.match(journaled[0]!.content, /no operator quote recorded/);
+});
+
+test("issue #2: hand-off and dead workers pass but say no report was filed", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const journaled: DurableWakeupInput[] = [];
+	const teardown = b.withJournal((input) => journaled.push(input));
+
+	// (a) The pipeline hand-off: no managed worker in this bench, so no shutdown marker to read.
+	await addLiveUnreported(b, "cp-handoff");
+	const handoff = await teardown.teardown("cp-handoff", { acceptUnreported: "pipeline hand-off" });
+	assert.equal(handoff.torn_down, true, formatTeardown(handoff));
+	assert.equal(handoff.reason, "clean_research");
+	assert.equal(handoff.unreported, true);
+	assert.equal(handoff.killed_unreported, undefined);
+	assert.equal(journaled.length, 0);
+
+	// (b) A worker that already exited is not live: the gates decide, and the line says no report.
+	await addLiveUnreported(b, "cp-dead-unreported");
+	await b.fleet.mutate((jobs) => {
+		const job = jobs.find((entry) => entry.job_id === "cp-dead-unreported")!;
+		if (!("script" in job)) job.worker.exited_at = isoTimestamp();
+	});
+	const dead = await teardown.teardown("cp-dead-unreported");
+	assert.equal(dead.torn_down, true, formatTeardown(dead));
+	assert.equal(dead.reason, "clean_research");
+	assert.equal(dead.unreported, true);
+	assert.match(formatTeardown(dead), /no report was filed/);
+	assert.equal(journaled.length, 0);
+});
+
+test("unreportedLiveWorker: mid-turn wording, dead and reported workers, failed phase excluded", async (t) => {
+	const b = benchOf(t);
+	const reported = await b.addJob("cp-unit", join(b.home, "worktrees", "cp-unit"), "research");
+	const { reported_at: _reportedAt, ...rest } = reported;
+	const waiting = { ...rest, phase: "waiting" } as FleetRecord;
+	assert.match(unreportedLiveWorker(b.home, waiting, { worker: { alive: true, busy: true } })?.message ?? "", /mid-turn/);
+	assert.match(unreportedLiveWorker(b.home, waiting, { worker: { alive: true, busy: false } })?.message ?? "", /is alive/);
+	assert.equal(unreportedLiveWorker(b.home, waiting, { worker: { alive: false, busy: false } }), undefined);
+	assert.equal(unreportedLiveWorker(b.home, { ...reported, phase: "waiting" }, { worker: { alive: true, busy: true } }), undefined);
+	assert.equal(unreportedLiveWorker(b.home, { ...waiting, phase: "failed" } as FleetRecord, { worker: { alive: true, busy: true } }), undefined);
+});
+
+test("issue #2: cp_teardown verifies operator_quote before anything runs", async () => {
+	type Tool = { execute: (id: string, params: Record<string, unknown>, signal?: unknown, onUpdate?: unknown, ctx?: unknown) => Promise<unknown> };
+	const tools = new Map<string, Tool>();
+	const calls: unknown[] = [];
+	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
+		commandPost: () => ({
+			tearDown: async (id: string, options: unknown) => {
+				calls.push(options);
+				return { job_id: id, torn_down: false, worktree: "/w", branch: id, lease_returned: false, artifacts_removed: false };
+			},
+		}),
+		setLive: () => {}, refreshWidget: () => {},
+	} as never);
+	const ctx = { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: [{ type: "text", text: "Yes, kill cp-x now." }] } }] } };
+	const tool = tools.get("cp_teardown")!;
+	const run = (params: Record<string, unknown>) => tool.execute("t", { job_id: "cp-x", ...params }, undefined, undefined, ctx);
+
+	await run({ force: true });
+	assert.deepEqual(calls[0], { force: true, requireAuthorization: true });
+	await assert.rejects(() => run({ force: true, operator_quote: "made up" }), /quote not found in operator messages/);
+	await assert.rejects(() => run({ operator_quote: "Yes, kill cp-x now." }), /operator_quote authorizes force/);
+	assert.equal(calls.length, 1, "a refused quote never reaches teardown");
+	await run({ force: true, operator_quote: "Yes, kill cp-x now." });
+	assert.deepEqual(calls[1], { force: true, requireAuthorization: true, authorization: { by: "operator-quote", quote: "Yes, kill cp-x now." } });
+	await run({});
+	assert.deepEqual(calls[2], {});
 });
 
 // ---------------------------------------------------------------------------

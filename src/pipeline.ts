@@ -1775,7 +1775,8 @@ export class PipelineRunner {
 	async #tearDownResearch(researchId: string): Promise<TeardownResult | undefined> {
 		const job = this.#options.fleet.get(researchId);
 		if (!job || job.phase === "done") return undefined;
-		return this.#options.teardown.teardown(researchId);
+		// issue #2: the one recorded exemption from unreported_live_worker — docs/contracts.md "Hung-planner recovery".
+		return this.#options.teardown.teardown(researchId, { acceptUnreported: "pipeline hand-off: the planner's artifact passed the gate and the implementation is authorized" });
 	}
 
 	/**
