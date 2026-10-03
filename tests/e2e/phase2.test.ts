@@ -24,6 +24,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { type Failure, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { classifyRun, decideRecovery } from "../../src/failures.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
 
@@ -349,6 +350,11 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	const f = await fleet(t);
 	const jobId = await f.intake("survive a crash", { delivery: "local", slug: "crashy" });
 
+	// Since cur.4.2 a first crash is revived automatically, in the same worktree, and
+	// that revive races an operator's forced teardown. This test is the operator path
+	// (the bound is spent: the one automatic attempt was already used), so spend it.
+	recordRecoveryAttempt(f.home, jobId, "crash");
+
 	// First attempt: the worker starts a slow tool and is killed mid-run.
 	const firstModel = f.script("m2-crash-1", [
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 30" } }] },
@@ -386,6 +392,16 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	assert.equal(recovery.action, "retry_same");
 	assert.equal(recovery.same_brief, true);
 
+	// The automatic recovery (cur.4.2) had its one crash attempt spent above, so it
+	// escalated instead of reviving. Wait until it has, so nothing is still in flight
+	// inside the worktree when the operator acts.
+	await waitFor(
+		() => readEventLog(f.home, jobId),
+		(events) => events.some((event) => event.type === "recovery_escalated"),
+		{ timeoutMs: 60_000, what: "automatic recovery to hand the crash to the operator" },
+	);
+	assert.ok(!readEventLog(f.home, jobId).some((event) => event.type === "worker_revived"), "no automatic revive ran");
+
 	// Recovery, as an operator performs it: return the lease (nothing to save),
 	// remove the leftover job branch, dispatch the same brief again.
 	const forced = await f.post.tearDown(jobId, { force: true });
@@ -408,6 +424,39 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	);
 	assert.equal(held?.failure, undefined, "the replacement record carries no stale failure");
 	assert.equal(readFleet(f.home).jobs.length, 1, "one job, one record, whatever the attempt count");
+});
+
+test("m2: an unspent crash is revived once, in place, on the same lease", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t);
+	const jobId = await f.intake("survive a crash unattended", { delivery: "local", slug: "revived" });
+
+	// Step 1 hangs in a short tool and is killed (its orphaned sleep holds the pipe open until it ends); the revived worker answers with step 2 onward.
+	const model = f.script("m2-revive", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
+		...shipSteps(jobId, { push: false }),
+	]);
+	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
+	const managed = f.post.manager.get(jobId);
+	assert.ok(managed, "the manager owns the worker it spawned");
+	await waitFor(
+		() => readRunStatus(f.home, jobId),
+		(status) => status.phase === "working",
+		{ timeoutMs: 60_000, what: "the worker to start working" },
+	);
+	const leaseId = readFleet(f.home).jobs[0]?.lease_id;
+	await managed.worker.kill("SIGKILL");
+
+	// Nobody touches it: no teardown, no dispatch. Same lease, same worktree, same branch.
+	const held = await waitFor(
+		() => readFleet(f.home).jobs[0],
+		(record) => record?.phase === "held",
+		{ timeoutMs: 60_000, what: "the automatically revived worker to report" },
+	);
+	assert.equal(held?.lease_id, leaseId, "a revive keeps the lease");
+	assert.equal(held?.failure, undefined, "the revived record carries no stale failure");
+	const kinds = readEventLog(f.home, jobId).map((event) => event.type);
+	assert.equal(kinds.filter((kind) => kind === "worker_revived").length, 1, "exactly one automatic revive");
+	assert.ok(kinds.includes("recovery_attempted"));
 });
 
 // ---------------------------------------------------------------------------
