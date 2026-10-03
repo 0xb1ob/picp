@@ -242,7 +242,8 @@ test("reserveOuterRetry: landed-only, capped, independent of injections, survive
 	const box = outbox();
 	const a = box.enqueue("a");
 	const b = box.enqueue("b");
-	assert.equal(a.outer_retry_attempts, 0);
+	assert.equal("outer_retry_attempts" in a, false, "omitted until the first reservation, so an older reader still accepts the file");
+	assert.equal("outer_retry_attempts" in JSON.parse(readFileSync(box.file, "utf8")).entries[0], false);
 	assert.equal(box.reserveOuterRetry(a.id, 3), undefined, "queued: nothing to retry");
 	box.markInjected([a.id, b.id]);
 	box.markLanded([a.id, b.id]);
@@ -277,4 +278,14 @@ test("a record without outer_retry_attempts reads as zero; a negative or fractio
 		writeFileSync(box.file, JSON.stringify(file), "utf8");
 		assert.throws(() => box.reserveOuterRetry(entry.id, 5), ParentSendOutboxError);
 	}
+});
+
+test("reserveOuterRetry returns no ordinal when nothing was persisted", () => {
+	const box = outbox();
+	const entry = box.enqueue("raced");
+	const before = readFileSync(box.file, "utf8");
+	// The record read as landed, but by the write it no longer is: the update moves nothing.
+	box.get = () => ({ ...entry, state: "landed" });
+	assert.equal(box.reserveOuterRetry(entry.id, 5), undefined);
+	assert.equal(readFileSync(box.file, "utf8"), before);
 });

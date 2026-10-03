@@ -415,7 +415,6 @@ export class ParentSendOutbox {
 			queued_at: isoTimestamp(now),
 			state: "queued",
 			attempts: 0,
-			outer_retry_attempts: 0,
 		};
 		this.#mutate((entries) => {
 			entries.push(entry);
@@ -480,10 +479,10 @@ export class ParentSendOutbox {
 		const entry = this.get(id);
 		if (entry?.state !== "landed" || (entry.outer_retry_attempts ?? 0) >= limit) return undefined;
 		const ordinal = (entry.outer_retry_attempts ?? 0) + 1;
-		this.#update([id], ["landed"], (item) => {
+		const moved = this.#update([id], ["landed"], (item) => {
 			item.outer_retry_attempts = ordinal;
 		});
-		return ordinal;
+		return moved.length > 0 ? ordinal : undefined;
 	}
 
 	markUndeliverable(ids: readonly string[], reason: string): ParentSendEntry[] {

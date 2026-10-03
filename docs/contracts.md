@@ -1124,8 +1124,8 @@ corrupt outbox refuses `cp_parent start`, naming the file.
 
 **Transient retry budget.** The H1 outer ladder (`OUTER_RETRY_DELAYS_MS`,
 `MAX_OUTER_RETRIES`) spends its budget on the send's own record:
-`outer_retry_attempts` (optional integer ≥ 0; absent reads as 0, never
-migrated or inferred from `bridge-retry.jsonl`). It counts transient-retry
+`outer_retry_attempts` (optional integer ≥ 0; omitted until the first
+reservation and read as 0, never migrated or inferred from `bridge-retry.jsonl`). It counts transient-retry
 reservations, not RPC injections (`attempts`). `ParentSendOutbox.reserveOuterRetry`
 reserves the next ordinal on disk, `landed` sends only, before the sleep or the
 nudge; a death mid-sleep therefore leaves it spent, and the next transient
