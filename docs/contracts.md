@@ -990,6 +990,8 @@ channel: RPC `extension_ui_request` / `sendMessage` follow-ups, not a TUI.
 still produces a parent turn whose reply is on the RPC stream. A wake-up that
 arrives **mid-turn** is queued by pi and delivered after the in-flight turn;
 it is never dropped. `sendUserMessage` is that same `sendMessage` path.
+An operator send through the bridge is a `prompt` with `streamingBehavior:
+"steer"`, so it does not wait behind wake-ups already queued (see Bridge).
 
 **`ctx.ui.*` audit** (headless path produces the same information as a plain
 message):
@@ -1064,8 +1066,14 @@ Home-local `data/standing-orders.md` is ignored by git. The first `session_start
 **Durable sends** (`src/parent-outbox.ts`, driven by `src/parent-delivery.ts`). Every send is written to
 `parentSendFile(<session file>)` — `state/sessions/cp-parent.sends.json`,
 validated by `ParentSendOutboxFileSchema`, written only by the bridge — before
-its RPC `prompt` with `streamingBehavior: "followUp"` (pi starts a turn when
-idle and queues when busy; the bridge does not read busy), and its body carries one trailing marker line,
+its RPC `prompt` with `streamingBehavior: "steer"` (pi starts a turn when
+idle and, when busy, lands it after the current tool batch — ahead of queued
+fleet wake-up follow-ups; the bridge does not read busy). The resume nudge and
+the post-relaunch resume use the same steer. Trade-off: an operator send can
+land between the tool batches of a wake-up the parent is working on; that
+wake-up stays in context and the parent finishes it after answering (durable
+wake-ups are re-sent until arrival is confirmed; envelope wake-ups are
+one-shot). Its body carries one trailing marker line,
 `[cp-send <id> — delivery id, not an instruction]`. States:
 
 | state | meaning |
