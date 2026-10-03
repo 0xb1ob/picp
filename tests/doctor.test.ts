@@ -49,6 +49,7 @@ import {
 	COMMAND_POST_EXTENSION,
 	createScratchHome,
 	hostPiVersionConflict,
+	noModelAuthFinding,
 	REPO_ROOT,
 	type ScratchHome,
 	startRpc,
@@ -1493,13 +1494,14 @@ test(
 	// ahead of the installed one) legitimately trips host.pi.conflict. Tolerate
 	// exactly that finding, with the reason printed, and nothing else.
 	const piConflict = hostPiVersionConflict();
-	// CI installs treehouse but never has model credentials (no `pi auth`), so
-	// every route is refused there: tolerate exactly the `models.*` findings on CI.
+	// CI installs treehouse but has no model credentials (no `pi auth`). There,
+	// tolerate only the findings that say no model is authenticated at all.
 	const noModelAuth = process.env.GITHUB_ACTIONS === "true";
+	const tolerated = report.findings.filter((finding) => noModelAuth && noModelAuthFinding(finding));
 	const errors = report.findings
-		.filter((finding) => finding.severity === "error" && !(noModelAuth && finding.check.startsWith("models.")))
+		.filter((finding) => finding.severity === "error" && !tolerated.includes(finding))
 		.map((finding) => finding.check);
-	if (noModelAuth) console.log("doctor: CI has no pi auth — tolerating models.* findings");
+	if (noModelAuth) console.log(`doctor: CI has no pi auth — tolerating ${tolerated.length} no-model-auth finding(s)`);
 	if (piConflict) {
 		console.log(`doctor: tolerating host.pi.conflict — more than one pi version on PATH (${piConflict})`);
 		assert.deepEqual(errors, ["host.pi.conflict"], "a fresh home passes apart from this host's pi version conflict");

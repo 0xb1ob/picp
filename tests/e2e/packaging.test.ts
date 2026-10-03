@@ -29,7 +29,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { DoctorReport } from "../../src/contracts.ts";
 import { describeHome } from "../../src/home.ts";
-import { hostPiVersionConflict, REPO_ROOT, startRpc, treehouseAvailable } from "../harness/index.ts";
+import { hostPiVersionConflict, noModelAuthFinding, REPO_ROOT, startRpc, treehouseAvailable } from "../harness/index.ts";
 import { LAYOUT } from "../../src/contracts.ts";
 
 interface CleanMachine {
@@ -175,14 +175,15 @@ test("clean machine: a fresh clone loads, scaffolds its home and is dispatchable
 	if (piConflict) {
 		console.log(`packaging: tolerating host.pi.conflict — more than one pi version on PATH (${piConflict})`);
 	}
-	// CI installs treehouse but never has model credentials (`CP_LIVE_TESTS` stays
-	// empty, no `pi auth`), so there every route is refused. Tolerate exactly the
-	// `models.*` findings there, printed; every other error still fails.
+	// CI installs treehouse but has no model credentials (`CP_LIVE_TESTS` stays
+	// empty, no `pi auth`). There, tolerate only the findings that say no model
+	// is authenticated at all. Every other error still fails.
 	const noModelAuth = process.env.GITHUB_ACTIONS === "true";
-	const tolerated = (check: string) => (piConflict && check === "host.pi.conflict") || (noModelAuth && check.startsWith("models."));
-	const errors = report.findings.filter((finding) => finding.severity === "error" && !tolerated(finding.check));
+	const tolerated = (finding: (typeof report.findings)[number]) =>
+		(piConflict && finding.check === "host.pi.conflict") || (noModelAuth && noModelAuthFinding(finding));
+	const errors = report.findings.filter((finding) => finding.severity === "error" && !tolerated(finding));
 	if (noModelAuth) {
-		console.log(`packaging: CI has no pi auth — tolerating ${report.findings.filter((f) => f.severity === "error" && f.check.startsWith("models.")).length} models.* finding(s)`);
+		console.log(`packaging: CI has no pi auth — tolerating ${report.findings.filter((f) => noModelAuthFinding(f)).length} no-model-auth finding(s)`);
 	}
 	// "Dispatchable" is a claim about a host that actually has treehouse and
 	// authenticated models. Assert the strict "zero errors" claim only where

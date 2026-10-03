@@ -40,3 +40,22 @@ export function hostPiVersionConflict(): string | null {
 	if (byVersion.size < 2) return null;
 	return [...byVersion.entries()].map(([version, found]) => `${version}: ${found[0]}`).join(" | ");
 }
+
+/**
+ * True only for a `models.*` doctor error that says this host has **no
+ * authenticated model at all**. Every candidate was refused for `availability`
+ * (never `allowlist` or `effort`), and the probe listed `Available: (none).`.
+ * CI is that host on purpose: it has no `pi auth`, and `CP_LIVE_TESTS` stays
+ * empty. The live-doctor tests use this on CI to tolerate exactly these
+ * findings. A routing, allowlist or effort regression still fails.
+ */
+export function noModelAuthFinding(finding: { check: string; severity: string; detail?: string }): boolean {
+	const detail = finding.detail ?? "";
+	return (
+		finding.check.startsWith("models.") &&
+		finding.severity === "error" &&
+		detail.endsWith("Available: (none).") &&
+		/\(availability\)|is not usable/.test(detail) &&
+		!/\((?:allowlist|effort)\)/.test(detail)
+	);
+}
