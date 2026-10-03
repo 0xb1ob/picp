@@ -687,9 +687,15 @@ property of the notification path — not a prompt for more parent diligence.
   that is still readable is a summary somebody still acts on.
 - **Silence is recorded.** Every withheld or rewritten wake-up appends a
   `cp:wakeup_suppressed` marker (kind, generation, `issued_at`, delay, reason,
-  and which stage caught it) to the job's run log. Never a body. **A marker is
+  the stamp's `keys` (at most 8), and which stage caught it) to the job's run
+  log. A jobless `cp-recovery` marker lands in the run log of each listed job
+  that has one. Never a body. **A marker is
   not activity**: it records a message the parent declined to send, so it
   advances `event_count` but never `last_activity_at` (see Run artifacts).
+  The replay memory (`state/wakeup-replay.json`) keeps the first withhold
+  reason (at most `WAKEUP_WITHHELD_REASON_MAX_CHARS`, 300) as the `withheld:`
+  value, so a later context says *why* ("already withheld in an earlier
+  context: …"); a legacy entry says "original reason not recorded".
 - **Age is never evidence of staleness.** Staleness is decided from facts (a
   generation, a `reported_at`, a phase, an open tool call). `WAKEUP_LATE_SECONDS`
   only adds a line saying how late a still-true wake-up was — `stalled` stays
