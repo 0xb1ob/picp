@@ -3546,7 +3546,7 @@ through a three-tier ladder, `resolveMandateGrant`: an explicit argument on the
 `cp_mandate issue` call wins, then a matching `mandate` override object on the
 named project's `data/projects.json` entry, then the home's
 `data/mandate-defaults.json` (scaffolded once by `scaffoldHome` with
-conservative values — 8h expiry, $100, 10M non-cached tokens (`token_ceiling` 100M), 3-job cap, serial dispatch,
+conservative values — 8h expiry, $100, 10M non-cached tokens (`token_ceiling` 100M), 3-job cap, 3 jobs at once,
 every action including merge, `ask_on: [risk:high]`, and `.github/workflows/`,
 `secrets/`, `**/.env*` excluded — and never rewritten after). A mandate that
 names more than one project only takes a project tier when every named project
@@ -3588,8 +3588,8 @@ actions, echo the effective grant (fields and sources) in one line once issued.
 answers what a continuation loop needs after every wake-up: given the active
 mandate (the earliest-issued active mandate covering the project, else the earliest paused one; revoked and expired never count),
 the open unblocked jobs it covers (`cp_job ready`, filtered by `covers()`),
-how many of them are already working (`phase: waiting`) against `dispatch_parallelism` (default 1,
-i.e. serial; a `held` delivery counts toward spend and jobs but not the slot). Serial means one *fresh*
+how many of them are already working (`phase: waiting`) against `dispatch_parallelism` (the resolved
+default, 3 on a fresh home, 1 = serial; a grant without one is serial; a `held` delivery counts toward spend and jobs but not the slot). A slot is one *fresh*
 implementer at a time: `assertDispatchAllowed(..., { promotion: true })` — a `cp_send` promotion of an
 existing job's own worker — is still gated by risk and pauses but never by the slot, so repairing a held PR
 may overlap the next job's work. The mandate's status and remaining spend/token/job caps, and one
