@@ -428,7 +428,11 @@ one result in `state/update.json` (its only writer):
   when `package-lock.json` changed, cp-daemon `reload` (a new inner on the new code: the supervisor starts a
   fresh host, the viewer restarts, the hold is released);
 - **verify** (≤ 120 s): a host running a parent whose `/doctor` is not an error, and the viewer's
-  `/api/identity` → `updated`;
+  `/api/identity` → `updated`; + ≤ 300 s while the parent is alive but busy (`#settledProc`'s
+  "parent must be settled with no pending send", or a doctor queued behind the host's serial queue while
+  the host's `status` read names the same live parent pid), then accepted with `doctor deferred: parent busy
+  420s` at the end of the `updated` detail. An absent parent, a `/doctor` error or any other doctor
+  rejection, and a down viewer are never extended and never accepted;
 - **rollback:** a failure after the merge first drains again, because a restarted parent has already
   cleared the drain and reopened dispatch. If a live worker does not settle within 660 s, or no host
   answers while `fleet.json` still names one, nothing is stopped: `rollback_failed` with phase
@@ -437,7 +441,8 @@ one result in `state/update.json` (its only writer):
   while a run is actually working. `service.update` warns. A rollback kills no live worker. Once drained it
   stops, runs `git reset --keep <from>` (only after the clean/not-ahead check, only to the recorded
   sha), `npm ci` if the lock changed, restarts and verifies → `rolled_back` with `bad_sha` (never
-  retried) or `rollback_failed`. A failure before the merge reloads cp-daemon → `failed`. A run that
+  retried) or `rollback_failed` (`bad_sha` unchanged: a failure it cannot attribute never marks the
+  target bad; the sticky `rollback_failed` holds it). A failure before the merge reloads cp-daemon → `failed`. A run that
   died mid-phase takes this path at its next start; one that died mid-drain cancels the drain, or,
   when it had already reached `drained` (which cancel refuses, and which keeps dispatch closed until
   the parent restarts), stops and restarts the drained parent → `failed`. The restart runs even when

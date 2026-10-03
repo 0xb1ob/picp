@@ -17,16 +17,18 @@
  *   update    host `stop`, cp-daemon `hold` (the viewer), `git merge --ff-only <to>`, `npm ci` only when
  *             package-lock.json changed, cp-daemon `reload` (a new inner: parent supervisor and viewer)
  *   verify    ≤ 120 s: a host running a parent whose `/doctor` is not an error, and the viewer's identity
- *             → `updated`
+ *             → `updated`; + ≤ 300 s while the parent is alive but busy (PARENT_UNSETTLED, or doctor queued
+ *             behind a live parent per the status read), then accepted with `doctor deferred` in the detail
  *   rollback  a failure after the merge: drain again (a restarted parent reopened dispatch; live workers that
  *             will not settle defer it, phase stays `rolling_back`, retried after 4× the interval), stop,
  *             `git reset --keep <from>`, npm ci if the lock changed, restart, verify → `rolled_back` (`bad_sha`,
- *             never retried) or `rollback_failed` (sticky until a human removes state/update.json); a failure
- *             before the merge: reload → `failed`; a run that died after `drained`: restart it
+ *             never retried) or `rollback_failed` (sticky until a human removes state/update.json; `bad_sha`
+ *             unchanged); a failure before the merge: reload → `failed`; a run that died after `drained`:
+ *             restart it
  *
  * Its record is `state/update.json` (its only writer). It never pushes: after every failure it asks
  * cp-daemon for a health run, which sends the one notice. No authority: host ops `hello`, `drain`, `drainCancel`,
- * `stop`, `doctor` only; it never dispatches, decides or merges and never writes the fleet or the ledger.
+ * `stop`, `doctor`, `status` only; it never dispatches, decides or merges and never writes the fleet or the ledger.
  * Static imports only: the checkout moves under it.
  */
 import { spawnSync } from "node:child_process";
@@ -38,6 +40,7 @@ import { type DrainRecord, liveWorkerJobs, readDrain, restartActivity } from "..
 import { FleetStore, isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
+import { PARENT_UNSETTLED } from "../parent-diagnostics.ts";
 import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
 import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
@@ -74,6 +77,11 @@ export const DRAIN_TIMEOUT_S = 600;
 export const BUSY_FORCE_FACTOR = 4;
 export const DRAIN_WAIT_MS = 660_000;
 export const VERIFY_MS = 120_000;
+/** Extra wait while the parent is alive but busy: PARENT_UNSETTLED or a doctor queued behind a live parent; never for an absent parent or an observed failure. */
+export const VERIFY_SETTLE_MS = 300_000;
+/** Longer than a queued send's 120 s settle and parentDiagnostic's 120 s timeout. */
+export const DOCTOR_PROBE_MS = 150_000;
+export const STATUS_PROBE_MS = 3_000;
 const POLL_MS = 5_000;
 const DETAIL_MAX = 300;
 
@@ -107,6 +115,20 @@ export function readUpdateConfig(dataDir: string): { enabled: boolean; interval_
 	}
 }
 
+/** One post-restart look at the parent: doctor passed, reported an error, the parent is alive but busy, or it is down. */
+export type ParentProbe = { ok: true } | { error: string } | { busy: string } | { down: string };
+/** undefined: healthy; a string: why not; `{note}`: healthy, with what was deferred. */
+export type VerifyResult = string | undefined | { note: string };
+
+export interface VerifyPorts {
+	/** One doctor probe answering within about `budgetMs` (+ a status read on timeout). */
+	probeParent(budgetMs: number): Promise<ParentProbe>;
+	viewerDown(): Promise<string | undefined>;
+	now(): number;
+	sleep(ms: number): Promise<void>;
+	log(line: string): void;
+}
+
 export interface UpdatePorts {
 	run(command: string, args: readonly string[], cwd?: string): RunResult;
 	/** One op on this home's current host (connect, request, disconnect); throws when none answers. */
@@ -117,8 +139,11 @@ export interface UpdatePorts {
 	busy(): string[];
 	/** Live script jobs, and live workers not idle (`restartActivity`): what a restart would cut mid-turn. */
 	activity(): { working: string[]; scripts: string[] };
-	/** Within `timeoutMs`: undefined once a parent's `/doctor` is not an error and the viewer answers; else why not. */
-	verify(timeoutMs: number): Promise<string | undefined>;
+	/**
+	 * Within `timeoutMs` (+ VERIFY_SETTLE_MS while the parent is alive but busy): undefined once a parent's `/doctor` is
+	 * not an error and the viewer answers; `{note}` when a still-busy parent was accepted without doctor; else why not.
+	 */
+	verify(timeoutMs: number): Promise<VerifyResult>;
 	/** cp-daemon's control socket: `hold` the viewer, `reload` the inner (parent supervisor and viewer), ask for a `health` run. */
 	daemon: DaemonControl;
 	now(): Date;
@@ -228,7 +253,8 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		return outcome === "drained" ? undefined : outcome === "timeout" ? `the fleet did not drain within ${DRAIN_TIMEOUT_S}s (cancelled)` : "state/drain.json went away before it drained";
 	};
 	const rollback = async (from: string, to: string, lock: boolean, why: string): Promise<UpdateState> => {
-		const patch = { from, to, bad_sha: to };
+		// No `bad_sha` here: only a verified rollback attributes the failure to `to`; rollback_failed keeps the prior one.
+		const patch = { from, to };
 		ports.log(`rolling back to ${short(from)}: ${why}`);
 		// Not `held` while this run works: the watchdog stands down through the stop/restart window.
 		save({ phase: "rolling_back", detail: clip(why), held: undefined });
@@ -239,9 +265,11 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		if (stop) ports.log(`rollback: ${stop}; continuing`);
 		const reset = git("reset", "--quiet", "--keep", from);
 		if (reset.status !== 0) return finish("rollback_failed", `${why}; git reset --keep ${short(from)} failed: ${reset.stderr.trim()}`, patch);
-		const broken = (lock ? npmCi() : undefined) ?? (await restartUnits()) ?? (await ports.verify(VERIFY_MS));
+		const failed = (lock ? npmCi() : undefined) ?? (await restartUnits());
+		const verified = failed ? undefined : await ports.verify(VERIFY_MS);
+		const broken = failed ?? (typeof verified === "string" ? verified : undefined);
 		if (broken) return finish("rollback_failed", `${why}; after the rollback: ${broken}`, patch);
-		return finish("rolled_back", `${why}; back at ${short(from)}; ${short(to)} is never retried`, patch);
+		return finish("rolled_back", `${why}; back at ${short(from)}; ${short(to)} is never retried${typeof verified === "object" ? `; ${verified.note}` : ""}`, { ...patch, bad_sha: to });
 	};
 
 	// A legacy cp-update.service (no data/daemon.json): it never touches the checkout again; cp-install migrates.
@@ -323,9 +351,86 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 	const broken = (lock ? npmCi() : undefined) ?? (await restartUnits());
 	if (broken) return rollback(from, to, lock, broken);
 	save({ phase: "verifying" });
-	const unhealthy = await ports.verify(VERIFY_MS);
-	if (unhealthy) return rollback(from, to, lock, unhealthy);
-	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}`, { from, to, updated_at: at });
+	const verified = await ports.verify(VERIFY_MS);
+	if (typeof verified === "string") return rollback(from, to, lock, verified);
+	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}`, { from, to, updated_at: at });
+}
+
+/** `promise` settled within `ms`: its value or its error; undefined on timeout. */
+async function settleWithin(promise: Promise<unknown>, ms: number): Promise<{ value: unknown } | { error: unknown } | undefined> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise.then((value) => ({ value }), (error: unknown) => ({ error })),
+			new Promise<undefined>((done) => {
+				timer = setTimeout(() => done(undefined), ms);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * One doctor probe, classified. An explicit rejection is busy only when it is exactly PARENT_UNSETTLED, never
+ * otherwise; no answer within `budgetMs` (a doctor queued behind the host's serial queue) is busy only when the
+ * host's non-queued `status` read confirms the same parent pid alive within `statusMs`.
+ */
+export async function probeDoctor(doctor: () => Promise<unknown>, status: () => Promise<unknown>, parentPid: number, budgetMs: number, statusMs = STATUS_PROBE_MS): Promise<ParentProbe> {
+	const answer = await settleWithin(Promise.resolve().then(doctor), budgetMs);
+	if (answer && "error" in answer) {
+		const message = errorText(answer.error);
+		return message === PARENT_UNSETTLED ? { busy: message } : { down: message };
+	}
+	if (answer) {
+		const report = answer.value as { level?: unknown; text?: unknown } | null;
+		return report?.level === "error" ? { error: String(report.text ?? "") } : { ok: true };
+	}
+	const read = await settleWithin(Promise.resolve().then(status), statusMs);
+	const live = read && "value" in read ? (read.value as { alive?: unknown; pid?: unknown } | null) : undefined;
+	if (live?.alive === true && live.pid === parentPid) return { busy: `doctor queued behind the host queue for ${budgetMs}ms; parent pid ${parentPid} alive` };
+	const why = !read ? `did not answer within ${statusMs}ms` : "error" in read ? `failed: ${errorText(read.error)}` : live?.alive !== true ? "says no parent is alive" : `names pid ${String(live.pid)}, not ${parentPid}`;
+	return { down: `doctor did not answer within ${budgetMs}ms and status ${why}` };
+}
+
+/**
+ * Post-restart verify: ≤ `timeoutMs` for a parent whose doctor is not an error and a live viewer; only a busy parent
+ * extends that by ≤ `settleMs`, after which it is accepted with a `doctor deferred` note. An absent parent, an
+ * observed doctor failure or a down viewer is never extended and never accepted.
+ */
+export async function verifyRestart(ports: VerifyPorts, timeoutMs: number, settleMs = VERIFY_SETTLE_MS): Promise<VerifyResult> {
+	const base = ports.now() + timeoutMs;
+	const hard = base + settleMs;
+	let parentOk = false;
+	let lastBusy = false;
+	let why = "no parent host answered";
+	const deadline = () => (!parentOk && lastBusy ? hard : base);
+	for (;;) {
+		if (!parentOk) {
+			const probe = await ports.probeParent(Math.min(DOCTOR_PROBE_MS, Math.max(1_000, deadline() - ports.now())));
+			if ("error" in probe) return `the parent's /doctor reports an error: ${probe.error}`;
+			if ("ok" in probe) parentOk = true;
+			else {
+				// A down after a busy falls back to the base deadline: the parent died or was replaced.
+				lastBusy = "busy" in probe;
+				why = "busy" in probe ? probe.busy : probe.down;
+			}
+		}
+		if (parentOk) {
+			const down = await ports.viewerDown();
+			if (!down) return undefined;
+			why = `viewer: ${down}`;
+		}
+		if (ports.now() >= deadline()) {
+			if (parentOk || !lastBusy) return `not healthy within ${Math.round(timeoutMs / 1000)}s: ${why}`;
+			const note = `doctor deferred: parent busy ${Math.round((timeoutMs + settleMs) / 1000)}s`;
+			ports.log(note);
+			const down = await ports.viewerDown();
+			return down ? `viewer: ${down}` : { note };
+		}
+		await ports.sleep(2_000);
+	}
 }
 
 /** The production ports for `home` (multi mode, layout configured). */
@@ -350,38 +455,34 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		drain: () => readDrain(home)?.state,
 		busy: () => liveWorkerJobs(new FleetStore({ home }).list()),
 		activity: () => restartActivity(new FleetStore({ home }).list(), (jobId) => readStatusFile(home, jobId)?.phase),
-		verify: async (timeoutMs) => {
-			const deadline = Date.now() + timeoutMs;
-			let doctorOk = false;
-			let why = "no parent host answered";
-			for (;;) {
-				if (doctorOk) {
-					const down = await viewerDown(home, env);
-					if (!down) return undefined;
-					why = `viewer: ${down}`;
-				} else {
-					const { record } = currentHost(paths);
-					const client = record ? await ParentHostClient.connect(record, 3_000).catch((error: Error) => void (why = error.message)) : undefined;
-					if (client) {
+		verify: (timeoutMs) =>
+			verifyRestart(
+				{
+					// A thin socket adapter: every classification is probeDoctor's.
+					probeParent: async (budgetMs) => {
+						const { record } = currentHost(paths);
+						if (!record) return { down: "no parent host answered" };
+						let client: ParentHostClient;
 						try {
-							if (client.parentPid === undefined) why = `host pid ${client.hostPid} runs no parent yet`;
-							else {
-								const doctor = (await client.request("doctor")) as { text?: string; level?: string };
-								if (doctor.level === "error") return `the parent's /doctor reports an error: ${doctor.text ?? ""}`;
-								doctorOk = true;
-								continue;
-							}
+							client = await ParentHostClient.connect(record, 3_000);
 						} catch (error) {
-							why = (error as Error).message; // e.g. a parent still busy with its startup turn: asked again
+							return { down: (error as Error).message };
+						}
+						try {
+							const parentPid = client.parentPid;
+							if (parentPid === undefined) return { down: `host pid ${client.hostPid} runs no parent yet` };
+							return await probeDoctor(() => client.request("doctor"), () => client.request("status"), parentPid, budgetMs);
 						} finally {
 							client.disconnect();
 						}
-					}
-				}
-				if (Date.now() >= deadline) return `not healthy within ${Math.round(timeoutMs / 1000)}s: ${why}`;
-				await sleep(2_000);
-			}
-		},
+					},
+					viewerDown: () => viewerDown(home, env),
+					now: Date.now,
+					sleep,
+					log: (line) => console.error(`update: ${line}`),
+				},
+				timeoutMs,
+			),
 		daemon: daemonControl(home, (line) => console.error(`update: ${line}`)),
 		now: () => new Date(),
 		sleep,

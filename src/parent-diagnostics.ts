@@ -5,6 +5,9 @@ export interface ParentDiagnostic {
 	level: "info" | "error";
 }
 
+/** #settledProc's refusal: alive and ready, but mid-turn or a send pending. */
+export const PARENT_UNSETTLED = "parent must be settled with no pending send";
+
 /** Invoke only registered diagnostic commands: an unknown slash command would become an LLM prompt. */
 export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "version" | "drain", timeoutMs = 120_000, args = ""): Promise<ParentDiagnostic> {
 	const command = action === "doctor" ? "doctor" : action === "drain" ? "cp-drain" : "cp-version";

@@ -19,7 +19,7 @@ import {
 } from "./contracts.ts";
 import { autoParentContext, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus } from "./parent-context.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
-import { parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
+import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
 import { durableIdsFromMessage, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
@@ -442,7 +442,7 @@ export class CpBridge {
 		const proc = this.#proc;
 		if (!proc?.alive || !this.#ready || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");
 		if (this.#controlBusy || proc.busy || this.#runOpen || this.#delivery?.outbox.list().some((entry) =>
-			["queued", "injected", "landed"].includes(entry.state))) throw new CpBridgeError("parent must be settled with no pending send");
+			["queued", "injected", "landed"].includes(entry.state))) throw new CpBridgeError(PARENT_UNSETTLED);
 		return proc;
 	}
 	async diagnostic(action: "doctor" | "version"): Promise<ParentDiagnostic> {
