@@ -348,11 +348,13 @@ export class BoundedRecovery {
 	/**
 	 * cp-a9fq: recovery owns the job's in-flight state for its whole attempt, taken
 	 * synchronously on entry. A teardown already in flight wins: recovery stands
-	 * down without spending an attempt, and says so in the run log.
+	 * down without spending an attempt, and says so in the run log. Nothing
+	 * retries it: if that teardown refuses, the job stays dead until an operator
+	 * revives or re-dispatches it (the reason says so).
 	 */
 	#claimed(jobId: string, failure: Failure, work: () => Promise<RecoveryOutcome>): Promise<RecoveryOutcome> {
 		return withJobClaim(this.#options.claims, jobId, "recovery", work, async (holder) => {
-			const reason = `automatic recovery of ${jobId} stood down: a ${holder} is in flight for this job`;
+			const reason = `automatic recovery of ${jobId} stood down: a ${holder} is in flight for this job. Nothing retries it automatically — if that ${holder} does not close the job, cp_revive ${jobId} (or re-dispatch) once it finishes`;
 			this.#options.runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "claim", error: reason });
 			return { action: "revive_refused", reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - readRecoveryAttempts(this.#options.home, jobId, failure.class), 0) };
 		});

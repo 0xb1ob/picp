@@ -248,7 +248,7 @@ test("cp-a9fq: a teardown in flight wins; recovery stands down without spending 
 	const recovery = new BoundedRecovery({ home: b.home.path, fleet: b.fleet, runs: b.runs, escalations: b.escalations, reviver: () => b.reviver, sender: b.sender, claims });
 	const outcome = await recovery.onDeath(JOB_ID, CRASH());
 	assert.equal(outcome.action, "revive_refused");
-	assert.match(outcome.action === "revive_refused" ? outcome.reason : "", /teardown is in flight/);
+	assert.match(outcome.action === "revive_refused" ? outcome.reason : "", /teardown is in flight.*Nothing retries it automatically.*cp_revive cp-recover/);
 	assert.equal(b.reviver.plans, 0, "nothing was attempted beside the teardown");
 	assert.equal(readRecoveryAttempts(b.home.path, JOB_ID, "crash"), 0, "no attempt spent");
 	assert.equal(b.escalations.list().length, 0);

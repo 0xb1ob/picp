@@ -2577,7 +2577,11 @@ entry (`src/job-claims.ts`, one map per parent), and the loser refuses rather
 than waits or cancels — a teardown that finds recovery in flight is
 `job_in_flight` (retry after `recovery_attempted`/`recovery_escalated`), and a
 recovery that finds a teardown in flight stands down without spending an
-attempt (`cp:recovery_failed`, `stage: "claim"`).
+attempt (`cp:recovery_failed`, `stage: "claim"`). The stand-down is final:
+nothing retries recovery once the teardown finishes. If that teardown refuses
+(a gate held, or `lease_return_failed`), the job stays dead with its lease, and
+the operator acts on it after the holder finishes: `cp_revive <job>` or a
+re-dispatch. No automatic retry is assumed.
 
 `force` is operator authorization, not a shortcut: it exists so a job whose
 worktree vanished can still be closed, it is recorded in the run log, and it
