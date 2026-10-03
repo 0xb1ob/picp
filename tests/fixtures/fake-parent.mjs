@@ -47,6 +47,12 @@ const rl = createInterface({ input: process.stdin, terminal: false });
 let woke = false;
 /** The body of a HANG turn still open. */
 let held = null;
+/** A SEGMENT turn answered at a clean turn_end, its run still open. */
+let segmented = false;
+/** pi's turn_end after a text-only answer: the end of a segment, not of the run. */
+const SEGMENT_END = { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] };
+/** FAKE_PARENT_WAKE_SEGMENT=1: the startup wake ends at a clean turn_end and never settles. */
+const wakeEnd = () => (process.env.FAKE_PARENT_WAKE_SEGMENT === "1" ? SEGMENT_END : { type: "agent_settled" });
 let compacted = false;
 let compactedTurn = false;
 const entriesFile = sessionFromArgv() ? `${sessionFromArgv()}.fake-entries.jsonl` : null;
@@ -122,7 +128,7 @@ rl.on("line", (line) => {
 		if (lines.length > 1 && process.env.FAKE_PARENT_WAKE_TEXT) {
 			lines.push(
 				{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: process.env.FAKE_PARENT_WAKE_TEXT }] } },
-				{ type: "agent_settled" },
+				wakeEnd(),
 			);
 		} else if (lines.length > 1) {
 			lines.push(
@@ -133,7 +139,7 @@ rl.on("line", (line) => {
 						content: [{ type: "text", text: "job: cp-wake\nwake: worker settled" }],
 					},
 				},
-				{ type: "agent_settled" },
+				wakeEnd(),
 			);
 		}
 		process.stdout.write(lines.map((record) => JSON.stringify(record)).join("\n") + "\n");
@@ -195,10 +201,11 @@ rl.on("line", (line) => {
 			appendFileSync(entriesFile, `${JSON.stringify(entry)}\n`);
 		}
 		const userEcho = { type: "message_end", message: { role: "user", content: [{ type: "text", text: raw }] } };
-		if (held !== null && text.includes("RELEASE")) {
+		if ((held !== null || segmented) && text.includes("RELEASE")) {
 			// The held turn answers first; the follow-up lands after it, in the same run.
-			write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${held}` }] } });
+			if (held !== null) write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${held}` }] } });
 			held = null;
+			segmented = false;
 			write(userEcho);
 			write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${text}` }] } });
 			write({ type: "agent_settled" });
@@ -222,6 +229,14 @@ rl.on("line", (line) => {
 		}
 		if (text.includes("HANG")) {
 			held = text;
+			write({ type: "response", command: type, id, success: true });
+			return;
+		}
+		if (text.includes("SEGMENT")) {
+			// Answered at a clean turn_end; the run stays open (no agent_settled) until a RELEASE.
+			segmented = true;
+			write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${text}` }], stopReason: "stop" } });
+			write(SEGMENT_END);
 			write({ type: "response", command: type, id, success: true });
 			return;
 		}
