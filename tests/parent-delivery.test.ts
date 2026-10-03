@@ -19,6 +19,7 @@ function scripted() {
 	const sent: string[] = [];
 	const calls: Array<[string | undefined, string | undefined]> = [];
 	const counted: boolean[] = [];
+	const slept: number[] = [];
 	const relays: Array<{ sendId: string; text: string }> = [];
 	let answer: (value: { entries: unknown[]; dropped: number }) => void = () => undefined;
 	const proc = {
@@ -34,12 +35,14 @@ function scripted() {
 	const delivery = new ParentDelivery(box, {
 		liveProc: () => proc,
 		emit: (relay) => relays.push(relay),
-		sleep: async () => undefined,
+		sleep: async (ms) => {
+			slept.push(ms);
+		},
 		journal: () => undefined,
 		countTurn: (failed) => counted.push(failed),
 	});
 	const turn = (): LandedTurn => ({ texts: [], assistantCount: 0, landed: [], answers: [] });
-	return { box, proc, sent, calls, counted, relays, delivery, turn, answer: (value: { entries: unknown[]; dropped: number }) => answer(value) };
+	return { box, proc, sent, calls, counted, slept, relays, delivery, turn, answer: (value: { entries: unknown[]; dropped: number }) => answer(value) };
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -154,6 +157,7 @@ test("an interleaved send gets the run's error when no answer finished", async (
 		["failed", "failed"],
 	);
 	assert.deepEqual(ctx.counted, [true, true]);
+	assert.deepEqual(ctx.slept, [], "a non-transient run error never sleeps for a resume");
 });
 
 test("cleanSegmentEnd: only a text-only turn_end that did not fail or get cut off", () => {
