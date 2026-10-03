@@ -26,6 +26,7 @@ import {
 	isSafeProjectName,
 	LAYOUT,
 	PROJECT_NAME_PATTERN,
+	type MergePolicy,
 	type Project,
 	type ProjectRegistryFile,
 	paths,
@@ -205,6 +206,18 @@ export class ProjectRegistry {
 			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
 			const { archived: _drop, ...rest } = projects[index] as Project;
 			projects[index] = archived ? { ...rest, archived: true } : rest;
+		});
+		return this.require(name);
+	}
+
+	/** Set who lands a reviewed, green PR; `repo` (the default) deletes the key. */
+	async setMergePolicy(name: string, policy: MergePolicy): Promise<Project> {
+		if (policy !== "repo" && policy !== "human_handoff") throw new ProjectError(`unknown merge policy "${String(policy)}" — repo or human_handoff`);
+		await this.mutate((projects) => {
+			const index = projects.findIndex((entry) => entry.name === name);
+			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
+			const { merge_policy: _drop, ...rest } = projects[index] as Project;
+			projects[index] = policy === "human_handoff" ? { ...rest, merge_policy: policy } : rest;
 		});
 		return this.require(name);
 	}
@@ -464,7 +477,7 @@ export function formatProjects(
 	for (const project of projects) {
 		const clone = options.cloneExists ? (options.cloneExists(project) ? "cloned" : "not cloned yet") : "";
 		lines.push(
-			`  ${project.name}${project.archived ? " [archived]" : ""}  delivery:${project.delivery}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
+			`  ${project.name}${project.archived ? " [archived]" : ""}  delivery:${project.delivery}${project.merge_policy === "human_handoff" ? " merge:human_handoff" : ""}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
 			`    ${project.clone_url}${project.base_branch ? `  base=${project.base_branch}` : ""}`,
 		);
 	}

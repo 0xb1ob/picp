@@ -552,7 +552,7 @@ export function answeredIdsFromMessage(message: unknown): string[] {
 			// this fleet mints ends in one, and `…merge-f7b8769.` in prose must read
 			// as the id followed by a full stop.
 			const id = match.replace(/[.\-_]+$/, "");
-			if (id.length > "aw-".length) ids.add(id);
+			if (id.length > 3) ids.add(id);
 		}
 	}
 	return [...ids];
@@ -562,9 +562,10 @@ export function answeredIdsFromMessage(message: unknown): string[] {
  * An Awaiting-you id as it appears inside prose. `.` is in the class because a
  * scoped checkpoint id contains one (`aw-checkpoint-cp-x.merge-<head>`) — the
  * one character whose absence made a merge authorization unconfirmable, and so
- * repeatable, for a whole session (cp-5mgg).
+ * repeatable, for a whole session (cp-5mgg). `es-` is an escalation answer's
+ * own wake id, confirmable the same way.
  */
-const AWAITING_ID_IN_TEXT = /\baw-[A-Za-z0-9_.-]+/g;
+const AWAITING_ID_IN_TEXT = /\b(?:aw|es)-[A-Za-z0-9_.-]+/g;
 
 /** A custom message's content is a string here, an array of parts elsewhere. */
 function noticeText(content: unknown): string {

@@ -398,9 +398,12 @@ brief says it for every rendering. The reason is not politeness about turn time:
 
 A single **non-blocking** snapshot is still allowed (`gh run list --branch
 <branch> --limit 3 --json conclusion,status,headSha,workflowName`); whatever it
-says — queued, in progress, no runs at all — the worker reports and stops. If CI
-comes back red afterwards, the parent promotes the held worker or re-dispatches;
-that is cheaper than a worker asleep in a tool call.
+says — queued, in progress, no runs at all — the worker reports and stops. It is
+one per worker process (`ciStatusQuery`): a second `gh run list|view`,
+`gh pr checks` or check-runs call is refused with a pointer to `report_result`.
+Failure logs (`gh run view <id> --log` / `--log-failed`) are not status and stay
+allowed. If CI comes back red afterwards, the parent promotes the held worker or
+re-dispatches; that is cheaper than a worker asleep in a tool call.
 
 **Enforcement, because wording already failed here once.** PR #39 fixed this as
 brief guidance and lost to the next brief that asked for a green confirmation,
@@ -1183,7 +1186,8 @@ The operator session relays, once per id, any escalation open at least
 open operator ask represents and that never reached the session as a relay —
 a gate-raised escalation has no `cp_escalate` relay path. Bridge escalation
 relays are recorded too, in the same ledger, `state/operator/escalation-relays.json`,
-so neither path repeats the other, across restarts. It runs at `session_start`
+so neither path repeats the other, across restarts. Ids still open are pinned;
+only settled history is capped at 512. It runs at `session_start`
 and on a 60 s tick; a send-reply mention of the id does not swallow it. It is
 not a parent wake and never authorization. An unreadable ledger or store sets
 the `escalation-backstop` status line and relays nothing. Two edges are
@@ -2948,6 +2952,46 @@ id `aw-checkpoint-<id>`; `diff` is `<id>.diff.json`; `merge` is
 stripping a suffix, so no store can report another kind's checkpoint under a br
 id that was never a job id.
 
+### Per-project human-review handoff (`merge_policy: human_handoff`)
+
+A project may choose that the command post never lands its PRs:
+`cp_project merge_policy name:<p> policy:human_handoff` (`repo` deletes the key;
+absent means `repo`, and integration is then argv-identical to the rules above).
+The policy is read through the project registry the composition root injects
+into `makeHandoff` (`src/human-handoff.ts`), keyed by the job's fleet-record
+project name — the same name `cp_integrate` resolves the canonical clone from;
+`src/integrate.ts` performs no lookup of its own. An unreadable registry fails
+closed: surface, nothing merged.
+
+**The handoff happens only after green CI and a passing review on the current
+head.** The hook sits after the CI read (green, or the repository positively has
+no CI) and after the draft step (a reviewed draft is readied first, exactly as
+above), and before update-branch, retry, merge pending and the unreadable
+fallback. It hands off when the verdict is `permitted`, or `pending` with cause
+`reviews`, `behind` or `unknown_block` (a rule-required update counts as
+`behind`, as it does for the update step) — and only after `#reviewRequired`
+passes; an unreviewed head returns `next: review` unchanged. The handoff records
+step `permit`, next `surface`, journals `integration_permitted` with
+`policy: human_handoff`, and declares one subject-keyed Awaiting row
+`human-review pr <url>` naming the head. Under the policy, `gh pr merge` and
+`gh pr update-branch` never run and no merge checkpoint is minted.
+
+**What never hands off:** pending CI (`wait`), CI on a superseded head (`wait`),
+red CI (resolve), a permission `retry`, and `pending` with cause `checks`,
+`unstable`, `conflict` or `queue` (today's merge-pending reminder). CI or merge
+state that cannot be read surfaces "not handed off" with **no** merge checkpoint
+and no row.
+
+**Landing and change requests add no new path.** The human's merge on GitHub is
+observed like any external merge (`MERGED` → record, teardown, close), and the
+row goes obsolete on the merged receipt. A change request is a `cp_send` to the
+same job (`cp_revive` first if its worker is dead): it reopens the envelope, the
+worker pushes and reports, the continuation reviews the new head and waits for
+its CI, and the handoff then updates the same row — one continuation notice per
+head, never a new job or branch. Until then the row still names the old head.
+GitHub review events are not polled, and an approval on GitHub never triggers a
+merge by the command post.
+
 ### The two-writer boundary
 
 The branch has exactly one writer at any moment, and the boundaries are code:
@@ -3558,11 +3602,26 @@ operator quote (never a mandate basis — `risk:high` never auto-permits) —
 a structured escalation is never a checkpoint or a declared Awaiting-you row,
 so `decide()` answers it through `EscalationStore.answer` and never through
 `CheckpointStore`/`AwaitingStore`. The record: a **decided, approving**
-`risk_high_irreversible` escalation naming a job id is permission for that job
-id only; a new job id needs a new decision, and an escalation answered `drop`
+`risk_high_irreversible` escalation naming a job id is permission for the job
+ids it names only; a new job id needs a new decision, and an escalation answered `drop`
 leaves the job refused. `cp_dispatch dry_run` reports `mandate_gate: "would ask:
 risk:high"` from the same predicate (`MandateStore.wouldAskRiskHigh`), with
 nothing escalated.
+
+**Batch approval** (`cp_escalate action:"batch_risk_high" job_ids:[2..16]`,
+`batchRiskHigh` in `src/risk-batch.ts`): one `risk_high_irreversible` record
+listing every id (sorted), options exactly `approve`/`drop`, recommended `drop`,
+under the one asking mandate's clause; then each job's open per-job row is
+withdrawn (raise first, so a crash leaves a duplicate, never a lost question).
+Every id is validated before any write — unknown, ungated (no open per-job row
+and no `risk:high` label), not covered by exactly one active mandate asking on
+`risk:high` (mixed or none), already approved, duplicated, fewer than 2 or more
+than 16 — and a refusal leaves `escalations.json` byte-identical. One `cp_decide
+<es-id> approve` with an operator quote authorizes every listed job at
+`cp_dispatch`, the `cp_send` promotion and the pipeline implementer; `drop`
+refuses them all; there is no partial answer. While the batch is open, a refused
+dispatch of a listed job raises nothing new and names the batch
+(`raiseRiskHigh` returns it).
 
 **H6: an inferred risk:high warns; an assessed risk:high gates** (`src/risk-warning.ts`).
 `inferScopeAndRisk` is a keyword heuristic. When routing's risk is `high` only
@@ -3750,7 +3809,9 @@ run by `revoke`, the expiring sweep and `issue`). An escalation belongs to the g
 question. `cp_mandate supersede_stale` runs the same pass on demand for records left open under grants revoked
 or expired before this rule shipped. A superseded record is not open, so it leaves `cp_awaiting list`.
 `/cp-decide <es-id>` journals the answer and, when `checkpoint_job_id` is set,
-resolves that checkpoint in the same method.
+resolves that checkpoint in the same method. The answer re-checks status inside the store's queue and decides a
+linked checkpoint in that same step; a superseded or withdrawn record, or a different answer to an answered one,
+is refused before any linked write.
 
 **Mission-end close.** An operator-quoted `cp_decide <es-id> close` on a `mission_end` record answers it first,
 then `MandateStore.revoke`s that record's `mandate_id` alone — no other grant changes. The answer lands before
@@ -4761,6 +4822,7 @@ writers, so there is still exactly one writer per decision and no new one:
 | declared row (`cp_status_block`, `/cp-decide`) | `AwaitingStore.answer` | `cp-answered` |
 | derived approval (held research, no PR) | `AwaitingStore.answerResolved` | `cp-answered` |
 | checkpoint authorization (`/cp-authorize`, `/cp-decline`, `/cp-decide approve`, the authorizer dialog) | `CheckpointStore.decide` | `cp-answered` |
+| escalation (`cp_decide <es-id>`, `/cp-awaiting`, mandate auto-close) | `EscalationStore.answer` | `cp-answered` (id `es-…`; a linked checkpoint or awaiting row reports instead) |
 
 **Queue first, deliver second** ([`src/answered.ts`](../src/answered.ts)). The
 answer is already on disk when the sink runs; the sink appends it to

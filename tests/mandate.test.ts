@@ -37,6 +37,7 @@ import { CommandPost } from "../src/command-post.ts";
 import { awaitingListText } from "../extensions/command-post/index.ts";
 import { assertReviewAllowed, raiseTokenCap } from "../src/mandate-usage.ts";
 import { createScratchHome, createScratchLedger, REPO_ROOT } from "./harness/index.ts";
+import { batchRiskHigh } from "../src/risk-batch.ts";
 
 function later(ms = 86_400_000): string {
 	return isoTimestamp(new Date(Date.now() + ms));
@@ -1036,6 +1037,37 @@ test("assertDispatchAllowed: risk:high answered 'drop' stays refused \u2014 drop
 			return true;
 		},
 	);
+});
+
+test("assertDispatchAllowed (6B-T3): one approved batch authorizes every listed job, promotion included; drop refuses them all; an open batch is named, never duplicated", async (t) => {
+	for (const answer of ["approve", "drop"] as const) {
+		const home = createScratchHome();
+		t.after(() => home.cleanup());
+		const store = new MandateStore(home.path);
+		issue(store, { ask_on: ["risk:high"], objective: "ship the bump" });
+		const escalations = new EscalationStore({ home: home.path });
+		const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+		const ids: string[] = [];
+		for (const slug of ["b1", "b2", "out"]) ids.push((await ledger.create({ title: `example ${slug}`, project: "demo", delivery: "pr", kind: "ship", slug, risk: "high" })).id);
+		const [b1, b2, outside] = ids as [string, string, string];
+		const gate = (jobId: string, promotion = false) => store.assertDispatchAllowed({ jobId, project: "demo", kind: "ship", risk: "high", ...(promotion ? { promotion } : {}) });
+		await assert.rejects(() => gate(b1), /risk:high under ask_on/);
+		const { escalation } = await batchRiskHigh({ escalations, mandates: store, ledger }, { jobIds: [b1, b2] });
+
+		// B3: a refused dispatch of a batched job raises nothing new and names the batch.
+		const before = escalations.list().length;
+		await assert.rejects(() => gate(b2), new RegExp(`${escalation.id} raised, cp_decide it with an operator quote to authorize it`));
+		assert.equal(escalations.list().length, before, "no new row for a batched job");
+
+		await escalations.answer(escalation.id, { answer, by: "operator-quote" });
+		for (const jobId of [b1, b2]) {
+			for (const promotion of [false, true]) {
+				if (answer === "approve") await gate(jobId, promotion);
+				else await assert.rejects(() => gate(jobId, promotion), /risk:high under ask_on/);
+			}
+		}
+		await assert.rejects(() => gate(outside), /risk:high under ask_on/, "a job outside the batch still needs its own decision");
+	}
 });
 
 test("assertDispatchAllowed: risk:low and a mandate without risk:high in ask_on dispatch untouched", async (t) => {

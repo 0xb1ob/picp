@@ -9,12 +9,16 @@
  * the open record; a different question, under the same grant or another, or
  * with no grant, files as its own record,
  * never merged into an older one. `superseded` closes a record whose mandate was revoked, expired
- * or replaced, with no operator answer. Answer journals the pick and, when a
- * checkpoint or awaiting row is linked, resolves it in the same method.
+ * or replaced, with no operator answer. Answer claims the record inside the store's queue and
+ * decides a linked checkpoint in that same synchronous step, so a superseded or withdrawn record,
+ * or a contrary answer to an answered one, is refused before any linked write; a linked awaiting
+ * row converges after the claim. A newly recorded answer wakes the parent (`onAnswered`) unless
+ * its linked checkpoint or awaiting row reports it under its own id.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { answeredDecision, type AnsweredSink } from "./answered.ts";
 import type { AwaitingStore } from "./awaiting.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import {
@@ -68,18 +72,22 @@ export class EscalationStore {
 	readonly #now: () => Date;
 	readonly #checkpoints: (() => CheckpointStore) | undefined;
 	readonly #awaiting: (() => AwaitingStore) | undefined;
+	readonly #onAnswered: AnsweredSink | undefined;
 
 	constructor(options: {
 		home: string;
 		now?: () => Date;
 		checkpoints?: () => CheckpointStore;
 		awaiting?: () => AwaitingStore;
+		/** Told about every answer this store newly records that no linked checkpoint or awaiting row reports. */
+		onAnswered?: AnsweredSink;
 	}) {
 		this.home = canonicalDir(options.home);
 		this.file = join(this.home, LAYOUT.escalationsFile);
 		this.#now = options.now ?? (() => new Date());
 		this.#checkpoints = options.checkpoints;
 		this.#awaiting = options.awaiting;
+		this.#onAnswered = options.onAnswered;
 	}
 
 	read(): EscalationFile {
@@ -198,21 +206,23 @@ export class EscalationStore {
 		if (existing.status === "withdrawn" || existing.status === "superseded") {
 			throw new EscalationError(`escalation ${id} was ${existing.status} — nothing to answer`);
 		}
-		if (existing.status === "answered") {
-			if (existing.answer === options.answer) {
-				await this.#resolveDependency(existing);
-				return existing;
-			}
+		// An identical answer to an answered record is a retry: it skips the preflight below and
+		// reaches the queued claim, which returns the record as is, so the awaiting follow-up
+		// re-runs and converges one a failure or crash after the claim left unfinished.
+		const retry = existing.status === "answered";
+		if (retry && existing.answer !== options.answer) {
 			throw new EscalationError(
 				`escalation ${id} is already answered ("${existing.answer}" by ${existing.answered_by ?? "?"})`,
 			);
 		}
 
-		if (existing.dropped_dependency && !["proceed", "drop", "reopen"].includes(options.answer)) {
+		if (!retry && existing.dropped_dependency && !["proceed", "drop", "reopen"].includes(options.answer)) {
 			throw new EscalationError(`${id}: choose proceed, drop or reopen`);
 		}
 		const planRevise = existing.kind === "plan_approval" && /^revise\b/i.test(options.answer.trim());
-		if (existing.checkpoint_job_id && !planRevise) {
+		const decidesCheckpoint = Boolean(existing.checkpoint_job_id) && !planRevise;
+		let target: CheckpointStore | undefined;
+		if (decidesCheckpoint && !retry) {
 			const store = this.#checkpoints?.();
 			if (!store) {
 				throw new EscalationError(
@@ -220,41 +230,39 @@ export class EscalationStore {
 				);
 			}
 			const kind = existing.checkpoint_kind ?? store.kind;
-			const target =
+			target =
 				kind === store.kind
 					? store
-					: new CheckpointStore(this.home, { kind });
-			const approved = escalationApproves(options.answer, existing);
-			target.decide(existing.checkpoint_job_id, approved, {
-				by: options.by,
-				...(options.basis ? { basis: options.basis } : {}),
-				...(options.provenance ? { provenance: options.provenance } : {}),
-				note: options.answer,
-				at,
-				...(existing.checkpoint_scope ? { scope: existing.checkpoint_scope } : {}),
-			});
-		}
-		if (existing.awaiting_id) {
-			const awaiting = this.#awaiting?.();
-			if (awaiting) {
-				try {
-					await awaiting.answer(existing.awaiting_id, { ...options, at });
-				} catch {
-					// Linked awaiting may already be answered or derived; the escalation still journals.
-				}
-			}
+					: new CheckpointStore(this.home, { kind, ...(this.#onAnswered ? { onAnswered: this.#onAnswered } : {}) });
 		}
 
+		// Claim inside the queue, and decide a linked checkpoint in that same synchronous step:
+		// a supersede, a withdrawal or a contrary answer that won the race is refused before any
+		// linked write, so a refused answer has never authorized anything.
 		let result: Escalation | undefined;
+		let recordedNow = false as boolean;
 		await this.#mutate((items) => {
 			const item = items.find((entry) => entry.id === id);
 			if (!item) throw new EscalationError(`no escalation ${id}`);
-			if (item.status === "withdrawn") {
-				throw new EscalationError(`escalation ${id} was withdrawn — nothing to answer`);
+			if (item.status === "withdrawn" || item.status === "superseded") {
+				throw new EscalationError(`escalation ${id} was ${item.status} — nothing to answer`);
 			}
 			if (item.status === "answered") {
+				if (item.answer !== options.answer) {
+					throw new EscalationError(`escalation ${id} is already answered ("${item.answer}" by ${item.answered_by ?? "?"})`);
+				}
 				result = item;
 				return items;
+			}
+			if (target && item.checkpoint_job_id) {
+				target.decide(item.checkpoint_job_id, escalationApproves(options.answer, item), {
+					by: options.by,
+					...(options.basis ? { basis: options.basis } : {}),
+					...(options.provenance ? { provenance: options.provenance } : {}),
+					note: options.answer,
+					at,
+					...(item.checkpoint_scope ? { scope: item.checkpoint_scope } : {}),
+				});
 			}
 			item.status = "answered";
 			item.answer = options.answer.slice(0, 1000);
@@ -263,11 +271,48 @@ export class EscalationStore {
 			if (options.basis) item.basis = options.basis;
 			item.answered_at = at;
 			result = item;
+			recordedNow = true;
 			return items;
 		});
 		if (!result) throw new EscalationError(`no escalation ${id}`);
-		await this.#resolveDependency(result);
-		return result;
+		const answered: Escalation = result;
+
+		// The record is final; a linked awaiting row converges after it, never authorizes. It runs
+		// on an identical retry too (the awaiting store is idempotent for the same answer), so a
+		// follow-up that failed after the claim is completed by retrying the answer.
+		let awaitingReported = false;
+		if (answered.awaiting_id) {
+			const awaiting = this.#awaiting?.();
+			if (awaiting) {
+				try {
+					await awaiting.answer(answered.awaiting_id, { ...options, at: recordedNow ? at : (answered.answered_at ?? at) });
+					awaitingReported = true;
+				} catch {
+					// Linked awaiting may already be answered or derived; the escalation still journals.
+				}
+			}
+		}
+		// Wake before the dependency ledger, so a ledger failure never costs the wake. A linked
+		// checkpoint or awaiting row reports under the id the operator saw; otherwise this does.
+		if (recordedNow && !decidesCheckpoint && !awaitingReported && this.#onAnswered) {
+			try {
+				this.#onAnswered(
+					answeredDecision({
+						id: answered.id,
+						type: "escalation",
+						job_id: answered.job_ids[0] ?? "",
+						decision: answered.question,
+						answer: answered.answer ?? options.answer,
+						answered_by: options.by,
+						answered_at: at,
+					}),
+				);
+			} catch {
+				// Delivery is retried from state/answered.json; see src/answered.ts.
+			}
+		}
+		await this.#resolveDependency(answered);
+		return answered;
 	}
 
 	async #resolveDependency(item: Escalation): Promise<void> {
@@ -300,7 +345,9 @@ export class EscalationStore {
 	/**
 	 * Close every open record `reasonFor` names a reason for as `superseded` \u2014 no answer, no linked
 	 * checkpoint decided. Synchronous so a mandate write can supersede in the same call: `#write`'s
-	 * body has no await, so this can never interleave with a queued mutation in this process.
+	 * body has no await, so this can never interleave with a queued mutation in this process. An
+	 * answer claims inside such a mutation, so a supersede either lands first (and the answer is
+	 * refused) or finds the record already answered (and leaves it): neither overwrites the other.
 	 */
 	supersede(reasonFor: (item: Escalation) => string | undefined): Escalation[] {
 		const closed: Escalation[] = [];
@@ -576,6 +623,9 @@ export function raiseRiskHigh(
 	store: EscalationStore,
 	input: { jobId: string; evidence: readonly string[]; mandateId?: string },
 ): Promise<Escalation> {
+	// An open batch (src/risk-batch.ts) already asks about this job: name it, never mint a duplicate per-job row.
+	const batch = store.list({ jobId: input.jobId, kind: "risk_high_irreversible", status: "open" }).find((item) => item.job_ids.length > 1);
+	if (batch) return Promise.resolve(batch);
 	const words = input.evidence.length > 0 ? input.evidence.join("; ") : "risk:high";
 	return store.raise({
 		...(input.mandateId ? { mandate_id: input.mandateId, mandate_clause: `${input.mandateId}: ask_on includes risk:high` } : {}),

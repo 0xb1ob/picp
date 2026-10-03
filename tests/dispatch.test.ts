@@ -25,6 +25,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { LeaseManager } from "../src/leases.ts";
 import { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { batchRiskHigh } from "../src/risk-batch.ts";
 import { Preflight, type PreflightRequest, type PreflightResult } from "../src/preflight.ts";
 import { loadProfile } from "../src/profiles.ts";
 import { ProjectRegistry } from "../src/projects.ts";
@@ -578,6 +579,29 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 		fetch: false,
 	});
 	assert.equal(result.state, "dispatched");
+});
+
+// cp-itl4 6b (6B-T4): a refused dispatch of a job in an open batch raises nothing new and names the batch.
+test("risk:high batch: a refused dispatch of a batched job names the batch and raises nothing; one approve dispatches every listed job", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const task = "Rotate the production database credentials.";
+	const jobs = [await b.ledger.create({ title: "rotate prod-a", project: "demo", delivery: "local", kind: "ship", slug: "prod-a" })];
+	jobs.push(await b.ledger.create({ title: "rotate prod-b", project: "demo", delivery: "local", kind: "ship", slug: "prod-b" }));
+	for (const job of jobs) await assert.rejects(() => dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false }), /risk:high under ask_on/);
+	const escalations = new EscalationStore({ home: b.home });
+	const { escalation, withdrawn } = await batchRiskHigh({ escalations, mandates, ledger: b.ledger }, { jobIds: jobs.map((job) => job.id) });
+	assert.equal(withdrawn.length, 2);
+	const count = escalations.list().length;
+
+	await assert.rejects(() => dispatcher.dispatch({ jobId: jobs[0]!.id, task, model: b.model, fetch: false }), new RegExp(`${escalation.id} raised`));
+	assert.equal(escalations.list().length, count, "no new escalation for a batched job");
+	assert.deepEqual(b.fleet.read().jobs, [], "still no lease");
+
+	await escalations.answer(escalation.id, { answer: "approve", by: "operator-quote" });
+	for (const job of jobs) assert.equal((await dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false })).state, "dispatched");
 });
 
 // H6: an inferred risk:high warns; an assessed risk:high gates.

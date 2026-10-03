@@ -305,6 +305,7 @@ MergeAuthority	type	02b381902047206c	-
 MergeAuthorityKind	type	e32798fa32b9e074	-
 MergeAuthorityKindSchema	value	7c795457954fe693	2ce96a49e7a2ad68
 MergeAuthoritySchema	value	7c809a03719a1bf5	a005f946854df404
+MergePolicy	type	7e22d7f78b01b916	-
 MergeReceipt	type	e2e9da140f63e5f2	-
 MergeReceiptSchema	value	bb28380be28124cb	f2ff2c3a68ed90a5
 MergeStrategy	type	cdc17c15173e8f33	-
@@ -352,11 +353,11 @@ PlannerBlocker	type	08e5796a23cb7faa	-
 PlannerBlockerSchema	value	ecb4bc1049897eaf	b417417c98a01569
 ProfileFrontmatter	type	cbec462ee5fdaa6f	-
 ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
-Project	type	8f9612a795716191	-
+Project	type	8c0e88cc1e4401c8	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
-ProjectRegistrySchema	value	1cc8877e8fc45666	756864c048c2c20f
-ProjectSchema	value	2db3ede67d5e61ea	fda4dd723bb77100
+ProjectRegistrySchema	value	1cc8877e8fc45666	6478c41300c5e39a
+ProjectSchema	value	96b79a59aad9d7ad	5d6f7eccfdc7dbe5
 QUALITY_LENSES	value	9d9728612bd80e96	da1ad1cd9d71c6cc
 QUALITY_PANEL_SLOT	value	9dac97ccd7bc9dfb	e80fdef4566bcfb0
 QUESTION_ANSWER_MAX_CHARS	value	72be5ce6a6f549aa	40510175845988f1

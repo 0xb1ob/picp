@@ -307,7 +307,15 @@ test("parent reads of the checks API are refused and point at cp_integrate", (t)
 		assert.equal(decision?.code, "ci_checks_read", `${command} was allowed`);
 		assert.match(decision.reason, /cp_integrate <job-id>/);
 	}
-	assert.equal(b.bash("gh run list --branch cp-a1"), undefined);
+	for (const command of [
+		"gh run list --branch cp-a1",
+		"gh run view 123 --log-failed",
+		"gh -R acme/demo run list --limit 3",
+		"gh run -R acme/demo view 123",
+	]) {
+		assert.equal(b.bash(command)?.code, "ci_checks_read", `${command} was allowed`);
+	}
+	assert.equal(b.bash("gh run rerun 123"), undefined);
 	assert.equal(b.bash('gh issue create --body "document statusCheckRollup"'), undefined);
 	assert.equal(b.bash("gh --repo acme/demo pr view 12 --json number"), undefined);
 	assert.equal(b.bash("gh api repos/acme/demo/issues/1/comments --field=body=hello"), undefined);

@@ -1,5 +1,6 @@
 /** The project registry — data/projects.json. Import via src/contracts.ts. */
 
+import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, PROJECT_NAME_PATTERN, validate, type ValidationResult } from "./core.ts";
 import { type MandateAction, MandateActionSchema, type MandateAskOn, MandateAskOnSchema } from "./mandates.ts";
@@ -18,6 +19,8 @@ export const ProjectSchema = Type.Object(
 		base_branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 		/** Retired registration: absent means false. Kept for history/lookups, skipped by pollers, refused for new work. */
 		archived: Type.Optional(Type.Boolean()),
+		/** Who lands a reviewed, green PR: absent or `repo` means cp_integrate merges when the repo permits; `human_handoff` hands it to a human on GitHub and never merges. */
+		merge_policy: Type.Optional(StringEnum(["repo", "human_handoff"])),
 		/**
 		 * Per-project mandate defaults (autonomy-programme-cur.2.5): overrides
 		 * `data/mandate-defaults.json` field-by-field, absent means "use the home
@@ -51,9 +54,10 @@ export type ProjectMandateOverride = {
 	ask_on?: MandateAskOn[];
 	exclude_paths?: string[];
 };
+export type MergePolicy = "repo" | "human_handoff";
 export type Project = Replace<
 	Narrow<Static<typeof ProjectSchema>, "delivery", Delivery>,
-	{ mandate?: ProjectMandateOverride }
+	{ mandate?: ProjectMandateOverride; merge_policy?: MergePolicy }
 >;
 
 export const ProjectRegistrySchema = Type.Object(

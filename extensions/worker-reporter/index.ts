@@ -32,7 +32,7 @@ import { dirname, join, resolve } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { ciWaitRefusal, detectCiWait } from "../../src/ci-wait.ts";
+import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import {
 	ANSWER_MAX_BYTES,
@@ -577,6 +577,7 @@ export const NO_ANSWER_TEXT = [
 export default function (pi: ExtensionAPI): void {
 	const context = loadJobContext();
 	const state: ReporterState = { attempts: 0, reported: false };
+	let ciStatusQueries = 0;
 
 	// Recursion guard: a worker never dispatches, gates, or tears down.
 	// Same hook, second guard (cp-kzc): a worker never waits for CI either. The
@@ -594,6 +595,11 @@ export default function (pi: ExtensionAPI): void {
 			const command = (event.input as { command?: unknown } | undefined)?.command;
 			const finding = typeof command === "string" ? detectCiWait(command) : undefined;
 			if (finding) return { block: true, reason: ciWaitRefusal(finding) };
+			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
+			// One CI status snapshot per worker process (revive = new process = one more).
+			if (typeof command === "string" && ciStatusQuery(command)) {
+				if (ciStatusQueries++ >= 1) return { block: true, reason: ciStatusRepeatRefusal() };
+			}
 		}
 		const web = webEgressRefusal(event.toolName, event.input);
 		if (web) return { block: true, reason: web };

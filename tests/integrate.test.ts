@@ -24,7 +24,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { AwaitingStore, deriveFromCheckpoints, isDerivedAwaitingId } from "../src/awaiting.ts";
+import { AwaitingStore, deriveFromCheckpoints, isDerivedAwaitingId, obsoleteDeclaredReason } from "../src/awaiting.ts";
+import { makeHandoff } from "../src/human-handoff.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { detectCiWait } from "../src/ci-wait.ts";
 import {
@@ -491,6 +492,8 @@ interface BenchOptions {
 	noSender?: boolean;
 	/** `false` — the default — means the real AwaitingStore, at the bench's home. */
 	noAwaiting?: boolean;
+	/** Wires the human-handoff port with a registry that knows only the bench's project ("demo"). */
+	policy?: "repo" | "human_handoff";
 }
 
 async function benchOf(
@@ -595,6 +598,7 @@ async function benchOf(
 				runs,
 				run,
 				...(options.noAwaiting ? {} : { awaiting: () => new AwaitingStore({ home: home.path }) }),
+				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs }) } : {}),
 				...(options.noSender
 					? {}
 					: {
@@ -2551,4 +2555,125 @@ test("jje.5: the approved final-fix head of a draft is marked ready, then merges
 	assert.deepEqual([ready.next, count(b, "gh pr ready"), merges(b).length], ["advance", 1, 0]);
 	await b.integrator(onHead(HEAD_B), send).advance({ jobId: BR });
 	assert.equal(matchHeadBinding(merges(b)[0] ?? "")?.head, HEAD_B);
+});
+
+// ---------------------------------------------------------------------------
+// merge_policy human_handoff (src/human-handoff.ts)
+// ---------------------------------------------------------------------------
+
+const HANDOFF = { policy: "human_handoff" } as const;
+const handoffRows = (b: Bench) => b.awaiting().list().filter((item) => item.subject?.startsWith("human-review pr "));
+const mutations = (b: Bench) => b.calls.filter((line) => line.startsWith("gh pr merge") || line.startsWith("gh pr update-branch"));
+const REQUIRED_CHECKS = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "ci" }] } }];
+
+test("human_handoff never hands off pending, superseded, red or unreadable CI, a retry, or a checks/unstable hold", async (t) => {
+	const cases: Array<[string, Partial<World>, string, string]> = [
+		["CI pending", { runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] }, "ci", "wait"],
+		["CI only on a superseded head", { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] }, "ci", "wait"],
+		["CI failed", { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }] }, "ci", "resolve"],
+		["mergeStateStatus UNKNOWN", { pr: { ...openPr(), mergeStateStatus: "UNKNOWN" } }, "permit", "retry"],
+		["UNSTABLE", { pr: { ...openPr(), mergeStateStatus: "UNSTABLE" } }, "permit", "surface"],
+		["BLOCKED on required checks", { pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" }, rules: REQUIRED_CHECKS }, "permit", "surface"],
+	];
+	for (const [label, world, step, next] of cases) {
+		const b = await benchOf(t);
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next], [step, next], label);
+		assert.equal(handoffRows(b).length, 0, `${label}: no handoff row`);
+		assert.deepEqual(mutations(b), [], `${label}: no merge, no update-branch`);
+		assert.ok(!result.facts.some((fact) => fact.startsWith("human_handoff: handed")), label);
+		if (label === "UNSTABLE" || label === "BLOCKED on required checks") {
+			assert.match(b.awaiting().list()[0]?.decision ?? "", /merge pending/, `${label}: today's reminder`);
+		}
+	}
+	// CI or merge state unreadable: surface "not handed off" — no merge checkpoint, no row.
+	for (const [label, world] of [
+		["workflows probe unreadable", { runs: [], workflows: { fail: "HTTP 403" } }],
+		["mergeStateStatus not reported", { pr: { ...openPr(), mergeStateStatus: undefined } }],
+	] as Array<[string, Partial<World>]>) {
+		const b = await benchOf(t);
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next], ["permit", "surface"], label);
+		assert.ok(result.facts.some((fact) => fact.includes("not handed off, no merge checkpoint")), label);
+		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `${label}: no checkpoint`);
+		assert.equal(b.awaiting().list().length, 0, `${label}: no row`);
+		assert.deepEqual(mutations(b), [], label);
+	}
+});
+
+test("human_handoff hands a reviewed, green PR to a human: CLEAN, BEHIND, review/unknown blocks, a rule-required update and no CI", async (t) => {
+	const cases: Array<[string, Partial<World>]> = [
+		["CLEAN", {}],
+		["BEHIND", { pr: { ...openPr(), mergeStateStatus: "BEHIND" } }],
+		["BLOCKED on reviews", { pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } }],
+		["BLOCKED, unreadable why", { pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" } }],
+		["BLOCKED, strict rule on a stale base", { ancestor: false, pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" }, rules: STRICT_RULES }],
+		["no CI configured", { runs: [], workflows: NO_WORKFLOWS }],
+	];
+	for (const [label, world] of cases) {
+		const b = await benchOf(t);
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next, result.head_sha], ["permit", "surface", HEAD_A], label);
+		assert.deepEqual(mutations(b), [], `${label}: never merged or update-branched`);
+		const rows = handoffRows(b);
+		assert.equal(rows.length, 1, label);
+		assert.equal(rows[0]?.state, "open", label);
+		assert.match(rows[0]?.decision ?? "", new RegExp(HEAD_A.slice(0, 12)), label);
+		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, label);
+		assert.ok(readRunEvents(b.home, BR).some((event) => event.type === "integration_permitted" && (event.payload as { policy?: string }).policy === "human_handoff"), label);
+	}
+});
+
+test("human_handoff: no pass is a review hold, a draft is readied first, and repo policy is argv-identical", async (t) => {
+	const unreviewed = await benchOf(t, {}, { reviewHead: false });
+	const review = await unreviewed.integrator({}, HANDOFF).advance({ jobId: BR });
+	assert.equal(review.next, "review");
+	assert.equal(unreviewed.awaiting().list().length, 0);
+
+	const draft = await benchOf(t);
+	const ready = await draft.integrator({ pr: draftPr() }, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([ready.next, count(draft, "gh pr ready"), handoffRows(draft).length], ["advance", 1, 0]);
+	const handed = await draft.integrator({}, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([handed.next, handoffRows(draft).length, mutations(draft).length], ["surface", 1, 0]);
+
+	const plain = await benchOf(t);
+	await plain.integrator().advance({ jobId: BR });
+	const repo = await benchOf(t);
+	await repo.integrator({}, { policy: "repo" }).advance({ jobId: BR });
+	assert.deepEqual(repo.calls, plain.calls, "repo policy changes no argv");
+	assert.ok(repo.calls.some((line) => line.startsWith("gh pr merge")));
+});
+
+test("human_handoff: a change request's new head is reviewed and handed off again on the same row", async (t) => {
+	const b = await benchOf(t);
+	await b.integrator({}, HANDOFF).advance({ jobId: BR });
+	const [first] = handoffRows(b);
+	assert.ok(first);
+
+	const onB = { pr: { ...openPr(), headRefOid: HEAD_B }, runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] };
+	const unreviewed = await b.integrator(onB, HANDOFF).advance({ jobId: BR });
+	assert.equal(unreviewed.next, "review", "a new head needs its own pass");
+	assert.equal(handoffRows(b).length, 1);
+	assert.match(handoffRows(b)[0]?.decision ?? "", new RegExp(HEAD_A.slice(0, 12)), "the row still names the old head until the next handoff");
+
+	writeReviewPass(b.home, HEAD_B, { attempt: 2 });
+	const again = await b.integrator(onB, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([again.next, again.head_sha], ["surface", HEAD_B]);
+	const rows = handoffRows(b);
+	assert.equal(rows.length, 1, "one row, updated in place");
+	assert.equal(rows[0]?.id, first.id);
+	assert.match(rows[0]?.decision ?? "", new RegExp(HEAD_B.slice(0, 12)));
+	assert.deepEqual(mutations(b), []);
+});
+
+test("human_handoff: the human's merge lands through the ordinary MERGED path and the row goes obsolete", async (t) => {
+	const b = await benchOf(t);
+	await b.integrator({}, HANDOFF).advance({ jobId: BR });
+	const done = await b.integrator({ pr: mergedPr() }, HANDOFF).advance({ jobId: BR });
+	assert.deepEqual([done.step, done.next, done.merge?.recorded, b.teardowns.length], ["done", "done", true, 1]);
+	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(mutations(b), [], "the command post never merged it");
+	const row = handoffRows(b)[0];
+	assert.ok(row);
+	assert.ok(obsoleteDeclaredReason(row, b.fleet.list() as unknown as Parameters<typeof obsoleteDeclaredReason>[1]));
 });

@@ -336,6 +336,31 @@ test("an old registry without archived still validates; archive/unarchive round-
 	await assert.rejects(() => registry.setArchived("ghost", true), /unknown project "ghost"/);
 });
 
+test("merge_policy round-trips: absent is repo, human_handoff persists and renders, repo drops the key, junk is refused", async (t) => {
+	const home = withHome(t);
+	const registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "example-app", clone_url: "https://example.invalid/example-app.git" });
+	assert.ok(!("merge_policy" in registry.require("example-app")), "absent means repo");
+
+	const handed = await registry.setMergePolicy("example-app", "human_handoff");
+	assert.equal(handed.merge_policy, "human_handoff");
+	assert.equal(new ProjectRegistry({ home: home.path }).require("example-app").merge_policy, "human_handoff", "persisted");
+	assert.match(formatProjects(registry.list()), /example-app {2}delivery:pr merge:human_handoff/);
+
+	const repo = await registry.setMergePolicy("example-app", "repo");
+	assert.ok(!("merge_policy" in repo), "repo deletes the key");
+	assert.doesNotMatch(formatProjects(registry.list()), /merge:/);
+
+	const before = readFileSync(registry.file, "utf8");
+	await assert.rejects(() => registry.setMergePolicy("example-app", "auto" as "repo"), /unknown merge policy "auto"/);
+	await assert.rejects(() => registry.setMergePolicy("ghost", "human_handoff"), /unknown project "ghost"/);
+	assert.equal(readFileSync(registry.file, "utf8"), before, "a refusal writes nothing");
+	const file = JSON.parse(before) as { projects: Array<Record<string, unknown>> };
+	(file.projects[0] as Record<string, unknown>).merge_policy = "auto";
+	writeFileSync(registry.file, JSON.stringify(file));
+	assert.throws(() => registry.read(), /violates the registry contract/);
+});
+
 test("the ledger refuses a job in an archived project with a clear message", async (t) => {
 	const home = withHome(t);
 	createScratchLedger({ home: home.path });

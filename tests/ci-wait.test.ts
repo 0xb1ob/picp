@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ciWaitRefusal, detectCiWait } from "../src/ci-wait.ts";
+import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../src/ci-wait.ts";
 import {
 	type Envelope,
 	type EnvelopeContext,
@@ -158,6 +158,63 @@ test("a legitimate long-running command is never flagged", () => {
 		assert.equal(detectCiWait(command), undefined, `wrongly flagged: ${command}`);
 	}
 	assert.equal(detectCiWait(""), undefined);
+});
+
+test("ciStatusQuery meters status queries, not failure logs or quoted mentions", () => {
+	for (const command of [
+		"gh run list --branch b --limit 3 --json conclusion,status,headSha",
+		"gh run view 123",
+		"gh run view 123 --json conclusion",
+		"gh pr checks 42",
+		"gh -R o/r run list",
+		"gh --repo=o/r run view 123",
+		"git fetch && gh run list --branch b",
+		"gh api repos/o/r/commits/deadbeef/check-runs",
+	]) {
+		assert.equal(ciStatusQuery(command), true, command);
+	}
+	for (const command of [
+		"gh run view 123 --log-failed",
+		"gh run view 123 --log",
+		"gh run view --log-failed 123 | tail -50",
+		"gh -R o/r run view 123 --job 9 --log",
+		"gh --repo o/r run view 123 --log-failed",
+		"gh run view 123 --repo o/r --log",
+		"gh api repos/o/r/actions/runs/123/logs",
+		'grep -rn "gh run list" tests/',
+		"npm test",
+		"gh pr view 42 --json url",
+	]) {
+		assert.equal(ciStatusQuery(command), false, command);
+	}
+	assert.match(ciStatusRepeatRefusal(), /report_result/);
+	assert.match(ciStatusRepeatRefusal(), /head_sha/);
+});
+
+test("shellPatchCommand refuses command-position apply_patch, not prose, diffs or commits", () => {
+	for (const command of [
+		"apply_patch <<'EOF'\n*** Begin Patch\n*** End Patch\nEOF",
+		"cd src && apply_patch < change.patch",
+		"git status; apply_patch",
+		"cat <<EOF > /tmp/x\nhello\nEOF\napply_patch < /tmp/x",
+	]) {
+		assert.equal(shellPatchCommand(command), true, command);
+	}
+	for (const command of [
+		"echo apply_patch",
+		'grep -rn "apply_patch" src/',
+		"git diff origin/main...HEAD",
+		"git apply --check change.patch",
+		"git commit -m 'refuse apply_patch in bash'",
+		"git commit -F - <<'EOF'\nguard: refuse\napply_patch in bash\nEOF",
+		"git log --oneline",
+		"npm run test:one -- tests/ci-wait.test.ts",
+		"gh run view 123 --log-failed",
+	]) {
+		assert.equal(shellPatchCommand(command), false, command);
+	}
+	assert.match(shellPatchRefusal(), /replace/);
+	assert.match(shellPatchRefusal(), /insert/);
 });
 
 // ---------------------------------------------------------------------------
