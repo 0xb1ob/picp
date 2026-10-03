@@ -1109,6 +1109,19 @@ Turns the parent takes that were not caused by `send`, and `cp_escalate`
 calls on the stream, become messages in the main session, tagged with kind
 and job id. Escalation duplicates are suppressed by id. A parent message that
 carries `STALE WAKE-UP — do not act on this` is marked stale.
+
+**Escalation backstop** ([`src/escalation-backstop.ts`](../src/escalation-backstop.ts)).
+The operator session relays, once per id, any escalation open at least
+`ESCALATION_BACKSTOP_SECONDS` (600, the dashboard's amber threshold) that no
+open operator ask represents and that never reached the session as a relay —
+a gate-raised escalation has no `cp_escalate` relay path. Bridge escalation
+relays are recorded too, in the same ledger, `state/operator/escalation-relays.json`,
+so neither path repeats the other, across restarts. It runs at `session_start`
+and on a 60 s tick; a send-reply mention of the id does not swallow it. It is
+not a parent wake and never authorization. An unreadable ledger or store sets
+the `escalation-backstop` status line and relays nothing. Two edges are
+accepted: the ledger is claimed before the push, so a session that dies in
+between loses that one relay; two operator sessions on one home can both relay.
 A `wake` whose stamped job ids (wake-up stamps, and a `cp-schedule` fire
 message's `details.job_id`) are all scheduled jobs (ledger label
 `schedule:<id>`) is not relayed: scheduled jobs are independent jobs, and their
