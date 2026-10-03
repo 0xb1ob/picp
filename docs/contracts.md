@@ -67,17 +67,18 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
 
 ## Directory layout
 
-Everything below is relative to the **command post home**: this checkout (or
-`~/.pi/command-post`, or `CP_HOME`; single-project mode was removed, see
-[Modes](#modes)). Every home-local file lives
-under the one gitignored root `.pi-command-post/` (cp-u3i2; see
-[storage.md](storage.md) for the full inventory and who may write where). In
-this document `data/…`, `state/…` and `projects/…` mean
-`.pi-command-post/data/…` and so on.
+Everything below is relative to the **command post home**: the standard home
+`~/.pi-command-post`, a source checkout, or `CP_HOME`; single-project mode was removed, see
+[Modes](#modes). Every home-local file lives
+under the one runtime root (cp-u3i2; see
+[storage.md](storage.md) for the full inventory and who may write where): the
+standard home is its own runtime root, any other home keeps it in a gitignored
+`<home>/.pi-command-post/`. In this document `data/…`, `state/…` and `projects/…` mean
+`<runtime root>/data/…` and so on.
 
 ```
 defaults/routing.default.json  shipped default rubric template (tracked; cp-default-rubric)
-.pi-command-post/          the one runtime root (gitignored)
+<runtime root>/             the one runtime root (the standard home itself, else <home>/.pi-command-post/, gitignored)
   jobs.json               the job ledger: every job, its labels, blockers, comments (spec 2026-09-04)
   settings.json           mode preference, operator-written, read-only (multi|auto; single refused)
   data/                   operator + policy data
@@ -157,9 +158,9 @@ cannot cost it — the cap applies to the file's text and the header is composed
 around the already-shortened body.
 
 **It resolves under `PACKAGE_ROOT`, not the home — deliberately.** Every other
-path in this package keys off the home (`CP_HOME`, else `~/.pi/command-post`);
+path in this package keys off the home (`CP_HOME`, else the standard home `~/.pi-command-post`);
 `USER.md` does not, because it is defined by what it sits *beside*. `AGENTS.md`
-is a repo file that ships in this package, and a managed home contains no
+is a repo file that ships in this package, and a standard home contains no
 `AGENTS.md` at all, so on any home that is not the checkout "beside `AGENTS.md`"
 and "under the home" are different places. `AGENTS.md` tells every parent that the
 `USER.md` at this repo's root loads itself (never `read` or `ls` it); if the loader read the home's copy instead, the
@@ -354,7 +355,7 @@ predeclared path, and a research worktree must be clean
 (`git status --porcelain` empty). Failing those is repairable, so the model can
 fix the tree or report `blocked` instead.
 
-### Ship worker final step: rebase, run the suite, push, report the head sha
+### Ship worker final step: rebase, run focused checks, push, report the head sha
 
 Every `ship` job **must** follow this final sequence before calling `report_result`.
 It replaces stale-base green runs (a worker reported green, the base moved, the
@@ -364,7 +365,7 @@ rebases across a day.
 
 **Rebase onto `origin/<base>` — the base branch the brief names, resolved per
 repository from `origin/HEAD` and `main` only when that is what it resolves to —
-re-run the CI suite locally, push, report the pushed head sha — and stop.** In
+re-run typecheck and the touched tests locally, push, report the pushed head sha — and stop.** In
 detail:
 
 1. `git fetch origin` — ensure you have the latest base.
@@ -374,8 +375,10 @@ detail:
      resolve both sides (the right resolution is unclear), report `blocked` with
      the exact conflict and the resolution you tried — the operator will take it
      from there.
-3. Run the CI suite the way `.github/workflows/ci.yml` invokes it on the rebased
-   tree. That local run on the rebased base is the evidence the worker owes.
+3. Run `npm run typecheck` and only the touched test files
+   (`npm run test:one -- tests/<x>.test.ts`) on the rebased tree — never the full
+   `npm test` locally; CI (`.github/workflows/ci.yml`) runs the full suite once on
+   the pushed head. That focused run on the rebased base is the evidence the worker owes.
 4. `git push --force-with-lease` to update the branch with the rebased commits.
 5. `git rev-parse HEAD` → `head_sha`, `git rev-parse origin/<base>` → `base_sha`.
    Call `report_result` with both. **The job ends here.**
@@ -476,9 +479,10 @@ A missing or malformed value is a **load failure**: a worker that cannot say
 which job it is must not run. Briefs never carry secrets, and the worker's
 environment is the only channel for identity.
 
-When `<home>/.beads/beads.db` exists, the shared worker environment builder sets
-`BEADS_DIR` to the absolute `<home>/.beads` directory, overriding an inherited
-value so `br show <id>` resolves from leased worktrees too. Reference use is
+The worker environment builder strips an inherited `BEADS_DIR`/`BEADS_DB` and never
+selects the home's `.beads`. Dispatch sets `BEADS_DIR` explicitly from the project's
+tracker (`projectBeadsDb`: its active connection's endpoint, else an existing
+`<clone>/.beads/beads.db`, else none) so `br show <id>` resolves from leased worktrees too. Reference use is
 read-only by instruction, not a filesystem restriction; no database is created.
 
 `self_assessment` is ported from the command-post research envelope
@@ -8614,14 +8618,14 @@ restore from backup), and ok otherwise.
 
 Growth is a decision, not a drift. `tests/structure.test.ts` fixes four things as constants at
 the top of that one file: a per-file cap with a
-grandfathered list of files that were already over it (pinned to their own size — they may
-shrink, never grow), an exact two-package runtime allowlist (`preact`, `esbuild`)
+grandfathered list of files that were already over it (each pinned to its historical
+size plus a 3% margin, rounded up to the next 10 lines), an exact two-package runtime allowlist (`preact`, `esbuild`)
 on `package.json`, line caps on AGENTS.md
 and the operator note, and a short list of banned identifiers for surfaces that were
 deliberately deleted (`attachConsole` and friends) so they cannot quietly come back.
 
-**Raising a cap:** edit the constant at the top of `tests/structure.test.ts` and put the reason
-in the commit message, one line — never in the assertion message, which stays a fact ("X is N
+**Raising a cap:** edit the constant at the top of `tests/structure.test.ts` and put a
+one-sentence justification in the PR description — never in the assertion message, which stays a fact ("X is N
 lines, over the cap") and not a changelog. Splitting a grandfathered file below the general
 per-file cap removes it from `GRANDFATHERED` instead of raising anything.
 

@@ -173,7 +173,8 @@ first match wins:
    recommendation for both (`changed: model: parent <m> (recommended: …; --parent-model overrides)`).
 
 No listed model prints "run `pi`, then /login, then rerun cp-install" and pins
-nothing. Changing a pin needs the flag and `--force`; it applies at the next
+nothing; after the login the rerun must be `cp-install --force` (a plain rerun keeps
+the unpinned choice and lists nothing; `--force` also runs `npm ci` and replaces generated files that differ). Changing a pin needs the flag and `--force`; it applies at the next
 session and host start. `settings.json` is never edited.
 
 ### 7b. The optional gateway

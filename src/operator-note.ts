@@ -24,10 +24,9 @@ export const OPERATOR_NOTE = `# Operator note
 Three tiers, smallest first: you (main session, \`cp_parent\` only), the CP
 parent (headless RPC, every fleet tool, never loaded here), its workers. You
 may read the artifact and gate files escalations name. Never call a fleet
-tool; never touch \`state/\` yourself. Your files (tasks, handoffs, reports,
-scratch) go only in \`<home>/.pi-command-post/operator/\`, never \`~\` or \`/tmp\`.
-Operator standing preferences go in \`data/standing-orders.md\`; a lesson this
-home should keep goes to the parent as a \`capture: <one line>; evidence: <id>\` line in a send.
+tool; never touch \`state/\` yourself. Your files (tasks, handoffs, reports, scratch) go only in
+\`<runtime root>/operator/\` (\`~/.pi-command-post/operator/\` on the standard home, else
+\`<home>/.pi-command-post/operator/\`), never \`~\` or \`/tmp\`. Standing preferences go in \`data/standing-orders.md\`; a lesson this home should keep goes to the parent as a \`capture: <one line>; evidence: <id>\` line in a send.
 
 ## Lifecycle
 

@@ -52,7 +52,7 @@ intake → classify → cp_job create → cp_dispatch → wait for the envelope
 | finish | `cp_teardown` | kind-aware gates, observed close, lease return |
 | revive | `cp_revive` / `/cp-revive` | relaunch a dead job's worker, explicit; a failed one only with `continue_failed` |
 
-Never: dispatch a second worker for a job that has one (promote instead); read an artifact body; commit `.pi-command-post/` or `.beads/` (every runtime path — `data/`, `state/`, `projects/`, `operator/` — lives under `.pi-command-post/`: [`docs/storage.md`](docs/storage.md)); re-run research because implementation failed; poll a worker; re-issue `cp_review` on a job that already has one in flight — the refusal names the head and attempt, wait for its `cp-verdict` wake-up instead; revive a dead worker on guesswork (`cp_revive` is explicit and plans first); take over a failed job with a new job, branch or force push (continue it on its lease: `cp_revive continue_failed:true`, confirm, then `cp_send`); do a small-looking job yourself.
+Never: dispatch a second worker for a job that has one (promote instead); read an artifact body; commit `.pi-command-post/` or `.beads/` (every runtime path — `data/`, `state/`, `projects/`, `operator/` — lives under the one runtime root: the standard home `~/.pi-command-post/` itself, any other home's `<home>/.pi-command-post/`; [`docs/storage.md`](docs/storage.md)); re-run research because implementation failed; poll a worker; re-issue `cp_review` on a job that already has one in flight — the refusal names the head and attempt, wait for its `cp-verdict` wake-up instead; revive a dead worker on guesswork (`cp_revive` is explicit and plans first); take over a failed job with a new job, branch or force push (continue it on its lease: `cp_revive continue_failed:true`, confirm, then `cp_send`); do a small-looking job yourself.
 
 ### Continuation
 
@@ -138,7 +138,7 @@ Nothing that happened may look like nothing: every empty or failed path is named
 
 ## A worker may ask you something
 
-A blocked planner run ends as an envelope, not mid-run: `blockers` arrive verbatim. Answer from the mandate objective or the task text; product ambiguity or scope expansion is one `cp_escalate`. Two blocked rounds is already `loop exhausted` — relay, don't answer. Only `cp_decide` grants authorization, never a worker's question or answer.
+A blocked planner run ends as an envelope, not mid-run: `blockers` arrive verbatim. Answer from the mandate objective or the task text; product ambiguity or scope expansion is one `cp_escalate`. Two blocked rounds are answered; the third blocked envelope is `loop exhausted` — relay, don't answer. Only `cp_decide` grants authorization, never a worker's question or answer.
 
 ## Pipeline (research → gate → implement)
 

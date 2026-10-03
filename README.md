@@ -82,8 +82,10 @@ The usual sequence on a new machine:
 1. Run the command above. It installs `pi` if needed and tells you when no
    model login exists yet.
 2. Run `pi`, type `/login`, pick your provider, then quit pi.
-3. Run the installer again so it can offer the models your login gives:
-   `~/.pi-command-post/app/bin/cp-install`.
+3. Run the installer again with `--force` so it can offer the models your login gives:
+   `~/.pi-command-post/app/bin/cp-install --force`. Without `--force` a rerun keeps
+   the unpinned choice and offers nothing; `--force` also reruns `npm ci` and replaces a
+   generated file that differs from what this install renders.
 
 Pass flags after `sh -s --` (bootstrap) or straight to `bin/cp-install`:
 
@@ -223,7 +225,7 @@ Run it from a checkout instead of the installed app:
 
 ```bash
 git clone https://github.com/0xb1ob/picp.git
-cd pi-command-post
+cd picp
 npm install
 ./bin/cp-operator          # the operator session, against this checkout as its home
 ```

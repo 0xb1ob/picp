@@ -7,7 +7,7 @@ Notes for changing pi-command-post itself. Newcomers start at the
 
 ```bash
 git clone https://github.com/0xb1ob/picp.git
-cd pi-command-post
+cd picp
 npm install
 ./bin/cp-operator
 ```
