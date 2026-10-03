@@ -5,7 +5,7 @@
  * time zone, and the screen rendered from a fixture.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -151,6 +151,21 @@ test("schedules view: a symlinked job artifact dir does not redefine the allowed
 	assert.equal(scheduleAnswer(options, "cp-link", join(external, "outside.txt")), null, "an artifact path in a symlinked dir is refused");
 	writeFileSync(join(external, "report.md"), "SYNTHETIC_SECRET");
 	assert.equal(scheduleAnswer(options, "cp-link", undefined), null, "so is the intake copy");
+});
+
+test("schedules view: a symlinked state dir or artifacts root still serves a real job dir's answer", (t) => {
+	const options = fixture(t, file(cron));
+	const answerOf = (state: ViewerOptions) => scheduleAnswer(state, "cp-fire1", join(options.stateDir, "artifacts", "cp-fire1", "report.md"));
+	assert.match(answerOf(options)?.text ?? "", /^ANSWER-HEAD/, "baseline");
+	const alias = join(options.home, "state-alias");
+	symlinkSync(options.stateDir, alias);
+	assert.match(answerOf({ ...options, stateDir: alias })?.text ?? "", /^ANSWER-HEAD/, "a symlinked state dir");
+	const moved = join(options.home, "moved-artifacts");
+	renameSync(join(options.stateDir, "artifacts"), moved);
+	symlinkSync(moved, join(options.stateDir, "artifacts"));
+	assert.match(scheduleAnswer(options, "cp-fire1", undefined)?.text ?? "", /^ANSWER-HEAD/, "a symlinked artifacts root");
+	symlinkSync(join(moved, "cp-fire1"), join(moved, "cp-link"));
+	assert.equal(scheduleAnswer(options, "cp-link", undefined), null, "a symlinked job dir is still refused");
 });
 
 test("schedules view: the 8 KiB cap trims back to a whole UTF-8 character", (t) => {
