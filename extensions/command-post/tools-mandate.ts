@@ -143,6 +143,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					return { content: [{ type: "text", text: `${mandate.id} ${said[action]}` }], details: mandate as unknown as Record<string, unknown> };
 				}
 				if (!params.projects?.length) throw new MandateError("cp_mandate issue needs projects");
+				const archived = params.projects.filter((name) => post.registry.get(name)?.archived);
+				if (archived.length) throw new MandateError(`cp_mandate issue refused: archived project(s) ${archived.join(", ")} — unarchive with cp_project unarchive first`);
 				if (!params.objective?.trim()) throw new MandateError("cp_mandate issue needs objective");
 				const homeDefaults = loadMandateDefaults(post.home);
 				// A grant may name several projects; the ladder's project tier only applies when every

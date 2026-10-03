@@ -355,8 +355,8 @@ ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
 Project	type	8f9612a795716191	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
-ProjectRegistrySchema	value	1cc8877e8fc45666	4890f0403bf582eb
-ProjectSchema	value	291511d07221cec4	4f86b75b302ff945
+ProjectRegistrySchema	value	1cc8877e8fc45666	756864c048c2c20f
+ProjectSchema	value	2db3ede67d5e61ea	fda4dd723bb77100
 QUALITY_LENSES	value	9d9728612bd80e96	da1ad1cd9d71c6cc
 QUALITY_PANEL_SLOT	value	9dac97ccd7bc9dfb	e80fdef4566bcfb0
 QUESTION_ANSWER_MAX_CHARS	value	72be5ce6a6f549aa	40510175845988f1

@@ -1078,6 +1078,7 @@ export class CommandPost {
 		return new Ledger({
 			home: this.home,
 			knownProjects: this.registry.names(),
+			archivedProjects: this.registry.archivedNames(),
 			beadsDbFor: (project) => projectBeadsDb(this.home, project, () => this.registry.pathOf(project)),
 		});
 	}

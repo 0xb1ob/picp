@@ -16,6 +16,8 @@ export const ProjectSchema = Type.Object(
 		registered_at: IsoTimestampSchema,
 		/** Default base branch; resolved from the clone when absent (T12). */
 		base_branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+		/** Retired registration: absent means false. Kept for history/lookups, skipped by pollers, refused for new work. */
+		archived: Type.Optional(Type.Boolean()),
 		/**
 		 * Per-project mandate defaults (autonomy-programme-cur.2.5): overrides
 		 * `data/mandate-defaults.json` field-by-field, absent means "use the home

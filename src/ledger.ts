@@ -305,6 +305,8 @@ export interface LedgerOptions {
 	 * intake refuses a project the registry does not know.
 	 */
 	knownProjects?: readonly string[];
+	/** Registered but archived projects: known, yet refused for new jobs. */
+	archivedProjects?: readonly string[];
 	/**
 	 * Resolve a project name to its beads DB's absolute path: the project's
 	 * active tracker connection, else `<checkout>/.beads/beads.db` when it exists —
@@ -487,6 +489,9 @@ export class Ledger {
 			throw new LedgerError(
 				`unknown project ${JSON.stringify(input.project)} — register it first; known: ${known.join(", ") || "(none)"}`,
 			);
+		}
+		if (this.#options.archivedProjects?.includes(input.project)) {
+			throw new LedgerError(`project ${JSON.stringify(input.project)} is archived — unarchive it (cp_project unarchive) before creating jobs`);
 		}
 		let externalRef = input.externalRef?.trim();
 		if (externalRef !== undefined && (externalRef.length === 0 || /[\r\n]/.test(externalRef) || externalRef.length > 1000)) {

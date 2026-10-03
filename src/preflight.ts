@@ -32,6 +32,7 @@ export const LIVE_PHASES: readonly JobPhase[] = Object.freeze(["waiting", "held"
 
 export const CHECK_CODES = [
 	"clone_not_canonical",
+	"project_archived",
 	"origin_mismatch",
 	"fetch_failed",
 	"fetch_contention",
@@ -251,6 +252,15 @@ export class Preflight {
 		let clone: string;
 		try {
 			const project = this.#options.registry.require(request.project);
+			if (project.archived) {
+				findings.push({
+					code: "project_archived",
+					level: "fail",
+					message: `project ${request.project} is archived — no new dispatch`,
+					fix: `cp_project unarchive ${request.project} first`,
+				});
+				return finish(result);
+			}
 			clone = this.#options.registry.assertCanonicalClone(request.project);
 			result.clone = clone;
 			const origin = this.#options.registry.originUrl(request.project);

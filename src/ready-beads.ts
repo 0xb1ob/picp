@@ -18,7 +18,7 @@ export interface ReadyBeads {
 /** One bounded command per project per invocation, shared by all mandate views. */
 export async function readReadyBeads(registry: ProjectRegistry, ledger: Ledger, project?: string, exec: CommandRunner = runCommand): Promise<ReadyBeads[]> {
 	const results: ReadyBeads[] = [];
-	for (const entry of registry.list().filter((entry) => !project || entry.name === project)) {
+	for (const entry of registry.list().filter((entry) => project ? entry.name === project : !entry.archived)) {
 		try {
 			// Only the project's own connection or clone DB; a project with neither has no beads (never the home's).
 			const tracker = projectTracker(registry.home, entry.name, () => registry.pathOf(entry.name));
