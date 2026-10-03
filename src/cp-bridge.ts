@@ -21,7 +21,7 @@ import { autoParentContext, liveParentStatus, missionEndOf, parentBridgeStatus, 
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
-import { durableIdsFromMessage } from "./wakeup-outbox.ts";
+import { durableIdsFromMessage, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
 import { PACKAGE_ROOT } from "./home.ts";
@@ -30,7 +30,7 @@ import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { isPidAlive } from "./fleet.ts";
 import { asEscalation, openMissionEnds } from "./escalation-relay.ts";
-import { deliverableRelay, scheduleJobIdOf } from "./relay-scope.ts";
+import { deliverableRelay, type EnvelopeSummary, envelopeSummaryOf, scheduleJobIdOf, withEnvelopeSummaries } from "./relay-scope.ts";
 import { readParentLock } from "./parent-lock.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
 import type { ModelProbe } from "./routing.ts";
@@ -130,9 +130,11 @@ interface TurnBuf {
 	landed: LandedMark[];
 	/** Refused cp_escalate calls, relayed at settle unless a later call in this run succeeds. */
 	refused: BridgeRelay[];
+	/** Accepted cp-envelope wake-ups seen this run (issue #2); appended verbatim to the wake relay. */
+	envelopes: EnvelopeSummary[];
 }
 
-const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], refused: [] });
+const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], refused: [], envelopes: [] });
 
 const emptyReceipt = (): BridgeReceipt => ({ level: null, reached: [] });
 
@@ -632,11 +634,13 @@ export class CpBridge {
 		if (event.type === "message_end") {
 			// Only assistant messages count as replies; custom fleet notices relay directly.
 			const message = event.message as { role?: unknown; customType?: unknown } | undefined;
-			// Idle-bead notices and the one drain outcome wake (durable id `drain:<started>:<outcome>`) reach the operator directly.
-			const drainWake = durableIdsFromMessage(message).some((id) => id.startsWith("drain:"));
-			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || drainWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
+			// Idle-bead notices, the one drain outcome wake (durable id `drain:<started>:<outcome>`) and a `killed-unreported:` notice (issue #2) reach the operator directly.
+			const directWake = durableIdsFromMessage(message).some((id) => id.startsWith("drain:") || id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
+			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
 			if (stamped) { this.#turn.jobId = stamped; if (!this.#turn.jobIds.includes(stamped)) this.#turn.jobIds.push(stamped); }
+			const envelope = envelopeSummaryOf(message);
+			if (envelope) this.#turn.envelopes.push(envelope);
 			if (message?.role === "user") this.#delivery?.landed(textOf(message), this.#turn);
 			if (!message || message.role !== "assistant") return;
 			this.#turn.assistantCount += 1;
@@ -704,7 +708,7 @@ export class CpBridge {
 					kind: "wake",
 					...(this.#turn.jobId ? { jobId: this.#turn.jobId, jobIds: [...this.#turn.jobIds] } : {}),
 					stale: this.#turn.stale,
-					text,
+					text: withEnvelopeSummaries(text, turn.envelopes),
 					receipt: climb(climb(emptyReceipt(), "turn_settled"), "owner_observed"),
 					paths: home && this.#turn.jobId ? bridgePaths(home, [this.#turn.jobId]) : [],
 				});

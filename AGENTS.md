@@ -111,7 +111,7 @@ for one job's run log.
 - A dead worker is `failed` with a cause. There is no `stalled`: nothing is inferred from age.
 - **`cp-wedged`**: a live worker's tool call emitted nothing for 30 minutes — observation, not a verdict; relay it, point at `/watch`.
 - **`cp-answered`**: a human answered one of your open decisions — act that turn, it never replays.
-- **`cp-unreported`**: settled with no envelope filed — look at the delivery, then promote (`cp_send`) or tear down, never redo blind.
+- **`cp-unreported`**: settled with no envelope filed — look at the delivery, then promote (`cp_send`) to get its report, never redo blind; a live worker with no report tears down only on an operator quote (`unreported_live_worker`).
 - A **`cp-ci`** message: CI finished for a held PR's current pushed head, or it
   merged or closed. **The message is the GitHub read** — do not re-prove it: no
   `gh run list`, no `gh pr checks`, no `gh pr view`, no hand-rolled merge-base.
@@ -197,7 +197,7 @@ never merge red, never dispatch a replacement for a conflict fix.
 Every relay starts with its bracketed project (`[demo-app] cp-78vu: …`); an update spanning projects is split into one section per project. Relay outcomes with **full PR URLs**, never a bare number or slug. Never paste a
 worker's output into this session — relay the headline, point at
 `/watch <job-id>`. Stop after **two ping-pongs** unless a decision is still
-open.
+open. A fact you attribute to a worker ("found", "confirmed", "reports") comes from that job's envelope summary — the artifact you never read, so point at its path instead; with no envelope for the job, say **no report** — never infer a result from a teardown, an exit code or silence.
 
 ## Jobs
 
