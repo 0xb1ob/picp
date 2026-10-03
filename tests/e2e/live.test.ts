@@ -554,8 +554,13 @@ test(
 		const view = restarted.watch(issue.id);
 		assert.ok(view.lines.length > 0, "a restarted parent can still render the run");
 
-		// Closing the books on an orphan is a deliberate act: force, and it claims
-		// no pass reason because nothing was proven.
+		// A live orphan keeps its lease even under force: nothing here can observe its close.
+		const refused = await restarted.tearDown(issue.id, { force: true });
+		assert.equal(refused.failure?.code, "unmanaged_live_worker", JSON.stringify(refused));
+		assert.equal(isPidAlive(workerPid), true);
+		// End this test's own recorded worker pid, then closing the books is a deliberate force.
+		process.kill(workerPid, "SIGTERM");
+		await waitFor(() => isPidAlive(workerPid), (alive) => !alive, { what: "the orphan worker to exit" });
 		const torn = await restarted.tearDown(issue.id, { force: true });
 		assert.equal(torn.torn_down, true, JSON.stringify(torn));
 		assert.equal(torn.reason, undefined, "force proves nothing, so it claims nothing");

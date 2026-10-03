@@ -6,10 +6,10 @@
  * nothing here drains a live parent.
  */
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { EMPTY_USAGE, type FleetRecord, isoTimestamp, type RunPhase } from "../src/contracts.ts";
+import { EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, type RunPhase, SCHEMA_VERSION } from "../src/contracts.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { assertNotDraining, DrainControl, drainFile, DrainError, formatDrain, liveWorkerJobs, readDrain, restartActivity, restartNotice } from "../src/drain.ts";
 import { EscalationStore } from "../src/escalation.ts";
@@ -258,6 +258,32 @@ test("drain: reconcile never clears this process's drain; the next parent's star
 	assert.match(restart[0]!.content, /cp-held held, lease \/wt\/cp-held, head none/);
 	await next.reconcile();
 	assert.equal(next.durableWakeups.pending().filter((entry) => entry.content.startsWith("RESTART AFTER DRAIN")).length, 1, "reported once");
+});
+
+test("reconcile: a parent startup closes the ledger row of a research job torn down just before a crash", async (t) => {
+	const home = createScratchHome();
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => {
+		await post.shutdown();
+		home.cleanup();
+	});
+	const scratch = createScratchLedger({ knownProjects: ["demo"], home: home.path });
+	const job = await scratch.ledger.create({ title: "synthetic research", project: "demo", delivery: "pipeline", kind: "research" });
+	await scratch.ledger.claim(job.id, "w");
+	await post.fleet.add(record(job.id, {
+		kind: "research", delivery: "pipeline", phase: "done", reported_at: isoTimestamp(),
+		closed_at: isoTimestamp(new Date(Date.now() + 60_000)), closed_reason: "gated",
+		worker: { ...record(job.id).worker, exited_at: isoTimestamp() },
+	}));
+	mkdirSync(join(home.path, paths.runDir(job.id)), { recursive: true });
+	writeFileSync(join(home.path, paths.envelopeFile(job.id)), JSON.stringify({
+		schema_version: SCHEMA_VERSION, job_id: job.id, received_at: isoTimestamp(), attempt: 1,
+		envelope: { job_id: job.id, kind: "research", status: "done", summary: "synthetic findings", artifact_path: "/synthetic/report.md" },
+	}));
+	await post.reconcile();
+	const closed = await scratch.ledger.show(job.id);
+	assert.equal(closed.status, "closed");
+	assert.equal(closed.close_reason, "researched: /synthetic/report.md");
 });
 
 test("cp_parent drain path: parentDiagnostic sends /cp-drain <seconds> and returns the parent's immediate answer", async () => {

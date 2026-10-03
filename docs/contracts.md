@@ -2460,6 +2460,17 @@ was filed, so a pass reason such as `clean_research` never reads as a result.
 reported; going on without it is `cp_job drop` and the operator's
 dropped-dependency answer.
 
+**An unowned live worker keeps its lease (cp-t9yr F1).** A non-script job whose
+worker has no recorded exit, no observed close, a live pid, and no session here
+that owns it is refused with `unmanaged_live_worker` before every other gate:
+nothing here can observe that worker's close, and returning the lease would hand
+its worktree to the next job while it can still write there. `force`,
+`operator_quote` and the pipeline hand-off (`acceptUnreported`) do not skip it,
+and neither does the plain gated path `cp_integrate` uses. `killed_unreported`
+therefore only ever means an observed shutdown of a worker this session owns.
+Recovery: confirm the pid is this job's worker, end it deliberately (or let it
+exit), then re-run `cp_teardown`.
+
 **The merged-head trap** (ported from
 `reports/operating-knowledge.md`): when a PR is squash-merged and GitHub
 auto-deletes the head branch, absence from origin reads exactly like "never
@@ -2530,11 +2541,17 @@ and fetching is a side effect this gate does not own.
 genuinely unprovable case, it still claims no pass reason, and it is still
 recorded as `closed_reason: "forced"`.
 
-A research or `delivery:answer` job whose envelope is filed is closed in the
-ledger with a reason derived from that envelope (`answered: <headline>`,
-`researched: <artifact path>`, `gated: <verdict>`). Already closed is a no-op.
-Ship jobs are unchanged: `cp_integrate` still closes them. `cp_job close` remains
-the path for dropping work.
+A research or `delivery:answer` job is closed in the ledger with a reason
+derived from its filed envelope (`answered: <headline>`, `researched: <artifact
+path>`, `gated: <verdict>`) only when the fleet record has `reported_at`, the
+envelope is filed, and the ledger row is open/in_progress and not updated since
+the fleet `closed_at` (a reopened row stays open). A close that fails returns
+`ledger_close_error` on the teardown result, journals one `recovery` wake-up
+with id prefix `ledger-close-failed:`, and is retried by a re-run `cp_teardown`
+of the done job (`ledger_closed: true`; no lease or worker is touched) and once
+per parent startup (`CommandPost.reconcile`). Ship jobs are unchanged:
+`cp_integrate` still closes them. `cp_job close` remains the path for dropping
+work.
 
 Order: gates → **worker shutdown (observed close)** → lease return → fleet
 `done` → ledger close for research/answer → optional artifact cleanup. T17 amendment to the ported order (lease

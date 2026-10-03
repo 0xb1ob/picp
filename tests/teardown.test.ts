@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -30,7 +30,7 @@ import { loadProfile } from "../src/profiles.ts";
 import { initialStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import type { Ledger } from "../src/ledger.ts";
-import { formatTeardown, type GitRunner, Teardown } from "../src/teardown.ts";
+import { formatTeardown, type GitRunner, Teardown, type TeardownLedger } from "../src/teardown.ts";
 import { unreportedLiveWorker } from "../src/teardown-head.ts";
 import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
 import { registerIntegrateTools } from "../extensions/command-post/tools-integrate.ts";
@@ -151,6 +151,7 @@ function benchOf(t: { after(fn: () => void | Promise<void>): void }): Bench {
 					role: kind === "research" ? "planner" : "implementer",
 					model: "mock/model",
 					started_at: isoTimestamp(),
+					exited_at: isoTimestamp(),
 				},
 				worktree,
 				branch: jobId,
@@ -720,60 +721,79 @@ async function addLiveUnreported(b: Bench, jobId: string): Promise<string> {
 		const job = jobs.find((entry) => entry.job_id === jobId)!;
 		delete job.reported_at;
 		job.phase = "waiting";
+		if (!("script" in job)) delete job.worker.exited_at;
 	});
 	return worktree;
 }
 
-test("issue #2: a live worker with no report is refused; force needs an operator quote and ends killed_unreported", { timeout: 60_000 }, async (t) => {
+test("cp-t9yr F1: an unmanaged live worker is refused under every call shape; force and a quote do not skip it", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
 	const jobId = "cp-live-unreported";
 	await addLiveUnreported(b, jobId);
 	const journaled: DurableWakeupInput[] = [];
 	const teardown = b.withJournal((input) => journaled.push(input));
-
-	const refused = await teardown.teardown(jobId);
-	assert.equal(refused.failure?.code, "unreported_live_worker");
-	assert.equal(refused.lease_returned, false);
-	assert.equal(b.fleet.require(jobId).phase, "waiting");
-	assert.ok(readRunEvents(b.home, jobId).some((event) => event.type === "teardown_refused"));
-
-	const unauthorized = await teardown.teardown(jobId, { force: true, requireAuthorization: true });
-	assert.equal(unauthorized.failure?.code, "unreported_live_worker");
-	assert.match(unauthorized.failure?.fix ?? "", /operator_quote/);
-	assert.equal(b.fleet.require(jobId).phase, "waiting");
-	assert.equal(journaled.length, 0);
-
 	const quote = "Kill cp-live-unreported now.";
-	const killed = await teardown.teardown(jobId, { force: true, requireAuthorization: true, authorization: { by: "operator-quote", quote } });
-	assert.equal(killed.torn_down, true, formatTeardown(killed));
-	assert.equal(killed.killed_unreported, true);
-	assert.equal(killed.reason, undefined);
-	assert.equal(b.fleet.require(jobId).closed_reason, "forced");
-	assert.match(formatTeardown(killed), /killed_unreported/);
-	const marker = readRunEvents(b.home, jobId).filter((event) => event.type === "shutdown_requested").at(-1)?.payload as Record<string, unknown>;
-	assert.equal(marker.killed_unreported, true);
-	assert.equal(marker.operator_quote, quote);
-	assert.equal(marker.authorized_by, "operator-quote");
-	assert.equal(journaled.length, 1);
-	const wake = journaled[0]!;
-	assert.equal(wake.kind, "recovery");
-	assert.ok(wake.id.startsWith(`killed-unreported:${jobId}:`), wake.id);
-	assert.equal(wake.job_id, jobId);
-	assert.equal(wake.keys, undefined);
-	assert.match(wake.content, new RegExp(`^\\[demo\\] ${jobId}: killed_unreported`));
-	assert.match(wake.content, /no report/);
+	const shapes = [
+		{},
+		{ force: true },
+		{ force: true, requireAuthorization: true },
+		{ force: true, requireAuthorization: true, authorization: { by: "operator-quote", quote } },
+		{ acceptUnreported: "pipeline hand-off" },
+	];
+	for (const shape of shapes) {
+		const refused = await teardown.teardown(jobId, shape);
+		assert.equal(refused.failure?.code, "unmanaged_live_worker", JSON.stringify(shape));
+		assert.equal(refused.lease_returned, false);
+		assert.equal(refused.torn_down, false);
+		assert.equal(refused.killed_unreported, undefined);
+		assert.match(refused.failure?.fix ?? "", /keep the lease/);
+		assert.equal(b.fleet.require(jobId).phase, "waiting");
+	}
+	assert.equal(journaled.length, 0);
+	assert.ok(readRunEvents(b.home, jobId).some((event) => event.type === "teardown_refused"));
+	assert.doesNotThrow(() => process.kill(process.pid, 0));
+	for (const phase of ["held", "failed"] as const) {
+		await b.fleet.mutate((jobs) => {
+			const job = jobs.find((entry) => entry.job_id === jobId)!;
+			job.phase = phase;
+			job.reported_at = isoTimestamp();
+			if (phase === "failed") job.failure = { class: "crash", message: "exit 1", at: isoTimestamp() };
+		});
+		const refused = await teardown.teardown(jobId, { force: true });
+		assert.equal(refused.failure?.code, "unmanaged_live_worker", phase);
+		assert.equal(b.fleet.require(jobId).phase, phase);
+	}
 });
 
-test("issue #2: direct API force still records killed_unreported", { timeout: 60_000 }, async (t) => {
+test("cp-t9yr F1: a reported held job with a live unowned worker is refused even by the gated (integrate) path", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
-	const jobId = "cp-live-forced";
-	await addLiveUnreported(b, jobId);
-	const journaled: DurableWakeupInput[] = [];
-	const forced = await b.withJournal((input) => journaled.push(input)).teardown(jobId, { force: true });
-	assert.equal(forced.torn_down, true);
-	assert.equal(forced.killed_unreported, true);
-	assert.equal(journaled.length, 1);
-	assert.match(journaled[0]!.content, /no operator quote recorded/);
+	const live = "cp-gated-orphan";
+	await b.addJob(live, b.worktree(live), "research");
+	const setExited = (jobId: string, exited: boolean) => b.fleet.mutate((jobs) => {
+		const job = jobs.find((entry) => entry.job_id === jobId)!;
+		if ("script" in job) return;
+		if (exited) job.worker.exited_at = isoTimestamp();
+		else delete job.worker.exited_at;
+	});
+	await setExited(live, false);
+	const refused = await b.teardown.teardown(live);
+	assert.equal(refused.failure?.code, "unmanaged_live_worker");
+	assert.equal(b.fleet.require(live).phase, "held");
+	await setExited(live, true);
+	const torn = await b.teardown.teardown(live);
+	assert.equal(torn.torn_down, true, formatTeardown(torn));
+	assert.equal(torn.reason, "clean_research");
+
+	// An observed close in the run status is just as dead as a recorded exit.
+	const observed = "cp-observed-orphan";
+	await b.addJob(observed, b.worktree(observed), "research");
+	await setExited(observed, false);
+	const status = initialStatus(observed, {}, isoTimestamp());
+	Object.assign(status, { phase: "exited", exited_at: isoTimestamp(), exit_code: 0 });
+	mkdirSync(join(b.home, paths.runDir(observed)), { recursive: true });
+	writeFileSync(join(b.home, paths.statusFile(observed)), JSON.stringify(status));
+	const closed = await b.teardown.teardown(observed);
+	assert.equal(closed.torn_down, true, formatTeardown(closed));
 });
 
 test("issue #2: hand-off and dead workers pass but say no report was filed", { timeout: 60_000 }, async (t) => {
@@ -781,13 +801,22 @@ test("issue #2: hand-off and dead workers pass but say no report was filed", { t
 	const journaled: DurableWakeupInput[] = [];
 	const teardown = b.withJournal((input) => journaled.push(input));
 
-	// (a) The pipeline hand-off: no managed worker in this bench, so no shutdown marker to read.
+	// (a) The pipeline hand-off on a live unowned worker is refused: nothing here can observe its close.
 	await addLiveUnreported(b, "cp-handoff");
 	const handoff = await teardown.teardown("cp-handoff", { acceptUnreported: "pipeline hand-off" });
-	assert.equal(handoff.torn_down, true, formatTeardown(handoff));
-	assert.equal(handoff.reason, "clean_research");
-	assert.equal(handoff.unreported, true);
-	assert.equal(handoff.killed_unreported, undefined);
+	assert.equal(handoff.failure?.code, "unmanaged_live_worker", formatTeardown(handoff));
+	assert.equal(handoff.lease_returned, false);
+
+	// (a2) Once that worker has exited, the hand-off tears down and says no report was filed.
+	await b.fleet.mutate((jobs) => {
+		const job = jobs.find((entry) => entry.job_id === "cp-handoff")!;
+		if (!("script" in job)) job.worker.exited_at = isoTimestamp();
+	});
+	const after = await teardown.teardown("cp-handoff", { acceptUnreported: "pipeline hand-off" });
+	assert.equal(after.torn_down, true, formatTeardown(after));
+	assert.equal(after.reason, "clean_research");
+	assert.equal(after.unreported, true);
+	assert.equal(after.killed_unreported, undefined);
 	assert.equal(journaled.length, 0);
 
 	// (b) A worker that already exited is not live: the gates decide, and the line says no report.
@@ -1478,4 +1507,109 @@ test("teardown of a ship job does not close the ledger", { timeout: 60_000 }, as
 	assert.equal(result.torn_down, true, formatTeardown(result));
 	const still = await scratch.ledger.show(job.id);
 	assert.notEqual(still.status, "closed");
+});
+
+/** A Teardown over the bench stores with its own lease counter, a ledger port and a journal. */
+function ledgerTeardown(b: Bench, ledger: () => TeardownLedger, journaled: DurableWakeupInput[], releases: string[]): Teardown {
+	const leases = new LeaseManager({
+		home: b.home,
+		cwd: () => b.home,
+		runner: async (bin, args) => {
+			if (bin === "treehouse" && args[0] === "return") releases.push(String(args.at(-1)));
+			return { status: 0, stdout: "", stderr: "" };
+		},
+	});
+	return new Teardown({ home: b.home, fleet: b.fleet, leases, manager: b.manager, runs: b.runs, ledger, journal: (input) => journaled.push(input) });
+}
+
+test("research ledger close: a failed close is surfaced and retried by the next teardown", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const scratch = createScratchLedger({ home: b.home, knownProjects: ["demo"] });
+	const job = await scratch.ledger.create({ title: "look into it", project: "demo", delivery: "pipeline", kind: "research" });
+	await scratch.ledger.claim(job.id, "w");
+	await b.addJob(job.id, b.worktree(job.id), "research");
+	const artifact = join(b.home, "artifacts", `${job.id}.md`);
+	writeEnvelope(b.home, job.id, { kind: "research", summary: "findings", artifact_path: artifact });
+	let calls = 0;
+	const flaky: TeardownLedger = {
+		list: (filter) => scratch.ledger.list(filter),
+		close: async (id, reason) => {
+			calls += 1;
+			if (calls === 1) throw new Error("synthetic transient\nsecond line");
+			return scratch.ledger.close(id, reason);
+		},
+	};
+	const journaled: DurableWakeupInput[] = [];
+	const releases: string[] = [];
+
+	const first = await ledgerTeardown(b, () => flaky, journaled, releases).teardown(job.id);
+	assert.equal(first.torn_down, true, formatTeardown(first));
+	assert.equal(first.lease_returned, true);
+	assert.equal(first.ledger_close_error, "synthetic transient");
+	assert.match(formatTeardown(first), /re-run cp_teardown/);
+	assert.equal(journaled.length, 1);
+	assert.equal(journaled[0]!.id, `ledger-close-failed:${job.id}`);
+	assert.equal(journaled[0]!.kind, "recovery");
+	assert.equal(journaled[0]!.job_id, job.id);
+	assert.equal((await scratch.ledger.show(job.id)).status, "in_progress");
+	assert.equal(releases.length, 1);
+
+	const second = await ledgerTeardown(b, () => flaky, journaled, releases).teardown(job.id);
+	assert.equal(second.torn_down, false);
+	assert.equal(second.ledger_closed, true);
+	assert.match(formatTeardown(second), /ledger close was retried/);
+	const closed = await scratch.ledger.show(job.id);
+	assert.equal(closed.status, "closed");
+	assert.equal(closed.close_reason, `researched: ${artifact}`);
+	assert.equal(releases.length, 1, "a retry never touches the lease");
+
+	const third = await ledgerTeardown(b, () => flaky, journaled, releases).teardown(job.id);
+	assert.equal(third.ledger_closed, undefined);
+	assert.equal(calls, 2);
+	assert.equal(journaled.length, 1);
+});
+
+test("research ledger close: crash boundary and guards", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const scratch = createScratchLedger({ home: b.home, knownProjects: ["demo"] });
+	const make = async (title: string, kind: JobKind = "research") => {
+		const job = await scratch.ledger.create({ title, project: "demo", delivery: kind === "research" ? "pipeline" : "pr", kind });
+		await scratch.ledger.claim(job.id, "w");
+		const record = await b.addJob(job.id, join(b.home, "worktrees", job.id), kind);
+		await b.fleet.mutate((jobs) => {
+			const entry = jobs.find((e) => e.job_id === job.id)!;
+			entry.phase = "done";
+			entry.closed_at = isoTimestamp(new Date(Date.now() + 60_000));
+			entry.closed_reason = "gated";
+		});
+		writeEnvelope(b.home, job.id, { kind, summary: `${title} done` });
+		return record.job_id;
+	};
+	const eligible = await make("eligible");
+	const unreported = await make("unreported");
+	await b.fleet.mutate((jobs) => { delete jobs.find((e) => e.job_id === unreported)!.reported_at; });
+	const noEnvelope = await make("no envelope");
+	rmSync(join(b.home, paths.envelopeFile(noEnvelope)));
+	const edited = await make("edited after close");
+	await b.fleet.mutate((jobs) => { jobs.find((e) => e.job_id === edited)!.closed_at = "2020-01-01T00:00:00Z"; });
+	const ship = await make("ship", "ship");
+
+	const journaled: DurableWakeupInput[] = [];
+	const releases: string[] = [];
+	const teardown = ledgerTeardown(b, () => scratch.ledger, journaled, releases);
+	const crashed = await teardown.teardown(eligible);
+	assert.equal(crashed.torn_down, false);
+	assert.equal(crashed.ledger_closed, true);
+	assert.equal((await scratch.ledger.show(eligible)).status, "closed");
+	for (const id of [unreported, noEnvelope, edited, ship]) {
+		assert.equal((await teardown.teardown(id)).ledger_closed, undefined, id);
+		assert.equal((await scratch.ledger.show(id)).status, "in_progress", id);
+	}
+
+	// The startup sweep over the whole done fleet closes only the newly eligible row.
+	const again = await make("eligible again");
+	const swept = await ledgerTeardown(b, () => scratch.ledger, journaled, releases).retryLedgerCloses();
+	assert.deepEqual(swept, { closed: [again], failed: [] });
+	assert.equal(journaled.length, 0);
+	assert.equal(releases.length, 0);
 });

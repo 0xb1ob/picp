@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Teardown keeps the lease of an unowned live worker, and retries a failed research ledger close
+
+`Teardown.teardown` (`src/teardown.ts`) refuses with the new gate code `unmanaged_live_worker` when the job's worker has no recorded exit, no observed close, a live pid, and no session here owns it — before every other gate, on every call shape: plain (the `cp_integrate` path), `force`, `force` + `operator_quote`, and the pipeline hand-off (`acceptUnreported`). The lease stays, the fleet phase is unchanged, and the fix names the recovery: end that pid deliberately (or let it exit), then re-run `cp_teardown`. `killed_unreported` now only ever follows an observed shutdown of a worker this session owns. A research/answer ledger close (`closeResearchLedgers`, `src/teardown-head.ts`) now requires `reported_at`, a filed envelope and an open row not edited since the fleet `closed_at`; a failure returns `ledger_close_error`, journals one `ledger-close-failed:<job>` recovery wake-up, and is retried by a re-run `cp_teardown` of the done job (`ledger_closed: true`, no lease or worker touched) and once per parent startup (`CommandPost.reconcile`). Migration: none; an orphan used to be force-closed now needs its pid ended first.
+
 ### The parent's transient retry budget survives a restart (cp-md0c)
 
 `ParentSendEntry` gains optional `outer_retry_attempts` (`src/parent-outbox.ts`): the transient-retry reservations a send id has spent, written by `ParentSendOutbox.reserveOuterRetry` before the outer ladder sleeps (`src/parent-delivery.ts`). A parent death or restart no longer resets the ladder to attempt 1; the in-memory map now holds only pending timers. A reservation that cannot be written journals `outer_retry_reservation_failed` and fails the send once. Normal restart resume nudges are unchanged and uncounted. Migration: none for upgrades (absent reads as 0). Downgrade: an older binary rejects a sends file carrying the field — roll back only with the parent stopped and a backup of `state/sessions/cp-parent.sends.json`.
