@@ -42,7 +42,7 @@ function scripted() {
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-test("every parent injection is one prompt with streamingBehavior followUp, busy or idle", async () => {
+test("every parent injection is one prompt with streamingBehavior steer, busy or idle", async () => {
 	const ctx = scripted();
 	(ctx.proc as unknown as { busy: boolean }).busy = true;
 	await ctx.delivery.send("A", 10);
@@ -52,9 +52,9 @@ test("every parent injection is one prompt with streamingBehavior followUp, busy
 	ctx.delivery.afterSettle();
 	await flush();
 	assert.deepEqual(ctx.calls, [
-		["prompt", "followUp"],
-		["prompt", "followUp"],
-		["prompt", "followUp"],
+		["prompt", "steer"],
+		["prompt", "steer"],
+		["prompt", "steer"],
 	]);
 });
 

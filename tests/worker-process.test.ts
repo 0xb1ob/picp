@@ -172,6 +172,49 @@ test("busy worker takes steer and follow_up as queued receipts", { timeout: 90_0
 	await worker.waitForSettled(60_000);
 });
 
+test("busy worker: a prompt+steer reaches the model before an earlier queued prompt+followUp", { timeout: 90_000 }, async (t) => {
+	const provider = await MockProvider.start();
+	const repo = createScratchRepo({ name: "steer-order" });
+	const script = "steer-order";
+	const model = provider.addScript(script, [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 2 && echo slept" } }] },
+		{ kind: "text", text: "first answer" },
+		{ kind: "text", text: "second answer" },
+		{ kind: "text", text: "spare answer" },
+	]);
+	const agentDir = createAgentDir({ provider });
+	const worker = WorkerProcess.spawn({
+		cwd: repo.path,
+		model,
+		tools: ["bash"],
+		env: agentDir.env,
+		extraArgs: ["--no-context-files", "--no-session"],
+	});
+	t.after(async () => {
+		await worker.shutdown();
+		agentDir.cleanup();
+		repo.cleanup();
+		await provider.stop();
+	});
+
+	await worker.getState(30_000);
+	await worker.prompt("start the slow job");
+	await worker.waitForEvent((event) => event.type === "tool_execution_start", 30_000);
+	assert.equal(worker.busy, true);
+
+	const wake = await worker.send("wake one", "prompt", "followUp");
+	assert.equal(wake.receipt, "queued", JSON.stringify(wake));
+	const operator = await worker.send("operator now", "prompt", "steer");
+	assert.equal(operator.receipt, "queued", JSON.stringify(operator));
+
+	await worker.waitForSettled(60_000);
+	const bodies = provider.requests(script).map((request) => JSON.stringify(request.body));
+	const firstWith = (text: string) => bodies.findIndex((body) => body.includes(text));
+	assert.ok(firstWith("operator now") >= 0, "the steered prompt reached the model");
+	assert.ok(firstWith("wake one") >= 0, "the queued follow-up reached the model");
+	assert.ok(firstWith("operator now") < firstWith("wake one"), "steer overtakes the earlier follow-up");
+});
+
 test(
 	"send(): the receipt is pi's disposition, never the busy flag",
 	{ timeout: 30_000 },

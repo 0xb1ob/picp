@@ -4,8 +4,10 @@
  * Loaded only in the operator's outer pi session (`bin/cp-operator`). It does
  * not register fleet tools. The CP parent is a headless RPC child.
  *
- * Mid-turn wakes use `deliverAs: "followUp"`: a busy coordinator queues them,
- * never drops them, never steers into the current tool batch.
+ * Mid-turn wakes into this operator session use `deliverAs: "followUp"`: a
+ * busy coordinator queues them, never drops them, never steers into the
+ * current tool batch. (Sends into the CP parent steer instead; see
+ * `src/parent-delivery.ts`.)
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";

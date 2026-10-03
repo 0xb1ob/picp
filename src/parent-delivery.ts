@@ -21,6 +21,9 @@ import type { WorkerProcess } from "./worker-process.ts";
 
 type OuterRetryEvent = "outer_retry_attempt" | "outer_retry_succeeded" | "outer_retry_exhausted" | "relay_failed";
 
+/** An operator send must not queue behind fleet follow-ups: it lands at the next tool-batch boundary. */
+const PARENT_STREAMING = "steer" as const;
+
 export interface LandedMark {
 	id: string;
 	/** `texts.length` and `assistantCount` of the run when the marker landed. */
@@ -169,7 +172,7 @@ export class ParentDelivery {
 		if (this.#retries.get(id) !== attempt) return; // superseded, or dropped by a death/stop
 		const proc = this.#host.liveProc();
 		if (!proc) return; // still `landed`: the relaunch's resume nudge answers it
-		const sent = await proc.send(frameBatch([{ id, text: RESUME_NUDGE }]), "prompt", "followUp");
+		const sent = await proc.send(frameBatch([{ id, text: RESUME_NUDGE }]), "prompt", PARENT_STREAMING);
 		if (sent.receipt === "failed") this.#finish(id, { failed: true, reply: "", error: sent.error ?? error });
 	}
 
@@ -204,7 +207,7 @@ export class ParentDelivery {
 				.filter((entry) => entry.state === "landed" && (landed.has(entry.id) || injected.has(entry.id)) && !this.#live.has(entry.id))
 				.map((entry) => entry.id);
 			if (resume.length > 0) {
-				const sent = await proc.send(frameResume(resume), "prompt", "followUp");
+				const sent = await proc.send(frameResume(resume), "prompt", PARENT_STREAMING);
 				if (sent.receipt === "failed") throw new Error(sent.error ?? "resume failed");
 			}
 		} catch {
@@ -274,13 +277,13 @@ export class ParentDelivery {
 	}
 
 	/** Reserve on disk, then one RPC write; a refused write goes back to `queued`. Returns the refusal. */
-	// pi, not `proc.busy`, decides start vs queue: prompt + followUp starts a run when idle, queues when busy.
+	// pi, not `proc.busy`, decides start vs queue: prompt + steer starts a run when idle, lands after the current tool batch when busy.
 	async #inject(proc: WorkerProcess, entries: readonly ParentSendEntry[]): Promise<string | undefined> {
 		if (entries.length === 0) return undefined;
 		const ids = entries.map((entry) => entry.id);
 		for (const id of ids) this.#live.add(id);
 		this.outbox.markInjected(ids);
-		const sent = await proc.send(frameBatch(entries), "prompt", "followUp");
+		const sent = await proc.send(frameBatch(entries), "prompt", PARENT_STREAMING);
 		if (sent.receipt !== "failed") return undefined;
 		try {
 			this.outbox.revertInjected(ids);
