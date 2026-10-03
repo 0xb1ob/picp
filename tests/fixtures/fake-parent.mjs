@@ -202,8 +202,12 @@ rl.on("line", (line) => {
 		}
 		const userEcho = { type: "message_end", message: { role: "user", content: [{ type: "text", text: raw }] } };
 		if ((held !== null || segmented) && text.includes("RELEASE")) {
-			// The held turn answers first; the follow-up lands after it, in the same run.
-			if (held !== null) write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${held}` }] } });
+			// The held turn answers first and ends cleanly (pi takes a follow-up only
+			// after a turn_end); the follow-up lands after it, in the same run.
+			if (held !== null) {
+				write({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `reply: ${held}` }], stopReason: "stop" } });
+				write(SEGMENT_END);
+			}
 			held = null;
 			segmented = false;
 			write(userEcho);
