@@ -533,6 +533,29 @@ test("a landed delivery is refused, not silently reopened", { timeout: 120_000 }
 	assert.equal(markers.filter((event) => event.type === "prompt_sent").length, 1, "the refused brief never reached the worker");
 });
 
+test("human_handoff change request: cp_send to the handed-off job reopens it on the same branch; a dead worker points at cp_revive", { timeout: 120_000 }, async (t) => {
+	const jobId = "cp-aaa1";
+	const envelope = { job_id: jobId, kind: "ship" as const, status: "done" as const, summary: "Pushed and opened the PR.", branch: jobId };
+	const b = await bench(t, [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }, { kind: "text", text: "on it" }], { jobId });
+	await b.sender.send({ jobId, message: "do the job" });
+	await settled(b.worker, 1);
+	await waitFor(() => b.fleet.require(jobId), (job) => job.phase === "held", { what: "the envelope" });
+	// Handed off to a human on GitHub: still held, PR open (src/human-handoff.ts adds no state of its own).
+	await b.fleet.patch(jobId, { delivery: "pr", receipts: [{ kind: "pr", status: "open", title: `PR for ${jobId}`, url: "https://github.com/example/example-app/pull/1" }] });
+
+	const change = await b.sender.send({ jobId, message: "the reviewer asked for a rename — push it and report" });
+	assert.equal(change.receipt, "delivered");
+	assert.equal(change.superseded?.generation, 1, "the change request reopens the envelope");
+	const reopened = b.fleet.require(jobId);
+	assert.equal(reopened.phase, "waiting");
+	assert.equal(reopened.branch, jobId, "same branch, same job");
+	assert.deepEqual(b.fleet.list().map((job) => job.job_id), [jobId], "no new job");
+
+	await settled(b.worker, 2);
+	await b.manager.shutdown(jobId);
+	await assert.rejects(() => b.sender.send({ jobId, message: "one more change" }), /no live worker in this session[\s\S]*revive/);
+});
+
 test("promote rules: same model only, live jobs only, live workers only", { timeout: 120_000 }, async (t) => {
 	const b = await bench(t, [{ kind: "text", text: "ok" }]);
 

@@ -2948,6 +2948,46 @@ id `aw-checkpoint-<id>`; `diff` is `<id>.diff.json`; `merge` is
 stripping a suffix, so no store can report another kind's checkpoint under a br
 id that was never a job id.
 
+### Per-project human-review handoff (`merge_policy: human_handoff`)
+
+A project may choose that the command post never lands its PRs:
+`cp_project merge_policy name:<p> policy:human_handoff` (`repo` deletes the key;
+absent means `repo`, and integration is then argv-identical to the rules above).
+The policy is read through the project registry the composition root injects
+into `makeHandoff` (`src/human-handoff.ts`), keyed by the job's fleet-record
+project name — the same name `cp_integrate` resolves the canonical clone from;
+`src/integrate.ts` performs no lookup of its own. An unreadable registry fails
+closed: surface, nothing merged.
+
+**The handoff happens only after green CI and a passing review on the current
+head.** The hook sits after the CI read (green, or the repository positively has
+no CI) and after the draft step (a reviewed draft is readied first, exactly as
+above), and before update-branch, retry, merge pending and the unreadable
+fallback. It hands off when the verdict is `permitted`, or `pending` with cause
+`reviews`, `behind` or `unknown_block` (a rule-required update counts as
+`behind`, as it does for the update step) — and only after `#reviewRequired`
+passes; an unreviewed head returns `next: review` unchanged. The handoff records
+step `permit`, next `surface`, journals `integration_permitted` with
+`policy: human_handoff`, and declares one subject-keyed Awaiting row
+`human-review pr <url>` naming the head. Under the policy, `gh pr merge` and
+`gh pr update-branch` never run and no merge checkpoint is minted.
+
+**What never hands off:** pending CI (`wait`), CI on a superseded head (`wait`),
+red CI (resolve), a permission `retry`, and `pending` with cause `checks`,
+`unstable`, `conflict` or `queue` (today's merge-pending reminder). CI or merge
+state that cannot be read surfaces "not handed off" with **no** merge checkpoint
+and no row.
+
+**Landing and change requests add no new path.** The human's merge on GitHub is
+observed like any external merge (`MERGED` → record, teardown, close), and the
+row goes obsolete on the merged receipt. A change request is a `cp_send` to the
+same job (`cp_revive` first if its worker is dead): it reopens the envelope, the
+worker pushes and reports, the continuation reviews the new head and waits for
+its CI, and the handoff then updates the same row — one continuation notice per
+head, never a new job or branch. Until then the row still names the old head.
+GitHub review events are not polled, and an approval on GitHub never triggers a
+merge by the command post.
+
 ### The two-writer boundary
 
 The branch has exactly one writer at any moment, and the boundaries are code:

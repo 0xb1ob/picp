@@ -935,6 +935,26 @@ test("jje.2 red: a failed head stops visibly once, and a duplicate event never p
 	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_failed", head: NEW_HEAD })).action, "wait");
 });
 
+test("human_handoff: one durable notice per handed-off head, none for a repeat, and the human's merge lands", async () => {
+	const b = continuationBench();
+	b.script.set("cp-4wz", ["surface"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", attempt: 2, head: HEAD });
+	const ids = () => new Set(b.notices.map((notice) => notice.id));
+	assert.equal(ids().size, 1, "a repeated handoff of the same head is the same notice id, delivered once by the outbox");
+	assert.match(b.notices[0]?.content ?? "", /HELD PR STOPPED — cp-4wz \(continuation, next: surface\)/);
+
+	b.heads.set("cp-4wz", NEW_HEAD);
+	b.during.head = NEW_HEAD;
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: NEW_HEAD });
+	assert.equal(ids().size, 2, "a change request's new head is handed off with one more notice");
+
+	b.script.set("cp-4wz", ["done"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "pr_merged", head: NEW_HEAD });
+	assert.equal(ids().size, 3);
+	assert.match(b.notices.at(-1)?.content ?? "", /HELD PR LANDED — cp-4wz/);
+});
+
 test("jje.2 stale: a moved head, a reopened generation or a job no longer held acts on nothing", async () => {
 	const b = continuationBench();
 	b.script.set("cp-4wz", ["advance", "done"]);
