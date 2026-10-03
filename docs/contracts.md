@@ -3606,6 +3606,8 @@ recommendation:
 | a ready job has a `PipelineStore` record | `pipeline` \u2014 `cp_pipeline advance <id>` |
 | otherwise, the first ready job | `dispatch` \u2014 `cp_dispatch <id>` |
 
+When several grants cover the project, every other grant's result rides along in `others`; one the parent must act on (`dispatch`, `pipeline`, `mission_end`, an escalation id, a warning, or a blocked row with a `cp_decide` id) renders in full, and the rest is one line each (`<id>: <status> <live>/<parallelism>, jobs <used>/<cap> — <kind>: <reason>`), so the answer does not grow with the number of waiting grants.
+
 `cp_next` also reads each registered project's `br ready --json` once per call
 (10-second command timeout, 4 MiB output bound), using the canonical clone's
 explicit bead database. It skips epics, `deferred` labels, and beads already

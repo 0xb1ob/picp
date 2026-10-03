@@ -273,9 +273,21 @@ export function formatNext(result: NextResult): string {
 	if ((result.blocked?.length ?? 0) > 10) lines.push(`blocked: +${result.blocked!.length - 10} more jobs`);
 	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${result.action.reason}`);
 	if (result.escalation_id) lines.push(`escalation: ${result.escalation_id}`);
-	for (const other of result.others ?? []) lines.push(formatNext(other));
+	for (const other of result.others ?? []) lines.push(needsAction(other) ? formatNext(other) : compactOther(other));
 	lines.push(...formatReadyBeads(result.ready_beads ?? []));
 	return lines.join("\n");
+}
+
+/** An `others` grant the parent must act on renders in full; the rest (waiting, paused) is one line each, so output does not grow per grant. */
+function needsAction(result: NextResult): boolean {
+	const kind = result.action.kind;
+	return kind === "dispatch" || kind === "pipeline" || kind === "mission_end" || result.escalation_id !== undefined || result.warning !== undefined || (result.blocked ?? []).some((row) => row.escalation_ids?.length);
+}
+
+function compactOther(result: NextResult): string {
+	const m = result.mandate;
+	const head = m ? `${m.id}: ${m.status} ${m.live_workers}/${m.parallelism}, jobs ${m.jobs_used}/${m.job_cap}` : "no active mandate";
+	return `${head} \u2014 ${result.action.kind}: ${result.action.reason}`;
 }
 
 /** A `cp_next` answer identical to the last one for the same scope is one line, not the whole block again. */
