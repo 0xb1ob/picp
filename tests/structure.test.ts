@@ -218,3 +218,25 @@ test("systemd ratchet: systemctl/loginctl/journalctl appear only in the backend 
 	assert.deepEqual([...hits].filter((rel) => !SYSTEMD_ALLOWED.includes(rel)).sort(), [], "systemd tools belong in src/service/daemon-backend.ts (cp-daemon's backend port)");
 	assert.deepEqual(SYSTEMD_ALLOWED.filter((rel) => !hits.has(rel)), [], "allowlisted file(s) no longer hit: drop them from SYSTEMD_ALLOWED");
 });
+
+// cp-2diz (review 1 of cp-27h0): statements are never joined with `;` to stay under a line cap.
+// Scoped to the files the task cites: integrate.ts, src/command-post.ts, human-handoff.ts and the
+// extensions/command-post/ modules (tools-dispatch.ts included). Strings and comments are blanked first; type-literal
+// members (`{ a: T; b: U }`) and `for (;;)` headers are not statements, so they never match.
+const JOINED_STATEMENT = /;\s*(?:(?:const|let|var|if|return|await|import|export|throw)\b|this\.|[A-Za-z_$][\w$]*\s*(?:\(|=(?![=>])|\.))/;
+const NO_JOINED_STATEMENTS = ["src/integrate.ts", "src/command-post.ts", "src/human-handoff.ts", "extensions/command-post"];
+
+function joinedStatementLines(text: string): number[] {
+	const code = (line: string) => line.replace(/\\./g, "").replace(/"[^"]*"|'[^']*'|`[^`]*`/g, '""').replace(/\/\*.*?\*\//g, "").replace(/\/\/.*$/, "");
+	return text.split("\n").flatMap((line, index) => (/^\s*(?:\*|\/\/|\/\*|for\s*\()/.test(line) || !JOINED_STATEMENT.test(code(line)) ? [] : [index + 1]));
+}
+
+test("no joined statements: integrate, src/command-post, human-handoff and extensions/command-post keep one statement per line", () => {
+	assert.deepEqual(joinedStatementLines('import { A } from "./a.ts"; import { B } from "./b.ts";'), [1], "two imports on one line");
+	assert.deepEqual(joinedStatementLines("\tconst x = await f(); if (x) return x; // why"), [1], "a statement and its guard");
+	assert.deepEqual(joinedStatementLines("\tconst on = (ctx) => { s = ctx ?? s; relays.started(); };"), [1], "an arrow body");
+	assert.deepEqual(joinedStatementLines('\topts: { a?: string; b: number };\n\tfor (let i = 0; i < n; i++) {}\n\tsay("a; b(c)");'), [], "type literals, for headers and strings");
+	const files = NO_JOINED_STATEMENTS.flatMap((root) => (root.endsWith(".ts") ? [root] : sourcesBelow(root)));
+	const hits = files.flatMap((rel) => joinedStatementLines(readFileSync(join(REPO_ROOT, rel), "utf8")).map((line) => `${rel}:${line}`));
+	assert.deepEqual(hits, [], "split joined statements onto their own lines (or extract a helper); never compact to dodge a size cap");
+});
