@@ -71,6 +71,42 @@ test("T5b: the ledger records once, persists, refuses bad JSON, keeps the newest
 	assert.throws(() => new EscalationRelayLedger(file).ids(), (error: Error) => error.message.includes(file) && /refusing to guess/.test(error.message));
 });
 
+test("T5f: open ids are pinned past 512 later relays; only settled history is capped, and the backstop never re-relays a pinned id", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ledger = new EscalationRelayLedger(join(home.path, "pinned.json"));
+	const open = new Set(["es-open01"]);
+	ledger.note("es-open01", "bridge", isoTimestamp(NOW), open);
+	for (let i = 1; i <= ESCALATION_RELAY_LEDGER_KEEP; i++) ledger.note(`es-n${i}`, "backstop", isoTimestamp(new Date(NOW.getTime() + i * 1000)), open);
+	assert.ok(ledger.ids().has("es-open01"), "an open id survives 512 later relays");
+	assert.equal(ledger.ids().size, ESCALATION_RELAY_LEDGER_KEEP + 1);
+	ledger.note("es-late", "backstop", isoTimestamp(new Date(NOW.getTime() + 600_000)), new Set());
+	assert.equal(ledger.ids().has("es-open01"), false, "settled, it is pruned under the cap");
+	assert.equal(ledger.ids().size, ESCALATION_RELAY_LEDGER_KEEP);
+
+	const raised = await gateEscalation(home.path);
+	const file = escalationRelayLedgerFile(home.path, "multi");
+	const real = new EscalationRelayLedger(file);
+	const pin = new Set([raised.id]);
+	real.note(raised.id, "bridge", isoTimestamp(NOW), pin);
+	for (let i = 1; i <= ESCALATION_RELAY_LEDGER_KEEP; i++) real.note(`es-m${i}`, "backstop", isoTimestamp(new Date(NOW.getTime() + i * 1000)), pin);
+	const sent: BridgeRelay[] = [];
+	assert.deepEqual(runEscalationBackstop({
+		home: home.path, open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledger: real, relay: (relay) => sent.push(relay), now: () => NOW,
+	}), []);
+	assert.equal(sent.length, 0);
+
+	// Control: the same escalation in a ledger filled the same way without the pin is evicted, so it reads as never relayed.
+	const unpinned = new EscalationRelayLedger(join(home.path, "unpinned.json"));
+	unpinned.note(raised.id, "bridge", isoTimestamp(NOW));
+	for (let i = 1; i <= ESCALATION_RELAY_LEDGER_KEEP; i++) unpinned.note(`es-m${i}`, "backstop", isoTimestamp(new Date(NOW.getTime() + i * 1000)));
+	assert.equal(unpinned.ids().has(raised.id), false, "without the pin the open id is evicted");
+	assert.deepEqual(runEscalationBackstop({
+		home: home.path, open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledger: unpinned, relay: (relay) => sent.push(relay), now: () => NOW,
+	}), [raised.id], "and is relayed again");
+	assert.equal(sent.length, 1);
+});
+
 const gateVerdict: GateVerdict = {
 	schema_version: SCHEMA_VERSION, job_id: "cp-gjva", attempt: 1, verdict: "escalate", cause: "policy",
 	flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },

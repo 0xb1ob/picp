@@ -9,13 +9,15 @@
  * Notification only: no authorization, no parent wake, no write to the escalation store or
  * the ask journal. At most once per id, with two accepted edges: the ledger is claimed before
  * the push, so a session that dies in between loses that one relay; and two operator sessions
- * on one home can both relay (`atomicWriteJson` is not a cross-process lock).
+ * on one home can both relay (`atomicWriteJson` is not a cross-process lock). Open ids are
+ * pinned in the ledger; only settled history is capped.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Static, Type } from "typebox";
 import { bridgePaths, type BridgeRelay } from "./cp-bridge.ts";
 import { type Escalation, IsoTimestampSchema, isoTimestamp, layoutForHome, type Mode, SCHEMA_VERSION, validate } from "./contracts.ts";
+import { EscalationStore } from "./escalation.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { OperatorAsk } from "./operator-asks.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, projectTag, withProjectTag } from "./project-report.ts";
@@ -71,13 +73,17 @@ export class EscalationRelayLedger {
 		return new Set(this.#read().items.map((item) => item.id));
 	}
 
-	/** Record `id`; false when it is already recorded. Keeps the newest `ESCALATION_RELAY_LEDGER_KEEP`. */
-	note(id: string, via: "bridge" | "backstop", at: string = isoTimestamp()): boolean {
+	/**
+	 * Record `id`; false when it is already recorded. Ids in `open` are pinned, so a still-open
+	 * escalation is never forgotten and re-relayed; only the rest is capped to the newest
+	 * `ESCALATION_RELAY_LEDGER_KEEP`.
+	 */
+	note(id: string, via: "bridge" | "backstop", at: string = isoTimestamp(), open: ReadonlySet<string> = new Set()): boolean {
 		const ledger = this.#read();
 		if (ledger.items.some((item) => item.id === id)) return false;
-		const items = [...ledger.items, { id, relayed_at: at, via }]
-			.sort((a, b) => a.relayed_at.localeCompare(b.relayed_at))
-			.slice(-ESCALATION_RELAY_LEDGER_KEEP);
+		const all = [...ledger.items, { id, relayed_at: at, via }].sort((a, b) => a.relayed_at.localeCompare(b.relayed_at));
+		const kept = new Set(all.filter((item) => !open.has(item.id)).slice(-ESCALATION_RELAY_LEDGER_KEEP));
+		const items = all.filter((item) => open.has(item.id) || kept.has(item));
 		const next = { schema_version: SCHEMA_VERSION, items };
 		const checked = validate<Ledger>(LedgerSchema, next);
 		if (!checked.ok) throw new Error(`refusing to write an invalid escalation-relay ledger: ${checked.errors.join("; ")}`);
@@ -89,7 +95,8 @@ export class EscalationRelayLedger {
 /** Record a bridge escalation relay, so the backstop never repeats it. Throws on a ledger failure. */
 export function noteBridgeRelay(home: string, mode: Mode, relay: BridgeRelay): void {
 	if (relay.kind !== "escalation" || !relay.escalationId) return;
-	new EscalationRelayLedger(escalationRelayLedgerFile(home, mode)).note(relay.escalationId, "bridge");
+	const open = new Set(new EscalationStore({ home }).open().map((item) => item.id));
+	new EscalationRelayLedger(escalationRelayLedgerFile(home, mode)).note(relay.escalationId, "bridge", isoTimestamp(), open);
 }
 
 /** The dashboard's rule: open, old enough, no open ask represents it — and never relayed. */
@@ -143,10 +150,12 @@ export interface EscalationBackstopPorts {
 export function runEscalationBackstop(ports: EscalationBackstopPorts): string[] {
 	const now = ports.now?.() ?? new Date();
 	const relayed = ports.ledger.ids();
-	const due = dueEscalations({ open: ports.open(), asks: ports.asks(), relayed, now });
+	const open = ports.open();
+	const pinned = new Set(open.map((item) => item.id));
+	const due = dueEscalations({ open, asks: ports.asks(), relayed, now });
 	const sent: string[] = [];
 	for (const escalation of due) {
-		if (!ports.ledger.note(escalation.id, "backstop", isoTimestamp(now))) continue;
+		if (!ports.ledger.note(escalation.id, "backstop", isoTimestamp(now), pinned)) continue;
 		ports.relay(overdueRelay(ports.home, escalation, now));
 		sent.push(escalation.id);
 	}

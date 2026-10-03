@@ -1186,7 +1186,8 @@ The operator session relays, once per id, any escalation open at least
 open operator ask represents and that never reached the session as a relay —
 a gate-raised escalation has no `cp_escalate` relay path. Bridge escalation
 relays are recorded too, in the same ledger, `state/operator/escalation-relays.json`,
-so neither path repeats the other, across restarts. It runs at `session_start`
+so neither path repeats the other, across restarts. Ids still open are pinned;
+only settled history is capped at 512. It runs at `session_start`
 and on a 60 s tick; a send-reply mention of the id does not swallow it. It is
 not a parent wake and never authorization. An unreadable ledger or store sets
 the `escalation-backstop` status line and relays nothing. Two edges are
@@ -3808,7 +3809,9 @@ run by `revoke`, the expiring sweep and `issue`). An escalation belongs to the g
 question. `cp_mandate supersede_stale` runs the same pass on demand for records left open under grants revoked
 or expired before this rule shipped. A superseded record is not open, so it leaves `cp_awaiting list`.
 `/cp-decide <es-id>` journals the answer and, when `checkpoint_job_id` is set,
-resolves that checkpoint in the same method.
+resolves that checkpoint in the same method. The answer re-checks status inside the store's queue and decides a
+linked checkpoint in that same step; a superseded or withdrawn record, or a different answer to an answered one,
+is refused before any linked write.
 
 **Mission-end close.** An operator-quoted `cp_decide <es-id> close` on a `mission_end` record answers it first,
 then `MandateStore.revoke`s that record's `mandate_id` alone — no other grant changes. The answer lands before
@@ -4819,6 +4822,7 @@ writers, so there is still exactly one writer per decision and no new one:
 | declared row (`cp_status_block`, `/cp-decide`) | `AwaitingStore.answer` | `cp-answered` |
 | derived approval (held research, no PR) | `AwaitingStore.answerResolved` | `cp-answered` |
 | checkpoint authorization (`/cp-authorize`, `/cp-decline`, `/cp-decide approve`, the authorizer dialog) | `CheckpointStore.decide` | `cp-answered` |
+| escalation (`cp_decide <es-id>`, `/cp-awaiting`, mandate auto-close) | `EscalationStore.answer` | `cp-answered` (id `es-…`; a linked checkpoint or awaiting row reports instead) |
 
 **Queue first, deliver second** ([`src/answered.ts`](../src/answered.ts)). The
 answer is already on disk when the sink runs; the sink appends it to

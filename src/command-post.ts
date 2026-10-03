@@ -489,6 +489,7 @@ export class CommandPost {
 			home: options.home,
 			checkpoints: () => this.checkpoints,
 			awaiting: () => this.awaiting,
+			onAnswered: (decision) => this.#recordAnswered(decision),
 		});
 		// cur.4.4: `this.bounds` before `this.recovery` (reversed from cur.4.2) so a
 		// `redispatch`'s fresh worker can be wired into it directly \u2014 `onBreach`'s
