@@ -7433,9 +7433,12 @@ R1 also covers spend tokens (`estimate the tokens`, `context-tokens`, `noncached
 and `tokens` coordinated with `usd`/`cost`/`spend`/a bare `$`); R5 `migration`
 followed by `: none` or `: n/a`; R6 a history rewrite named only as one option of
 a remedy list right after `fix`/`remedy`/`recommend…` (`fix (delete/redact/rewrite
-history)`) in a text that declares a read-only audit, review, answer or report;
-a bare `read-only` elsewhere ("keep backups read-only; run squash/rewrite history")
-is not enough.
+history)`) in a purely advisory text that declares a read-only audit, review, answer
+or report and has no action cue (`then`, `first`, `next`, `apply`, `run`, `execute`,
+`perform`, `push`, `on main`); a bare `read-only` elsewhere ("keep backups read-only;
+run squash/rewrite history") or a later action ("Read-only audit first, then fix:
+squash/rewrite history on main") is not enough. A credential qualifier counts joined
+by a hyphen too (`github-tokens`).
 Approval-sense `authorization` ("applicable risk
 authorization") is still evidence: record `risk: low` on the job instead.
 Explicit values always win, and the run log records which it was:
