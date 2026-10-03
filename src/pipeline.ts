@@ -246,8 +246,8 @@ export const RISK_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.f
 	{ re: /\b(prod|production|live (system|site|traffic))\b/i, why: "the task names production" },
 ]);
 
-/** Shared inference/warning filter: omit negations and Constraints/Non-goals
- * sections, retaining affirmative matches in signal order then text order. */
+/** Shared inference/warning filter: omit negations and Constraints/Non-goals/Test plan/Evidence/Unknowns/Self-assessment/
+ * Acceptance sections (cp-wkv1), retaining affirmative matches in signal order then text order. */
 export function acceptedRiskMatches(text: string, alsoBenign?: (text: string, index: number, word: string) => boolean): Array<{ word: string; why: string }> {
 	let excludedLevel: number | undefined;
 	let fence: string | undefined;
@@ -265,7 +265,7 @@ export function acceptedRiskMatches(text: string, alsoBenign?: (text: string, in
 		if (heading?.[1] && heading[2]) {
 			const level = heading[1].length;
 			if (excludedLevel !== undefined && level <= excludedLevel) excludedLevel = undefined;
-			if (excludedLevel === undefined && /^(constraints|non-goals):?$/i.test(heading[2])) excludedLevel = level;
+			if (excludedLevel === undefined && /^(constraints|non-goals|test plan|evidence|unknowns(\s*\/\s*blockers)?|self-assessment|acceptance):?$/i.test(heading[2])) excludedLevel = level;
 		}
 		return excludedLevel === undefined ? line : "";
 	}).join("\n");

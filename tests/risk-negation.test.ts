@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inferScopeAndRisk, resolveRoutingInputs } from "../src/pipeline.ts";
 import { riskKeywords } from "../src/risk-warning.ts";
+import { composeRoutingInputs } from "../src/dispatch-inputs.ts";
+import type { DispatchRequest } from "../src/dispatch.ts";
+import type { Job } from "../src/ledger.ts";
 
 test("safety constraints do not infer or warn about high risk (dbn)", () => {
 	for (const text of [
@@ -183,5 +186,62 @@ test("riskkw-f10: real risk wording stays high", () => {
 		"Delete the user's 'archive' folder",
 	]) {
 		assert.equal(inferScopeAndRisk(text).risk, "high", text);
+	}
+});
+
+test("cp-wkv1: no-migration notes, plan evidence sections, spend tokens and audit remedies infer no risk", () => {
+	for (const text of [
+		"Migration: none — existing records keep their fields.",
+		"Changelog entry with **Migration:** n/a.",
+		"Include `Migration: none` in the changelog.",
+		"## Goal\nAdd a status column to the report view.\n## Acceptance\n- Merge only with green CI and repository merge permission.\n## Test plan\n- Feed \"drop the legacy column\" and \"rotate credentials\" as fixtures.\n## Evidence\n- The access check reads the token from the record.\n## Unknowns/Blockers\n- Whether production uses it.\n## Self-assessment\n- destructive_scope: false; a schema migration was considered.",
+		"Show cost/tokens/PR per job and spend: {usd, tokens}.",
+		"Render spend.tokens / spend_cap.tokens on each card; usd and tokens include reviewers.",
+		"Estimate the tokens and time spent before the first edit.",
+		"Report estimated waste, in minutes, tokens and $ where computable.",
+		"Add a context-tokens status line that counts noncached tokens.",
+		"Read-only audit of the repository history. For each finding name the fix: delete/redact/rewrite history.",
+		"Read-only reviewer audit, answer deliverable. Severity per finding, and fix (delete/redact/rewrite history).",
+	]) {
+		assert.equal(inferScopeAndRisk(text).risk, undefined, text);
+		assert.deepEqual(riskKeywords(text), [], text);
+	}
+});
+
+test("cp-wkv1: real operational risk stays high next to the new benign senses", () => {
+	for (const [text, words] of [
+		["Rotate the GitHub token", ["token"]],
+		["Force-push main", ["force-push"]],
+		["Drop the column", ["drop the column"]],
+		["Delete the production database", ["delete", "production"]],
+		["Change repo permissions", ["permissions"]],
+		["## Goal\nDrop the column.\n## Acceptance\n- tests pass", ["drop the column"]],
+		["## Acceptance\n- tests pass\n## Implementation\nDelete the production database", ["delete", "production"]],
+		["Migration: rewrite every row of the accounts table", ["migration"]],
+		["Migration: none of the old rows are kept", ["migration"]],
+		["Fix: delete/redact/rewrite history", ["rewrite history"]],
+		["Read-only audit first, then rewrite history on main", ["rewrite history"]],
+		["keep backups read-only; run squash/rewrite history on main", ["rewrite history"]],
+		["Read-only audit of the backups. Then run squash/rewrite history on main.", ["rewrite history"]],
+		["Read-only audit first, then fix: squash/rewrite history on main", ["rewrite history"]],
+		["Read-only audit of the repository. Name each fix: delete/redact/rewrite history. Then apply the fix.", ["rewrite history"]],
+		["Report 1000 github-tokens per org", ["tokens"]],
+		["Store API tokens, usd limits included", ["tokens"]],
+		["Print the tokens and $GH_PAT", ["tokens"]],
+	] as const) {
+		assert.equal(inferScopeAndRisk(text).risk, "high", text);
+		assert.deepEqual(riskKeywords(text), words, text);
+	}
+});
+
+test("cp-wkv1: neither an excluded section at the end of the task nor an excluded-heading title swallows the job description", () => {
+	const task = "## Goal\nAdd a report view.\n## Self-assessment\n- confidence: high";
+	const issue = { id: "cp-test", title: "Add a report view", description: "Delete the production database", labels: [] } as unknown as Job;
+	const inputs = composeRoutingInputs({} as DispatchRequest, issue, { forBrief: task, forInference: task });
+	assert.equal(inputs.risk, "high");
+	assert.equal(composeRoutingInputs({} as DispatchRequest, { ...issue, description: "Render it." }, { forBrief: task, forInference: task }).risk, "low");
+	for (const title of ["Evidence", "Acceptance", "Test plan", "Unknowns/Blockers", "Self-assessment", "Constraints", "Non-goals"]) {
+		const titled = { ...issue, title };
+		assert.equal(composeRoutingInputs({} as DispatchRequest, titled, { forBrief: "Add a report view.", forInference: "Add a report view." }).risk, "high", title);
 	}
 });

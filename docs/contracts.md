@@ -7410,12 +7410,15 @@ match elsewhere still are. Coordinated credential nouns share the negation
 or "or rotate credentials"). `or` starts a fresh clause by default, except
 for coordinated credential nouns and schema/data/database migration modifiers;
 unrecognized noun coordination may conservatively warn.
-Markdown sections headed `Constraints` or `Non-goals` are excluded, including
-subsections, until the next same-level or higher heading (bead dbn).
+Markdown sections headed `Constraints`, `Non-goals`, `Test plan`, `Evidence`, `Unknowns`
+(`Unknowns/Blockers`), `Self-assessment` or `Acceptance` are excluded, including
+subsections, until the next same-level or higher heading (bead dbn, cp-wkv1); the
+dispatch joins the job title as a `# Job: <title>` heading, so neither a task's last
+section nor a title such as "Evidence" swallows the job description.
 Access wording means access work (`auth`,
 `authentication`, `authorization`, `credentials`, …), never `authority` or
 `author`. Explicit/assessed highs and the H6 recorded-low rule are unchanged.
-Four senses are not risk evidence (`benignSenseAt`, `src/risk-negation.ts`,
+These senses are not risk evidence (`benignSenseAt`, `src/risk-negation.ts`,
 riskkw-f10): R1 `token(s)` as LLM usage or design tokens (a context/cached/output/
 colour qualifier, a magnitude such as `53.6M`, or a following `cap`/`budget`/
 `window`/`usage`/… or "in context"), unless a credential qualifier (`api`,
@@ -7425,7 +7428,18 @@ segments); R3 `delete`/`backfill` naming a step (`backfill failure`, `delete
 advice`); R4 a negation — `stop advising/recommending/suggesting/telling` joins
 the negation cues for every signal, and `delete`/`backfill` inside a quoted span
 after a mention verb (`calls it 'safe to delete'`) is reported speech. R2, R3 and
-the quoted-span rule stay limited to those two words. Approval-sense `authorization` ("applicable risk
+the quoted-span rule stay limited to those two words. cp-wkv1 adds three more:
+R1 also covers spend tokens (`estimate the tokens`, `context-tokens`, `noncached`,
+and `tokens` coordinated with `usd`/`cost`/`spend`/a bare `$`); R5 `migration`
+followed by `: none` or `: n/a`; R6 a history rewrite named only as one option of
+a remedy list right after `fix`/`remedy`/`recommend…` (`fix (delete/redact/rewrite
+history)`) in a purely advisory text that declares a read-only audit, review, answer
+or report and has no action cue (`then`, `first`, `next`, `apply`, `run`, `execute`,
+`perform`, `push`, `on main`); a bare `read-only` elsewhere ("keep backups read-only;
+run squash/rewrite history") or a later action ("Read-only audit first, then fix:
+squash/rewrite history on main") is not enough. A credential qualifier counts joined
+by a hyphen too (`github-tokens`).
+Approval-sense `authorization` ("applicable risk
 authorization") is still evidence: record `risk: low` on the job instead.
 Explicit values always win, and the run log records which it was:
 `cp:routing_resolved` carries `model`, `source`, `rule`, `thinking`, the inputs
