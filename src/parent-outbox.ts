@@ -67,6 +67,8 @@ export const ParentSendEntrySchema = Type.Object(
 		queued_at: IsoTimestampSchema,
 		state: StringEnum([...PARENT_SEND_STATES]),
 		attempts: Type.Integer({ minimum: 0 }),
+		/** Transient-retry reservations this send id has spent (absent on older records: 0). Not an RPC injection count. */
+		outer_retry_attempts: Type.Optional(Type.Integer({ minimum: 0 })),
 		last_injected_at: Type.Optional(IsoTimestampSchema),
 		owner: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
 		landed_at: Type.Optional(IsoTimestampSchema),
@@ -465,6 +467,22 @@ export class ParentSendOutbox {
 				}
 			}).length > 0
 		);
+	}
+
+	/**
+	 * Spend one transient-retry reservation of a `landed` send below `limit`, on
+	 * disk before any timer or nudge. Returns the new 1-based ordinal; undefined
+	 * (nothing written) for an unknown, non-landed or exhausted send.
+	 */
+	reserveOuterRetry(id: string, limit: number): number | undefined {
+		if (!Number.isInteger(limit) || limit < 1) throw new ParentSendOutboxError(`outer retry limit must be a positive integer; got ${limit}`);
+		const entry = this.get(id);
+		if (entry?.state !== "landed" || (entry.outer_retry_attempts ?? 0) >= limit) return undefined;
+		const ordinal = (entry.outer_retry_attempts ?? 0) + 1;
+		const moved = this.#update([id], ["landed"], (item) => {
+			item.outer_retry_attempts = ordinal;
+		});
+		return moved.length > 0 ? ordinal : undefined;
 	}
 
 	markUndeliverable(ids: readonly string[], reason: string): ParentSendEntry[] {

@@ -20,7 +20,12 @@ import {
 import { isTransientProviderError, MAX_OUTER_RETRIES, OUTER_RETRY_DELAYS_MS, RESUME_NUDGE } from "./provider-retry.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 
-type OuterRetryEvent = "outer_retry_attempt" | "outer_retry_succeeded" | "outer_retry_exhausted" | "relay_failed";
+type OuterRetryEvent =
+	| "outer_retry_attempt"
+	| "outer_retry_succeeded"
+	| "outer_retry_exhausted"
+	| "outer_retry_reservation_failed"
+	| "relay_failed";
 
 /** An operator send must not queue behind fleet follow-ups: it lands at the next tool-batch boundary. */
 const PARENT_STREAMING = "steer" as const;
@@ -62,11 +67,10 @@ export class ParentDelivery {
 	/** Sync `send()` calls still holding their tool result, by send id. */
 	readonly #waiters = new Map<string, (outcome: SendOutcome | undefined) => void>();
 	/**
-	 * Outer-ladder attempts per send id (H1, Pier 2.6), in memory.
-	 * ponytail: a death or restart mid-ladder drops the count; the entry stays
-	 * `landed`, so the relaunch's resume nudge takes over. Persist it if that matters.
+	 * Pending outer-ladder timers by send id (identity only). The retry budget is
+	 * `outer_retry_attempts` on the send's record, so a death or restart keeps it.
 	 */
-	readonly #retries = new Map<string, number>();
+	readonly #pending = new Map<string, object>();
 	/** The post-ready transcript read failed; retried on the next settle. */
 	#reconcilePending = false;
 	/**
@@ -159,8 +163,13 @@ export class ParentDelivery {
 	}
 
 	#finish(id: string, outcome: SendOutcome): void {
-		const attempts = this.#retries.get(id) ?? 0;
-		this.#retries.delete(id);
+		let attempts = 0;
+		try {
+			attempts = this.outbox.get(id)?.outer_retry_attempts ?? 0;
+		} catch {
+			// Unreadable outbox: attribution only; the settle below reports it.
+		}
+		this.#pending.delete(id);
 		if (attempts > 0 && !outcome.failed) this.#host.journal("outer_retry_succeeded", { send_id: id, afterAttempts: attempts });
 		if (attempts >= MAX_OUTER_RETRIES && outcome.failed) {
 			this.#host.journal("outer_retry_exhausted", { send_id: id, attempts, message: outcome.error });
@@ -179,23 +188,37 @@ export class ParentDelivery {
 	}
 
 	/** A transient provider failure with ladder left: resume later, under the same id. */
+	/** A transient provider failure with budget left: resume later, under the same id. */
 	#scheduleResume(id: string, error: string): boolean {
-		const attempt = (this.#retries.get(id) ?? 0) + 1;
-		if (!isTransientProviderError(error) || attempt > MAX_OUTER_RETRIES) return false;
-		this.#retries.set(id, attempt);
+		if (!isTransientProviderError(error)) return false;
+		if (this.#pending.has(id)) return true; // one timer per send
+		let attempt: number | undefined;
+		try {
+			// On disk before the sleep or the nudge: a death mid-ladder still spends it.
+			attempt = this.outbox.reserveOuterRetry(id, MAX_OUTER_RETRIES);
+		} catch (reservationError) {
+			const message = (reservationError as Error).message ?? String(reservationError);
+			this.#host.journal("outer_retry_reservation_failed", { send_id: id, message });
+			this.#finish(id, { failed: true, reply: "", error: `outer retry reservation failed: ${message}` });
+			return true;
+		}
+		if (attempt === undefined) return false;
+		const timer = {};
+		this.#pending.set(id, timer);
 		const delayMs = OUTER_RETRY_DELAYS_MS[attempt - 1] as number;
 		this.#host.journal("outer_retry_attempt", { send_id: id, attempt, delayMs, message: error });
-		void this.#host.sleep(delayMs).then(() => this.#resume(id, attempt, error));
+		void this.#host.sleep(delayMs).then(() => this.#resume(id, timer, error));
 		return true;
 	}
 
 	/** The resume nudge carries the same id's marker, so its reply settles this send. */
-	async #resume(id: string, attempt: number, error: string): Promise<void> {
-		if (this.#retries.get(id) !== attempt) return; // superseded, or dropped by a death/stop
+	async #resume(id: string, timer: object, error: string): Promise<void> {
+		if (this.#pending.get(id) !== timer) return; // superseded, or dropped by a death/stop
+		this.#pending.delete(id);
 		const proc = this.#host.liveProc();
 		if (!proc) return; // still `landed`: the relaunch's resume nudge answers it
 		const sent = await proc.send(frameBatch([{ id, text: RESUME_NUDGE }]), "prompt", PARENT_STREAMING);
-		if (sent.receipt === "failed") this.#finish(id, { failed: true, reply: "", error: sent.error ?? error });
+		if (sent.receipt === "failed" && this.#host.liveProc() === proc) this.#finish(id, { failed: true, reply: "", error: sent.error ?? error });
 	}
 
 	/** "When the parent's turn ends": queued sends go in now, as one message. */
@@ -258,7 +281,7 @@ export class ParentDelivery {
 	failWaiters(): void {
 		for (const waiter of this.#waiters.values()) waiter(undefined);
 		this.#waiters.clear();
-		this.#retries.clear();
+		this.#pending.clear(); // timers only: the retry budget stays on disk
 		this.#live.clear();
 		this.#relayFailedJournaled.clear();
 	}

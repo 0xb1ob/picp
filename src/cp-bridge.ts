@@ -398,7 +398,7 @@ export class CpBridge {
 	 * write must not take the ladder down with it.
 	 */
 	#journalOuterRetry(
-		event: "outer_retry_attempt" | "outer_retry_succeeded" | "outer_retry_exhausted" | "relay_failed",
+		event: "outer_retry_attempt" | "outer_retry_succeeded" | "outer_retry_exhausted" | "outer_retry_reservation_failed" | "relay_failed",
 		payload: Record<string, unknown>,
 	): void {
 		const home = this.#home;

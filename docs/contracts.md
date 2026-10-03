@@ -1126,6 +1126,21 @@ operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
 corrupt outbox refuses `cp_parent start`, naming the file.
 
+**Transient retry budget.** The H1 outer ladder (`OUTER_RETRY_DELAYS_MS`,
+`MAX_OUTER_RETRIES`) spends its budget on the send's own record:
+`outer_retry_attempts` (optional integer ≥ 0; omitted until the first
+reservation and read as 0, never migrated or inferred from `bridge-retry.jsonl`). It counts transient-retry
+reservations, not RPC injections (`attempts`). `ParentSendOutbox.reserveOuterRetry`
+reserves the next ordinal on disk, `landed` sends only, before the sleep or the
+nudge; a death mid-sleep therefore leaves it spent, and the next transient
+failure takes the next ordinal and delay. The in-memory map keeps only pending
+timer identities. A reservation that cannot be read or written journals
+`outer_retry_reservation_failed`, retries nothing and fails the send once through
+the usual waiter/relay path. The normal restart resume nudge is separate: not
+counted, and no backoff deadline is persisted. Downgrade: an older binary's
+schema rejects a sends file carrying the new field — roll back only with the
+parent stopped and a backup, never by erasing counters on a running home.
+
 **Segments** (`src/bridge-segments.ts`). A run that keeps taking follow-ups
 settles late, so a clean `turn_end` — no tool results, `stopReason` not
 `error`/`aborted`/`length` — ends a segment. There each landed, unsettled send

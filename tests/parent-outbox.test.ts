@@ -237,3 +237,55 @@ test("frameBatch round-trips through sendIdsInText; relays carry send_id in deta
 	assert.equal(sendIdOfMessage({ customType: "cp-ci", details: { send_id: a.id } }), undefined);
 	assert.equal(sendIdOfMessage({ customType: "cp-bridge", details: {} }), undefined);
 });
+
+test("reserveOuterRetry: landed-only, capped, independent of injections, survives reload and settle", () => {
+	const box = outbox();
+	const a = box.enqueue("a");
+	const b = box.enqueue("b");
+	assert.equal("outer_retry_attempts" in a, false, "omitted until the first reservation, so an older reader still accepts the file");
+	assert.equal("outer_retry_attempts" in JSON.parse(readFileSync(box.file, "utf8")).entries[0], false);
+	assert.equal(box.reserveOuterRetry(a.id, 3), undefined, "queued: nothing to retry");
+	box.markInjected([a.id, b.id]);
+	box.markLanded([a.id, b.id]);
+	const before = readFileSync(box.file, "utf8");
+	assert.equal(box.reserveOuterRetry("ps-20000101000000-00000000", 3), undefined);
+	assert.equal(readFileSync(box.file, "utf8"), before, "a no-op never writes");
+	assert.deepEqual([1, 2, 3].map(() => box.reserveOuterRetry(a.id, 3)), [1, 2, 3]);
+	assert.equal(box.reserveOuterRetry(a.id, 3), undefined, "cap reached");
+	assert.equal(box.reserveOuterRetry(b.id, 3), 1, "counters are per send id");
+	const reloaded = new ParentSendOutbox({ file: box.file });
+	assert.equal(reloaded.get(a.id)?.outer_retry_attempts, 3);
+	assert.equal(reloaded.get(a.id)?.attempts, 1, "injection attempts are a separate count");
+	assert.equal(reloaded.reserveOuterRetry(b.id, 3), 2, "reload continues at the next ordinal");
+	reloaded.settle(a.id, { error: "boom" });
+	assert.equal(reloaded.get(a.id)?.outer_retry_attempts, 3, "the terminal record keeps the count");
+	assert.equal(reloaded.reserveOuterRetry(a.id, 9), undefined, "terminal: nothing to retry");
+	for (const limit of [0, -1, 1.5, Number.NaN]) assert.throws(() => reloaded.reserveOuterRetry(b.id, limit), ParentSendOutboxError);
+});
+
+test("a record without outer_retry_attempts reads as zero; a negative or fractional one is refused", () => {
+	const box = outbox();
+	const entry = box.enqueue("legacy");
+	box.markInjected([entry.id]);
+	box.markLanded([entry.id]);
+	const file = JSON.parse(readFileSync(box.file, "utf8")) as { entries: Array<Record<string, unknown>> };
+	delete file.entries[0]?.outer_retry_attempts;
+	writeFileSync(box.file, JSON.stringify(file), "utf8");
+	assert.equal(box.get(entry.id)?.outer_retry_attempts, undefined);
+	assert.equal(box.reserveOuterRetry(entry.id, 5), 1);
+	for (const bad of [-1, 0.5]) {
+		file.entries[0]!.outer_retry_attempts = bad;
+		writeFileSync(box.file, JSON.stringify(file), "utf8");
+		assert.throws(() => box.reserveOuterRetry(entry.id, 5), ParentSendOutboxError);
+	}
+});
+
+test("reserveOuterRetry returns no ordinal when nothing was persisted", () => {
+	const box = outbox();
+	const entry = box.enqueue("raced");
+	const before = readFileSync(box.file, "utf8");
+	// The record read as landed, but by the write it no longer is: the update moves nothing.
+	box.get = () => ({ ...entry, state: "landed" });
+	assert.equal(box.reserveOuterRetry(entry.id, 5), undefined);
+	assert.equal(readFileSync(box.file, "utf8"), before);
+});
