@@ -35,17 +35,16 @@ if [ ! -e "$APP/.git" ]; then
 else
 	[ -z "$(git -C "$APP" status --porcelain)" ] || die "$APP has uncommitted changes; commit or stash them, then rerun"
 	[ "$(git -C "$APP" rev-parse --abbrev-ref HEAD)" = main ] || die "$APP is not on main; check out main, then rerun"
-	if [ "$DRY" = 1 ]; then # git fetch writes refs and objects: a dry run never fetches
-		say changed "would fetch origin main and fast-forward $APP when behind and not ahead (dry-run: nothing fetched)"
+	# git fetch writes refs and objects: a dry run never fetches and compares with the local origin/main
+	[ "$DRY" = 1 ] || git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
+	[ "$(git -C "$APP" rev-list --count origin/main..HEAD)" = 0 ] || die "$APP has commits not on origin/main; push or drop them, then rerun"
+	if [ "$DRY" = 1 ]; then
+		say changed "would fetch origin main and fast-forward $APP when behind (dry-run: nothing fetched; not ahead of the local origin/main)"
+	elif [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
+		say ok "$APP is at origin/main"
 	else
-		git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
-		[ "$(git -C "$APP" rev-list --count origin/main..HEAD)" = 0 ] || die "$APP has commits not on origin/main; push or drop them, then rerun"
-		if [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
-			say ok "$APP is at origin/main"
-		else
-			git -C "$APP" merge --quiet --ff-only origin/main
-			say changed "fast-forwarded $APP to origin/main"
-		fi
+		git -C "$APP" merge --quiet --ff-only origin/main
+		say changed "fast-forwarded $APP to origin/main"
 	fi
 fi
 if [ -f "$APP/node_modules/.package-lock.json" ]; then

@@ -961,10 +961,25 @@ test("bin/cp-bootstrap honours --app DIR and --app=DIR over CP_APP, and a dry ru
 	for (const flag of [["--app", app], [`--app=${app}`]]) {
 		const dry = spawnSync("sh", [BOOTSTRAP, "--dry-run", ...flag], { env, encoding: "utf8" });
 		assert.equal(dry.status, 0, dry.stdout + dry.stderr);
-		assert.ok(dry.stdout.includes(`changed: bootstrap: would fetch origin main and fast-forward ${app} when behind and not ahead (dry-run: nothing fetched)`), dry.stdout);
+		assert.ok(dry.stdout.includes(`changed: bootstrap: would fetch origin main and fast-forward ${app} when behind (dry-run: nothing fetched; not ahead of the local origin/main)`), dry.stdout);
 		assert.ok(dry.stdout.includes(`cp-install --app ${app} --dry-run ${flag.join(" ")}`), dry.stdout);
 	}
 	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8"), /\bfetch\b|\bmerge\b/);
+
+	// A checkout ahead of its local origin/main is refused in a dry run as in a real one, still without a fetch.
+	const genv = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, GIT_CONFIG_NOSYSTEM: "1" };
+	const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env: genv, encoding: "utf8" });
+	const seed = join(dir, "seed");
+	mkdirSync(seed);
+	git(dir, "init", "-q", "-b", "main", seed);
+	git(seed, "commit", "-q", "--allow-empty", "-m", "seed");
+	const ahead = join(dir, "ahead");
+	git(dir, "clone", "-q", "--branch", "main", seed, ahead);
+	git(ahead, "commit", "-q", "--allow-empty", "-m", "local");
+	const refused = spawnSync("sh", [BOOTSTRAP, "--dry-run", "--app", ahead], { env: genv, encoding: "utf8" });
+	assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+	assert.ok(refused.stdout.includes(`fail: bootstrap: ${ahead} has commits not on origin/main; push or drop them, then rerun`), refused.stdout);
+	assert.equal(existsSync(join(ahead, ".git/FETCH_HEAD")), false, "a dry run never fetches");
 });
 
 test("bin/cp-bootstrap: a second run on an up-to-date checkout is all ok and never reruns npm ci", (t) => {

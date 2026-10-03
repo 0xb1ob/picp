@@ -108,9 +108,9 @@ still asks; with no terminal, `--yes`, `--no-prompt` or `--dry-run` every prompt
 takes its default. `--dry-run` probes and prints and changes nothing (the code
 step too: it never runs `git fetch`, so an existing checkout prints "would fetch"; it never runs `gh` or `pi`,
 which write their own state under `HOME`, so gh login and the model list are reported unchecked; a required
-tool a real run would install is printed and the plan goes on). A failed step stops the install before
-anything later is written or started: a failed prerequisite (step 3) or a refused gateway (7b) leaves no
-`data/daemon.json`, unit or wrapper behind and starts nothing. A second run reports every step `ok`/`skip`. Never `sudo`: a step that
+tool a real run would install is printed and the plan goes on). cp-daemon is started (step 9) only when no
+earlier step failed, and a failed step-3 prerequisite or a refused gateway (7b) stops the install before
+step 4, leaving no `data/daemon.json`, unit or wrapper behind. A second run reports every step `ok`/`skip`. Never `sudo`: a step that
 needs it prints the line for you.
 
 ### 3b. The viewer host
