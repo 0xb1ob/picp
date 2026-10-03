@@ -252,6 +252,12 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					mandates: cmdPost.mandates,
 					escalations: cmdPost.escalations,
 					pipelines: cmdPost.pipelines,
+					capacity: () => {
+						// Raw count, reviewers included: the manager's non-reviewer cap check counts every live process too.
+						const active = cmdPost.manager.active;
+						const held = new Set(cmdPost.fleet.read().jobs.filter((job) => job.phase === "held").map((job) => job.job_id));
+						return { active: active.length, cap: cmdPost.manager.spawnCap, held: [...new Set(active.map((w) => w.jobId))].filter((id) => held.has(id)) };
+					},
 				},
 				params.project,
 			);

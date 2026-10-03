@@ -44,6 +44,8 @@ export interface NextPorts {
 	/** When present, a ready job with a pipeline record recommends `cp_pipeline advance`, not `cp_dispatch`. */
 	pipelines?: PipelineStore;
 	now?: () => Date;
+	/** Live worker processes against the manager's `spawn_cap`; `held` are job ids whose fleet phase is `held`. */
+	capacity?: () => { active: number; cap: number; held: string[] };
 }
 
 export type NextActionKind = "dispatch" | "pipeline" | "wait" | "no_mandate" | "paused" | "mission_end" | "draining";
@@ -136,6 +138,17 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	// Uncovered dependencies still need a visible explanation, but never an automatic question.
 	const uncovered = blocked.filter(({ job }) => !candidates.some((mandate) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) })));
+	// The manager refuses a non-reviewer spawn at its cap (held authors keep their process), so no grant's `dispatch` is
+	// recommended at the cap. `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (gate/quality, inside
+	// the manager's +3 review reserve) or nothing, and its implementer dispatch meets the same refusal with rollback.
+	const capacity = results.some((result) => result.action.kind === "dispatch") ? ports.capacity?.() : undefined;
+	if (capacity && capacity.active >= capacity.cap) {
+		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
+		for (const result of results) {
+			if (result.action.kind !== "dispatch") continue;
+			result.action = { kind: "wait", reason: `spawn cap ${capacity.cap} reached: ${capacity.active} live worker processes${held} — ${result.action.job_id} dispatches when one tears down` };
+		}
+	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
 	primary.ready_beads = visibleBeads;

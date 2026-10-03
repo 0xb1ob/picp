@@ -14,6 +14,10 @@ are recorded here with the migration; the binding detail lives in
 
 Every parent injection from `src/parent-delivery.ts` (the operator send, the resume nudge and the post-relaunch resume) is now an RPC `prompt` with `streamingBehavior: "steer"` instead of `"followUp"`. A busy parent takes an operator send after its current tool batch instead of after every fleet wake-up already queued; wake-ups stay triggering follow-ups. Trade-off: an operator send can land between the tool batches of a wake-up the parent is working on — that wake-up stays in context, durable wake-ups are re-sent until arrival is confirmed, and an envelope wake-up (one-shot) is finished after the answer. Migration: none.
 
+### cp_next waits at the spawn cap (cp-j13p)
+
+`cp_next` no longer recommends a `dispatch` the worker manager would refuse: when live worker processes (held authors and reviewers included, as the manager counts them) reach `spawn_cap`, every grant's `dispatch` (primary and `others`) becomes `wait`, naming the cap, the live count and up to three held job ids. A `pipeline` recommendation stands, since `cp_pipeline advance` spawns a gate-reviewer inside the manager's review reserve. Nothing is queued; held workers keep their process. `NextPorts` gains an optional `capacity` port. Migration: none.
+
 ### Fresh homes dispatch three jobs at once (cp-z03i)
 
 Values only. `SCAFFOLD_MANDATE_DEFAULTS.dispatch_parallelism` is now 3 (was 1), and its note reads "jobs under the grant that may run at once; set 1 for serial". This is what a fresh home's `data/mandate-defaults.json` gets and what a home without that file resolves to. Migration: none; the file is copied once, so an existing home keeps its configured value (set it with `cp_mandate defaults_set dispatch_parallelism <n>`). A grant issued without `dispatch_parallelism` stays serial.
