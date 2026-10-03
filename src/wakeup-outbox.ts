@@ -36,6 +36,9 @@ export function boundedWakeupId(raw: string): string {
 	return `${raw.slice(0, 139)}:${digest}`;
 }
 
+/** issue #2: the durable id prefix of a killed_unreported notice; cp-bridge relays it straight to the operator. */
+export const KILLED_UNREPORTED_WAKEUP_PREFIX = "killed-unreported:";
+
 export interface DurableWakeupInput {
 	id: string;
 	kind: DurableWakeupKind;

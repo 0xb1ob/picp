@@ -1129,6 +1129,11 @@ runs show on the Schedules page (cp-hhuf P1). Escalations and errors for the
 same job still relay, and so does a turn that also touched an unscheduled job;
 an unreadable ledger drops nothing. The filter is `deliverableRelay`
 (`src/relay-scope.ts`), the one choke point for live and backlog relays.
+A wake relay for a run that received an accepted `cp-envelope` appends
+`envelope <job> (<status>), verbatim: <summary>` from the envelope's structured
+details (`withEnvelopeSummaries`, issue #2), so the parent's paraphrase sits
+next to what the worker filed. A `killed-unreported:` durable wake-up is relayed
+directly, like `drain:`.
 
 On observed parent death the bridge relaunches the same `--session` once per
 death so `session_start` runs fleet reconcile, and announces once, naming how
@@ -2359,6 +2364,30 @@ lease until the reported HEAD matches or `cp_merged` records a receipt for
 that exact head. The check runs after git/review gates and before shutdown;
 script jobs are unchanged. `force` explicitly bypasses it and records
 `closed_reason: "forced"`, with no verified pass reason.
+
+**A live worker with no report is not finished work (issue #2).** Before any
+other gate, `unreported_live_worker` refuses a non-script job in phase
+`waiting`/`launching` with no `reported_at` whose worker is live — owned by the
+manager and `alive`, or unowned with no `exited_at`, no observed close and a
+live pid (the reconcile rule). The message says "mid-turn" when the worker is
+busy or its status phase is `working`. `failed` jobs are excluded: their
+failure was already announced and `unreported_head` covers failed ship jobs.
+The pipeline's hung-planner hand-off is the one exemption: it passes
+`acceptUnreported` with a reason, recorded on `shutdown_requested`, because it
+runs only after a gate pass and an authorized plan. The model-facing
+`cp_teardown` passes `requireAuthorization` with `force`: forcing past this
+gate needs `operator_quote`, verified verbatim against the session's user
+messages by `requireOperatorQuote` before anything runs. A force that ends such
+a worker is `killed_unreported` — on `TeardownResult`, on the
+`shutdown_requested` payload (with `authorized_by` and `operator_quote`), while
+`closed_reason` stays `"forced"` — and journals one durable `recovery` wake-up
+with id prefix `killed-unreported:` and no `keys` (a done job never stales it),
+which the cp-bridge relays straight to the operator. Any teardown of a job with
+no `reported_at` returns `unreported: true`, and `formatTeardown` says no report
+was filed, so a pass reason such as `clean_research` never reads as a result.
+`cp_job dep_remove` refuses to drop an open blocker whose worker never
+reported; going on without it is `cp_job drop` and the operator's
+dropped-dependency answer.
 
 **The merged-head trap** (ported from
 `reports/operating-knowledge.md`): when a PR is squash-merged and GitHub

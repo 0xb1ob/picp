@@ -680,12 +680,12 @@ export function formatSettleOutcome(jobId: string, outcome: SettleOutcome): stri
 			return (
 				`${jobId}: settled ${outcome.settles}x without filing an envelope and the work is STILL on disk (${describeUnreportedWork(outcome.work)}).\n` +
 				`Automatic recovery is spent (${MAX_RECOVERY_PROMPTS} prompt(s)); nothing was deleted and the worktree is intact.\n` +
-				`Decide: promote it (cp_send ${jobId}) with what to do, or tear it down — never re-dispatch the brief blind.`
+				`Decide: promote it (cp_send ${jobId}) with what to do — never re-dispatch the brief blind; its live worker tears down only on an operator quote (unreported_live_worker).`
 			);
 		}
 		return (
 			`${jobId}: settled ${outcome.settles} time(s) without filing an envelope. The work may be complete — ` +
-			`check the branch and any PR, then promote it (cp_send ${jobId}) or tear it down. It is not a failure and it is not reported.` +
+			`check the branch and any PR, then promote it (cp_send ${jobId}) to get its report; its live worker tears down only on an operator quote. It is not a failure and it is not reported.` +
 			// The cause, when there is one: an envelope that exists but cannot be
 			// stamped is a different problem from a worker that filed nothing, and the
 			// two used to read identically (pi-command-post-3ip).

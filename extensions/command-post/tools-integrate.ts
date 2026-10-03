@@ -9,6 +9,7 @@ import { formatMerge } from "../../src/merges.ts";
 import { formatIntegration } from "../../src/integrate.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { type MergeStrategy } from "../../src/contracts.ts";
+import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { formatTeardown } from "../../src/teardown.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { writeBackLine } from "../../src/trackers/link.ts";
@@ -29,19 +30,27 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			"Use cp_teardown once a job's envelope is in and its delivery has landed; never delete a worktree by hand.",
 			"cp_teardown refusing is the correct outcome for a dirty or unpushed tree: fix the cause, then retry.",
 			"Research and Q&A jobs close in the ledger here; do not follow with cp_job close. Dropped work is still cp_job drop.",
+			"cp_teardown refusing unreported_live_worker means the worker is alive and has not reported: wait for its envelope or cp_send it to report, and relay \"no report\" for it. Force past it only with operator_quote taken verbatim from an operator message; it ends as killed_unreported.",
 		],
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The job to tear down" }),
 			force: Type.Optional(
 				Type.Boolean({
-					description: "Operator authorization to skip the gates (e.g. the worktree is gone). Recorded in the run log.",
+					description: "Operator authorization to skip the gates (e.g. the worktree is gone). Recorded in the run log. Forcing past unreported_live_worker (a live worker that never reported) also needs operator_quote and ends as killed_unreported.",
 				}),
 			),
+			operator_quote: Type.Optional(Type.String({ description: "With force: one complete sentence, verbatim from an operator message in this session, authorizing this forced teardown; recorded with it." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
+			if (params.operator_quote !== undefined && !params.force) throw new Error("cp_teardown: operator_quote authorizes force; pass force: true with it, or neither");
+			// issue #2: verified before anything runs; Teardown decides whether force needs it (unreported_live_worker).
+			const verified = params.force && params.operator_quote !== undefined
+				? requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) })
+				: undefined;
 			const result = await commandPost(ctx.modelRegistry).tearDown(params.job_id, {
-				...(params.force ? { force: true } : {}),
+				...(params.force ? { force: true, requireAuthorization: true } : {}),
+				...(verified ? { authorization: { by: verified.decidedBy, quote: verified.stored.operator_quote } } : {}),
 			});
 			refreshWidget(ctx);
 			return {

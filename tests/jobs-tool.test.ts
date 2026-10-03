@@ -22,7 +22,7 @@ import type { Runtime } from "../src/contracts.ts";
 
 const MULTI_RUNTIME: Runtime = { mode: "multi", home: "/h", source: "checkout", reason: "test" };
 
-function ports(t: { after(fn: () => void): void }, live: Set<string> = new Set()) {
+function ports(t: { after(fn: () => void): void }, live: Set<string> = new Set(), reports: Map<string, "reported" | "unreported" | "none"> = new Map()) {
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());
 	return {
@@ -31,6 +31,7 @@ function ports(t: { after(fn: () => void): void }, live: Set<string> = new Set()
 			ledger: scratch.ledger,
 			escalations: () => new EscalationStore({ home: scratch.path }),
 			hasLiveWorker: (id: string) => live.has(id),
+			reportState: (id: string) => reports.get(id) ?? "none",
 			resolveProject: (given: string | undefined) => {
 				if (!given) throw new Error("cp_job create needs `project`");
 				return given;
@@ -231,6 +232,33 @@ test("dependencies through the runner: dep_add gates ready, blocked lists blocke
 	assert.deepEqual((await runJobAction({ action: "blocked" }, p)).details.jobs, []);
 	const updated = await runJobAction({ action: "update", job_id: b.id, status: "deferred", add_labels: ["phase:7"] }, p);
 	assert.equal((updated.details.job as { status: string }).status, "deferred");
+});
+
+test("issue #2: dep_remove refuses a blocker whose worker never reported, warns on an open one", async (t) => {
+	const reports = new Map<string, "reported" | "unreported" | "none">();
+	const { ports: p } = ports(t, new Set(), reports);
+	const create = async (title: string) => ((await runJobAction({ action: "create", title, project: "demo", delivery: "pr" }, p)).details.job as { id: string }).id;
+	const a = await create("a");
+	const b = await create("b");
+	await runJobAction({ action: "dep_add", job_id: b, blocker_id: a }, p);
+
+	reports.set(a, "unreported");
+	await assert.rejects(runJobAction({ action: "dep_remove", job_id: b, blocker_id: a }, p), /dep_remove refused: .* filed no report/);
+	assert.deepEqual((await runJobAction({ action: "blocked" }, p)).details.jobs, [{ id: b, blockers: [a] }]);
+
+	reports.set(a, "none");
+	const freed = await runJobAction({ action: "dep_remove", job_id: b, blocker_id: a }, p);
+	assert.match(freed.text, /warning: .* still open and was never dispatched/);
+	assert.ok((freed.details as { warning?: string }).warning);
+
+	const c = await create("c");
+	const d = await create("d");
+	await runJobAction({ action: "dep_add", job_id: d, blocker_id: c }, p);
+	await runJobAction({ action: "close", job_id: c, reason: "done" }, p);
+	reports.set(c, "unreported");
+	const closed = await runJobAction({ action: "dep_remove", job_id: d, blocker_id: c }, p);
+	assert.equal((closed.details as { warning?: string }).warning, undefined);
+	assert.doesNotMatch(closed.text, /warning/);
 });
 
 test("parseJobsArgs: ready by default, list flags, show needs an id, import-beads", () => {
