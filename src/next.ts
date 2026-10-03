@@ -138,13 +138,18 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	// Uncovered dependencies still need a visible explanation, but never an automatic question.
 	const uncovered = blocked.filter(({ job }) => !candidates.some((mandate) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) })));
-	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
-	// The manager refuses a spawn at its cap (held authors keep their process), so never recommend one it would refuse.
-	const capacity = primary.action.kind === "dispatch" || primary.action.kind === "pipeline" ? ports.capacity?.() : undefined;
+	// The manager refuses a non-reviewer spawn at its cap (held authors keep their process), so no grant's `dispatch` is
+	// recommended at the cap. `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (gate/quality, inside
+	// the manager's +3 review reserve) or nothing, and its implementer dispatch meets the same refusal with rollback.
+	const capacity = results.some((result) => result.action.kind === "dispatch") ? ports.capacity?.() : undefined;
 	if (capacity && capacity.active >= capacity.cap) {
 		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
-		primary.action = { kind: "wait", reason: `spawn cap ${capacity.cap} reached: ${capacity.active} live worker processes${held} — ${primary.action.job_id} dispatches when one tears down` };
+		for (const result of results) {
+			if (result.action.kind !== "dispatch") continue;
+			result.action = { kind: "wait", reason: `spawn cap ${capacity.cap} reached: ${capacity.active} live worker processes${held} — ${result.action.job_id} dispatches when one tears down` };
+		}
 	}
+	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
 	primary.ready_beads = visibleBeads;
 	const others = results.filter((result) => result !== primary);

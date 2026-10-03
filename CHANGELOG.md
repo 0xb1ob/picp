@@ -12,7 +12,7 @@ Every parent injection from `src/parent-delivery.ts` (the operator send, the res
 
 ### cp_next waits at the spawn cap (cp-j13p)
 
-`cp_next` no longer recommends a `dispatch` or `pipeline` the worker manager would refuse: when live worker processes (held authors and reviewers included, as the manager counts them) reach `spawn_cap`, the action is `wait`, naming the cap, the live count and up to three held job ids. Nothing is queued; held workers keep their process. `NextPorts` gains an optional `capacity` port. Migration: none.
+`cp_next` no longer recommends a `dispatch` the worker manager would refuse: when live worker processes (held authors and reviewers included, as the manager counts them) reach `spawn_cap`, every grant's `dispatch` (primary and `others`) becomes `wait`, naming the cap, the live count and up to three held job ids. A `pipeline` recommendation stands, since `cp_pipeline advance` spawns a gate-reviewer inside the manager's review reserve. Nothing is queued; held workers keep their process. `NextPorts` gains an optional `capacity` port. Migration: none.
 
 ### Keyword risk skips plan evidence sections, spend tokens and "Migration: none" (cp-wkv1)
 
