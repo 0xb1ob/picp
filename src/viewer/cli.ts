@@ -7,8 +7,8 @@
  *
  * Default host: CP_VIEWER_HOST, else the tailnet IPv4 (`tailscale ip -4`), else
  * 127.0.0.1 — or, with `--require-tailnet` (what `bin/cp-operator` and
- * cp-view.service pass), exit non-zero; under it a wildcard, public or non-IP
- * host is refused (src/viewer/bind-host.ts).
+ * cp-view.service pass), exit non-zero. A wildcard, public or non-IP host is always
+ * refused (src/viewer/bind-host.ts), flag or not.
  * `--require-tailnet` is also the only way the operator's own full transcript is
  * served (`/api/sessions?view=you&transcript=1`, refused 403 without it).
  * Default port: 8766. Default home: CP_HOME, else this package's home.
@@ -61,9 +61,9 @@ export async function main(argv: readonly string[]): Promise<void> {
 	const address = viewerAddress({ ...process.env, ...(values.port !== undefined ? { CP_VIEWER_PORT: values.port } : {}) }, values["require-tailnet"] === true && values.host === undefined);
 	const { port } = address;
 	const host = values.host ?? address.host;
-	// Whoever reaches a --require-tailnet viewer holds its write controls: never a wildcard, public or non-IP bind.
-	const refusal = values["require-tailnet"] === true ? bindHostRefusal(host) : undefined;
-	if (refusal) throw new Error(`cp-view: refusing to serve dashboard controls on ${host}: ${refusal}`);
+	// Unflagged, the viewer still serves transcripts and explorer data to whoever reaches it: never a wildcard, public or non-IP bind.
+	const refusal = bindHostRefusal(host);
+	if (refusal) throw new Error(`cp-view: refusing to serve the viewer on ${host}: ${refusal}`);
 	const stateDir = resolveStateDir(home);
 	let app: ViewerApp | undefined;
 	let appBuildError: string | undefined;

@@ -137,10 +137,10 @@ export async function deliver(input: { endpoint: string; body: Uint8Array; autho
 		if (kind === "delivered") return { kind };
 		if (kind === "gone") return { kind, status: response.status };
 		const text = await response.text().catch(() => "");
-		return { kind, reason: redact(oneLine(`HTTP ${response.status}${text ? ` ${oneLine(text, 120)}` : ""}`, 140)) };
+		return { kind, reason: oneLine(`HTTP ${response.status}${text ? ` ${oneLine(redact(text), 120)}` : ""}`, 140) };
 	} catch (error) {
 		const cause = (error as { cause?: { message?: unknown } }).cause?.message;
 		const message = `${(error as Error).message ?? String(error)}${typeof cause === "string" ? `: ${cause}` : ""}`;
-		return { kind: "retry", reason: redact(oneLine(message, 140)) };
+		return { kind: "retry", reason: oneLine(redact(message), 140) };
 	}
 }

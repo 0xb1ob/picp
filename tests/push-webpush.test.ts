@@ -92,4 +92,14 @@ test("deliver posts once with the RFC 8030 headers and never follows a redirect;
 	assert.equal(rejected.kind, "rejected");
 	assert.match((rejected as { reason: string }).reason, /^HTTP 403 bad vapid y+$/);
 	assert.ok((rejected as { reason: string }).reason.length <= 140);
+	// A long endpoint is redacted before truncation: no capability fragment survives, in a response or an exception.
+	const long = `https://fcm.googleapis.com/fcm/send/${"SYNTHETIC_CAPABILITY_".repeat(12)}`;
+	const leaks = [
+		await deliver({ endpoint: long, body: Buffer.from("x"), authorization: "a", fetch: async () => ({ status: 403, text: async () => long }) }),
+		await deliver({ endpoint: long, body: Buffer.from("x"), authorization: "a", fetch: async () => { throw new TypeError(`fetch failed for ${long}`); } }),
+	];
+	for (const out of leaks) {
+		assert.doesNotMatch(JSON.stringify(out), /SYNTHETIC_CAPABILITY|fcm\.googleapis/);
+		assert.match((out as { reason: string }).reason, /<endpoint>/);
+	}
 });

@@ -316,11 +316,12 @@ test("default host: interactive falls back to 127.0.0.1; with --require-tailnet 
 	assert.throws(() => defaultHost(() => undefined, true), /tailscale ip -4.*--viewer-host/);
 });
 
-test("cli: under --require-tailnet a wildcard, public or non-IP host is refused before anything binds", () => {
-	for (const host of ["0.0.0.0", "8.8.8.8", "localhost"]) {
-		const result = spawnSync(process.execPath, [join(REPO_ROOT, "src", "viewer", "cli.ts"), "--require-tailnet", "--host", host, "--port", "1", "--home", tmpdir()], { encoding: "utf8", timeout: 30_000 });
+test("cli: with or without --require-tailnet a wildcard, public or non-IP host is refused before anything binds", () => {
+	for (const flags of [["--require-tailnet"], []]) for (const host of ["0.0.0.0", "8.8.8.8", "localhost"]) {
+		const result = spawnSync(process.execPath, [join(REPO_ROOT, "src", "viewer", "cli.ts"), ...flags, "--host", host, "--port", "1", "--home", tmpdir()], { encoding: "utf8", timeout: 30_000 });
 		assert.notEqual(result.status, 0, host);
-		assert.match(result.stderr, new RegExp(`refusing to serve dashboard controls on ${host.replace(/\./g, "\\.")}`), result.stderr);
+		assert.match(result.stderr, new RegExp(`refusing to serve the viewer on ${host.replace(/\./g, "\\.")}`), result.stderr);
+		assert.doesNotMatch(result.stdout, /built|http:\/\//, "refused before build and listen");
 	}
 });
 
