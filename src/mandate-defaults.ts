@@ -39,7 +39,7 @@ export class MandateDefaultsError extends Error {}
 export const DEFAULT_TOKEN_CEILING = 100_000_000;
 
 /**
- * Scaffold values: 8h, $100, 10M non-cached tokens, 3 jobs, serial, every action incl. merge, ask_on risk:high only.
+ * Scaffold values: 8h, $100, 10M non-cached tokens, 3 jobs, 3 at once, every action incl. merge, ask_on risk:high only.
  * 10M: the 2026-09-22/23 session's 22 jobs used 3.06M non-cached tokens in all (median job 0.10M, p90 0.26M,
  * max 0.71M) against 97.7M total (96.9% cache reads), at ~$6.25 per 1M non-cached — so 10M is ~3x the whole
  * session and ~14x its largest job (10M is ~$62 at that price, inside the $100 cap): a runaway guard, never the brake on a normal mission.
@@ -51,7 +51,7 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 	spend_tokens: 10_000_000,
 	token_ceiling: DEFAULT_TOKEN_CEILING,
 	job_cap: 3,
-	dispatch_parallelism: 1,
+	dispatch_parallelism: 3,
 	allowed_actions: ["plan", "implement", "review", "repair", "merge"],
 	ask_on: ["risk:high"],
 	exclude_paths: [".github/workflows/", "secrets/", "**/.env*"],
@@ -61,7 +61,7 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 		spend_tokens: "non-cached token cap (input + output + cache_write; cache reads excluded) across every job the grant covers; at the cap the grant pauses and the parent may raise it itself up to token_ceiling",
 		token_ceiling: "the highest token cap the parent may raise a grant to on its own (journaled with a reason); reaching it, or the USD cap, escalates budget_exhausted to the operator",
 		job_cap: "max jobs the grant covers before it pauses; raise for a mandate meant to run a whole backlog",
-		dispatch_parallelism: "max jobs in flight at once under the grant; 1 is serial, raise only once serial is proven safe",
+		dispatch_parallelism: "jobs under the grant that may run at once; set 1 for serial",
 		allowed_actions: "every action a mandate may auto-decide; merge is granted by default and is gated only by the repository's own rules and ask_on — add ask_on: [\"risk:high\",\"merge\"] to require a human look before merge",
 		ask_on: "still asks the operator for these even inside an active mandate; risk:high is the one this ships with",
 		exclude_paths: "paths no mandate may auto-touch regardless of allowed_actions: CI workflows and secrets",

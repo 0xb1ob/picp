@@ -6,8 +6,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
 import {
@@ -43,7 +43,8 @@ test("scaffoldHome writes data/mandate-defaults.json once, with the scope's cons
 	assert.equal(written.spend_tokens, 10_000_000, "non-cached; ~3x the 2026-09-23 session's 3.06M non-cached tokens");
 	assert.equal(written.token_ceiling, 100_000_000);
 	assert.equal(written.job_cap, 3);
-	assert.equal(written.dispatch_parallelism, 1);
+	assert.equal(written.dispatch_parallelism, 3);
+	assert.equal(written.notes.dispatch_parallelism, "jobs under the grant that may run at once; set 1 for serial");
 	assert.deepEqual(written.allowed_actions.sort(), ["implement", "merge", "plan", "repair", "review"].sort());
 	assert.deepEqual(written.ask_on, ["risk:high"]);
 	assert.deepEqual(written.exclude_paths, [".github/workflows/", "secrets/", "**/.env*"]);
@@ -54,6 +55,20 @@ test("scaffoldHome writes data/mandate-defaults.json once, with the scope's cons
 	const second = scaffoldHome({ home: home.path, ledger: false });
 	assert.equal(second.steps.find((s) => s.step === "mandate-defaults")?.action, "present");
 	assert.equal(loadMandateDefaults(home.path).spend_usd, 42);
+});
+
+test("an existing home's configured dispatch_parallelism 1 survives scaffold and resolves as is", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const file = join(home.path, LAYOUT.mandateDefaultsFile);
+	const before = JSON.stringify({ ...SCAFFOLD_MANDATE_DEFAULTS, dispatch_parallelism: 1 });
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, before);
+	assert.equal(scaffoldHome({ home: home.path, ledger: false }).steps.find((s) => s.step === "mandate-defaults")?.action, "present");
+	assert.equal(readFileSync(file, "utf8"), before, "no migration: the file is untouched");
+	const resolved = resolveMandateGrant({}, loadMandateDefaults(home.path), undefined);
+	assert.equal(resolved.dispatch_parallelism, 1);
+	assert.equal(resolved.provenance.dispatch_parallelism, "home");
 });
 
 test("loadMandateDefaults refuses an invalid file rather than guessing", (t) => {
