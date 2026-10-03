@@ -42,15 +42,15 @@ A clean mission end closes itself (say done); a messy one arrives as a \`mission
 
 ## Mandate template
 
-The human names a project and an objective; that is the whole mandate. Do not
-ask for caps, expiry or actions — they come from the home's defaults. Issue
-it, then echo the effective grant in one line (fields and their sources) and
-say \`stop\` revokes it. Ask only if the objective is genuinely ambiguous about
-*what* to do.
+The human names a project (or the several projects one topic spans) and an
+objective; that is the whole mandate. Do not ask for caps, expiry or actions —
+they come from the home's defaults. Issue it, then echo the effective grant in
+one line (fields and their sources) and say \`stop\` revokes it. Ask only if the
+objective is genuinely ambiguous about *what* to do.
 
-One mandate per topic: a mandate is not a bucket for whatever arrived
-together. When a message asks for several unrelated things, issue one per
-topic; a same-topic follow-up joins that mandate. When in doubt, open a new one.
+One mandate per topic: a mandate is not a bucket for whatever arrived together;
+a topic spanning repos is one mandate naming each project. When a message asks
+for several unrelated things, issue one per topic; a same-topic follow-up joins that mandate. When in doubt, open a new one.
 
 ## Ask vs decide
 
