@@ -134,7 +134,7 @@ import { Sender, type SendRequest, type SendResult } from "./send.ts";
 import { SettleWatcher, type SettleOutcome } from "./settle.ts";
 import { StatusReporter, type StatusQuery } from "./status.ts";
 import { viewerAddress } from "./viewer/cli.ts";
-import { Teardown, type TeardownResult } from "./teardown.ts";
+import { Teardown, type TeardownCallOptions, type TeardownResult } from "./teardown.ts";
 import { type RenderOptions, RunWatcher, type RunView } from "./watch.ts";
 import { type DrainProjection, WorkerManager } from "./worker-manager.ts";
 import { tryResolveWorkerPackages } from "./worker-packages.ts";
@@ -442,6 +442,7 @@ export class CommandPost {
 			manager: this.manager,
 			runs: this.runs,
 			ledger: () => this.ledger(),
+			journal: (input) => this.#journalDurable(input),
 		});
 		// cp-vk1: `cp_merged` writes here and the ship gate reads it, which is how
 		// "confirm the PR merged" stopped being advice with no mechanism behind it.
@@ -1188,7 +1189,7 @@ export class CommandPost {
 		return this.sender.send(request);
 	}
 
-	async tearDown(jobId: string, options: { force?: boolean } = {}): Promise<TeardownResult> {
+	async tearDown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
 		return this.teardown.teardown(jobId, options);
 	}
 

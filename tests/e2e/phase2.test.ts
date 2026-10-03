@@ -245,7 +245,8 @@ test("m2: intake → dispatch → envelope → promote → unreported head needs
 	// The CI fix moved HEAD without a new accepted report. A push alone cannot
 	// justify releasing this lease; force is the explicit unverified exit.
 	const refused = await f.post.tearDown(jobId);
-	assert.equal(refused.failure?.code, "unreported_head");
+	// issue #2: the promoted worker is still live and unreported, so that gate answers first.
+	assert.equal(refused.failure?.code, "unreported_live_worker");
 	assert.equal(refused.lease_returned, false);
 	const torn = await f.post.tearDown(jobId, { force: true });
 	assert.equal(torn.torn_down, true, JSON.stringify(torn));
@@ -442,7 +443,7 @@ test("m2: a budget breach escalates and the worker survives", { skip: SKIP, time
 
 	// The budget test never files a report; ordinary teardown must keep its lease.
 	const refused = await f.post.tearDown(jobId);
-	assert.equal(refused.failure?.code, "unreported_head");
+	assert.equal(refused.failure?.code, "unreported_live_worker", "issue #2: the budget worker survives, live and unreported");
 	const torn = await f.post.tearDown(jobId, { force: true });
 	assert.equal(torn.torn_down, true, JSON.stringify(torn));
 	assert.equal(torn.reason, undefined);

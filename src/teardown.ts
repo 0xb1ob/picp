@@ -67,10 +67,7 @@ import {
 	CheckpointSchema,
 	type DiffVerdict,
 	DiffVerdictSchema,
-	type Envelope,
 	type FleetRecord,
-	type GateVerdict,
-	GateVerdictSchema,
 	isoTimestamp,
 	isScriptFleetRecord,
 	type JobKind,
@@ -85,9 +82,15 @@ import { type Lease, leaseFromRecord, type LeaseManager } from "./leases.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
-import { acceptedHeadFailure, readFiledEnvelope } from "./teardown-head.ts";
+import {
+	acceptedHeadFailure, derivedCloseReason, forcedShutdownFacts, killedUnreportedWakeup, latestGateVerdict,
+	readFiledEnvelope, type TeardownCallOptions, unreportedLiveWorker,
+} from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
+import type { DurableWakeupInput } from "./wakeup-outbox.ts";
 import type { WorkerManager } from "./worker-manager.ts";
+
+export type { TeardownCallOptions } from "./teardown-head.ts";
 
 export class TeardownError extends Error {}
 
@@ -108,6 +111,8 @@ export const GATE_CODES = [
 	"review_escalated",
 	/** A failed/waiting ship job has no accepted report or merge receipt for HEAD. */
 	"unreported_head",
+	/** issue #2: a live or mid-turn worker with no report for this generation. */
+	"unreported_live_worker",
 	/**
 	 * cp-vk1: origin could not be asked at all (no remote, no network, no
 	 * permission), so nothing is known about whether this work is off the machine.
@@ -145,6 +150,10 @@ export interface TeardownResult {
 	lease_returned: boolean;
 	artifacts_removed: boolean;
 	failure?: GateFailure;
+	/** Force ended a live worker that never reported (issue #2). */
+	killed_unreported?: true;
+	/** No report was ever filed: a pass reason proves the tree, not a result. */
+	unreported?: true;
 }
 
 /** Just enough of `Ledger` to close a research/answer job after a successful teardown. */
@@ -165,6 +174,8 @@ export interface TeardownOptions {
 	removeArtifacts?: boolean;
 	/** Built per call by the caller, like integrate. Absent: skip the ledger close (tests that only exercise gates). */
 	ledger?: () => TeardownLedger;
+	/** Durable wake-up port (CommandPost#journalDurable); absent in gate-only tests. */
+	journal?: (input: DurableWakeupInput) => void;
 }
 
 export type GitRunner = (cwd: string, args: readonly string[]) => Promise<{ status: number | null; stdout: string; stderr: string }>;
@@ -176,7 +187,7 @@ export class Teardown {
 		this.#options = options;
 	}
 
-	async teardown(jobId: string, options: { force?: boolean } = {}): Promise<TeardownResult> {
+	async teardown(jobId: string, options: TeardownCallOptions = {}): Promise<TeardownResult> {
 		const { fleet, leases, manager, runs } = this.#options;
 		const now = this.#options.now ?? (() => new Date());
 		const record = fleet.get(jobId);
@@ -204,6 +215,13 @@ export class Teardown {
 			if (record.script_process && isPidAlive(record.script_process.pid)) throw new TeardownError(`${jobId}: script pid ${record.script_process.pid} is still alive with no observed exit; keep the lease and inspect it before teardown`);
 			if (!options.force) throw new TeardownError(`${jobId}: script exit is unknown; keep the lease, inspect the worktree, then use --force to close it deliberately`);
 		}
+		// issue #2: a live worker with no report is not finished work; force past it is killed_unreported.
+		const unreported = options.acceptUnreported ? undefined : unreportedLiveWorker(this.#options.home, record, manager.get(jobId));
+		if (unreported && (!options.force || (options.requireAuthorization && !options.authorization))) {
+			const failure = options.force ? { ...unreported, fix: `force past this needs operator_quote, a verbatim sentence from an operator message. ${unreported.fix}` } : unreported;
+			runs.open(jobId).cp("teardown_refused", { code: failure.code, message: failure.message, fix: failure.fix });
+			return { ...base, failure };
+		}
 		// --- gates (skipped only by an explicit operator force) --------------
 		// `force` is operator authorization, not a shortcut: it is recorded, it
 		// reports no pass reason (nothing was proven), and it exists only because
@@ -227,14 +245,14 @@ export class Teardown {
 				return { ...base, failure: outcome.failure };
 			}
 		} else {
-			runs.open(jobId).cp("shutdown_requested", { job_id: jobId, forced: true, gates: "skipped by operator" });
+			runs.open(jobId).cp("shutdown_requested", { job_id: jobId, forced: true, gates: "skipped by operator", ...forcedShutdownFacts(unreported, options) });
 		}
 
 		// --- the worker first: its close must be ours, and observed ----------
 		let exitCode: number | null | undefined;
 		const managed = manager.get(jobId);
 		if (managed) {
-			runs.open(jobId).cp("shutdown_requested", { job_id: jobId });
+			runs.open(jobId).cp("shutdown_requested", { job_id: jobId, ...(options.acceptUnreported ? { unreported_accepted: options.acceptUnreported } : {}) });
 			const exit = await managed.worker.shutdown();
 			exitCode = exit.code;
 			await manager.shutdown(jobId);
@@ -270,6 +288,7 @@ export class Teardown {
 			} }),
 			...(runStatus ? { usage: runStatus.usage } : {}),
 		});
+		if (unreported) this.#options.journal?.(killedUnreportedWakeup(this.#options.home, record, closedAt, options.authorization));
 		runs.close(jobId);
 		await this.#closeLedger(jobId, record);
 
@@ -286,6 +305,8 @@ export class Teardown {
 			...base,
 			torn_down: true,
 			...(outcome?.ok ? { reason: outcome.reason } : {}),
+			...(unreported ? { killed_unreported: true as const } : {}),
+			...(!isScriptFleetRecord(record) && record.reported_at === undefined ? { unreported: true as const } : {}),
 			...(exitCode !== undefined ? { exit_code: exitCode } : {}),
 			lease_returned: true,
 			artifacts_removed: artifactsRemoved,
@@ -744,31 +765,6 @@ export class Teardown {
 	}
 }
 
-function latestGateVerdict(home: string, jobId: string): string | undefined {
-	for (let attempt = 32; attempt >= 1; attempt -= 1) {
-		const file = join(home, paths.gateFile(jobId, attempt));
-		if (!existsSync(file)) continue;
-		try {
-			const parsed = validate<GateVerdict>(GateVerdictSchema, JSON.parse(readFileSync(file, "utf8")));
-			if (parsed.ok) return parsed.value.verdict;
-		} catch {
-			// unreadable attempt is not a verdict
-		}
-	}
-	return undefined;
-}
-
-function headline(summary: string): string {
-	return summary.trim().split("\n")[0] ?? summary.trim();
-}
-
-function derivedCloseReason(record: Pick<FleetRecord, "delivery">, envelope: Envelope, verdict?: string): string {
-	if (record.delivery === "answer") return `answered: ${headline(envelope.summary)}`;
-	if (verdict) return `gated: ${verdict}`;
-	const artifact = envelope.artifact_path?.trim();
-	return `researched: ${artifact && artifact.length > 0 ? artifact : headline(envelope.summary)}`;
-}
-
 function isDirectory(path: string): boolean {
 	try {
 		return statSync(path).isDirectory();
@@ -790,7 +786,9 @@ function defaultGit(cwd: string, args: readonly string[]) {
 /** One operator line; on refusal it says what is kept and what to do. */
 export function formatTeardown(result: TeardownResult): string {
 	if (result.torn_down) {
-		return `${result.job_id} torn down (${result.reason}): lease returned, worker exit ${result.exit_code ?? "n/a"}`;
+		const why = result.killed_unreported ? "killed_unreported" : result.reason ?? "forced";
+		const note = result.unreported ? ` — no report was filed for ${result.job_id}: relay "no report", never a result` : "";
+		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}`;
 	}
 	if (result.failure) {
 		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
