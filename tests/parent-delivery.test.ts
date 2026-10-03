@@ -38,7 +38,7 @@ function scripted() {
 		journal: () => undefined,
 		countTurn: (failed) => counted.push(failed),
 	});
-	const turn = (): LandedTurn => ({ texts: [], assistantCount: 0, landed: [] });
+	const turn = (): LandedTurn => ({ texts: [], assistantCount: 0, landed: [], answers: [] });
 	return { box, proc, sent, calls, counted, relays, delivery, turn, answer: (value: { entries: unknown[]; dropped: number }) => answer(value) };
 }
 
@@ -101,6 +101,61 @@ test("segmentEnd settles each landed send at its own clean turn_end: own reply, 
 	assert.deepEqual(ctx.counted, [false, false, false]);
 });
 
+/** A lands, the parent answers it only with tool calls (optionally with commentary), B steers in, then one finished answer. */
+async function interleaved(commentary?: string) {
+	const ctx = scripted();
+	const a = ctx.delivery.send("A", 60_000);
+	const b = ctx.delivery.send("B", 60_000);
+	await flush();
+	const turn = ctx.turn();
+	ctx.delivery.landed(ctx.sent[0] as string, turn);
+	if (commentary) turn.texts.push(commentary);
+	turn.assistantCount += 1; // the tool-use message
+	ctx.delivery.landed(ctx.sent[1] as string, turn);
+	turn.texts.push("Answer B.");
+	turn.assistantCount += 1;
+	ctx.delivery.segmentEnd(turn);
+	const [first, second] = [await a, await b];
+	assert.deepEqual(ctx.counted, [false, false]);
+	const relays = ctx.relays.length;
+	ctx.delivery.settle(turn);
+	assert.deepEqual(ctx.counted, [false, false], "settle adds nothing after segmentEnd");
+	assert.equal(ctx.relays.length, relays);
+	return { first, second };
+}
+
+test("a send answered only by tool calls is not settled empty by a later send's answer", async () => {
+	const { first, second } = await interleaved();
+	assert.equal(first.level, "owner_observed");
+	assert.equal(first.reply, "Answer B.");
+	assert.equal(second.reply, "Answer B.");
+});
+
+test("an interleaved send's reply keeps its own commentary and shares the next finished answer", async () => {
+	const { first, second } = await interleaved("Checking A now.");
+	assert.equal(first.reply, "Checking A now.\nAnswer B.");
+	assert.equal(second.reply, "Answer B.");
+});
+
+test("an interleaved send gets the run's error when no answer finished", async () => {
+	const ctx = scripted();
+	void ctx.delivery.send("A", 10);
+	void ctx.delivery.send("B", 10);
+	await flush();
+	const turn = ctx.turn();
+	ctx.delivery.landed(ctx.sent[0] as string, turn);
+	turn.assistantCount += 1;
+	ctx.delivery.landed(ctx.sent[1] as string, turn);
+	turn.assistantCount += 1;
+	turn.error = { message: "usage limit reached" };
+	ctx.delivery.settle(turn);
+	assert.deepEqual(
+		ctx.box.list().map((entry) => entry.state),
+		["failed", "failed"],
+	);
+	assert.deepEqual(ctx.counted, [true, true]);
+});
+
 test("cleanSegmentEnd: only a text-only turn_end that did not fail or get cut off", () => {
 	const end = (stopReason: string | undefined, toolResults: unknown[] = []) => ({ type: "turn_end", message: { role: "assistant", stopReason }, toolResults });
 	assert.equal(cleanSegmentEnd(end("stop")), true);
@@ -138,6 +193,80 @@ test("a send injected or landed while the restart reconcile reads the transcript
 	// X was absent from the transcript: requeued and delivered once, as the drain's batch.
 	const bodies = ctx.sent.filter((text) => !text.includes("— resume]")).map((text) => sendIdsInText(text));
 	assert.deepEqual(bodies, [[y.id], [z.id], [x.id]]);
+});
+
+/** One outbox, two parent processes: `old` is reading its transcript when the bridge moves to `fresh`. */
+function superseded() {
+	const box = new ParentSendOutbox({ file: parentSendFile(join(mkdtempSync(join(tmpdir(), "parent-delivery-")), "cp-parent.jsonl")) });
+	const fake = () => {
+		const state = {
+			sent: [] as string[],
+			reads: 0,
+			answer: (_value: { entries: unknown[]; dropped: number }) => undefined as void,
+			fail: (_error: Error) => undefined as void,
+		};
+		const proc = {
+			busy: false,
+			alive: true,
+			send: async (text: string) => {
+				state.sent.push(text);
+				return { receipt: "injected" };
+			},
+			getEntries: () => {
+				state.reads += 1;
+				return new Promise((resolve, reject) => {
+					state.answer = resolve;
+					state.fail = reject;
+				});
+			},
+		} as unknown as WorkerProcess;
+		return { proc, state };
+	};
+	const old = fake();
+	const fresh = fake();
+	let live = old.proc;
+	const delivery = new ParentDelivery(box, {
+		liveProc: () => live,
+		emit: () => undefined,
+		sleep: async () => undefined,
+		journal: () => undefined,
+		countTurn: () => undefined,
+	});
+	const injected = box.enqueue("X");
+	box.markInjected([injected.id]);
+	const landed = box.enqueue("L");
+	box.markInjected([landed.id]);
+	box.markLanded([landed.id]);
+	const ready = delivery.afterReady(old.proc);
+	delivery.failWaiters();
+	live = fresh.proc;
+	return { box, delivery, old, fresh, ready, injected, landed };
+}
+
+test("a superseded afterReady neither reconciles nor RPCs the old process", async () => {
+	const ctx = superseded();
+	ctx.old.state.answer({ entries: [], dropped: 0 });
+	await ctx.ready;
+	assert.deepEqual(ctx.old.state.sent, [], "no resume nudge on a process that is no longer live");
+	assert.equal(ctx.box.get(ctx.injected.id)?.state, "injected", "no reconcile against the old transcript");
+	ctx.delivery.afterSettle();
+	await flush();
+	assert.equal(ctx.fresh.state.reads, 0, "no stale reconcile flag for the new process");
+});
+
+test("a superseded afterReady that fails leaves no stale reconcile flag", async () => {
+	const ctx = superseded();
+	ctx.old.state.fail(new Error("old process gone"));
+	await ctx.ready;
+	ctx.delivery.afterSettle();
+	await flush();
+	assert.equal(ctx.fresh.state.reads, 0);
+	const ready = ctx.delivery.afterReady(ctx.fresh.proc);
+	ctx.fresh.state.answer({ entries: [], dropped: 0 });
+	await ready;
+	const resumes = ctx.fresh.state.sent.filter((text) => text.includes("— resume]"));
+	assert.equal(resumes.length, 1, "the new process nudges the landed send exactly once");
+	assert.deepEqual(sendIdsInText(resumes[0] as string), [ctx.landed.id]);
 });
 
 test("a failed turn counts toward the relaunch cap when its outcome is pending or relayed, not only synchronous", async () => {

@@ -264,14 +264,18 @@ export function sendRelay(entry: ParentSendEntry, file: string) {
 }
 
 type SpanMark = { id: string; index: number; assistants: number; end?: number; endAssistants?: number };
-type SpanTurn = { texts: readonly string[]; assistantCount: number; landed: ReadonlyArray<SpanMark> };
+type SpanTurn = { texts: readonly string[]; assistantCount: number; landed: ReadonlyArray<SpanMark>; answers: readonly number[] };
 
 /**
  * Where a landed send's reply stops: the segment end it was settled at, else
  * the next landing, else the run so far (`last`: the run's error is its own).
+ * A later landing ends this span only after a finished answer (clean
+ * turn_end) fell between them; until then the sends share one answer.
  */
 export function markSpan(turn: SpanTurn, mark: SpanMark): { end: number; endAssistants: number; last: boolean } {
-	const next = turn.landed.find((other) => other.assistants > mark.assistants);
+	const next = turn.landed.find(
+		(other) => other.assistants > mark.assistants && turn.answers.some((at) => at > mark.assistants && at <= other.assistants),
+	);
 	return {
 		end: mark.end ?? next?.index ?? turn.texts.length,
 		endAssistants: mark.endAssistants ?? next?.assistants ?? turn.assistantCount,
