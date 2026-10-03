@@ -740,7 +740,8 @@ test("cp-t9yr F1: an unmanaged live worker is refused under every call shape; fo
 		{ force: true, requireAuthorization: true, authorization: { by: "operator-quote", quote } },
 		{ acceptUnreported: "pipeline hand-off" },
 	];
-	for (const shape of shapes) {
+	const refusals = () => readRunEvents(b.home, jobId).filter((event) => event.type === "teardown_refused").length;
+	for (const [index, shape] of shapes.entries()) {
 		const refused = await teardown.teardown(jobId, shape);
 		assert.equal(refused.failure?.code, "unmanaged_live_worker", JSON.stringify(shape));
 		assert.equal(refused.lease_returned, false);
@@ -748,11 +749,12 @@ test("cp-t9yr F1: an unmanaged live worker is refused under every call shape; fo
 		assert.equal(refused.killed_unreported, undefined);
 		assert.match(refused.failure?.fix ?? "", /keep the lease/);
 		assert.equal(b.fleet.require(jobId).phase, "waiting");
+		assert.equal(refusals(), index + 1, `one teardown_refused per call: ${JSON.stringify(shape)}`);
 	}
 	assert.equal(journaled.length, 0);
-	assert.ok(readRunEvents(b.home, jobId).some((event) => event.type === "teardown_refused"));
 	assert.doesNotThrow(() => process.kill(process.pid, 0));
 	for (const phase of ["held", "failed"] as const) {
+		const before = refusals();
 		await b.fleet.mutate((jobs) => {
 			const job = jobs.find((entry) => entry.job_id === jobId)!;
 			job.phase = phase;
@@ -762,7 +764,23 @@ test("cp-t9yr F1: an unmanaged live worker is refused under every call shape; fo
 		const refused = await teardown.teardown(jobId, { force: true });
 		assert.equal(refused.failure?.code, "unmanaged_live_worker", phase);
 		assert.equal(b.fleet.require(jobId).phase, phase);
+		assert.equal(refusals(), before + 1, phase);
 	}
+
+	// `launching`: the fleet schema refuses to persist a model record in that phase,
+	// so a read-through store serves it; the gate refuses before any lease or fleet write.
+	const launching = { ...b.fleet.require(jobId), phase: "launching" } as FleetRecord;
+	const fleet = { get: (id: string) => (id === jobId ? launching : undefined) } as unknown as FleetStore;
+	const leases = { release: async () => assert.fail("a refused teardown never releases") } as unknown as LeaseManager;
+	const viaLaunching = new Teardown({ home: b.home, fleet, leases, manager: b.manager, runs: b.runs, journal: (input) => journaled.push(input) });
+	for (const shape of shapes) {
+		const before = refusals();
+		const refused = await viaLaunching.teardown(jobId, shape);
+		assert.equal(refused.failure?.code, "unmanaged_live_worker", `launching ${JSON.stringify(shape)}`);
+		assert.equal(refused.lease_returned, false);
+		assert.equal(refusals(), before + 1);
+	}
+	assert.equal(journaled.length, 0);
 });
 
 test("cp-t9yr F1: a reported held job with a live unowned worker is refused even by the gated (integrate) path", { timeout: 60_000 }, async (t) => {
@@ -1612,4 +1630,25 @@ test("research ledger close: crash boundary and guards", { timeout: 60_000 }, as
 	assert.deepEqual(swept, { closed: [again], failed: [] });
 	assert.equal(journaled.length, 0);
 	assert.equal(releases.length, 0);
+});
+
+test("research ledger close: a startup sweep whose fleet read throws journals ledger-close-failed:startup and never throws", async (t) => {
+	const b = benchOf(t);
+	const journaled: DurableWakeupInput[] = [];
+	const fleet = { list: () => { throw new Error("synthetic fleet read failure\nsecond line"); } } as unknown as FleetStore;
+	const leases = { release: async () => assert.fail("the sweep never touches a lease") } as unknown as LeaseManager;
+	let ledgerCalls = 0;
+	const ledger: TeardownLedger = {
+		list: async () => { ledgerCalls += 1; return []; },
+		close: async () => { ledgerCalls += 1; },
+	};
+	const teardown = new Teardown({ home: b.home, fleet, leases, manager: b.manager, runs: b.runs, ledger: () => ledger, journal: (input) => journaled.push(input) });
+	const outcome = await teardown.retryLedgerCloses();
+	assert.deepEqual(outcome, { closed: [], failed: [] });
+	assert.equal(journaled.length, 1);
+	assert.equal(journaled[0]!.id, "ledger-close-failed:startup");
+	assert.equal(journaled[0]!.kind, "recovery");
+	assert.match(journaled[0]!.content, /synthetic fleet read failure/);
+	assert.doesNotMatch(journaled[0]!.content, /second line/);
+	assert.equal(ledgerCalls, 0);
 });
