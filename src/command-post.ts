@@ -129,7 +129,6 @@ import { SUGGEST_DEFAULT_MODEL, type SuggestConfig } from "./contracts.ts";
 import { type Asker, QuestionRelay } from "./questions.ts";
 import { type PlanTarget, type ResolvePlanOptions, resolvePlanTarget } from "./plan-view.ts";
 import { BoundedRecovery } from "./recovery.ts";
-import type { JobClaims } from "./job-claims.ts";
 import { RunRegistry } from "./runs.ts";
 import { Sender, type SendRequest, type SendResult } from "./send.ts";
 import { SettleWatcher, type SettleOutcome } from "./settle.ts";
@@ -320,7 +319,7 @@ export class CommandPost {
 	readonly shippedSeen: ShippedSeenStore;
 	readonly #options: CommandPostOptions;
 	readonly #announcer: FailureAnnouncer;
-	readonly #claims: JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
+	readonly #claims: import("./job-claims.ts").JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
 
 	constructor(options: CommandPostOptions) {
 		this.#options = options;
