@@ -68,6 +68,11 @@ export function leaseReturnFailed(jobId: string, error: string): GateFailure {
 	};
 }
 
+// cp-a9fq: `defaultGit` and `formatTeardown` live here, not in teardown.ts, only
+// to keep teardown.ts under the 800-line per-module cap (tests/structure.test.ts)
+// without raising it; teardown.ts imports the one and re-exports the other, so
+// no caller changed. Pure moves — behaviour is identical.
+/** Teardown's git runner when no `git` port is injected; never throws, the status says. */
 export function defaultGit(cwd: string, args: readonly string[]) {
 	return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolvePromise) => {
 		execFile("git", [...args], { cwd, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {

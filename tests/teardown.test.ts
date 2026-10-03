@@ -4,6 +4,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,6 +18,7 @@ import {
 	type GateCause,
 	type GateVerdictValue,
 	isoTimestamp,
+	isScriptFleetRecord,
 	type JobKind,
 	paths,
 	type PipelineRecord,
@@ -951,6 +953,47 @@ test("cp-a9fq: a lease treehouse did not return is never reported returned, forc
 	assert.equal(gated.failure?.code, "lease_return_failed");
 	assert.equal(b.fleet.require("cp-stuck-gated").phase, "held");
 	assert.equal(returns.length, 2, "each teardown asked treehouse exactly once");
+});
+
+test("cp-a9fq: after lease_return_failed the lease and job are kept until a re-run teardown's return is confirmed", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-retry-return";
+	const worktree = b.worktree(jobId);
+	await b.addJob(jobId, worktree);
+	git(worktree, "push", "--quiet", "-u", "origin", jobId);
+	// A dead held worker, as the failed attempt leaves it: no recorded exit on the
+	// fleet record, a pid that is gone, and no manager entry.
+	const deadPid = spawnSync("true").pid as number;
+	const held = b.fleet.require(jobId);
+	if (isScriptFleetRecord(held)) assert.fail("ship job expected");
+	const { exited_at: _gone, ...worker } = held.worker;
+	await b.fleet.patch(jobId, { worker: { ...worker, pid: deadPid } });
+
+	let treehouseReturns = 1;
+	const returns: string[] = [];
+	const leases = new LeaseManager({
+		home: b.home,
+		cwd: () => b.home,
+		runner: async (_bin, args) => {
+			returns.push(String(args.at(-1)));
+			return treehouseReturns-- > 0 ? { status: 1, stdout: "", stderr: "treehouse: worktree is busy" } : { status: 0, stdout: "", stderr: "" };
+		},
+	});
+	const teardown = new Teardown({ home: b.home, fleet: b.fleet, leases, manager: b.manager, runs: b.runs });
+
+	const first = await teardown.teardown(jobId);
+	assert.equal(first.failure?.code, "lease_return_failed");
+	assert.equal(first.lease_returned, false);
+	assert.equal(b.fleet.require(jobId).phase, "held", "still held: the lease was not confirmed returned");
+	assert.equal(b.fleet.require(jobId).closed_at, undefined);
+
+	const second = await teardown.teardown(jobId);
+	assert.equal(second.torn_down, true, formatTeardown(second));
+	assert.equal(second.lease_returned, true);
+	assert.equal(second.reason, "pushed");
+	assert.equal(b.fleet.require(jobId).phase, "done");
+	assert.equal(b.fleet.require(jobId).closed_reason, "gated");
+	assert.deepEqual(returns, [worktree, worktree], "one treehouse return per teardown, the second confirmed");
 });
 
 test("cp-a9fq: teardown refuses while automatic recovery owns the job, and owns the job while it runs", { timeout: 60_000 }, async (t) => {
