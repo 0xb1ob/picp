@@ -398,9 +398,12 @@ brief says it for every rendering. The reason is not politeness about turn time:
 
 A single **non-blocking** snapshot is still allowed (`gh run list --branch
 <branch> --limit 3 --json conclusion,status,headSha,workflowName`); whatever it
-says — queued, in progress, no runs at all — the worker reports and stops. If CI
-comes back red afterwards, the parent promotes the held worker or re-dispatches;
-that is cheaper than a worker asleep in a tool call.
+says — queued, in progress, no runs at all — the worker reports and stops. It is
+one per worker process (`ciStatusQuery`): a second `gh run list|view`,
+`gh pr checks` or check-runs call is refused with a pointer to `report_result`.
+Failure logs (`gh run view <id> --log` / `--log-failed`) are not status and stay
+allowed. If CI comes back red afterwards, the parent promotes the held worker or
+re-dispatches; that is cheaper than a worker asleep in a tool call.
 
 **Enforcement, because wording already failed here once.** PR #39 fixed this as
 brief guidance and lost to the next brief that asked for a green confirmation,

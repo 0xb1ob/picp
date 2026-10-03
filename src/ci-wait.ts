@@ -156,3 +156,39 @@ export function ciWaitRefusal(finding: CiWaitFinding): string {
 		"still allowed if you want a snapshot; sleeping, looping or --watch is not.",
 	].join("\n");
 }
+
+/**
+ * `gh`, tolerating `-R/--repo/--hostname <v>` between `gh` and the subcommand
+ * (`gh -R o/r run list`), so a flag cannot step around the status quota.
+ */
+const GH = "gh(?:\\s+(?:-R|--repo|--hostname)(?:\\s+|=)\\S+)*";
+
+const CI_STATUS_RES: readonly RegExp[] = [
+	atCommandPosition(`${GH}\\s+run\\s+(?:list|view)\\b`),
+	atCommandPosition(`${GH}\\s+pr\\s+checks\\b`),
+	CI_QUERY_RES[2] as RegExp,
+];
+
+/** A log fetch (`--log`, `--log-failed`, `gh api …/logs`): failure evidence, not a status query. */
+const CI_LOG_RE = /\s--log\b|\/logs\b/;
+
+/**
+ * True when a command-position stage of `command` asks GitHub for CI *status*
+ * (`gh run list|view`, `gh pr checks`, check-runs API). `gh run view --log[-failed]`
+ * is not status and stays unmetered. The worker hook allows one per process.
+ */
+export function ciStatusQuery(command: string): boolean {
+	if (typeof command !== "string") return false;
+	return command
+		.split(/[;&|\n]+/)
+		.some((stage) => CI_STATUS_RES.some((re) => re.test(stage)) && !CI_LOG_RE.test(stage));
+}
+
+/** Refusal for the second CI status query in one worker process. */
+export function ciStatusRepeatRefusal(): string {
+	return [
+		"Refused: this worker already took its one CI status snapshot; a second one tells you nothing new.",
+		"Rebase, run the suite, push, and report the pushed head sha (`git rev-parse HEAD`) in report_result's",
+		"`head_sha`; the parent re-verifies CI itself. Failure logs (`gh run view <id> --log-failed`) are still allowed.",
+	].join("\n");
+}
