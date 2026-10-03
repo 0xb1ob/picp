@@ -9,8 +9,8 @@
  *
  * Covered: intake → dispatch (routing, lease, branch, preflight) → scripted
  * worker edits/commits/pushes → envelope intake (held vs teardown-ready) →
- * promote round trip → teardown gates (pass and fail-closed) → crash with a
- * bounded re-dispatch → budget breach escalation.
+ * promote round trip → teardown gates (pass and fail-closed) → crash with one
+ * automatic revive (bounded recovery) → budget breach escalation.
  *
  * `npm run e2e:phase2`
  */
@@ -23,6 +23,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { type Failure, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { classifyRun, decideRecovery } from "../../src/failures.ts";
+import { readRecoveryAttempts } from "../../src/recovery.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
@@ -345,15 +346,17 @@ test("m2: a dirty worktree keeps everything until it is clean", { skip: SKIP, ti
 // failure taxonomy: crash → bounded re-dispatch
 // ---------------------------------------------------------------------------
 
-test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, timeout: 300_000 }, async (t) => {
+test("m2: a crashed worker is classified and revived once, automatically", { skip: SKIP, timeout: 300_000 }, async (t) => {
 	const f = await fleet(t);
 	const jobId = await f.intake("survive a crash", { delivery: "local", slug: "crashy" });
 
-	// First attempt: the worker starts a slow tool and is killed mid-run.
-	const firstModel = f.script("m2-crash-1", [
+	// First request: a slow tool the worker is killed in. The rest of the script
+	// answers the automatic revive (cur.4.2), which resumes the same session.
+	const model = f.script("m2-crash", [
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 30" } }] },
+		...shipSteps(jobId, { push: false }),
 	]);
-	const first = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model: firstModel, fetch: false });
+	const first = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);
 	assert.ok(managed, "the manager owns the worker it spawned");
 	await waitFor(
@@ -361,18 +364,11 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 		(status) => status.phase === "working",
 		{ timeoutMs: 60_000, what: "the worker to start working" },
 	);
+	const firstLeaseId = readFleet(f.home).jobs[0]?.lease_id;
 
 	await managed.worker.kill("SIGKILL");
-	const failed = await waitFor(
-		() => readFleet(f.home).jobs[0],
-		(record) => record?.phase === "failed",
-		{ timeoutMs: 60_000, what: "the crash to be classified" },
-	);
-	assert.equal(failed?.failure?.class, "crash");
-	// The transition (fleet phase) and the announcer's durable journal write are one
-	// atomic step (pi-command-post-autonomy-programme-cur.1.3); onFailure fires after
-	// that journal write, which is not instant (it inspects the worktree), so it can
-	// still be in flight the instant the phase above is observed as failed.
+	// onFailure fires after the announcer's durable journal write (cur.1.3) and
+	// before bounded recovery acts, so it is the stable observation of the crash.
 	await waitFor(
 		() => f.failures,
 		(list) => list.length > 0,
@@ -386,28 +382,18 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	assert.equal(recovery.action, "retry_same");
 	assert.equal(recovery.same_brief, true);
 
-	// Recovery, as an operator performs it: return the lease (nothing to save),
-	// remove the leftover job branch, dispatch the same brief again.
-	const forced = await f.post.tearDown(jobId, { force: true });
-	assert.equal(forced.torn_down, true);
-	git(f.clone, "branch", "-D", jobId);
-
-	const firstLeaseId = failed?.lease_id;
-	const secondModel = f.script("m2-crash-2", shipSteps(jobId, { push: false }));
-	const second = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model: secondModel, fetch: false });
-	assert.equal(second.state, "dispatched");
-	// The pool may hand back the same slot (it is free again); the LEASE is what
-	// must be new, and the fleet must carry the new identity.
-	assert.notEqual(readFleet(f.home).jobs[0]?.lease_id, firstLeaseId, "a new attempt holds a new lease");
-	assert.equal(second.branch, first.branch, "the branch is still the job id: one job, one branch");
-
+	// Bounded recovery revives it on its own: same lease, same branch, one attempt spent.
 	const held = await waitFor(
 		() => readFleet(f.home).jobs[0],
 		(record) => record?.phase === "held",
-		{ timeoutMs: 60_000, what: "the second attempt to report" },
+		{ timeoutMs: 60_000, what: "the revived worker to report" },
 	);
-	assert.equal(held?.failure, undefined, "the replacement record carries no stale failure");
+	assert.equal(readRecoveryAttempts(f.home, jobId, "crash"), 1, "exactly one automatic attempt");
+	assert.equal(held?.lease_id, firstLeaseId, "a revive keeps the lease");
+	assert.equal(held?.branch, first.branch, "the branch is still the job id: one job, one branch");
+	assert.equal(held?.failure, undefined, "the revived record carries no stale failure");
 	assert.equal(readFleet(f.home).jobs.length, 1, "one job, one record, whatever the attempt count");
+	assert.deepEqual(f.failures.map(([id]) => id), [jobId], "the revived run did not fail again");
 });
 
 // ---------------------------------------------------------------------------

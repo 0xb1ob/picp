@@ -519,7 +519,7 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	}
 	// Runtime state is never committed.
 	assert.equal(
-		f.post.checkToolCall({ toolName: "bash", input: { command: "git add state/fleet.json" }, cwd: f.home })?.code,
+		f.post.checkToolCall({ toolName: "bash", input: { command: "git add .pi-command-post/state/fleet.json" }, cwd: f.home })?.code,
 		"never_commit_path",
 	);
 

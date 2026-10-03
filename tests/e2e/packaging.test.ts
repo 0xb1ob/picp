@@ -175,15 +175,19 @@ test("clean machine: a fresh clone loads, scaffolds its home and is dispatchable
 	if (piConflict) {
 		console.log(`packaging: tolerating host.pi.conflict — more than one pi version on PATH (${piConflict})`);
 	}
-	const errors = report.findings.filter(
-		(finding) => finding.severity === "error" && !(piConflict && finding.check === "host.pi.conflict"),
-	);
+	// CI installs treehouse but never has model credentials (`CP_LIVE_TESTS` stays
+	// empty, no `pi auth`), so there every route is refused. Tolerate exactly the
+	// `models.*` findings there, printed; every other error still fails.
+	const noModelAuth = process.env.GITHUB_ACTIONS === "true";
+	const tolerated = (check: string) => (piConflict && check === "host.pi.conflict") || (noModelAuth && check.startsWith("models."));
+	const errors = report.findings.filter((finding) => finding.severity === "error" && !tolerated(finding.check));
+	if (noModelAuth) {
+		console.log(`packaging: CI has no pi auth — tolerating ${report.findings.filter((f) => f.severity === "error" && f.check.startsWith("models.")).length} models.* finding(s)`);
+	}
 	// "Dispatchable" is a claim about a host that actually has treehouse and
-	// authenticated models — CI (ubuntu-latest, `npm ci` only, no `pi auth`) is
-	// deliberately not that host, the same way it was never a `br` host before
-	// this build dropped br. Assert the strict "zero errors" claim only where it
-	// can be true; every other assertion in this test (scaffold, registration,
-	// idempotence) still runs unconditionally on every machine, CI included.
+	// authenticated models. Assert the strict "zero errors" claim only where
+	// treehouse is present; every other assertion in this test (scaffold,
+	// registration, idempotence) still runs unconditionally on every machine.
 	if (treehouseAvailable()) {
 		assert.deepEqual(
 			errors.map((finding) => finding.check),

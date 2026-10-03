@@ -31,6 +31,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The m2/m3/pipeline lease suites need a real treehouse on PATH and
+      # self-skip without it; tests/ci-host-tools.test.ts fails the run if it
+      # is missing. Prepending ~/.local/bin makes the upstream install script
+      # pick that directory (no sudo). install-tools.ts no-ops when the image
+      # already has one copy. The installer tracks upstream latest (no version
+      # pin is supported), so the version is printed into the job log.
+      - name: Install treehouse
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          PATH="$HOME/.local/bin:$PATH" node scripts/install-tools.ts treehouse
+          PATH="$HOME/.local/bin:$PATH" treehouse --version
+
       - name: Run suite (typecheck + tests)
         run: npm test
         env:

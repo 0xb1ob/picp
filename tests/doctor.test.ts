@@ -1493,13 +1493,18 @@ test(
 	// ahead of the installed one) legitimately trips host.pi.conflict. Tolerate
 	// exactly that finding, with the reason printed, and nothing else.
 	const piConflict = hostPiVersionConflict();
+	// CI installs treehouse but never has model credentials (no `pi auth`), so
+	// every route is refused there: tolerate exactly the `models.*` findings on CI.
+	const noModelAuth = process.env.GITHUB_ACTIONS === "true";
+	const errors = report.findings
+		.filter((finding) => finding.severity === "error" && !(noModelAuth && finding.check.startsWith("models.")))
+		.map((finding) => finding.check);
+	if (noModelAuth) console.log("doctor: CI has no pi auth — tolerating models.* findings");
 	if (piConflict) {
 		console.log(`doctor: tolerating host.pi.conflict — more than one pi version on PATH (${piConflict})`);
-		assert.deepEqual(
-			report.findings.filter((finding) => finding.severity === "error").map((finding) => finding.check),
-			["host.pi.conflict"],
-			"a fresh home passes apart from this host's pi version conflict",
-		);
+		assert.deepEqual(errors, ["host.pi.conflict"], "a fresh home passes apart from this host's pi version conflict");
+	} else if (noModelAuth) {
+		assert.deepEqual(errors, [], "a fresh home passes apart from model auth on CI");
 	} else {
 		assert.equal(report.ok, true, "a fresh home passes");
 	}
