@@ -59,7 +59,9 @@ function utf8Boundary(buffer: Buffer): number {
 export function scheduleAnswer(state: ViewerState, id: string, artifactPath: string | undefined): ScheduleHistoryJob["answer"] {
 	if (!isSafeId(id)) return null;
 	try {
-		const dir = realpathSync(join(state.stateDir, "artifacts", id));
+		const root = realpathSync(join(state.stateDir, "artifacts"));
+		const dir = realpathSync(join(root, id));
+		if (dir !== join(root, id)) return null; // a symlinked job dir would redefine the allowed root
 		const inside = (path: string): string | undefined => {
 			try { const real = realpathSync(path); return real.startsWith(`${dir}${sep}`) && statSync(real).isFile() ? real : undefined; } catch { return undefined; }
 		};

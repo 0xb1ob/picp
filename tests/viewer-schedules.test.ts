@@ -141,6 +141,18 @@ test("schedules view: an answer is read only from the job's own artifact dir; a 
 	assert.equal(SCHEDULE_ANSWER_MAX_BYTES, ANSWER_MAX_BYTES, "the viewer's cap mirrors the contract");
 });
 
+test("schedules view: a symlinked job artifact dir does not redefine the allowed root", (t) => {
+	const options = fixture(t, file(cron));
+	const external = join(options.home, "external-dir");
+	mkdirSync(external, { recursive: true });
+	writeFileSync(join(external, "outside.txt"), "SYNTHETIC_SECRET");
+	const job = join(options.stateDir, "artifacts", "cp-link");
+	symlinkSync(external, job);
+	assert.equal(scheduleAnswer(options, "cp-link", join(external, "outside.txt")), null, "an artifact path in a symlinked dir is refused");
+	writeFileSync(join(external, "report.md"), "SYNTHETIC_SECRET");
+	assert.equal(scheduleAnswer(options, "cp-link", undefined), null, "so is the intake copy");
+});
+
 test("schedules view: the 8 KiB cap trims back to a whole UTF-8 character", (t) => {
 	const options = fixture(t, file(cron));
 	// 1 + 3n bytes: the cap at 8192 falls inside the 2731st euro sign.
