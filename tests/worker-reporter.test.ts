@@ -4,12 +4,15 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
 	clampVerdictItems,
 	classifyEditFailure,
+	createMissCounter,
+	enrichAnchorEditFailure,
 	enrichEditFailure,
 	enrichSilentBashFailure,
 	ENVELOPE_FILE,
@@ -25,6 +28,7 @@ import {
 	VERDICT_RAW_FILE,
 	VERDICT_REJECTION_FILE,
 } from "../extensions/worker-reporter/index.ts";
+import workerReporter from "../extensions/worker-reporter/index.ts";
 import {
 	ANSWER_MAX_BYTES,
 	ENVELOPE_REPAIR_MAX_ATTEMPTS,
@@ -149,6 +153,142 @@ test("an unreadable file still gets the cause and hint, just no near-miss line",
 	);
 	assert.match(error, /cause: no_match/);
 	assert.doesNotMatch(error, /Nearest line/);
+});
+
+test("replace/insert failures get a cause and next move, like edit", () => {
+	const stale = enrichAnchorEditFailure(
+		'[E_STALE_ANCHOR] 1 stale anchor in README.md: "ReUA". The file changed since read. Call read() on README.md for fresh anchors.',
+	);
+	assert.equal(stale?.cause, "stale_anchor");
+	assert.equal(stale?.path, "README.md");
+	assert.match(stale?.text ?? "", /cause: stale_anchor — .*Call read/);
+	assert.equal(enrichAnchorEditFailure('[E_BAD_REF] Invalid anchor "x".')?.cause, "bad_anchor");
+	const invalid = enrichAnchorEditFailure('Validation failed for tool "insert":\n  - lines: required');
+	assert.equal(invalid?.cause, "bad_arguments");
+	assert.equal(invalid?.path, undefined);
+	assert.equal(enrichAnchorEditFailure("Operation aborted"), undefined);
+});
+
+test("miss counter: identical = same scope and cause (not same input); scopes never pool; resets clear runs", () => {
+	const counter = createMissCounter();
+	const a = { path: "a.ts" };
+	const b = { path: "b.ts" };
+	assert.equal(counter.miss(a, "no_match"), undefined);
+	assert.equal(counter.miss(b, "no_match"), undefined); // other path has its own count
+	assert.equal(counter.miss(a, "no_match"), undefined);
+	assert.match(counter.miss(a, "no_match") ?? "", /Identical no_match failure #3 on a\.ts.*read a\.ts again/);
+	assert.equal(counter.miss(b, "no_match"), undefined);
+	// a different cause restarts the run
+	assert.equal(counter.miss(a, "not_unique"), undefined);
+	// a reset restarts it too
+	counter.miss(a, "not_unique");
+	counter.reset("a.ts");
+	assert.equal(counter.miss(a, "not_unique"), undefined);
+	// anchor-scoped (path unknown) runs never pool across anchors, and a miss with no scope is not counted
+	for (let i = 0; i < 5; i++) assert.equal(counter.miss({}, "bad_arguments"), undefined);
+	counter.miss({ anchor: "AAAA" }, "bad_arguments");
+	counter.miss({ anchor: "BBBB" }, "bad_arguments");
+	assert.equal(counter.miss({ anchor: "AAAA" }, "bad_arguments"), undefined);
+	assert.match(counter.miss({ anchor: "AAAA" }, "bad_arguments") ?? "", /#3 on the target file/);
+	// reset(path) clears anchor-scoped runs too (their anchors are stale after a re-read); reset() clears all
+	counter.miss({ anchor: "AAAA" }, "bad_arguments");
+	counter.reset("any.ts");
+	assert.equal(counter.miss({ anchor: "AAAA" }, "bad_arguments"), undefined);
+	counter.miss(b, "no_match");
+	counter.reset();
+	assert.equal(counter.miss(b, "no_match"), undefined);
+});
+
+// Real inputs, from the run-log corpus: the replace/insert schema is anchors only, no `path`.
+const REPLACE_INPUT = { remove_from: "MMvt", remove_to: "MMvt", replacement_lines: "x" };
+const INSERT_INPUT = { anchor: "MMvt", direction: "after", lines: "x" };
+const STALE = (file: string) =>
+	`[E_STALE_ANCHOR] 1 stale anchor in ${file}: "ReUA". The file changed since read. Call read() on ${file} for fresh anchors.`;
+const INVALID = 'Validation failed for tool "replace":\n  - replacement_lines: must have required properties replacement_lines';
+
+function stubbedToolResultHandler() {
+	const keys = ["CP_JOB_ID", "CP_KIND", "CP_DELIVERY", "CP_RUN_DIR", "CP_ROLE"];
+	const saved = keys.map((key) => process.env[key]);
+	Object.assign(process.env, {
+		CP_JOB_ID: "cp-stub",
+		CP_KIND: "ship",
+		CP_DELIVERY: "pr",
+		CP_RUN_DIR: mkdtempSync(join(tmpdir(), "wr-handler-")),
+		CP_ROLE: "implementer",
+	});
+	const handlers: Record<string, (event: unknown) => unknown> = {};
+	try {
+		workerReporter({
+			on: (name: string, fn: (event: unknown) => unknown) => {
+				handlers[name] = fn;
+			},
+			registerTool: () => {},
+		} as never);
+	} finally {
+		keys.forEach((key, i) => (saved[i] === undefined ? delete process.env[key] : (process.env[key] = saved[i])));
+	}
+	return (toolName: string, input: Record<string, unknown>, text: string, isError = true): string | undefined => {
+		const out = handlers.tool_result?.({ toolName, input, isError, content: [{ type: "text", text }] }) as
+			| { content: Array<{ text: string }> }
+			| undefined;
+		return out?.content[0]?.text;
+	};
+}
+
+test("tool_result handler: replace/insert are enriched, and the 3rd identical miss on a file appends the re-read line", () => {
+	assert.ok(!("path" in REPLACE_INPUT) && !("path" in INSERT_INPUT));
+	const result = stubbedToolResultHandler();
+	assert.match(result("replace", REPLACE_INPUT, STALE("README.md")) ?? "", /cause: stale_anchor/);
+	const second = result("insert", INSERT_INPUT, STALE("README.md")) ?? "";
+	assert.match(second, /cause: stale_anchor/);
+	assert.doesNotMatch(second, /Identical/);
+	assert.match(result("replace", REPLACE_INPUT, STALE("README.md")) ?? "", /cause: stale_anchor[\s\S]*Identical stale_anchor failure #3 on README\.md\. Stop retrying: read README\.md again/);
+	// edit failures share the same per-path count
+	const edit = { path: "src/x.ts", oldText: "nope", newText: "y" };
+	const miss = "Could not find the exact text in src/x.ts. The old text must match exactly.";
+	assert.doesNotMatch(result("edit", edit, miss) ?? "", /Identical/);
+	assert.doesNotMatch(result("edit", edit, miss) ?? "", /Identical/);
+	assert.match(result("edit", edit, miss) ?? "", /cause: no_match[\s\S]*Identical no_match failure #3 on src\/x\.ts/);
+});
+
+test("tool_result handler: misses on different files are not pooled; an input path is preferred", () => {
+	const result = stubbedToolResultHandler();
+	// path-less errors on three different anchors (different files) never reach 3
+	for (const anchor of ["AAAA", "BBBB", "CCCC"]) {
+		assert.doesNotMatch(result("replace", { ...REPLACE_INPUT, remove_from: anchor }, INVALID) ?? "", /Identical/);
+	}
+	// if an input names a path it wins over the one inside the error text
+	const named = { ...REPLACE_INPUT, path: "named.ts" };
+	result("replace", named, STALE("other.md"));
+	result("replace", named, STALE("different.md"));
+	assert.match(result("replace", named, STALE("third.md")) ?? "", /#3 on named\.ts/);
+});
+
+test("tool_result handler: a successful read resets the run, including the path-less fallback", () => {
+	const result = stubbedToolResultHandler();
+	result("replace", REPLACE_INPUT, STALE("README.md"));
+	result("replace", REPLACE_INPUT, STALE("README.md"));
+	assert.equal(result("read", { path: "README.md" }, "file text", false), undefined);
+	assert.doesNotMatch(result("replace", REPLACE_INPUT, STALE("README.md")) ?? "", /Identical/);
+	// anchor-scoped run (error names no file)
+	result("replace", REPLACE_INPUT, INVALID);
+	result("replace", REPLACE_INPUT, INVALID);
+	result("read", { path: "anything.ts" }, "file text", false);
+	assert.doesNotMatch(result("replace", REPLACE_INPUT, INVALID) ?? "", /Identical/);
+});
+
+test("tool_result handler: successes and unrelated results are left untouched", () => {
+	const result = stubbedToolResultHandler();
+	assert.equal(result("replace", REPLACE_INPUT, "Replaced lines", false), undefined);
+	assert.equal(result("insert", INSERT_INPUT, "Inserted", false), undefined);
+	assert.equal(result("edit", { path: "a.ts" }, "Operation aborted"), undefined);
+	assert.equal(result("replace", REPLACE_INPUT, "Operation aborted"), undefined);
+	assert.equal(result("grep", {}, "boom"), undefined);
+	// a success clears runs: two misses, one good replace, then a miss starts over
+	result("replace", REPLACE_INPUT, STALE("README.md"));
+	result("replace", REPLACE_INPUT, STALE("README.md"));
+	result("replace", REPLACE_INPUT, "Replaced lines", false);
+	assert.doesNotMatch(result("replace", REPLACE_INPUT, STALE("README.md")) ?? "", /Identical/);
 });
 
 test("a bash non-zero exit with no output names the command that failed", () => {
