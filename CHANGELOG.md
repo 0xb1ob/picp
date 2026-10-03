@@ -20,7 +20,7 @@ Values only. `SCAFFOLD_MANDATE_DEFAULTS.dispatch_parallelism` is now 3 (was 1), 
 
 ### Operator note: one mandate may name several projects (cp-doc3)
 
-The operator note's mandate template now says the human names a project "(or the several projects one topic spans)" and that a topic spanning repos is one mandate naming each project — `Mandate.projects` already accepts several. Wording only; the note stays within its 60-line cap. Migration: none.
+The operator note's mandate template now says the human names a project "(or the several projects one topic spans)" and that a topic spanning repos is one mandate naming each project — `Mandate.projects` already accepts several. `docs/contracts.md` (Operator note, Mandate defaults) says the same. Wording only; the note stays within its 60-line cap. Migration: none.
 
 ### Keyword risk skips plan evidence sections, spend tokens and "Migration: none" (cp-wkv1)
 

@@ -1177,10 +1177,12 @@ is ssh or tmux onto the main session; there is no remote protocol.
 static, ≤60-line prompt appended to the main session's system prompt on every
 `before_agent_start` turn, at a fixed position so the prefix stays cacheable.
 It names the three tiers and who reads what, the lifecycle rules above,
-the mandate template (name a project and an objective, never ask for caps,
+the mandate template (name a project, or the several projects one topic spans,
+and an objective, never ask for caps,
 expiry or actions \u2014 they resolve through `src/mandate-defaults.ts`'s ladder \u2014
 and echo the effective grant, fields and sources, in one line once issued),
-one mandate per topic (never a bucket for unrelated work, so cost, expiry,
+one mandate per topic (a topic spanning repos is one mandate naming each
+project; never a bucket for unrelated work, so cost, expiry,
 revoke and mission-end summary stay per topic), the ask/decide split, and the plan-review
 procedure. The ask/decide split is one tier up from AGENTS.md §Escalation's
 own list: `operatorAction(kind, inScope)` in `src/operator-note.ts` says
@@ -3580,7 +3582,8 @@ is prose — no verification, no job, no escalation (bead b-qbi.2). `owner/repo#
 always verified; `cp_job create`'s `external_ref` stays strict.
 
 The operator note's Mandate template (`src/operator-note.ts`) tells the main LLM
-the same thing: name a project and an objective, never ask for caps/expiry/
+the same thing: name a project (or the several projects one topic spans) and an
+objective, never ask for caps/expiry/
 actions, echo the effective grant (fields and sources) in one line once issued.
 
 ### Continuation (`cp_next`, cur.4.1)
