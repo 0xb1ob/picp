@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createViewer, hostAllowed, type ViewerOptions } from "../src/viewer/server.ts";
+import { bindHostRefusal } from "../src/viewer/bind-host.ts";
 import { deriveSidebar, resolveSessionFile, resolveStateDir, sidebar, type SessionRow } from "../src/viewer/sessions.ts";
 import { readLines, startOffset } from "../src/viewer/tail.ts";
 import { defaultHost } from "../src/viewer/cli.ts";
@@ -314,6 +315,8 @@ test("default host: interactive falls back to 127.0.0.1; with --require-tailnet 
 	assert.equal(defaultHost(() => undefined), "127.0.0.1");
 	assert.throws(() => defaultHost(() => undefined, true), /require-tailnet/);
 	assert.throws(() => defaultHost(() => undefined, true), /tailscale ip -4.*--viewer-host/);
+	assert.equal(bindHostRefusal(defaultHost(() => undefined)), undefined, "the unflagged loopback default passes the always-on bind guard");
+	assert.equal(bindHostRefusal("127.0.0.1"), undefined);
 });
 
 test("cli: with or without --require-tailnet a wildcard, public or non-IP host is refused before anything binds", () => {
