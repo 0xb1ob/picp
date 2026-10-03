@@ -100,6 +100,23 @@ test("two dependent jobs: the second dispatches once the first closes, no operat
 	assert.equal(after.action.job_id, second.id, "the second job dispatches with no operator message");
 });
 
+test("spawn cap: cp_next waits when live worker processes reach spawn_cap, dispatches below it", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const job = await ports.ledger.create({ title: "capped", project: "demo", delivery: "pr", kind: "ship" });
+	ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+
+	const full = await cpNext({ ...ports, capacity: () => ({ active: 10, cap: 10, held: ["cp-a1"] }) }, "demo");
+	assert.equal(full.action.kind, "wait");
+	assert.equal(full.action.job_id, undefined);
+	assert.match(full.action.reason, /spawn cap 10 reached: 10 live worker processes \(held: cp-a1\)/);
+	assert.match(full.action.reason, new RegExp(`${job.id} dispatches when one tears down`));
+
+	const room = await cpNext({ ...ports, capacity: () => ({ active: 9, cap: 10, held: [] }) }, "demo");
+	assert.deepEqual([room.action.kind, room.action.job_id], ["dispatch", job.id]);
+});
+
 test("an objective-issue grant without job_ids covers a second same-project job and never invents a mission end on the first close", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
@@ -641,7 +658,7 @@ test("the cp_next tool: an identical second call is one line, full/compaction/ro
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
 	const hooks = new Map<string, () => void>();
 	registerMandateTools({ on: (event: string, fn: () => void) => hooks.set(event, fn), registerTool: (tool: { name: string; execute: never }) => tools.set(tool.name, tool) } as never, {
-		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, curationPlan: () => post.curationPlan() }),
+		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager: post.manager, curationPlan: () => post.curationPlan() }),
 		setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined,
 	} as never);
 	const call = async (params: Record<string, unknown> = { project: "demo" }) => (await tools.get("cp_next")!.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined })).content[0]!.text;
