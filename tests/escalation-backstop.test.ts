@@ -95,6 +95,16 @@ test("T5f: open ids are pinned past 512 later relays; only settled history is ca
 		home: home.path, open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledger: real, relay: (relay) => sent.push(relay), now: () => NOW,
 	}), []);
 	assert.equal(sent.length, 0);
+
+	// Control: the same escalation in a ledger filled the same way without the pin is evicted, so it reads as never relayed.
+	const unpinned = new EscalationRelayLedger(join(home.path, "unpinned.json"));
+	unpinned.note(raised.id, "bridge", isoTimestamp(NOW));
+	for (let i = 1; i <= ESCALATION_RELAY_LEDGER_KEEP; i++) unpinned.note(`es-m${i}`, "backstop", isoTimestamp(new Date(NOW.getTime() + i * 1000)));
+	assert.equal(unpinned.ids().has(raised.id), false, "without the pin the open id is evicted");
+	assert.deepEqual(runEscalationBackstop({
+		home: home.path, open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledger: unpinned, relay: (relay) => sent.push(relay), now: () => NOW,
+	}), [raised.id], "and is relayed again");
+	assert.equal(sent.length, 1);
 });
 
 const gateVerdict: GateVerdict = {

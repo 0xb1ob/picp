@@ -21,6 +21,8 @@ import {
 } from "../src/escalation.ts";
 import { queued } from "../src/json-store.ts";
 import type { AwaitingStore } from "../src/awaiting.ts";
+import { AnsweredOutbox } from "../src/answered.ts";
+import type { AnsweredDecision } from "../src/contracts.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExtensionDeps } from "../extensions/command-post/shared.ts";
 import { registerMandateTools } from "../extensions/command-post/tools-mandate.ts";
@@ -230,10 +232,18 @@ async function holdQueue(file: string): Promise<{ held: Promise<void>; release: 
 	return { held, release: () => release() };
 }
 
+/** An `onAnswered` sink that records each decision and queues it in the home's real outbox. */
+function wakeRecorder(home: string): { seen: AnsweredDecision[]; outbox: AnsweredOutbox; sink: (decision: AnsweredDecision) => void } {
+	const seen: AnsweredDecision[] = [];
+	const outbox = new AnsweredOutbox({ home });
+	return { seen, outbox, sink: (decision) => { seen.push(decision); outbox.enqueue(decision); } };
+}
+
 test("a supersede landing while an answer waits on the queue wins: the answer is refused and nothing is recorded", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const store = new EscalationStore({ home: home.path });
+	const wakes = wakeRecorder(home.path);
+	const store = new EscalationStore({ home: home.path, onAnswered: wakes.sink });
 	const raised = await store.raise({ job_ids: ["cp-synth1"], kind: "product_ambiguity", question: "which copy?", options: OPTIONS, recommended: "approve" });
 	const gate = await holdQueue(store.file);
 	const pending = store.answer(raised.id, { answer: "approve", by: "operator command" });
@@ -242,14 +252,17 @@ test("a supersede landing while an answer waits on the queue wins: the answer is
 	await gate.held;
 	await assert.rejects(pending, /superseded/);
 	assert.deepEqual([store.get(raised.id)?.status, store.get(raised.id)?.answer], ["superseded", undefined]);
+	assert.deepEqual(wakes.seen, [], "a refused answer reports nothing");
+	assert.deepEqual(wakes.outbox.pending(), [], "and queues no wake in answered.json");
 });
 
 test("a supersede landing while a linked answer waits leaves the linked checkpoint pending", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const checkpoints = new CheckpointStore(home.path);
+	const wakes = wakeRecorder(home.path);
+	const checkpoints = new CheckpointStore(home.path, { onAnswered: wakes.sink });
 	checkpoints.request({ jobId: "cp-synth1", question: "authorize cp-synth1?" });
-	const store = new EscalationStore({ home: home.path, checkpoints: () => checkpoints });
+	const store = new EscalationStore({ home: home.path, checkpoints: () => checkpoints, onAnswered: wakes.sink });
 	const raised = await store.raise({ job_ids: ["cp-synth1"], kind: "conflicting_acceptance", question: "ship anyway?", options: OPTIONS, recommended: "approve", checkpoint_job_id: "cp-synth1" });
 	const gate = await holdQueue(store.file);
 	const pending = store.answer(raised.id, { answer: "approve", by: "operator command" });
@@ -259,6 +272,8 @@ test("a supersede landing while a linked answer waits leaves the linked checkpoi
 	await assert.rejects(pending, /superseded/);
 	assert.equal(store.get(raised.id)?.status, "superseded");
 	assert.equal(checkpoints.get("cp-synth1")?.decision, "pending", "a refused answer never authorized");
+	assert.deepEqual(wakes.seen, [], "neither the escalation nor the checkpoint reports a refused answer");
+	assert.deepEqual(wakes.outbox.pending(), [], "and answered.json holds no wake");
 });
 
 test("two contrary answers racing on an unlinked record: one wins, the other is refused as already answered", async (t) => {
