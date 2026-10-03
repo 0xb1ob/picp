@@ -219,7 +219,8 @@ export interface IntegratorOptions {
 	 * skipped — the merge is still never forced either way.
 	 */
 	awaiting?: () => AwaitingLike;
-	/** merge_policy human_handoff (src/human-handoff.ts): a result stops the step before any update or merge; absent or `undefined` changes nothing. */ handoff?: import("./human-handoff.ts").HandoffPort;
+	/** merge_policy human_handoff (src/human-handoff.ts): a result stops the step before any update or merge; absent or `undefined` changes nothing. */
+	handoff?: import("./human-handoff.ts").HandoffPort;
 }
 
 export interface IntegrateRequest {
@@ -501,7 +502,8 @@ export class Integrator {
 					// human checkpoint is the honest exit, exactly as before: an unreadable
 					// signal is never permission.
 					return this.#fallback({
-						jobId, project: record.project,
+						jobId,
+						project: record.project,
 						branch,
 						facts,
 						prUrl,
@@ -696,7 +698,8 @@ export class Integrator {
 			// fallback is the per-head human checkpoint, exactly as it worked before
 			// this rule existed.
 			return this.#fallback({
-				jobId, project: record.project,
+				jobId,
+				project: record.project,
 				branch,
 				facts,
 				prUrl,
@@ -860,7 +863,8 @@ export class Integrator {
 	 * for. Only an **unreadable** CI configuration does.
 	 */
 	async #fallback(input: {
-		jobId: string; project: string;
+		jobId: string;
+		project: string;
 		branch: string;
 		facts: string[];
 		prUrl: string;
@@ -872,9 +876,8 @@ export class Integrator {
 		draft?: boolean;
 	}): Promise<IntegrateResult> {
 		const { jobId, branch, facts, prUrl, head, request, cwd } = input;
-		const blocked = await this.#reviewRequired({ jobId, branch, facts, prUrl, head });
-		if (blocked) return blocked;
-		const handed = await this.#options.handoff?.({ jobId, branch, facts, prUrl, head, project: input.project, at: "fallback", write: (w) => this.#write(w) }); if (handed) return handed; // human_handoff never mints a merge checkpoint
+		const held = (await this.#reviewRequired({ jobId, branch, facts, prUrl, head })) ?? (await this.#options.handoff?.({ jobId, branch, facts, prUrl, head, project: input.project, at: "fallback", write: (w) => this.#write(w) }));
+		if (held) return held; // review gate first; human_handoff then never mints a merge checkpoint
 		if (input.draft) return this.#ready({ jobId, branch, facts, prUrl, head, cwd });
 		const checkpoints = this.#checkpoints();
 		const scope = scopeOf(head);

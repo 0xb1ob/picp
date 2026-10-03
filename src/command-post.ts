@@ -118,7 +118,8 @@ import {
 } from "./curation.ts";
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
-import { HeldContinuation } from "./held-continuation.ts"; import { makeHandoff } from "./human-handoff.ts";
+import { HeldContinuation } from "./held-continuation.ts";
+import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
 import { ProjectRegistry } from "./projects.ts";
