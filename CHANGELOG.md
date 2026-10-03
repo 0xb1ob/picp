@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### The parent's transient retry budget survives a restart (cp-md0c)
+
+`ParentSendEntry` gains optional `outer_retry_attempts` (`src/parent-outbox.ts`): the transient-retry reservations a send id has spent, written by `ParentSendOutbox.reserveOuterRetry` before the outer ladder sleeps (`src/parent-delivery.ts`). A parent death or restart no longer resets the ladder to attempt 1; the in-memory map now holds only pending timers. A reservation that cannot be written journals `outer_retry_reservation_failed` and fails the send once. Normal restart resume nudges are unchanged and uncounted. Migration: none for upgrades (absent reads as 0). Downgrade: an older binary rejects a sends file carrying the field — roll back only with the parent stopped and a backup of `state/sessions/cp-parent.sends.json`.
+
 ### The updater no longer rolls back a busy live parent, and bad_sha marks only a verified rollback (cp-ot8i)
 
 Post-update verification (`src/service/update.ts` `verifyRestart`) treats a live parent that is busy as not yet verified, instead of unhealthy: busy is the exact `#settledProc` refusal (`PARENT_UNSETTLED`, now exported from `src/parent-diagnostics.ts`), or a doctor still queued behind the host's serial queue while the host's non-queued `status` read names the same live parent pid. Only busy extends the 120 s window, by ≤ 300 s; a parent still busy at the bound is accepted and the `updated` detail ends with `; doctor deferred: parent busy 420s`. An absent parent, a `/doctor` error, any other doctor rejection and a down viewer still roll back at 120 s. `rollback_failed` no longer stamps `bad_sha = to`; only `rolled_back` does, so a failure that is not attributed to the target never skips it later (the sticky `rollback_failed` still holds a bad one). Worst case stays ≈ 2172 s of cp-daemon's 45 min update timeout. Takes effect for updates after this one lands: the updater that applies this commit still runs the strict 120 s check. Migration: none.

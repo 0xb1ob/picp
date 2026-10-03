@@ -1320,6 +1320,45 @@ test("the outer retry ladder runs in the background under the same send id: pend
 	]);
 });
 
+test("a restarted bridge continues a send's persisted transient budget: remaining delays only, then one failed receipt", async (t) => {
+	const home = createScratchHome();
+	process.env.FAKE_PARENT_TRANSIENT_ALWAYS = "1";
+	const bridge = new CpBridge();
+	const relays: BridgeRelay[] = [];
+	bridge.onRelay((relay) => relays.push(relay));
+	const delays: number[] = [];
+	t.after(async () => {
+		delete process.env.FAKE_PARENT_TRANSIENT_ALWAYS;
+		await bridge.stop();
+		home.cleanup();
+	});
+	// Left by a dead bridge: landed, two transient retries already spent.
+	mkdirSync(join(home.path, LAYOUT.sessions), { recursive: true });
+	const box = new ParentSendOutbox({ file: join(home.path, LAYOUT.sessions, "cp-parent.sends.json") });
+	const entry = box.enqueue("seeded before the restart");
+	box.markInjected([entry.id]);
+	box.markLanded([entry.id]);
+	box.reserveOuterRetry(entry.id, 5);
+	box.reserveOuterRetry(entry.id, 5);
+	await bridge.start({
+		home: home.path,
+		mode: "multi",
+		model: "mock/parent",
+		piBin: FAKE_PARENT,
+		requestTimeoutMs: 5_000,
+		settleTimeoutMs: 5_000,
+		outerRetrySleep: async (ms) => {
+			delays.push(ms);
+		},
+	});
+	await until(() => relays.some((relay) => relay.kind === "send" && relay.sendId === entry.id), "the final relay");
+	assert.deepEqual(delays, [20_000, 40_000, 80_000], "attempts 3-5 only: the spent two are not replayed");
+	const final = new ParentSendOutbox({ file: box.file }).get(entry.id);
+	assert.equal(final?.state, "failed");
+	assert.equal(final?.outer_retry_attempts, 5);
+	assert.equal(relays.filter((relay) => relay.kind === "send").length, 1);
+});
+
 // Parent host (src/parent-host.ts): a detached child owns the parent; clients attach over a private socket.
 
 const HOST_MODULE = resolve(import.meta.dirname, "..", "src", "parent-host.ts");

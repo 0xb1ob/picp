@@ -4,13 +4,14 @@
  * whose outcome arrives after their tool result.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
 import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText } from "../src/parent-outbox.ts";
+import { OUTER_RETRY_DELAYS_MS } from "../src/provider-retry.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
 
 function scripted() {
@@ -269,4 +270,106 @@ test("H3c: a relay that keeps throwing for the same send id journals relay_faile
 	for (const item of delivery.outbox.relaysDue()) delivery.relay(item);
 	assert.deepEqual(relayed, [bad.id]);
 	assert.deepEqual(journaled, [{ event: "relay_failed", send_id: bad.id }], "still exactly one journal entry once it lands");
+});
+
+/** A landed send with `spent` reservations and a delivery whose sleeps are held until released. */
+function laddered(spent = 0) {
+	const ctx = scripted();
+	const journal: Array<{ event: string; payload: Record<string, unknown> }> = [];
+	const sleeps: Array<{ ms: number; release: () => void }> = [];
+	const host = {
+		liveProc: () => ctx.proc,
+		emit: (relay: { sendId: string; text: string }) => ctx.relays.push(relay),
+		sleep: (ms: number) => new Promise<void>((resolve) => sleeps.push({ ms, release: resolve })),
+		journal: (event: string, payload: Record<string, unknown>) => journal.push({ event, payload }),
+		countTurn: (failed: boolean) => ctx.counted.push(failed),
+	};
+	// `fresh()` is a restarted delivery over the same outbox file: nothing volatile carries over.
+	const fresh = () => new ParentDelivery(new ParentSendOutbox({ file: ctx.box.file }), host as never);
+	const entry = ctx.box.enqueue("task");
+	ctx.box.markInjected([entry.id]);
+	ctx.box.markLanded([entry.id]);
+	for (let i = 0; i < spent; i++) ctx.box.reserveOuterRetry(entry.id, 5);
+	const fail = (delivery: ParentDelivery, message = "503 service unavailable") => {
+		const turn = ctx.turn();
+		delivery.landed(frameBatch([entry]), turn);
+		turn.error = { message };
+		delivery.settle(turn);
+	};
+	return { ...ctx, entry, journal, sleeps, fresh, fail };
+}
+
+test("the transient retry budget is on disk: a restarted delivery continues at the next ordinal and delay", async () => {
+	const ctx = laddered(2);
+	const delivery = ctx.fresh();
+	ctx.fail(delivery);
+	assert.deepEqual(ctx.sleeps.map((sleep) => sleep.ms), [OUTER_RETRY_DELAYS_MS[2]]);
+	assert.equal(ctx.journal[0]?.payload.attempt, 3);
+	assert.equal(ctx.box.get(ctx.entry.id)?.outer_retry_attempts, 3, "reserved before the sleep");
+	ctx.sleeps[0]?.release();
+	await flush();
+	assert.equal(ctx.sent.length, 1, "one nudge, never the original body");
+	assert.match(ctx.sent[0] as string, /previous turn failed/);
+	assert.equal(ctx.box.get(ctx.entry.id)?.attempts, 1, "injection attempts untouched");
+});
+
+test("a death mid-sleep keeps the reservation spent; the stale timer sends nothing and the next failure takes the next ordinal", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	ctx.fail(delivery);
+	delivery.failWaiters();
+	ctx.sleeps[0]?.release();
+	await flush();
+	assert.deepEqual(ctx.sent, [], "an obsolete timer sends nothing");
+	assert.equal(ctx.box.get(ctx.entry.id)?.outer_retry_attempts, 1);
+	ctx.fail(delivery);
+	assert.deepEqual(ctx.sleeps.map((sleep) => sleep.ms), [OUTER_RETRY_DELAYS_MS[0], OUTER_RETRY_DELAYS_MS[1]]);
+});
+
+test("a second failure while a timer is pending schedules no second timer and spends nothing", () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	ctx.fail(delivery);
+	ctx.fail(delivery);
+	assert.equal(ctx.sleeps.length, 1);
+	assert.equal(ctx.box.get(ctx.entry.id)?.outer_retry_attempts, 1);
+});
+
+test("a spent budget fails the send once: final receipt, no timer, exhausted journaled", () => {
+	const ctx = laddered(5);
+	const delivery = ctx.fresh();
+	ctx.fail(delivery);
+	assert.deepEqual(ctx.sleeps, []);
+	assert.equal(ctx.box.get(ctx.entry.id)?.state, "failed");
+	assert.equal(ctx.box.get(ctx.entry.id)?.outer_retry_attempts, 5, "terminal record keeps the count");
+	assert.deepEqual(ctx.journal.map((line) => line.event), ["outer_retry_exhausted"]);
+	assert.equal(ctx.journal[0]?.payload.attempts, 5);
+	assert.deepEqual(ctx.counted, [true]);
+	assert.deepEqual(ctx.relays.map((relay) => relay.sendId), [ctx.entry.id]);
+});
+
+test("a success after retries journals the persisted count", () => {
+	const ctx = laddered(2);
+	const delivery = ctx.fresh();
+	const turn = ctx.turn();
+	delivery.landed(frameBatch([ctx.entry]), turn);
+	turn.texts.push("done");
+	turn.assistantCount += 1;
+	delivery.settle(turn);
+	assert.deepEqual(ctx.journal.map((line) => [line.event, line.payload.afterAttempts]), [["outer_retry_succeeded", 2]]);
+	assert.equal(ctx.box.get(ctx.entry.id)?.outer_retry_attempts, 2);
+});
+
+test("a reservation that cannot be written is named, schedules no retry and fails the send", () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	const turn = ctx.turn();
+	delivery.landed(frameBatch([ctx.entry]), turn);
+	turn.error = { message: "503 service unavailable" };
+	writeFileSync(ctx.box.file, "not json", "utf8");
+	delivery.settle(turn);
+	assert.deepEqual(ctx.sleeps, []);
+	assert.deepEqual(ctx.journal.map((line) => line.event), ["outer_retry_reservation_failed"]);
+	assert.equal(ctx.journal[0]?.payload.send_id, ctx.entry.id);
+	assert.deepEqual(ctx.counted, [true], "failed once, volatile retrying never takes over");
 });
