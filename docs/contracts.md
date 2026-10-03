@@ -2967,6 +2967,7 @@ move is the right one.
 | `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`, and `.beads/` in multi mode) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
+| `ci_checks_read` | parent bash `gh pr checks` or any `gh` call naming `statusCheckRollup` (the checks API is refused in this home) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
 
 The bash rule is an allowlist, because that is the only shape that fails
 closed: a command that mentions an artifact path is refused unless it is a
