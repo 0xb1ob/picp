@@ -107,11 +107,12 @@ export function dueEscalations(input: {
 	now: Date;
 	afterSeconds?: number;
 }): Escalation[] {
-	const after = (input.afterSeconds ?? ESCALATION_BACKSTOP_SECONDS) * 1000;
+	const defaultAfter = (input.afterSeconds ?? ESCALATION_BACKSTOP_SECONDS) * 1000;
 	const represented = new Set(input.asks.filter((ask) => ask.state === "open").map((ask) => ask.source_escalation));
 	return input.open
 		.filter((item) => {
 			const created = Date.parse(item.created_at);
+			const after = item.kind === "service_health" ? 0 : defaultAfter; // a failing service is relayed at once
 			return item.status === "open" && Number.isFinite(created) && input.now.getTime() - created >= after && !represented.has(item.id) && !input.relayed.has(item.id);
 		})
 		.sort((a, b) => a.created_at.localeCompare(b.created_at));

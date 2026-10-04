@@ -197,7 +197,17 @@ test("offline → starting → running (cp-daemon P3): the composer holds with t
 	assert.match(offlineHtml, /operator<\/span><strong title="offline · 2 held">offline · 2 held</);
 	assert.match(ui.overview({ ...data, fleet: { ...data.fleet, operator: { running: false, pid: null, since: null, held: 0 } } }, view(offline)), /class="start-session-button">Start in tmux/, "the Overview offline line offers Start session");
 	assert.doesNotMatch(ui.overview({ ...data, fleet: { ...data.fleet, operator: { running: true, pid: 7, since: null, held: 0 } } }, view(status({}))), /start-session/);
-	assert.match(ui.overview({ ...data, services: { health: { last_run_at: data.generated_at, failing: [{ check: "disk", detail: "3 GiB" }] } } }), /health failing: disk \(0m ago\)/);
+	const since = (secondsAgo: number) => new Date(Date.parse(data.generated_at) - secondsAgo * 1000).toISOString();
+	const disk = (secondsAgo: number) => ({ ...data, services: { health: { last_run_at: data.generated_at, failing: [{ check: "disk", detail: "3 GiB", since: since(secondsAgo) }] } } });
+	assert.match(ui.overview(disk(0)), /health failing: disk \(0m ago\)/);
+	// cp-6fyl PR2: the alarm banner (role="alert") only for a health check failing 15 min or an unacked relay 10 min.
+	const banner = /<section class="overview-alarm" role="alert">([\s\S]*?)<\/section>/;
+	assert.doesNotMatch(ui.overview(data), banner, "a calm page has no banner");
+	assert.doesNotMatch(ui.overview(disk(899)), banner, "14 min 59 s: not yet");
+	assert.match(banner.exec(ui.overview(disk(900)))?.[1] ?? "", /health check disk failing 15m: 3 GiB/);
+	const unseen = (age: number, alarm: boolean) => ({ ...data, delivery: { availability: "ok", unseen: 2, oldest_id: "esc:es-demo1", oldest_kind: "escalation", oldest_age_seconds: age, consumer_seen_at: null, alarm } });
+	assert.doesNotMatch(ui.overview(unseen(599, false)), banner);
+	assert.match(banner.exec(ui.overview(unseen(600, true)))?.[1] ?? "", /2 parent messages not seen by the main session, oldest 10m \(escalation esc:es-demo1\)/);
 });
 
 test("client: startOperator posts {via} with the inbox token and maps starting / already_running / unavailable / a refusal; chip and line say offline", async () => {

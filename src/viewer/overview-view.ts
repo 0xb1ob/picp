@@ -5,6 +5,7 @@ import { dashboard } from "./fleet-view.ts";
 import { roots } from "./explorer.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { decisions } from "./overview-decisions.ts";
+import { delivery } from "./overview-delivery.ts";
 import { blocked, closedToday, failedJobs, flights, shipped } from "./overview-jobs.ts";
 import { health, quota } from "./overview-health.ts";
 import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp } from "./overview-read.ts";
@@ -39,7 +40,7 @@ export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: n
   blocked:blocked(ledger.value,grants.value,fleet.value,now,ledger.availability !== "unavailable" && grants.availability !== "unavailable"),
   failed:failedJobs(state,fleet.value,ledger.value), main_ci:mainCi(state),
   mandates:{active_count:count(m => m.status === "active" && Date.parse(String(m.expiry)) > now), paused_count:count(m => m.status === "paused"), paused_projects:[...new Set(grants.value.filter(m => m.status === "paused").flatMap(m => strings(m.projects)))], revoked_hidden_count:count(m => m.status === "revoked"), items},
-  fleet:{...health(state,fleet.value,now,fleet.availability !== "unavailable",isAlive), operator:operatorHealth(state,isAlive)}, services:services(state), quota:quota(state,fleet.value),
+  fleet:{...health(state,fleet.value,now,fleet.availability !== "unavailable",isAlive), operator:operatorHealth(state,isAlive)}, services:services(state), delivery:delivery(state,now), quota:quota(state,fleet.value),
   navigation:{project_count:accessible.filter(r => r.kind === "project").length, worktree_count:accessible.filter(r => r.kind === "worktree").length},
   warnings:Object.entries(availability).filter(([,v]) => v === "unavailable").map(([section]) => ({section,message:"Recorded data is unavailable or malformed."})),
  };
@@ -55,7 +56,7 @@ function services(state: ViewerState): OverviewResponse["services"] {
  const record = readObject(join(state.stateDir,"health.json"));
  const checks = obj(record?.checks);
  if (!record || !timestamp(record.last_run_at) || !checks) return {health:null};
- const failing = Object.entries(checks).flatMap(([check,value]) => { const row = obj(value); return row?.status === "fail" ? [{check, detail:str(row.detail) ?? ""}] : []; });
+ const failing = Object.entries(checks).flatMap(([check,value]) => { const row = obj(value); return row?.status === "fail" ? [{check, detail:str(row.detail) ?? "", since:timestamp(row.since) ? row.since : String(record.last_run_at)}] : []; });
  return {health:{last_run_at:String(record.last_run_at), failing}};
 }
 /**

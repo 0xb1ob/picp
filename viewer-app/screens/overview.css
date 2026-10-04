@@ -7,6 +7,8 @@
 .overview-meta { font-size: 12px; line-height: 1.5; color: var(--dim); }
 .overview-error { color: var(--coral); font-size: 13px; }
 .overview-amber { color: var(--amber); }
+.overview-alarm { padding: 12px 14px; border: 2px solid var(--coral); border-radius: 12px; background: var(--surface); color: var(--coral); font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.overview-alarm p + p { margin-top: 4px; }
 progress { appearance: none; display: block; border: 0; height: 3px; width: 100%; border-radius: 2px; overflow: hidden; background: var(--border); color: var(--secondary); }
 progress::-webkit-progress-bar { background: var(--border); }
 progress::-webkit-progress-value { background: var(--secondary); }

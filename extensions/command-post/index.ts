@@ -29,6 +29,7 @@ import { registerReviewTools } from "./tools-review.ts";
 import { registerScheduleTools } from "./tools-schedule.ts";
 import { registerTrackerTools } from "./tools-tracker.ts";
 import { registerPushTick } from "./push-tick.ts";
+import { registerServiceAlertTick } from "./service-alert-tick.ts";
 import { registerSendStatusTools } from "./tools-send-status.ts";
 import { createWakeupSurfaces } from "./wakeup-surfaces.ts";
 
@@ -95,6 +96,7 @@ export default function (pi: ExtensionAPI): void {
 	registerScheduleTools(pi, deps, () => s.parentLock !== undefined, (get) => { s.scheduleRunner = get; }, (result) => session.wakeEnvelope(result));
 	registerTrackerTools(pi, deps, () => s.parentLock !== undefined);
 	registerPushTick(pi, deps, () => s.parentLock !== undefined);
+	registerServiceAlertTick(pi, deps, () => s.parentLock !== undefined);
 
 	// Spec 2026-09-04: the ledger's two surfaces. `emit` and `commandPost` are
 	// this closure's; the policy lives in ./jobs.ts so it is testable without pi.

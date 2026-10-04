@@ -120,6 +120,9 @@ export type Checkpoint = Replace<
 // Escalation — one schema for "ask the human" (autonomy-programme-cur.2.3)
 // ---------------------------------------------------------------------------
 
+/** The synthetic job anchor of a `service_health` escalation (the schema needs one job id); no such job exists. */
+export const SERVICE_HEALTH_JOB_ID = "cp-service-health";
+
 export const ESCALATION_ID_PATTERN = "^es-[a-z0-9]{4,16}$";
 const ESCALATION_ID_RE = new RegExp(ESCALATION_ID_PATTERN);
 export const EscalationIdSchema = Type.String({ pattern: ESCALATION_ID_PATTERN });
@@ -137,6 +140,7 @@ export const ESCALATION_KINDS = [
 	"merge_refused",
 	"mission_end",
 	"plan_approval",
+	"service_health",
 ] as const;
 export type EscalationKind = (typeof ESCALATION_KINDS)[number];
 export const EscalationKindSchema = StringEnum([...ESCALATION_KINDS]);
@@ -168,6 +172,7 @@ export const ESCALATION_KIND_SURFACES = [
 	{ kind: "merge_refused", surface: "integrate surface / repo refuses merge", agents: "merge refused" },
 	{ kind: "mission_end", surface: "mission end", agents: "mission end" },
 	{ kind: "plan_approval", surface: "plan approval", agents: "plan approval" },
+	{ kind: "service_health", surface: "service health (cp-health failing / rollback_failed)", agents: "service health" },
 ] as const satisfies readonly { kind: EscalationKind; surface: string; agents: string }[];
 
 export const EscalationOptionSchema = Type.Object(

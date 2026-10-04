@@ -42,6 +42,13 @@ test("T5a: due means open, at least 600 s old, no open ask for it, never relayed
 	assert.deepEqual(due([escalation({ id: "es-new", created_at: ago(700) }), escalation({ id: "es-old", created_at: ago(900) })]), ["es-old", "es-new"], "oldest first");
 });
 
+test("cp-6fyl PR2: a service_health escalation is due at age 0, any other kind still waits its 600 s", () => {
+	assert.deepEqual(due([escalation({ kind: "service_health", job_ids: ["cp-service-health"], created_at: ago(1) })]), ["es-aaaa11"]);
+	assert.deepEqual(due([escalation({ created_at: ago(1) })]), [], "an ordinary kind is not");
+	assert.deepEqual(due([escalation({ kind: "service_health", created_at: ago(1) })], [ask({ source_escalation: "es-aaaa11" })]), [], "an open ask still represents it");
+	assert.deepEqual(due([escalation({ kind: "service_health", created_at: ago(1) })], [], ["es-aaaa11"]), [], "and it is relayed once");
+});
+
 test("T5b: the ledger records once, persists, refuses bad JSON, keeps the newest 512, notes bridge escalations only", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

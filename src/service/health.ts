@@ -11,6 +11,9 @@
  *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
  *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to`, so a new failure pushes
  *               again                                                          → `health: update failed`
+ *   relay       a parent→operator relay unacked 10 min (`state/operator/relay-outbox.json` vs `relay-acks.jsonl`), or an open
+ *               escalation 20 min old no ack, discard or open ask accounts for; keyed `relay:<id>` / `escalation:<id>`
+ *                                                                               → `health: relay unseen`
  *
  * Its record is `state/health.json` (this unit is its only writer). It reads `data/push/` (the VAPID key and the
  * subscriptions) and sends directly; it never writes `state/push-deliveries.json` (the parent sweep's ledger) and
@@ -31,10 +34,16 @@ import { hostHeaderFor } from "../viewer/server.ts";
 import { viewerAddress } from "../viewer/cli.ts";
 import { listSubscriptions, pushServiceAllowed } from "../viewer/push-files.ts";
 import { daemonPaths } from "./daemon-files.ts";
+import { EscalationStore } from "../escalation.ts";
+import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
+import { OperatorAsks } from "../operator-asks.ts";
 
-export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update"] as const;
+export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
-const KIND: Record<HealthCheck, string> = { parent: "parent down", viewer: "viewer down", supervisor: "crash-looping", disk: "disk low", git: "git credential", gh: "gh credential", update: "update failed" };
+const KIND: Record<HealthCheck, string> = { parent: "parent down", viewer: "viewer down", supervisor: "crash-looping", disk: "disk low", git: "git credential", gh: "gh credential", update: "update failed", relay: "relay unseen" };
+/** cp-6fyl PR2: a relay the operator session has not acked this long, or an open escalation unseen this long (the 600 s backstop plus one alarm window). */
+export const RELAY_UNSEEN_SECONDS = 600;
+export const ESCALATION_UNSEEN_SECONDS = 1200;
 /** Runs in a row a failure must last before it counts (a restart blip is not an outage). */
 const CONSECUTIVE: Partial<Record<HealthCheck, number>> = { parent: 2, viewer: 2 };
 export const HEALTH_PUSH_RETRIES = 3;
@@ -251,7 +260,42 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 			if (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && Number(update?.fetch_failures) >= 3)) return { ok: false, key: `${result}:${to}`, detail: `auto-update ${result}${to ? ` (${to.slice(0, 12)})` : ""}; see state/update.json and cp-daemon log` };
 			return result === "updated" || result === "up_to_date" ? { ok: true } : { skip: `update ${result}` };
 		},
+		relay: () => relayObservation(home, stateDir, now()),
 	};
+}
+
+/**
+ * The last line of defense for the parent→operator relays (cp-6fyl PR2). Two failures, read from the host's outbox, the
+ * operator's ack journal, the escalations and the asks — never from the parent or the operator session themselves:
+ *  - a relay unacked and not discarded for `RELAY_UNSEEN_SECONDS` (key `relay:<id>`);
+ *  - an open escalation older than `ESCALATION_UNSEEN_SECONDS` that no ack, discard or open ask accounts for (key `escalation:<id>`).
+ * A missing outbox is no signal (an old host, or nothing relayed yet); an unreadable file is a failure, never an empty read.
+ */
+function relayObservation(home: string, stateDir: string, now: Date): Observation {
+	const outboxFile = operatorRelayOutboxFile(stateDir);
+	if (!existsSync(outboxFile)) return { skip: "no relay outbox" };
+	try {
+		const outbox = new OperatorRelayOutbox(outboxFile).read();
+		const fold = new OperatorRelayAcks(operatorRelayAcksFile(stateDir)).fold();
+		const oldest = oldestUnacked(outbox, fold, now);
+		if (oldest && oldest.ageSeconds >= RELAY_UNSEEN_SECONDS) {
+			const { entry } = oldest;
+			// An ack-capable session wrote a `consumer` line at its start; an old bridge never does, and a dead one cannot ack.
+			const newer = fold.consumer !== undefined && Date.parse(fold.consumer.at) >= Date.parse(entry.queued_at);
+			const capable = newer || (fold.consumer !== undefined && isPidAlive(fold.consumer.pid));
+			return { ok: false, key: `relay:${entry.id}`, detail: `${pendingRelays(outbox, fold).length} relay(s) unseen by the main session, oldest ${entry.id} ${Math.floor(oldest.ageSeconds / 60)} min (${entry.relay.kind})${capable ? "" : " — no ack-capable operator session; relaunch it (dashboard: Restart session)"}` };
+		}
+		const settled = [...fold.acked.keys(), ...fold.discarded.keys()];
+		const represented = new Set(new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open().map((ask) => ask.source_escalation));
+		const unseen = new EscalationStore({ home }).open()
+			.filter((item) => now.getTime() - Date.parse(item.created_at) >= ESCALATION_UNSEEN_SECONDS * 1000 && !represented.has(item.id) && !settled.some((id) => id === `esc:${item.id}` || id.startsWith(`esc:${item.id}#`)))
+			.sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+		if (unseen) return { ok: false, key: `escalation:${unseen.id}`, detail: `escalation ${unseen.id} (${unseen.kind}) open ${Math.floor((now.getTime() - Date.parse(unseen.created_at)) / 60_000)} min and unseen by the main session` };
+		if (outbox.entries.length > OPERATOR_RELAY_OUTBOX_CAP) return { ok: false, key: "over-cap", detail: `outbox over cap: ${outbox.entries.length} entries in ${outboxFile}` };
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, key: "unreadable", detail: (error as Error).message };
+	}
 }
 
 /**
