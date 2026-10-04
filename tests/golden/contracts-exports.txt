@@ -285,7 +285,7 @@ MERGE_STRATEGIES	value	f3a53b9439e69194	1c655a696307b8f0
 MINIMAL_PLAN_SUMMARY	value	d97f95db71e5477e	195b8f7ce377f26c
 MODES	value	3283b80f6b595713	0f8df5baff38eebb
 MODE_SETTINGS	value	a09441fb2fcfe5f9	c9b1a20166e4ce59
-Mandate	type	8bf30c0140f7c5c6	-
+Mandate	type	6f27c4d30218dc9f	-
 MandateAction	type	a5670930f3415fa2	-
 MandateActionSchema	value	da9c9c8a5d81337f	1756035535c14214
 MandateAskOn	type	b3ce7197b7ec18cf	-
@@ -303,7 +303,7 @@ MandateFieldSource	type	f3ed4ab652ec1e92	-
 MandateFieldSourceSchema	value	a2d3848e5d1c474b	424bfc3b8f6273c5
 MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandateProvenance	type	483039dec428e70a	-
-MandateSchema	value	e1b931acbfd6e797	0f62214ece7b809d
+MandateSchema	value	cc7d0601ac1785cd	b4ca148411451091
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -400,6 +400,8 @@ REVIEW_ORIGINAL_TASK_MAX_BYTES	value	4df681eb2e1ce13d	3bb78535cc9555ff
 REVIEW_SURFACES	value	99d4c3a17ee2cd26	48ec4d7c9d777cf8
 RISKS	value	704c18a55a68b3e9	88dd67a2576f195b
 RISK_CRITERIA	value	8f2379984a1bdf57	f8155ba5f9fa3583
+RISK_PREAPPROVAL_SCOPES	value	c94451a9ea8bf03a	846cd16f53485559
+RISK_PREAPPROVED_USES	value	3d5aafc7cd7631a1	1feeefd8aa24e807
 ROLES	value	3657010683988473	ead66c5898c9f0bd
 ROUTING_PROVENANCE	value	3578d740f54f400a	f2037ce4c04a22c5
 ROUTING_SOURCES	value	0161f8caf3129326	4a674f65e9b2855e
@@ -415,6 +417,12 @@ ReviewApprovalSchema	value	7568f2851e72d9bd	6f4d0a8aafa49e49
 ReviewSurface	type	5085d1c636efb2af	-
 ReviewSurfaceSchema	value	6a7a5b18f703fd02	12610825d26662c8
 Risk	type	939fab96717aaecf	-
+RiskPreapproval	type	ec3984a617b90ede	-
+RiskPreapprovalSchema	value	01540058697e2382	c1401b1f9c803300
+RiskPreapprovalScope	type	f3b0350921273aac	-
+RiskPreapprovedRow	type	f7d9af4a6f31e108	-
+RiskPreapprovedRowSchema	value	451cd2698991dde5	b514992f08a63e3a
+RiskPreapprovedUse	type	337c3ce13d760899	-
 RiskSchema	value	b4055cddc5ebe49b	4c69b248be0b796e
 Role	type	489e2b166077591d	-
 RoleSchema	value	f6981b169f7fab5b	26b77ce3a05c5aff

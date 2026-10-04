@@ -3,7 +3,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema } from "./core.ts";
-import { type CheckpointKind, CheckpointKindSchema } from "./escalations.ts";
+import { type CheckpointKind, CheckpointKindSchema, DelegationProvenanceFields } from "./escalations.ts";
 import type { Replace } from "./internal.ts";
 
 // ---------------------------------------------------------------------------
@@ -83,6 +83,44 @@ export const MandateEscalationSchema = Type.Object(
 );
 export type MandateEscalation = Static<typeof MandateEscalationSchema>;
 
+/**
+ * Operator pre-approval of risk:high on a grant (unload-parent PR0, `src/risk-preapproval.ts`): one verified,
+ * verbatim operator quote that lets a covered job's risk:high dispatch or promotion pass `ask_on: risk:high`
+ * without a per-job escalation. Dispatch and promotion only — never a merge, a checkpoint or a script dispatch.
+ * `named_jobs` covers `job_ids` only; `mandate_jobs` covers the grant's own `job_ids` and jobs created at or
+ * after its `issued_at` in its projects.
+ */
+export const RISK_PREAPPROVAL_SCOPES = ["named_jobs", "mandate_jobs"] as const;
+export type RiskPreapprovalScope = (typeof RISK_PREAPPROVAL_SCOPES)[number];
+export const RiskPreapprovalSchema = Type.Object(
+	{
+		operator_quote: Type.String({ minLength: 1, maxLength: 4000 }),
+		decided_by: StringEnum(["operator-quote", "operator-delegated"]),
+		...DelegationProvenanceFields,
+		job_ids: Type.Optional(Type.Array(JobIdSchema, { minItems: 1, maxItems: 64 })),
+		scope: StringEnum([...RISK_PREAPPROVAL_SCOPES]),
+		granted_at: IsoTimestampSchema,
+	},
+	{ additionalProperties: false },
+);
+export type RiskPreapproval = Replace<Static<typeof RiskPreapprovalSchema>, { decided_by: "operator-quote" | "operator-delegated"; scope: RiskPreapprovalScope }>;
+
+export const RISK_PREAPPROVED_USES = ["dispatch", "promote"] as const;
+export type RiskPreapprovedUse = (typeof RISK_PREAPPROVED_USES)[number];
+/** One audit row per risk:high gate a pre-approval passed. `quote_sha` is the first 12 hex of sha256(quote), never the quote. */
+export const RiskPreapprovedRowSchema = Type.Object(
+	{
+		at: IsoTimestampSchema,
+		job_id: JobIdSchema,
+		use: StringEnum([...RISK_PREAPPROVED_USES]),
+		decided_by: Type.Literal("operator-delegated"),
+		quote_sha: Type.String({ pattern: "^[0-9a-f]{12}$" }),
+		evidence: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 8 }),
+	},
+	{ additionalProperties: false },
+);
+export type RiskPreapprovedRow = Replace<Static<typeof RiskPreapprovedRowSchema>, { use: RiskPreapprovedUse }>;
+
 export const MandateSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
@@ -119,6 +157,9 @@ export const MandateSchema = Type.Object(
 		escalations: Type.Array(MandateEscalationSchema, { maxItems: 32 }),
 		/** Parent-side token-cap raises (`cp_mandate raise_tokens`), each journaled with its reason; the USD cap has no such path. */
 		token_raises: Type.Optional(Type.Array(Type.Object({ at: IsoTimestampSchema, from: Type.Integer({ minimum: 0 }), to: Type.Integer({ minimum: 0 }), reason: Type.String({ minLength: 1, maxLength: 400 }) }, { additionalProperties: false }), { maxItems: 64 })),
+		/** Operator risk:high pre-approval (`cp_mandate preapprove_risk`) and its audit rows, newest 500 kept. Optional: older grants validate. */
+		risk_preapproval: Type.Optional(RiskPreapprovalSchema),
+		risk_preapproved: Type.Optional(Type.Array(RiskPreapprovedRowSchema, { maxItems: 500 })),
 		/** Each covered fleet job's usage at issue (`usageBaseline`, src/mandate-accounting.ts): the grant counts only what
 		 * accrues past it. Absent on grants issued before it existed, which count lifetime usage. */
 		usage_baseline: Type.Optional(
@@ -156,6 +197,8 @@ export type Mandate = Replace<
 		decisions: MandateDecisionRecord[];
 		exclusions?: { paths?: string[]; subsystems?: string[]; job_kinds?: JobKind[] };
 		provenance?: MandateProvenance;
+		risk_preapproval?: RiskPreapproval;
+		risk_preapproved?: RiskPreapprovedRow[];
 	}
 >;
 

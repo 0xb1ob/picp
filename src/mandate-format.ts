@@ -1,6 +1,7 @@
 /** `cp_mandate show`'s rendering of one grant. Split out of src/mandate.ts (its size ceiling), which re-exports it. */
 import type { Mandate } from "./contracts.ts";
 import { mandateSpend, type MandateUsageJob } from "./mandate-accounting.ts";
+import { formatPreapproval } from "./risk-preapproval.ts";
 
 export function formatMandate(mandate: Mandate, jobs: readonly MandateUsageJob[] = []): string {
 	const spend = mandateSpend(mandate, jobs);
@@ -19,6 +20,7 @@ export function formatMandate(mandate: Mandate, jobs: readonly MandateUsageJob[]
 		...(mandate.usage_baseline?.length ? [`  counted from ${mandate.issued_at}: earlier usage of ${mandate.usage_baseline.length} covered job(s) excluded`] : []),
 		...(mandate.token_raises ?? []).map((raise) => `  token cap raised: ${raise.at} ${raise.from} -> ${raise.to} (${raise.reason})`),
 		`  job cap: ${spend.jobs} / ${mandate.job_cap}`,
+		...formatPreapproval(mandate),
 	];
 	if (mandate.pause_reason) lines.push(`  pause-reason: ${mandate.pause_reason}`);
 	if (mandate.provenance && Object.keys(mandate.provenance).length > 0) {
