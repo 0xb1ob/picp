@@ -232,7 +232,9 @@ export class HardBoundsWatch {
 		const arm = (): void => {
 			const ms = Math.max(0, bounds.wall_clock_seconds * 1000 - (Date.now() - started));
 			timer = setTimeout(() => {
-				const elapsed = Math.floor((Date.now() - started) / 1000);
+				// setTimeout can fire up to ~1 ms before Date.now() shows the full span; flooring
+				// then read 19 s of a 20 s cap and the one-shot timer never tripped. Round up.
+				const elapsed = Math.ceil((Date.now() - started) / 1000);
 				const breach = detectHardBound(bounds, { elapsedSeconds: elapsed, toolStarts: starts });
 				if (breach) void this.#trip(jobId, breach);
 			}, ms);

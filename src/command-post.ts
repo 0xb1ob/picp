@@ -495,8 +495,7 @@ export class CommandPost {
 		});
 		// cur.4.4: `this.bounds` before `this.recovery` (reversed from cur.4.2) so a
 		// `redispatch`'s fresh worker can be wired into it directly \u2014 `onBreach`'s
-		// own reference to `this.recovery` stays a closure either way and does not
-		// care about construction order.
+		// closure over `this.recovery` does not care about construction order.
 		this.bounds = new HardBoundsWatch({
 			fleet: this.fleet,
 			runs: this.runs,
