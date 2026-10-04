@@ -9,7 +9,14 @@ import { join } from "node:path";
 import { type Escalation, ESCALATION_NO_MANDATE, type JobKind, type Mandate, paths, validateRunStatus } from "./contracts.ts";
 
 /** Every mandate refusal. Lives here so the permission gate (`src/mandate-permission.ts`) needs no runtime import of `mandate.ts`. */
-export class MandateError extends Error {}
+export class MandateError extends Error {
+	/** Set only where a caller branches: `parallelism_full` keeps a queued dispatch at its head (src/dispatch-queue.ts). */
+	readonly code?: "parallelism_full";
+	constructor(message: string, options?: { code?: "parallelism_full" }) {
+		super(message);
+		if (options?.code !== undefined) this.code = options.code;
+	}
+}
 
 export interface MandateUsageJob {
 	job_id: string;

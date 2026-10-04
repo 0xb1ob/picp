@@ -21,7 +21,8 @@ import {
 } from "../src/revive.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
-import { readRunEvents } from "./harness/index.ts";
+import { fakeWorker, fakeWorkerManager, readRunEvents } from "./harness/index.ts";
+import { HeldRelease } from "../src/held-release.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -683,4 +684,60 @@ test("continueFailed: a spawn that fails keeps the failure and the lease", async
 	});
 	await assert.rejects(() => reviver.revive("cp-nospawn", { continueFailed: true }), /spawn failed/);
 	assert.deepEqual(fleet.require("cp-nospawn"), before);
+});
+
+// ---------------------------------------------------------------------------
+// 4b-1 (4B1-T7): a revive at the spawn cap releases another held author
+// ---------------------------------------------------------------------------
+
+async function capBench(t: { after(fn: () => void | Promise<void>): void }) {
+	const home = createScratchHome();
+	const fleet = new FleetStore({ home: home.path });
+	const runs = new RunRegistry(home.path);
+	const workers = fakeWorkerManager(home.path, 2);
+	t.after(async () => {
+		await workers.manager.shutdownAll();
+		runs.closeAll();
+		home.cleanup();
+	});
+	const worktree = join(home.path, "worktrees", "cp-aaa1");
+	mkdirSync(join(worktree, ".git"), { recursive: true });
+	writeFileSync(join(home.path, "s.jsonl"), "{}\n");
+	await fleet.add(makeRecord({ job_id: "cp-aaa1", worktree }, home.path));
+	await fleet.add(makeRecord({ job_id: "cp-aaa2" }, home.path));
+	await fleet.add(makeRecord({ job_id: "cp-aaa3" }, home.path));
+	// cp-aaa1 was released earlier; cp-aaa2 is a live idle author, cp-aaa3 busy: the cap (2) is full.
+	runs.open("cp-aaa1").cp("held_released", { for_job: "cp-aaa9", reason: "spawn cap" });
+	const idle = workers.spawn("cp-aaa2");
+	workers.spawn("cp-aaa3", fakeWorker({ busy: true }));
+	const held = new HeldRelease({
+		home: home.path, fleet, manager: workers.manager,
+		busy: { sending: () => false, promoting: () => false, driving: () => false },
+		integration: () => undefined, journal: (id, kind, payload) => runs.open(id).cp(kind, payload),
+	});
+	const reviver = new Reviver({
+		home: home.path, profilesDir: PROFILES_DIR, fleet, manager: workers.manager, runs, isPidAlive: () => false,
+		git: fakeGit(join(worktree, ".git")),
+		makeRoom: (id, role) => held.makeRoom(id, role), released: (id) => held.wasReleased(id),
+	});
+	return { home: home.path, fleet, workers, idle, reviver };
+}
+
+test("4B1-T7: a revive at the cap releases another idle author (never itself) and spawns into the reserved slot", async (t) => {
+	const b = await capBench(t);
+	await b.reviver.revive("cp-aaa1");
+	assert.equal(b.idle.shutdownCalls, 1, "the other idle author was released");
+	assert.ok(b.workers.manager.get("cp-aaa1"));
+	assert.equal(b.workers.manager.reserved, 0, "the spawn consumed the reservation");
+	const revived = readRunEvents(b.home, "cp-aaa1").find((event) => event.type === "worker_revived");
+	assert.equal((revived?.payload as { continuation?: string }).continuation, "held_release");
+	assert.equal(b.fleet.require("cp-aaa2").phase, "held", "the released author keeps its phase");
+});
+
+test("4B1-T7: a failed revive spawn after makeRoom leaves no reservation", async (t) => {
+	const b = await capBench(t);
+	b.workers.failNext();
+	await assert.rejects(() => b.reviver.revive("cp-aaa1"), /spawn failed/);
+	assert.equal(b.workers.manager.reserved, 0);
+	assert.equal(b.workers.manager.get("cp-aaa1"), undefined);
 });

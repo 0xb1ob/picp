@@ -174,6 +174,8 @@ export const CP_EVENT_KINDS = [
 	"worker_revived",
 	/** `cp_revive` refused to relaunch a worker; nothing changed. */
 	"revive_refused",
+	/** A live, idle held author's process was stopped to free a spawn slot (phase and lease kept); `cp_send` restores it. */
+	"held_released",
 	/**
 	 * A wake-up was not sent, or was rewritten on delivery, because the facts it
 	 * described had already moved on (cp-p6m). Silence is acceptable for a stale

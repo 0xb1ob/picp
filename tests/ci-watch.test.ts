@@ -870,6 +870,23 @@ test("jje.2 green: envelope starts the review, a passing verdict merges and fini
 	assert.equal(b.notices[0]?.keys, undefined, "a landing notice is about the job being done, so it is never stale for it");
 });
 
+test("4B1-T6: driving(job) is true during an advance and false after, including after a throwing step", async () => {
+	const b = continuationBench();
+	const seen: boolean[] = [];
+	b.during.step = (jobId) => void seen.push(b.continuation.driving(jobId));
+	b.script.set("cp-4wz", ["done"]);
+	assert.equal(b.continuation.driving("cp-4wz"), false);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 });
+	assert.deepEqual(seen, [true]);
+	assert.equal(b.continuation.driving("cp-4wz"), false);
+	b.during.step = () => {
+		throw new Error("step broke");
+	};
+	const failed = await b.continuation.trigger({ jobId: "cp-4wz", event: "startup" });
+	assert.equal(failed.action, "error");
+	assert.equal(b.continuation.driving("cp-4wz"), false);
+});
+
 test("laf: a HELD PR LANDED notice names the tracker write-back; a stop, or no writeBack dep, adds nothing", async () => {
 	const line = "tracker write-back: demo-beads/b-1 closes with https://github.com/o/r/pull/7 on the next write-back tick";
 	const asked: string[] = [];

@@ -64,7 +64,7 @@ import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact }
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
 import { assertNotDraining, DrainControl, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
-import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
+import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { MandateStore } from "./mandate.ts";
@@ -112,10 +112,12 @@ import {
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
+import { HeldRelease } from "./held-release.ts";
+import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
-import { ProjectRegistry } from "./projects.ts";
+import { ProjectRegistry, projectDirResolver } from "./projects.ts";
 import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
 import { ALWAYS_AVAILABLE, isAllowed, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { loadSuggestConfig } from "./suggest.ts";
@@ -243,6 +245,8 @@ export class CommandPost {
 	readonly integrator: Integrator;
 	/** Serial, coalesced progression of held PRs; `integrate()` shares its per-project lane. */
 	readonly continuation: HeldContinuation;
+	readonly heldRelease: HeldRelease; // 4b-1: release an idle held author's slot on demand (src/held-release.ts)
+	readonly dispatchQueue: DispatchQueue; // 4b-2: spawn-cap refusals, drained by the lock owner only (src/dispatch-queue.ts)
 	readonly drain: DrainControl; // graceful drain before a restart (src/drain.ts)
 	/** cp-uug: the per-PR, per-head merge authorization. Answered only by a human. */
 	readonly mergeCheckpoints: CheckpointStore;
@@ -375,7 +379,7 @@ export class CommandPost {
 			...(options.parentEnv ? { parentEnv: options.parentEnv } : {}),
 		});
 		this.mandates = new MandateStore(options.home);
-		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId) });
+		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
 		// it and a card that is only queued when a live extension happens to be
@@ -573,11 +577,7 @@ export class CommandPost {
 			merges: this.merges,
 			teardown: this.teardown,
 			ledger: () => this.ledger(),
-			projectDir: (project, worktree) => {
-				const clone = this.registry.pathOf(project);
-				if (existsSync(clone)) return clone;
-				return worktree && existsSync(worktree) ? worktree : this.home;
-			},
+			projectDir: projectDirResolver(this.registry, this.home),
 			runs: this.runs,
 			send: async (jobId, message) => {
 				const result = await this.sender.send({ jobId, message, purpose: "repair" });
@@ -601,6 +601,9 @@ export class CommandPost {
 			runs: this.runs,
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 		});
+		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
+		this.dispatchQueue = new DispatchQueue({ home: options.home, dispatch: (r) => this.dispatch(r), capacityFree: () => this.heldRelease.capacityFree(), owns: () => this.#ownsHome(), ledger: () => this.ledger(), fleet: this.fleet, journal: (w) => this.#journalDurable(w) });
+		wireSlotFree(this.manager, this.dispatchQueue);
 		this.awaiting = new AwaitingStore({
 			home: options.home,
 			onAnswered: (decision) => this.#recordAnswered(decision),
@@ -1119,7 +1122,7 @@ export class CommandPost {
 	/** One observer set for every spawn path (dispatch, revive, bounded recovery), so wiring cannot diverge. */
 	#observers() {
 		const usage = { fleet: this.fleet, runs: this.runs, mandates: this.mandates, journal: (input: DurableWakeupInput) => this.#journalDurable(input) };
-		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => observeMandateUsage(usage, jobId, previous, current) };
+		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => observeMandateUsage(usage, jobId, previous, current), makeRoom: (id: string, role: Role) => this.heldRelease.makeRoom(id, role), released: (id: string) => this.heldRelease.wasReleased(id) };
 	}
 
 	async dispatch(request: DispatchRequest & { task: string }): Promise<DispatchResult>;

@@ -133,9 +133,16 @@ export class HeldContinuation {
 	readonly #lanes = new Map<string, Promise<unknown>>();
 	/** Keys queued, running or handled. A `wait` releases its key so the watch can re-trigger the same fact. */
 	readonly #seen = new Set<string>();
+	/** Jobs whose continuation is mid-drive (one at a time per lane). */
+	readonly #driving = new Set<string>();
 
 	constructor(deps: HeldContinuationDeps) {
 		this.#deps = deps;
+	}
+
+	/** True while a continuation step sequence is driving this job (HeldRelease never releases it then). */
+	driving(jobId: string): boolean {
+		return this.#driving.has(jobId);
 	}
 
 	/** Run `fn` after every earlier step on the same project's lane. */
@@ -170,12 +177,15 @@ export class HeldContinuation {
 		if (this.#seen.size >= CONTINUATION_KEY_MEMORY) this.#seen.clear();
 		this.#seen.add(key);
 		const outcome = await this.serialize(trigger.jobId, async () => {
+			this.#driving.add(trigger.jobId);
 			try {
 				return await this.#drive(trigger, key);
 			} catch (error) {
 				const reason = `${trigger.jobId}: continuation failed: ${(error as Error).message.split("\n")[0]}`;
 				this.#notice(trigger.jobId, `error:${key}`, "retry", reason);
 				return { ...skip("error", reason), next: "retry" as const };
+			} finally {
+				this.#driving.delete(trigger.jobId);
 			}
 		});
 		// Re-armed only after it settles: while queued or running the key still coalesces.

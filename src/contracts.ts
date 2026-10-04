@@ -24,6 +24,7 @@ export * from "./contracts/fleet.ts";
 export * from "./contracts/questions.ts";
 export * from "./contracts/jobs.ts";
 export * from "./contracts/integration.ts";
+export * from "./contracts/dispatch-queue.ts";
 export * from "./contracts/reviews.ts";
 export * from "./contracts/escalations.ts";
 export * from "./contracts/mandates.ts";

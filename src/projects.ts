@@ -124,6 +124,14 @@ export function assertCanonicalRepo(path: string, label: string = path): string 
 	return abs;
 }
 
+/** The Integrator's working dir for a project: its canonical clone, else the job's worktree, else the home. */
+export function projectDirResolver(registry: Pick<ProjectRegistry, "pathOf">, home: string): (project: string, worktree?: string) => string {
+	return (project, worktree) => {
+		const clone = registry.pathOf(project);
+		if (existsSync(clone)) return clone;
+		return worktree && existsSync(worktree) ? worktree : home;
+	};
+}
 export class ProjectRegistry {
 	readonly home: string;
 	readonly file: string;

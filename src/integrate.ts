@@ -227,6 +227,11 @@ export class Integrator {
 		this.#options = options;
 	}
 
+	/** True while this integrator is promoting the job's implementer (HeldRelease never releases it then). */
+	promoting(jobId: string): boolean {
+		return this.#resolving.has(jobId);
+	}
+
 	file(jobId: string): string {
 		return join(this.#options.home, paths.integrationFile(jobId));
 	}

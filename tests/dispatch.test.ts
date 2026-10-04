@@ -11,7 +11,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
-import { type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
+import { DispatchQueue } from "../src/dispatch-queue.ts";
+import { HeldRelease } from "../src/held-release.ts";
+import { MandateError } from "../src/mandate-accounting.ts";
+import { RunRegistry } from "../src/runs.ts";
 import {
 	cleanupCreatedJobBranch,
 	Dispatcher,
@@ -46,6 +50,7 @@ import {
 	git,
 	MockProvider,
 	readFleet,
+	fakeWorkerManager,
 	readRunEvents,
 	readRunStatus,
 	REPO_ROOT,
@@ -181,6 +186,54 @@ test("a failed npm ci is logged once and the worker still starts, told in its br
 	assert.equal(logged.length, 1);
 	assert.match(JSON.stringify(logged[0]?.payload), /failed.*EINTEGRITY/);
 	assert.match(readFileSync(join(b.home, paths.briefFile(job.id)), "utf8"), /Dependencies in this worktree may be stale/);
+});
+
+test("4B1-T7: at the cap dispatch releases the one idle held author into a reserved slot; a failed spawn rolls back; nothing releasable lets spawn_cap escape", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const workers = fakeWorkerManager(b.home, 1);
+	t.after(() => workers.manager.shutdownAll());
+	const runs = new RunRegistry(b.home);
+	t.after(() => runs.closeAll());
+	const idle = workers.spawn("cp-aaa1");
+	await b.fleet.add({
+		job_id: "cp-aaa1", project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held",
+		worker: { pid: 4242, session_id: "s", session_file: join(b.home, "s.jsonl"), profile: "implementer", role: "implementer", model: b.model, started_at: isoTimestamp() },
+		worktree: b.home, branch: "cp-aaa1", dispatched_at: isoTimestamp(), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
+	});
+	const held = new HeldRelease({
+		home: b.home, fleet: b.fleet, manager: workers.manager,
+		busy: { sending: () => false, promoting: () => false, driving: () => false },
+		integration: () => undefined, journal: (id, kind, payload) => runs.open(id).cp(kind, payload),
+	});
+	const dispatcher = b.makeDispatcher({ manager: workers.manager, makeRoom: (id, role) => held.makeRoom(id, role) });
+
+	// Nothing releasable (the author is busy): spawn_cap escapes, nothing reserved, no record.
+	const blocked = await b.ledger.create({ title: "blocked", project: "demo", kind: "ship", delivery: "local", slug: "t7-blocked" });
+	const busy = idle as { busy: boolean };
+	busy.busy = true;
+	await assert.rejects(dispatcher.dispatch({ jobId: blocked.id, task: "Bump x.", model: b.model, fetch: false }), (error: unknown) => (error as SpawnSafetyError).code === "spawn_cap");
+	assert.equal(workers.manager.reserved, 0);
+	assert.equal(b.fleet.get(blocked.id), undefined);
+	busy.busy = false;
+
+	// A spawn that throws after makeRoom: the author is released, the reservation is not leaked, the same error escapes.
+	const failing = await b.ledger.create({ title: "failing", project: "demo", kind: "ship", delivery: "local", slug: "t7-failing" });
+	workers.failNext();
+	await assert.rejects(dispatcher.dispatch({ jobId: failing.id, task: "Bump x.", model: b.model, fetch: false }), /spawn failed/);
+	assert.equal(idle.shutdownCalls, 1);
+	assert.equal(workers.manager.reserved, 0);
+	assert.equal(b.fleet.get(failing.id), undefined);
+	assert.equal(b.fleet.require("cp-aaa1").phase, "held", "a release never changes phase");
+
+	// At the cap with one releasable author: it is released and the dispatch spawns into its slot.
+	const second = workers.spawn("cp-aaa1");
+	const job = await b.ledger.create({ title: "reserved", project: "demo", kind: "ship", delivery: "local", slug: "t7-ok" });
+	const result = await dispatcher.dispatch({ jobId: job.id, task: "Bump x.", model: b.model, fetch: false });
+	assert.equal(result.state, "dispatched");
+	assert.equal(second.shutdownCalls, 1);
+	assert.equal(workers.manager.reserved, 0);
+	assert.ok(workers.manager.get(job.id));
+	assert.equal(readRunEvents(b.home, "cp-aaa1").filter((event) => event.type === "held_released").length, 2);
 });
 
 test("dispatch snapshots referenced beads for the worker and reviewers, including missing refs", { skip: SKIP, timeout: 180_000 }, async (t) => {
@@ -581,6 +634,34 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 	assert.equal(result.state, "dispatched");
 });
 
+test("4B2-T1c: a real Dispatcher's parallelism_full refusal reaches the queue coded; the head stays byte-identical, and a freed slot starts it", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "ship the queue", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, dispatch_parallelism: 1 });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const first = await b.ledger.create({ title: "first", project: "demo", kind: "ship", delivery: "local", slug: "t1c-first" });
+	assert.equal((await dispatcher.dispatch({ jobId: first.id, task: "Bump x.", model: b.model, fetch: false })).state, "dispatched");
+	const job = await b.ledger.create({ title: "queued", project: "demo", kind: "ship", delivery: "local", slug: "t1c-queued" });
+	const errors: unknown[] = [];
+	const wakes: unknown[] = [];
+	const queue = new DispatchQueue({
+		home: b.home, owns: () => true, capacityFree: () => true, ledger: () => b.ledger, fleet: b.fleet, journal: (wake) => void wakes.push(wake),
+		dispatch: (request) => dispatcher.dispatch({ jobId: request.jobId, task: request.task!, model: b.model, fetch: false }).catch((error: unknown) => {
+			errors.push(error);
+			throw error;
+		}),
+	});
+	queue.enqueue(job.id, { task: "Bump x." });
+	const file = join(b.home, LAYOUT.dispatchQueueFile);
+	const before = readFileSync(file, "utf8");
+	await queue.drain();
+	assert.ok(errors[0] instanceof MandateError && errors[0].code === "parallelism_full", `coded refusal, got ${String(errors[0])}`);
+	assert.equal(readFileSync(file, "utf8"), before, "the kept head is byte-identical");
+	assert.deepEqual(queue.ids(), [job.id]);
+	assert.equal(b.fleet.get(job.id), undefined, "no record");
+	assert.ok(!treehouse(b.clone, "status").includes(job.id), "no lease");
+	assert.equal(wakes.length, 0, "no wake-up");
+});
 // cp-itl4 6b (6B-T4): a refused dispatch of a job in an open batch raises nothing new and names the batch.
 test("risk:high batch: a refused dispatch of a batched job names the batch and raises nothing; one approve dispatches every listed job", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
