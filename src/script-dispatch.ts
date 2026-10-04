@@ -80,7 +80,7 @@ export class ScriptDispatcher {
 		const labels = requireJobLabels(issue);
 		const text = [issue.title, issue.description ?? "", issue.script.path].join("\n");
 		const inputs = resolveRoutingInputs({ text, ...(request.scope ? { scope: request.scope } : {}), ...riskField(request.risk, issue, "") });
-		const job = { jobId: issue.id, project: labels.project, kind: "ship" as const, pathHints: [issue.script.path] };
+		const job = { jobId: issue.id, project: labels.project, kind: "ship" as const, pathHints: [issue.script.path], script: true };
 		const blockers = await this.options.ledger.blockersOf(issue.id);
 		return {
 			preview: true,
@@ -122,7 +122,7 @@ export class ScriptDispatcher {
 		const pre = await preflight.check({ jobId: issue.id, project: labels.project, ...(request.base ? { base: request.base } : {}), ...(request.fetch === false ? { fetch: false } : {}) });
 		if (pre.status !== "ok" || !pre.clone || !pre.base) throw new DispatchError(`preflight refused ${issue.id}:\n${formatPreflight(pre)}`, pre);
 		try {
-			await mandates?.assertDispatchAllowed({ jobId: issue.id, project: labels.project, kind: "ship", pathHints: [scriptPath], risk: inputs.risk, evidence: inputs.reasons }, fleet.read().jobs);
+			await mandates?.assertDispatchAllowed({ jobId: issue.id, project: labels.project, kind: "ship", pathHints: [scriptPath], risk: inputs.risk, evidence: inputs.reasons, script: true }, fleet.read().jobs);
 		} catch (error) {
 			throw new DispatchError(error instanceof Error ? error.message : String(error));
 		}

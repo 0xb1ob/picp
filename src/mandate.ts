@@ -29,6 +29,7 @@ import {
 	MANDATE_ASK_ON,
 	MandateSchema,
 	type Risk,
+	type RiskPreapproval,
 	type RoutingProvenance,
 	SCHEMA_VERSION,
 	isoTimestamp,
@@ -43,6 +44,7 @@ import { batchRefusal, capReached, covers, enrollCapacity, isActive, jobCapRefus
 import { readScheduleFile } from "./viewer/schedule-core.ts";
 import { assertGrantsPermit, type GrantPermission, type GrantUse, grantStanding, inFlightRecord, isInFlight } from "./mandate-permission.ts";
 import { formatMandate } from "./mandate-format.ts";
+import { preapprovedRow, riskPreapproval, withPreapproval } from "./risk-preapproval.ts";
 import { type Ledger, readJobsDocument } from "./ledger.ts";
 import { loadTokenCeiling } from "./mandate-defaults.ts";
 import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "./verify-external-ref.ts";
@@ -185,6 +187,8 @@ export interface IssueMandateInput {
 	at?: string;
 	/** Where each defaultable field came from (autonomy-programme-cur.2.5): `resolveMandateGrant`'s output. */
 	provenance?: MandateProvenance;
+	/** A verified operator risk:high pre-approval written with the grant (`withPreapproval`). */
+	risk_preapproval?: RiskPreapproval;
 }
 
 // final_fix is never granted: evaluateAuthority refuses it before any action is read.
@@ -530,7 +534,7 @@ export class MandateStore {
 					`${spend.jobs} / ${mandate.job_cap} jobs. Usage from before a grant is never counted (usage_baseline); issue a cap above zero.`,
 			);
 		}
-		const written = this.#write(this.#underCeiling(mandate));
+		const written = this.#write(this.#underCeiling(input.risk_preapproval ? withPreapproval(mandate, input.risk_preapproval) : mandate));
 		this.supersedeEscalations(jobs);
 		return written;
 	}
@@ -621,12 +625,15 @@ export class MandateStore {
 		evidence?: readonly string[];
 		/** A same-worker promotion of an existing job: gated like a dispatch, but never by the parallelism slot. */
 		promotion?: boolean;
+		/** A script dispatch: never covered by a risk pre-approval (its text is a path, so no hard stop can be read). */
+		script?: boolean;
 	}, jobs: readonly MandateUsageJob[] = []): Promise<void> {
 		// No active grant: the latest speaking one decides (src/mandate-permission.ts); an expired grant's continuation keeps its risk ask.
 		const { active, continuing } = this.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
 		const speaking = continuing ? [continuing] : active;
 		if (speaking.length === 0) return;
 
+		let preapproved: Mandate[] = [];
 		if (job.risk === "high" && speaking.some((mandate) => mandate.ask_on.includes("risk:high"))) {
 			const escalations = new EscalationStore({ home: this.home });
 			// Not escalationApproves: its recommended-shortcut approves a bare
@@ -637,9 +644,12 @@ export class MandateStore {
 			const authorized = escalations
 				.list({ jobId: job.jobId, kind: "risk_high_irreversible" })
 				.some((entry) => entry.status === "answered" && APPROVE.test((entry.answer ?? "").trim()));
-			if (!authorized) {
-				const asking = speaking.find((mandate) => mandate.ask_on.includes("risk:high"));
-				const raised = await raiseRiskHigh(escalations, { jobId: job.jobId, evidence: job.evidence ?? [], ...(asking ? { mandateId: asking.id } : {}) });
+			const asking = speaking.filter((mandate) => mandate.ask_on.includes("risk:high"));
+			// An operator pre-approval naming the job passes (audited below, after the caps); a hard stop still asks.
+			const pre = authorized ? undefined : riskPreapproval(asking, job, this.jobCreatedAt(job.jobId));
+			if (pre?.covered) preapproved = asking;
+			else if (pre) {
+				const raised = await raiseRiskHigh(escalations, { jobId: job.jobId, evidence: [...(job.evidence ?? []), ...pre.stops], ...(asking[0] ? { mandateId: asking[0].id } : {}) });
 				throw new MandateError(
 					`${job.jobId}: risk:high under ask_on \u2014 refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it`,
 				);
@@ -664,6 +674,16 @@ export class MandateStore {
 				}
 			}
 		}
+		const at = this.#stamp();
+		for (const { id } of preapproved) {
+			const grant = this.require(id);
+			this.#write({ ...grant, risk_preapproved: [...(grant.risk_preapproved ?? []), preapprovedRow(grant, job.jobId, job.promotion ? "promote" : "dispatch", at, job.evidence)].slice(-500) });
+		}
+	}
+
+	/** Record an operator risk:high pre-approval on a grant (`withPreapproval` checks it; audit rows stay). */
+	preapproveRisk(id: string, record: RiskPreapproval): Mandate {
+		return this.#write(withPreapproval(this.require(id), record));
 	}
 
 	/** `assertGrantsPermit` at this store's clock: the active grants covering the job, or the expired grant continuing it. */
@@ -680,13 +700,12 @@ export class MandateStore {
 	 * A `dry_run` reads this instead of calling `assertDispatchAllowed`: the
 	 * same predicate, with no escalation raised and nothing taken.
 	 */
-	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] }, risk: Risk | undefined): boolean {
+	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean }, risk: Risk | undefined): boolean {
 		if (risk !== "high") return false;
 		const now = this.#stamp();
 		const scope = this.scheduleOf(job.jobId);
-		return this.sweep(now)
-			.filter((mandate) => covers(mandate, { ...job, ...scope }))
-			.some((mandate) => isActive(mandate, now) && mandate.ask_on.includes("risk:high"));
+		const asking = this.sweep(now).filter((mandate) => covers(mandate, { ...job, ...scope }) && isActive(mandate, now) && mandate.ask_on.includes("risk:high"));
+		return asking.length > 0 && !riskPreapproval(asking, job, this.jobCreatedAt(job.jobId)).covered;
 	}
 
 	/** The home's `token_ceiling`, raiseTokenCap's bound (src/mandate-usage.ts). */

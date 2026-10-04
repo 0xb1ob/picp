@@ -22,7 +22,8 @@ import { formatMandateDefaults, loadMandateDefaults, MANDATE_HOME_ONLY_FIELDS, r
 import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
 import { cpNext, dedupeNext, formatNext } from "../../src/next.ts";
 import { homeMandateProjects } from "../../src/project-report.ts";
-import { decide, DecideError, operatorTextsFromEntries } from "../../src/decide.ts";
+import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
+import { preapprovalRecord } from "../../src/risk-preapproval.ts";
 import { EscalationError } from "../../src/escalation.ts";
 import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
@@ -50,17 +51,25 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			`After intake in this turn, job_ids may be ["${MANDATE_JOBS_THIS_TURN}"] instead of retyping ids.`,
 			"Without job_ids a grant is project-wide: an issue named in the objective is verified and minted as a job but never pins the grant, so follow-on PRs stay covered. The objective is the operator's mission scope: record follow-ons only within it, escalate growth beyond it (scope expansion).",
 			"A schedule runs only under a schedule_grant:true grant, which covers nothing but that one schedule's jobs; a project-wide grant never covers a scheduled job.",
-			"risk:high stays pending unless ask_on omits it and the objective names the job. Merge stays pending when ask_on includes merge.",
+			"A risk:high checkpoint stays pending unless ask_on omits it and the objective names the job. Merge stays pending when ask_on includes merge.",
+			"When the operator pre-approves risk:high for a mandate's work, record their verbatim words with cp_mandate preapprove_risk mandate_id operator_quote (job_ids narrows it), or risk_preapproval on issue: covered risk:high dispatches and promotions then proceed with an audit row, no escalation. Never merge, never a script, never a job outside the grant; force push, data deletion, credential handling and external publishing in the task still escalate.",
 			"cp_mandate show lists every auto-decision taken under the grant, and which source (explicit/project/home) set each field. pause/revoke stop new auto-decisions; in-flight workers are not killed.",
 			"A token cap reached (pause_reason token_cap) is yours to decide, never an operator ask: cp_mandate raise_tokens mandate_id spend_tokens reason, up to the home's token_ceiling; the grant resumes and in-flight work continues. The USD cap is never yours to raise \u2014 it, and the ceiling, are budget_exhausted.",
 			"The job cap limits new dispatches only; it never pauses a grant or stalls review, repair or merge of a job it already covers. A project-wide grant's job cap counts other mandates' jobs in its projects (src/mandate-accounting.ts), so prefer named job_ids with home-default bounds; issue warns on a project-wide grant.",
 			"Revoke, expiry and a replacing grant close that grant's open escalations as superseded, no answer needed; cp_mandate supersede_stale does the same on demand for records left open before this rule.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "supersede_stale", "defaults_show", "defaults_set"], {
-				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json",
+			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set"], {
+				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json",
 			}),
-			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens: the mandate id (md-…)" })),
+			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk: the mandate id (md-…)" })),
+			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session" })),
+			risk_preapproval: Type.Optional(
+				Type.Object(
+					{ operator_quote: Type.String(), job_ids: Type.Optional(Type.Array(Type.String())) },
+					{ description: "issue: pre-approve risk:high dispatch/promotion under the new grant with the operator's verbatim words; job_ids narrows it to those jobs" },
+				),
+			),
 			reason: Type.Optional(Type.String({ description: "raise_tokens: why the raise, journaled on the grant" })),
 			projects: Type.Optional(Type.Array(Type.String(), { description: "issue: project names this grant covers" })),
 			objective: Type.Optional(Type.String({ description: "issue: what this grant is for" })),
@@ -69,7 +78,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			),
 			job_ids: Type.Optional(
 				Type.Array(Type.String(), {
-					description: `issue: optional explicit job ids, or ["${MANDATE_JOBS_THIS_TURN}"] for every id cp_job create returned this turn`,
+					description: `issue: optional explicit job ids, or ["${MANDATE_JOBS_THIS_TURN}"] for every id cp_job create returned this turn. preapprove_risk: the only jobs it covers (default: every job created under the grant)`,
 				}),
 			),
 			schedule_grant: Type.Optional(
@@ -131,6 +140,15 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					// SAFETY: Extension tool details are JSON records consumed by the bridge.
 					return { content: [{ type: "text", text }], details: { superseded: closed } as unknown as Record<string, unknown> };
 				}
+				const operatorTexts = () => operatorTextsFromEntries(ctx.sessionManager.getEntries());
+				if (params.action === "preapprove_risk") {
+					if (!params.mandate_id || !params.operator_quote) throw new MandateError("cp_mandate preapprove_risk needs mandate_id and operator_quote");
+					const record = preapprovalRecord(requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTexts() }), resolveMandateJobIds(params.job_ids, deps.createdThisTurn), isoTimestamp());
+					const mandate = post.mandates.preapproveRisk(params.mandate_id, record);
+					const text = `${mandate.id} risk:high pre-approved by ${record.decided_by} for ${record.job_ids ? record.job_ids.join(", ") : "jobs created under the grant"}: dispatch and promotion only, never merge; hard stops still escalate`;
+					// SAFETY: The mandate is a JSON record returned through the extension API.
+					return { content: [{ type: "text", text }], details: mandate as unknown as Record<string, unknown> };
+				}
 				if (params.action !== "issue") {
 					if (!params.mandate_id) throw new MandateError(`cp_mandate ${params.action} needs mandate_id`);
 					const { spend_tokens: tokens, reason, spend_usd: usd } = params;
@@ -147,6 +165,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				const archived = params.projects.filter((name) => post.registry.get(name)?.archived);
 				if (archived.length) throw new MandateError(`cp_mandate issue refused: archived project(s) ${archived.join(", ")} — unarchive with cp_project unarchive first`);
 				if (!params.objective?.trim()) throw new MandateError("cp_mandate issue needs objective");
+				// Verified before anything is written or minted: a quote not found refuses the whole issue.
+				const verifiedQuote = params.risk_preapproval ? requireOperatorQuote(params.risk_preapproval.operator_quote, { operatorTexts: operatorTexts() }) : undefined;
 				const homeDefaults = loadMandateDefaults(post.home);
 				// A grant may name several projects; the ladder's project tier only applies when every
 				// named project agrees on an override (or has none) — disagreement falls through to home
@@ -190,6 +210,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					},
 				);
 				const jobIds = resolveMandateJobIds(params.job_ids, deps.createdThisTurn);
+				const preapproval = verifiedQuote ? preapprovalRecord(verifiedQuote, resolveMandateJobIds(params.risk_preapproval?.job_ids, deps.createdThisTurn), isoTimestamp()) : undefined;
 				const mandate = post.mandates.issue({
 					projects: params.projects,
 					objective: params.objective,
@@ -204,6 +225,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					...(jobIds?.length ? { job_ids: jobIds } : {}),
 					...(params.schedule_grant ? { schedule_grant: true as const } : {}),
 					...(exclusions ? { exclusions } : {}),
+					...(preapproval ? { risk_preapproval: preapproval } : {}),
 				}, liveUsageJobs(post.fleet, post.runs));
 				return {
 					content: [

@@ -3587,7 +3587,8 @@ them.
 ### Mandate evaluation (`MandateSchema`, `evaluateAuthority`)
 
 Persisted at `state/mandates/<id>.json`. Written only by `cp_mandate`
-(`issue|pause|resume|revoke|show|raise_tokens|supersede_stale|defaults_show|defaults_set`). `evaluateAuthority`
+(`issue|pause|resume|revoke|show|raise_tokens|preapprove_risk|supersede_stale|defaults_show|defaults_set`), plus the
+risk:high gate's pre-approval audit rows (`risk_preapproved`, see *Operator risk pre-approval* below). `evaluateAuthority`
 is pure: given a pending checkpoint (kind, job, project, routing `risk`/`scope`,
 artifact hash) and the mandates on disk it returns `permitted (mandate id,
 clause)` or `not permitted (reason)`.
@@ -3779,6 +3780,32 @@ ids it names only; a new job id needs a new decision, and an escalation answered
 leaves the job refused. `cp_dispatch dry_run` reports `mandate_gate: "would ask:
 risk:high"` from the same predicate (`MandateStore.wouldAskRiskHigh`), with
 nothing escalated.
+
+**Operator risk pre-approval** (`cp_mandate preapprove_risk`, `src/risk-preapproval.ts`, unload-parent PR0). The
+operator can pre-approve a grant's risk:high work once instead of per job: `cp_mandate preapprove_risk mandate_id
+operator_quote [job_ids]` (or `risk_preapproval: { operator_quote, job_ids? }` on `cp_mandate issue`) verifies the
+quote verbatim against this session's operator messages (`requireOperatorQuote`, the `cp_decide` rule — a quote not
+found refuses and writes nothing) and stores it once on the grant as `risk_preapproval` (`operator_quote`,
+`decided_by` `operator-quote|operator-delegated` plus delegation provenance, `scope`, `job_ids`, `granted_at`).
+`scope: named_jobs` (job_ids given; each must be in the grant's own `job_ids` when it has any) covers those ids;
+`mandate_jobs` covers the grant's `job_ids`, or — project-wide — jobs whose ledger `created_at` is at or after the
+grant's `issued_at` in its projects (the code proxy for "jobs created under the mandate"; objective prose is never
+read). A revoked or expired grant takes none. In `assertDispatchAllowed`, after the answered-approve read and before
+`raiseRiskHigh`, a risk:high dispatch or `cp_send` promotion passes with **no escalation** when every speaking grant
+asking on `risk:high` has a pre-approval covering the job, it is not a script dispatch (its text is only a path), and
+its task text names no **hard stop** (`hardStops`: credential handling outside the repo — `~/.ssh`, `auth.json`,
+rotate/revoke/print/leak a secret/token/key/credential; data deletion — `rm -rf`, `drop table|database`,
+delete/purge/wipe production/user/customer data; force push — `force push`, `git push -f|--force|--force-with-lease|+ref`;
+external publishing — `npm publish`, `gh release create`, `docker push`, publish to npm/pypi/registry, deploy to
+production — each skipped when negated, `negatedAt`/`negatedHeadAt`/`benignSenseAt`). A hard stop raises today's
+escalation with `hard stop <kind>: <words>` added to its evidence; an uncovered job raises it unchanged. Caps and
+parallelism still bind afterwards; only a pass writes one audit row to the grant's `risk_preapproved` (newest 500
+kept): `{at, job_id, use: dispatch|promote, decided_by: operator-delegated, quote_sha (first 12 hex of sha256 of the
+quote, never the quote), evidence (≤8 × ≤200 chars)}`, shown with the quote (120 chars) by `cp_mandate show`.
+`wouldAskRiskHigh` (dry run, H6 warning) reads the same predicate. A pre-approval is dispatch/promotion only: it
+never touches `evaluateAuthority` (checkpoints, `merge`, `final_fix`, plan approval), `ask_on: merge`, a
+`human_handoff` project's merge, `batchRiskHigh`, or `decide()`. Both fields are optional and additive; a grant
+written before them validates unchanged.
 
 **Batch approval** (`cp_escalate action:"batch_risk_high" job_ids:[2..16]`,
 `batchRiskHigh` in `src/risk-batch.ts`): one `risk_high_irreversible` record
