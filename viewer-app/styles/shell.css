@@ -30,6 +30,15 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-search, .shell-back { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 10px; }
 .shell-clock { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .shell-corner { display: none; }
+/* The ⋮ menu (Restart session): a 44px button, and a popover that never outgrows the viewport. */
+.more-menu { position: relative; flex-shrink: 0; }
+.more-menu > summary { width: 44px; height: 44px; position: relative; display: flex; align-items: center; justify-content: center; list-style: none; cursor: pointer; border-radius: 10px; color: var(--muted); }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu[open] > summary { background: var(--surface); color: var(--text); }
+.more-menu-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+.more-menu-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; width: 280px; max-width: calc(100vw - 16px); padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.more-menu-panel .operator-restart { flex-direction: column; align-items: stretch; }
+.more-menu-panel .operator-restart-line { flex-basis: auto; }
 .shell-main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 16px 40px; overflow-wrap: anywhere; }
 .shell-header-subpage { padding: 0 8px; justify-content: flex-start; }
 .shell-header-subpage .shell-brand { flex: 1; }
@@ -81,5 +90,5 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-sidebar-nav .shell-count { left: 130px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
  .shell-main { min-width: 0; padding: 32px 40px 48px; }
- .shell-corner { display: block; position: fixed; top: 8px; right: 24px; z-index: 1; padding: 2px 8px; border-radius: 8px; background: var(--background); }
+ .shell-corner { display: flex; align-items: center; gap: 4px; position: fixed; top: 8px; right: 24px; z-index: 1; padding: 2px 8px; border-radius: 8px; background: var(--background); }
 }

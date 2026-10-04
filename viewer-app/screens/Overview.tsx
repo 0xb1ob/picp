@@ -2,7 +2,6 @@ import type { ComponentChildren } from "preact";
 import type { FlightJob, OverviewResponse } from "../../src/viewer/api-types.ts";
 import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
-import { RestartSession } from "../components/RestartSession.tsx";
 import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
@@ -45,7 +44,6 @@ function Services({data,control}: {data:OverviewResponse;control?:ControlView | 
  return <section class="overview-services" aria-label="Services">
   <p class="overview-meta overview-services-line" title={health?.failing.map(f => `${f.check}: ${f.detail}`).join("\n") || undefined}>{line}</p>
   {!data.fleet.operator.running && control && <StartSession control={control}/>}
-  {control && (data.fleet.operator.running || control.restarting) && <RestartSession control={control}/>}
  </section>;
 }
 const ago = (at: string, now: string): string => {
