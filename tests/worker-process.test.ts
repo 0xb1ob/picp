@@ -762,3 +762,28 @@ test("cp-xbxz: dialogOptions forwards the worker's signal, and omits the key whe
 	assert.deepEqual(plain, { timeout: 5_000 });
 	assert.ok(!Object.hasOwn(plain, "signal"));
 });
+
+test("decoder: a message_update is a delta, never a cumulative message snapshot", { timeout: 10_000 }, async () => {
+	// Replays tests/fixtures/pi-rpc/delta-turn.jsonl through the real decoder:
+	// agent_start, one message_update delta, agent_settled, then child close.
+	const fixture = resolve(import.meta.dirname, "fixtures", "pi-rpc", "delta-turn.jsonl");
+	const events: WorkerEvent[] = [];
+	const worker = WorkerProcess.spawn({
+		cwd: process.cwd(),
+		model: "mock/does-not-matter",
+		piBin: process.execPath,
+		argv: ["-e", "process.stdout.write(require('node:fs').readFileSync(process.argv[1]))", fixture],
+		onEvent: (event) => events.push(event),
+	});
+	await worker.closed;
+
+	assert.deepEqual(
+		events.map((event) => event.type),
+		["agent_start", "message_update", "agent_settled"],
+	);
+	const update = events[1] as WorkerEvent;
+	assert.ok(!Object.hasOwn(update, "message"), "a delta carries no cumulative message; the decoder must not invent one");
+	assert.deepEqual(update.assistantMessageEvent, { type: "text_delta", contentIndex: 0, delta: "partial" });
+	assert.equal(worker.busy, false);
+	assert.equal(worker.settledCount, 1);
+});

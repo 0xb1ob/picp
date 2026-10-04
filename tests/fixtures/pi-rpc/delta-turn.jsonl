@@ -1,0 +1,3 @@
+{"type":"agent_start"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"partial"}}
+{"type":"agent_settled"}
