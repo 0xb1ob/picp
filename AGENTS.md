@@ -12,6 +12,10 @@ receipt, an event, or an observed exit.
 the tools refuse what the contract refuses — read the refusal, it names the
 sanctioned path, and most tool results carry the one rule for what just happened.
 
+**If you are a worker editing this repo** (an implementer or planner, not the parent): the parent rules below do not apply to you.
+Check with `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts`; CI runs the full suite.
+Your role profile (`profiles/`, git worktree safety included) and brief are your instructions; see `docs/development.md`.
+
 ## Home
 
 `/cp-version` prints the home. It holds `projects/<name>` clones; every job names its project. Single-project mode was removed: `CP_MODE=single`, a `settings.json` saying `single`, or a launch inside a plain git repository is refused at startup.
@@ -77,7 +81,7 @@ Work arrives as prose in this conversation. Record each item once, this turn, wi
 
 ## Dispatch
 
-`cp_dispatch` is the whole path and fails closed at every step. `receipt: "accepted"` is a fact (pi answered) — it does not mean the model complied. `state: "promote"` means do not dispatch; the job already has a live worker, use `cp_send`. Promotion is same worker, same worktree, same model; a cross-model role hop is teardown plus a fresh dispatch. A refused dispatch names the fix — do not work around it. `script_path` jobs are ship/local: dispatch without model/task, never promote/revive/retry an unknown exit, read only the result headline, and keep the lease until the ordinary ship teardown gate passes; X2 may use `Ledger.create({scriptPath})` plus `cp_next`/`cp_dispatch`.
+`cp_dispatch` is the whole path and fails closed at every step. `receipt: "accepted"` is a fact (pi answered) — it does not mean the model complied. `state: "promote"` means do not dispatch; the job already has a live worker, use `cp_send`. Promotion is same worker, same worktree, same model; a cross-model role hop is teardown plus a fresh dispatch. A refused dispatch names the fix — do not work around it. `script_path` jobs follow [`docs/contracts.md`](docs/contracts.md) (script declaration).
 
 ## Fan out, and where to stop
 
@@ -125,7 +129,6 @@ for one job's run log.
   recovery (cur.4.2) already acted if eligible (count in `recovery-attempts.json`);
   `cp-bound` arrives only after its outcome, never beside a live replacement: lease kept, continue on it (`cp_revive`), `cp_teardown` only to abandon; don't guess a phase. `bound spent — one automatic attempt already ran and failed` — not a hint one is still pending.
 - **`cp-recovery`**: parent restart lists dead/revivable/orphaned jobs; act on it (`cp_revive`/`cp_teardown`), don't restart again to look.
-- **`DRAIN:` notices** (drained / timed out / cancelled): before acting on one, verify the live `state/drain.json` exists and its `started_at` matches the notice, and that no `cancelled` notice for that `started_at` is known. Stale = file gone, different `started_at`, or already cancelled: relay one line — no hold, no defer, no worker stop. The drain GATE (not a notice) controls starts: it refuses new ones; a notice never triggers a worker stop.
 - **`cp-wedged` and `cp-unreported` never describe the same job** — one is
   mid-call, the other is after the fact. Budget breach escalates, never kills
   silently; wall-clock/tool-call caps do kill.
@@ -194,7 +197,7 @@ never merge red, never dispatch a replacement for a conflict fix. A project with
 
 ## Reporting to the operator
 
-Every relay starts with its bracketed project (`[demo-app] cp-78vu: …`); an update spanning projects is split into one section per project. Relay outcomes with **full PR URLs**, never a bare number or slug. Never paste a
+Every relay starts with its bracketed project (`[demo-app] cp-abcd: …`); an update spanning projects is split into one section per project. Relay outcomes with **full PR URLs**, never a bare number or slug. Never paste a
 worker's output into this session — relay the headline, point at
 `/watch <job-id>`. Stop after **two ping-pongs** unless a decision is still
 open. A fact you attribute to a worker ("found", "confirmed", "reports") comes from that job's envelope summary — the artifact you never read, so point at its path instead; with no envelope for the job, say **no report** — never infer a result from a teardown, an exit code or silence.
@@ -238,13 +241,10 @@ approval used to ([`src/curation.ts`](src/curation.ts)).
 ## When you are stuck
 
 - The environment: `/doctor` — every finding names its fix.
-- One job: `/watch <job-id>`, then `.pi-command-post/state/runs/<job-id>/status.json` for numbers.
+- One job: `/watch <job-id>`.
 - A worker that died or hit a hard bound: act on the wake-up (`cp-death`/`cp-bound`
   while live, `cp-recovery` after a parent crash) — bounded recovery (cur.4.2)
   already tried once; `cp_teardown`/`cp_revive` as the message names, don't
   guess a phase. Restarting the parent kills every live worker; drain first.
 - A rule you cannot find here: it is probably code; `docs/contracts.md` says why,
   the tool's refusal says how.
-- **git worktree safety** (cur-20260901-10): empty `git status --porcelain` does
-  not make `git reset --hard origin/<branch>` safe — check `git rev-list --count
-  origin/<branch>..HEAD` is 0 first, to confirm no commits ahead of origin.

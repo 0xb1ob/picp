@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### AGENTS.md carries a worker block and no job id or memory tag
+
+`AGENTS.md` gains a short block for workers editing this repo (typecheck and `test:one` commands; the parent rules do not apply to them), uses a synthetic job id in its relay example, and drops a memory-id tag. The git-worktree-safety rule moved to `profiles/implementer.md`, the `DRAIN:` notice bullet (already in `docs/contracts.md`, Graceful drain) and the `script_path` dispatch rules (now in `docs/contracts.md`, Script declaration) left it. Migration: none.
+
 ### A ship report must name its worktree HEAD
 
 The worker reporter now rejects, repairably (`localChecks`, `extensions/worker-reporter/head.ts`), a `report_result` with `status: done` whose `head_sha` is not `git rev-parse HEAD` of the worker's own worktree (`CP_WORKTREE`, else the cwd), and a ship/done report with no `head_sha` at all. The rejection names the observed sha, so the model copies it within the 3-attempt repair budget; a `git rev-parse` that fails (not a repo, git missing, 10 s timeout) fails closed with `head_sha: cannot verify`. Research, answer, board and blocked envelopes without `head_sha` trigger no git call. `validateEnvelope` and intake are unchanged, and `head_sha` keeps its schema shape (only its description changed). Migration: none — stored envelopes are not re-validated against the new rule.
