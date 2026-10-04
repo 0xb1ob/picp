@@ -194,11 +194,6 @@ export function actionForKind(kind: CheckpointKind): MandateAction {
 	return ACTION_FOR_KIND[kind];
 }
 
-export function effectiveRisk(subject: MandateSubject): Risk | undefined {
-	if (subject.risk === "high") return "high";
-	return subject.risk;
-}
-
 /**
  * A leading double-star-slash in an exclusion means "any directory or none"; a trailing star means
  * "any suffix" (pi-command-post-autonomy-programme-cur.2.6) — minimal globbing so the scaffolded
@@ -208,7 +203,7 @@ export function effectiveRisk(subject: MandateSubject): Risk | undefined {
 function hitsNeedle(value: string, needle: string): boolean {
 	if (needle.length === 0) return false;
 	if (!needle.includes("*")) {
-		return value === needle || value.startsWith(`${needle}/`) || value.startsWith(needle) || value.includes(needle);
+		return value.includes(needle);
 	}
 	const pattern = needle
 		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
@@ -303,7 +298,7 @@ function judgeCovered(mandate: Mandate, subject: MandateSubject, jobs: readonly 
 	if (subject.kind === "ship" && mandate.ask_on.includes("plan_approval")) return { permitted: false, reason: `${mandate.id}: ask_on includes plan_approval` };
 	if (subject.kind === "merge" && mandate.ask_on.includes("merge")) return { permitted: false, reason: `${mandate.id}: ask_on includes merge` };
 
-	const high = effectiveRisk(subject) === "high";
+	const high = subject.risk === "high";
 	if (high && (mandate.ask_on.includes("risk:high") || !mandate.objective.includes(subject.jobId))) {
 		return { permitted: false, reason: `${mandate.id}: risk:high is never auto-permitted unless ask_on excludes it and the objective names the job` };
 	}

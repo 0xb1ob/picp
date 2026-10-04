@@ -1,14 +1,7 @@
 /**
- * Composition root.
- *
- * Every module in `src/` is independently testable and knows nothing about pi.
- * This is where they are wired into one object for the parent extension, so the
- * extension file stays a thin adapter: tools in, policy out.
- *
- * Configuration that an operator can edit at runtime (`data/routing.json`,
- * `data/budgets.json`) is re-read per operation rather than cached at load: a
- * command post that must be restarted to notice a config change is a command
- * post nobody edits.
+ * Composition root: wires the independently testable `src/` modules into one object for the
+ * parent extension. Operator-editable config (`data/routing.json`, `data/budgets.json`) is
+ * re-read per operation rather than cached at load.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -177,25 +170,15 @@ export interface CommandPostOptions {
 	/** One evidence-only notice when the last working slot becomes idle. */
 	onIdleBeads?: (text: string) => void;
 	/**
-	 * cp-answer-doesnt-wake: called once per *newly recorded* human answer, from
-	 * whichever writer recorded it (a declared row, a derived approval row, a
-	 * checkpoint authorization). The answer is already on disk and already queued
-	 * in `state/answered.json` when this runs, so the callback's only job is to
-	 * deliver the wake-up — and a failure to deliver costs a retry, never the
-	 * decision. Absent (a test, a headless re-entry) means the answer is queued
-	 * and delivered by whichever parent drains the outbox next.
+	 * Called once per newly recorded human answer, from whichever writer recorded it. The answer
+	 * is already on disk and queued in `state/answered.json`, so a failure to deliver costs a
+	 * retry, never the decision. Absent means the next draining parent delivers it.
 	 */
 	onAnswered?: (decision: AnsweredDecision) => void;
 	/**
-	 * Does this session own the home (pi-command-post-u9q review)? The answered
-	 * outbox's **consumption** side is gated on it: only the parent that holds
-	 * `state/parent.lock` may reserve an emission, send one, or stamp an arrival.
-	 * Default: the lock file itself, read per call, so a session whose
-	 * `acquireParentLock` was refused is gated with no wiring at all — and so is
-	 * one whose lock was reclaimed while it ran.
-	 *
-	 * Injected only by tests, which is where a second *process* has to be played
-	 * by a second object.
+	 * Does this session own the home (pi-command-post-u9q)? The answered outbox's consumption
+	 * side is gated on it. Default: `state/parent.lock` itself, read per call; injected only by
+	 * tests that play a second process.
 	 */
 	holdsParentLock?: () => boolean;
 	/** Called once per classified failure. */
@@ -657,30 +640,12 @@ export class CommandPost {
 	}
 
 	/**
-	 * The startup truth pass, and the one action it implies
-	 * (pi-command-post-3ip).
-	 *
-	 * `FleetStore.reconcile` classifies; it never stamps. Nothing used to act on
-	 * its `needs_intake` list, and intake ran only from a live worker's event
-	 * stream — so a worker that wrote `envelope.json` and then lost its parent
-	 * (a restart kills every child) left a delivery on disk that no surface would
-	 * ever accept: the ledger stayed `in_progress`, the fleet stayed `waiting`,
-	 * the settle boundary correctly refused to nudge a job that had reported, and
-	 * the worker-reporter correctly refused to file a second envelope. Every gate
-	 * was right and the job was stuck.
-	 *
-	 * So the reconcile step ends where the live path does: `intake`, once per
-	 * unstamped envelope. It is the ordinary intake, not a restart-only variant —
-	 * same contract re-check, same generation scoping (a superseded envelope's
-	 * slot is the live one's, never both), same `onReported` wake-up, same
-	 * stat-and-move for artifacts, so no body is ever read here. It is idempotent
-	 * by construction: an already-stamped generation returns `already` and writes
-	 * nothing, which is what makes a second restart a no-op.
-	 *
-	 * Fail-closed and never throws: an envelope that violates the contract is
-	 * marked `failed` by intake with its own reason, and an intake that throws is
-	 * returned as a `failure` on the job it concerns rather than taking the rest
-	 * of the startup pass down with it.
+	 * The startup truth pass (pi-command-post-3ip). `FleetStore.reconcile` classifies but never
+	 * stamps, so a worker that wrote `envelope.json` and lost its parent to a restart would stay
+	 * stuck. This ends where the live path does: ordinary `intake`, once per unstamped envelope,
+	 * idempotent (an already-stamped generation returns `already`). Fail-closed and never throws:
+	 * a contract violation is marked `failed` by intake, and an intake that throws is returned as
+	 * a `failure` on its job without taking the rest of the pass down.
 	 */
 	async reconcile(options: ReconcileOptions = {}): Promise<{ report: ReconcileReport; intake: IntakeResult[] }> {
 		const report = await this.fleet.reconcile(options);
@@ -923,19 +888,10 @@ export class CommandPost {
 	}
 
 	/**
-	 * Send every **due** answer through `deliver`, coalesced into one message.
-	 * Called by the parent extension on an answer, at `session_start` and on the
-	 * widget tick: three triggers, one drain, and no polling of anything but a
-	 * file the widget already reads. A `deliver` that throws leaves the queue
-	 * intact and rethrows.
-	 *
-	 * Due, not pending (cp-5mgg): an answer already emitted and still inside its
-	 * retry window is left alone, because re-emitting it on the next answer's
-	 * trigger is how one merge authorization reached the parent three times.
-	 *
-	 * Sending is not delivering (cp-nx7): nothing is marked delivered here. The
-	 * parent confirms arrival through `confirmAnswered` when the wake-up actually
-	 * lands in its context, and an unconfirmed answer is sent again.
+	 * Send every due answer through `deliver`, coalesced into one message; a throwing `deliver`
+	 * leaves the queue intact and rethrows. An answer already emitted and inside its retry window
+	 * is left alone (cp-5mgg). Nothing is marked delivered here: `confirmAnswered` does that when
+	 * the wake-up lands, and an unconfirmed answer is sent again (cp-nx7).
 	 */
 	drainAnswered(deliver: (decisions: readonly AnsweredDecision[]) => void): AnsweredDecision[] {
 		if (!this.#ownsHome()) return [];
@@ -1629,15 +1585,9 @@ export class CommandPost {
 	}
 
 	/**
-	 * The decision details pane for one Awaiting-you item (pi-command-post-4mn):
-	 * the latest review and gate verdicts, the row's own checkpoint and the CI
-	 * watcher's last observation, bounded, redacted and tied to the head they
-	 * describe. Local files only — this is called on a render path, and never
-	 * reads an artifact body or a diff.
-	 *
-	 * Total by construction: a home with nothing on disk, or a record that cannot
-	 * be read, yields an empty pane rather than an error, because a decision must
-	 * never be taken down by its own evidence.
+	 * The decision details pane for one Awaiting-you item (pi-command-post-4mn): local files
+	 * only, bounded and redacted, tied to the head described; never reads an artifact body or a
+	 * diff. Total: unreadable evidence yields an empty pane, never an error.
 	 */
 	decisionContext(item: ResolvedAwaitingItem, options: BuildDecisionContextOptions = {}): DecisionContext {
 		try {
