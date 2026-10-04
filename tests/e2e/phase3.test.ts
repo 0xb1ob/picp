@@ -187,7 +187,7 @@ async function pipeline(t: { after(fn: () => void | Promise<void>): void }): Pro
 	// fault re-runs the same reviewer model and is capped at
 	// `operational_persistent`. The script stays registered because the m3
 	// scenario drives that second attempt explicitly.
-	const ladder = provider.addScript("m3-gate-ladder", [{ kind: "text", text: "still not reporting" }]);
+	provider.addScript("m3-gate-ladder", [{ kind: "text", text: "still not reporting" }]);
 	// Same script, second registration: the *model* is what the assertion is about.
 	const bigShip = provider.addScript(
 		"m3-ship-big",

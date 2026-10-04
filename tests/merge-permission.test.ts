@@ -12,7 +12,6 @@ import { test } from "node:test";
 import { detectCiWait } from "../src/ci-wait.ts";
 import {
 	evaluateMergePermission,
-	GH_PR_PERMISSION_FIELDS,
 	ghBranchRulesArgs,
 	parseBranchRules,
 	rulesRequireUpToDate,
@@ -138,13 +137,6 @@ test("rulesRequireUpToDate is proof only from an explicit strict required-checks
 
 test("ghBranchRulesArgs names the rules endpoint gh can actually read here", () => {
 	assert.deepEqual(ghBranchRulesArgs("main"), ["api", "repos/{owner}/{repo}/rules/branches/main"]);
-});
-
-test("the permission fields list carries what this rule needs and nothing else", () => {
-	assert.deepEqual(
-		[...GH_PR_PERMISSION_FIELDS].sort(),
-		["autoMergeRequest", "headRefOid", "isDraft", "mergeable", "mergeStateStatus", "reviewDecision", "state"].sort(),
-	);
 });
 
 test("no command this module can build is a blocking CI-wait shape", () => {

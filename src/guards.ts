@@ -560,17 +560,8 @@ export function formatGuardDecision(decision: GuardDecision): string {
 // Shell shapes (deliberately small: we classify commands, we do not run them)
 // ---------------------------------------------------------------------------
 
-/** Split a command line into the pieces a shell would run separately. */
-export function splitSegments(command: string): string[] {
-	return command
-		.split(/\|\||&&|;|\||\n|(?<!\\)&/)
-		.map((segment) => segment.trim())
-		.filter((segment) => segment.length > 0);
-}
-
 /**
- * Split a command line into independent statements — like {@link splitSegments}
- * but *keeping* a pipeline's stages together, because data flows between them:
+ * Split a command line into independent statements, *keeping* a pipeline's stages together, because data flows between them:
  * a path named in one stage and read in the next is still one real read.
  */
 export function splitStatements(command: string): string[] {

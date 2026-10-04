@@ -17,7 +17,6 @@ import {
 	EMPTY_USAGE,
 	type FleetRecord,
 	LONG_TOOL_CALL_SECONDS,
-	type QuestionMethod,
 	type RunStatus,
 	SCHEMA_VERSION,
 	type StatusSnapshot,

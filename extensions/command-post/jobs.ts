@@ -45,7 +45,6 @@ export const JOB_ACTIONS = [
 	"close",
 	"drop",
 ] as const;
-export type JobAction = (typeof JOB_ACTIONS)[number];
 
 /**
  * Closed, like every other contract object: an argument this tool does not

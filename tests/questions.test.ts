@@ -25,8 +25,6 @@ import {
 	type Asker,
 	ASKING_ROLES,
 	decideAsk,
-	formatQuestion,
-	type HandleResult,
 		normaliseReviewRequest,
 	type OperatorQuestion,
 	QuestionError,
@@ -128,7 +126,7 @@ test("a question that asks for permission is refused, and told why", () => {
 		});
 		assert.equal(decision.allowed, false, `must be refused: ${question}`);
 		assert.match(decision.reason ?? "", /A dialog is not a checkpoint/);
-		assert.match(decision.reason ?? "", /cp-authorize/, "the refusal names who may authorize");
+		assert.match(decision.reason ?? "", /cp_decide/, "the refusal names who may authorize");
 	}
 
 	// The boundary is authorization, not caution: real design questions pass.
@@ -377,16 +375,13 @@ test("a confirm becomes a boolean, and a long answer is truncated", async (t) =>
 	assert.equal(value.length, QUESTION_ANSWER_MAX_CHARS, "a worker's context is not an inbox");
 });
 
-test("the journal lives in the run dir, and one line renders for an operator", async (t) => {
+test("the journal lives in the run dir", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const relay = relayWith(home.path, { async ask() { return { answer: "SQLite", by: "operator dialog (tui)" }; } });
 	await relay.handle({ jobId: BR, role: "planner", request: request() });
 
 	assert.ok(relay.store.file(BR).endsWith(paths.questionsFile(BR)), "questions.jsonl belongs to the job's run dir");
-	const rendered = formatQuestion(relay.store.list(BR).at(-1) as never);
-	assert.match(rendered, /cp-ask1 q1 \[answered\]/, "both lines of one exchange share its number");
-	assert.match(rendered, /Postgres or SQLite\? → SQLite \(operator dialog \(tui\)\)/);
 });
 
 // ---------------------------------------------------------------------------
@@ -440,11 +435,6 @@ test("cp-xbxz: a worker that dies mid-question closes `worker_exited`, and the j
 		["cp-died", "question_asked"],
 		["cp-died", "question_closed"],
 	]);
-	// One operator-facing line, and it cannot be mistaken for an answer.
-	const rendered = formatQuestion(closed as never);
-	assert.match(rendered, /\[worker_exited\]/);
-	assert.ok(!rendered.includes("→"), `no answer arrow: nothing was answered here — ${rendered}`);
-	assert.ok(!rendered.includes("operator dialog"), `and no human is credited with it — ${rendered}`);
 });
 
 test("cp-xbxz: a question for an already-dead worker never reaches a human", async (t) => {

@@ -777,8 +777,8 @@ export class AwaitingStore {
 	): Promise<AwaitingItem> {
 		if (item.type === "authorization") {
 			throw new AwaitingError(
-				`${item.id} is an authorization item: only CheckpointStore.decide records one (/cp-authorize, /cp-decline, or ` +
-					"an approve/decline answer in /cp-decide). It is never written to state/awaiting.json.",
+				`${item.id} is an authorization item: only CheckpointStore.decide records one (cp_decide, with a mandate or an operator quote). ` +
+					"It is never written to state/awaiting.json.",
 			);
 		}
 		let result: AwaitingItem | undefined;
@@ -859,7 +859,7 @@ function applyAnswer(
 function missingDerivedRowMessage(id: string): string {
 	return (
 		`${id} is a derived Awaiting-you row, so it has no record in state/awaiting.json until it is answered — ` +
-		"answer it through /cp-decide (AwaitingStore.answerResolved), which materialises the row under this same id."
+		"answer it through cp_decide (AwaitingStore.answerResolved), which materialises the row under this same id."
 	);
 }
 

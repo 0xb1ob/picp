@@ -164,11 +164,6 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
 	return describeHome(env).home;
 }
 
-/** Has this home ever been scaffolded? Cheap check, used by doctor and the CLI. */
-export function homeIsScaffolded(home: string): boolean {
-	return existsSync(resolve(home, LAYOUT.state)) && existsSync(resolve(home, LAYOUT.data));
-}
-
 /** Local refs only: never fetch, update the checkout, or restart the parent. */
 export function homeCheckoutFinding(home: string, packageRoot: string, run: CommandRunner): DoctorFinding | undefined {
 	if (canonicalDir(home) !== canonicalDir(packageRoot) || !existsSync(resolve(home, ".git"))) return undefined;

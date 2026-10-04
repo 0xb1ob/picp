@@ -692,7 +692,7 @@ test("capturing a lesson at the maximum length (300 chars) can be promoted using
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const longLesson = "a".repeat(CANDIDATE_MAX_CHARS);
-	const candidateLine = capture(home.path, longLesson);
+	capture(home.path, longLesson);
 
 	// Promotion using just the lesson text should work (the new behavior)
 	const result = promoteCandidate(home.path, {

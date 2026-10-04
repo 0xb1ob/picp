@@ -19,7 +19,7 @@ import { formatMandateDefaults, loadMandateDefaults, setMandateDefault } from ".
 import { formatRunView } from "../../src/watch.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_PREFIX, formatDrain } from "../../src/drain.ts";
 import { openPlanViewer } from "./plan-viewer.ts";
-import { currentRuntime, runtimeOrRefusal, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
+import { runtimeOrRefusal, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {

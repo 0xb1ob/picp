@@ -29,7 +29,6 @@ import { rebuildStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import {
 	decideReopen,
-	formatSupersession,
 	landedReceipt,
 	lastFiledEnvelopeFile,
 	reopenEnvelopeSlot,
@@ -222,7 +221,6 @@ test("reopening archives the envelope, clears reported_at and journals the super
 
 	// And the run projection stops claiming this run already reported.
 	assert.equal(rebuildStatus(b.home.path, "cp-reopen").reported, false);
-	assert.match(formatSupersession(supersession), /envelope slot reopened \(generation 2\)/);
 });
 
 test("reopening a job with nothing filed changes nothing", async (t) => {

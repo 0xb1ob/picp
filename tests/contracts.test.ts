@@ -68,7 +68,6 @@ import {
 	collectLegacyJobFields,
 	stripLegacyJobFields,
 	SUMMARY_MAX_LINES,
-	QUESTION_DEFAULT_TIMEOUT_MS,
 	QUESTION_OUTCOMES,
 	validate,
 	CP_EVENT_KINDS,

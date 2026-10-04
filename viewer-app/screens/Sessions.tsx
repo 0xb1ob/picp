@@ -17,8 +17,6 @@ import { useViewportFit } from "../viewport-fit.ts";
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
 type Worker = SessionsResponse["workers"][number];
-/** Audit P2 #14, the Overview's worker vocabulary (`flights`/`health`): a running fleet phase shows its run phase, never "waiting". */
-export const workerPhase = (w: Worker): string | undefined => w.phase !== "waiting" ? w.phase : w.run_phase === "starting" ? "launching" : w.run_phase === "working" || w.run_phase === "idle" ? w.run_phase : w.phase;
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
 /** One remembered choice, shared by every view: absent means tool calls are hidden (cp-hidetools). */

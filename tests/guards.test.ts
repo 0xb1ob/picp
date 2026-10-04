@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ArtifactStore } from "../src/artifacts.ts";
-import { ContextGuard, GUARD_CODES, type GuardDecision, formatGuardDecision, parseGit, splitSegments } from "../src/guards.ts";
+import { ContextGuard, GUARD_CODES, type GuardDecision, formatGuardDecision, parseGit } from "../src/guards.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -479,7 +479,6 @@ test("non-guarded tools and shell shapes are left alone", (t) => {
 	assert.equal(b.guard.check({ toolName: "read", input: {} }), undefined);
 	assert.equal(b.guard.check({ toolName: "read", input: null }), undefined);
 	assert.equal(b.bash(""), undefined);
-	assert.deepEqual(splitSegments("a && b; c | d"), ["a", "b", "c", "d"]);
 	assert.deepEqual(parseGit(["git", "-C", "/tmp", "add", "-A"]), { subcommand: "add", args: ["-A"] });
 	assert.match(
 		formatGuardDecision(b.tool("read", ".pi-command-post/state/artifacts/cp-research-1/report.md") as GuardDecision),

@@ -296,7 +296,7 @@ export function decideAsk(input: AskPolicyInput): AskDecision {
 			allowed: false,
 			reason:
 				"that is an authorization request, not a question. A dialog is not a checkpoint: only the operator's " +
-				"/cp-authorize or /cp-decline can approve work. Ask what to build, never whether you may ship.",
+				"cp_decide can approve work. Ask what to build, never whether you may ship.",
 		};
 	}
 	const question = raw.slice(0, QUESTION_MAX_CHARS);
@@ -566,12 +566,3 @@ function truncate(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
-/** One operator-facing line per exchange, for `/status` and `/watch`. */
-export function formatQuestion(record: QuestionRecord): string {
-	const head = `${record.job_id} q${record.seq} [${record.outcome}]`;
-	const question = record.question.split("\n")[0] ?? record.question;
-	if (record.outcome === "answered") {
-		return `${head} ${question} → ${record.answer ?? ""} (${record.answered_by ?? "operator"})`;
-	}
-	return `${head} ${question}${record.reason ? ` — ${record.reason}` : ""}`;
-}

@@ -66,7 +66,6 @@ import {
 	CheckpointSchema,
 	type DiffVerdict,
 	DiffVerdictSchema,
-	type FleetRecord,
 	isoTimestamp,
 	isScriptFleetRecord,
 	type JobKind,

@@ -15,7 +15,6 @@ import {
 	AWAITING_SENTINEL_OPTIONS,
 	LAYOUT,
 	SUGGEST_FIELD_MAX_CHARS,
-	SUGGEST_MAX_CANDIDATES,
 	SUGGEST_PROMPT_MAX_CHARS,
 } from "../src/contracts.ts";
 import {
@@ -23,7 +22,6 @@ import {
 	loadSuggestConfig,
 	parseSuggestions,
 	SuggestionCache,
-	suggestionFingerprint,
 	suggestionInput,
 	suggestionsEnabled,
 	withDeadline,

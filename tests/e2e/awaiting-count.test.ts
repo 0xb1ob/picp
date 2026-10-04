@@ -105,13 +105,13 @@ test(
 			why: "why 1",
 			blocks: "blocks 1",
 		});
-		const item2 = await post.awaiting.declare({
+		await post.awaiting.declare({
 			type: "design",
 			decision: "decision 2",
 			why: "why 2",
 			blocks: "blocks 2",
 		});
-		const item3 = await post.awaiting.declare({
+		await post.awaiting.declare({
 			type: "design",
 			decision: "decision 3",
 			why: "why 3",

@@ -6,6 +6,14 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### The unreachable Awaiting-you overlay is deleted
+
+The `agent_settled` hook already returned before opening anything, so the questionnaire overlay, its plain-dialog fallback, the suggestion generator and the session snooze/latch/cache state behind them could never run. They are removed (`questionnaire.ts`, `suggest-model.ts`, `awaiting-questionnaire.ts`, `awaiting-dialog.ts`, `CommandPost.suggestionModel`/`suggestConfig`, `decisionPaneFactory`); `/cp-awaiting` still lists, `cp_decide` still answers, and `HumanPrompt`/`applyPromptWorking` stay. No contract export changed. Migration: none.
+
+### Unused helpers, locals and stale command wording are trimmed
+
+Removed: `mandateIssueCountMismatch`, `GH_PR_PERMISSION_FIELDS`, `formatQuestion`, `formatSupersession`, `splitSegments`, `homeIsScaffolded`, `SURFACES`, `workerPhase`, the `JobAction` type, unused locals and imports, and the orphaned `@earendil-works/pi-server` devDependency (its test stays: it asserts pi's entry point does not import the server). Operator-facing refusals and guidelines that named the retired `/cp-authorize`, `/cp-decline` and `/cp-decide` commands (and a nonexistent `cp_checkpoint` tool) now name `cp_decide`. Migration: none.
+
 ### AGENTS.md carries a worker block and no job id or memory tag
 
 `AGENTS.md` gains a short block for workers editing this repo (typecheck and `test:one` commands; the parent rules do not apply to them), uses a synthetic job id in its relay example, and drops a memory-id tag. The git-worktree-safety rule moved to `profiles/implementer.md`, the `DRAIN:` notice bullet (already in `docs/contracts.md`, Graceful drain) and the `script_path` dispatch rules (now in `docs/contracts.md`, Script declaration) left it. Migration: none.

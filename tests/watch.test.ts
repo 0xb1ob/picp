@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseWatchArgs } from "../extensions/command-post/index.ts";
@@ -525,15 +525,6 @@ test("/watch is bounded and refuses to follow inside the parent session", () => 
 	assert.throws(() => parseWatchArgs("cp-a --serve"), /unknown argument/);
 	assert.throws(() => parseWatchArgs("cp-a cp-b"), /one job id at a time/);
 });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (predicate()) return;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error("timed out waiting for the follow to render");
-}
 
 test("cp-routing-provenance: routing_resolved renders per-axis provenance, and the legacy shape unchanged", () => {
 	const events: RunEvent[] = [
