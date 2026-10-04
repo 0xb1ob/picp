@@ -330,10 +330,10 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 				result = { pid: process.pid, protocol: PARENT_HOST_PROTOCOL, parent: status.alive ? status.pid : null };
 			} else if (op === "subscribe") {
 				subscribers.add(socket);
-				// A client that reads the relay outbox from disk passes `{backlog: false}`: the memory backlog stays for an older one.
+				// A client that reads the relay outbox from disk passes `{backlog: false}`: the memory backlog is only for an older one.
 				const backlogWanted = (args[0] as { backlog?: unknown } | undefined)?.backlog !== false;
-				for (const relay of backlogWanted ? backlog.splice(0) : []) {
-					const current = deliverableRelay(home, relay);
+				for (const relay of backlog.splice(0)) {
+					const current = backlogWanted ? deliverableRelay(home, relay) : undefined;
 					if (current) frame(socket, { relay: current });
 				}
 				result = true;

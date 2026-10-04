@@ -232,6 +232,8 @@ export default function (pi: ExtensionAPI): void {
 	};
 	// cp-6fyl A: relays come from the host's on-disk outbox (a frame is only a poke), are acked at context entry,
 	// and wait out the operator's own turn and any compaction (a turn started mid-compaction races the summarizer).
+	// A hand-off still waiting on compaction counts as pending: an idle settle must not re-emit it.
+	let deferredRelays = 0;
 	const relayFiles = () => {
 		const target = backstopTarget();
 		const layout = layoutForHome(target.mode, target.home);
@@ -249,7 +251,11 @@ export default function (pi: ExtensionAPI): void {
 				try { const { target } = relayFiles(); noteBridgeRelay(target.home, target.mode, relay); }
 				catch (error) { setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: ledger write failed (${(error as Error).message})`); }
 			}
-			compaction.whenIdle(() => pi.sendMessage({ customType: "cp-bridge", content: message.content, display: true, details: message.details }, { deliverAs: "followUp", triggerTurn: true }));
+			deferredRelays += 1;
+			compaction.whenIdle(() => {
+				deferredRelays -= 1;
+				pi.sendMessage({ customType: "cp-bridge", content: message.content, display: true, details: message.details }, { deliverAs: "followUp", triggerTurn: true });
+			});
 		},
 		status: (line) => setStatusLine(sessionCtx, "cp-relays", line),
 	});
@@ -267,7 +273,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; consumer.started(); });
 	pi.on("agent_settled", async (_event, ctx) => {
 		sessionCtx = ctx ?? sessionCtx;
-		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: sessionCtx?.hasPendingMessages?.() ?? true });
+		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
 	});
 
 	pi.on("message_start", async (event) => {
