@@ -36,6 +36,13 @@ export function boundedWakeupId(raw: string): string {
 	return `${raw.slice(0, 139)}:${digest}`;
 }
 
+/** `prefix` + a cause, at most 160 chars; a long cause keeps its head and its tail (the status/HTTP code) plus a hash. */
+export function boundedCauseId(prefix: string, cause: string): string {
+	const raw = prefix + cause;
+	if (raw.length <= 160) return raw;
+	return `${prefix}${cause.slice(0, 30)}…${cause.slice(-70)}:${createHash("sha256").update(raw).digest("hex").slice(0, 12)}`;
+}
+
 /** issue #2: the durable id prefix of a killed_unreported notice; cp-bridge relays it straight to the operator. */
 export const KILLED_UNREPORTED_WAKEUP_PREFIX = "killed-unreported:";
 

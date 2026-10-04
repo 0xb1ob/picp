@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AnswerCardOutbox, type AnswerCardDueOptions, type AnswerCardSink } from "./answer-delivery.ts";
 import { AnsweredOutbox, isSelfAnswered } from "./answered.ts";
-import { boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
+import { boundedCauseId, boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
 import { observeMandateUsage } from "./mandate-usage.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
@@ -701,7 +701,7 @@ export class CommandPost {
 	ciWatchFailed(error: unknown): void {
 		const cause = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.slice(0, 300) || "no message";
 		const content = `CI/PR WATCH TICK FAILED — ${cause}\n  The watch keeps ticking and re-derives every unconfirmed fact; held PRs may wake you late until this clears.`;
-		this.#journalDurable({ id: boundedWakeupId(`ci-watch-failed:${cause}`), kind: "recovery", content });
+		this.#journalDurable({ id: boundedCauseId("ci-watch-failed:", cause), kind: "recovery", content });
 	}
 
 	/** Evidence that a `cp-ci` wake-up reached the parent: the keys it carried. */

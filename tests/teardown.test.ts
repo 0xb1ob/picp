@@ -817,6 +817,23 @@ test("cp-t9yr F1: a reported held job with a live unowned worker is refused even
 	assert.equal(closed.torn_down, true, formatTeardown(closed));
 });
 
+test("N6: teardown keeps the recorded worker exit time; closed_at carries the teardown clock", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-exited-earlier";
+	await b.addJob(jobId, b.worktree(jobId), "research");
+	const exitedAt = "2026-01-01T00:00:00Z";
+	await b.fleet.mutate((jobs) => {
+		const job = jobs.find((entry) => entry.job_id === jobId)!;
+		if (!("script" in job)) job.worker.exited_at = exitedAt;
+	});
+	const torn = await b.teardown.teardown(jobId);
+	assert.equal(torn.torn_down, true, formatTeardown(torn));
+	const closed = b.fleet.require(jobId);
+	if (isScriptFleetRecord(closed)) assert.fail("research job expected");
+	assert.equal(closed.worker.exited_at, exitedAt);
+	assert.notEqual(closed.closed_at, exitedAt);
+});
+
 test("issue #2: hand-off and dead workers pass but say no report was filed", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
 	const journaled: DurableWakeupInput[] = [];

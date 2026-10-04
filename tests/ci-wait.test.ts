@@ -130,11 +130,17 @@ test("a sleep-then-poll bash call is refused, by shape", () => {
 	assert.match(refusal, /head_sha/);
 	assert.match(refusal, /report_result/);
 	assert.match(refusal, /never waits for CI/);
+	for (const text of [refusal, ciStatusRepeatRefusal()]) {
+		assert.match(text, /typecheck/);
+		assert.match(text, /test:one/);
+		assert.match(text, /never `npm test`/);
+		assert.doesNotMatch(text, /full suite|run the suite/i);
+	}
 });
 
 test("a legitimate long-running command is never flagged", () => {
 	for (const command of [
-		// The suite this very job runs — long, and exactly what a worker must do.
+		// A long suite is not a CI wait; the refusal text, not this detector, tells a worker not to run it locally.
 		"npm test > /tmp/test-out.txt 2>&1",
 		"npm run typecheck",
 		"node --test --test-timeout=300000 tests/**/*.test.ts",
