@@ -104,11 +104,13 @@ function parseTranscript(file: string, sides: {user:string;assistant:string}): {
   } else {
    const text=textOf(message.content);
    if (!text.trim()) continue; // an empty system/prompt record is nothing the CLI showed
-   // Image parts follow the text, so the end-anchored marker is read from the text parts alone; the parts stay `[image]`.
+   // Image parts follow the text, so the end-anchored marker is read from the text parts alone. The marker's upload ids
+   // render as thumbnails (`images`); image parts a marker does not name stay `[image]`.
    const dashboard=role === "user" && sides === SIDES.you ? parseDashboardText(textOf(message.content,false)) : undefined;
    if (dashboard) {
-    const shown=Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
+    const shown=!dashboard.images && Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
     const e=entry(base,at,"via","Operator (dashboard)",[dashboard.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;
+    if (dashboard.images) e.images=dashboard.images;
     if (dashboard.askId) e.ask_id=dashboard.askId;
     entries.push(e); continue;
    }

@@ -5766,7 +5766,7 @@ running session's CSRF token → 201 `{id, mime, bytes, expires_at, url}`. Refus
 | the `upload` journal line is written **first** (`id`, `mime`, `bytes`, never bytes) | 500, nothing stored |
 | the write | 500 (503 for an unsafe directory) |
 
-**`GET|HEAD /api/operator/uploads/<id>`** — the composer's thumbnail: only under `--require-tailnet` (403, like the
+**`GET|HEAD /api/operator/uploads/<id>`** — the composer's and the transcript's thumbnail: only under `--require-tailnet` (403, like the
 Full transcript), `Sec-Fetch-Site` absent, `same-origin` or `none` (403), an id (400 `not an upload id`); missing,
 expired or invalid is 404 `{error: "image expired"}`. 200 serves the bytes with the sniffed type, `nosniff`,
 `cross-origin-resource-policy: same-origin`, `content-security-policy: default-src 'none'; img-src 'self'; sandbox`
@@ -5787,7 +5787,9 @@ control is on, stats every upload (410 missing, 400 unreadable), then reads and 
 exceeded 15 s; nothing was sent` and nothing is injected. An image pi cannot resize is sent as a line `[image <id> could
 not be attached inline; file: <absolute path>]` instead, and the `injected` outcome says how many. The marker gains
 `; images=<id>,…` (`[cp-dashboard dc-… — from the dashboard; images=im-…]`), so the transcript still tags the message
-`dashboard`; its image parts show as `[image]`.
+`dashboard`; the Full transcript shows the marker's ids as 96 px thumbnails in the operator's bubble (a tap opens one at
+the bubble's width), and an id the GET route answers 404 for reads **"image expired"** (`SessionEntry.images`,
+`viewer-app/components/TranscriptImages.tsx`). Image parts no marker names stay `[image]`.
 
 **Recovery.** `rm -rf /tmp/cp-dashboard-uploads` is safe at any time (a pending send then answers 410); the opt-out
 stops uploads with every other control. **Migration:** restart the operator session once (⋮ → Restart session) so its

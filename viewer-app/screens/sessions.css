@@ -89,6 +89,15 @@
 .session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .session-failed .session-bubble > .session-body { border-color: var(--error-border); }
 .session-bubble .session-send { margin-top: 4px; }
+/* Sent images (cp-br81 D9): 96 px tiles in the bubble, wrapping at 390 px; a tap opens one at the bubble's width; a file gone from the upload store reads "image expired". */
+.session-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; min-width: 0; }
+.session-images > li { display: flex; min-width: 0; max-width: 100%; }
+.session-images > li.session-image-open { flex-basis: 100%; }
+.session-image-toggle { display: block; min-width: 0; max-width: 100%; padding: 0; background: none; border: 0; border-radius: 10px; cursor: zoom-in; }
+.session-image-open > .session-image-toggle { cursor: zoom-out; }
+.session-image { display: block; width: 96px; height: 96px; object-fit: cover; border-radius: 10px; }
+.session-image-open .session-image { width: auto; height: auto; max-width: 100%; max-height: 70vh; object-fit: contain; }
+.session-image-expired { display: flex; align-items: center; justify-content: center; width: 96px; height: 96px; padding: 6px; box-sizing: border-box; border: 1px dashed var(--border); border-radius: 10px; font-size: 12px; line-height: 1.3; text-align: center; color: var(--muted); }
 /* Markdown inside a bubble: code blocks and tables scroll sideways in their own box, never past the bubble. */
 .md { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .md ul, .md ol { display: flex; flex-direction: column; gap: 2px; margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.55; }

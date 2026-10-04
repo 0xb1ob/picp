@@ -273,6 +273,13 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   least one image, no tile still uploading and no failed tile; the send body carries
   `images: [id…]` and the tiles clear. Styles: `.operator-composer-attach*`,
   `.operator-composer-thumb*` in `components/control.css` (wrapping row at 390 px).
+- **Sent images** (cp-br81 PR2): a dashboard message whose marker lists `images=`
+  carries `images` (`SessionEntry`), and its operator bubble shows each as a 96 px
+  `object-fit: cover` thumbnail from `/api/operator/uploads/<id>` under the text
+  (`components/TranscriptImages.tsx`; tiles wrap at 390 px). A tap opens one at the
+  bubble's width (at most 70vh tall), a second tap closes it. A file the route
+  answers 404 for (the 7-day sweep, a cleaned `/tmp`) swaps its tile for the text
+  "image expired". Styles: `.session-image*` in `screens/sessions.css`.
 - **Mobile layout** (below 900 px, every Sessions view): the global header and the
   bottom nav give way to one 48 px top bar — back to Overview, a menu of every
   session (Operator ↔ you, CP parent, each worker), the view's name, the live dot,

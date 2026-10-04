@@ -146,6 +146,29 @@ test("an opened bridge relay shows six lines, the rest behind Show more; a short
 	assert.equal(short!.querySelector(".session-notice-more"), null, "nothing to hide, no Show more");
 });
 
+test("sent images: a dashboard bubble shows its upload ids as thumbnails; a tap opens one; a 404 swaps it for \"image expired\"", async (t) => {
+	const ids = ["im-20261004-0123456789abcdef01234567.png", "im-20260920-89abcdef0123456789abcdef.jpg"];
+	const s = stage(t);
+	await act(() => mount(s.root, view([entry("d1", "via", { who: "Operator (dashboard)", tag: "dashboard", text: "look", dashboard_id: "dc-1", images: ids }), entry("a1", "say", { text: "no images here" })])));
+	const bubble = s.root.querySelector(".session-bubble")!;
+	assert.deepEqual([...bubble.querySelectorAll("img.session-image")].map(i => i.getAttribute("src")), ids.map(id => `/api/operator/uploads/${id}`), "same-origin upload route, so img-src 'self' holds");
+	assert.equal(s.root.querySelectorAll(".session-images").length, 1, "only the bubble with images gets a strip");
+	await s.click(bubble.querySelector(".session-image-toggle"));
+	assert.equal(bubble.querySelector(".session-images > li")!.getAttribute("class"), "session-image-open");
+	assert.equal(bubble.querySelector(".session-image-toggle")!.getAttribute("aria-expanded"), "true");
+	await s.click(bubble.querySelector(".session-image-toggle"));
+	assert.equal(bubble.querySelector(".session-image-open"), null, "a second tap closes it");
+	const second = bubble.querySelectorAll("img.session-image")[1]!;
+	await act(() => { second.dispatchEvent(new window.Event("error")); });
+	assert.deepEqual([...bubble.querySelectorAll(".session-images > li")].map(li => li.textContent), ["", "image expired"], "the gone file reads image expired; the other stays a thumbnail");
+	assert.equal(bubble.querySelectorAll("img.session-image").length, 1);
+	assert.doesNotMatch(s.root.innerHTML, /style=/, "no inline styles (CSP style-src-attr 'none')");
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
+	assert.match(css, /\.session-images \{[^}]*flex-wrap: wrap;/, "tiles wrap inside the bubble at 390 px");
+	assert.match(css, /\.session-image \{[^}]*width: 96px; height: 96px; object-fit: cover;/);
+	assert.match(css, /\.session-image-open \.session-image \{[^}]*max-width: 100%;/, "an opened image never passes the bubble");
+});
+
 test("layout: bubbles cap at 85% on a phone and 75% on desktop; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");

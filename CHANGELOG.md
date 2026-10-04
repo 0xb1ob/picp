@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Dashboard sent-image thumbnails (cp-br81, PR2)
+
+The Full transcript shows the images a dashboard message sent as 96 px thumbnails in the operator's bubble, read by upload id from the message's `images=` marker through `GET /api/operator/uploads/<id>`; a tap opens one at the bubble's width. An upload the route no longer has (the 7-day sweep, a cleaned `/tmp`) reads "image expired" instead of a broken image. `SessionEntry` gains `images`; a dashboard message no longer repeats its image parts as `[image]` (a CLI message with an image still does). Migration: none.
+
 ### Dashboard composer image attachments (cp-br81, PR1)
 
 The Full transcript composer attaches images — a paperclip or a paste, up to 8 per message, each uploaded at once and shown as a removable thumbnail — and a message may be text, images or both. Images reach the operator session as pi user-message image parts (resized by pi's `resizeImage`), never as text. New routes `POST /api/operator/upload` (same guard chain as the control routes, magic-byte check, HEIC and SVG refused, its own 24/60 s limiter) and `GET /api/operator/uploads/<id>`; files live in `/tmp/cp-dashboard-uploads/<yyyymmdd>/` (0700/0600, 7-day sweep, 256 MiB cap; `CP_UPLOAD_ROOT` overrides); `dashboard.jsonl` records ids, never bytes. `/api/operator/message` takes `images`; the bridge's new socket op `send_images` carries them, and the status says `images: true` only for a bridge that has it. Migration: restart the operator session once (⋮ → Restart session) — until then the paperclip stays hidden, and an older bridge answers 409 unsupported. Sent-image thumbnails in the transcript come in PR2; until then an image part shows as `[image]`.

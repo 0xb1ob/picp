@@ -22,6 +22,8 @@ export interface SessionEntry {
  trace: {id: string; label: string; at: string | null; detail: string}[];
  /** Full transcript: a message the dashboard injected (its `dc-…` id), the ask a card or click is about, and the card itself. */
  dashboard_id?: string; ask_id?: string; ask?: TranscriptAsk;
+ /** Full transcript: the upload ids a dashboard message's marker names (`; images=`), shown as thumbnails from `/api/operator/uploads/<id>`. */
+ images?: string[];
  /** A cp-bridge notice's own `paths:` block (src/cp-bridge.ts formatBridgeRelay), each already a viewer link. */
  paths?: { path: string; href: string | null; read: string | null }[];
  /** Each bare `.pi-command-post` path in `text` the viewer can open (src/viewer/linkify.ts), path → href. */

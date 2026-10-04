@@ -252,7 +252,8 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
  const click=full.entries[6];
  assert.deepEqual([click.who,click.tag,click.text,click.dashboard_id,click.ask_id],["Operator (dashboard)","dashboard","ask-abcd: Keep","dc-20260927082500-0123abcd","ask-abcd"],"the marker is stripped and read");
  assert.deepEqual([full.entries[7].text,full.entries[7].dashboard_id,full.entries[7].ask_id],["steer: stop the merge","dc-20260927082600-4567cdef",undefined]);
- assert.deepEqual([full.entries[8].tag,full.entries[8].text,full.entries[8].dashboard_id],["dashboard","look\n[image]","dc-20260927082700-89abcdef"],"image parts follow the marker: still a dashboard message, the image still shown as [image]");
+ assert.deepEqual([full.entries[8].tag,full.entries[8].text,full.entries[8].dashboard_id,full.entries[8].images],["dashboard","look","dc-20260927082700-89abcdef",["im-20260927-0123456789abcdef01234567.png"]],"image parts follow the marker: still a dashboard message; the marker's ids are its thumbnails, never [image]");
+ assert.equal(full.entries[7].images,undefined,"a text-only dashboard message carries no images");
  assert.equal(full.entries[9].text,"from the CLI\n[image]","a CLI message with an image is unchanged");
 });
 
