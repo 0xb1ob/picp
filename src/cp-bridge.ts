@@ -188,7 +188,6 @@ export function buildParentArgv(options: {
 	return args;
 }
 
-/** Paths only. The main session is the tier allowed to read the bodies. */
 /**
  * cp-0wq7/cur.5.4: never invent a parent model. `CP_PARENT_MODEL`, then the
  * operator session's own model (explicit `sessionModel`, which the caller
@@ -423,6 +422,7 @@ export class CpBridge {
 	confirmObserved(id: string): boolean {
 		return this.#delivery?.outbox.markObserved(id) ?? false;
 	}
+	sweepSends(): void { this.#delivery?.sweep(); }
 
 	/** Main-session messages: each `cp-bridge` relay carrying `details.send_id` is observed. Never throws. */
 	observe(messages: unknown): void {

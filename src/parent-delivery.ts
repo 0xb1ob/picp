@@ -5,20 +5,26 @@
  * every outcome no tool result carried. Process ownership, relaunch and the
  * relay stream stay in `src/cp-bridge.ts`.
  */
+import type { BridgeRelay } from "./cp-bridge.ts";
 import {
 	frameBatch,
 	frameResume,
 	landedOutcomes,
 	markSpan,
+	PARENT_SEND_MAX_AGE_HOURS,
 	type ParentSendEntry,
 	type ParentSendDelegation,
 	type ParentSendOutbox,
 	type ParentSendReceipt,
+	receiptOf,
 	sendIdsInText,
 	sendRelay,
 } from "./parent-outbox.ts";
 import { isTransientProviderError, MAX_OUTER_RETRIES, OUTER_RETRY_DELAYS_MS, RESUME_NUDGE } from "./provider-retry.ts";
 import type { WorkerProcess } from "./worker-process.ts";
+
+/** A send still not terminal this long after `queued_at` gets one visible notice (cp-6fyl B1). */
+export const SEND_NOTICE_SECONDS = 600;
 
 type OuterRetryEvent =
 	| "outer_retry_attempt"
@@ -55,7 +61,7 @@ type SendOutcome = { failed: boolean; reply: string; error: string };
 export interface DeliveryHost {
 	/** The ready, live parent; undefined while dead, booting, relaunching or stopping. */
 	liveProc(): WorkerProcess | undefined;
-	emit(relay: ReturnType<typeof sendRelay>): void;
+	emit(relay: BridgeRelay): void;
 	/** H1 outer ladder: the wait between resumes, its journal, and once-per-send turn counting. */
 	sleep(ms: number): Promise<void>;
 	journal(event: OuterRetryEvent, payload: Record<string, unknown>): void;
@@ -274,11 +280,34 @@ export class ParentDelivery {
 		for (const entry of this.outbox.relaysDue()) this.relay(entry);
 	}
 
-	/** `cp_parent stop`: sends that never landed end undeliverable, relayed once. */
+	/** `cp_parent stop`: sends that never landed end undeliverable, and landed ones still awaiting a reply end too; each relayed once. */
 	discardUnlanded(reason: string): void {
 		try {
 			const ids = this.outbox.unlanded().map((entry) => entry.id);
 			for (const entry of this.outbox.markUndeliverable(ids, reason)) this.relay(entry);
+			const landed = this.outbox.list().filter((entry) => entry.state === "landed").map((entry) => entry.id);
+			for (const entry of this.outbox.markUndeliverable(landed, "parent stopped before replying")) this.relay(entry);
+		} catch {
+			// An unreadable outbox is reported by status and the next start.
+		}
+	}
+
+	/**
+	 * cp-6fyl B1, on the host tick whether or not a parent runs: queued sends past their bound expire, a landed
+	 * send with no reply 24 h after landing ends, and a send still open 10 min after `queued_at` gets one notice.
+	 */
+	sweep(now: Date = new Date()): void {
+		try {
+			for (const entry of this.outbox.expireStale()) this.relay(entry);
+			const landed = this.outbox.landedOlderThan(PARENT_SEND_MAX_AGE_HOURS, now).map((entry) => entry.id);
+			for (const entry of this.outbox.markUndeliverable(landed, `no reply within ${PARENT_SEND_MAX_AGE_HOURS} h of landing`)) this.relay(entry);
+			for (const entry of this.outbox.overdue(SEND_NOTICE_SECONDS, now)) {
+				if (!this.outbox.markPendingNotice(entry.id)) continue;
+				const proc = this.#host.liveProc();
+				const why = !proc ? "parent not running" : entry.state === "landed" ? "landed, awaiting reply" : proc.busy ? "parent busy" : "waiting for the parent";
+				const minutes = Math.floor((now.getTime() - Date.parse(entry.queued_at)) / 60_000);
+				this.#host.emit({ kind: "error", stale: false, text: `send ${entry.id} still ${entry.state} after ${minutes} min: ${why}. Do not resend; its outcome arrives as a [cp-bridge send send=${entry.id}] message.`, receipt: receiptOf(entry), paths: [] });
+			}
 		} catch {
 			// An unreadable outbox is reported by status and the next start.
 		}

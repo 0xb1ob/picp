@@ -17,10 +17,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
-import { reattachLoop } from "../../src/bridge-reattach.ts";
-import { CpBridgeError, formatBridgeRelay, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
-import { currentEscalationRelay } from "../../src/escalation-relay.ts";
-import { OperatorRelayQueue } from "../../src/operator-relays.ts";
+import { HOST_PROBE_MS, probeHost, reattachLoop } from "../../src/bridge-reattach.ts";
+import { type BridgeRelay, CpBridgeError, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
+import { OperatorRelayConsumer, RELAY_TICK_MS, recheckRelay } from "../../src/operator-delivery.ts";
+import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile, relayIdOf } from "../../src/operator-outbox.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
@@ -31,7 +31,7 @@ import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
 import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
-import { ParentSendDelegationSchema, sendIdOfMessage } from "../../src/parent-outbox.ts";
+import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
@@ -181,7 +181,6 @@ export default function (pi: ExtensionAPI): void {
 		const target = connectedTarget ?? resolveOperatorTarget();
 		return new OperatorAsks(resolve(target.home, layoutForHome(target.mode, target.home).state, "operator/asks.jsonl"));
 	};
-	const seenRelays = new Set<string>();
 	// Read before a stop or rotate kills the parent's workers: drained, or how many die.
 	const killNotice = (): string => {
 		try {
@@ -212,7 +211,7 @@ export default function (pi: ExtensionAPI): void {
 			if (client) { attached.disconnect(); return client; } // the reattach loop (or a racing call) attached first
 			track(attached);
 			if (hasLiveTarget && (attached.hostPid !== runtime.hostPid || attached.parentPid !== runtime.parentPid)) throw new CpBridgeError(`operator target pid mismatch for ${runtime.home}`);
-			await attached.onRelay(onRelay);
+			await attached.onRelay(onRelay, { backlog: false });
 			afterAttach(attached);
 			return attached;
 		}
@@ -231,31 +230,37 @@ export default function (pi: ExtensionAPI): void {
 		configureLayout(target.mode, target.home);
 		return target;
 	};
-	// Coordinator busy: followUp waits out the current turn, then triggers. A turn started while
-	// compaction runs would race the summarizer, so wakes wait for it to end.
-	const relays = new OperatorRelayQueue((relay) => compaction.whenIdle(() => pi.sendMessage(
-		{ customType: "cp-bridge", content: formatBridgeRelay(relay), display: true, details: relay.sendId ? { send_id: relay.sendId } : {} },
-		{ deliverAs: "followUp", triggerTurn: true },
-	)), (relay) => {
-		if (!connectedTarget) return relay;
-		configureLayout(connectedTarget.mode, connectedTarget.home);
-		return currentEscalationRelay(connectedTarget.home, relay);
-	});
-	const onRelay = (relay: Parameters<typeof formatBridgeRelay>[0]) => {
-		const identity = relay.sendId ? `send:${relay.sendId}` : relay.escalationId ? `escalation:${relay.escalationId}` : undefined;
-		if (identity && seenRelays.has(identity)) return;
-		if (identity) seenRelays.add(identity);
-		// Recorded so the escalation backstop never relays this id again; a failed write still delivers.
-		if (relay.kind === "escalation" && relay.escalationId) {
-			try {
-				const target = backstopTarget();
-				noteBridgeRelay(target.home, target.mode, relay);
-			} catch (error) {
-				setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: ledger write failed (${(error as Error).message})`);
-			}
-		}
-		relays.push(relay);
+	// cp-6fyl A: relays come from the host's on-disk outbox (a frame is only a poke), are acked at context entry,
+	// and wait out the operator's own turn and any compaction (a turn started mid-compaction races the summarizer).
+	// A hand-off still waiting on compaction counts as pending: an idle settle must not re-emit it.
+	let deferredRelays = 0;
+	const relayFiles = () => {
+		const target = backstopTarget();
+		const layout = layoutForHome(target.mode, target.home);
+		const state = join(resolve(target.home), layout.state);
+		return { target, state, sends: parentSendFile(join(target.home, layout.sessions, "cp-parent.jsonl")) };
 	};
+	const consumer = new OperatorRelayConsumer({
+		outbox: () => new OperatorRelayOutbox(operatorRelayOutboxFile(relayFiles().state)),
+		acks: () => new OperatorRelayAcks(operatorRelayAcksFile(relayFiles().state)),
+		sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
+		recheck: (relay) => { const files = relayFiles(); return recheckRelay(files.target.home, files.sends, relay); },
+		send: (message) => {
+			// Recorded so the escalation backstop never relays these ids again; a failed write still delivers.
+			for (const relay of message.relays) if (relay.kind === "escalation" && relay.escalationId) {
+				try { const { target } = relayFiles(); noteBridgeRelay(target.home, target.mode, relay); }
+				catch (error) { setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: ledger write failed (${(error as Error).message})`); }
+			}
+			deferredRelays += 1;
+			compaction.whenIdle(() => {
+				deferredRelays -= 1;
+				pi.sendMessage({ customType: "cp-bridge", content: message.content, display: true, details: message.details }, { deliverAs: "followUp", triggerTurn: true });
+			});
+		},
+		status: (line) => setStatusLine(sessionCtx, "cp-relays", line),
+	});
+	// A frame without an id is from a host older than the outbox: delivered through the same consumer, in memory.
+	const onRelay = (relay: BridgeRelay, relayId?: string) => (relayId ? consumer.poke() : consumer.direct(relay, relayIdOf(relay)));
 
 	let control: DashboardControl | undefined;
 	let sessionCtx: ExtensionContext | undefined;
@@ -264,17 +269,22 @@ export default function (pi: ExtensionAPI): void {
 	const sayParent = (line: string) => setStatusLine(sessionCtx, "cp-parent", line);
 	const attachedLine = (hostPid: number, parentPid: number | undefined) => `cp-parent: attached (host pid ${hostPid}${parentPid ? `, parent pid ${parentPid}` : ", no parent yet"})`;
 
-	// mz0: relays raised during the operator's own turn wait for it to settle, then recheck.
-	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; relays.started(); });
-	pi.on("agent_settled", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; relays.settled(); });
+	// mz0: relays raised during the operator's own turn wait for it to settle, then go out as one message.
+	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; consumer.started(); });
+	pi.on("agent_settled", async (_event, ctx) => {
+		sessionCtx = ctx ?? sessionCtx;
+		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
+	});
 
 	pi.on("message_start", async (event) => {
 		const message = (event as { message?: unknown }).message;
+		consumer.ack(message); // cp-6fyl I3: the relay is in context now
 		observe([message]);
 		control?.observe(message);
 	});
 	pi.on("context", async (event) => {
 		const messages = (event as { messages?: unknown }).messages;
+		if (Array.isArray(messages)) for (const message of messages) consumer.ack(message);
 		observe(messages);
 		if (control && Array.isArray(messages)) for (const message of messages) control.observe(message);
 	});
@@ -297,7 +307,7 @@ export default function (pi: ExtensionAPI): void {
 				open: () => new EscalationStore({ home: target.home }).open(),
 				asks: () => operatorAsks().list(),
 				ledger: new EscalationRelayLedger(escalationRelayLedgerFile(target.home, target.mode)),
-				relay: (relay) => { seenRelays.add(`escalation:${relay.escalationId}`); relays.push(relay, true); },
+				relay: (relay) => consumer.direct(relay, `esc:${relay.escalationId}`, true),
 				...(afterSeconds !== undefined ? { afterSeconds } : {}),
 			});
 		} catch (error) {
@@ -319,8 +329,9 @@ export default function (pi: ExtensionAPI): void {
 			reattach.schedule();
 		});
 	};
-	// After a loss: say it once, then relay every open escalation the ledger never saw (the live relay and this replay share seenRelays and the ledger).
+	// After a loss: say it once, deliver what the outbox gathered, then relay every open escalation the ledger never saw.
 	const afterAttach = (attached: ParentHostClient): void => {
+		consumer.poke(); // whatever the outbox gathered while this session was not attached
 		if (!lost) return sayParent(attachedLine(attached.hostPid, attached.parentPid));
 		lost = false;
 		sayParent(`cp-parent: reattached (pid ${attached.hostPid})`);
@@ -332,11 +343,23 @@ export default function (pi: ExtensionAPI): void {
 		const { record } = currentHost(parentHostPaths(target.home, target.mode));
 		if (!record) throw new CpBridgeError("parent host is not running");
 		const attached = await ParentHostClient.connect(record);
-		try { await attached.onRelay(onRelay); }
+		try { await attached.onRelay(onRelay, { backlog: false }); }
 		catch (error) { attached.disconnect(); throw error; }
 		if (client || shuttingDown) return attached.disconnect();
 		track(attached);
 		afterAttach(attached);
+	};
+	// cp-6fyl A5: a host that is alive but silent is dropped within 65 s; the close above re-attaches under #43's loop.
+	let relayTimer: NodeJS.Timeout | undefined;
+	let relayTicks = 0;
+	const probe = async (): Promise<void> => {
+		const probed = client;
+		if (!probed) return;
+		const target = backstopTarget();
+		if (await probeHost(probed, () => currentHost(parentHostPaths(target.home, target.mode)).record?.pid)) return;
+		if (client !== probed || shuttingDown) return;
+		sayParent(`cp-parent: host pid ${probed.hostPid} silent; re-attaching read-only`);
+		probed.abandon();
 	};
 	const attachReadOnly = async (): Promise<void> => {
 		if (shuttingDown) return;
@@ -352,6 +375,8 @@ export default function (pi: ExtensionAPI): void {
 		reattach.cancel();
 		clearInterval(backstopTimer);
 		backstopTimer = undefined;
+		clearInterval(relayTimer);
+		relayTimer = undefined;
 		control?.stop();
 		control = undefined;
 		client?.disconnect();
@@ -422,6 +447,14 @@ export default function (pi: ExtensionAPI): void {
 		shuttingDown = false;
 		lost = false;
 		await attachReadOnly();
+		consumer.sessionStarted(); // cp-6fyl A2: a new process or session re-emits what never reached context
+		clearInterval(relayTimer);
+		relayTicks = 0;
+		relayTimer = setInterval(() => {
+			consumer.poke(); // delivery from disk keeps working while the socket is down
+			if (++relayTicks % Math.round(HOST_PROBE_MS / RELAY_TICK_MS) === 0) void probe().catch(() => undefined);
+		}, RELAY_TICK_MS);
+		relayTimer.unref();
 		clearInterval(backstopTimer);
 		backstopTick();
 		backstopTimer = setInterval(backstopTick, ESCALATION_BACKSTOP_TICK_MS);
@@ -587,7 +620,7 @@ export default function (pi: ExtensionAPI): void {
 						receipt.reply !== undefined ? `reply:\n${receipt.reply}` : "",
 						receipt.error ? `error: ${receipt.error}` : "",
 					].filter((line) => line.length > 0);
-					relays.replied(receipt.reply);
+					consumer.replied(receipt.reply);
 					return textResult(lines.join("\n"), { ...receipt });
 				}
 				if (params.action === "doctor" || params.action === "version" || params.action === "drain") {

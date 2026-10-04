@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { reattachLoop } from "../src/bridge-reattach.ts";
+import { probeHost, reattachLoop } from "../src/bridge-reattach.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -50,4 +50,15 @@ test("a close during the attempt that just succeeded schedules one more attempt"
 	loop.schedule();
 	await sleep(150);
 	assert.equal(attempts, 2);
+});
+
+test("probeHost: an answering current host is live; a silent, failing or superseded one is not", async () => {
+	const answering = { hostPid: 7, request: async () => ({ pid: 7 }) };
+	assert.equal(await probeHost(answering, () => 7, 50), true);
+	assert.equal(await probeHost(answering, () => 8, 50), false, "a newer generation took the home");
+	assert.equal(await probeHost({ hostPid: 7, request: () => Promise.reject(new Error("closed")) }, () => 7, 50), false);
+	const begin = Date.now();
+	assert.equal(await probeHost({ hostPid: 7, request: () => new Promise(() => undefined) }, () => 7, 50), false, "silent past the timeout");
+	assert.ok(Date.now() - begin < 1_000);
+	assert.equal(await probeHost(answering, () => { throw new Error("record unreadable"); }, 50), true, "an unreadable record is not proof of replacement");
 });

@@ -289,3 +289,20 @@ test("reserveOuterRetry returns no ordinal when nothing was persisted", () => {
 	assert.equal(box.reserveOuterRetry(entry.id, 5), undefined);
 	assert.equal(readFileSync(box.file, "utf8"), before);
 });
+
+test("pending_notice_at round-trips the schema; markPendingNotice writes once and never on a terminal send", () => {
+	let now = new Date("2030-01-01T00:00:00Z");
+	const box = outbox({ now: () => now });
+	const entry = box.enqueue("slow");
+	now = new Date(now.getTime() + 601_000);
+	assert.deepEqual(box.overdue(600).map((item) => item.id), [entry.id]);
+	assert.equal(box.markPendingNotice(entry.id), true);
+	const stamped = box.get(entry.id)?.pending_notice_at;
+	assert.equal(stamped, "2030-01-01T00:10:01Z");
+	assert.equal(new ParentSendOutbox({ file: box.file }).get(entry.id)?.pending_notice_at, stamped, "survives a reload");
+	assert.equal(box.markPendingNotice(entry.id), false);
+	assert.deepEqual(box.overdue(600), [], "a noticed send is not overdue again");
+	const done = box.enqueue("done");
+	box.markUndeliverable([done.id], "gone");
+	assert.equal(box.markPendingNotice(done.id), false);
+});

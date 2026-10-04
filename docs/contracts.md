@@ -1125,7 +1125,7 @@ one-shot). Its body carries one trailing marker line,
 | `injected` | RPC write done (reserved before the write, rolled back if refused) |
 | `landed` | marker seen in a parent `role: "user"` message — the body is in its context |
 | `settled` / `failed` | its reply ended at a clean `turn_end`, or the run it landed in settled; reply stored, or `turn_failed` |
-| `undeliverable` | attempt ceiling, age ceiling, unprovable landing, or `cp_parent stop` |
+| `undeliverable` | attempt ceiling, age ceiling (queued, or landed with no reply 24 h after landing), unprovable landing, or `cp_parent stop` (never-landed sends, and landed ones as `parent stopped before replying`) |
 
 A send that outlasts the wait returns `level: injected` with `pending: <id>`
 and no error; its outcome later arrives as one `send`-kind relay (`send=<id>`,
@@ -1139,10 +1139,21 @@ absent is requeued; one the 400-entry window cannot prove is `undeliverable`,
 relayed, rather than risk a duplicate. A reconcile whose parent process was
 superseded mid-read stops there; the new process reconciles from disk.
 Ceilings: `PARENT_SEND_MAX_ATTEMPTS`
-(5) injections, `PARENT_SEND_MAX_AGE_HOURS` (24) queued. A fresh bridge (an
+(5) injections, `PARENT_SEND_MAX_AGE_HOURS` (24) queued, and the same 24 h for a
+`landed` send with no reply since landing. **Every send is bounded** (cp-6fyl B1):
+`ParentDelivery.sweep` runs on the host's 60 s relay tick whether or not a parent
+is running — it expires stale queued sends, ends long-landed ones, and gives a
+send still not terminal `SEND_NOTICE_SECONDS` (600) after `queued_at` exactly one
+`error` relay (`send <id> still <state> after <m> min: parent not running |
+parent busy | landed, awaiting reply`), persisted as `pending_notice_at` so a
+restart never repeats it. Each outcome then reaches `owner_observed` (sync tool
+result, or its relay acked in the operator relay outbox below) or an
+`undeliverable`/`failed` relay. A fresh bridge (an
 operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
-corrupt outbox refuses `cp_parent start`, naming the file.
+corrupt outbox refuses `cp_parent start`, naming the file. Downgrade: an older
+binary rejects a sends file carrying `pending_notice_at`, exactly like
+`outer_retry_attempts` below.
 
 **Transient retry budget.** The H1 outer ladder (`OUTER_RETRY_DELAYS_MS`,
 `MAX_OUTER_RETRIES`) spends its budget on the send's own record:
@@ -1176,8 +1187,50 @@ counts twice.
 
 Receipts are `injected | turn_settled | http_accepted | owner_observed |
 turn_failed`. Never overload those as `accepted`. This channel is RPC, so
-`http_accepted` is never claimed. A mid-turn wake into the main session is
-`followUp`, not steer: a busy coordinator queues it and does not drop it.
+`http_accepted` is never claimed.
+
+**Operator relay outbox** (`src/operator-outbox.ts`, `src/operator-delivery.ts`, cp-6fyl A).
+Every relay the parent host produces is written to `state/operator/relay-outbox.json`
+under a stable relay id **before** any socket frame: `send:<ps-id>`,
+`esc:<es-id>`, otherwise `<kind>:<uuid>`. A pending `esc:` entry re-raised with
+new text is replaced in place (newest text wins, `queued_at` kept); once acked a
+refresh is a new entry `esc:<id>#<n>`. Only the host writes that file (atomic
+rewrite in one process); it prunes acked/discarded entries older than 24 h beyond
+the newest 200 and never an unacked one. Operator sessions only append to
+`state/operator/relay-acks.jsonl` (`O_APPEND`, one `write()` per batch): `consumer`,
+`emit`, `emit_failed`, `ack`, `discard` lines; a torn last line is skipped, and
+the file is compacted at `session_start` past 512 KiB. Invariants:
+(I1) an enqueue failure is logged to `parent-host.log` and the frame still goes
+out without an id — with nobody subscribed it waits in the memory backlog and goes to
+the next subscriber, `{backlog: false}` included (a full backlog dropping one is logged);
+an id-less frame goes through the consumer in memory and is not replayed after a restart; (I2) one writer per file; (I3) an `ack` is written only when
+`message_start`/`context` shows a `cp-bridge` message carrying that id in
+`details.relay_ids` — a hand-off is an `emit`; (I4) an acked id never enters
+context again, across restarts; (I5) an unacked id is due unless this process
+emitted it into the current session file — a new process or session, or an idle
+settle with no pending messages, re-emits it; (I6) nothing is retired silently:
+an escalation no longer open (`superseded: <status>`), one named in a send reply
+(`named in send reply`; a backstop relay keeps today's rule) and a send outcome
+already `owner_observed` (`returned in tool result`) are `discard` lines, named
+once on the next message as `retired:` and on the `cp-relays` status line.
+`OperatorRelayConsumer.deliverDue` runs on a frame (a poke only), a 15 s disk
+tick, `session_start`/reattach and `agent_settled`, never during the operator's
+own turn; per pass one `send` outcome goes alone (keeping `details.send_id`) and
+the rest as **one** coalesced `followUp` (at most 20 relays / 24,000 chars, the
+remainder next pass). Wakes, errors and relaunch notices older than 1 h arrive
+headline-only under `stale — do not act`. The host's 60 s tick confirms
+`owner_observed` for every acked `send:` id whose socket `observe` was lost.
+**Liveness**: the operator probes the host every 60 s (`hello`, 5 s timeout,
+`probeHost`); a silent or superseded host is dropped and `reattachLoop`
+re-attaches read-only, while delivery from disk continues. Compatibility: a new
+client subscribes with `{backlog: false}`; an older client gets the host's memory
+backlog as before but writes no acks. A frame without `relay_id` (an older host)
+goes through the same consumer, in memory. Accepted edges: a host crash between
+the parent event and the enqueue loses that relay (escalations come back through
+the backstop); a crash between `message_start` and the ack append delivers once
+more; two operator sessions on one home can both deliver; an append during
+compaction can be lost (at worst one duplicate). Nothing from before the upgrade
+is migrated.
 
 Only the assistant's own messages ever count toward a reply or a wake; the
 user message the bridge injects is never mistaken for one. A turn's last
@@ -1201,7 +1254,9 @@ a gate-raised escalation has no `cp_escalate` relay path. Bridge escalation
 relays are recorded too, in the same ledger, `state/operator/escalation-relays.json`,
 so neither path repeats the other, across restarts. Ids still open are pinned;
 only settled history is capped at 512. It runs at `session_start`
-and on a 60 s tick; a send-reply mention of the id does not swallow it. It is
+and on a 60 s tick; a send-reply mention of the id does not swallow it. Its relays
+go through the operator relay outbox consumer under `esc:<id>` and ack through the
+same journal. It is
 not a parent wake and never authorization. An unreadable ledger or store sets
 the `escalation-backstop` status line and relays nothing. Two edges are
 accepted: the ledger is claimed before the push, so a session that dies in
