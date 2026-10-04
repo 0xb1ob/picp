@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Operator answers journal: cp_parent answer (cp-mxk4 PR1)
+
+The main session can post an answer the human asked for with `cp_parent answer` (`project`, `question`, `answer`, optional `evidence_paths` and `job_id`). It appends one `posted` line to the new `state/operator/answers.jsonl` (0600) straight away, with no parent turn, no push and no relay. Text is redacted and refused if a secret shape survives; a `job_id` must be a landed `kind:research` job of the same project (any delivery: local, answer, board) and is posted once. The dashboard list and the acknowledge tick follow in PR2. Migration: none.
+
 ### Ask guard: a question put to the human in prose is forced into a card (cp-6fyl PR3)
 
 The main session's `cp-bridge` extension now watches each run for a final assistant reply that asks the human something (a sentence ending in `?`, or a cue phrase such as "should I", "let me know") while no `cp_parent ask` succeeded in the run. It forces one continuation (`agent_before_settle` `continue: true`, a hidden `cp-ask-guard` message: open the ask or reply `NO-ASK`); if the run still opens none, the bridge opens a detected ask card itself (context prefix `Detected in the main session's reply`), and the human's next chat message answers it. Enforced: the ask-succeeded check, the single continuation and the fallback card. Heuristic, and documented as such in `docs/contracts.md` (Bridge → Ask guard): the question detector misses imperative asks and fires on rhetorical or quoted questions. `src/operator-note.ts` gains one line. No schema, endpoint or host-op change. Migration: none.

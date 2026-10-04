@@ -25,6 +25,7 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
+import { OperatorAnswers } from "../../src/operator-answers.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
@@ -508,14 +509,16 @@ export default function (pi: ExtensionAPI): void {
 			"(injected, turn_settled, http_accepted, owner_observed — never 'accepted') plus the reply when the turn settles, " +
 			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart; compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. " +
+			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
-		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/doctor/version/drain/compact/rotate/model/stop)",
+		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/compact/rotate/model/stop)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
 			"Raise every human question with ask before relaying it; close it with ask_answer using the human's verbatim reply, or ask_withdraw with a reason. Bookkeeping is never authorization; parent decisions still use their existing channel.",
 			"Keep an ask's question short; put the background in its context (plain text, up to 2000 chars): what happened, what each option really does, and the risk. The dashboard shows it on the decision card.",
+			"Post every answer the human asked for with answer (project, their question verbatim, the full answer, evidence_paths; job_id when it is the landing of a kind:research job they requested, any delivery (research report, cp_ask answer or board)): it lands on the dashboard without a parent turn and never pushes. Once per job_id; never for status, relays, decisions (ask/ask_answer) or chat.",
 			"A user message `<ask-id>: <label>` whose last line is `[cp-dashboard dc-… — from the dashboard; ask=<ask-id>]` is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
 			"Send delegated:true with a short delegation_rule when deciding on the human's behalf; omit it for the human's own answer.",
 			"Use integration_hold with job_id and reason before sending a request to pause merging; it writes immediately even while the parent is busy. Release only when that pause is explicitly lifted, then send cp_integrate advance to resume.",
@@ -526,7 +529,7 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "integration_hold", "integration_release", "doctor", "version", "drain", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent" }),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
@@ -534,8 +537,11 @@ export default function (pi: ExtensionAPI): void {
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "start: optional thinking level" })),
 			ask: Type.Optional(OperatorAskInputSchema),
 			id: Type.Optional(Type.String({ description: "ask_answer or ask_withdraw: ask id" })),
-			answer: Type.Optional(Type.String({ description: "ask_answer: human's verbatim words" })),
-			job_id: Type.Optional(Type.String({ description: "integration_hold or integration_release: delivery:pr ship job" })),
+			answer: Type.Optional(Type.String({ description: "ask_answer: human's verbatim words; answer: the full answer text" })),
+			project: Type.Optional(Type.String({ description: "answer: the project the question was about" })),
+			question: Type.Optional(Type.String({ description: "answer: the human's question, verbatim" })),
+			evidence_paths: Type.Optional(Type.Array(Type.String(), { description: "answer: report, board or file paths behind the answer" })),
+			job_id: Type.Optional(Type.String({ description: "integration_hold or integration_release: delivery:pr ship job; answer: the kind:research job, any delivery (local, answer, board), whose landing this answers" })),
 			reason: Type.Optional(Type.String({ description: "ask_withdraw or integration_hold: reason" })),
 			...ParentSendDelegationSchema.properties,
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
@@ -549,6 +555,19 @@ export default function (pi: ExtensionAPI): void {
 					const holds = new IntegrationHolds(target.home);
 					const hold = params.action === "integration_hold" ? holds.hold(params.job_id, params.reason ?? "") : (holds.release(params.job_id), null);
 					return textResult(hold ? `${params.job_id}: integration held: ${hold.reason}` : `${params.job_id}: integration hold released; send the parent cp_integrate advance to resume with all gates rechecked.`, { job_id: params.job_id, hold });
+				}
+				if (params.action === "answer") {
+					if (params.id) throw new CpBridgeError("cp_parent answer posts a new answer; close an ask with ask_answer");
+					if (!params.project || !params.question || !params.answer) throw new CpBridgeError("cp_parent answer needs project, question and answer");
+					const target = connectedTarget ?? resolveOperatorTarget();
+					configureLayout(target.mode, target.home);
+					const stateDir = resolve(target.home, layoutForHome(target.mode, target.home).state);
+					const { state, answer } = new OperatorAnswers(stateDir, { jobs: (id) => new FleetStore({ home: target.home }).get(id) }).post({
+						project: params.project, question: params.question, answer: params.answer,
+						...(params.evidence_paths ? { evidence_paths: params.evidence_paths } : {}),
+						...(params.job_id ? { job_id: params.job_id } : {}),
+					});
+					return textResult(state === "duplicate" ? `answer: ${answer.job_id} already posted as ${answer.id}; nothing written` : `answer: ${answer.id} posted to the dashboard (bookkeeping only; no push)`, { state, id: answer.id, job_id: answer.job_id, project: answer.project });
 				}
 				if (["ask", "ask_answer", "ask_withdraw"].includes(params.action)) {
 					const asks = operatorAsks();
@@ -672,7 +691,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "integration_hold", "integration_release"].includes(params.action) ? { isError: true } : {}) };
+				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release"].includes(params.action) ? { isError: true } : {}) };
 			}
 		},
 	});

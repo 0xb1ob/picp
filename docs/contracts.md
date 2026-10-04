@@ -1092,6 +1092,21 @@ card — on `#awaiting` and pinned above the Full transcript's composer — whos
 option buttons and "Other answer…" field go through the guarded
 `POST /api/operator/message` path (`{kind:"answer"}` / `{kind:"message"}`).
 
+**Operator answers.** `cp_parent answer` (cp-mxk4 PR1) posts an answer the human asked for
+to `state/operator/answers.jsonl`: `project`, `question` (their words; stored up to 500 chars, then `…`), `answer`
+(at most 8,000 chars; the first paragraph is the short answer), optional `evidence_paths` (at most 10) and `job_id`.
+The bridge handles it before any parent client, so it works with the parent busy or down: no parent turn, no push,
+no relay, never authorization. Question, answer and paths go through `redactSecrets`; text that still matches a
+`SECRET_PATTERNS` entry is refused by pattern name, never value. `job_id` must be a `kind:research` job of the same
+project in phase `held` or `done`, whatever its `delivery` (`local`, `pipeline`, `answer`, `board`, `pr`: `answer` and
+`board` are deliveries of research jobs, not kinds); a ship job, an unknown id, another project's job or an unlanded
+one is refused with the reason. A second post for the same `job_id` writes nothing and returns `state:"duplicate"`
+with the first `ans-` id. Status pings, relays (`[cp-bridge…]`, `[cp-dashboard…]`, `ask-…:` replies), decisions and
+chat are not answers; `id` is `ask_answer`'s. The journal is append-only: the bridge's `posted` lines (`ans-<12 hex>`)
+and, from PR2, the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-files.ts`; a torn last line is
+ignored, bad lines count as skipped, the first `job_id` wins, a repeat ack is ignored). The dashboard list and the
+acknowledge route arrive in PR2 (§Dashboard control → Answers to acknowledge).
+
 **Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
 without a `cp_parent ask` is forced back once, then carded by the bridge itself.
 *Enforced:* whether a `cp_parent ask` succeeded in the run (`tool_execution_end`,

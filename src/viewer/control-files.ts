@@ -10,11 +10,12 @@
  *   state/operator/inbox.jsonl      0600: messages held while no operator session runs (cp-daemon P3)
  *   state/schedule-control.jsonl    0600: Schedules page requests (viewer request lines) and the parent's
  *                                   claimed/outcome lines (cp-hhuf P6)
+ *   state/operator/answers.jsonl    0600: answers the operator asked for (bridge posted lines, viewer acked lines)
  *
  * Nothing in this file writes.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pushDataDir, readPushConfig } from "./push-files.ts";
 
@@ -98,6 +99,84 @@ export function readScheduleControl(stateDir: string): { requests: ScheduleContr
 	return { requests: [...requests.values()].sort((a, b) => a.at.localeCompare(b.at)), error: null };
 }
 
+/** cp-mxk4: answers the operator asked for; the bridge appends `posted`, the viewer `acked`. */
+export const operatorAnswersFile = (stateDir: string): string => join(stateDir, "operator", "answers.jsonl");
+export const ANSWER_ID_RE = /^ans-[a-f0-9]{12}$/;
+export const isAnswerId = (value: unknown): value is string => typeof value === "string" && ANSWER_ID_RE.test(value);
+export const ANSWER_QUESTION_MAX = 500;
+export const ANSWER_TEXT_MAX = 8000;
+export const ANSWER_EVIDENCE_MAX = 10;
+export const ANSWER_PROJECT_MAX = 120;
+export const ANSWERS_MAX_BYTES = 16 * 1024 * 1024;
+export type AnswerLine =
+	| { type: "posted"; by: "bridge"; id: string; at: string; project: string; question: string; answer: string; evidence_paths: string[]; job_id: string | null }
+	| { type: "acked"; by: "viewer"; id: string; at: string; peer: string | null };
+export interface RecordedAnswer {
+	id: string;
+	project: string;
+	question: string;
+	answer: string;
+	evidence_paths: string[];
+	job_id: string | null;
+	posted_at: string;
+	acked_at: string | null;
+	acked_peer: string | null;
+}
+// Kept inline: this module may not import src/viewer/overview-read.ts.
+const ANSWER_TIME_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+const isText = (value: unknown): value is string => typeof value === "string";
+
+/**
+ * Fold the answers journal, oldest first. An unterminated last line (torn) is ignored; a complete line that is not
+ * JSON or not a valid line, a repeated `posted` id or `job_id` (the first wins) and an `acked` for an unknown id count
+ * in `skipped`; a repeated `acked` is ignored. `error` names an unreadable or oversized file (never silently empty).
+ */
+export function readAnswers(stateDir: string): { exists: boolean; answers: RecordedAnswer[]; skipped: number; error: string | null } {
+	const file = operatorAnswersFile(stateDir);
+	let text: string;
+	try {
+		const size = statSync(file).size;
+		if (size > ANSWERS_MAX_BYTES) return { exists: true, answers: [], skipped: 0, error: `${file} is ${size} bytes, over the ${ANSWERS_MAX_BYTES} byte cap; move it aside` };
+		text = readFileSync(file, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, answers: [], skipped: 0, error: null };
+		return { exists: true, answers: [], skipped: 0, error: `${file}: ${(error as Error).message}` };
+	}
+	const rows = text.split("\n");
+	rows.pop(); // "" after the final newline, or the torn last line
+	const byId = new Map<string, RecordedAnswer>();
+	const jobs = new Set<string>();
+	let skipped = 0;
+	for (const row of rows) {
+		let line: Record<string, unknown>;
+		try {
+			line = JSON.parse(row) as Record<string, unknown>;
+		} catch {
+			skipped++;
+			continue;
+		}
+		if (line === null || typeof line !== "object" || !isAnswerId(line.id) || !isText(line.at) || !ANSWER_TIME_RE.test(line.at)) {
+			skipped++;
+			continue;
+		}
+		if (line.type === "posted" && line.by === "bridge") {
+			const evidence = line.evidence_paths;
+			const job = line.job_id === null ? null : isText(line.job_id) ? line.job_id : undefined;
+			if (!isText(line.project) || !isText(line.question) || !isText(line.answer) || !Array.isArray(evidence) || !evidence.every(isText) || job === undefined || byId.has(line.id) || (job !== null && jobs.has(job))) {
+				skipped++;
+				continue;
+			}
+			if (job !== null) jobs.add(job);
+			byId.set(line.id, { id: line.id, project: line.project, question: line.question, answer: line.answer, evidence_paths: evidence, job_id: job, posted_at: line.at, acked_at: null, acked_peer: null });
+		} else if (line.type === "acked" && line.by === "viewer" && (line.peer === null || isText(line.peer))) {
+			const known = byId.get(line.id);
+			if (!known) skipped++;
+			else if (known.acked_at === null) Object.assign(known, { acked_at: line.at, acked_peer: line.peer });
+		} else skipped++;
+	}
+	return { exists: true, answers: [...byId.values()], skipped, error: null };
+}
+
 export type ControlConfig = { state: "on" | "off" | "invalid"; reason: string };
 
 /** On unless `data/dashboard-control.json` says `{"enabled": false}`; anything else in that file is invalid (fail closed). */
@@ -174,5 +253,5 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
 export type ControlAuditLine =
 	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
