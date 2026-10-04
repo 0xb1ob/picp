@@ -216,6 +216,17 @@ export function sendIdsInTranscript(entries: readonly TranscriptEntry[]): Set<st
 	return ids;
 }
 
+/** Ids whose `frameResume` line is already in the parent's own user messages: a successor never nudges them again (N5). */
+export function resumedIdsInTranscript(entries: readonly TranscriptEntry[]): Set<string> {
+	const ids = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type !== "message" || entry.message?.role !== "user") continue;
+		const text = messageText(entry.message);
+		for (const id of sendIdsInText(text)) if (text.includes(frameResume([id]))) ids.add(id);
+	}
+	return ids;
+}
+
 /** A cp-bridge relay message in the main session carries `details.send_id`. */
 export function sendIdOfMessage(message: unknown): string | undefined {
 	if (!message || typeof message !== "object") return undefined;

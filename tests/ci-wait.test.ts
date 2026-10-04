@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../src/ci-wait.ts";
+import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, detectSleepLoop, shellPatchCommand, shellPatchRefusal } from "../src/ci-wait.ts";
 import {
 	type Envelope,
 	type EnvelopeContext,
@@ -164,6 +164,27 @@ test("a legitimate long-running command is never flagged", () => {
 		assert.equal(detectCiWait(command), undefined, `wrongly flagged: ${command}`);
 	}
 	assert.equal(detectCiWait(""), undefined);
+});
+
+test("N2: detectSleepLoop flags a command-position loop that sleeps, not a bare sleep, a one-shot query or a quote", () => {
+	for (const command of [
+		"for i in $(seq 1 30); do sleep 20; jq .state state/update.json; done",
+		"while true; do\n  cat state/update.json\n  sleep 15\ndone",
+		"until [ -f /tmp/x ]; do sleep 1; done",
+	]) {
+		assert.ok(detectSleepLoop(command), `missed: ${command}`);
+	}
+	for (const command of [
+		"sleep 5",
+		"gh run list --branch main --limit 3 --json conclusion,status,headSha",
+		'grep -rn "sleep 20" src/',
+		'grep -n "for i in x; do sleep 20; done" notes.md',
+		"for f in a b; do echo $f; done",
+		"cat > /tmp/notes.md <<'EOF'\nwhile true; do\nsleep 20\ndone\nEOF",
+		"",
+	]) {
+		assert.equal(detectSleepLoop(command), undefined, `wrongly flagged: ${command}`);
+	}
 });
 
 test("ciStatusQuery meters status queries, not failure logs or quoted mentions", () => {

@@ -171,7 +171,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 - **Planner and QA:** only the artifact heredoc.
 - **Reviewers:** only `report_verdict`.
 - **Parent:** only through its tools.
-- **Operator session:** only in `<home>/.pi-command-post/operator/` and `data/standing-orders.md`, plus `cp_parent`.
+- **Operator session:** only in `<home>/.pi-command-post/operator/`, `state/task-files/` and exactly `data/standing-orders.md`, plus `cp_parent`. Enforced: the bridge's `tool_call` hook refuses any other `write`/`edit`, and a bash sleep or CI poll loop (`extensions/cp-bridge/index.ts`).
 - **Tests:** only in their own `mkdtemp` roots.
 - **Nobody** writes ad hoc to `$HOME`, the `/tmp` root, sibling repositories or
   another home.
