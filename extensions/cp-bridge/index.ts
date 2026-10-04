@@ -347,6 +347,7 @@ export default function (pi: ExtensionAPI): void {
 	};
 	pi.on("session_shutdown", async () => {
 		shuttingDown = true;
+		lost = false;
 		reattach.cancel();
 		clearInterval(backstopTimer);
 		backstopTimer = undefined;
@@ -417,6 +418,7 @@ export default function (pi: ExtensionAPI): void {
 			setStatusLine(ctx, "operator-context", `operator context: not loaded (${(error as Error).message})`);
 		}
 		shuttingDown = false;
+		lost = false;
 		await attachReadOnly();
 		clearInterval(backstopTimer);
 		backstopTick();

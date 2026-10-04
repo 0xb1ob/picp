@@ -78,11 +78,28 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 		sessionManager: { getSessionFile: () => join(home.path, "operator.jsonl"), getEntries: () => [{ type: "message" }] },
 	};
 	const mentions = (needle: string) => messages.filter((text) => text.includes(needle)).length;
+	// Open in the store under the id the fake parent's cp_escalate reports; fresh, so the 10 min backstop cannot relay it.
+	const store = new EscalationStore({ home: home.path });
+	const raiseAs = async (id: string, job: string): Promise<string> => {
+		await store.raise({
+			job_ids: [job], kind: "product_ambiguity", question: `ship ${job}?`,
+			options: [{ id: "hold", label: "Hold", consequence: "No merge", cost: "none" }],
+			recommended: "hold", evidence_paths: [],
+		});
+		const data = store.read();
+		data.items[data.items.length - 1]!.id = id;
+		writeFileSync(store.file, JSON.stringify(data));
+		return id;
+	};
 	await emit("session_start", ctx);
 	await until("attached to generation 1", () => statuses.some((line) => line.startsWith("cp-parent: attached")));
 	assert.equal(mentions(unseenId), 0, "the first outcome never reached the session");
 	const sendId = await settledSend("seen"); // relayed to the attached session live, still unobserved by it
 	await until("the live send outcome relayed", () => mentions(sendId) >= 1);
+	// An open escalation the parent raises while attached: relayed live, so the ledger has it before the kill.
+	const liveBeforeKill = await raiseAs("es-0001", "cp-job");
+	await first.request("send", "ESCALATE");
+	await until("the live escalation relayed", () => mentions(`id=${liveBeforeKill}`) >= 1);
 
 	// The host dies; nothing may start a host or parent while the loop retries.
 	process.kill(first.hostPid, "SIGKILL");
@@ -92,15 +109,7 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	assert.equal(statuses.some((line) => line.startsWith("cp-parent: reattached")), false);
 
 	// Raised while the bridge had no connection; fresh, so only the reattach replay (not the 10 min backstop) can relay it now.
-	const store = new EscalationStore({ home: home.path });
-	await store.raise({
-		job_ids: ["cp-job"], kind: "product_ambiguity", question: "ship?",
-		options: [{ id: "hold", label: "Hold", consequence: "No merge", cost: "none" }],
-		recommended: "hold", evidence_paths: [],
-	});
-	const data = store.read();
-	data.items[0]!.id = "es-0001";
-	writeFileSync(store.file, JSON.stringify(data));
+	const gap = await raiseAs("es-0002", "cp-job-gap");
 
 	// Generation 2, started the way the supervisor does; its parent wakes at start.
 	Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_JOB: "cp-gen2", FAKE_PARENT_WAKE_TEXT: "Wake from the new generation" });
@@ -110,13 +119,15 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 
 	await until("reattached", () => statuses.some((line) => line === `cp-parent: reattached (pid ${second.hostPid})`));
 	await until("the new generation's wake", () => mentions("Wake from the new generation") >= 1);
-	await until("the gap escalation", () => mentions("id=es-0001") >= 1);
+	await until("the gap escalation", () => mentions(`id=${gap}`) >= 1);
 	await until("the unseen send outcome replayed by host 2", () => mentions(unseenId) >= 1);
 
-	// Gap escalation: the live relay of the same id races the replay, still one.
-	await second.request("send", "ESCALATE");
+	// Escalations: the live relay of the same id races the replay (es-0002) or follows its own earlier live relay (es-0001): still one each.
+	await second.request("send", "REFRESH"); // raises es-0002 live, twice
+	await second.request("send", "ESCALATE"); // raises es-0001 live again
 	await sleep(500);
-	assert.equal(mentions("id=es-0001"), 1, JSON.stringify(messages));
+	assert.equal(mentions(`id=${gap}`), 1, JSON.stringify(messages));
+	assert.equal(mentions(`id=${liveBeforeKill}`), 1, JSON.stringify(messages));
 	// Send outcomes: host 2 re-emits every settled, unobserved one (relaysDue). The unseen one arrives once; the one the session
 	// already saw live (same id) is deduplicated, not shown twice.
 	assert.equal(mentions(unseenId), 1, "the unseen outcome is replayed once");

@@ -17,14 +17,15 @@ test("the loop retries with doubling delay up to the cap, one loop at a time, un
 		if (at.length < 5) throw new Error("no host");
 	}, 40, 100);
 	loop.schedule();
-	await sleep(700);
+	for (const deadline = Date.now() + 10_000; at.length < 5 && Date.now() < deadline;) await sleep(10);
 	assert.equal(at.length, 5, `attempts: ${at}`);
 	assert.equal(overlap, false);
 	const gaps = at.slice(1).map((time, index) => time - at[index]!);
-	// 40, 80, 100 (capped), 100 — each gap includes the 5 ms attempt itself.
-	assert.ok(gaps[0]! >= 80 && gaps[0]! < 130, `gaps: ${gaps}`);
-	assert.ok(gaps[1]! >= 100 && gaps[1]! < 150, `gaps: ${gaps}`);
-	assert.ok(gaps[3]! >= 100 && gaps[3]! < 150, `capped: ${gaps}`);
+	// Nominal 80, 100 (capped from 160), 100, 100, each plus the attempt itself. Lower bounds are the contract (a timer never
+	// fires early); the upper bound only has to tell the cap (100) from doubling (320), so it is loose for a loaded machine.
+	assert.ok(gaps[0]! >= 75, `gaps: ${gaps}`);
+	for (const gap of gaps.slice(1)) assert.ok(gap >= 95, `gaps: ${gaps}`);
+	assert.ok(gaps[2]! < 250 && gaps[3]! < 250, `capped: ${gaps}`);
 	await sleep(250);
 	assert.equal(at.length, 5, "a success ends the loop");
 	loop.schedule();
