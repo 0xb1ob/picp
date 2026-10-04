@@ -3919,7 +3919,7 @@ token-cap raise within the ceiling (`cp_mandate raise_tokens`, journaled).
 
 Auto-decision: when a checkpoint is minted and evaluation permits, `decide()`
 runs with `decided_by: mandate:<id>` and the clause in `note`,
-and no `cp-answered` wake-up fires (a self-answer, see §An answer wakes the parent). `cp_mandate show` lists every auto-decision.
+and the `cp-answered` wake-up still fires: unlike an operator-quoted `cp_decide`, an auto-decision can run outside a parent turn. `cp_mandate show` lists every auto-decision.
 Expiry/revoke: no new auto-decisions (except an expired grant's diff/merge for an in-flight job, see
 *one permission rule*); workers are not killed. Merge authority
 stays the repository's — the mandate may only allow the parent to proceed when
@@ -5061,15 +5061,17 @@ repeats it. Both writers report only an answer they actually recorded (an
 idempotent repeat returns early), and `enqueue` refuses an id that is already
 pending or delivered: answering twice never wakes twice.
 
-**Self-answers do not echo.** The parent's own decisions are recorded by their
-writers as always, but `CommandPost.#recordAnswered` neither enqueues them nor
-fires `onAnswered` when `answered_by` is exactly `operator-quote`, exactly
-`operator-delegated`, or starts with `mandate:` (`isSelfAnswered`,
-`src/answered.ts`): the parent that made the call needs no `cp-answered` turn to
-learn it. Every other `answered_by` (a `/cp-decide` or dialog answer by a human)
-queues and wakes exactly as above. The escalation, awaiting and checkpoint
-records are untouched, nothing is queued, so a restart replays nothing
-(`tests/answered.test.ts`).
+**Self-answers do not echo.** `cp_decide` records an operator-quoted answer inside
+the parent's own turn. When `answered_by` is exactly `operator-quote` or exactly
+`operator-delegated` (`isSelfAnswered`, `src/answered.ts`), the writer records it
+as always but `CommandPost.#recordAnswered` neither enqueues it nor fires
+`onAnswered`: the parent that made the call needs no `cp-answered` turn to learn
+it. **`mandate:<id>` still wakes** (including mandate auto-close), as does every
+other `answered_by`: a mandate auto-decision (`#tryMandate` → `autoDecideCheckpoint`)
+can run outside a parent turn when a gate or review lands, so suppressing it could
+strand a dispatch or merge. The escalation, awaiting and checkpoint records are
+untouched; a suppressed answer queues nothing, so a restart replays nothing, while
+a queued one is replayed as before (`tests/answered.test.ts`).
 
 **Skip still writes nothing and wakes nobody.** It never reaches a writer, so
 there is nothing to queue — `state/answered.json` may not even exist afterwards.

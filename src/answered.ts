@@ -135,12 +135,15 @@
  *
  * ## Self-answers do not echo
  *
- * The parent's own decisions — `answered_by` exactly `operator-quote`, exactly
- * `operator-delegated`, or starting with `mandate:` (`isSelfAnswered`) — are recorded by
- * their writers as always, but `CommandPost.#recordAnswered` neither enqueues them nor fires
- * the `onAnswered` wake: the parent that made the call does not need a `cp-answered` turn to
- * learn it. Every other `answered_by` (a `/cp-decide` or dialog answer by a human) is
- * queued and woken exactly as above. Nothing is queued, so nothing is replayed on restart.
+ * `cp_decide` records an operator-quoted answer inside the parent's own turn, so
+ * `answered_by` exactly `operator-quote` or exactly `operator-delegated`
+ * (`isSelfAnswered`) is recorded by its writer as always, but `CommandPost.#recordAnswered`
+ * neither enqueues it nor fires the `onAnswered` wake: the parent that made the call needs no
+ * `cp-answered` turn to learn it. Every other `answered_by` is queued and woken exactly as
+ * above — in particular `mandate:<id>`: a mandate auto-decision (`#tryMandate` →
+ * `autoDecideCheckpoint`, mandate auto-close) can land outside any parent turn, when a gate or
+ * review finishes, so suppressing it could strand a dispatch or merge. Nothing is queued for a
+ * suppressed answer, so a restart replays nothing; a queued one is replayed as before.
  *
  * Skip is not an answer: it writes nothing, anywhere, so nothing is enqueued
  * and nobody is woken. Skip never reaches a writer, so this
@@ -586,12 +589,12 @@ function noticeText(content: unknown): string {
 }
 
 /**
- * The parent's own act: `operator-quote` / `operator-delegated` (its `cp_decide` with a quote) or
- * `mandate:<id>` (its grant's auto-decision). The answer is recorded, but it is never echoed back
- * to the parent as a `cp-answered` wake.
+ * The parent's own `cp_decide` answers: `operator-quote` / `operator-delegated`, recorded inside its
+ * turn, so echoing them back as a `cp-answered` wake is noise. `mandate:<id>` is deliberately NOT
+ * here: an auto-decision can run outside a parent turn and must still wake it.
  */
 export function isSelfAnswered(answeredBy: string): boolean {
-	return answeredBy === "operator-quote" || answeredBy === "operator-delegated" || answeredBy.startsWith("mandate:");
+	return answeredBy === "operator-quote" || answeredBy === "operator-delegated";
 }
 
 /** `by: mandate:<id>` is a mandate's auto-decision, never a human's answer. */
