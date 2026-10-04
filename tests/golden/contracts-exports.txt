@@ -7,6 +7,7 @@ ANSWER_CARD_DEFER_SECONDS	value	ccfa81e5f28cdf96	69f59c273b6e669a
 ANSWER_CARD_KEEP_DELIVERED	value	5b0cf3ade9f5dc7b	27badc983df1780b
 ANSWER_ENTRY_TYPE	value	55a2afee9d7f09f0	4e4041cb17c7e372
 ANSWER_MAX_BYTES	value	c76dc68c11bb70f4	864a936a35324151
+ARMED_DISPATCH_MAX	value	f4649fcb0dea3540	e29c9c180c6279b0
 ASK_OPERATOR_TOOL	value	af49f10d79b86fe4	36e87b68634077b4
 AWAITING_ANSWER_MAX_CHARS	value	5a5d0c52316bee4d	40510175845988f1
 AWAITING_AUTO_OPEN_OVERLAY_TIMEOUT_MS	value	525afee3b5bb92e8	a3c25177bb8fb18a
@@ -42,6 +43,10 @@ AnsweredOutboxFile	type	66a3bb3911876739	-
 AnsweredOutboxFileSchema	value	6753f4d50b9d4732	d77f8618d750f456
 AnsweredSend	type	23de0cd9f3485dce	-
 AnsweredSendSchema	value	67afda8c43fc54f6	13862f3e18c830be
+ArmedDispatchEntry	type	597e2e5bf8d6060f	-
+ArmedDispatchEntrySchema	value	6cc115eac0cef6bd	f1b741c637169ff0
+ArmedDispatchFile	type	69f2df726c30de2b	-
+ArmedDispatchFileSchema	value	50fcc829d1aa9b76	91f690db9d80f808
 AwaitingDeclaredType	type	51c8a15e8c9398f2	-
 AwaitingDeclaredTypeSchema	value	23d550656cf58e23	883abdaaaf466dbc
 AwaitingFile	type	f2854410f34ae97c	-
@@ -68,6 +73,7 @@ CHECKPOINT_DECLINE_OPTION	value	cc166f5fa77c2bca	cfb718cd193c6572
 CHECKPOINT_KINDS	value	b8cac397b31f5763	e4a595617a55b769
 CHECKPOINT_LATER_OPTION	value	a6e44f79e0664582	43685e450bb54ed5
 CHECKPOINT_SCOPE_PATTERN	value	ba991787d6935643	8fe92dce8f887a51
+CI_RERUNS_MAX	value	bf0d7a30fd1b54ed	27badc983df1780b
 CI_WATCH_DELIVERY_RETRY_SECONDS	value	145c921357f9752d	2abaca4911e68fa9
 CI_WATCH_EVENTS	value	0e6600222b89262f	b2e0258bf7fae870
 CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
@@ -82,6 +88,10 @@ CheckpointKind	type	c5b0c0465981343d	-
 CheckpointKindSchema	value	81df83f2306c527b	b720acb40b60ce94
 CheckpointSchema	value	13944a647908c2da	7dca27a263c4dda2
 CheckpointScopeSchema	value	0d113a721cf5cffb	7030103eb711adff
+CiRerunEntry	type	dff8c63ccacf2551	-
+CiRerunEntrySchema	value	02379cd19d6e12db	2ead2973f12f5434
+CiRerunsFile	type	b91368acf263725e	-
+CiRerunsFileSchema	value	e602eb469e487e8c	ee93b93cb99572ca
 CiWatchEvent	type	9e238ea3f8a46be6	-
 CiWatchEventSchema	value	c7d95bc45723a36a	9a56195b2606111d
 CiWatchFile	type	97ebcefe12e807f1	-
@@ -266,12 +276,12 @@ JobStatus	type	221dc0ca1696f40f	-
 JobStatusSchema	value	50748456edcad95b	bd62caaeedebc279
 JobsDocument	type	34b6a954ff5d593a	-
 JobsDocumentSchema	value	d617b60b841d313e	0054b5f6f375b7a6
-LAYOUT	value	12b83b5c283bd385	65aa3985d84d8dee
+LAYOUT	value	12b83b5c283bd385	a884171b550feb66
 LEDGER_PREFIX_PATTERN	value	be414b07abc002a0	8b9f60e471e86a5c
 LEGACY_JOB_FIELDS	value	6e6683803c4a2a3a	4f36ea757ebce99a
 LEGACY_ROLE_ALIASES	value	aae3045414f95ecc	6a94f43a3c23d1f9
 LONG_TOOL_CALL_SECONDS	value	6b1b29c2819b6840	983bd614bb5afece
-Layout	type	cd7ae77ebee9885a	-
+Layout	type	f8fc40250907fd0f	-
 LegacyJobFields	type	223afe8be7d06be3	-
 MANDATE_ACTIONS	value	078aa2328cae0a51	6497bc371d290108
 MANDATE_ASK_ON	value	7a99914de3a7a78f	fd9d6449689ca449
@@ -578,7 +588,7 @@ isSafeScriptPath	value	2d1bb4f70dcc5fcf	844cbc3057d8f467
 isScriptFleetRecord	value	95cbe4d9d4856a64	523b3872abd75820
 isoTimestamp	value	d5fa064e9682f2b7	8fffe8a7895366ce
 jobsInvariantErrors	value	8c5ea1fd870d5e20	76c67dd2470a9390
-layoutFor	value	f423d178a7283f63	ba0ec8ea54419432
+layoutFor	value	8dc91de49d094be9	ba0ec8ea54419432
 layoutForHome	value	3f3cc27b052470ae	1f4c4199de549bc9
 looksLikeAuthorization	value	0bbe1d31228aefc6	2ded89cfee1063a6
 missingArtifactSections	value	6dd5ba3ca05052c8	a83d546e09108cec
@@ -597,7 +607,9 @@ unreportedWorkPresent	value	b8f58313cb148c34	a4ca0df1b50635a1
 validate	value	ae4e0b94ebf9242c	c4926bee7d4919bd
 validateAnswerCardOutboxFile	value	ecdbb52dcdb5404a	cedea7323349f267
 validateAnsweredOutboxFile	value	855295af1491b444	97be31c3b771109b
+validateArmedDispatchFile	value	6c9b3cdca1ffd069	6f486bd6da2ab07f
 validateAwaitingFile	value	ba64c8072d1a84b5	17f0df12f3af7fdc
+validateCiRerunsFile	value	48ef0ee5800e1657	0ba257e4bdbc3e60
 validateCiWatchFile	value	90373be005783d4d	cb514c9e05f3a93e
 validateDispatchQueueFile	value	6a39d9be0da7613b	8b354ddca1cd114a
 validateDoctorReport	value	851d4865b019186a	35c45ceeab9c86ea
