@@ -112,6 +112,7 @@ import {
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
+import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { makeHandoff } from "./human-handoff.ts";
@@ -583,6 +584,7 @@ export class CommandPost {
 			},
 			awaiting: () => this.awaiting,
 			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs }), // merge_policy by record.project through this registry; no fleet lookup
+			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home) }), // unload-parent PR2: one rerun per job+head
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(),
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.

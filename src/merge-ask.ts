@@ -300,7 +300,7 @@ export interface MergeAskSubject {
 }
 
 /** Conclusions that mean "this run says the head is fine to merge". */
-const GREEN_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+export const GREEN_CONCLUSIONS: ReadonlySet<string> = new Set(["success", "neutral", "skipped"]);
 
 /** A sha comparison that tolerates the short shas humans and gh both print. */
 export function shaMatches(a: string | undefined, b: string | undefined): boolean {
