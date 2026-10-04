@@ -1466,13 +1466,14 @@ worktree's `.git` file):
 | worktree state | effect |
 |---|---|
 | a rebase, merge or cherry-pick in progress | refused (`repo_operation_in_progress`) — resuming a conversation that says nothing about it is the exact hazard this exists to name |
+| a live child of the stored worker pid (`/proc/<pid>/task/*/children`) | refused (`tool_child_alive`) — a tool it started may still be changing the worktree while the revived worker is told the call failed; checked before `pid_alive`, the stored pid only, nothing signalled. Bounded recovery decides it before `recordRecoveryAttempt`: one escalation, `revive_refused` with `attempted: false`, the attempt not spent (every other plan refusal still spends, then escalates) |
 | detached HEAD | refused (`repo_detached_head`) — the job branch is not even checked out |
 | uncommitted changes | **not refused** — the ordinary shape of a ship job mid-work; surfaced as `worktreeDirty` on the plan and the revive result instead, so the operator sees it without every real revival being blocked by it |
 
 **The refusal ladder** (`Reviver.plan`, re-checked at revive time, never trusted
 from a startup classification): no fleet record; phase is neither `held` nor
 `waiting`; the session file is gone; a `WorkerManager` entry already exists for
-the job; the pid is alive; the worktree is gone; the worktree has an
+the job; a child of the stored pid is alive; the pid is alive; the worktree is gone; the worktree has an
 in-progress git operation or a detached HEAD. Every refusal is a `{ok: false,
 code, message}` value, never a thrown error, so `cp_revive` can show it to the
 operator instead of crashing.

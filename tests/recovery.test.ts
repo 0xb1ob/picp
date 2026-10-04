@@ -447,7 +447,26 @@ test("a refused revive plan escalates instead of throwing", async (t) => {
 	b.reviver.ok = false;
 	const outcome = await b.recovery.onDeath(JOB_ID, CRASH());
 	assert.equal(outcome.action, "revive_refused");
+	assert.equal(outcome.action === "revive_refused" && outcome.attempted, true, "any other plan refusal spends, then escalates");
+	assert.equal(readRecoveryAttempts(b.home.path, JOB_ID, "crash"), 1);
 	assert.equal(b.escalations.list().length, 1);
+});
+
+test("a live tool child refuses the revive before the attempt is spent: one escalation, attempted false", async (t) => {
+	const b = await bench(t);
+	b.reviver.plan = async (jobId) => {
+		b.reviver.plans += 1;
+		return { ok: false, job_id: jobId, code: "tool_child_alive", message: "pid 4242 has live child process(es) 4243" };
+	};
+	const outcome = await b.recovery.onDeath(JOB_ID, CRASH());
+	assert.deepEqual(
+		outcome.action === "revive_refused" ? { attempted: outcome.attempted, attemptsLeft: outcome.attemptsLeft } : outcome,
+		{ attempted: false, attemptsLeft: 1 },
+	);
+	assert.match(outcome.action === "revive_refused" ? outcome.reason : "", /tool_child_alive/);
+	assert.equal(readRecoveryAttempts(b.home.path, JOB_ID, "crash"), 0, "recovery-attempts.json not incremented");
+	assert.equal(b.reviver.revives, 0, "nothing spawned");
+	assert.equal(b.escalations.list().length, 1, "escalated once");
 });
 
 // ---------------------------------------------------------------------------

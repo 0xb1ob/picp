@@ -243,7 +243,8 @@ export type RecoveryOutcome =
  * The shape a caller uses to tell the truth in a `failed` wake-up (cur.4.2
  * review, finding 2): `attempted` is whether `Reviver.plan`/`revive` was ever
  * called for this occurrence (false only for a policy cause, `risk:high`, or
- * an already-exhausted bound \u2014 nothing was tried, not just "tried and lost"),
+ * an already-exhausted bound \u2014 nothing was tried, not just "tried and lost" \u2014
+ * or a `tool_child_alive` plan refusal, decided before the attempt is spent),
  * and `attemptsLeft` is what remains for this (job, class) pair afterward.
  */
 export interface RecoveryNotRevived {
@@ -378,6 +379,16 @@ export class BoundedRecovery {
 			await this.#escalate(jobId, failure, decision.reason);
 			return { action: "escalated", reason: decision.reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - attempts, 0) };
 		}
+		// A live tool child of the dead worker is decided before the attempt is
+		// spent: waiting it out is not a failed attempt. Every other plan refusal
+		// still spends, then escalates (below).
+		const reviver = decision.action === "redispatch" ? undefined : this.#options.reviver();
+		const plan = await reviver?.plan(jobId, { recovering: true });
+		if (plan && !plan.ok && plan.code === "tool_child_alive") {
+			const reason = `automatic recovery could not revive ${jobId} (${plan.code}): ${plan.message}`;
+			await this.#escalate(jobId, failure, reason);
+			return { action: "revive_refused", reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - attempts, 0) };
+		}
 		const spent = recordRecoveryAttempt(home, jobId, failure.class);
 		const attemptsLeft = Math.max(RECOVERY_ATTEMPT_BOUND - spent, 0);
 
@@ -402,10 +413,9 @@ export class BoundedRecovery {
 				return { action: "revive_refused", reason, attempted: true, attemptsLeft };
 			}
 		} else {
-			const reviver = this.#options.reviver();
 			// `recovering: true`: `fail()` has already stamped `phase: failed` by the
 			// time this runs (see the module header) \u2014 see `RevivePlanOptions`.
-			const plan = await reviver.plan(jobId, { recovering: true });
+			if (!reviver || !plan) throw new Error(`${jobId}: bounded recovery planned no revive`);
 			if (!plan.ok) {
 				const reason = `automatic recovery could not revive ${jobId} (${plan.code}): ${plan.message}`;
 				await this.#escalate(jobId, failure, reason);
