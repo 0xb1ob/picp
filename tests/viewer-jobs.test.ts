@@ -46,7 +46,7 @@ test("jobs, detail and board join the ledger with observed phases without writin
  assert.equal((await get("/api/job/cp-queued")).status,200);
  for(const id of ["cp-missing","%2e%2e%2fsecret","%E0"]) assert.equal((await get(`/api/job/${id}`)).status,404);
  const board=await (await get("/api/board")).json() as BoardResponse;
- assert.deepEqual(board.columns.map(c=>c.key),["queued","launching","working","held","done","failed"]);
+ assert.deepEqual(board.columns.map(c=>c.key),["queued","launching","working","waiting","held","done","failed"]);
  assert.equal(board.lanes.find(l=>l.id==="md-paused")?.active,false);
  assert.equal(board.jobs.some(j=>j.id==="cp-old"),false);
  assert.equal((await get("/api/stream?view=jobs").then(r=>{r.body?.cancel();return r.status;})),200);

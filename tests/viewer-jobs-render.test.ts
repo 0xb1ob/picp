@@ -31,6 +31,10 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  board.jobs=[...board.jobs,{...job,id:"cp-landed",phase:"done",mandate_id:"md-paused"}];
  const grid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
  assert.match(grid,/Landed today<span>1<\/span>/); assert.match(grid,/Failed<span>1<\/span>/,"other columns still count the shown lanes");
+ // A waiting or idle job is not a Working job: it counts under Waiting only.
+ board.jobs=[{...job,id:"cp-wait",phase:"waiting"},{...job,id:"cp-idle",phase:"idle"},{...job,id:"cp-run",phase:"working"}];
+ const waitGrid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
+ assert.match(waitGrid,/Working<span>1<\/span>/); assert.match(waitGrid,/Waiting<span>2<\/span>/); assert.match(waitGrid,/needs a person, or the worker is idle/);
  assert.match(screen("Jobs",list),/Finished today<span>1<\/span>/);
  // Audit P4 #23: one Jobs item with a List | Board | Map toggle on each view, the current one marked, on every width.
  for (const [name,data,current] of [["Jobs",list,"#jobs"],["Board",board,"#board"]] as const) {

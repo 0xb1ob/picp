@@ -89,7 +89,7 @@ export function boardView(state:ViewerState,now=Date.now()):BoardResponse {
  lanes=lanes.filter(l=>jobs.some(j=>j.board_lane_id===l.id)).sort((a,b)=>Number(b.active)-Number(a.active));
  return {...data,jobs,lanes,columns:[
   {key:"queued",name:"Queued",hint:"blocked, or waiting for a slot"},{key:"launching",name:"Launching",hint:"worker starting"},
-  {key:"working",name:"Working",hint:"worker running"},{key:"held",name:"Held",hint:"waiting on CI or review, normal for hours"},
+  {key:"working",name:"Working",hint:"worker running"},{key:"waiting",name:"Waiting",hint:"needs a person, or the worker is idle"},{key:"held",name:"Held",hint:"waiting on CI or review, normal for hours"},
   {key:"done",name:"Landed today",hint:"merged or closed"},{key:"failed",name:"Failed",hint:"stopped; may continue on its lease"}],
   revoked_hidden:grants.filter(m=>m.status==="revoked" && !lanes.some(l=>l.id===m.id)).length,stranded_count:base.blocked.stranded_count};
 }

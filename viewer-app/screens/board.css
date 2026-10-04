@@ -37,7 +37,7 @@
  .board-controls button { padding: 0 14px; border-radius: 7px; white-space: nowrap; }
  .board-inactive { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--subtle); font-size: 13px; cursor: pointer; }
  .board-inactive input { accent-color: var(--text); }
- .board-grid-head, .board-cells { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; }
+ .board-grid-head, .board-cells { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 12px; }
  .board-grid-head { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
  .board-column-heading h2 { font-size: 13px; flex-wrap: wrap; }
  .board-lanes { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
