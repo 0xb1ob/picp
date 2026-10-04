@@ -1,14 +1,7 @@
 /**
- * Composition root.
- *
- * Every module in `src/` is independently testable and knows nothing about pi.
- * This is where they are wired into one object for the parent extension, so the
- * extension file stays a thin adapter: tools in, policy out.
- *
- * Configuration that an operator can edit at runtime (`data/routing.json`,
- * `data/budgets.json`) is re-read per operation rather than cached at load: a
- * command post that must be restarted to notice a config change is a command
- * post nobody edits.
+ * Composition root: wires the independently testable `src/` modules into one object for the
+ * parent extension. Operator-editable config (`data/routing.json`, `data/budgets.json`) is
+ * re-read per operation rather than cached at load.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -71,7 +64,7 @@ import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact }
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
 import { assertNotDraining, DrainControl, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
-import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
+import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { MandateStore } from "./mandate.ts";
@@ -119,10 +112,12 @@ import {
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
+import { HeldRelease } from "./held-release.ts";
+import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
-import { ProjectRegistry } from "./projects.ts";
+import { ProjectRegistry, projectDirResolver } from "./projects.ts";
 import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
 import { ALWAYS_AVAILABLE, isAllowed, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { loadSuggestConfig } from "./suggest.ts";
@@ -177,25 +172,15 @@ export interface CommandPostOptions {
 	/** One evidence-only notice when the last working slot becomes idle. */
 	onIdleBeads?: (text: string) => void;
 	/**
-	 * cp-answer-doesnt-wake: called once per *newly recorded* human answer, from
-	 * whichever writer recorded it (a declared row, a derived approval row, a
-	 * checkpoint authorization). The answer is already on disk and already queued
-	 * in `state/answered.json` when this runs, so the callback's only job is to
-	 * deliver the wake-up — and a failure to deliver costs a retry, never the
-	 * decision. Absent (a test, a headless re-entry) means the answer is queued
-	 * and delivered by whichever parent drains the outbox next.
+	 * Called once per newly recorded human answer, from whichever writer recorded it. The answer
+	 * is already on disk and queued in `state/answered.json`, so a failure to deliver costs a
+	 * retry, never the decision. Absent means the next draining parent delivers it.
 	 */
 	onAnswered?: (decision: AnsweredDecision) => void;
 	/**
-	 * Does this session own the home (pi-command-post-u9q review)? The answered
-	 * outbox's **consumption** side is gated on it: only the parent that holds
-	 * `state/parent.lock` may reserve an emission, send one, or stamp an arrival.
-	 * Default: the lock file itself, read per call, so a session whose
-	 * `acquireParentLock` was refused is gated with no wiring at all — and so is
-	 * one whose lock was reclaimed while it ran.
-	 *
-	 * Injected only by tests, which is where a second *process* has to be played
-	 * by a second object.
+	 * Does this session own the home (pi-command-post-u9q)? The answered outbox's consumption
+	 * side is gated on it. Default: `state/parent.lock` itself, read per call; injected only by
+	 * tests that play a second process.
 	 */
 	holdsParentLock?: () => boolean;
 	/** Called once per classified failure. */
@@ -260,6 +245,8 @@ export class CommandPost {
 	readonly integrator: Integrator;
 	/** Serial, coalesced progression of held PRs; `integrate()` shares its per-project lane. */
 	readonly continuation: HeldContinuation;
+	readonly heldRelease: HeldRelease; // 4b-1: release an idle held author's slot on demand (src/held-release.ts)
+	readonly dispatchQueue: DispatchQueue; // 4b-2: spawn-cap refusals, drained by the lock owner only (src/dispatch-queue.ts)
 	readonly drain: DrainControl; // graceful drain before a restart (src/drain.ts)
 	/** cp-uug: the per-PR, per-head merge authorization. Answered only by a human. */
 	readonly mergeCheckpoints: CheckpointStore;
@@ -392,7 +379,7 @@ export class CommandPost {
 			...(options.parentEnv ? { parentEnv: options.parentEnv } : {}),
 		});
 		this.mandates = new MandateStore(options.home);
-		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId) });
+		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
 		// it and a card that is only queued when a live extension happens to be
@@ -590,11 +577,7 @@ export class CommandPost {
 			merges: this.merges,
 			teardown: this.teardown,
 			ledger: () => this.ledger(),
-			projectDir: (project, worktree) => {
-				const clone = this.registry.pathOf(project);
-				if (existsSync(clone)) return clone;
-				return worktree && existsSync(worktree) ? worktree : this.home;
-			},
+			projectDir: projectDirResolver(this.registry, this.home),
 			runs: this.runs,
 			send: async (jobId, message) => {
 				const result = await this.sender.send({ jobId, message, purpose: "repair" });
@@ -618,6 +601,9 @@ export class CommandPost {
 			runs: this.runs,
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 		});
+		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
+		this.dispatchQueue = new DispatchQueue({ home: options.home, dispatch: (r) => this.dispatch(r), capacityFree: () => this.heldRelease.capacityFree(), owns: () => this.#ownsHome(), ledger: () => this.ledger(), fleet: this.fleet, journal: (w) => this.#journalDurable(w) });
+		wireSlotFree(this.manager, this.dispatchQueue);
 		this.awaiting = new AwaitingStore({
 			home: options.home,
 			onAnswered: (decision) => this.#recordAnswered(decision),
@@ -657,30 +643,12 @@ export class CommandPost {
 	}
 
 	/**
-	 * The startup truth pass, and the one action it implies
-	 * (pi-command-post-3ip).
-	 *
-	 * `FleetStore.reconcile` classifies; it never stamps. Nothing used to act on
-	 * its `needs_intake` list, and intake ran only from a live worker's event
-	 * stream — so a worker that wrote `envelope.json` and then lost its parent
-	 * (a restart kills every child) left a delivery on disk that no surface would
-	 * ever accept: the ledger stayed `in_progress`, the fleet stayed `waiting`,
-	 * the settle boundary correctly refused to nudge a job that had reported, and
-	 * the worker-reporter correctly refused to file a second envelope. Every gate
-	 * was right and the job was stuck.
-	 *
-	 * So the reconcile step ends where the live path does: `intake`, once per
-	 * unstamped envelope. It is the ordinary intake, not a restart-only variant —
-	 * same contract re-check, same generation scoping (a superseded envelope's
-	 * slot is the live one's, never both), same `onReported` wake-up, same
-	 * stat-and-move for artifacts, so no body is ever read here. It is idempotent
-	 * by construction: an already-stamped generation returns `already` and writes
-	 * nothing, which is what makes a second restart a no-op.
-	 *
-	 * Fail-closed and never throws: an envelope that violates the contract is
-	 * marked `failed` by intake with its own reason, and an intake that throws is
-	 * returned as a `failure` on the job it concerns rather than taking the rest
-	 * of the startup pass down with it.
+	 * The startup truth pass (pi-command-post-3ip). `FleetStore.reconcile` classifies but never
+	 * stamps, so a worker that wrote `envelope.json` and lost its parent to a restart would stay
+	 * stuck. This ends where the live path does: ordinary `intake`, once per unstamped envelope,
+	 * idempotent (an already-stamped generation returns `already`). Fail-closed and never throws:
+	 * a contract violation is marked `failed` by intake, and an intake that throws is returned as
+	 * a `failure` on its job without taking the rest of the pass down.
 	 */
 	async reconcile(options: ReconcileOptions = {}): Promise<{ report: ReconcileReport; intake: IntakeResult[] }> {
 		const report = await this.fleet.reconcile(options);
@@ -923,19 +891,10 @@ export class CommandPost {
 	}
 
 	/**
-	 * Send every **due** answer through `deliver`, coalesced into one message.
-	 * Called by the parent extension on an answer, at `session_start` and on the
-	 * widget tick: three triggers, one drain, and no polling of anything but a
-	 * file the widget already reads. A `deliver` that throws leaves the queue
-	 * intact and rethrows.
-	 *
-	 * Due, not pending (cp-5mgg): an answer already emitted and still inside its
-	 * retry window is left alone, because re-emitting it on the next answer's
-	 * trigger is how one merge authorization reached the parent three times.
-	 *
-	 * Sending is not delivering (cp-nx7): nothing is marked delivered here. The
-	 * parent confirms arrival through `confirmAnswered` when the wake-up actually
-	 * lands in its context, and an unconfirmed answer is sent again.
+	 * Send every due answer through `deliver`, coalesced into one message; a throwing `deliver`
+	 * leaves the queue intact and rethrows. An answer already emitted and inside its retry window
+	 * is left alone (cp-5mgg). Nothing is marked delivered here: `confirmAnswered` does that when
+	 * the wake-up lands, and an unconfirmed answer is sent again (cp-nx7).
 	 */
 	drainAnswered(deliver: (decisions: readonly AnsweredDecision[]) => void): AnsweredDecision[] {
 		if (!this.#ownsHome()) return [];
@@ -1163,7 +1122,7 @@ export class CommandPost {
 	/** One observer set for every spawn path (dispatch, revive, bounded recovery), so wiring cannot diverge. */
 	#observers() {
 		const usage = { fleet: this.fleet, runs: this.runs, mandates: this.mandates, journal: (input: DurableWakeupInput) => this.#journalDurable(input) };
-		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => observeMandateUsage(usage, jobId, previous, current) };
+		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => observeMandateUsage(usage, jobId, previous, current), makeRoom: (id: string, role: Role) => this.heldRelease.makeRoom(id, role), released: (id: string) => this.heldRelease.wasReleased(id) };
 	}
 
 	async dispatch(request: DispatchRequest & { task: string }): Promise<DispatchResult>;
@@ -1629,15 +1588,9 @@ export class CommandPost {
 	}
 
 	/**
-	 * The decision details pane for one Awaiting-you item (pi-command-post-4mn):
-	 * the latest review and gate verdicts, the row's own checkpoint and the CI
-	 * watcher's last observation, bounded, redacted and tied to the head they
-	 * describe. Local files only — this is called on a render path, and never
-	 * reads an artifact body or a diff.
-	 *
-	 * Total by construction: a home with nothing on disk, or a record that cannot
-	 * be read, yields an empty pane rather than an error, because a decision must
-	 * never be taken down by its own evidence.
+	 * The decision details pane for one Awaiting-you item (pi-command-post-4mn): local files
+	 * only, bounded and redacted, tied to the head described; never reads an artifact body or a
+	 * diff. Total: unreadable evidence yields an empty pane, never an error.
 	 */
 	decisionContext(item: ResolvedAwaitingItem, options: BuildDecisionContextOptions = {}): DecisionContext {
 		try {

@@ -35,6 +35,8 @@ export interface Layout {
 	answerCardsFile: string;
 	/** What the CI/PR watcher has already observed and announced (cp-e2d). */
 	ciWatchFile: string;
+	/** `cp_dispatch` requests refused only by the spawn cap, drained FIFO by the lock owner (cp-itl4 4b-2). */
+	dispatchQueueFile: string;
 	/** What the status block has already reported under Shipped, per session (cp-b5eg). */
 	shippedSeenFile: string;
 	/**
@@ -127,6 +129,7 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		wakeupsFile: `${state}/wakeups.json`,
 		answerCardsFile: `${state}/answer-cards.json`,
 		ciWatchFile: `${state}/ci-watch.json`,
+		dispatchQueueFile: `${state}/dispatch-queue.json`,
 		shippedSeenFile: `${state}/status-block-shipped.json`,
 		parentLock: `${state}/parent.lock`,
 		migrationsDir: `${state}/.migrations`,

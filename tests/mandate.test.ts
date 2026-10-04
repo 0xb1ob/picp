@@ -504,6 +504,29 @@ test("assertDispatchAllowed: serial limits fresh dispatches by working jobs; a s
 	);
 });
 
+test("4B2-T0: the parallelism refusal carries code parallelism_full on a real MandateError; a job-cap refusal has no code", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	issue(store, { dispatch_parallelism: 1 });
+	const bWorking = [{ job_id: "cp-b", project: "demo", phase: "waiting" }];
+	await assert.rejects(() => store.assertDispatchAllowed({ jobId: "cp-c", project: "demo", kind: "ship" }, bWorking), (error: unknown) => {
+		assert.ok(error instanceof MandateError);
+		assert.equal(error.code, "parallelism_full");
+		assert.match(error.message, /dispatch-parallelism 1 is full/);
+		return true;
+	});
+	const capped = createScratchHome();
+	t.after(() => capped.cleanup());
+	const capStore = new MandateStore(capped.path);
+	issue(capStore, { job_cap: 1 });
+	await assert.rejects(() => capStore.assertDispatchAllowed({ jobId: "cp-c", project: "demo", kind: "ship" }, [{ job_id: "cp-b", project: "demo", phase: "held" }]), (error: unknown) => {
+		assert.ok(error instanceof MandateError);
+		assert.match(error.message, /job cap 1 reached/);
+		assert.equal(error.code, undefined);
+		return true;
+	});
+});
 // The one permission rule (src/mandate-permission.ts), cell by cell: status x use x in-flight. Letters follow
 // GRANT_USES order — dispatch, promote, implement, review, repair, merge — P permit, R refuse, S silent. Columns:
 // the job's own same-kind fleet record is working/held, that record's worker failed, no such record.

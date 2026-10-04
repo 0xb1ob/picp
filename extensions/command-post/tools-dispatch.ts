@@ -6,8 +6,9 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
-import { RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
+import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
+import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { autoLink } from "../../src/trackers/link.ts";
@@ -86,6 +87,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			"cp_dispatch returning state:promote means send the existing worker a new brief instead of dispatching.",
 			"cp_dispatch with dry_run:true answers 'which model and effort would this job get, and why' and takes nothing. It is optional — never a required step before a dispatch — and it reserves nothing: the dispatch recomputes from the live config. Reach for it when a job is uncertain or expensive, not as a habit.",
 			"Leave scope or risk absent when you do not know it: the axis is then assessed from the task's own words and recorded as inferred or defaulted. Never invent S/low to fill the schema, and never dispatch an extra worker just to classify a task.",
+			"cp_dispatch returning state:queued means the spawn cap was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
 		],
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The job id; it is also the branch and the run directory" }),
@@ -131,6 +133,13 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 						"recomputes from the live config, so a preview reserves nothing and authorizes nothing.",
 				}),
 			),
+			queue: Type.Optional(
+				Type.Boolean({
+					description:
+						"Default true: a dispatch refused only by the spawn cap is queued (state/dispatch-queue.json) and started, fully re-gated, " +
+						"when a worker slot frees. false keeps the plain refusal. Script jobs are never queued.",
+				}),
+			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
@@ -163,19 +172,43 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			} catch (error) {
 				trackerLine = `not linked to a tracker bead: ${(error as Error).message.split("\n")[0]}`;
 			}
-			const result = await post.dispatch({
-				jobId: params.job_id,
-				...(params.task === undefined ? {} : { task: params.task }),
-				...(params.task_file === undefined ? {} : { taskFile: params.task_file }),
-				...(params.scope ? { scope: params.scope as "S" | "M" | "L" } : {}),
-				...(params.risk ? { risk: params.risk as "low" | "high" } : {}),
-				...(params.model ? { model: params.model } : {}),
-				...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
-				...(params.profile ? { profile: params.profile } : {}),
-				...(params.base ? { base: params.base } : {}),
-				...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
-				...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
-			});
+			// 4b-2: a queued job starts when a slot frees; a second dispatch would race it.
+			const queuedAt = post.dispatchQueue.position(params.job_id);
+			if (queuedAt !== undefined) throw new Error(`${params.job_id} is already queued at position ${queuedAt} — it starts when a worker slot frees; the outcome arrives as a wake-up. Do not re-dispatch.`);
+			let result: Awaited<ReturnType<typeof post.dispatch>>;
+			try {
+				result = await post.dispatch({
+					jobId: params.job_id,
+					...(params.task === undefined ? {} : { task: params.task }),
+					...(params.task_file === undefined ? {} : { taskFile: params.task_file }),
+					...(params.scope ? { scope: params.scope as "S" | "M" | "L" } : {}),
+					...(params.risk ? { risk: params.risk as "low" | "high" } : {}),
+					...(params.model ? { model: params.model } : {}),
+					...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
+					...(params.profile ? { profile: params.profile } : {}),
+					...(params.base ? { base: params.base } : {}),
+					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
+					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
+				});
+			} catch (error) {
+				// Only the spawn cap queues, only for a non-script job, and only unless queue:false.
+				if (!(error instanceof SpawnSafetyError && error.code === "spawn_cap") || params.queue === false) throw error;
+				if ((await post.ledger().show(params.job_id).catch(() => undefined))?.script) throw error;
+				const { job_id: _id, dry_run: _dry, queue: _queue, ...request } = params;
+				let position: number;
+				try {
+					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
+				} catch (queueError) {
+					// Today's refusal stands; the queue failure is named on it.
+					(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;
+					throw error;
+				}
+				refreshWidget(ctx);
+				return {
+					content: [{ type: "text", text: `queued (position ${position}): ${params.job_id} starts when a worker slot frees; the outcome arrives as a wake-up — do not re-dispatch` }],
+					details: { state: "queued", position, job_id: params.job_id },
+				};
+			}
 			refreshWidget(ctx);
 			return {
 				content: [{ type: "text", text: `${formatDispatchResult(result)}${trackerLine ? `\n  tracker: ${trackerLine}` : ""}` }],

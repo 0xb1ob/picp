@@ -104,7 +104,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 
 | Path | Writer | What | Class | Who may write |
 |---|---|---|---|---|
-| `fleet.json escalations.json awaiting.json answered.json wakeups.json answer-cards.json ci-watch.json status-block-shipped.json` | `src/fleet.ts`, `src/escalation.ts`, `src/awaiting.ts`, `src/answered.ts`, `src/wakeup-outbox.ts`, `src/answer-delivery.ts`, `src/ci-watch.ts`, `src/shipped-seen.ts` | fleet and outboxes | H | code only |
+| `fleet.json escalations.json awaiting.json answered.json wakeups.json answer-cards.json ci-watch.json dispatch-queue.json status-block-shipped.json` | `src/fleet.ts`, `src/escalation.ts`, `src/awaiting.ts`, `src/answered.ts`, `src/wakeup-outbox.ts`, `src/answer-delivery.ts`, `src/ci-watch.ts`, `src/dispatch-queue.ts`, `src/shipped-seen.ts` | fleet and outboxes | H | code only |
 | `parent.lock`, `parent-host.<gen>.json/.sock`, `parent-host.log` | `src/parent-lock.ts`, `src/parent-host.ts` | one-parent lock, host records | H | code only |
 | `parent-host.stopped.json` (0600) | `src/parent-host.ts` (the `stop` op, before the host exits) | `{gen, at}`: the generation an operator stop closed; the parent supervisor never respawns it (`docs/service.md`) | H | code only |
 | `health.json` | `src/service/health.ts` (run by cp-daemon, a oneshot: its only writer), atomic replace | the watchdog's record: `{schema_version, last_run_at, checks: {<name>: {status, key, since, detail, fails, notified_key, notified_state, push_attempts, checked_at}}}`; read by `/doctor` `service.health` and the Overview status line | H | code only |

@@ -39,6 +39,9 @@ import {
 	type ScriptStep,
 	waitFor,
 	WORKER_REPORTER_EXTENSION,
+	type FakeWorker,
+	fakeWorker,
+	fakeWorkerManager,
 } from "./harness/index.ts";
 
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
@@ -1054,4 +1057,93 @@ test("conversation question: delivered as a blocked-envelope ask, not refused", 
 	const result = await b.sender.send({ jobId: b.jobId, message: `ask the planner of job ${b.jobId}: which auth provider?` });
 	assert.equal(result.receipt, "delivered");
 	await b.worker.waitForSettled(60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 4b-1 (4B1-T5): restore on send — fake workers, no child process
+// ---------------------------------------------------------------------------
+
+async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, options: { reviveFails?: boolean; mandates?: unknown } = {}) {
+	const home = createScratchHome();
+	const runs = new RunRegistry(home.path);
+	const fleet = new FleetStore({ home: home.path });
+	const workers = fakeWorkerManager(home.path, 3);
+	t.after(async () => {
+		await workers.manager.shutdownAll();
+		runs.closeAll();
+		home.cleanup();
+	});
+	const jobId = "cp-aaa1";
+	await fleet.add({
+		job_id: jobId, project: "example-app", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held",
+		worker: { pid: 4242, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/unused", started_at: isoTimestamp() },
+		worktree: home.path, branch: jobId, dispatched_at: isoTimestamp(), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
+	});
+	const released = new Set<string>();
+	const revived: string[] = [];
+	let restored: FakeWorker | undefined;
+	const sender = new Sender({
+		fleet, manager: workers.manager, runs, home: home.path,
+		...(options.mandates ? { mandates: options.mandates as never } : {}),
+		released: (id) => released.has(id),
+		revive: async (id) => {
+			revived.push(id);
+			if (options.reviveFails) throw new Error(`cannot revive ${id} (pid_alive)`);
+			restored = workers.spawn(id);
+		},
+	});
+	return { home: home.path, jobId, workers, sender, released, revived, restored: () => restored };
+}
+
+test("4B1-T5: a send during a release never reaches the stopping worker; it waits, restores, then delivers", async (t) => {
+	const b = await releaseBench(t);
+	let exit!: () => void;
+	const old = b.workers.spawn(b.jobId, fakeWorker({ shutdown: (worker) => new Promise<void>((resolve) => {
+		exit = () => {
+			worker.exit();
+			resolve();
+		};
+	}) }));
+	const stopping = b.workers.manager.shutdown(b.jobId);
+	b.released.add(b.jobId);
+	const sending = b.sender.send({ jobId: b.jobId, message: "fix the review findings" });
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(b.sender.sending(b.jobId), true);
+	assert.deepEqual(old.sent, [], "nothing is delivered into a worker being released");
+	assert.deepEqual(b.revived, []);
+	exit();
+	await stopping;
+	const result = await sending;
+	assert.equal(result.receipt, "delivered");
+	assert.deepEqual(b.revived, [b.jobId], "restored once");
+	assert.match(b.restored()?.sent[0] ?? "", /^fix the review findings/);
+	assert.deepEqual(old.sent, []);
+	assert.equal(b.sender.sending(b.jobId), false);
+});
+
+test("4B1-T5: a dead job that was not released keeps today's cp_revive refusal; sending() clears after a throw", async (t) => {
+	const b = await releaseBench(t);
+	await assert.rejects(b.sender.send({ jobId: b.jobId, message: "go" }), (error: unknown) => {
+		assert.ok(error instanceof SendError);
+		assert.match(error.message, /has no live worker in this session.*cp_revive cp-aaa1/s);
+		return true;
+	});
+	assert.deepEqual(b.revived, []);
+	assert.equal(b.sender.sending(b.jobId), false);
+});
+
+test("4B1-T5: a repair refusal comes before any revive; a revive refusal is surfaced", async (t) => {
+	const refused = await releaseBench(t, { mandates: { assertPermitted: () => { throw new Error("mandate refuses repair"); } } });
+	refused.released.add(refused.jobId);
+	await assert.rejects(refused.sender.send({ jobId: refused.jobId, message: "fix CI", purpose: "repair" }), /mandate refuses repair/);
+	assert.deepEqual(refused.revived, []);
+
+	const failing = await releaseBench(t, { reviveFails: true });
+	failing.released.add(failing.jobId);
+	await assert.rejects(failing.sender.send({ jobId: failing.jobId, message: "go" }), (error: unknown) => {
+		assert.ok(error instanceof SendError);
+		assert.match(error.message, /has no live worker in this session/);
+		assert.match(error.message, /Restoring the released worker failed: cannot revive cp-aaa1 \(pid_alive\)/);
+		return true;
+	});
 });

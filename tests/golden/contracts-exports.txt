@@ -74,7 +74,7 @@ CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
 CI_WATCH_INTERVAL_MS	value	7167448c735abb91	d55d01d0341ed0ba
 CI_WATCH_KEEP_ANNOUNCED	value	565599989d7b8406	1a6562590ef19d10
 CI_WATCH_MAX_BACKOFF_MS	value	6ecd5f312ec3ee6a	d1d282f04815e254
-CP_EVENT_KINDS	value	44cb604f96d2b553	d905ceb17817a1ae
+CP_EVENT_KINDS	value	a991abc433ac0ca9	17c8695ba1acd0e3
 Checkpoint	type	d1c462e0c6aa9937	-
 CheckpointDecision	type	1a7bb07fade60614	-
 CheckpointDecisionSchema	value	e4ce39719c2509de	fc45a9911b41c900
@@ -91,7 +91,7 @@ CiWatchJobSchema	value	bdb72f0e135d76ef	898debb712735da7
 Confidence	type	b626807470740910	-
 ContractError	class	e6cbe92ed1ab171c	e200d9d8db2fc02b
 CpEventKind	type	d73f96cfd2161fd9	-
-CpEventKindSchema	value	28b4ba70f9a2809b	577ed6bfc090ba90
+CpEventKindSchema	value	28b4ba70f9a2809b	2b3f69a8ef8fd82b
 CurrentToolSchema	value	8ac5ec202fe7c032	cbcc4590e0baed94
 DEATH_MESSAGE_TYPE	value	0bd493782cc0def1	210bdf086fd1826b
 DECISION_CONTEXT_LINE_MAX_CHARS	value	5a616797cd2968ab	a512db2741cd2069
@@ -117,6 +117,7 @@ DELEGATION_RULE_MAX	value	72a868888d111b88	983bd614bb5afece
 DELIVERIES	value	c867a238ec6b6870	284699d82edc76df
 DIFF_REVIEW_MAX_BYTES	value	9c4616f4ac7223d1	6ce318969619d1c3
 DIFF_REVIEW_MAX_STAT_FILES	value	d917c83b1242b68f	983bd614bb5afece
+DISPATCH_QUEUE_MAX	value	3be8ee7eba896144	e29c9c180c6279b0
 DOCTOR_SEVERITIES	value	1d59f19a13fa2a5c	33d2c2aba2607b20
 DURABLE_WAKEUP_KEEP_DELIVERED	value	d78e0bbab657665a	27badc983df1780b
 DURABLE_WAKEUP_KINDS	value	1447cc7f2f684dfa	17c8aad4ab0b6278
@@ -134,6 +135,10 @@ DiffReviewConfig	type	b288bf8a3bd544c0	-
 DiffReviewConfigSchema	value	653bd2f8a3e802a6	45f7df13f61b505a
 DiffVerdict	type	3d9db624a1d998e8	-
 DiffVerdictSchema	value	6a3f1fe754dba070	6ddeb0af39bd4960
+DispatchQueueEntry	type	dad77fe22fd82e46	-
+DispatchQueueEntrySchema	value	6f0de259b7870358	8040502747afa9aa
+DispatchQueueFile	type	0c6a3a55f0e3d4f5	-
+DispatchQueueFileSchema	value	e1beebd2806e727a	7aa66c24857253b3
 DoctorFinding	type	aa5d891425255f72	-
 DoctorFindingSchema	value	b23a9c4cfbf50684	b2d0cec94426cf21
 DoctorReport	type	83d41069de768ae9	-
@@ -261,12 +266,12 @@ JobStatus	type	221dc0ca1696f40f	-
 JobStatusSchema	value	50748456edcad95b	bd62caaeedebc279
 JobsDocument	type	34b6a954ff5d593a	-
 JobsDocumentSchema	value	d617b60b841d313e	0054b5f6f375b7a6
-LAYOUT	value	12b83b5c283bd385	833277e53e7f8947
+LAYOUT	value	12b83b5c283bd385	65aa3985d84d8dee
 LEDGER_PREFIX_PATTERN	value	be414b07abc002a0	8b9f60e471e86a5c
 LEGACY_JOB_FIELDS	value	6e6683803c4a2a3a	4f36ea757ebce99a
 LEGACY_ROLE_ALIASES	value	aae3045414f95ecc	6a94f43a3c23d1f9
 LONG_TOOL_CALL_SECONDS	value	6b1b29c2819b6840	983bd614bb5afece
-Layout	type	d1ef2276dd92df31	-
+Layout	type	cd7ae77ebee9885a	-
 LegacyJobFields	type	223afe8be7d06be3	-
 MANDATE_ACTIONS	value	078aa2328cae0a51	6497bc371d290108
 MANDATE_ASK_ON	value	7a99914de3a7a78f	fd9d6449689ca449
@@ -382,6 +387,8 @@ QuestionOutcome	type	fe04ef13e504b355	-
 QuestionOutcomeSchema	value	c3199453b6a724ac	43966f50a0eebe2f
 QuestionRecord	type	4668237b72099107	-
 QuestionRecordSchema	value	0ba928388defb908	1d775a6f1359f568
+QueuedDispatchRequest	type	d9245ef57b68b970	-
+QueuedDispatchRequestSchema	value	91876c8b1c1c7ee9	514bed4049163c34
 RECOVERY_ATTEMPT_BOUND	value	b111130ecf9f46e0	6b86b273ff34fce1
 RECOVERY_MESSAGE_TYPE	value	dd36d3e3b011b067	ab7c77b7ea6048e4
 RECOVERY_POLICY	value	db3d391a46df1fc2	8e3b80a11ed3404f
@@ -562,7 +569,7 @@ isSafeScriptPath	value	2d1bb4f70dcc5fcf	844cbc3057d8f467
 isScriptFleetRecord	value	95cbe4d9d4856a64	523b3872abd75820
 isoTimestamp	value	d5fa064e9682f2b7	8fffe8a7895366ce
 jobsInvariantErrors	value	8c5ea1fd870d5e20	76c67dd2470a9390
-layoutFor	value	451c0af0019efd2f	ba0ec8ea54419432
+layoutFor	value	f423d178a7283f63	ba0ec8ea54419432
 layoutForHome	value	3f3cc27b052470ae	1f4c4199de549bc9
 looksLikeAuthorization	value	0bbe1d31228aefc6	2ded89cfee1063a6
 missingArtifactSections	value	6dd5ba3ca05052c8	a83d546e09108cec
@@ -583,6 +590,7 @@ validateAnswerCardOutboxFile	value	ecdbb52dcdb5404a	cedea7323349f267
 validateAnsweredOutboxFile	value	855295af1491b444	97be31c3b771109b
 validateAwaitingFile	value	ba64c8072d1a84b5	17f0df12f3af7fdc
 validateCiWatchFile	value	90373be005783d4d	cb514c9e05f3a93e
+validateDispatchQueueFile	value	6a39d9be0da7613b	8b354ddca1cd114a
 validateDoctorReport	value	851d4865b019186a	35c45ceeab9c86ea
 validateDurableWakeupOutboxFile	value	6f8df83942a7eec1	6b8dc6f2e78b9dd3
 validateEnvelope	value	349db48e29e78780	fe3d1a5b11addfe1

@@ -53,6 +53,8 @@ export function registerScheduleTools(
 		} else pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details: { ...event } }, { deliverAs: "followUp", triggerTurn: true });
 	};
 	const tick = async (): Promise<void> => {
+		// 4b-2 backstop: the queue's own owns() decides; a scheduler fault never stops it.
+		try { await deps.commandPost().dispatchQueue.drain(); } catch (error) { log(`dispatch queue drain failed: ${(error as Error).message}`); }
 		try {
 			scheduler ??= build();
 			runner ??= buildRunner();

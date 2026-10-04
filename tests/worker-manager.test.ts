@@ -43,6 +43,8 @@ import {
 	type ScratchRepo,
 	type ScriptStep,
 	WORKER_REPORTER_EXTENSION,
+	fakeWorker,
+	fakeWorkerManager,
 } from "./harness/index.ts";
 
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
@@ -708,3 +710,125 @@ test(
 		}
 	},
 );
+
+// ---------------------------------------------------------------------------
+// 4b-1: typed refusals, reservations, stopping, slot-free (4B1-T1)
+// ---------------------------------------------------------------------------
+
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: Error) => void } {
+	let resolve!: (value: T) => void;
+	let reject!: (error: Error) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+test("4b-1: spawn refusals carry a typed code; the messages are unchanged", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { manager, spawn } = fakeWorkerManager(home.path, 1);
+	spawn("cp-aaa1");
+	assert.throws(() => spawn("cp-aaa2"), (error: unknown) => error instanceof SpawnSafetyError && error.code === "spawn_cap" && /spawn cap reached \(1\/1 workers\)/.test(error.message));
+	assert.throws(() => spawn("cp-aaa1"), (error: unknown) => error instanceof SpawnSafetyError && error.code === "duplicate" && /already has a live worker/.test(error.message));
+	for (const key of ["cp-aaa1#review-1", "cp-aaa1#review-2", "cp-aaa1#review-3"]) spawn(key, undefined, "gate-reviewer");
+	assert.throws(() => spawn("cp-aaa1#review-4", undefined, "gate-reviewer"), (error: unknown) => error instanceof SpawnSafetyError && error.code === "review_reserve");
+	assert.equal(manager.active.length, 4);
+});
+
+test("4b-1: a reservation holds a slot for its key; spawn consumes it silently, release notifies once", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { manager, spawn } = fakeWorkerManager(home.path, 2);
+	let notified = 0;
+	manager.onSlotFree(() => {
+		notified += 1;
+	});
+	spawn("cp-live");
+	const release = manager.reserve("cp-x");
+	assert.equal(manager.reserved, 1);
+	assert.throws(() => spawn("cp-q"), (error: unknown) => error instanceof SpawnSafetyError && error.code === "spawn_cap" && /reserved for cp-x/.test(error.message));
+	assert.throws(() => manager.reserve("cp-x"), (error: unknown) => error instanceof SpawnSafetyError && error.code === "duplicate");
+	spawn("cp-x");
+	assert.equal(manager.reserved, 0);
+	release();
+	assert.equal(notified, 0, "a consumed reservation releases nothing");
+	// A gate reviewer keeps its +3 reserve even with a reservation outstanding.
+	const second = manager.reserve("cp-y");
+	spawn("cp-x#review-1", undefined, "gate-reviewer");
+	second();
+	assert.equal(notified, 1);
+	second();
+	assert.equal(notified, 1, "release is idempotent");
+	assert.equal(manager.reserved, 0);
+});
+
+test("4b-1: a stopping worker is marked from shutdown's first tick until its exit; notify fires once", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { manager, spawn } = fakeWorkerManager(home.path, 3);
+	let notified = 0;
+	manager.onSlotFree(() => {
+		notified += 1;
+	});
+	const exit = deferred();
+	spawn("cp-h", fakeWorker({ shutdown: () => exit.promise }));
+	const stopping = manager.shutdown("cp-h");
+	assert.equal(manager.stopping("cp-h"), true);
+	assert.equal(manager.whenStopped("cp-h"), stopping);
+	assert.ok(manager.get("cp-h"), "still registered (and alive) during the await");
+	exit.resolve();
+	await stopping;
+	assert.equal(manager.stopping("cp-h"), false);
+	assert.equal(manager.whenStopped("cp-h"), undefined);
+	assert.equal(manager.get("cp-h"), undefined);
+	assert.equal(notified, 1);
+
+	const failing = deferred();
+	spawn("cp-r", fakeWorker({ shutdown: () => failing.promise }));
+	const rejected = manager.shutdown("cp-r");
+	assert.equal(manager.stopping("cp-r"), true);
+	failing.reject(new Error("kill failed"));
+	await assert.rejects(rejected, /kill failed/);
+	assert.equal(manager.stopping("cp-r"), false);
+	assert.equal(notified, 2);
+
+	// A shutdown() that throws synchronously still clears `stopping` (the call is deferred past the map write).
+	const sync = fakeWorker();
+	sync.shutdown = () => {
+		throw new Error("sync kill failed");
+	};
+	spawn("cp-s", sync);
+	const thrown = manager.shutdown("cp-s");
+	assert.equal(manager.stopping("cp-s"), true);
+	await assert.rejects(thrown, /sync kill failed/);
+	assert.equal(manager.stopping("cp-s"), false, "never left stopping forever");
+	assert.equal(manager.whenStopped("cp-s"), undefined);
+});
+
+test("4b-1: slot-free fires after an observed close; unsubscribe works; a throwing listener breaks nothing", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const recorded: string[] = [];
+	const { manager, spawn } = fakeWorkerManager(home.path, 3, { recordEvent: (_job, kind, payload) => recorded.push(`${kind}:${String(payload.reason)}`) });
+	let notified = 0;
+	const off = manager.onSlotFree(() => {
+		notified += 1;
+	});
+	manager.onSlotFree(() => {
+		throw new Error("listener broke");
+	});
+	const worker = spawn("cp-c");
+	worker.exit();
+	await worker.closed;
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(manager.get("cp-c"), undefined, "the close still deregistered it");
+	assert.equal(notified, 1);
+	assert.match(recorded.join("\n"), /failure:slot-free listener failed: listener broke/);
+	off();
+	const second = spawn("cp-d");
+	second.exit();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(notified, 1, "unsubscribed");
+});

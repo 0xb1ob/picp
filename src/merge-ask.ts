@@ -102,7 +102,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CiConfiguredState } from "./ci-configured.ts";
 import {
@@ -708,6 +708,16 @@ export function parseCiRuns(stdout: string): CiRun[] {
 	return runs;
 }
 
+/** The writer's own schema decodes the file. An unreadable or contract-violating file is no verdict. */
+function readVerdictFile(file: string): DiffVerdict | undefined {
+	try {
+		const parsed = validate<DiffVerdict>(DiffVerdictSchema, JSON.parse(readFileSync(file, "utf8")));
+		return parsed.ok ? parsed.value : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * The heads `cp_review` has returned a **pass** for (cp-1som), read from this
  * home's own `state/runs/<job-id>/review-<n>.json`. Local files only: no
@@ -737,32 +747,20 @@ export function parseCiRuns(stdout: string): CiRun[] {
  * failed while a later one landed) would then hide the pass in `review-2.json`
  * and defer a merge ask that is genuinely ready. The scan is bounded by
  * `REVIEW_MAX_ATTEMPTS`, which is the same bound the review ladder itself
- * enforces, so looking at every slot costs at most five `existsSync` calls.
+ * enforces, so looking at every slot costs at most five file reads.
  */
 export function readReviewPassHeads(home: string, jobId: string): string[] {
 	const heads: string[] = [];
 	for (let attempt = 1; attempt <= REVIEW_MAX_ATTEMPTS; attempt += 1) {
-		const file = join(home, paths.reviewFile(jobId, attempt));
-		if (!existsSync(file)) continue;
-		try {
-			// The writer's own schema, so "what cp_review writes" and "what this reads"
-			// are one definition rather than two hand-kept-in-sync field lists.
-			const parsed = validate<DiffVerdict>(DiffVerdictSchema, JSON.parse(readFileSync(file, "utf8")));
-			if (parsed.ok && isCompletePass(parsed.value)) heads.push(parsed.value.head_sha);
-		} catch {
-			// An unreadable verdict is not a pass.
-		}
+		const verdict = readVerdictFile(join(home, paths.reviewFile(jobId, attempt)));
+		if (verdict && isCompletePass(verdict)) heads.push(verdict.head_sha);
 	}
 	const dir = join(home, paths.runDir(jobId));
 	try {
 		for (const name of readdirSync(dir)) {
 			if (!name.startsWith("review-equivalent-") || !name.endsWith(".json")) continue;
-			try {
-				const parsed = validate<DiffVerdict>(DiffVerdictSchema, JSON.parse(readFileSync(join(dir, name), "utf8")));
-				if (parsed.ok && isCompletePass(parsed.value) && parsed.value.equivalent_to) heads.push(parsed.value.head_sha);
-			} catch {
-				// An unreadable equivalence is not a pass.
-			}
+			const verdict = readVerdictFile(join(dir, name));
+			if (verdict && isCompletePass(verdict) && verdict.equivalent_to) heads.push(verdict.head_sha);
 		}
 	} catch {
 		// A missing run directory has no passes.
@@ -775,19 +773,11 @@ export function readReviewPassHeads(home: string, jobId: string): string[] {
 /** A persisted, complete pass for this exact head, including patch-id equivalence. */
 export function readReviewPassVerdict(home: string, jobId: string, head: string): DiffVerdict | undefined {
 	for (let attempt = REVIEW_MAX_ATTEMPTS; attempt >= 1; attempt -= 1) {
-		const file = join(home, paths.reviewFile(jobId, attempt));
-		if (!existsSync(file)) continue;
-		try {
-			const parsed = validate<DiffVerdict>(DiffVerdictSchema, JSON.parse(readFileSync(file, "utf8")));
-			if (parsed.ok && isCompletePass(parsed.value) && shaMatches(parsed.value.head_sha, head)) return parsed.value;
-		} catch {}
+		const verdict = readVerdictFile(join(home, paths.reviewFile(jobId, attempt)));
+		if (verdict && isCompletePass(verdict) && shaMatches(verdict.head_sha, head)) return verdict;
 	}
-	try {
-		const parsed = validate<DiffVerdict>(DiffVerdictSchema, JSON.parse(readFileSync(join(home, paths.reviewEquivalenceFile(jobId, head)), "utf8")));
-		return parsed.ok && isCompletePass(parsed.value) ? parsed.value : undefined;
-	} catch {
-		return undefined;
-	}
+	const verdict = readVerdictFile(join(home, paths.reviewEquivalenceFile(jobId, head)));
+	return verdict && isCompletePass(verdict) ? verdict : undefined;
 }
 
 /**

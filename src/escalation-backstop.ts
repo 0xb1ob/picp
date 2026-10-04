@@ -144,6 +144,8 @@ export interface EscalationBackstopPorts {
 	ledger: EscalationRelayLedger;
 	relay(relay: BridgeRelay): void;
 	now?(): Date;
+	/** Age threshold; 0 on a reattach, to replay every open escalation the ledger has not seen. */
+	afterSeconds?: number;
 }
 
 /** One pass: claim each due id in the ledger, then relay it. Returns the relayed ids; store and ledger errors propagate. */
@@ -152,7 +154,7 @@ export function runEscalationBackstop(ports: EscalationBackstopPorts): string[] 
 	const relayed = ports.ledger.ids();
 	const open = ports.open();
 	const pinned = new Set(open.map((item) => item.id));
-	const due = dueEscalations({ open, asks: ports.asks(), relayed, now });
+	const due = dueEscalations({ open, asks: ports.asks(), relayed, now, ...(ports.afterSeconds !== undefined ? { afterSeconds: ports.afterSeconds } : {}) });
 	const sent: string[] = [];
 	for (const escalation of due) {
 		if (!ports.ledger.note(escalation.id, "backstop", isoTimestamp(now), pinned)) continue;
