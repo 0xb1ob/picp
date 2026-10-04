@@ -59,3 +59,9 @@ jobs:
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""
+
+      # Offline contract eval: fails when evals/results/contract.json is stale.
+      # Never set CP_EVAL_LIVE here; --live is not passed.
+      - name: Eval contract check
+        run: npm run eval:check
+        timeout-minutes: 5
