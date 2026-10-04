@@ -1,4 +1,5 @@
 import type { ControlSendResponse, ControlStatusResponse, OperatorStartResponse } from "../src/viewer/api-types.ts";
+import type { Restarting } from "./restart-control.ts";
 
 /** Dashboard control (cp-dashboard-operator-control): what the Full transcript's composer and decision cards can say and do. */
 export const CONTROL_STATUS_URL = "/api/operator/control";
@@ -17,7 +18,7 @@ export interface Delivery { id: string | null; state: "sending" | "queued" | "de
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
 /** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void }
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 async function failure(response: Response): Promise<string> {

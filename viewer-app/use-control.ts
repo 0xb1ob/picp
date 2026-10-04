@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { SessionEntry } from "../src/viewer/api-types.ts";
 import { canStart, type ControlBody, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator } from "./control.ts";
+import { restartInFlight } from "./restart-control.ts";
+import { useRestart } from "./use-restart.ts";
 
 /**
  * The Full transcript's dashboard control: reads `/api/operator/control` on mount and on every refresh of the
@@ -36,12 +38,13 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   void poll();
   return () => { stop = true; };
  }, [active, starting?.state]);
+ const {restarting, restart} = useRestart(active, status, fetcher, setStatus);
  if (!active) return undefined;
  // Promote a queued send once the bridge or the transcript itself has seen it.
  const seen = delivery?.id && delivery.state === "queued" && (entries.some(e => e.dashboard_id === delivery.id) || (status && !("error" in status) && status.recent.some(r => r.id === delivery.id && r.state === "delivered")));
  const shown = seen ? {...delivery, state: "delivered" as const} : delivery;
  const send = (body: ControlBody, card?: string) => {
-  if (!controlReady(status) || delivery?.state === "sending" || starting?.state === "starting") return;
+  if (!controlReady(status) || delivery?.state === "sending" || starting?.state === "starting" || restartInFlight(restarting)) return;
   const askId = body.kind === "answer" ? body.ask_id : card ?? null;
   setDelivery({id: null, state: "sending", reason: null, ask_id: askId});
   void sendControl(fetcher, controlToken(status), body).then(result => {
@@ -57,5 +60,5 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
    else if (result.state === "already_running") setGeneration(value => value + 1);
   });
  };
- return {status, delivery: shown, send, starting, start};
+ return {status, delivery: shown, send, starting, start, restarting, restart};
 }

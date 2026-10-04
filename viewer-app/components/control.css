@@ -68,6 +68,14 @@
 .start-session-button:disabled { opacity: 0.5; }
 .start-session-line { flex: 1 1 220px; min-width: 0; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .start-session-failed { color: var(--coral); }
+/* Restart session (cp-aqxl): running only; the confirm names a long session file, so the button wraps at 390 px instead of widening the page. */
+.operator-restart { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.operator-restart-button { min-height: 44px; max-width: 100%; padding: 6px 18px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 22px; font: inherit; font-size: 14px; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.operator-restart-button:disabled { opacity: 0.5; }
+.operator-restart-confirm { color: var(--coral); border-color: var(--coral); }
+.operator-restart-cancel { min-height: 44px; padding: 0 12px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 14px; }
+.operator-restart-line { flex: 1 1 220px; min-width: 0; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.operator-restart-failed { color: var(--coral); }
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {

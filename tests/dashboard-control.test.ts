@@ -141,7 +141,8 @@ test("delivery: a message is injected as a user message with the marker; idle is
 
 	const status = await controlRequest(record, "status", {});
 	assert.ok(status.ok);
-	assert.deepEqual({ ...(status.result as object), recent: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined });
+	assert.deepEqual({ ...(status.result as object), recent: undefined, restart: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined, restart: undefined });
+	assert.equal((status.result as { restart: { supported: boolean } }).restart.supported, false, "ports without the restart members: Restart session unsupported");
 	assert.equal(journal(stateDir).filter((l) => l.type === "request").length, 3, "status writes no journal line");
 
 	const lines = journal(stateDir);

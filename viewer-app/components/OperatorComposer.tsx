@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { CONTROL_TEXT_MAX, type ControlView, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
+import { RestartSession } from "./RestartSession.tsx";
+import { restartInFlight } from "../restart-control.ts";
 
 /** The composer's placeholder: short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message (Enter to send)";
@@ -17,8 +19,8 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  const menu = useRef<HTMLDetailsElement>(null);
  const status = control.status;
  const ready = controlReady(status);
- // Held while offline; disabled while a started session comes up, so nothing races its first live token.
- const sending = control.delivery?.state === "sending" || control.starting?.state === "starting";
+ // Held while offline; disabled while a started session comes up or a restart runs, so nothing races its first live token.
+ const sending = control.delivery?.state === "sending" || control.starting?.state === "starting" || restartInFlight(control.restarting);
  const busy = ready && status.running && status.busy === true;
  // Grow with the text; CSS max-height (about five lines) makes it scroll inside past that.
  useLayoutEffect(() => {
@@ -45,6 +47,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  return <section class="operator-composer" aria-label="Message the operator session">
   <p class={ready && status.running ? "operator-composer-state operator-composer-state-ready" : "operator-composer-state"}>{controlLine(status)}{ready && status.running && status.session_file && <span> · delivers to the running session <code>{status.session_file}</code></span>}</p>
   <StartSession control={control}/>
+  <RestartSession control={control}/>
   {ready && <div class="operator-composer-row">
    <textarea ref={field} aria-label="Message to the operator session" maxLength={CONTROL_TEXT_MAX} rows={1} value={text} disabled={sending}
     placeholder={COMPOSER_PLACEHOLDER} title="Enter sends · Shift+Enter for a new line"

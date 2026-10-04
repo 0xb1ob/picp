@@ -9,7 +9,8 @@
  *  - `status` → busy, pending, session file, last outcomes (no side effect, no journal line);
  *  - `send` → a composer message or a decision-card click, injected as a **user message**, exactly what the
  *    human could type: never a `cp_decide`, never a parent call, never a write to the ask journal;
- *  - `abort` → abort the running turn.
+ *  - `abort` → abort the running turn;
+ *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
  * a request that cannot be journaled is refused and never injected. At listen (cp-daemon P3) the messages the
  * dashboard held in `state/operator/inbox.jsonl` while no session ran are delivered once (`deliverInbox`).
@@ -20,6 +21,7 @@ import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, join } from "node:path";
 import { OperatorAsks } from "./operator-asks.ts";
+import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
@@ -40,6 +42,10 @@ export interface ControlPorts {
 	isIdle(): boolean;
 	hasPendingMessages(): boolean;
 	sessionFile(): string | undefined;
+	/** Restart session (src/dashboard-restart.ts); any of the three absent means restart is unsupported. */
+	shutdown?(): void;
+	relaunchFile?(): string | undefined;
+	parentSends?(): { ids: string[]; error: string | null };
 }
 
 export interface ControlOutcome { id: string; kind: ControlKind; state: string; at: string; reason: string | null; ask_id: string | null }
@@ -183,14 +189,15 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		return { ok: true, result: { id, state: settled, deliver } };
 	};
 
-	const handle = async (frame: Record<string, unknown>): Promise<Reply> => {
+	const handle = async (frame: Record<string, unknown>): Promise<Reply & { after?: () => void }> => {
 		const args = frame.args !== null && typeof frame.args === "object" && !Array.isArray(frame.args) ? (frame.args as Record<string, unknown>) : {};
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent] } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
+		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		return { ok: false, status: 400, error: `unknown op ${String(frame.op)}` };
 	};
 
@@ -230,7 +237,12 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 					return;
 				}
 				handle(frame)
-					.then((reply) => { if (!socket.destroyed) socket.write(`${JSON.stringify({ v: CONTROL_PROTOCOL, id, ...reply })}\n`); })
+					.then(({ after, ...reply }) => {
+						// Restart: pi's shutdown runs only once the 202 is on the wire (or the viewer is gone).
+						const later = after ? () => { setTimeout(after, 50); } : undefined;
+						if (!socket.destroyed) socket.write(`${JSON.stringify({ v: CONTROL_PROTOCOL, id, ...reply })}\n`, later);
+						else later?.();
+					})
 					.catch((error: Error) => { if (!socket.destroyed) socket.write(`${JSON.stringify({ v: CONTROL_PROTOCOL, id, ok: false, status: 500, error: error.message })}\n`); });
 			}
 			if (buffer.length > MAX_FRAME_CHARS) socket.destroy();

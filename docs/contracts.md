@@ -125,6 +125,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     push-deliveries.json            Web Push delivery ledger, once per id (Pier 1.1)
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
+    operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
 .beads/                   frozen archive of the retired br ledger (gitignored; safe to delete; left in place)
 ```
 
@@ -5417,6 +5418,56 @@ until `running` (≤ 60 s) and opens the composer; the held messages arrive with
 with `tmux attach -t cp-operator`,
 or open herdr → workspace `cp-operator` (docs/service.md). **Nothing
 auto-starts**: a message alone never starts a session (it spends model tokens), only this explicit click.
+
+**Restart session** (cp-aqxl; `POST /api/operator/restart`,
+[`src/viewer/operator-restart.ts`](../src/viewer/operator-restart.ts) → the bridge's `restart` op,
+[`src/dashboard-restart.ts`](../src/dashboard-restart.ts) → the launcher,
+[`src/operator-relaunch.ts`](../src/operator-relaunch.ts)). While a session runs, the page offers **Restart session**:
+the session stops itself after its checks and the `cp-operator` that started it relaunches it in the same terminal on
+the exact session file. **The viewer holds no process control**: it forwards one `restart` frame and never spawns,
+signals or locates a process (tmux/herdr pane hunting was rejected as fragile). The viewer refuses, in order:
+
+| Check | Refusal |
+|---|---|
+| method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `restart`) |
+| body is exactly `{"restart": true}` | 400 `body must be exactly {"restart": true}` |
+| a live session record | 409 `{state: "offline"}` `no operator session is running (…); use Start session or Resume last session` |
+| `x-cp-control-token` equals the record's `csrf` | 403 `control token missing or stale; reload the page` |
+| one accepted restart per 60 s (reserved across the frame, released unless the bridge accepted, so a `not now` can be retried) | 429 with `retry-after` |
+| the socket answers within 5 s | 503 / 504, as for a message |
+| an older bridge answers `unknown op restart` | 409 `unsupported: this session's cp-bridge predates Restart session; restart it once by hand: /quit, then cp-operator -c` |
+| the bridge's own checks (below) | 202 `{id, state: "restarting", session_file}` (basename only), or its status and reason as `{state: "refused", error}` |
+
+Every viewer refusal after the `--require-tailnet` guard is one `refused` line (`kind: "restart"`) in
+`state/operator/dashboard.jsonl`; a refusal the bridge made is journaled by the bridge, not twice. The bridge's
+`restart` op appends its `request` line (`kind: "restart"`, `deliver: "restart"`, `text: null`) **first** — a line
+that cannot be written is 500 and nothing else happens — then refuses with one `outcome` `refused` line and the
+reason, in order:
+
+| Bridge check | Refusal |
+|---|---|
+| `data/dashboard-control.json` on | 403 `dashboard control is off (…)` |
+| supported: the bridge has the `shutdown`, `parentSends` and `relaunchFile` ports and `CP_OPERATOR_RELAUNCH_FILE` is an absolute path | 409 `unsupported: this session was not started by a cp-operator that relaunches it; restart it once by hand: /quit, then cp-operator -c` |
+| idle, no queued messages, no injected dashboard request the session has not seen, no dashboard answer click on an ask still open in `asks.jsonl`, no `cp_parent send` from the last 24 h without an observed outcome (`<sessions>/cp-parent.sends.json`; unreadable refuses too) | 409 `not now: <blocker>; <blocker>` |
+| the session file is absolute, `.jsonl` and on disk | 409 `the session file … is not on disk; nothing to resume` |
+| the marker is written | 500 `failed: relaunch marker unwritable (…)`, outcome `failed` |
+| — | outcome `restarting`; the reply is written, then (50 ms later) pi's own `ctx.shutdown()` through the compaction idle gate |
+
+`GET /api/operator/control` carries `restart: {supported, blockers, reason}` (the same checks, no journal line) and
+`session_started_at` (the record's `started_at`, so the page tells the relaunched session from the old one); a status
+without `restart` reads unsupported.
+
+**The handshake and the marker.** `cp-operator` gives every pi it starts `CP_OPERATOR_RELAUNCH_FILE` =
+`state/operator/relaunch.json` of its home (cleared, never inherited, when no home resolves); its presence is the
+capability. The bridge writes the marker 0600 through a tmp file and a rename: `{version: 1, id: dc-…, pid,
+session_file, at}`, `pid` being its own pi's pid. When that pi exits, `cp-operator` takes (reads and removes) the
+marker **only** when it is well-formed and names the pid of the child that just exited — any other marker stays,
+inert — and spawns pi again with exactly `--session <file>` (`-c` when the file is gone; the wrapper's `--model` is
+not added), at most 3 relaunches per 10 min (then one line: `resume by hand: cp-operator --session <file>`, and its
+exit code). A `cp-operator` that was itself signalled never relaunches. No marker: it exits with pi's code, as before.
+**Migration:** a session started before this release has no handshake and reports unsupported; restart it once by
+hand (`/quit`, then `cp-operator -c`). Restart is never an authorization and starts nothing new: it resumes the same
+session file.
 
 **Trust boundary.** Any local process of the same user can already read the 0600 record and reach the socket;
 that is the same boundary as the parent host's. The Origin check and CSRF token stop a hostile web page in the

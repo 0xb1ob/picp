@@ -210,7 +210,9 @@ test("operator launcher loads only the bridge", () => {
 	const script = readFileSync(join(PACKAGE_ROOT, "bin/cp-operator"), "utf8");
 	assert.match(script, /exec node "\$ROOT\/src\/viewer\/operator\.ts" "\$@"/);
 	const launcher = readFileSync(join(PACKAGE_ROOT, "src/viewer/operator.ts"), "utf8");
-	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(piArgs\), web\.extensions\)/);
+	// The supervise loop (src/operator-relaunch.ts) hands each run its args: the CLI's first, `--session <file>` on a relaunch.
+	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args\), web\.extensions\)/);
+	assert.match(launcher, /firstArgs: piArgs/);
 	assert.equal(script.includes("extensions/command-post") || launcher.includes("extensions/command-post"), false);
 	const args = operatorPiArgs(PACKAGE_ROOT);
 	assert.ok(args.includes("--no-extensions"));
