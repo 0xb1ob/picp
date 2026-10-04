@@ -161,3 +161,32 @@
  .session-trace { margin-left: 68px; }
  .session-new-wrap { bottom: 24px; }
 }
+/*
+ * Light Sessions (cp-wfw3): a light-scheme browser gets the Sessions screen — sidebar, top bar, transcript, cards and
+ * composer — in light, the rest of the app keeps its dark shell. No new colours: the palette's own values are
+ * captured on the parent (`--lt-*`, read from the dark tokens) and the tokens are remapped on `.sessions`, so every
+ * component inside (control.css, context.css, the ask cards) follows without a rule of its own. Accents darken for
+ * text on a light ground; the own bubble takes the light blue.
+ */
+@media (prefers-color-scheme: light) {
+ .shell-main:has(> .sessions) {
+  --lt-ink: var(--background); --lt-ink-2: var(--surface); --lt-ink-3: var(--nav-selected);
+  --lt-muted: var(--faint); --lt-dim: var(--disabled-text); --lt-faint: var(--dim); --lt-decor: var(--muted);
+  --lt-line: var(--subtle); --lt-line-2: var(--secondary); --lt-paper-2: var(--objective); --lt-paper: var(--text); --lt-white: var(--hover);
+  --lt-green: var(--check-border); --lt-amber: var(--map-stranded-border); --lt-blue: var(--held-border); --lt-coral: var(--error-border);
+  --lt-soft-green: var(--green); --lt-soft-amber: var(--amber); --lt-soft-blue: var(--blue); --lt-soft-coral: var(--coral);
+ }
+ .sessions {
+  color-scheme: light;
+  --page: var(--lt-line); --background: var(--lt-paper); --nav: var(--lt-paper-2); --surface: var(--lt-white);
+  --divider: var(--lt-paper-2); --nav-selected: var(--lt-line-2); --border: var(--lt-line-2); --toggle: var(--lt-line-2);
+  --button: var(--lt-white); --tab-selected: var(--lt-line-2); --questions-background: var(--lt-white); --transcript-divider: var(--lt-paper-2);
+  --tag-border: var(--lt-line); --worth-border: var(--lt-line); --paused-border: var(--lt-line); --ledger-border: var(--lt-line); --trail-line: var(--lt-line);
+  --empty-background: var(--lt-white); --empty-border: var(--lt-line-2); --check-background: var(--lt-white); --check-border: var(--lt-soft-green);
+  --ask-background: var(--lt-white); --ask-border: var(--lt-soft-amber); --error-border: var(--lt-soft-coral); --held-border: var(--lt-soft-blue);
+  --text: var(--lt-ink); --secondary: var(--lt-ink-2); --subtle: var(--lt-ink-3); --objective: var(--lt-ink-2); --hover: var(--lt-ink);
+  --muted: var(--lt-muted); --empty-text: var(--lt-muted); --dim: var(--lt-dim); --faint: var(--lt-decor); --disabled-text: var(--lt-faint);
+  --green: var(--lt-green); --amber: var(--lt-amber); --blue: var(--lt-blue); --coral: var(--lt-coral);
+  background: var(--background); color: var(--text);
+ }
+}

@@ -157,3 +157,16 @@ test("layout: bubbles cap at 85% on a phone and 75% on desktop; code and tables 
 	assert.match(phone!, /\.session-transcript \{ flex: 1; min-height: 0; overflow-y: auto;/, "the transcript is the one scroller");
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*flex-shrink: 0; \}/, "the composer keeps its height at the bottom of the panel");
 });
+
+test("light scheme: Sessions remaps the palette tokens to a light ground, captured on the parent so nothing is a cycle", () => {
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
+	const light = css.split("@media (prefers-color-scheme: light) {")[1] ?? "";
+	const rule = (selector: string) => new RegExp(`${selector.replace(/[.()>:]/g, "\\$&")} \\{([^}]*)\\}`).exec(light)?.[1] ?? "";
+	const capture = rule(".shell-main:has(> .sessions)"), sessions = rule(".sessions");
+	assert.match(capture, /--lt-ink: var\(--background\);[\s\S]*--lt-paper: var\(--text\);/, "the light values are the palette's own, read from the dark tokens on the parent");
+	assert.match(sessions, /color-scheme: light;/, "native controls and scrollbars follow");
+	for (const pair of ["--background: var(--lt-paper);", "--text: var(--lt-ink);", "--held-border: var(--lt-soft-blue);"]) assert.ok(sessions.includes(pair), `light ground, dark ink, light-blue own bubble: ${pair}`);
+	assert.match(sessions, /background: var\(--background\); color: var\(--text\);/);
+	for (const [, name] of sessions.matchAll(/(--[a-z-]+): var\(--lt-/g)) assert.doesNotMatch(capture, new RegExp(`${name}:`), `${name} is remapped where it is not captured`);
+	assert.doesNotMatch(light, /#[\da-f]{3,8}\b/i, "no colour of its own: the palette guard holds");
+});
