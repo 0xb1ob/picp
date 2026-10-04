@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -13,6 +13,7 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, pa
 import { FleetStore } from "../src/fleet.ts";
 import { loadProfile } from "../src/profiles.ts";
 import {
+	childPids,
 	formatRevivePlan,
 	inspectWorktree,
 	readInterruptedTool,
@@ -127,6 +128,7 @@ test("plan refuses: no record, wrong phase, missing session, live pid, missing w
 		manager: b.manager,
 		runs: b.runs,
 		isPidAlive: () => true,
+		childPids: () => [],
 	});
 	const livePid = await aliveReviver.plan("cp-alive");
 	assert.equal(livePid.ok, false);
@@ -143,6 +145,56 @@ test("plan refuses: no record, wrong phase, missing session, live pid, missing w
 	const noWorktree = await reviver.plan("cp-noworktree");
 	assert.equal(noWorktree.ok, false);
 	if (!noWorktree.ok) assert.equal(noWorktree.code, "worktree_missing");
+});
+
+test("plan refuses tool_child_alive while a child of the stored pid lives; the stored pid only, nothing signalled", async (t) => {
+	const b = bench(t);
+	const worktree = join(b.home, "worktrees", "cp-child");
+	mkdirSync(worktree, { recursive: true });
+	const sessionFile = join(b.home, "child.jsonl");
+	writeFileSync(sessionFile, "{}\n");
+	await b.fleet.add(makeRecord({ job_id: "cp-child", worktree, worker: { ...makeRecord({}, b.home).worker, session_file: sessionFile, pid: 4242 } }, b.home));
+	const asked: number[] = [];
+	const planWith = (live: readonly number[]) =>
+		new Reviver({
+			home: b.home,
+			profilesDir: PROFILES_DIR,
+			fleet: b.fleet,
+			manager: b.manager,
+			runs: b.runs,
+			isPidAlive: (pid) => live.includes(pid),
+			childPids: (pid) => {
+				asked.push(pid);
+				return [4243, 4244];
+			},
+		}).plan("cp-child");
+
+	const child = await planWith([4242, 4243]);
+	assert.equal(child.ok, false);
+	if (!child.ok) {
+		assert.equal(child.code, "tool_child_alive");
+		assert.match(child.message, /pid 4242 has live child process\(es\) 4243 /);
+		assert.match(child.message, /Nothing was signalled/);
+	}
+	assert.deepEqual(asked, [4242], "only the stored pid is asked about");
+
+	// Children that already exited do not refuse; the live pid itself still does.
+	const exited = await planWith([4242]);
+	assert.equal(exited.ok ? "" : exited.code, "pid_alive");
+
+	// A dead stored pid has no attributable children: its children are not asked for.
+	asked.length = 0;
+	const dead = await planWith([]);
+	assert.notEqual(dead.ok ? "" : dead.code, "tool_child_alive");
+	assert.deepEqual(asked, []);
+});
+
+test("childPids reads a real child of this process from procfs", { skip: !existsSync("/proc/self/task") }, async (t) => {
+	const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+	t.after(() => child.kill()); // the pid this test started, nothing else
+	assert.ok(child.pid);
+	assert.ok(childPids(process.pid).includes(child.pid as number));
+	assert.deepEqual(childPids(DEAD_PID), []);
 });
 
 test("plan refuses a worktree with a rebase/merge/cherry-pick in progress or a detached HEAD; dirty is surfaced, not refused", async (t) => {

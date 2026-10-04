@@ -30,7 +30,7 @@
  * silently handing an unproven worktree back to a resumed conversation.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
@@ -50,6 +50,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"pid_alive",
 	"worktree_missing",
 	"repo_operation_in_progress",
+	"tool_child_alive",
 	"repo_detached_head",
 	"envelope_unresolved",
 ] as const;
@@ -163,6 +164,8 @@ export interface ReviverOptions {
 	bounds?: WorkerObserverOptions["bounds"];
 	onUsage?: WorkerObserverOptions["onUsage"];
 	isPidAlive?: (pid: number) => boolean;
+	/** The child pids of a pid (default: `childPids`, Linux procfs). Test hook. */
+	childPids?: (pid: number) => number[];
 	fileExists?: (path: string) => boolean;
 	git?: GitRunner;
 	now?: () => Date;
@@ -287,6 +290,36 @@ function refuse(jobId: string, code: ReviveRefusalCode, message: string): Revive
 }
 
 /**
+ * The direct children of `pid`, read from Linux `/proc/<pid>/task/<tid>/children`.
+ * No procfs, an unknown pid or a thread that exits mid-read yields fewer pids,
+ * never a throw. Read-only: nothing here signals a process.
+ * ponytail: direct children of the stored pid only — an exited worker's children
+ * are reparented and no longer attributable to it; a stored tool pid would be the upgrade.
+ */
+export function childPids(pid: number): number[] {
+	let tasks: string[];
+	try {
+		tasks = readdirSync(`/proc/${pid}/task`);
+	} catch {
+		return [];
+	}
+	const children = new Set<number>();
+	for (const tid of tasks) {
+		let text: string;
+		try {
+			text = readFileSync(`/proc/${pid}/task/${tid}/children`, "utf8");
+		} catch {
+			continue; // this thread exited between the two reads
+		}
+		for (const token of text.trim().split(/\s+/)) {
+			const child = Number(token);
+			if (Number.isInteger(child) && child > 0) children.add(child);
+		}
+	}
+	return [...children];
+}
+
+/**
  * A failed job whose envelope slot is in a state a resumed worker cannot report
  * through: an envelope intake never accepted (the worker is told "already
  * filed") or the worker's own rejection record (the next intake fails the job
@@ -370,6 +403,21 @@ export class Reviver {
 		}
 
 		const alive = this.#options.isPidAlive ?? isPidAlive;
+		// A tool subprocess can still be changing the worktree (docs/contracts.md
+		// §Revival). Checked before `pid_alive` so bounded recovery can stand down on
+		// it without spending its one attempt (src/recovery.ts). The stored pid only.
+		const liveChildren = alive(record.worker.pid)
+			? (this.#options.childPids ?? childPids)(record.worker.pid).filter((child) => alive(child))
+			: [];
+		if (liveChildren.length > 0) {
+			return refuse(
+				jobId,
+				"tool_child_alive",
+				`${jobId}'s pid ${record.worker.pid} has live child process(es) ${liveChildren.join(", ")} \u2014 a tool it ` +
+					`started may still be changing ${record.worktree}, and a revived worker would be told that call failed. ` +
+					"Nothing was signalled; wait for those pids to exit (or stop them yourself), then retry.",
+			);
+		}
 		const ownPid = closesWorker && registered?.worker.pid === record.worker.pid;
 		if (!ownPid && alive(record.worker.pid)) {
 			return refuse(
