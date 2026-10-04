@@ -15,7 +15,7 @@ import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { cpNext } from "../src/next.ts";
-import { formatScheduleEvent, latestCronSlot, parseCron, runWatchScript, Scheduler, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
+import { formatScheduleEvent, formatSchedules, latestCronSlot, parseCron, runWatchScript, Scheduler, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
 import { createScratchHome, createScratchLedger, type ScratchHome } from "./harness/index.ts";
 
 const T0 = new Date("2026-07-01T06:00:00Z");
@@ -429,6 +429,72 @@ test("an archived project: cp_schedule add is refused, and a schedule saved befo
 	assert.match(event?.reason ?? "", /archived project demo/);
 	assert.match((await scheduler.fireNow(schedule.id, "sc-1")).reason, /run now not recorded: archived project demo/);
 	assert.equal((await ledger.list({ all: true })).length, 0, "no job was recorded");
+});
+
+
+const skillJob = { title: "Self-review", kind: "research" as const, delivery: "local" as const, skill: "cp-self-review" };
+
+test("a manual skill schedule is never ticked: no fire, no write, no job at any clock", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { clock, ledger, ports, grant } = bench(home);
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "self-review", project: "demo", mandate_id: grant().id, manual: true, ...skillJob });
+	assert.deepEqual([schedule.trigger, schedule.job.skill], [{ type: "manual" }, "cp-self-review"]);
+	for (const at of [T0.getTime(), T0.getTime() + 400 * 86_400_000]) {
+		clock.now = new Date(at);
+		assert.deepEqual(await scheduler.tick(), []);
+	}
+	const saved = scheduler.list()[0]!;
+	assert.deepEqual([saved.last_checked_at, saved.last_fire, saved.last_skip], [undefined, undefined, undefined]);
+	assert.equal((await ledger.list({ all: true })).length, 0);
+	assert.match(formatSchedules([saved]), /manual \(fires only on Run now\) → expanded by skill cp-self-review/);
+});
+
+test("manual/skill add refusals each throw and write nothing", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { ports, grant } = bench(home);
+	const scheduler = new Scheduler(ports);
+	const id = grant().id;
+	const base = { name: "self-review", project: "demo", mandate_id: id };
+	const refusals: [Partial<Parameters<Scheduler["add"]>[0]>, RegExp][] = [
+		[{ manual: true, cron: "0 9 * * *", tz: "UTC", ...skillJob }, /exactly one of cron/],
+		[{ ...skillJob, skill: undefined, kind: "research", delivery: "local" }, /exactly one of cron/],
+		[{ manual: true, ...skillJob, delivery: "answer" }, /skill needs a manual schedule/],
+		[{ manual: true, ...skillJob, kind: "ship" }, /skill needs a manual schedule/],
+		[{ manual: true, ...skillJob, script_path: "x.sh" }, /skill needs a manual schedule/],
+		[{ manual: true, ...skillJob, skill: "cp-other" }, /unknown skill "cp-other"; known: cp-self-review/],
+	];
+	for (const [input, message] of refusals) await assert.rejects(scheduler.add({ ...base, ...skillJob, ...input } as Parameters<Scheduler["add"]>[0]), message);
+	// skill on a cron schedule: the cron branch has manual unset.
+	await assert.rejects(scheduler.add({ ...base, cron: "0 9 * * *", tz: "UTC", ...skillJob }), /skill needs a manual schedule/);
+	await assert.rejects(scheduler.add({ ...base, manual: true, ...skillJob, mandate_id: grant({ schedule_grant: undefined }).id }), /not a schedule grant/);
+	assert.equal(scheduler.list().length, 0);
+});
+
+test("run now on a manual skill schedule: grant-checked, one deferred anchor, single flight", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { ledger, mandates, ports, grant } = bench(home);
+	const mandate = grant();
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "self-review", project: "demo", mandate_id: mandate.id, manual: true, ...skillJob });
+	mandates.pause(mandate.id);
+	const paused = await scheduler.fireNow(schedule.id, "sc-1");
+	assert.equal(paused.outcome, "skipped");
+	assert.match(paused.reason, new RegExp(`^run now not recorded: ${mandate.id} is paused`));
+	assert.equal((await ledger.list({ all: true })).length, 0);
+	mandates.resume(mandate.id);
+	const fired = await scheduler.fireNow(schedule.id, "sc-2");
+	assert.equal(fired.outcome, "fired");
+	assert.equal(fired.skill, "cp-self-review");
+	const anchor = await ledger.show(fired.job_id as string);
+	assert.equal(anchor.status, "deferred");
+	assert.ok(anchor.labels.includes(`schedule:${schedule.id}`));
+	assert.match(formatScheduleEvent(fired), /parent-expanded run.*skill cp-self-review/);
+	assert.match((await scheduler.fireNow(schedule.id, "sc-3")).reason, new RegExp(`the previous fire ${anchor.id} is still open`));
+	assert.equal((await ledger.list({ all: true })).length, 1);
 });
 
 test("cp_schedule is parent-only", () => {

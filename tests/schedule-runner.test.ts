@@ -66,6 +66,22 @@ test("runnerOwns: a schedule: label and an answer/board/local delivery", () => {
 	assert.equal(runnerOwns({ labels: ["delivery:answer"] }), false);
 });
 
+test("a parent-expanded schedule's jobs are the parent's: runnerOwns is false and the runner never dispatches, drops or tears them down", async (t) => {
+	const expanded = new Set(["sch-abc123"]);
+	assert.equal(runnerOwns({ labels: ["schedule:sch-abc123", "delivery:local"] }, expanded), false);
+	assert.equal(runnerOwns({ labels: ["schedule:sch-abc123", "delivery:answer"] }, expanded), false);
+	assert.equal(runnerOwns({ labels: ["schedule:sch-def456", "delivery:local"] }, expanded), true, "another schedule is unaffected");
+	const manual = schedule({ trigger: { type: "manual" }, job: { kind: "research", delivery: "local", skill: "cp-self-review" } });
+	const { ledger, calls, clock, runner, scheduled } = bench(t, [manual]);
+	const child = await scheduled("local");
+	clock.now = new Date(Date.parse(child.created_at) + 400 * 86_400_000);
+	await runner.retryPending();
+	await runner.sweepReported();
+	assert.deepEqual(calls.dispatch, []);
+	assert.equal((await ledger.show(child.id)).status, "open", "not dropped");
+	assert.equal(runner.claims(report(child.id)), false);
+});
+
 test("an LLM schedule dispatches one worker with its description as the task (title when none)", async (t) => {
 	const { calls, runner, scheduled } = bench(t, [schedule({ job: { description: "Summarise yesterday's merges." } }), schedule({ id: "sch-def456" })]);
 	const first = await scheduled();

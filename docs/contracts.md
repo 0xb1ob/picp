@@ -5692,7 +5692,7 @@ than 120 s → `expired` (never applied late); `data/dashboard-control.json` not
 `interrupted`, never re-applied. Effects: `enable` is refused unless the schedule's grant passes the fire check, and
 restarts cron slot evaluation at the enable time; `disable` and `remove` are never grant-gated; `run_now` is a manual
 fire (see Schedules), whose job goes to the schedule runner (answer/board/local) or the `cp-schedule` wake
-(pr/pipeline) exactly like a slot fire.
+(pr/pipeline) exactly like a slot fire — or, for a parent-expanded schedule, the deferred anchor and the expansion wake.
 
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the route and refuses queued requests at
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
@@ -6507,7 +6507,7 @@ shell are marked *outside guard coverage*.
 
 A headless bridge parent is started with `PARENT_BRIDGE_FLAGS` (`--no-extensions
 --no-skills`) plus `-e` the command-post extension and `--skill
-<home>/skills/cp-memory` only (falling back to the package's shipped copy when
+<home>/skills/<name>` for each `PARENT_SKILLS` entry (`cp-memory`, `cp-self-review`; each falling back to the package's shipped copy when
 the home has none), so that path reports zero foreign tools and loads no
 implementation skills. The doctor check is for a human-launched TUI parent that still loads
 global extensions.
@@ -7019,6 +7019,27 @@ fires. The page's Run now is a manual fire (title `<title> (<name> run now
 <minute>Z)`) under the same grant and open-fire checks; it never writes
 `last_fire`/`last_skip`, is refused on a disabled schedule, and is serialized
 with slot fires, so the two never both create.
+
+**Manual and parent-expanded schedules.** `manual: true` saves `trigger:
+{type:"manual"}`: no tick ever fires it or writes to it (no `last_checked_at`,
+`last_fire` or `last_skip`); only Run now does, with the grant, archived-project and
+open-fire checks above. `skill: cp-self-review` (manual, `research`, `local`, no
+`script_path` only; refused on cron and watch) makes the fire a **parent-expanded
+run**: the job it records is a `deferred` anchor (never dispatched, never offered
+by `cp_next`; it holds the open-fire guard until the parent closes it), and the
+parent is woken with `cp-schedule` naming the anchor, the schedule and the skill
+to expand it with that skill (`skills/cp-self-review`: six read-only reader jobs
+and one synthesis job over the last 36 h). Its jobs carry `schedule:<id>`, so only
+the schedule grant covers and counts them; they are the parent's (`cp_next`, the
+envelope wakes), never the schedule runner's (`runnerOwns(job, expanded)` is
+false for them). A deferred anchor with no `expanded:` comment re-wakes the
+parent once per parent process, so a restart before the fan-out finished still
+finishes it. `cp_job create` and `cp_job update add_labels` refuse a `schedule:`
+label unless that schedule is parent-expanded and has a deferred anchor, so the
+only way to mint a schedule-grant job is a grant-checked Run now (fan-out is
+idempotent: titles carry the anchor id and create dedupes on project + title).
+`state/schedules.json` may now hold `trigger.type: "manual"` and `job.skill`; an
+older binary reads the whole file as invalid (see CHANGELOG, Downgrade).
 
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,

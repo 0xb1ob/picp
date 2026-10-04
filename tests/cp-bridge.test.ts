@@ -21,6 +21,7 @@ import {
 	CpBridgeError,
 	operatorPiArgs,
 	parentEnv,
+	PARENT_SKILLS,
 	parentSkillPaths,
 	requireAvailableParentModel,
 	resolveParentModel,
@@ -227,22 +228,23 @@ test("operator argv adds only the resolved web extension, after the bridge", () 
 	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"], ["/pkg/web/index.ts"]), ["--no-extensions", "-e", bridge, "-e", "/pkg/web/index.ts", "--x"]);
 });
 
-test("parent starts with --no-skills plus --skill <home>/skills/cp-memory, and nothing else skill-wise", () => {
+test("parent starts with --no-skills plus --skill <home>/skills/<name> for each PARENT_SKILLS entry, and nothing else skill-wise", () => {
 	assert.deepEqual([...PARENT_BRIDGE_FLAGS], ["--no-extensions", "--no-skills"]);
-	// A checkout home is the package root: the shipped skill resolves from it.
-	assert.deepEqual(parentSkillPaths(PACKAGE_ROOT), [join(PACKAGE_ROOT, "skills/cp-memory")]);
-	assert.match(readFileSync(join(PACKAGE_ROOT, "skills/cp-memory/SKILL.md"), "utf8"), /^name: cp-memory$/m);
-	// A home with its own copy wins; a managed home without one falls back to the package.
+	const pkg = (name: string) => join(PACKAGE_ROOT, "skills", name);
+	// A checkout home is the package root: the shipped skills resolve from it.
+	assert.deepEqual(parentSkillPaths(PACKAGE_ROOT), [pkg("cp-memory"), pkg("cp-self-review")]);
+	for (const name of PARENT_SKILLS) assert.match(readFileSync(join(PACKAGE_ROOT, "skills", name, "SKILL.md"), "utf8"), new RegExp(`^name: ${name}$`, "m"));
+	// A home with its own copy wins per skill; a managed home without one falls back to the package.
 	const home = scratch();
-	assert.deepEqual(parentSkillPaths(home), [join(PACKAGE_ROOT, "skills/cp-memory")]);
+	assert.deepEqual(parentSkillPaths(home), [pkg("cp-memory"), pkg("cp-self-review")]);
 	mkdirSync(join(home, "skills/cp-memory"), { recursive: true });
 	writeFileSync(join(home, "skills/cp-memory/SKILL.md"), "---\nname: cp-memory\n---\n", "utf8");
-	assert.deepEqual(parentSkillPaths(home), [join(home, "skills/cp-memory")]);
+	assert.deepEqual(parentSkillPaths(home), [join(home, "skills/cp-memory"), pkg("cp-self-review")]);
 
 	const args = buildParentArgv({ sessionFile: "/s.jsonl", model: "m/x", extension: "/cp.ts", skills: parentSkillPaths(home) });
 	assert.ok(args.includes("--no-extensions") && args.includes("--no-skills"));
 	const skills = args.flatMap((arg, i) => (arg === "--skill" ? [args[i + 1]] : []));
-	assert.deepEqual(skills, [join(home, "skills/cp-memory")]);
+	assert.deepEqual(skills, parentSkillPaths(home));
 });
 
 test("cp_parent ask accepts and records the ask's context in state/operator/asks.jsonl", async (t) => {

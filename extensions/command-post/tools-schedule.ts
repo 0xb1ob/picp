@@ -13,8 +13,9 @@ import { Type } from "typebox";
 import type { Delivery, JobKind } from "../../src/contracts.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts";
+import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
 import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-control.ts";
-import { formatScheduleEvent, formatSchedules, type ScheduleEvent, Scheduler, SCHEDULER_TICK_MS } from "../../src/scheduler.ts";
+import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, SCHEDULER_TICK_MS } from "../../src/scheduler.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerScheduleTools(
@@ -45,9 +46,17 @@ export function registerScheduleTools(
 	};
 	// The fleet owner only: a session without the lock never tears anything down.
 	shareRunner(() => (holdsLock() ? (runner ??= buildRunner()) : undefined));
+	const woken = new Set<string>();
+	/** One `cp-schedule` wake per anchor per process: the live fire's wake and the restart sweep never double up. */
+	const wakeParent = (anchorId: string, text: string, details: Record<string, unknown>): void => {
+		if (woken.has(anchorId)) return;
+		woken.add(anchorId);
+		pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details }, { deliverAs: "followUp", triggerTurn: true });
+	};
 	const handle = (event: ScheduleEvent, active: ScheduleRunner): void => {
 		const text = formatScheduleEvent(event);
 		if (event.outcome !== "fired") log(text);
+		else if (event.skill && event.job_id) wakeParent(event.job_id, text, { ...event });
 		else if (event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)) {
 			log(text);
 			void active.onFired(event);
@@ -61,6 +70,10 @@ export function registerScheduleTools(
 			runner ??= buildRunner();
 			await runner.sweepReported();
 			await runner.retryPending();
+			// A deferred anchor not yet expanded (a restart before the fan-out finished) re-wakes the parent once per process.
+			for (const { anchor, schedule } of pendingExpansions(deps.commandPost().ledger().read().jobs, scheduler.list())) {
+				wakeParent(anchor.id, formatExpansionWake(anchor, schedule), { schedule_id: schedule.id, job_id: anchor.id, skill: schedule.job.skill });
+			}
 			for (const event of await scheduler.tick()) handle(event, runner);
 		} catch (error) {
 			log(`scheduler tick failed: ${(error as Error).message}`);
@@ -104,8 +117,8 @@ export function registerScheduleTools(
 		name: "cp_schedule",
 		label: "Schedule",
 		description:
-			"Saved schedules: `add` a cron line (5 fields + IANA tz) or a watch (a tracked script run every N seconds in the project's " +
-			"canonical clone, firing on exit 0 or on changed stdout); `list`, `enable`, `disable`, `remove`. A fire records an ordinary " +
+			"Saved schedules: `add` a cron line (5 fields + IANA tz), a watch (a tracked script run every N seconds in the project's " +
+			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`. A fire records an ordinary " +
 			"ledger job under the schedule's own grant (schedule_grant). answer/board/local fires are dispatched and torn down by the schedule runner " +
 			"in code (an LLM schedule as one short-lived worker with its description as the task, a script_path schedule directly, no model); " +
 			"pr/pipeline fires wake you (cp-schedule) for cp_next/cp_dispatch. Job caps, parallelism, risk gates and review apply either way. " +
@@ -113,6 +126,7 @@ export function registerScheduleTools(
 		promptSnippet: "Manage cron/watch schedules that file jobs under a mandate (cp_schedule)",
 		promptGuidelines: [
 			"A cp-schedule wake-up (pr/pipeline schedules only) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's, never dispatch them yourself.",
+			"A cp-schedule wake naming a parent-expanded run is yours: follow its skill (cp-self-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
 			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule): it covers only that schedule's jobs, and a project-wide grant never covers a scheduled job. A paused or expired grant skips the fire, never bypasses it.",
 		],
 		parameters: Type.Object({
@@ -131,6 +145,8 @@ export function registerScheduleTools(
 			delivery: Type.Optional(StringEnum(["pr", "local", "pipeline", "answer", "board"])),
 			description: Type.Optional(Type.String()),
 			script_path: Type.Optional(Type.String({ description: "Make each fired job a script job (ship/local)" })),
+			manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
+			skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			deps.setLive(ctx);
@@ -150,6 +166,7 @@ export function registerScheduleTools(
 					...(params.watch_script !== undefined ? { watch_script: params.watch_script } : {}),
 					...(params.every_seconds ? { every_seconds: params.every_seconds } : {}), ...(params.on ? { on: params.on as "exit0" | "changed" } : {}),
 					...(params.description ? { description: params.description } : {}), ...(params.script_path !== undefined ? { script_path: params.script_path } : {}),
+					...(params.manual ? { manual: true as const } : {}), ...(params.skill ? { skill: params.skill } : {}),
 				});
 				text = `added ${formatSchedules([added])}${holdsLock() ? "" : "\n(this session does not hold the parent lock: it will not fire here)"}`;
 			} else if (params.action === "remove") text = `removed ${(await s.remove(need("id"))).id}`;

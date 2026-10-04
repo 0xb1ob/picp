@@ -11,7 +11,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
 import { nextCronSlot, parseCron, scheduleFileErrors } from "../src/scheduler.ts";
-import { SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION } from "../src/viewer/schedule-core.ts";
+import { SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
+import { PARENT_SKILLS } from "../src/cp-bridge.ts";
 import { SCHEDULE_ANSWER_MAX_BYTES, scheduleAnswer, schedulesView } from "../src/viewer/schedules-view.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
 import type { ScheduleControlStatusResponse, SchedulesResponse } from "../src/viewer/api-types.ts";
@@ -116,6 +117,37 @@ test("schedules view: cron and watch schedules with next fire, mandate state and
 	assert.equal(w?.mandate_status, "paused");
 	assert.equal("last_output_sha" in (w ?? {}), false, "the watch output hash is not served");
 	assert.deepEqual(w?.history, []);
+});
+
+test("a manual skill schedule: schema accepts it, the view has no next fire, the page says it fires only on Run now", async (t) => {
+	const manual = {
+		id: "sch-cccccc", name: "self-review", project: "demo", mandate_id: "md-live1",
+		trigger: { type: "manual" }, job: { title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review" },
+		enabled: true, created_at: "2026-09-01T00:00:00Z",
+	};
+	assert.deepEqual(scheduleFileErrors(JSON.parse(file(manual))), []);
+	assert.match(scheduleFileErrors(JSON.parse(file({ ...manual, job: { ...manual.job, skill: "cp-other" } }))).join(), /job\/skill: must be one of cp-self-review/);
+	assert.match(scheduleFileErrors(JSON.parse(file({ ...manual, trigger: { type: "manual", cron: "* * * * *" } }))).join(), /trigger\/cron: unexpected property/);
+	for (const skill of SCHEDULE_SKILLS) assert.ok((PARENT_SKILLS as readonly string[]).includes(skill), `${skill} is a parent skill`);
+	const data = schedulesView(fixture(t, file(manual)), () => {}, NOW);
+	assert.deepEqual([data.error, data.schedules[0]?.next_at, data.schedules[0]?.next_note], [null, null, "manual: fires only on Run now"]);
+	const built = await build({
+		stdin: {
+			contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules, triggerText} from "./viewer-app/screens/Schedules.tsx"; export {triggerText}; export const screen=d=>render(h(Schedules,{data:d}));',
+			loader: "tsx",
+			resolveDir: REPO_ROOT,
+		},
+		bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" },
+	});
+	const { screen, triggerText } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as {
+		screen(data: SchedulesResponse): string;
+		triggerText(item: SchedulesResponse["schedules"][number]): string;
+	};
+	assert.equal(triggerText(data.schedules[0]!), "manual (Run now only), expanded by skill cp-self-review");
+	const html = screen(data);
+	assert.match(html, /Manual: fires only on Run now/);
+	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under this grant\./);
+	assert.doesNotMatch(html, /Next fire|Next check/);
 });
 
 test("schedules view: an answer is read only from the job's own artifact dir; a path outside it is refused", (t) => {

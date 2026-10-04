@@ -24,16 +24,18 @@ import type { IntakeResult } from "./intake.ts";
 import type { Job, Ledger } from "./ledger.ts";
 import { parseJobLabels } from "./ledger.ts";
 import { nextCronSlot, parseCron, type Schedule } from "./viewer/schedule-core.ts";
+import { parentExpandedIds } from "./schedule-expand.ts";
 
 export const RUNNER_DELIVERIES: readonly string[] = ["answer", "board", "local"];
 const SCHEDULE_LABEL = "schedule:";
 const REFUSED = "dispatch refused";
 
-/** A scheduled job the runner dispatches and tears down itself (never cp_next's). */
-export function runnerOwns(job: { labels?: readonly string[] }): boolean {
+/** A scheduled job the runner dispatches and tears down itself (never cp_next's); a parent-expanded schedule's jobs (`expanded`) are the parent's. */
+export function runnerOwns(job: { labels?: readonly string[] }, expanded: ReadonlySet<string> = new Set()): boolean {
 	const labels = job.labels ?? [];
 	const delivery = parseJobLabels(labels).delivery;
-	return labels.some((label) => label.startsWith(SCHEDULE_LABEL)) && delivery !== undefined && RUNNER_DELIVERIES.includes(delivery);
+	const label = labels.find((entry) => entry.startsWith(SCHEDULE_LABEL));
+	return label !== undefined && !expanded.has(label.slice(SCHEDULE_LABEL.length)) && delivery !== undefined && RUNNER_DELIVERIES.includes(delivery);
 }
 
 const scheduleIdOf = (job: Job): string | undefined => job.labels.find((label) => label.startsWith(SCHEDULE_LABEL))?.slice(SCHEDULE_LABEL.length);
@@ -82,8 +84,9 @@ export class ScheduleRunner {
 		const ledger = this.#ports.ledger();
 		const inFleet = new Set(this.#ports.fleetJobs().map((record) => record.job_id));
 		const now = this.#ports.now();
+		const expanded = parentExpandedIds(this.#ports.schedules());
 		for (const job of ledger.read().jobs) {
-			if (job.status !== "open" || !runnerOwns(job) || inFleet.has(job.id) || this.#inflight.has(job.id)) continue;
+			if (job.status !== "open" || !runnerOwns(job, expanded) || inFleet.has(job.id) || this.#inflight.has(job.id)) continue;
 			const id = scheduleIdOf(job);
 			const schedule = this.#ports.schedules().find((entry) => entry.id === id);
 			const next = schedule ? nextSlot(schedule, new Date(job.created_at)) : undefined;
@@ -156,7 +159,7 @@ export class ScheduleRunner {
 	#owns(jobId: string): boolean {
 		try {
 			const job = this.#ports.ledger().read().jobs.find((entry) => entry.id === jobId);
-			return job !== undefined && runnerOwns(job);
+			return job !== undefined && runnerOwns(job, parentExpandedIds(this.#ports.schedules()));
 		} catch {
 			return false; // an unreadable ledger is the parent's to see
 		}
@@ -187,6 +190,7 @@ export class ScheduleRunner {
 /** The slot after `after`: cron's next wall-clock slot, a watch's next interval. */
 function nextSlot(schedule: Schedule, after: Date): Date | undefined {
 	const trigger = schedule.trigger;
+	if (trigger.type === "manual") return undefined;
 	if (trigger.type === "watch") return new Date(after.getTime() + trigger.every_seconds * 1000);
 	return nextCronSlot(parseCron(trigger.cron), trigger.tz, after);
 }

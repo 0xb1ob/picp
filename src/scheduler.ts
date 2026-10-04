@@ -1,6 +1,6 @@
 /**
- * Saved schedules (Lane X, Pier 1.5): a cron line with a time zone, or a watch
- * script run every N seconds. A fire does exactly one thing — it records a
+ * Saved schedules (Lane X, Pier 1.5): a cron line with a time zone, a watch
+ * script run every N seconds, or a manual trigger no tick fires (Run now only). A fire does exactly one thing — it records a
  * normal ledger job under its own schedule grant (`schedule_grant`). Dispatch is never
  * here: answer/board/local fires are dispatched and torn down by the schedule
  * runner (src/schedule-runner.ts) through the ordinary `CommandPost.dispatch`,
@@ -22,11 +22,11 @@ import { isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, type JobKind, 
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
-import { assertTimeZone, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { assertTimeZone, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 
-export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, parseCron, readScheduleFile, type Schedule, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
 export const SCHEDULER_TICK_MS = 30_000;
 const WATCH_TIMEOUT_CAP_S = 600;
@@ -51,6 +51,10 @@ export interface ScheduleInput {
 	delivery: Delivery;
 	description?: string;
 	script_path?: string;
+	/** A manual schedule: never fires on a tick, only on Run now. */
+	manual?: true;
+	/** manual only: the fire records a deferred anchor and wakes the parent to expand it with this skill. */
+	skill?: string;
 }
 
 export interface WatchRun { code: number | null; stdout: string }
@@ -84,6 +88,8 @@ export interface ScheduleEvent {
 	missed_at?: string;
 	/** Run now from the dashboard: its request id (cp-hhuf P6). */
 	manual?: string;
+	/** A parent-expanded run (manual + skill): `job_id` is a deferred anchor the parent expands with this skill. */
+	skill?: string;
 }
 
 /** Tracked file only (the X1 script rules), in the canonical clone, with the script runner's bare environment. */
@@ -151,12 +157,17 @@ export class Scheduler {
 
 	async add(input: ScheduleInput): Promise<Schedule> {
 		const cron = input.cron !== undefined;
-		if (cron === (input.watch_script !== undefined)) throw new SchedulerError("a schedule is either cron (cron + tz) or watch (watch_script + every_seconds + on), never both or neither");
+		const manual = input.manual === true;
+		if ([cron, input.watch_script !== undefined, manual].filter(Boolean).length !== 1) throw new SchedulerError("a schedule is exactly one of cron (cron + tz), watch (watch_script + every_seconds + on) or manual (manual:true, Run now only)");
+		if (input.skill !== undefined) {
+			if (!(SCHEDULE_SKILLS as readonly string[]).includes(input.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(input.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
+			if (!manual || input.kind !== "research" || input.delivery !== "local" || input.script_path !== undefined) throw new SchedulerError("skill needs a manual schedule with kind research, delivery local and no script_path");
+		}
 		if (cron) {
 			parseCron(input.cron as string);
 			if (!input.tz) throw new SchedulerError("a cron schedule needs tz (an IANA time zone, e.g. UTC)");
 			assertTimeZone(input.tz);
-		} else {
+		} else if (!manual) {
 			if (!isSafeScriptPath(input.watch_script as string)) throw new SchedulerError(`unsafe watch script path ${JSON.stringify(input.watch_script)}`);
 			if (!input.every_seconds || !input.on) throw new SchedulerError("a watch schedule needs every_seconds (30-86400) and on (exit0 | changed)");
 		}
@@ -173,13 +184,16 @@ export class Scheduler {
 			name: input.name.trim(),
 			project: input.project,
 			mandate_id: input.mandate_id,
-			trigger: cron
-				? { type: "cron", cron: (input.cron as string).trim(), tz: input.tz as string }
-				: { type: "watch", script_path: input.watch_script as string, every_seconds: input.every_seconds as number, on: input.on as "exit0" | "changed" },
+			trigger: manual
+				? { type: "manual" }
+				: cron
+					? { type: "cron", cron: (input.cron as string).trim(), tz: input.tz as string }
+					: { type: "watch", script_path: input.watch_script as string, every_seconds: input.every_seconds as number, on: input.on as "exit0" | "changed" },
 			job: {
 				title: input.title.trim(), kind: input.kind, delivery: input.delivery,
 				...(input.description ? { description: input.description } : {}),
 				...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
+				...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
 			},
 			enabled: true,
 			created_at: now.toISOString(),
@@ -274,6 +288,7 @@ export class Scheduler {
 
 	async #check(schedule: Schedule, now: Date): Promise<ScheduleEvent | undefined> {
 		const trigger = schedule.trigger;
+		if (trigger.type === "manual") return undefined; // fires only on Run now; a tick writes nothing to it
 		const checked = { last_checked_at: now.toISOString() };
 		if (trigger.type === "cron") {
 			// Exactly once per slot: a clock set back (up to CLOCK_BACK_BOUND_MS) never rewinds last_checked_at, so an already-fired slot is never found again.
@@ -350,11 +365,12 @@ export class Scheduler {
 			const notes = manual !== undefined
 				? `run now from the dashboard (${manual}) for ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}`
 				: `scheduled by ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}${missed ? `; missed ${minuteIso(missedAt)}` : ""}`;
-			job = await ledger.update(created.id, { notes });
+			job = await ledger.update(created.id, { notes, ...(schedule.job.skill ? { status: "deferred" as const } : {}) });
 		}
 		if (manual === undefined) await this.#patch(schedule.id, { last_fire: { at, slot: slot.toISOString(), job_id: job.id, missed } });
 		return {
 			...base, outcome: "fired", job_id: job.id, delivery: schedule.job.delivery,
+			...(schedule.job.skill ? { skill: schedule.job.skill } : {}),
 			reason: `created ${job.id} under mandate ${schedule.mandate_id}`,
 			...(missed ? { missed_at: minuteIso(missedAt) } : {}),
 			...(manual !== undefined ? { manual } : {}),
@@ -372,7 +388,9 @@ export class Scheduler {
 export function formatScheduleEvent(event: ScheduleEvent): string {
 	const head = `[${event.project}] schedule ${event.name} (${event.schedule_id})`;
 	if (event.outcome === "skipped") return `${head} skipped: ${event.reason}`;
-	return `${head} fired: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${event.manual ? `; run now from the dashboard (${event.manual})` : ""}. ` +
+	const fired = `${head} fired: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${event.manual ? `; run now from the dashboard (${event.manual})` : ""}. `;
+	if (event.skill) return `${fired}${event.job_id} is a parent-expanded run (deferred anchor): use skill ${event.skill} to expand it — its jobs carry label schedule:${event.schedule_id}; never dispatch the anchor.`;
+	return fired +
 		(event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)
 			? `${event.job_id} is dispatched by the schedule runner — the mandate's job cap, dispatch parallelism and risk gate apply; no cp_next needed.`
 			: `Call cp_next: ${event.job_id} is an ordinary job — the mandate's job cap, dispatch parallelism, risk gate and review apply.`);
@@ -381,7 +399,9 @@ export function formatScheduleEvent(event: ScheduleEvent): string {
 export function formatSchedules(schedules: readonly Schedule[]): string {
 	if (schedules.length === 0) return "no schedules";
 	return schedules.map((s) => {
-		const trigger = s.trigger.type === "cron" ? `cron "${s.trigger.cron}" ${s.trigger.tz}` : `watch ${s.trigger.script_path} every ${s.trigger.every_seconds}s on ${s.trigger.on}`;
+		const trigger = s.trigger.type === "cron" ? `cron "${s.trigger.cron}" ${s.trigger.tz}`
+			: s.trigger.type === "manual" ? `manual (fires only on Run now)${s.job.skill ? ` → expanded by skill ${s.job.skill}` : ""}`
+			: `watch ${s.trigger.script_path} every ${s.trigger.every_seconds}s on ${s.trigger.on}`;
 		return [
 			`${s.id} ${s.name} [${s.project}] ${s.enabled ? "enabled" : "disabled"}: ${trigger} → ${s.job.kind}/${s.job.delivery} "${s.job.title}" under ${s.mandate_id}`,
 			...(s.last_fire ? [`  last fire: ${s.last_fire.at} → ${s.last_fire.job_id}${s.last_fire.missed ? " (missed slot)" : ""}`] : []),

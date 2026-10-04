@@ -26,6 +26,7 @@ import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.
 import { formatBeadsImport, importBeads } from "../../src/ledger-import.ts";
 import { type Ledger, assertScriptIntake, parseJobLabels } from "../../src/ledger.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
+import { readSchedulesOrEmpty, scheduleLabelRefusal } from "../../src/schedule-expand.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { autoLink } from "../../src/trackers/link.ts";
 import { BR_SHOW_RE, describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
@@ -200,6 +201,9 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const title = need(params, "title");
 			assertScriptIntake({ delivery, kind: params.kind, scriptPath: params.script_path });
 			const project = ports.resolveProject(params.project);
+			// A `schedule:<id>` label is minted by a fire: only a parent-expanded schedule's open run may add jobs to it.
+			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home));
+			if (labelRefusal) throw new Error(`cp_job create refused: ${labelRefusal}`);
 			const existing = ledger.findDuplicate({ title, project, ...(params.external_ref !== undefined ? { externalRef: params.external_ref } : {}) });
 			if (existing) {
 				if (existing.script?.path !== params.script_path) throw new Error(`cp_job create refused: ${existing.id} has a different action (${existing.script ? `script:${existing.script.path}` : "model"})`);
@@ -292,6 +296,8 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			return { text: `claimed ${job.id}`, details: { job } };
 		}
 		case "update": {
+			const labelRefusal = scheduleLabelRefusal(params.add_labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home));
+			if (labelRefusal) throw new Error(`cp_job update refused: ${labelRefusal}`);
 			const job = await ledger.update(need(params, "job_id"), {
 				...(params.status ? { status: params.status as JobStatus } : {}),
 				...(params.notes !== undefined ? { notes: params.notes } : {}),
