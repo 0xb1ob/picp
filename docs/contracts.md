@@ -1085,6 +1085,32 @@ card — on `#awaiting` and pinned above the Full transcript's composer — whos
 option buttons and "Other answer…" field go through the guarded
 `POST /api/operator/message` path (`{kind:"answer"}` / `{kind:"message"}`).
 
+**Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
+without a `cp_parent ask` is forced back once, then carded by the bridge itself.
+*Enforced:* whether a `cp_parent ask` succeeded in the run (`tool_execution_end`,
+`cp_parent`, not an error, `details.state: "open"`, `details.id` `ask-…`); when the
+detector fires and none did, one `agent_before_settle` `continue: true` carrying a
+hidden `cp-ask-guard` message ("open `cp_parent ask` now, or reply `NO-ASK`"); at
+the second settle with still no ask and a reply that is not `NO-ASK`, the bridge
+appends an `OperatorAsks` open event (project: the first `[project]` tag in the
+reply, else `command-post`; question: the detected sentence, 300 chars; one option
+"Answer in the operator chat"; context: `Detected in the main session's reply (no
+cp_parent ask was opened) at <ts>:` plus the last 1,500 chars). That prefix is the
+marker, so the asks schema is unchanged and the next human `role: "user"` message
+(not a `[cp-dashboard … ask=<id>]` click, which the LLM records itself) answers
+every open detected card with its text, clipped to 1,000 chars. The run state resets
+at `agent_settled`: pi emits `agent_start` for each forced continuation, so it is not
+a run boundary. *Heuristic, not guaranteed:* `detectHumanQuestion` reads the last 600
+chars minus code fences and `>` quotes, and fires on a sentence ending in `?` or one
+matching `should I | do you want | would you like | which option/one | please
+confirm/choose/decide | your call | let me know`. It misses a question with neither
+(an imperative "tell me which") and fires on a rhetorical or quoted one (the model
+answers `NO-ASK`). No pi hook can stop the model writing prose, so the guarantee is
+only that a detected question gets a nudge and then a card, whatever the model does;
+a card opened for a false positive is withdrawn like any ask. A card pushes like any
+open ask; there is no LLM classifier. A guard failure sets the `ask-guard` status line
+and never fails the turn.
+
 `cp_parent doctor` and `version` read the live parent's `/doctor` and
 `/cp-version` output, including its mode and home. They require a settled
 parent with no pending send, attach without starting or replacing it, and
