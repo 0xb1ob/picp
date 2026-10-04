@@ -218,9 +218,9 @@ first (iPhone/iPad: Share → Add to Home Screen; Turn on appears only when
 browser, not set up on this home, or blocked in browser settings. It also shows
 the device count and pushes undelivered in the last 24 h from `/api/push`.
 
-Pushes are for what only you can do (`PUSH_RULE`): open asks (the Awaiting you cards), a final fix, a merge ask, and the
-downtime exception, a failing service. A completed mandate (`mission_end`), `risk_high_irreversible`, `budget_exhausted`
-and `merge_refused` never push; the main session handles them, and a real operator need appears as an ask card.
+Pushes are for what only you can do (`PUSH_RULE`): an open ask card (Awaiting you), and the downtime exception, a failing
+service. A completed mandate (`mission_end`), `risk_high_irreversible`, `budget_exhausted`, `merge_refused`, a merge ask
+and a final fix never push directly; the main session handles them, and when one needs you it opens an ask card, which pushes.
 The separate cp-health failure push has no card; the Overview `health failing: <check>` line shows the same failure.
 
 - `/manifest.webmanifest`: `display: standalone`, `start_url: /#awaiting`, theme

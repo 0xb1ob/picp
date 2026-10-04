@@ -5281,26 +5281,25 @@ When something needs the operator, their phone or desktop gets a Web Push notifi
 from RFC 8030/8188/8291/8292, no Pier code). This section is the **push service**: the parent side. The
 dashboard half (subscribe control, service worker, Home Screen manifest) is §Web Push: the dashboard below.
 
-**What pushes, once per id.** Only what the operator must act on and only the operator can (`PUSH_RULE` in
+**What pushes, once per id.** Only a real ask card the operator must act on, and only the operator can (`PUSH_RULE` in
 [`src/push/sweep.ts`](../src/push/sweep.ts), shown by `/doctor` as a second `[push]` line). What the main session decides
 under delegation never pushes — not a mandate completing (`mission_end`), `risk_high_irreversible`, `budget_exhausted`,
-`merge_refused`, `plan_approval` or `conflicting_acceptance`; when one of them really needs the human, the main session opens
-an operator ask and the ask pushes. The sweep's pushes, each with the destination that holds it:
+`merge_refused`, `plan_approval` or `conflicting_acceptance` — and neither does a merge ask (an Awaiting-you row) or a
+pending `final_fix` checkpoint directly: when any of them really needs the human, the main session opens an operator ask
+card for it and only that ask pushes. The sweep's pushes:
 
 - a new **open operator ask** in `state/operator/asks.jsonl` (`cp_parent ask`; the dashboard's Awaiting you card): the ask id is the key, the
   ask's question the headline and its own `project` the project tag. An ask whose `source_escalation` is
-  pushed directly (an open `service_health` escalation, or a `sent`/`pending` ledger record) is not pushed again;
-- a pending **`final_fix` checkpoint** (keyed by its Awaiting-you id; only the operator's quote answers it);
-- a new **open merge ask**: an Awaiting-you row `isMergeAsk` recognises. A `deferred` row pushes when it is
-  promoted to `open`, not before; a `merge-pending pr <url>` reminder never pushes;
+  pushed directly (an open `service_health` escalation, or a `sent`/`pending` ledger record of that kind) is not pushed again;
+  a legacy record of a kind no longer pushed (`risk_high_irreversible`, `budget_exhausted`, `merge_refused`) never stands for its ask;
 - the **downtime exception**, a new open **`service_health` escalation** — `PUSH_ESCALATION_KINDS` (cp-6fyl PR2; raised by the
   parent from cp-health's record, withdrawn when the check recovers): a failing service may leave no session to open an ask.
 
-Everything else never pushes: routine wakes, answer cards, CI wakes and other checkpoints. A refreshed escalation (same id,
-fresher numbers) is not new. A ledger record for a `mandate`, `risk_high_irreversible`, `budget_exhausted` or `merge_refused`
-item written before this rule is no longer a candidate, so a still-pending one is `skipped` ("no longer open before
-delivery"), never sent. A ledger swept before the earlier rule change (no `rule_baseline_at`) is baselined as before:
-`skipped` ("open before the push rule changed").
+Everything else never pushes: routine wakes, answer cards, CI wakes and checkpoints. A refreshed escalation (same id,
+fresher numbers) is not new. A ledger record for a `mandate`, `risk_high_irreversible`, `budget_exhausted`, `merge_refused`,
+`merge_ask` or `checkpoint` item written before this rule is no longer a candidate, so a still-pending one is `skipped`
+("no longer open before delivery"), never sent. A ledger swept before the earlier rule change (no `rule_baseline_at`) is
+baselined as before: `skipped` ("open before the push rule changed").
 
 **Health, from the watchdog, not this sweep** (cp-daemon v1 P3; `PUSH_RULE` ends `; health (cp-health, once per
 failure/recovery)`). cp-health ([`src/service/health.ts`](../src/service/health.ts), run by cp-daemon every 5
@@ -5335,14 +5334,14 @@ endpoint; both fields extend the existing authenticated `/api/overview`.
 **A sweep of the durable records, not a hook in the raise path.** `runPushSweep` runs every
 `PUSH_TICK_MS` (15 s, plus one catch-up pass at `session_start`) only while this session holds the parent
 lock, never overlapping ([`extensions/command-post/push-tick.ts`](../extensions/command-post/push-tick.ts)).
-It reads `state/escalations.json`, `state/awaiting.json`, `state/operator/asks.jsonl` and the final_fix checkpoints fresh, so a raise through a fresh store, or a
+It reads `state/escalations.json` and `state/operator/asks.jsonl` fresh, so a raise through a fresh store, or a
 crash between a raise and its push, loses nothing — the record is the queue. `EscalationStore`,
 `AwaitingStore` and every raise path are untouched, and every error is caught into one stderr line: a push
 outage delays nothing in the fleet. Latency is at most one tick plus the push service.
 
 **The ledger is `state/push-deliveries.json`** ([`src/push/deliveries.ts`](../src/push/deliveries.ts)),
 single-writer, typebox-validated before every write, refused by name when invalid (nothing is sent then).
-One record per `source` (`escalation` | `merge_ask` | `checkpoint` | `ask`; `mandate` is read from old ledgers, never written) + `id`: `status` `pending` | `sent` | `failed` |
+One record per `source` (`escalation` | `ask`; `mandate`, `merge_ask` and `checkpoint` are read from old ledgers, never written) + `id`: `status` `pending` | `sent` | `failed` |
 `skipped`, `attempts`, `delivered`, the subscription ids still owed (`targets`), `next_attempt_at`,
 `last_error` (≤ 300 chars), `created_at`, `settled_at`. **No payload is stored.** The first sweep after push
 is set up writes the baseline: everything already open is `skipped` ("open before push was enabled").
@@ -5364,7 +5363,7 @@ endpoint, a key or a payload.
 **Payload** (`pushPayload`): exactly `{"project", "kind", "headline"}` — the project tag as the bridge
 computes it (≤ 80 chars, `project unknown` when none; an operator ask's own `project`), the kind —
 `decision needed` with the underlying kind as a suffix (`decision needed: service health`,
-`decision needed: merge ask`, `decision needed: final fix`; a bare `decision needed` for an
+a bare `decision needed` for an
 operator ask) — and the headline whitespace-collapsed and clipped to 100 characters. Never options,
 evidence paths, plans, ids or artifact text. It is encrypted per RFC 8291 (`aes128gcm`, one 4096-byte
 record) and signed per RFC 8292 (ES256 VAPID JWT for the push service's origin, 12 h) with `node:crypto`

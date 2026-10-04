@@ -28,8 +28,6 @@ export function registerPushTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLoc
 				stateDir: join(post.home, LAYOUT.state),
 				dataDir: join(post.home, LAYOUT.data),
 				openEscalations: () => post.escalations.open(),
-				openAwaiting: () => post.awaiting.list("open"),
-				pendingFinalFix: () => post.finalFixCheckpoints.listPending(),
 				projectsOf: (candidate) =>
 					escalationProjects(
 						{ job_ids: candidate.job_ids, ...(candidate.mandate_id ? { mandate_id: candidate.mandate_id } : {}) },
