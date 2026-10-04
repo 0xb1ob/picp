@@ -40,12 +40,12 @@
 .session-tools { display: flex; align-items: center; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--dim); cursor: pointer; }
 .session-tools:hover { color: var(--muted); }
 .session-heading > p { display: none; }
-.session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 16px; }
+.session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 0 16px 16px; }
 .session-entries { max-width: 780px; }
 .session-time { font-size: 11px; color: var(--dim); flex-shrink: 0; }
-.session-tool { border-bottom: 1px solid var(--transcript-divider); }
+.session-tool { min-width: 0; }
 .session-tool summary { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
-.session-tool summary > code:nth-child(2) { font-size: 12px; color: var(--secondary); flex-shrink: 0; min-width: 0; max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-tool summary > code:nth-child(2) { font-size: 12px; color: var(--muted); flex-shrink: 0; min-width: 0; max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tool summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tool pre, .file-text { margin: 0 0 12px; padding: 10px 12px; background: var(--surface); border-radius: 8px; font-size: 11px; line-height: 1.55; color: var(--subtle); white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-message { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--transcript-divider); }
@@ -56,10 +56,11 @@
 .session-notice { margin: 8px 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; gap: 4px; }
 .session-notice:has(.session-awaiting) { border-color: var(--ask-border); }
 .session-awaiting .session-who > span:last-child { color: var(--amber); }
-/* A cp-bridge notice (mobile-chat-layout): one line and how much it hides; the body opens in place. */
-.session-bridge .session-notice-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 13px; text-align: left; color: var(--muted); cursor: pointer; }
-.session-bridge .session-notice-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-bridge .session-notice-line > small { flex-shrink: 0; font-size: 12px; color: var(--dim); }
+/* A cp-bridge notice or any system entry (mobile-chat-layout, cp-wfw3): one muted line and how much it hides; the body opens in place. */
+.session-system .session-notice-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1 1 160px; min-width: 0; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 13px; text-align: left; color: var(--muted); cursor: pointer; }
+.session-system .session-notice-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-system .session-notice-line > small { flex-shrink: 0; font-size: 12px; color: var(--dim); }
+.session-system .session-notice-line[aria-expanded=true] { flex: 0 0 auto; }
 .session-notice-paths { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
 .session-notice-paths li { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .session-notice-paths a, .session-notice-paths code { min-width: 0; overflow-wrap: anywhere; }
@@ -70,7 +71,48 @@
 .session-trace summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 6px; }
 .session-trace summary > span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .session-trace p { white-space: pre-wrap; padding: 10px 12px; background: var(--surface); border-radius: 8px; }
-/* The "↓ New" pill rides the transcript's bottom edge, whatever sits below it (composer, pinned decisions). */
+/*
+ * Transcript chat (cp-wfw3). Bubbles: the prompting side on the right in the accent (the design's held blue), the session
+ * on the left on the surface, at most 85% wide on a phone; a group's later bubbles sit closer and carry no header.
+ * Tool calls and system/bridge entries stay compact muted one-liners, never bubbles; ask cards keep their card.
+ */
+.session-entries { --bubble-own: var(--held-border); }
+.session-message.session-bubble { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding: 0; border: 0; }
+.session-message.session-grouped { margin-top: 3px; }
+.session-own { align-items: flex-end; }
+.session-other { align-items: flex-start; }
+.session-bubble > .session-who { justify-content: flex-start; align-items: baseline; gap: 6px; max-width: 85%; padding: 0 6px; font-size: 12px; color: var(--muted); }
+.session-bubble > .session-body { max-width: 85%; gap: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 18px; overflow-wrap: anywhere; }
+.session-other > .session-body { background: var(--surface); border-top-left-radius: 6px; }
+.session-own > .session-body { background: var(--bubble-own); border-color: var(--bubble-own); border-top-right-radius: 6px; }
+.session-grouped.session-other > .session-body { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.session-failed .session-bubble > .session-body { border-color: var(--error-border); }
+.session-bubble .session-send { margin-top: 4px; }
+/* Markdown inside a bubble: code blocks and tables scroll sideways in their own box, never past the bubble. */
+.md { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.md ul, .md ol { display: flex; flex-direction: column; gap: 2px; margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.55; }
+.md li { white-space: pre-wrap; }
+.md a { color: var(--blue); overflow-wrap: anywhere; }
+.md code { padding: 1px 5px; background: var(--background); border-radius: 5px; font-size: 13px; }
+.md .md-code { max-width: 100%; margin: 0; padding: 10px 12px; overflow-x: auto; background: var(--background); border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: pre; overflow-wrap: normal; }
+.md .md-code code { padding: 0; background: none; font-size: 12px; }
+.md-table { max-width: 100%; overflow-x: auto; overflow-wrap: normal; }
+.md-table table { border-collapse: collapse; font-size: 13px; line-height: 1.4; }
+.md-table th, .md-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.md-table th { background: var(--background); color: var(--muted); font-weight: 600; white-space: nowrap; }
+.md blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--border); }
+.md blockquote p { color: var(--subtle); }
+/* System and bridge entries: one compact row — time, who, the line — that opens in place; never a full-width card. */
+.session-message.session-system { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 4px 0; padding: 0; background: none; border: 0; border-radius: 0; }
+.session-message.session-system > .session-time { padding-top: 0; line-height: 44px; }
+.session-message.session-system > .session-body { flex: 1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0 8px; padding: 0; background: none; border: 0; border-radius: 0; }
+.session-message.session-system .session-who { flex-wrap: nowrap; gap: 6px; font-size: 11px; color: var(--dim); }
+.session-message.session-system .session-body > p { flex: 1 1 160px; min-width: 0; padding: 12px 0; }
+.session-notice-rest { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 0 0 8px; }
+.session-notice-more { align-self: flex-start; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--blue); cursor: pointer; }
+.session-tool-run { display: flex; flex-direction: column; }
+/* The "Jump to latest" pill rides the transcript's bottom edge, whatever sits below it (composer, pinned decisions). */
 .session-new-wrap { position: sticky; bottom: 8px; height: 0; display: flex; justify-content: center; }
 .session-new { display: flex; align-items: center; gap: 6px; transform: translateY(-100%); min-height: 40px; padding: 0 14px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 4px 16px var(--page); }
 .session-empty, .session-warning { padding: 14px 0; font-size: 13px; color: var(--muted); }
@@ -103,7 +145,10 @@
  .session-heading > p { flex: 0 1 360px; min-width: 0; }
  .session-heading > p { display: block; font-size: 12px; color: var(--dim); max-width: 360px; text-align: right; }
  .session-transcript { padding: 16px 40px 96px; }
- .session-tool { border: 0; }
+ /* Chat in the 780px column: bubbles at most 75% wide; system rows share the tool calls' 56px time column. */
+ .session-bubble > .session-who, .session-bubble > .session-body { max-width: 75%; }
+ .session-message.session-system { gap: 12px; }
+ .session-message.session-system > .session-time { width: 56px; }
  .session-tool summary { display: grid; grid-template-columns: 56px 112px minmax(0,1fr); gap: 12px; font-size: 13px; }
  .session-tool pre { margin: 4px 0 12px 68px; padding: 12px 14px; font-size: 12px; }
  .session-message { display: grid; grid-template-columns: 56px minmax(0,1fr); gap: 12px; padding: 14px 0; border: 0; }

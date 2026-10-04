@@ -142,10 +142,10 @@ test("layout: the tool-calls toggle and a collapsed bridge notice hold at 390px,
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	const desktop = css.split("@media (min-width: 900px) {")[1] ?? "";
 	assert.match(css, /\.session-tools-toggle \{ display: flex;[^}]*min-height: 44px;[^}]*white-space: nowrap;[^}]*\}/, "a 44px touch target that never wraps at 390px");
-	assert.match(css, /\.session-bridge \.session-notice-line \{[^}]*min-height: 44px;[^}]*\}/, "the collapsed notice is a 44px touch target at 390px");
-	assert.match(css, /\.session-bridge \.session-notice-line > span \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;[^}]*\}/, "a long first line ellipsizes instead of wrapping the row");
+	assert.match(css, /\.session-system \.session-notice-line \{[^}]*min-height: 44px;[^}]*\}/, "the collapsed notice (bridge or system) is a 44px touch target at 390px");
+	assert.match(css, /\.session-system \.session-notice-line > span \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;[^}]*\}/, "a long first line ellipsizes instead of wrapping the row");
 	assert.match(css, /\.session-notice-paths a, \.session-notice-paths code \{ min-width: 0; overflow-wrap: anywhere; \}/, "long paths wrap inside the expanded body");
-	assert.doesNotMatch(desktop, /\.session-tools-toggle|\.session-bridge|\.session-notice-paths/, "the desktop block leaves the phone rules in place at 1440px");
+	assert.doesNotMatch(desktop, /\.session-tools-toggle|\.session-bridge|\.session-notice-line|\.session-notice-paths/, "the desktop block leaves the phone rules in place at 1440px");
 });
 
 test("mobile top bar: the ⋯ sheet's tool toggle is the same remembered choice; pinned decisions collapse to one bar and close after a click", async (t) => {
