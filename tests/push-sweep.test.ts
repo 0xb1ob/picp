@@ -97,7 +97,7 @@ test("unconfigured: no ledger, no fetch", async (t) => {
 test("first sweep baselines what is open; a new human-only escalation is pushed once per device, encrypted, and never again", async (t) => {
 	const b = bench(t);
 	const [a, m] = [b.subscribe(FCM), b.subscribe(MOZ)];
-	const risky = { kind: "budget_exhausted" as const };
+	const risky = { kind: "service_health" as const };
 	const before = await b.escalations.raise(raiseInput("Approve the old plan?", risky));
 	const baseline = await b.sweep();
 	assert.equal(baseline.baseline, 1);
@@ -117,12 +117,12 @@ test("first sweep baselines what is open; a new human-only escalation is pushed 
 		const payload = JSON.parse(device.decrypt(Buffer.from(call.init.body)));
 		assert.deepEqual(Object.keys(payload), ["project", "kind", "headline"]);
 		assert.equal(payload.project, "demo");
-		assert.equal(payload.kind, "decision needed: budget exhausted");
+		assert.equal(payload.kind, "decision needed: service health");
 		assert.equal(payload.headline.length, 100);
 		assert.match(payload.headline, /^Approve the new plan at \$1\.20 x+…$/);
 	}
 	assert.deepEqual(b.ledger()?.items.find((item) => item.id === raised.id), {
-		id: raised.id, source: "escalation", kind: "budget_exhausted", status: "sent", attempts: 1, delivered: 2, created_at: "2026-09-27T00:00:00Z", settled_at: "2026-09-27T00:00:00Z",
+		id: raised.id, source: "escalation", kind: "service_health", status: "sent", attempts: 1, delivered: 2, created_at: "2026-09-27T00:00:00Z", settled_at: "2026-09-27T00:00:00Z",
 	});
 	assert.doesNotMatch(readFileSync(pushDeliveriesFile(b.stateDir), "utf8"), /Approve|secret\.md|fcm\.googleapis/);
 
@@ -164,7 +164,7 @@ test("retryable failures back off 30/60/120/240 s and fail after 5 attempts, one
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" }));
+	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
 	const outcomes: Array<number | Error> = [500, 429, new TypeError("fetch failed"), 503, 500];
 	b.respondWith(() => outcomes.shift() ?? 201);
 	const record = () => b.ledger()?.items.find((item) => item.id === raised.id);
@@ -196,7 +196,7 @@ test("answered before the next attempt is skipped without a fetch", async (t) =>
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" }));
+	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
 	b.respondWith(() => 500);
 	await b.sweep();
 	await b.escalations.answer(raised.id, { answer: "approve", by: "operator" });
@@ -215,7 +215,7 @@ test("404 and 410 delete the subscription; 403 fails without retry; an off-allow
 	b.subscribe("https://evil.example/push/steal");
 	await b.sweep();
 	b.respondWith((url) => (url.endsWith("404") ? 404 : url.endsWith("410") ? 410 : 403));
-	const raised = await b.escalations.raise(raiseInput("Risky?", { kind: "budget_exhausted" }));
+	const raised = await b.escalations.raise(raiseInput("Risky?", { kind: "service_health" }));
 	await b.sweep();
 	assert.deepEqual(b.calls.map((call) => call.url.split("/").pop()).sort(), ["forbidden", "gone-404", "gone-410"]);
 	for (const url of ["https://fcm.googleapis.com/fcm/send/gone-404", "https://fcm.googleapis.com/fcm/send/gone-410"]) {
@@ -236,7 +236,7 @@ test("404 and 410 delete the subscription; 403 fails without retry; an off-allow
 test("with no subscribed device a new item is skipped, so a later subscriber gets no backlog", async (t) => {
 	const b = bench(t);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Merge refused?", { kind: "merge_refused" }));
+	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
 	await b.sweep();
 	b.subscribe(FCM);
 	await b.sweep();
@@ -301,20 +301,35 @@ test("risk:high never pushes on its own; the ask the main session opens for it p
 	assert.equal(b.ledger()?.items.find((item) => item.id === ask.id)?.source, "ask");
 });
 
-test("every push maps to an Awaiting item: the ask on the dashboard, the escalation as its open question, the merge ask as its row", async (t) => {
+test("budget and merge refused never push; every push that does lands on a destination only the operator can act on", async (t) => {
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
+	// Open, delegable (the main session decides them, or opens an ask): none of these pushes.
+	const delegated = [
+		await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" })),
+		await b.escalations.raise(raiseInput("Merge refused?", { kind: "merge_refused" })),
+		await b.escalations.raise(raiseInput("Risky?", { kind: "risk_high_irreversible" })),
+		await raiseMissionEnd(b.escalations, { jobIds: ["cp-demo1"], mandateId: "md-abc123", summary: "landed 1, dropped 0, cost $1.00" }),
+	];
+	// Operator-only: an ask card, a final fix (operator quote), a merge ask, and the no-session downtime alert.
 	const ask = b.asks.open({ ...ASK, question: "Which base?" });
-	const budget = await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" }));
+	b.finalFix.request({ jobId: "cp-demo1", scope: "abcdef123456", prUrl: "https://github.com/o/r/pull/1", question: "One final fix?", evidence: [] });
 	const merge = await b.awaiting.declare({ type: "approval", decision: "Merge PR #12 for cp-demo1?", why: "w", blocks: "b", job_id: "cp-demo1" });
+	const down = await b.escalations.raise(raiseInput("Down?", { kind: "service_health", job_ids: ["cp-service-health"] }));
 	await b.sweep();
-	assert.equal(b.calls.length, 3);
+	assert.equal(b.calls.length, 4);
+	const pushed = b.ledger()?.items ?? [];
+	assert.equal(pushed.some((item) => delegated.some((raised) => raised.id === item.id)), false);
 	const dashboard = decisions({ stateDir: b.stateDir } as ViewerState, Date.now());
-	assert.deepEqual(dashboard.awaiting.items.map((item) => item.id), [ask.id]);
-	assert.deepEqual(dashboard.parent_questions.map((item) => item.id), [budget.id]);
-	assert.deepEqual(b.awaiting.list("open").map((item) => item.id), [merge.id]);
-	assert.deepEqual(b.ledger()?.items.map((item) => item.id).sort(), [ask.id, budget.id, merge.id].sort());
+	const destination: Record<string, boolean> = {
+		ask: dashboard.awaiting.items.some((item) => item.id === ask.id),
+		merge_ask: b.awaiting.list("open").some((item) => item.id === merge.id),
+		checkpoint: b.finalFix.listPending().some((item) => item.job_id === "cp-demo1"),
+		escalation: dashboard.parent_questions.some((item) => item.id === down.id),
+	};
+	assert.deepEqual(pushed.map((item) => item.source).sort(), Object.keys(destination).sort());
+	assert.deepEqual(Object.values(destination), [true, true, true, true]);
 });
 
 test("an answered or withdrawn operator ask does not push", async (t) => {

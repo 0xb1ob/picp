@@ -38,8 +38,8 @@ test("pushFindings: ok with a device count, warnings for key trouble and recent 
 		{ check: "push", severity: "ok", what: "web push for https://cp.example.com: 1 subscribed device(s)" },
 		{ check: "push", severity: "ok", what: PUSH_RULE },
 	]);
-	assert.match(PUSH_RULE, /only actionable/);
-	assert.doesNotMatch(PUSH_RULE, /mandate complete|risk/);
+	assert.match(PUSH_RULE, /must act/);
+	assert.doesNotMatch(PUSH_RULE, /mandate complete|risk|budget|merge refused/);
 
 	writeFileSync(pushDeliveriesFile(stateDir), JSON.stringify({ schema_version: 1, baseline_at: "2026-09-26T00:00:00Z", items: [
 		record({ id: "es-old", status: "failed", settled_at: "2026-09-25T00:00:00Z", last_error: "stale" }),

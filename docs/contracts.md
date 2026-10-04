@@ -5281,30 +5281,26 @@ When something needs the operator, their phone or desktop gets a Web Push notifi
 from RFC 8030/8188/8291/8292, no Pier code). This section is the **push service**: the parent side. The
 dashboard half (subscribe control, service worker, Home Screen manifest) is §Web Push: the dashboard below.
 
-**What pushes, once per id.** Only what waits on the human (`PUSH_RULE` in
-[`src/push/sweep.ts`](../src/push/sweep.ts), shown by `/doctor` as a second `[push]` line). Informational events never
-push — not a mandate completing (`mission_end`), not `risk_high_irreversible`; a risk that needs the human reaches
-them as an operator ask. The sweep's pushes, each mapped to the Awaiting surface that holds it:
+**What pushes, once per id.** Only what the operator must act on and only the operator can (`PUSH_RULE` in
+[`src/push/sweep.ts`](../src/push/sweep.ts), shown by `/doctor` as a second `[push]` line). What the main session decides
+under delegation never pushes — not a mandate completing (`mission_end`), `risk_high_irreversible`, `budget_exhausted`,
+`merge_refused`, `plan_approval` or `conflicting_acceptance`; when one of them really needs the human, the main session opens
+an operator ask and the ask pushes. The sweep's pushes, each with the destination that holds it:
 
 - a new **open operator ask** in `state/operator/asks.jsonl` (`cp_parent ask`; the dashboard's Awaiting you card): the ask id is the key, the
   ask's question the headline and its own `project` the project tag. An ask whose `source_escalation` is
-  pushed directly (open human-only escalation, or a `sent`/`pending` ledger record) is not pushed again;
-- a new **open human-only escalation** — `PUSH_ESCALATION_KINDS`:
-  `budget_exhausted`, `merge_refused` (only the operator's own words close them, even with the main session
-  down), and `service_health` (cp-6fyl PR2; raised by the parent from cp-health's record, withdrawn when the
-  check recovers). Awaiting-you row `type: escalation`; on the dashboard the open question under Decisions "Being handled"
-  unless an ask represents it;
-- a pending **`final_fix` checkpoint** (keyed by its Awaiting-you id);
+  pushed directly (an open `service_health` escalation, or a `sent`/`pending` ledger record) is not pushed again;
+- a pending **`final_fix` checkpoint** (keyed by its Awaiting-you id; only the operator's quote answers it);
 - a new **open merge ask**: an Awaiting-you row `isMergeAsk` recognises. A `deferred` row pushes when it is
-  promoted to `open`, not before; a `merge-pending pr <url>` reminder never pushes (its `merge_refused`
-  escalation already did).
+  promoted to `open`, not before; a `merge-pending pr <url>` reminder never pushes;
+- the **downtime exception**, a new open **`service_health` escalation** — `PUSH_ESCALATION_KINDS` (cp-6fyl PR2; raised by the
+  parent from cp-health's record, withdrawn when the check recovers): a failing service may leave no session to open an ask.
 
-Everything else never pushes: `risk_high_irreversible`, `plan_approval`, `conflicting_acceptance`, `mission_end` and any
-kind the main session may decide under delegation reach the human only through an operator ask; routine
-wakes, answer cards, CI wakes and other checkpoints never push. A refreshed escalation (same id, fresher
-numbers) is not new. A ledger record for a `mandate` or `risk_high_irreversible` item written before this rule is no longer
-a candidate, so a still-pending one is `skipped` ("no longer open before delivery"), never sent. A ledger swept before the
-earlier rule change (no `rule_baseline_at`) is baselined as before: `skipped` ("open before the push rule changed").
+Everything else never pushes: routine wakes, answer cards, CI wakes and other checkpoints. A refreshed escalation (same id,
+fresher numbers) is not new. A ledger record for a `mandate`, `risk_high_irreversible`, `budget_exhausted` or `merge_refused`
+item written before this rule is no longer a candidate, so a still-pending one is `skipped` ("no longer open before
+delivery"), never sent. A ledger swept before the earlier rule change (no `rule_baseline_at`) is baselined as before:
+`skipped` ("open before the push rule changed").
 
 **Health, from the watchdog, not this sweep** (cp-daemon v1 P3; `PUSH_RULE` ends `; health (cp-health, once per
 failure/recovery)`). cp-health ([`src/service/health.ts`](../src/service/health.ts), run by cp-daemon every 5
@@ -5315,11 +5311,11 @@ failed, once more for each distinct updater failure (keyed `result:to`: `failed`
 `rollback_failed`, `config_invalid`, `fetch_failed` three times), and `health: <name> recovered` once. It sends
 directly to the subscribed devices with the same RFC code; its only record is `state/health.json`. A failed push
 is retried on the next ≤ 3 runs, then logged and given up. It never writes `state/push-deliveries.json` and never
-deletes a subscription, even on 404/410. **Actionable exposure (kept, not dropped):** this push is the one that is not an
-Awaiting card. It stays because the failure is actionable at once; the same failure is already exposed on existing paths
-only: the Overview `health failing: <check>` line (`services.health.failing`, immediately) and, after 900 s, the
-`service_health` escalation above (pushed by the sweep, a "Being handled" question on Decisions, the Overview alarm banner).
-No new surface was added for it.
+deletes a subscription, even on 404/410. **Downtime exception (kept, not dropped):** this push has no Awaiting card; it stays
+because a failing service can leave no session up to raise an ask. The same failure is exposed on existing paths only: the
+Overview `health failing: <check>` line (`services.health.failing`, immediately) and, after 900 s, the `service_health`
+escalation above (pushed by the sweep, a "Being handled" question on Decisions, the Overview alarm banner). No Awaiting
+surface was added for it.
 
 **The `relay` check** (cp-6fyl PR2, the last line of defense for parent→operator delivery; independent of the parent and
 the operator session). It reads the host's `state/operator/relay-outbox.json`, the operator's
@@ -5367,7 +5363,7 @@ endpoint, a key or a payload.
 
 **Payload** (`pushPayload`): exactly `{"project", "kind", "headline"}` — the project tag as the bridge
 computes it (≤ 80 chars, `project unknown` when none; an operator ask's own `project`), the kind —
-`decision needed` with the underlying kind as a suffix (`decision needed: budget exhausted`,
+`decision needed` with the underlying kind as a suffix (`decision needed: service health`,
 `decision needed: merge ask`, `decision needed: final fix`; a bare `decision needed` for an
 operator ask) — and the headline whitespace-collapsed and clipped to 100 characters. Never options,
 evidence paths, plans, ids or artifact text. It is encrypted per RFC 8291 (`aes128gcm`, one 4096-byte

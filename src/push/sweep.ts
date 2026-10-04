@@ -1,9 +1,9 @@
 /**
- * The Web Push sweep (Pier 1.1): push the operator only when something waits on the human (`PUSH_RULE`), never for an
- * informational event (a mandate completing, a risk:high flag the main session decides under delegation):
- *  - an open operator ask (`state/operator/asks.jsonl`, written by the main session; risk that needs the human arrives here),
- *  - a human-only escalation (`PUSH_ESCALATION_KINDS`: budget, merge refused, service health),
- *  - a pending final_fix checkpoint, or an open merge-ask row (per-head human authorization).
+ * The Web Push sweep (Pier 1.1): push the operator only when they must act (`PUSH_RULE`) and only the operator can: never
+ * for something the main session decides under delegation (mandate complete, risk:high, budget, merge refused, plans):
+ *  - an open operator ask (`state/operator/asks.jsonl`, the dashboard's Awaiting you card; real operator needs arrive here),
+ *  - a pending final_fix checkpoint (operator quote only) or an open merge-ask row (per-head human authorization),
+ *  - the downtime exception: a `service_health` escalation (`PUSH_ESCALATION_KINDS`), when no session may be up to relay it.
  * Every other kind reaches the human only through an operator ask.
  *
  * It reads the durable ask records the raise paths already write rather than hooking a raise path: the record is the
@@ -24,15 +24,15 @@ import { PUSH_LAST_ERROR_MAX_CHARS, PUSH_MAX_ATTEMPTS, type PushLedger, PushDeli
 import { readVapidKeys, type VapidKeys } from "./keys.ts";
 import { deliver, encryptPayload, type PushFetch, type PushOutcome, vapidAuthorization } from "./webpush.ts";
 
-/** Escalation kinds only the operator's own words can close, even while the main session is down: pushed directly. */
-export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["budget_exhausted", "merge_refused", "service_health"];
+/** The only escalation kind pushed directly: a failing service is the downtime exception, when no session may be up to relay it. */
+export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["service_health"];
 /** The active rule, one line, for `/doctor` and `/api/push`. */
 export const PUSH_RULE =
-	"pushes only actionable: open asks, budget, merge refused, final fix, merge asks, service health; health (cp-health, once per failure/recovery)";
+	"pushes only when you must act: open asks, final fix, merge asks; downtime: service health; health (cp-health, once per failure/recovery)";
 export const PUSH_MAX_RECORDS_PER_SWEEP = 10;
 export const PUSH_HEADLINE_MAX_CHARS = 100;
 const PUSH_PROJECT_MAX_CHARS = 80;
-/** `Integrator.#remind` raises merge_refused *and* declares this row; the escalation is the one pushed. */
+/** `Integrator.#remind` raises merge_refused *and* declares this row; the main session handles it, so neither pushes. */
 const MERGE_PENDING_PREFIX = "merge-pending ";
 
 export interface PushCandidate {
