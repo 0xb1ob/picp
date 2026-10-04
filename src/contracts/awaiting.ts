@@ -79,7 +79,7 @@ export const SUGGEST_PROMPT_MAX_CHARS = 1_200;
 export const SUGGEST_FIELD_MAX_CHARS = 200;
 /** Session-scoped LRU cap on the suggestion cache; never persisted. */
 export const SUGGEST_CACHE_MAX_ENTRIES = 200;
-/** How many items the headless `/cp-decide` listing may generate for, per call. */
+/** How many items the suggestion generator may generate for, per listing (no live reader since the overlay was retired). */
 export const SUGGEST_MAX_ITEMS_PER_LISTING = 5;
 /** Cheap-model default; overridable in `data/suggest.json`. */
 export const SUGGEST_DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
@@ -154,7 +154,7 @@ export const PLAN_VIEW_MIN_ROWS = 4;
 export const PLAN_VIEW_CHROME_ROWS = 2;
 /** Rows subtracted from the terminal height before computing the viewport. */
 export const PLAN_VIEW_RESERVED_ROWS = 6;
-/** The `/cp-decide` answer-menu option that opens the viewer, compared by identity. */
+/** The answer-menu option that opened the viewer, compared by identity (no live reader since the overlay was retired). */
 export const PLAN_VIEW_OPTION = "View the plan…";
 /**
  * Re-opening the viewer, offered *after* the plan has been read once. It is a

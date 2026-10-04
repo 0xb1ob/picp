@@ -1130,7 +1130,7 @@ export class PipelineRunner {
 			let detail =
 				checkpoint.decision === "declined"
 					? `declined${checkpoint.note ? `: ${checkpoint.note}` : ""} — the ship job stays undispatched.`
-					: `waiting for a human. Approve with /cp-authorize or cp_checkpoint; a passed gate is quality, never authorization.${flagNote}`;
+					: `waiting for a human. Approve with cp_decide; a passed gate is quality, never authorization.${flagNote}`;
 			// If we're replaying the verdict, label it and check if the artifact changed.
 			if (!gateResult) {
 				const artifactChanged = artifact.modified_at !== undefined && artifact.modified_at > last.decided_at;

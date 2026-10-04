@@ -43,8 +43,7 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
   - [One decision is one question](#one-decision-is-one-question)
   - [One surface at a time](#one-surface-at-a-time)
   - [The merge ask](#the-merge-ask)
-  - [Suggested answers](#suggested-answers)
-  - [The decide UI is the questionnaire](#the-decide-ui-is-the-questionnaire)
+  - [The decide overlay is retired](#the-decide-overlay-is-retired)
   - [The decision details pane](#the-decision-details-pane)
 - [Web Push](#web-push)
 - [Dashboard control](#dashboard-control)
@@ -1002,8 +1001,7 @@ watch because "nobody to wake". Under the bridge, that parent **is** the one
 to wake. `/doctor` (human form) prints `session: <mode> · …` and which of
 those timers are actually running.
 
-**Overlays never open** when `mode !== "tui"` or `CP_HEADLESS=1`
-(`routeAwaitingUi`). Escalations are structured messages (`operatorNotify` →
+**No overlay opens** (the decide overlay is retired). Escalations are structured messages (`operatorNotify` →
 `ctx.ui.notify` when a UI exists, else stderr). The bridge is the operator
 channel: RPC `extension_ui_request` / `sendMessage` follow-ups, not a TUI.
 
@@ -1043,7 +1041,7 @@ message):
 | `ui.notify` | `operatorNotify` — notify if `hasUI`, else stderr |
 | command output (`/status`, `/doctor`, …) | `emit` / `chooseOutputChannel`: entry in TUI, notify in RPC, stderr if no UI |
 | `ui.select` / `ui.input` | refused or unused (`Asker` returns undefined without UI; `/cp-decide` has a direct form) |
-| `ui.custom` (overlays) | `routeAwaitingUi` → plain, reason named |
+| `ui.custom` (overlays) | `/cp-plan` pager only; `openPlanViewer` gates on a real TUI |
 | `ui.setWidget` | no-op when `!hasUI`; RPC still paints if `hasUI` |
 | `ui.onTerminalInput` | not registered unless TUI + UI and not headless |
 | `ui.setWorkingVisible` | only on `ui_prompt_*` (a UI is already attached) |
@@ -4232,70 +4230,11 @@ and never the listing, because `Checkpoint.research_id` still carries it.
 
 ### One surface at a time
 
-**Two overlays on screen is one overlay too many, and the second one steals the
-first one's keystrokes.** Until p18 two independent owners could each reach
-`ctx.ui.custom`: the Awaiting-you loop (`runAwaitingDialog`) and the checkpoint
-authorizer (`authorizer.ask`). The loop was guarded by `SingleRunLatch`; the
-authorizer was guarded by nothing. A wake-up is delivered as
-`{ deliverAs: "followUp", triggerTurn: true }`, so a whole turn can run while an
-overlay is up — and a turn that calls `cp_pipeline advance` mints the ship
-checkpoint and asks about it, over the overlay already there.
-
-pi composites every visible overlay into one stack and focuses the **newest**
-(`docs/tui.md` §Overlay Focus), so the two questions overlapped line by line and
-only the newest received input. Measured (`docs/tui-verification/pi-command-post-p18.md`):
-`↓`+`Enter` aimed at a visible "ship, drop or follow-up?" resolved the *checkpoint*
-as `{"approved":false}` — an authorization written by `CheckpointStore.decide`,
-which is given once and stays on the record. The defect was never only a dead
-dialog; it was an authorization answerable by a keystroke meant for another
-question.
-
-**The latch now carries a holder, and every parent-owned overlay surface
-acquires it.** `SingleRunLatch.run(surface, body)` records *who* is on screen
-and returns `{ran:false, holder}` to whoever loses, and the release stays in the
-class's own `finally` so an answer, a throw and the auto-open deadline all free
-it. The same one-overlay rule applies to the surfaces themselves.
-
-- **A refused checkpoint ask is T21's "not now", never a decline.**
-  `askCheckpointUnderLatch` returns `undefined` and writes nothing at all. The
-  checkpoint was written `pending` *before* anyone was asked, so `#authorize`
-  returns it, `advance` still reports `state: awaiting_authorization,
-  next: "authorize"`, and the row is already in Awaiting you.
-- **No queue, because none is needed.** A rendered overlay is a frozen snapshot,
-  but the in-flight loop re-snapshots between rounds — and by §One decision is
-  one question above, that next `mergeAwaiting` returns the checkpoint row
-  *instead of* the research row for the same pair. The question the latch
-  refused is the question the next round offers.
-- **Nothing is ever closed under the operator.** The fix prevents the second
-  overlay; it never takes the first one away. `overlayTimeoutMs` still returns
-  `undefined` for `decide` and `checkpoint` — a human typed the first and a human
-  is being asked by the second.
-- **A surface that loses says so.** `surfaceBusyNotice` is the one wording, beside
-  `overlayFallbackNotice`. An auto-open stays silent (nobody asked for it); a
-  typed `/cp-decide` and a checkpoint ask name the surface that is open, exactly
-  as `ConsoleGate.allowAwaiting` does. Where there is no notify port (headless),
-  nothing is lost: the row and the widget marker carry it.
-- **Who writes an answer is unchanged.** `CheckpointStore.decide` remains the
-  single writer of an authorization, free text is still a note and never a
-  verdict, and cp-80cv's data-level dedup is untouched.
-
-**A pager, or any other extension prompt, is not a latch holder.** `/cp-plan`,
-T31's worker-question dialog stays off `SingleRunLatch`
-— nested `View the plan…` from `/cp-decide` already runs *inside*
-`awaitingLatch.run`, so putting the pager on the same latch would refuse itself.
-`humanPrompt.open` (set on the coalesced `ui_prompt_start`/`end` span) is OR'd
-into the existing busy checks instead: `runAwaitingDialog`'s early return,
-`authorizer.ask` in front of `askCheckpointUnderLatch` (still latch-only),
-and `autoOpenDecision({ … latchBusy: awaitingLatch.busy || humanPrompt.open })`.
-Auto-open stays silent; a typed `/cp-decide` and a checkpoint ask notify with
-`promptBusyNotice` and write nothing (`undefined` / T21 "not now"). Stacking a
-pager on decide is not p18; stacking an *answering* overlay on a pager is.
-
-The **worker-question dialog** (`asker.ask`, T31) still stacks by the same
-mechanism: it renders through `ctx.ui.select`/`input` and is gated by neither
-`ConsoleGate` nor this latch. It is a different contract — an unasked question
-fails closed to "no answer" and the planner records an unknown — so whether it
-should refuse or wait is its own decision, and it is the known remaining stacker.
+The parent-owned overlays that could stack on one another (the Awaiting-you loop and
+the checkpoint authorizer, p18) are retired along with `SingleRunLatch`; see
+[The decide overlay is retired](#the-decide-overlay-is-retired). The worker-question
+dialog (`asker.ask`, T31) is a different contract: it renders through
+`ctx.ui.select`/`input`, and an unasked question fails closed to "no answer".
 
 **A ship job can have two open authorizations, and both are in the table
 (cp-khf).** A flagged diff review raises a *second*, post-implementation
@@ -4316,8 +4255,8 @@ surface treats them that way:
   with different decision text and different `blocks`. Neither hides the other,
   and `listPending` never crosses the two kinds.
 - **two answers, one writer.** The row carries `checkpoint_kind`, and that is
-  what `resolveAwaitingResponse` hands `decideCheckpoint` — so `/cp-decide`
-  answers the very question it offered. `/cp-authorize` and `/cp-decline` take
+  what the answering path hands `CheckpointStore.decide` — so an answer
+  lands on the very question it offered. `/cp-authorize` and `/cp-decline` (retired) took
   `<job-id>` (the ship checkpoint, unchanged), `<job-id> --diff`, or the row id
   itself; a bare job id never falls through to "whichever one is open", because
   guessing is exactly what an answered-once decision must not do. Every path
@@ -4385,10 +4324,8 @@ create the row, so `state/awaiting.json` may still not exist afterwards, and
 the next merge re-derives the item unchanged.
 
 **Free text on an authorization item is a note, never a verdict.**
-`resolveAwaitingResponse` recognises only approve/decline-shaped text as a
-verdict for a `type: authorization` row; anything else is returned as a `note`
-and the checkpoint stays `pending` — the operator is told to use
-`/cp-authorize` or `/cp-decline` instead.
+Only approve/decline-shaped text (`authorizationVerdict`) is a verdict for a
+`type: authorization` row; anything else leaves the checkpoint `pending`.
 
 **br is the audit trail, not the queue.** Answering a declared item with a
 `job_id` appends one best-effort `br` comment naming the decision, the answer,
@@ -5129,348 +5066,22 @@ there is nothing to queue — `state/answered.json` may not even exist afterward
 Free text on an authorization stays a note, never a verdict, and a note is not an
 answer, so it is not a wake-up either.
 
-### Auto-open on settle
+### The decide overlay is retired
 
-The marker and `/cp-decide` are still the whole surface for every mode but
-one: in a real interactive TUI, `pi.on("agent_settled", …)` opens the *same*
-dialog `/cp-decide` opens — same resolver, same answer semantics, same menu —
-the moment the agent settles with at least one open item, instead of leaving
-it to the operator to notice the widget line. This adds a trigger, never a
-second answering path: `extensions/command-post/index.ts`'s `runAwaitingDialog`
-is the one loop both `/cp-decide` (`auto: false`) and the settle hook
-(`auto: true`) call.
+`/cp-decide`, `/cp-authorize` and `/cp-decline`, the questionnaire overlay, the
+`agent_settled` auto-open, the model-suggested answers and their session snooze
+are gone. The `agent_settled` hook only refreshes the live context. What stays:
 
-**Gated hard to a provable human surface.** `canAutoOpenDialog` (`src/awaiting.ts`)
-requires `ctx.mode === "tui" && ctx.hasUI`. RPC's `extension_ui_request` dialogs
-are functional (docs/rpc.md), but an RPC client may be a program with nobody
-watching; `json`/`print` have no UI at all; a worker never loads this extension
-in the first place. Every one of those — headless, no TTY, RPC, worker context,
-no human attached — falls back to today's behaviour untouched: no error, no
-hang, just the marker plus `/cp-decide`.
+- `/cp-awaiting` is the read-only listing (`formatDecideListing`), and
+  `cp_decide` is the one answering path, with a mandate or a verbatim operator
+  quote as its basis.
+- `CheckpointStore.decide` is still the single writer of an authorization, a
+  skip writes nothing, and free text on an authorization is never a verdict.
+- `HumanPrompt` and `applyPromptWorking` still hide pi's "working…" row while an
+  extension prompt is up.
 
-**Never blocks the parent.** `canAutoOpenDialog` opens this surface only where a
-real interactive TUI is proven, so what the operator faces is either the overlay
-(on screen, Esc-dismissible) or a plain dialog carrying
-`AWAITING_DIALOG_TIMEOUT_MS`, which auto-resolves on its deadline exactly as
-`/cp-decide`'s loop always has; `awaitingDialogOpen` refuses to stack a second
-loop (auto over auto, or auto over a manual `/cp-decide` already running).
-Nothing here blocks the event loop — only this one handler's own continuation —
-so an envelope arriving from a live worker while the dialog is open is
-unaffected: `onReported` still fires and queues its follow-up message
-independently of whether a dialog is open.
-
-**Do not nag.** A session-scoped set (`awaitingSnoozed`, reset at
-`session_start`, never persisted) records every item an auto-opened dialog has
-already offered — answered, skipped, or the whole dialog dismissed via
-Done/timeout — via `snoozeOffered` (`src/awaiting.ts`). `hasAutoOpenCandidate`
-is false when every open item is in that set, so the very next settle does not
-reopen for the same batch; a genuinely new item is never in the set and still
-triggers the next auto-open. An item that is actually answered is freed with
-`forgetSnoozed`. This is the same `snoozed` plumbing `mergeAwaiting` and
-`command-post.ts#awaitingSnapshot` already carry: a snoozed item is still
-rendered everywhere else (the marker, `/cp-decide`'s own listing, tagged
-`(skipped this session)`) — only *auto*-opening is suppressed for it, per the
-rule stated above.
-
-**Answer semantics are unchanged.** Free text, `skip` (writes nothing,
-anywhere, the item stays open), and any-order answering all go through the
-same `resolveAwaitingResponse` the manual path already uses; `/cp-decide`
-itself is untouched for manual invocation — it always shows every open item,
-unaffected by any session snooze, and never records "do not nag" state.
-
-### Suggested answers
-
-[`src/suggest.ts`](../src/suggest.ts) adds **model-generated candidate
-answers** to the `/cp-decide` menu, as ordinary selectable options — no new
-answering path, no persistence, no richer context than the operator already
-sees in the status block. The pure core is inert on its own
-(`src/diff-review.ts`'s "new, tested, unwired" shape); the pi-facing half
-(`extensions/command-post/suggest-model.ts`) is the only place that calls
-`ModelRegistry.complete`, mirroring the `plan-view.ts` / `plan-viewer.ts`
-split.
-
-**Permitted input.** `SuggestionInput` is a closed type: `type`, `decision`,
-`why`, `blocks`, `options`, `job_id`, `opened_at`, and — only when the merged
-row already carries them from a `StatusJob` — `title`, `project`, `kind`,
-`delivery`. Each field is truncated to `SUGGEST_FIELD_MAX_CHARS` and the whole
-prompt is capped at `SUGGEST_PROMPT_MAX_CHARS`. There is no field to put an
-artifact body, a diff, a gate document or a br comment in, and
-`buildSuggestionPrompt` accepts only `SuggestionInput`, never a string.
-
-**The six invariants:**
-
-1. **Never a verdict until a human selects it.** A candidate is just a member
-   of the `options` array passed to `ctx.ui.select`; the write path is
-   untouched (`deps.answer` → `resolveAwaitingResponse` →
-   `decideCheckpoint`/`answerDeclared`). `answerMenuOptions` never lets a
-   candidate lead: `Type an answer…` is pushed before the candidates when
-   nothing else has been pushed yet, so `options[0]` is always a sentinel or
-   an item-declared option.
-2. **No body reaches the parent's context, either direction.** Input is the
-   closed type above (no file is read on the generation path but
-   `data/suggest.json`); output reaches `ctx.ui.select` and nothing else —
-   never `sendMessage`, never `appendEntry`, never a run-log event, never
-   `state/awaiting.json`. The adapter is handed a registry, a config resolver
-   and a notifier, never `pi: ExtensionAPI`.
-3. **Skip stays a non-answer.** `parseSuggestions` drops every
-   `AWAITING_SENTINEL_OPTIONS` string, so a model can never mint a second
-   "Skip"; skipping after suggestions were shown writes nothing, anywhere.
-4. **`authorization` items keep their single writer.** `suggestionsEnabled`
-   refuses to call a model for one at all; as defence in depth,
-   `parseSuggestions` filters any authorization candidate through
-   `authorizationVerdict` (`src/awaiting.ts`) — the same anchored vocabulary
-   `resolveAwaitingResponse` uses — so a phrase like "approve — the gate
-   passed", which would otherwise resolve to an unwritable *note*, can never be
-   offered.
-5. **The dialog never blocks on the model.** `SUGGEST_DEADLINE_MS` (2s
-   default, operator-tunable in `data/suggest.json` within
-   `SUGGEST_DEADLINE_MIN_MS`…`SUGGEST_DEADLINE_MAX_MS`) bounds one item's
-   generation, once per item per session; a missing config, a disallowed or
-   unavailable model, a throw, or a timeout all degrade to `[]` — today's exact
-   menu.
-6. **Cost is bounded.** A cheap default model (`SUGGEST_DEFAULT_MODEL`), at
-   most `SUGGEST_MAX_CANDIDATES` candidates, `SUGGEST_MAX_OUTPUT_TOKENS`,
-   `temperature: 0`. `SuggestionCache` memoises by `suggestionFingerprint` —
-   sha1 over the whitelisted input — session-scoped, LRU-capped at
-   `SUGGEST_CACHE_MAX_ENTRIES`, negative-caching a failed generation so a
-   broken provider is asked once per item, never once per redraw.
-
-**Menu ordering** (`suggestions = []` is byte-identical to the pre-cp-9zj
-menu):
-
-```
-[PLAN_VIEW_OPTION            if planViewable && !planViewed]
-[PLAN_VIEW_BACK_OPTION       if planViewed]
-…item.options
-[AWAITING_TYPE_OPTION        if nothing has been pushed yet]   ← never lead with a candidate
-…suggestions
-[AWAITING_TYPE_OPTION        unless already pushed]
-[PLAN_VIEW_AGAIN_OPTION      if planViewable && planViewed]
-AWAITING_SKIP_OPTION
-```
-
-**Config.** `data/suggest.json` (`LAYOUT.suggestFile`), read fresh on every
-call — never cached at construction (cp-sr5's rule, again): `enabled`
-(default true), `model`, `deadline_ms`, `max_candidates`. Absent means "no
-override", not "suggestions off".
-
-**Degraded surfaces.** The headless `/cp-decide` listing (no UI) may print
-`suggested (model-generated, nothing preselected): a | b | c` per item, for at
-most `SUGGEST_MAX_ITEMS_PER_LISTING` items, from the same session cache and
-deadline — text only, no numbering that implies a default. The status block
-(`cp_status_block`) is untouched: suggestions are a `/cp-decide` surface only.
-
-### The decide UI is the questionnaire
-
-A typed `/cp-decide` **is** the questionnaire overlay from the installed pi
-package `@juicesharp/rpiv-ask-user-question`: every open Awaiting-you item is
-one **tab** of one overlay call, answered in any order and submitted once, with
-the package's own `Type something.` row on every tab, its notes, its collapse
-key, and no countdown. **Nothing about answering moved.** The writers
-(`resolveAwaitingResponse`, `CheckpointStore.decide`), `state/awaiting.json`,
-the sentinels, and the rule that skip writes nothing anywhere are what they
-always were.
-
-**What cp-4864 got wrong, and why a green suite did not catch it.** That change
-wired the package in as a *shim* behind `driveAwaitingDialog`'s injected
-`select`/`input` pair — one overlay per prompt — and resolved it with a single
-bare `import()`. On the operator's real TUI the hand-check found the **old**
-dialog: "Awaiting you — pick one to answer (Done to stop) (Ns)", `Type an
-answer…`, `Skip`, a timeout countdown. Two causes, one visible symptom:
-
-1. **Resolution.** A bare specifier resolves against *this checkout's*
-   `node_modules`. The package the operator installed lives in **pi's** package
-   root (`packages: ["npm:…"]` in `~/.pi/agent/settings.json` → installed under
-   `~/.pi/agent/npm/node_modules`), and a command-post checkout whose
-   `node_modules` predates the dependency has no copy at all — so every prompt
-   took the fallback.
-2. **Silence.** The fallback was deliberate and unannounced, so a total failure
-   to load the package looked exactly like normal operation.
-
-So `extensions/command-post/questionnaire.ts` now **finds** the package where pi
-put it and **names** every failure:
-
-- candidates, in order: the bare specifier (a checkout that depends on the
-  package keeps using its own copy), the same specifier resolved with
-  `createRequire`, then pi's own package roots — user scope
-  (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`, `+/npm/node_modules`) and project
-  scope (`<cwd>/.pi/npm/node_modules`). The entry inside a root is read from the
-  package's **own** `package.json` (`exports["."]`, then `main`), so this is
-  still the public `.` entry and never a hand-written subpath. Loading a
-  package from pi's root relies on pi's jiti aliases for its peers
-  (`@earendil-works/pi-tui` and friends), which is exactly how pi loads user
-  packages;
-- the load record carries either a `tool` and its `source`, or a `reason` that
-  lists every specifier tried, the first line of each failure, and the fix
-  (install it as a pi package, or `npm install` in the checkout). `/cp-decide`
-  shows that reason before it falls back — a silent degrade is the defect.
-
-**How the package is reached.** Through its public entry and pi's own
-`ToolDefinition` contract, with no vendoring: the default export is an
-`(pi) => void` factory, so the adapter calls it with a **shim** API whose
-`registerTool` *captures* the definition, then invokes
-`tool.execute(id, params, undefined, undefined, ctx)` with the real
-`ExtensionContext`. The overlay renders through `ctx.ui.custom` and the
-structured answers come back in `details`. The package is deliberately **not**
-listed in `pi.extensions`: registering it would put a second model-facing
-`ask_user_question` next to the operator's own install. The captured
-registration is inert, because the shim is not pi.
-
-**The projection** lives in
-[`src/awaiting-questionnaire.ts`](../src/awaiting-questionnaire.ts) — pure, pi
-free, and injected exactly like `driveAwaitingDialog`. One item becomes one
-question:
-
-```
-question  <decision>\nwhy: <why>\nblocks: <blocks>[\n<plan hint>]\n[<id>]
-header    Authorize | Approve | Design            (≤ 16 chars)
-options   [View the plan…            if planViewable && !planViewed]
-          …item.options                            (never reordered, never dropped)
-          …candidates                              (only while there is room)
-          [View the plan again…      if planViewable && planViewed]
-          [Skip                      only to reach the 2-option floor]
-```
-
-The id is in the body because the package refuses two identical question texts
-in one call — and because the operator answers by id everywhere else. The
-package's limits are the projection's limits: **4 questions per call, 2–4
-options per question, 60-char labels, no reserved label** (`Other`,
-`Type something.`, `Next`).
-
-**Three properties are load-bearing**, and all three are tested
-(`tests/awaiting-questionnaire.test.ts`, `tests/questionnaire.test.ts`):
-
-1. **An option round-trips byte-identically.** An awaiting option may be 120
-   chars (`AWAITING_OPTION_MAX_CHARS`) against a 60-char label budget, so a
-   menu that does not fit is rendered as numbered, truncated **labels** with the
-   full string as the **description** and mapped back through an identity map. A
-   label the adapter never sent resolves to **nothing** — a skip, never a guess.
-2. **Skip writes nothing, anywhere.** An untouched tab is a skip. Esc
-   (`cancelled: true`) is a skip for the whole batch, never a decline. `Skip`,
-   `View the plan…` and every other sentinel is compared by identity before
-   anything is resolved, so none of them can reach a writer. The overlay's
-   per-question notes and its global note are not answers and are not recorded.
-3. **What the overlay cannot render is deferred, never dropped.** An item with
-   more than 4 options, or with fewer than 2 the overlay can show, comes back in
-   `deferred` with a reason; `/cp-decide` says so and answers exactly those
-   items with the plain dialogs in the same sitting. Reading the plan is a
-   *step*, not an answer: the item stays open and is re-offered with
-   `View the plan again…` **last**, so a stray Enter never reopens the pager
-   (cp-viewer-scroll-stuck, unchanged).
-
-### Every surface that asks uses it
-
-Until cp-gb3w the overlay was `/cp-decide`'s alone, so answering the same item
-looked like two different products depending on which surface happened to ask.
-**Every surface now asks with the overlay first**, and there are exactly three:
-
-| surface | trigger | UI |
-|---|---|---|
-| `decide` | a typed `/cp-decide` | overlay, else the plain dialogs |
-| `auto_open` | `agent_settled` (`options.auto === true` in `runAwaitingDialog`) | overlay, else the plain dialogs |
-| `checkpoint` | `Authorizer.ask` — a minted checkpoint's approve/decline/not-now | overlay, else `ctx.ui.select` |
-
-The widget asks nothing: it renders the marker (`⧗ N decisions awaiting you`) and
-points at `/cp-decide`, which is the first row above. A planner's `ask_operator`
-question is **not** an Awaiting-you item (it is answered at that planner's own
-console and raises no row), and the direct form `/cp-decide <id> <answer>` opens
-no UI at all — both are unchanged.
-
-**One routing function decides, and it names its reason.**
-[`src/awaiting-ui.ts`](../src/awaiting-ui.ts)'s `routeAwaitingUi(surface, {mode,
-hasUI})` returns `overlay` only for a real TUI, and `plain` with a reason
-everywhere else — no UI attached (`pi -p`, `json`), or a host that is not a TUI
-(`--mode rpc`, an ACP pendant). `overlayFallbackNotice` is the single wording
-every surface prints before it degrades, so the operator always learns *why*
-they are looking at the plain prompts. **Degrade, never fail**: the plain path is
-always available, no awaiting item is unanswerable in any context, and the
-package is never a hard dependency of answering.
-
-**The auto-open keeps its deadline** (review 2). The plain dialogs carried
-`AWAITING_DIALOG_TIMEOUT_MS` here because a surface nobody asked for must not
-wait on a human forever, and the overlay has no external cancel of its own (its
-`execute` ignores the abort signal and the handle never leaves the package). So
-the adapter keeps the one thing that *can* close it: the `done` callback pi hands
-the component factory, captured on the way past through the `ExtensionContext`
-the package is given. On expiry `askQuestionnaire` calls
-`done({answers: [], cancelled: true})` — byte-identical to Esc — and reports
-`cancelled`. **That is the existing skip, exactly**: nothing is written anywhere,
-every item stays open and simply reappears, and the settle handler and the
-single-run latch are both released. The number is
-`AWAITING_AUTO_OPEN_OVERLAY_TIMEOUT_MS`, which *is* `AWAITING_DIALOG_TIMEOUT_MS`
-— the same 600s the plain dialog carried on this path, not a longer one.
-`overlayTimeoutMs(surface)` is the only place that decides: **auto-open only**.
-A typed `/cp-decide` and the checkpoint ask carry no deadline, because a human
-asked for the first and a human is being asked by the second.
-
-**The deadline holds in both orders** (review 3). `overlayDeadlineContext` is a
-small state machine, not a captured variable: if the overlay is already up,
-`expire()` closes it; if the deadline fires *before* the package ever reached
-`ui.custom` (a slow load, a slow `execute`), the wrapper **refuses to render** —
-the real `ctx.ui.custom` is never invoked and the package is handed the same
-cancelled result — so nothing can be left orphaned on screen after the batch was
-reported as a skip. The abandoned execution is never awaited and never becomes
-an unhandled rejection.
-
-**Closing the overlay is best effort; settling the ask is not** (review 4,
-operator decision). Closing depends on an assumption about somebody else's
-package — that it renders through `ctx.ui.custom` and that the factory's fourth
-argument is `done`. The timeout layer therefore takes that API as it stands and
-defends against it: `expire()` returns which of four things it managed —
-`closed`, `refused` (nothing had rendered), `no_handle` (it rendered through
-something this wrapper does not intercept, or with a shape carrying no `done`)
-or `close_failed` — and **every one of them settles the ask as `cancelled`**,
-releases the `SingleRunLatch` and releases the settle handler's continuation,
-writing nothing anywhere. Anything that is not `closed` also emits
-`OVERLAY_NO_CLOSE_HANDLE_NOTICE` as a warning, so a package whose shape has
-moved surfaces as a signal instead of a deadline that quietly does nothing. The
-overlay may then stay visible until the human dismisses it (Esc, which is the
-same skip) — that is accepted; an ask that never settles is not. The proxy is otherwise faithful: every non-`custom`
-member is forwarded to the real object, with methods **bound to it** so nothing
-is ever called with a proxy as `this`, and with stable identity across reads.
-
-Two further guarantees, and both are the code that runs rather than a claim about
-it. `canAutoOpenOverlay(env)` — `canAutoOpenDialog(env) &&
-routeAwaitingUi("auto_open", env).ui === "overlay"` — **is** the settle hook's
-gate, and the rest of that hook's decision is `autoOpenDecision({env, latchBusy,
-items})`, a pure function tested by running it (`no_human_surface` · `busy` ·
-`nothing_open` · `open`) rather than by matching the hook's source.
-`SingleRunLatch` replaces the bare `awaitingDialogOpen` flag: the release lives
-in the class's own `finally`, so a run that answers, throws, or ends on the
-overlay's deadline all leave the latch free for the next settle.
-
-**The checkpoint surface is one function**, `askCheckpointDecision`
-([`extensions/command-post/questionnaire.ts`](../extensions/command-post/questionnaire.ts)),
-so it is *exercised* by tests rather than matched as a source string: the
-overlay branch, the four ways out that are not a verdict (`not now`, an
-untouched tab, Esc, dismissing the plain dialog), free text as a note, and the
-degrade to `ctx.ui.select` with the reason named.
-
-**The invariants did not move.** `CheckpointStore.decide` is still the one writer
-for an authorization; a skip writes nothing anywhere and the item reappears;
-`cp_awaiting` still only lists and withdraws, and still refuses to withdraw an
-authorization row. On the checkpoint surface, only the two verdict rows are
-verdicts (`interpretCheckpointAnswer`): `not now`, an untouched tab and Esc all
-leave the checkpoint pending, and typed free text is surfaced as a **note**,
-never a verdict — the same rule `resolveAwaitingResponse` already enforced for an
-authorization row. "Do not nag" is one rule for both runs (`snoozeCandidates`):
-the overlay run and the plain run snooze the same items, and an answered row is
-never snoozed.
-
-**Real-TUI verification, as of cp-gb3w:** `/cp-decide`'s overlay was hand-checked
-when cp-vvaz shipped it. The two surfaces cp-gb3w newly routed to the same
-overlay — the `agent_settled` auto-open and the checkpoint ask — have **not** been
-hand-checked on a real pi TUI; their unit coverage is the routing decision, the
-fallback wording and the answer semantics, not the rendering. Treat their chrome
-as unobserved until somebody looks.
-
-**A green suite is not evidence for this surface** (AGENTS.md, cur-20260901-5).
-Every failure path here is unit-tested with a fake package and a fake overlay,
-and the resolution order is tested against a fake `node_modules` tree — but that
-is what cp-4864 also had. What proves the overlay renders is a hand-check on a
-real pi TUI: the tabbed dialog, `Type something.`, `n` for notes, `ctrl+]` to
-collapse, **no countdown**. If the plain countdown dialog appears, read the
-warning `/cp-decide` printed: it names the specifiers it tried.
+Older sections and `docs/tui-verification/` notes that describe the overlay, its
+latch, the suggestion cache or the auto-open record history, not behaviour.
 
 ### The decision details pane
 
@@ -5525,17 +5136,6 @@ cuts is always announced, inside the budget**: one truncation, one
 nothing at all rather than a claim nobody can check. (The earlier shape had a
 hole at "no room left for the tail", where lines were dropped with nothing said
 — PR #151, finding 3.)
-
-**The budget is the terminal's, when the terminal says what it is** (PR #151,
-finding 4). A bounded pane is not a small pane: on a 40×24 terminal a 20-line
-pane wrapped past the bottom of the screen and pushed the overlay's answer rows
-out of sight, and the overlay does not scroll to the selection — so the operator
-could navigate but not see what they were about to answer. `decisionPaneBudget`
-therefore reads `process.stdout.{columns,rows}` in the pi process and gives the
-pane `rows - DECISION_PANE_RESERVED_ROWS` **wrapped screen rows**; the builder
-counts `ceil(len / columns)` per line and cuts with the same explicit marker. The
-pane yields, never the decision. A terminal that reports no size keeps the
-line-only budget, unchanged.
 
 **The recommendation is a reading, never a decision.** It is one line, always
 prefixed with `DECISION_CONTEXT_RECOMMENDATION_LABEL` ("recommendation (not a
@@ -5879,11 +5479,8 @@ rather than assumed:
 
 1. **`ctx.ui.custom()` writes to the terminal only.** The pager is a full-screen
    overlay (`overlay: true`, `overlayOptions: { width: "100%", maxHeight: "100%",
-   margin: 0 }`, `onHandle: (handle) => handle.focus()` — full-screen overlay options), not an editor swap. Nested `View the plan…`
-   from `/cp-decide` is overlay-on-overlay: `q` / Esc / idle-timeout call
-   `done(undefined)`, which fires `ui_prompt_end` for the outer span only when
-   the pager was the outer prompt, and `hideOverlay` pops one frame so the
-   questionnaire stays on the stack and is focused and answerable. No
+   margin: 0 }`, `onHandle: (handle) => handle.focus()` — full-screen overlay options), not an editor swap. `q` / Esc / idle-timeout call
+   `done(undefined)`, which fires `ui_prompt_end` for the outer span. No
    `sessionManager` call exists anywhere on that path. `pi.appendEntry` — the
    mechanism `/status` and `/watch` use for long output (§Where long output
    goes) — was considered and rejected here for the opposite reason it is safe
@@ -5920,50 +5517,11 @@ check lives there and not scattered across every future caller.
 | surface | when | degrades to |
 |---|---|---|
 | `/cp-plan <job-id> [--gate [n]]` | any time, including before a checkpoint exists | a path+size notify (RPC) or stderr line (print/json) |
-| the `/cp-decide` answer menu | at the decision itself — inserted **first**, non-destructively | absent when no plan is viewable, or outside a real TUI |
 | `/watch`'s output | a pointer line only — path and byte count, appended when `artifacts.has(jobId)` | nothing when there is no artifact |
 
-The `/cp-decide` dialog step is inserted **first** in the answer menu, ahead of
-any checkpoint option, so the default-highlighted choice stays non-destructive
-— today's default was `approve`, and a stray Enter after closing the pager
-must never land on it. Picking it opens the viewer and, on close, re-shows the
-**same item's** menu: nothing is recorded, the operator's place is kept. The
-option string is compared by identity (`PLAN_VIEW_OPTION`,
-`src/contracts.ts`) before `resolveAwaitingResponse` ever runs, the same way
-`"Type an answer…"` and `"Skip"` already are — it can never be recorded as an
-answer or a note.
-
-**After the plan has been read, the default option is `Done`, never the viewer
-again** (cp-viewer-scroll-stuck). "First option = the viewer" is correct only
-until the operator has been in the pager; keeping it there afterwards made
-Enter reopen the pager, forever, which is what "even though I seen the plan and
-I clicked done, we are still stuck on this decide" is: read the plan, press
-Enter, read the plan, press Enter. So the menu is a **function of one bit of
-state** (`answerMenuOptions` in [`src/awaiting-dialog.ts`](../src/awaiting-dialog.ts)):
-
-| state | menu, in order |
-|---|---|
-| plan viewable, not yet read | `View the plan…`, the item's options, `Type an answer…`, `Skip` |
-| plan viewable, already read | `Done reading — back to the list`, the item's options, `Type an answer…`, `View the plan again…`, `Skip` |
-| no plan viewable (no artifact, or not a TUI) | the item's options, `Type an answer…`, `Skip` |
-
-`Done reading — back to the list` records nothing: the item stays open and the
-list is re-shown, so the operator can answer it now, answer another one first,
-or pick `Done` and leave. Every label above is in `AWAITING_SENTINEL_OPTIONS`
-and is compared by identity before anything is written — including when it is
-*typed verbatim* as free text, which `driveAwaitingDialog` refuses too.
-
-**The dialog loop lives in `src/`, not in the extension.**
-[`src/awaiting-dialog.ts`](../src/awaiting-dialog.ts) owns the state machine
-(item list → one item's menu → answer, skip, or the reading step) with every
-prompt injected — `select`, `input`, `viewPlan`, `answer`. The extension only
-adapts it to `ctx.ui` and keeps the "do not nag" bookkeeping, because the loop
-was previously inline in `extensions/command-post/index.ts` where no test could
-reach it, and the defect it shipped with was exactly the kind a test catches.
-The machine never throws out of a decision: a failed snapshot, a dismissed
-prompt and a refused write all end in an outcome (`AWAITING_DIALOG_MAX_ROUNDS`
-and `AWAITING_ITEM_MAX_STEPS` bound it), because a dialog that throws mid-item
-leaves the operator with a row they cannot answer.
+The decide overlay that used to embed a `View the plan…` step is retired (see
+[The decide overlay is retired](#the-decide-overlay-is-retired)); `/cp-plan` is
+the way to read a plan.
 
 **Scope.** Viewable: a research artifact (`state/artifacts/<job-id>/report.md`,
 ship ids resolved via `Checkpoint.research_id` then `PipelineStore.findByShipId`)
@@ -5977,11 +5535,8 @@ surface) and `questions.jsonl` (`question_journal_read` already names `/watch`
 as the one sanctioned surface for it; a second pager here would undo the point
 of that guard).
 
-**Idle timeout.** `PLAN_VIEW_IDLE_TIMEOUT_MS` equals `AWAITING_DIALOG_TIMEOUT_MS`
-(§Awaiting you: "a human is never load-bearing for a dialog's liveness") — a
-viewer left open resets `awaitingDialogOpen` on close exactly like every other
-dialog, so an abandoned pager cannot silently suppress the auto-open or
-`/cp-decide`.
+**Idle timeout.** `PLAN_VIEW_IDLE_TIMEOUT_MS` equals `AWAITING_DIALOG_TIMEOUT_MS`: a
+viewer left open closes itself, so an abandoned pager cannot hold the session.
 
 **Windowing is the viewer's own job.** `render(width)` returns exactly the
 viewport's row count every time — header, a slice of pre-rendered markdown

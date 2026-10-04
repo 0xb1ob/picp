@@ -23,7 +23,6 @@
  */
 
 import { parsePrUrl } from "./ci-watch.ts";
-import { githubRepoFromCloneUrl } from "./mandate.ts";
 import { type CommandRunner, MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
 
 /** One row of `gh pr list --json url,number,headRefOid`. */

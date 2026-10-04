@@ -22,25 +22,12 @@
  * from ever becoming a merge: everything that isn't explicitly permitted
  * falls to a state a caller must treat as "do not merge".
  *
- * Two helpers exist purely to *obtain* facts, mirroring src/merge-ask.ts's
- * shape: `GH_PR_PERMISSION_FIELDS` for `gh pr view`, and
- * `ghBranchRulesArgs`/`parseBranchRules` for `gh api
+ * `ghBranchRulesArgs`/`parseBranchRules` exist purely to *obtain* facts, for `gh api
  * repos/{owner}/{repo}/rules/branches/<base>` — readable in this home
  * (unlike classic `/branches/*\/protection`, which 403s) and used
  * **reason-only**: a 403 or a parse failure degrades the sentence a verdict
  * carries, never the verdict itself.
  */
-
-/** The `gh pr view --json` fields this module reads, on top of integrate.ts's own. */
-export const GH_PR_PERMISSION_FIELDS = [
-	"state",
-	"mergeable",
-	"mergeStateStatus",
-	"reviewDecision",
-	"isDraft",
-	"headRefOid",
-	"autoMergeRequest",
-] as const;
 
 export type MergePermission = "permitted" | "pending" | "retry" | "unreadable";
 

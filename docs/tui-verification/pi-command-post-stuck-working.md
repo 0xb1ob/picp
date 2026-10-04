@@ -1,5 +1,7 @@
 # Real-TUI verification — false-working loader and `/cp-plan` overlay
 
+> **Retired.** The overlay, its latch and the auto-open this record verified were removed; `HumanPrompt` and `applyPromptWorking` remain. Kept as history.
+
 AGENTS.md (cur-20260901-5) says a TUI change is not verified by a green suite:
 it has to be reproduced on a real pi TUI. This is the record of that run for
 hiding pi's working loader during an extension prompt and opening the plan pager

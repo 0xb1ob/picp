@@ -96,17 +96,6 @@ test("anything else is unverifiable, never a mismatch", async () => {
 	assert.equal(describeRefMismatch("https://jira.example.com/BROWSE-1", verification), undefined);
 });
 
-test("mandateIssueCountMismatch: the objective's 'open issues' count vs. what gh actually found", async () => {
-	const { mandateIssueCountMismatch } = await import("../src/verify-external-ref.ts");
-	assert.match(
-		mandateIssueCountMismatch("fix the two currently open GitHub issues #12 and #14 in example-infra", 0) ?? "",
-		/names 2 open issue.*found 0/,
-	);
-	assert.equal(mandateIssueCountMismatch("fix issue #12", 0), undefined, "no count named, nothing to compare");
-	assert.equal(mandateIssueCountMismatch("fix the 2 open issues", 2), undefined, "count matches, no mismatch");
-	assert.equal(mandateIssueCountMismatch("fix the 2 open issues", 5), undefined, "more open than named is not a mismatch");
-});
-
 test("br arrays preserve open and closed states; malformed responses stay diagnostic", async () => {
 	for (const state of ["open", "closed"]) {
 		const ref = "br show cp-array --json";

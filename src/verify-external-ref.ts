@@ -137,35 +137,6 @@ export function describeRefMismatch(ref: string, verification: RefVerification):
 	return undefined;
 }
 
-/**
- * Mandate wording check, cheap version: an objective that names N "open issues" for a project
- * against a `gh issue list --state open` count that came back lower is a mismatch worth saying —
- * the same shape of wrong belief that stored a merged PR as an open issue. Pure: the caller reads
- * the count (`gh issue list --state open --json number`, run in the project's clone so `gh`
- * resolves the repo itself) and passes it in; this only compares.
- */
-const NUMBER_WORDS: Record<string, number> = {
-	one: 1,
-	two: 2,
-	three: 3,
-	four: 4,
-	five: 5,
-	six: 6,
-	seven: 7,
-	eight: 8,
-	nine: 9,
-	ten: 10,
-};
-
-export function mandateIssueCountMismatch(objective: string, openCount: number): string | undefined {
-	const match = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:currently\s+)?open\s+(?:\S+\s+)?issues?\b/i.exec(objective);
-	if (!match) return undefined;
-	const token = (match[1] as string).toLowerCase();
-	const named = NUMBER_WORDS[token] ?? Number(token);
-	if (Number.isNaN(named) || openCount >= named) return undefined;
-	return `objective names ${named} open issue(s), but gh issue list --state open found ${openCount}`;
-}
-
 /** One line for the job's `notes`: what verification found, whether or not it matched. */
 export function describeRefVerification(verification: RefVerification): string {
 	switch (verification.status) {

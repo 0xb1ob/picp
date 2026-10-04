@@ -48,13 +48,13 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			if (params.id.startsWith("aw-checkpoint-")) {
 				throw new Error(
 					`${params.id} is a derived authorization item, not declared \u2014 it cannot be withdrawn here. ` +
-						"An authorization resolves only through /cp-authorize or /cp-decline.",
+						"An authorization resolves only through cp_decide.",
 				);
 			}
 			if (params.id.startsWith("aw-research-")) {
 				throw new Error(
 					`${params.id} is a derived approval item from a held research job, not declared \u2014 it cannot be withdrawn here. ` +
-						"It will clear when the research job is answered (ship, drop, or follow-up) via /cp-decide.",
+						"It will clear when the research job is answered (ship, drop, or follow-up) via cp_decide.",
 				);
 			}
 
@@ -83,7 +83,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		promptSnippet: "Run or advance a research->gate->implement pipeline (cp_pipeline)",
 		promptGuidelines: [
 			"Use cp_pipeline advance after a research envelope lands; it gates, closes and dispatches for you.",
-			"cp_pipeline never dispatches an implementer without valid authority: a human /cp-authorize, or an active mandate that permits the job. next 'authorize' means it stayed pending — ask the operator.",
+			"cp_pipeline never dispatches an implementer without valid authority: a human answer through cp_decide, or an active mandate that permits the job. next 'authorize' means it stayed pending — ask the operator.",
 			"classify is advisory: it recommends a workflow with reasons, and you may force it. It is not a routing decision — scope and risk choose the model, and a high-risk keyword is not a reason to build a pipeline.",
 			"Pass kind when the operator already settled it: kind:research classifies as one research job, never a pipeline.",
 		],

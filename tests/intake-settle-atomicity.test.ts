@@ -28,14 +28,14 @@ import {
 	SCHEMA_VERSION,
 	type SendReceipt,
 } from "../src/contracts.ts";
-import { FleetStore, hasEnvelopeOnDisk } from "../src/fleet.ts";
+import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake } from "../src/intake.ts";
 import { readStatusFile } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { SettleWatcher } from "../src/settle.ts";
 import { ENVELOPE_FILE } from "../extensions/worker-reporter/index.ts";
 import type { WorkerEvent } from "../src/worker-process.ts";
-import { createScratchHome, readFleet, readRunEvents, type ScratchHome } from "./harness/index.ts";
+import { createScratchHome, readRunEvents, type ScratchHome } from "./harness/index.ts";
 
 // ---------------------------------------------------------------------------
 // Doubles

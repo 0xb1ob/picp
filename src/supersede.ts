@@ -274,12 +274,3 @@ export function updateFrozenTask(options: UpdateFrozenTaskOptions): TaskUpdate {
 		source,
 	};
 }
-
-/** One operator line, for a receipt that would otherwise read as silence. */
-export function formatSupersession(supersession: Supersession): string {
-	const prior = supersession.prior_status ? `${supersession.prior_status} ` : "";
-	return (
-		`${supersession.job_id}: envelope slot reopened (generation ${supersession.generation + 1}); the ${prior}envelope ` +
-		`reported at ${supersession.prior_reported_at} is superseded${supersession.archived ? ` and kept at ${supersession.archived}` : ""}.`
-	);
-}

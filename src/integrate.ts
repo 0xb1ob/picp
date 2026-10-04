@@ -850,7 +850,7 @@ export class Integrator {
 				headSha: head,
 				reason:
 					`${input.reasonPrefix}. A merge authorization for ${head.slice(0, 12)} is now pending. ` +
-					"Only a human answers it (/cp-decide, /cp-authorize, /cp-decline) — evidence is not authorization.",
+					"Only a human answers it (cp_decide, with a mandate or an operator quote) — evidence is not authorization.",
 			});
 		}
 		if (existing.decision !== "approved") {

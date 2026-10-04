@@ -38,7 +38,6 @@ import {
 	PENDING_REVIEW_FILE,
 	type PendingReview,
 	paths,
-	REVIEW_SURFACES,
 	type ReviewSurface,
 	SCHEMA_VERSION,
 	validatePendingReview,
@@ -655,6 +654,3 @@ export class ReviewRuns {
 		return report;
 	}
 }
-
-/** Exported for the status view and the widget: which surfaces exist. */
-export const SURFACES: readonly ReviewSurface[] = REVIEW_SURFACES;

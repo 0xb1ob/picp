@@ -13,7 +13,6 @@ import { configureLayout, currentRuntimeDir, LAYOUT, layoutFor, layoutForHome, p
 import { Doctor } from "../src/doctor.ts";
 import { MEMORY_FILES } from "../src/memory.ts";
 import { FleetStore } from "../src/fleet.ts";
-import { homeIsScaffolded } from "../src/home.ts";
 import { resolveRuntime } from "../src/mode.ts";
 import { scaffoldHome } from "../src/scaffold.ts";
 import { storageFindings } from "../src/storage.ts";
@@ -80,7 +79,6 @@ test("a flat home scaffolds data/, state/, projects/ and the ledger directly: no
 	}
 	assert.ok(!existsSync(join(home, ".pi-command-post")), "no nested runtime dotdir");
 	assert.ok(!existsSync(join(home, ".gitignore")), "a flat home is not a repository");
-	assert.ok(homeIsScaffolded(home));
 	const second = scaffoldHome({ home, env: {}, packageRoot: REPO_ROOT });
 	assert.equal(second.already_ready, true);
 });
