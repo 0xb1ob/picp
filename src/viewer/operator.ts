@@ -9,15 +9,17 @@
  * With `CP_OPERATOR_VIEWER=service` (the installed `cp-operator` wrapper) `cp-view.service`
  * serves the dashboard and no session viewer starts; its `CP_OPERATOR_MODEL` becomes pi's `--model`
  * (`operatorModelArgs`: never over an explicit model flag or a resumed session).
+ * Restart session (cp-aqxl): pi gets `CP_OPERATOR_RELAUNCH_FILE`; when pi exits leaving a marker there that names its
+ * own pid (the dashboard restart), pi is relaunched here with exactly `--session <file>`, at most 3 times per 10 min.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { constants } from "node:os";
 import { join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { operatorPiArgs } from "../cp-bridge.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
+import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
@@ -102,7 +104,7 @@ export function operatorModelArgs(piArgs: readonly string[], env: NodeJS.Process
 }
 
 /** Run one operator session to its exit code, with the viewer's lifetime bound to it. */
-export async function runOperator(argv: readonly string[], options: { piBin?: string; viewer?: ViewerOptions } = {}): Promise<number> {
+export async function runOperator(argv: readonly string[], options: { piBin?: string; viewer?: ViewerOptions; relaunchFile?: string; relaunchLimit?: { count: number; windowMs: number } } = {}): Promise<number> {
 	const piArgs: string[] = [];
 	const cli: { host?: string; port?: string } = {};
 	for (let i = 0; i < argv.length; i++) {
@@ -125,28 +127,44 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 		: await startViewer({ ...options.viewer, ...(options.viewer?.host !== undefined || cli.host !== undefined ? { host } : {}), port });
 	const stopViewer = () => viewer.stop();
 	process.on("exit", stopViewer);
-	const pi = spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(piArgs), web.extensions), {
-		stdio: "inherit",
-		env: { ...process.env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
-	});
+	// Restart session: pi gets the marker path; a marker naming the exited child relaunches it here (src/operator-relaunch.ts).
+	const relaunchFile = options.relaunchFile ?? defaultRelaunchFile();
+	let current: ChildProcess | undefined;
+	let signalled = false;
 	const onSignal = (signal: NodeJS.Signals) => {
+		signalled = true;
 		viewer.stop();
-		if (pi.exitCode === null && pi.signalCode === null) pi.kill(signal);
+		if (current && current.exitCode === null && current.signalCode === null) current.kill(signal);
 	};
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
-	return new Promise((resolve) => {
-		const done = (code: number) => {
-			for (const signal of OPERATOR_SIGNALS) process.off(signal, onSignal);
-			process.off("exit", stopViewer);
-			viewer.stop();
-			resolve(code);
-		};
-		pi.once("error", (error) => {
-			process.stderr.write(`cp-operator: could not start pi: ${error.message}\n`);
-			done(127);
+	try {
+		return await superviseOperatorPi({
+			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args), web.extensions), {
+				stdio: "inherit",
+				env: { ...process.env, ...env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
+			}),
+			firstArgs: piArgs,
+			...(relaunchFile ? { relaunchFile } : {}),
+			...(options.relaunchLimit ? { limit: options.relaunchLimit } : {}),
+			onChild: (child) => { current = child; },
+			stopped: () => signalled,
 		});
-		pi.once("exit", (code, signal) => done(code ?? 128 + (signal ? constants.signals[signal] : 0)));
-	});
+	} finally {
+		for (const signal of OPERATOR_SIGNALS) process.off(signal, onSignal);
+		process.off("exit", stopViewer);
+		viewer.stop();
+	}
+}
+
+/** The selected home's `state/operator/relaunch.json`; no home resolves: undefined, pi runs once. */
+function defaultRelaunchFile(): string | undefined {
+	try {
+		const target = resolveOperatorTarget();
+		return relaunchFileFor(target.home, target.mode);
+	} catch (error) {
+		process.stderr.write(`cp-operator: Restart session unavailable (no home resolved: ${(error as Error).message})\n`);
+		return undefined;
+	}
 }
 
 if (import.meta.main) {

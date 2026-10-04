@@ -45,7 +45,14 @@ export interface ControlStatusResponse {
  launchers: {tmux: boolean; herdr: boolean};
  /** What Resume last session can use: as launchers (the wrapper with the fixed `-c`). */
  resume: {tmux: boolean; herdr: boolean};
+ /** Restart session (running only): whether this session can restart now, its blockers and the one reason it cannot. */
+ restart?: RestartStatus;
+ /** The running session's dashboard record `started_at`: a new value after a restart is the relaunched session. */
+ session_started_at?: string | null;
 }
+export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }
+/** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
+export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse { id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort" }
 /**

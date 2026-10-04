@@ -34,6 +34,8 @@ import { dashboard, jobDetail } from "./fleet-view.ts";
 import { sidebar, type ViewerState } from "./sessions.ts";
 import { handlePushSubscription, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, pushStatus } from "./push-api.ts";
 import { CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
+import { handleOperatorRestart } from "./operator-restart.ts";
+import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
 
@@ -137,8 +139,8 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		return;
 	}
 	const requestPath = (req.url ?? "/").split("?")[0];
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === SCHEDULE_CONTROL_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === SCHEDULE_CONTROL_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : handleOperatorStart(req, options))
 			.then((out) => sendJson(res, out.status, out.body, out.headers))
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });

@@ -20,6 +20,7 @@
  * `cp-operator` running the cp-operator wrapper — (fixed argv, no request data reaches either) behind the same
  * chain, the inbox token, no live session, and at most one start per 60 s; every outcome is one audit line.
  * `"resume": true` beside `via` is Resume last session: the wrapper with the fixed `-c`.
+ * `POST /api/operator/restart` (Restart session, operator-restart.ts) reuses `guarded` and `tokenMatches` from here.
  *
  * cp-hhuf P6, Schedules page controls: `GET /api/schedules/control` (--require-tailnet only, never writes) reads the
  * opt-out, this viewer's schedule token, whether the parent holds the home and the recent requests;
@@ -43,6 +44,7 @@ import {
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
+import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 
@@ -74,6 +76,8 @@ export interface OperatorStart {
 	env?: NodeJS.ProcessEnv;
 	run?: Run;
 	lastAt?: number;
+	/** Restart session (operator-restart.ts): when the last restart frame was sent. */
+	restartAt?: number;
 	herdrChecked?: { at: number; running: boolean };
 }
 
@@ -151,7 +155,7 @@ export function controlRequest(record: ControlRecord, op: string, args: Record<s
 
 const peerOf = (req: IncomingMessage): string | null => req.socket.remoteAddress?.replace(/^::ffff:/, "") ?? null;
 const log = (options: ControlRouteOptions) => options.log ?? ((line: string) => process.stderr.write(line));
-const tokenMatches = (given: unknown, want: string): boolean => {
+export const tokenMatches = (given: unknown, want: string): boolean => {
 	const a = Buffer.from(String(given ?? ""));
 	const b = Buffer.from(want);
 	return a.length === b.length && timingSafeEqual(a, b);
@@ -226,6 +230,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			...base, enabled: true, running: true, token: record.record.csrf,
 			busy: typeof status.busy === "boolean" ? status.busy : null, pending: typeof status.pending === "boolean" ? status.pending : null,
 			session_file: typeof status.session_file === "string" ? status.session_file : null, recent: Array.isArray(status.recent) ? status.recent : [],
+			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
 		} satisfies ControlStatusResponse,
 	};
 }
@@ -233,7 +238,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 type Parsed = { kind: ControlKind | "start" | "schedule" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string };
 type Body = { kind: "message"; text: string; deliver?: "followUp" | "steer" } | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
-interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
+export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
 function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { ok: false; reason: string; parsed: Parsed } {
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
@@ -258,7 +263,7 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 }
 
 /** The shared refusal chain up to a parsed JSON body: method, --require-tailnet, rate, opt-out, Origin, Sec-Fetch-Site, JSON, size. */
-async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>): Promise<ControlRouteResult> {
+export async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>): Promise<ControlRouteResult> {
 	const peer = peerOf(req);
 	if (req.method !== "POST") {
 		log(options)(`viewer: dashboard control refused 405: ${req.method} (${peer ?? "unknown peer"})\n`);

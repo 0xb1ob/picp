@@ -34,6 +34,7 @@ import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../
 import { ParentSendDelegationSchema, sendIdOfMessage } from "../../src/parent-outbox.ts";
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
+import { relaunchPorts } from "../../src/operator-relaunch.ts";
 
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
@@ -385,6 +386,7 @@ export default function (pi: ExtensionAPI): void {
 					isIdle: () => sessionCtx?.isIdle() ?? true,
 					hasPendingMessages: () => sessionCtx?.hasPendingMessages() ?? false,
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
+					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
 				},
 			});
 			if (started.state === "listening") {

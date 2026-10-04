@@ -340,6 +340,21 @@ starts a fresh one (the button's line says so). herdr types
 `'<cp-operator>' '-c'`; tmux runs `<tmux> new-session -d -s cp-operator <cp-operator> -c`
 (same session name).
 
+**Restart session** (cp-aqxl) shows while an operator session runs (`restart` in the control status: `supported`,
+`blockers`, `reason`). Two taps (the second names the session file) post `POST /api/operator/restart`
+`{"restart": true}` with the CSRF token through the same guard chain as a message, one accepted restart per 60 s.
+The viewer only forwards one `restart` frame to the session's control socket; it spawns, signals and locates no
+process. The bridge journals the request, refuses with the reason while the kill switch is off, while the session is
+busy or has queued messages, while a dashboard message or answer click is not yet seen by the session, or while a
+`cp_parent send` from the last 24 h has no observed outcome (an unreadable outbox refuses too). Otherwise it writes
+`state/operator/relaunch.json` (0600: `{version, id, pid, session_file, at}`) and calls pi's own `ctx.shutdown()`
+once compaction is idle. `cp-operator`, the parent of that pi, relaunches it in the same terminal with exactly
+`--session <file>` (`-c` if the file is gone) only when the marker names the pid of the child that just exited; at
+most 3 relaunches in 10 min, then it prints how to resume by hand. A signalled `cp-operator` never relaunches. A pi
+not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) reports unsupported: `/quit`, then
+`cp-operator -c`, once. The page follows the restart (stopping → relaunching → restarted, by a new
+`session_started_at`) and blocks the composer meanwhile; after 90 s it says where to look.
+
 ## Stop, drain, restart
 
 - **Stopping the fleet stays `cp_parent drain` + `cp_parent stop`.** A

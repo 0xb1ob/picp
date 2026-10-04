@@ -167,12 +167,12 @@ export function parseDashboardText(text: string): { body: string; id: string; as
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
 
-export type ControlKind = "message" | "answer" | "abort";
-export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort";
+export type ControlKind = "message" | "answer" | "abort" | "restart";
+export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restart";
 
 /** One audit line. The bridge writes request/outcome; the viewer writes refused (after the --require-tailnet guard). */
 export type ControlAuditLine =
 	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver }
-	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused"; reason: string | null }
+	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
 	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
