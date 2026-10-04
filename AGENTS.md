@@ -104,7 +104,8 @@ A review is evidence, never authorization, and never a merge action. CI remains 
 
 ## While they work
 
-Wake on envelopes, not on polls. `/status` for the fleet, `/watch <job-id>` for one job's run log.
+Wake on envelopes, not on polls. `/status` for the fleet, `/watch <job-id>`
+for one job's run log.
 
 - `/status` for the fleet, `/watch <job-id>` for one job's run log (bounded tail).
 - A dead worker is `failed` with a cause. There is no `stalled`: nothing is inferred from age.
@@ -124,8 +125,7 @@ Wake on envelopes, not on polls. `/status` for the fleet, `/watch <job-id>` for 
   successful automatic revive/re-dispatch never sends this message at all — bounded
   recovery (cur.4.2) already acted if eligible (count in `recovery-attempts.json`);
   `cp-bound` arrives only after its outcome, never beside a live replacement: lease kept, continue on it (`cp_revive`), `cp_teardown` only to abandon; don't guess a phase. `bound spent — one automatic attempt already ran and failed` — not a hint one is still pending.
-- **`cp-recovery`**: parent restart lists dead/revivable/orphaned jobs; act on it (`cp_revive`/`cp_teardown`), don't restart again to look.
-- **`DRAIN:` notices** (drained / timed out / cancelled): before acting on one, check the live `state/drain.json` exists with the same `started_at` the notice names, and whether a `cancelled` notice for that `started_at` is known. A stale one (file gone, other `started_at`, or cancelled) is relayed as one line — no hold, no deferral, no worker stop. The drain GATE refuses new starts; a notice never triggers stopping a worker.
+- **`cp-recovery`**: parent restart lists dead/revivable/orphaned jobs; act on it (`cp_revive`/`cp_teardown`), don't restart again to look. **`DRAIN:` notices** (drained / timed out / cancelled): before acting on one, check the live `state/drain.json` exists with the same `started_at` the notice names, and whether a `cancelled` notice for that `started_at` is known; a stale one is relayed as one line — no hold, no deferral, no worker stop. The drain GATE refuses new starts; a notice never triggers stopping a worker.
 - **`cp-wedged` and `cp-unreported` never describe the same job** — one is
   mid-call, the other is after the fact. Budget breach escalates, never kills
   silently; wall-clock/tool-call caps do kill.
