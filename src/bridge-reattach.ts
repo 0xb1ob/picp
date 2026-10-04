@@ -49,3 +49,28 @@ export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FI
 		},
 	};
 }
+
+/** cp-6fyl A5: an open but silent host socket is probed every 60 s with a 5 s `hello`. */
+export const HOST_PROBE_MS = 60_000;
+export const HOST_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * True when the host answers `hello` within `timeoutMs` and is still the home's current host
+ * (`currentPid()`). False on a timeout, an error or a superseded generation: the caller disconnects
+ * and lets `reattachLoop` find the current host.
+ */
+export async function probeHost(client: { request(op: string): Promise<unknown>; hostPid: number }, currentPid: () => number | undefined, timeoutMs = HOST_PROBE_TIMEOUT_MS): Promise<boolean> {
+	let timer: NodeJS.Timeout | undefined;
+	const expired = new Promise<false>((done) => { timer = setTimeout(() => done(false), timeoutMs); });
+	try {
+		const answered = await Promise.race([client.request("hello").then(() => true, () => false), expired]);
+		if (!answered) return false;
+		try {
+			return currentPid() === client.hostPid;
+		} catch {
+			return true; // an unreadable record is not proof the host was replaced
+		}
+	} finally {
+		clearTimeout(timer);
+	}
+}

@@ -93,7 +93,8 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	};
 	await emit("session_start", ctx);
 	await until("attached to generation 1", () => statuses.some((line) => line.startsWith("cp-parent: attached")));
-	assert.equal(mentions(unseenId), 0, "the first outcome never reached the session");
+	// cp-6fyl A1: the outcome the host relayed before this session attached is in the relay outbox: delivered at attach.
+	await until("the unseen outcome delivered from disk", () => mentions(unseenId) === 1);
 	const sendId = await settledSend("seen"); // relayed to the attached session live, still unobserved by it
 	await until("the live send outcome relayed", () => mentions(sendId) >= 1);
 	// An open escalation the parent raises while attached: relayed live, so the ledger has it before the kill.
@@ -120,7 +121,6 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	await until("reattached", () => statuses.some((line) => line === `cp-parent: reattached (pid ${second.hostPid})`));
 	await until("the new generation's wake", () => mentions("Wake from the new generation") >= 1);
 	await until("the gap escalation", () => mentions(`id=${gap}`) >= 1);
-	await until("the unseen send outcome replayed by host 2", () => mentions(unseenId) >= 1);
 
 	// Escalations: the live relay of the same id races the replay (es-0002) or follows its own earlier live relay (es-0001): still one each.
 	await second.request("send", "REFRESH"); // raises es-0002 live, twice
@@ -128,9 +128,9 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	await sleep(500);
 	assert.equal(mentions(`id=${gap}`), 1, JSON.stringify(messages));
 	assert.equal(mentions(`id=${liveBeforeKill}`), 1, JSON.stringify(messages));
-	// Send outcomes: host 2 re-emits every settled, unobserved one (relaysDue). The unseen one arrives once; the one the session
-	// already saw live (same id) is deduplicated, not shown twice.
-	assert.equal(mentions(unseenId), 1, "the unseen outcome is replayed once");
+	// Send outcomes: host 2 re-emits every settled, unobserved one (relaysDue) into the same relay ids; this session already
+	// holds both (its own emits in this session file), so neither is shown twice.
+	assert.equal(mentions(unseenId), 1, "the outcome delivered at attach is not replayed again");
 	assert.equal(mentions(sendId), 1, "the already-seen outcome is not shown again");
 	assert.equal(statuses.filter((line) => line.startsWith("cp-parent: reattached")).length, 1);
 	assert.equal(currentHost(paths).gen, generation + 1, "no further host generation");

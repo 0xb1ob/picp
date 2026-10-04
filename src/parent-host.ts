@@ -34,7 +34,8 @@ import { createConnection, createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configureLayout, layoutForHome, type Mode } from "./contracts.ts";
-import { type BridgeRelay, CpBridge, CpBridgeError, type ParentStartOptions, type RelayListener } from "./cp-bridge.ts";
+import { type BridgeRelay, CpBridge, CpBridgeError, type ParentStartOptions } from "./cp-bridge.ts";
+import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "./operator-outbox.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { isPidAlive } from "./fleet.ts";
 import { deliverableRelay } from "./relay-scope.ts";
@@ -46,6 +47,10 @@ const HOST_SCRIPT = fileURLToPath(import.meta.url);
 /** Relays kept while no client is subscribed; send outcomes are also durable in the outbox. */
 const RELAY_BACKLOG = 200;
 const MAX_FRAME_CHARS = 1_000_000;
+/** Prune the relay outbox, sweep sends (cp-6fyl B1), confirm acked send outcomes. */
+export const HOST_RELAY_TICK_MS = 60_000;
+/** A host relay frame; `relayId` is absent from a host older than the relay outbox. */
+export type HostRelayListener = (relay: BridgeRelay, relayId?: string) => void;
 /** Linux `sun_path` is 108 bytes including the NUL. */
 const MAX_SOCKET_PATH = 107;
 
@@ -230,13 +235,39 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	const connections = new Set<Socket>();
 	const subscribers = new Set<Socket>();
 	const backlog: BridgeRelay[] = [];
+	// cp-6fyl A1: on disk under a stable id before any frame; the frame is only a poke for a new client.
+	const relayOutbox = new OperatorRelayOutbox(operatorRelayOutboxFile(paths.dir));
+	const relayAcks = new OperatorRelayAcks(operatorRelayAcksFile(paths.dir));
 	bridge.onRelay((relay) => {
+		let relayId: string | undefined;
+		try {
+			relayId = relayOutbox.enqueue(relay, `${process.pid}.${gen}`, relayAcks.fold());
+		} catch (error) {
+			console.error(`parent host ${process.pid}: relay outbox write failed (${(error as Error).message}); framed without an id`);
+		}
 		if (subscribers.size === 0) {
 			backlog.push(relay);
 			if (backlog.length > RELAY_BACKLOG) backlog.shift();
 		}
-		for (const socket of subscribers) frame(socket, { relay });
+		for (const socket of subscribers) frame(socket, { relay, ...(relayId ? { relay_id: relayId } : {}) });
 	});
+	const confirmed = new Set<string>();
+	const relayTick = setInterval(() => {
+		try {
+			const fold = relayAcks.fold();
+			relayOutbox.prune(fold);
+			bridge.sweepSends();
+			// An ack whose socket `observe` was lost still closes the send at owner_observed.
+			for (const id of fold.acked.keys()) {
+				const sendId = /^send:(ps-[^#]+)/.exec(id)?.[1];
+				if (!sendId || confirmed.has(sendId)) continue;
+				if (bridge.confirmObserved(sendId) || bridge.sendReceipt(sendId)?.level === "owner_observed") confirmed.add(sendId);
+			}
+		} catch (error) {
+			console.error(`parent host ${process.pid}: relay tick failed: ${(error as Error).message}`);
+		}
+	}, HOST_RELAY_TICK_MS);
+	relayTick.unref();
 	let queue: Promise<unknown> = Promise.resolve();
 	let stopping = false;
 	const reads: Record<string, (args: unknown[]) => unknown> = {
@@ -299,7 +330,9 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 				result = { pid: process.pid, protocol: PARENT_HOST_PROTOCOL, parent: status.alive ? status.pid : null };
 			} else if (op === "subscribe") {
 				subscribers.add(socket);
-				for (const relay of backlog.splice(0)) {
+				// A client that reads the relay outbox from disk passes `{backlog: false}`: the memory backlog stays for an older one.
+				const backlogWanted = (args[0] as { backlog?: unknown } | undefined)?.backlog !== false;
+				for (const relay of backlogWanted ? backlog.splice(0) : []) {
 					const current = deliverableRelay(home, relay);
 					if (current) frame(socket, { relay: current });
 				}
@@ -365,7 +398,7 @@ export class ParentHostClient {
 	readonly #socket: Socket;
 	readonly #token: string;
 	readonly #pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-	readonly #listeners = new Set<RelayListener>();
+	readonly #listeners = new Set<HostRelayListener>();
 	#seq = 0;
 	/** Resolves when the host closed this connection (or it was disconnected). */
 	readonly closed: Promise<void>;
@@ -413,13 +446,14 @@ export class ParentHostClient {
 	}
 
 	#onFrame(line: string): void {
-		const message = parseFrame(line) as { id?: unknown; ok?: unknown; result?: unknown; error?: unknown; relay?: BridgeRelay } | undefined;
+		const message = parseFrame(line) as { id?: unknown; ok?: unknown; result?: unknown; error?: unknown; relay?: BridgeRelay; relay_id?: unknown } | undefined;
 		if (!message) {
 			this.#socket.destroy(new Error("parent host sent a frame that is not a JSON object"));
 			return;
 		}
 		if (message.relay) {
-			for (const listener of this.#listeners) listener(message.relay);
+			const relayId = typeof message.relay_id === "string" ? message.relay_id : undefined;
+			for (const listener of this.#listeners) listener(message.relay, relayId);
 			return;
 		}
 		const pending = typeof message.id === "number" ? this.#pending.get(message.id) : undefined;
@@ -438,14 +472,19 @@ export class ParentHostClient {
 		});
 	}
 
-	/** Relays from the host; the first listener subscribes and drains the host's backlog. */
-	async onRelay(listener: RelayListener): Promise<void> {
+	/** Relays from the host; the first listener subscribes and drains the host's backlog unless `backlog: false`. */
+	async onRelay(listener: HostRelayListener, options: { backlog?: boolean } = {}): Promise<void> {
 		this.#listeners.add(listener);
-		if (this.#listeners.size === 1) await this.request("subscribe");
+		if (this.#listeners.size === 1) await this.request("subscribe", ...(options.backlog === false ? [{ backlog: false }] : []));
 	}
 
 	disconnect(): void {
 		this.#socket.end();
+	}
+
+	/** A host that stopped answering (cp-6fyl A5): close now, never waiting for its FIN. */
+	abandon(): void {
+		this.#socket.destroy();
 	}
 }
 

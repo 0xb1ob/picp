@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
+import type { BridgeRelay } from "../src/cp-bridge.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
 import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText } from "../src/parent-outbox.ts";
 import { OUTER_RETRY_DELAYS_MS } from "../src/provider-retry.ts";
@@ -20,7 +21,7 @@ function scripted() {
 	const calls: Array<[string | undefined, string | undefined]> = [];
 	const counted: boolean[] = [];
 	const slept: number[] = [];
-	const relays: Array<{ sendId: string; text: string }> = [];
+	const relays: BridgeRelay[] = [];
 	let answer: (value: { entries: unknown[]; dropped: number }) => void = () => undefined;
 	const proc = {
 		busy: false,
@@ -412,7 +413,7 @@ function laddered(spent = 0) {
 	const sleeps: Array<{ ms: number; release: () => void }> = [];
 	const host = {
 		liveProc: () => ctx.proc,
-		emit: (relay: { sendId: string; text: string }) => ctx.relays.push(relay),
+		emit: (relay: BridgeRelay) => ctx.relays.push(relay),
 		sleep: (ms: number) => new Promise<void>((resolve) => sleeps.push({ ms, release: resolve })),
 		journal: (event: string, payload: Record<string, unknown>) => journal.push({ event, payload }),
 		countTurn: (failed: boolean) => ctx.counted.push(failed),
@@ -505,4 +506,60 @@ test("a reservation that cannot be written is named, schedules no retry and fail
 	assert.deepEqual(ctx.journal.map((line) => line.event), ["outer_retry_reservation_failed"]);
 	assert.equal(ctx.journal[0]?.payload.send_id, ctx.entry.id);
 	assert.deepEqual(ctx.counted, [true], "failed once, volatile retrying never takes over");
+});
+
+/** cp-6fyl B1: a delivery on a movable clock whose parent may be dead (`proc` undefined). */
+function swept(proc?: WorkerProcess) {
+	let now = new Date("2030-01-01T00:00:00Z");
+	const box = new ParentSendOutbox({ file: parentSendFile(join(mkdtempSync(join(tmpdir(), "parent-sweep-")), "cp-parent.jsonl")), now: () => now });
+	const relays: BridgeRelay[] = [];
+	const delivery = new ParentDelivery(box, { liveProc: () => proc, emit: (relay) => relays.push(relay), sleep: async () => undefined, journal: () => undefined, countTurn: () => undefined });
+	return { box, relays, delivery, advance: (ms: number) => (now = new Date(now.getTime() + ms)), now: () => now };
+}
+
+test("sweep with no live parent expires a 25 h queued send and relays it undeliverable", () => {
+	const ctx = swept();
+	const entry = ctx.box.enqueue("old");
+	ctx.advance(25 * 3_600_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.box.get(entry.id)?.state, "undeliverable");
+	const outcome = ctx.relays.find((relay) => relay.kind === "send");
+	assert.equal(outcome?.sendId, entry.id);
+	assert.match(outcome?.text ?? "", /was not delivered \(stale: queued/);
+});
+
+test("a send open past 600 s gets exactly one notice, persisted as pending_notice_at", () => {
+	const ctx = swept();
+	const entry = ctx.box.enqueue("slow");
+	ctx.advance(599_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.relays.length, 0, "not yet overdue at 599 s");
+	ctx.advance(2_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.relays.length, 1);
+	assert.equal(ctx.relays[0]?.kind, "error");
+	assert.match(ctx.relays[0]?.text ?? "", new RegExp(`send ${entry.id} still queued after 10 min: parent not running`));
+	assert.ok(ctx.box.get(entry.id)?.pending_notice_at);
+	ctx.advance(60_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.relays.length, 1, "a second sweep emits nothing");
+	assert.equal(ctx.box.markPendingNotice(entry.id), false, "idempotent");
+});
+
+test("a landed send with no reply 24 h after landing ends undeliverable; stop retires a landed send", () => {
+	const ctx = swept();
+	const late = ctx.box.enqueue("late");
+	ctx.box.markInjected([late.id]);
+	ctx.box.markLanded([late.id]);
+	ctx.advance(24 * 3_600_000 + 1_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.box.get(late.id)?.state, "undeliverable");
+	assert.match(ctx.box.get(late.id)?.error ?? "", /no reply within 24 h of landing/);
+	const stopped = ctx.box.enqueue("stopped");
+	ctx.box.markInjected([stopped.id]);
+	ctx.box.markLanded([stopped.id]);
+	ctx.delivery.discardUnlanded("parent stopped by the operator");
+	assert.equal(ctx.box.get(stopped.id)?.state, "undeliverable");
+	assert.equal(ctx.box.get(stopped.id)?.error, "parent stopped before replying");
+	assert.ok(ctx.relays.some((relay) => relay.sendId === stopped.id));
 });

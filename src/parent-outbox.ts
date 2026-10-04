@@ -78,6 +78,8 @@ export const ParentSendEntrySchema = Type.Object(
 		relayed_at: Type.Optional(IsoTimestampSchema),
 		relay_owner: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
 		owner_observed_at: Type.Optional(IsoTimestampSchema),
+		/** The one "still pending after 10 min" notice was relayed (cp-6fyl B1). */
+		pending_notice_at: Type.Optional(IsoTimestampSchema),
 	},
 	{ additionalProperties: false },
 );
@@ -582,5 +584,24 @@ export class ParentSendOutbox {
 		return this.list().filter(
 			(entry) => TERMINAL.includes(entry.state) && !entry.owner_observed_at && entry.relay_owner !== this.#owner,
 		);
+	}
+
+	/** Non-terminal sends queued more than `seconds` ago with no pending notice yet. */
+	overdue(seconds: number, now: Date = this.#now()): ParentSendEntry[] {
+		return this.list().filter((entry) => !TERMINAL.includes(entry.state) && !entry.pending_notice_at && now.getTime() - Date.parse(entry.queued_at) > seconds * 1_000);
+	}
+
+	/** Records the one pending notice; false (nothing written) when it is already recorded or the send is terminal. */
+	markPendingNotice(id: string): boolean {
+		if (this.get(id)?.pending_notice_at) return false;
+		const at = isoTimestamp(this.#now());
+		return this.#update([id], ["queued", "injected", "landed"], (entry) => {
+			entry.pending_notice_at = at;
+		}).length > 0;
+	}
+
+	/** `landed` sends whose landing is more than `hours` old: no reply is coming. */
+	landedOlderThan(hours: number, now: Date = this.#now()): ParentSendEntry[] {
+		return this.list().filter((entry) => entry.state === "landed" && now.getTime() - Date.parse(entry.landed_at ?? entry.queued_at) > hours * 3_600_000);
 	}
 }
