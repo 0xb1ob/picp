@@ -1614,3 +1614,37 @@ test("an alternate-kind (merge) linked checkpoint answered through the escalatio
 		home.cleanup();
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Self-answers do not echo
+// ---------------------------------------------------------------------------
+
+test("the parent's own answers (operator-quote, operator-delegated, mandate:) record but queue and wake nothing; another channel still wakes; a restart replays nothing", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const checkpoints = parent.post.pipeline().checkpoints;
+		const selfBy = ["operator-quote", "operator-delegated", "mandate:md-synth1"];
+		for (const [index, by] of selfBy.entries()) {
+			checkpoints.request({ jobId: `cp-self${index}`, question: "ship?" });
+			checkpoints.decide(`cp-self${index}`, true, { by });
+			assert.equal(checkpoints.get(`cp-self${index}`)?.decision, "approved", `${by}: the answer is still recorded`);
+		}
+		const raised = await parent.post.escalations.raise({ job_ids: ["cp-synth1"], kind: "product_ambiguity", question: "which copy?", options: ESC_OPTIONS, recommended: "approve" });
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator-quote" });
+		assert.equal(parent.post.escalations.get(raised.id)?.status, "answered", "the escalation record is kept");
+		assert.deepEqual(parent.sent, [], "no wake for the parent's own answers");
+		assert.deepEqual(parent.post.answered.pending(), [], "and nothing queued");
+		assert.equal(existsSync(join(home.path, LAYOUT.answeredFile)), false, "no outbox file at all");
+
+		checkpoints.request({ jobId: "cp-other", question: "ship?" });
+		checkpoints.decide("cp-other", true, { by: "operator command" });
+		assert.deepEqual(flat(parent.sent).map((decision) => decision.job_id), ["cp-other"], "another channel still wakes");
+
+		const restarted = parentOn(home.path);
+		assert.deepEqual(restarted.post.drainAnswered(() => assert.fail("a restart must replay nothing")), []);
+		assert.deepEqual(restarted.post.answered.pending(), []);
+	} finally {
+		home.cleanup();
+	}
+});

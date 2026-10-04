@@ -133,6 +133,15 @@
  * `enqueue` refuses an id that is already pending or already delivered, so
  * "answering twice must not wake twice" holds even if a caller retries.
  *
+ * ## Self-answers do not echo
+ *
+ * The parent's own decisions — `answered_by` exactly `operator-quote`, exactly
+ * `operator-delegated`, or starting with `mandate:` (`isSelfAnswered`) — are recorded by
+ * their writers as always, but `CommandPost.#recordAnswered` neither enqueues them nor fires
+ * the `onAnswered` wake: the parent that made the call does not need a `cp-answered` turn to
+ * learn it. Every other `answered_by` (a `/cp-decide` or dialog answer by a human) is
+ * queued and woken exactly as above. Nothing is queued, so nothing is replayed on restart.
+ *
  * Skip is not an answer: it writes nothing, anywhere, so nothing is enqueued
  * and nobody is woken. Skip never reaches a writer, so this
  * module simply never hears about it.
@@ -574,6 +583,15 @@ function noticeText(content: unknown): string {
 	return content
 		.map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : ""))
 		.join("\n");
+}
+
+/**
+ * The parent's own act: `operator-quote` / `operator-delegated` (its `cp_decide` with a quote) or
+ * `mandate:<id>` (its grant's auto-decision). The answer is recorded, but it is never echoed back
+ * to the parent as a `cp-answered` wake.
+ */
+export function isSelfAnswered(answeredBy: string): boolean {
+	return answeredBy === "operator-quote" || answeredBy === "operator-delegated" || answeredBy.startsWith("mandate:");
 }
 
 /** `by: mandate:<id>` is a mandate's auto-decision, never a human's answer. */

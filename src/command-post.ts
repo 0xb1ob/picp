@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AnswerCardOutbox, type AnswerCardDueOptions, type AnswerCardSink } from "./answer-delivery.ts";
-import { AnsweredOutbox } from "./answered.ts";
+import { AnsweredOutbox, isSelfAnswered } from "./answered.ts";
 import { boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
 import { observeMandateUsage } from "./mandate-usage.ts";
 import { ArtifactStore } from "./artifacts.ts";
@@ -878,6 +878,7 @@ export class CommandPost {
 	 * to "delivered on the next drain" rather than to a lost decision.
 	 */
 	#recordAnswered(decision: AnsweredDecision): void {
+		if (isSelfAnswered(decision.answered_by)) return;
 		try {
 			this.answered.enqueue(decision);
 		} catch {

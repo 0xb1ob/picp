@@ -3918,8 +3918,8 @@ failures, next job, merge when the repository permits, bounded recovery, a
 token-cap raise within the ceiling (`cp_mandate raise_tokens`, journaled).
 
 Auto-decision: when a checkpoint is minted and evaluation permits, `decide()`
-runs with `decided_by: mandate:<id>` and the clause in `note`; the existing
-`cp-answered` wake-up fires. `cp_mandate show` lists every auto-decision.
+runs with `decided_by: mandate:<id>` and the clause in `note`,
+and no `cp-answered` wake-up fires (a self-answer, see §An answer wakes the parent). `cp_mandate show` lists every auto-decision.
 Expiry/revoke: no new auto-decisions (except an expired grant's diff/merge for an in-flight job, see
 *one permission rule*); workers are not killed. Merge authority
 stays the repository's — the mandate may only allow the parent to proceed when
@@ -5060,6 +5060,16 @@ made is still an emission, and a restart that forgets it is a restart that
 repeats it. Both writers report only an answer they actually recorded (an
 idempotent repeat returns early), and `enqueue` refuses an id that is already
 pending or delivered: answering twice never wakes twice.
+
+**Self-answers do not echo.** The parent's own decisions are recorded by their
+writers as always, but `CommandPost.#recordAnswered` neither enqueues them nor
+fires `onAnswered` when `answered_by` is exactly `operator-quote`, exactly
+`operator-delegated`, or starts with `mandate:` (`isSelfAnswered`,
+`src/answered.ts`): the parent that made the call needs no `cp-answered` turn to
+learn it. Every other `answered_by` (a `/cp-decide` or dialog answer by a human)
+queues and wakes exactly as above. The escalation, awaiting and checkpoint
+records are untouched, nothing is queued, so a restart replays nothing
+(`tests/answered.test.ts`).
 
 **Skip still writes nothing and wakes nobody.** It never reaches a writer, so
 there is nothing to queue — `state/answered.json` may not even exist afterwards.
