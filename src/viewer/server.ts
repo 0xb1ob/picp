@@ -7,11 +7,12 @@
  * to the operator's own running session over its owner-only control socket (or, with no session running,
  * holds it in `state/operator/inbox.jsonl`) and journals every refusal to `state/operator/dashboard.jsonl`
  * (control-api.ts); `POST /api/operator/start` runs the fixed `<tmux> new-session -d -s cp-operator <wrapper>` (or a herdr workspace);
- * `POST /api/schedules/request` (with its status `GET /api/schedules/control`) journals one Schedules page request.
+ * `POST /api/schedules/request` (with its status `GET /api/schedules/control`) journals one Schedules page request;
+ * `POST /api/answers/ack` (with its status `GET /api/answers/control`) appends one `acked` line to `state/operator/answers.jsonl`.
  * The one request that reaches the parent does so only as a line in `state/schedule-control.jsonl`, which the
  * parent reads. Every route answers only
  * its own bind Host; the operator's own Full transcript
- * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes and both schedule-control routes are
+ * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes and both answers routes are
  * served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  */
 
@@ -33,7 +34,7 @@ import { gitView, jobRoot, listOrRead, roots, safePatch } from "./explorer.ts";
 import { dashboard, jobDetail } from "./fleet-view.ts";
 import { sidebar, type ViewerState } from "./sessions.ts";
 import { handlePushSubscription, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, pushStatus } from "./push-api.ts";
-import { CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
+import { ANSWER_ACK_PATH, ANSWERS_CONTROL_PATH, CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleAnswerAck, handleAnswersControlStatus, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
@@ -139,8 +140,8 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		return;
 	}
 	const requestPath = (req.url ?? "/").split("?")[0];
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === SCHEDULE_CONTROL_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : handleOperatorStart(req, options))
 			.then((out) => sendJson(res, out.status, out.body, out.headers))
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -195,6 +196,11 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			return;
 		case SCHEDULE_CONTROL_STATUS_PATH: {
 			const out = handleScheduleControlStatus(req, options);
+			sendJson(res, out.status, out.body, out.headers);
+			return;
+		}
+		case ANSWERS_CONTROL_PATH: {
+			const out = handleAnswersControlStatus(req, options);
 			sendJson(res, out.status, out.body, out.headers);
 			return;
 		}

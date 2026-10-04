@@ -5,10 +5,10 @@ viewer, its boards sidebar and HTML transcript stream have been removed;
 `/classic` and `/classic/` return 404. JSON APIs and published `/boards/`
 artifacts remain available. This is a read-only operational viewer, never an
 authority or decision endpoint. Decisions still go through the operator chat.
-Its writes are a browser's own Web Push subscription (see Web Push below) and,
-under `--require-tailnet`, one message into the operator's own running session
-with its audit line (see Dashboard control below) — a message is exactly what
-the human could type in that chat, never an authorization.
+Its writes are a browser's own Web Push subscription (see Web Push below), under `--require-tailnet`
+one message into the operator's own running session with its audit line (see Dashboard control below) — a message is
+exactly what the human could type in that chat, never an authorization — and an Answers acknowledgement, one `acked`
+line in `state/operator/answers.jsonl` that reaches no session and no parent and is not a decision.
 
 ## Build And Security
 
@@ -31,8 +31,8 @@ names cannot read disk. Old hashed files may remain for ordinary home cleanup.
 Only this trusted startup/build command writes generated output. Requests never
 write operational state (the request-time writes are a device's Web Push
 subscription under `data/push/subscriptions/`, the dashboard-control audit line in
-`state/operator/dashboard.jsonl` and a Schedules page `request` line in `state/schedule-control.jsonl`, which the
-parent reads), contact a gateway, invoke policy stores, probe process
+`state/operator/dashboard.jsonl`, a Schedules page `request` line in `state/schedule-control.jsonl`, which the
+parent reads, and an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard), contact a gateway, invoke policy stores, probe process
 liveness or communicate with a parent or worker (dashboard control talks only to the
 operator's own session, over its owner-only socket). Build failure is logged to
 stderr and `/` returns a generic 503 without paths, stack traces or a classic
@@ -50,7 +50,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
 loosened. The separate published-board policy still forbids scripts. Host binding,
-GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message` and `POST /api/schedules/request`) and explorer
+GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request` and `POST /api/answers/ack`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
 ## Routes
@@ -58,7 +58,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Entry | Destination |
 | --- | --- |
 | Overview / More | `#overview` / `#more` |
-| Decisions | `#decisions`; `#awaiting` and `#decided` open it scrolled to its Awaiting you and Decided sections |
+| Decisions | `#decisions`; `#awaiting`, `#answers` and `#decided` open it scrolled to its Awaiting you, Answers to acknowledge and Decided sections |
 | Sessions | `#sessions?view=you`, `#sessions?view=you&transcript=1&session=<file-id>`, `#sessions?view=parent`, `#sessions?view=workers&id=<id>` |
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Reports / Schedules / Files | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` |
@@ -66,6 +66,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
+| Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
 
 Native `hashchange` drives routing, including Back/Forward. Empty, malformed and
 unknown fragments show Overview. Legacy root session, files and dashboard hashes
@@ -332,6 +333,17 @@ latest request's state under them. A click is one `POST /api/schedules/request` 
 `#sessions?view=you&transcript=1&draft=…`: the composer starts with that draft (it never reaches the API). The
 buttons wrap (`.schedule-controls`, flex-wrap) at 390 px and sit in the card grid at 1440 px; long reasons wrap with
 the card (`overflow-wrap: anywhere`).
+
+**Answers to acknowledge** (cp-mxk4, docs/contracts.md §Answers to acknowledge). `screens/Answers.tsx` renders
+`answers` from `/api/decisions` as a section between Awaiting you and Being handled (`#answers`); it is absent while no
+journal exists. A row is the `[project]` tag, the time, the job and `read` links, the question (3-line clamp, the whole text
+as its title), the short answer, the **Full answer** expander (`white-space: pre-wrap`; only `http(s)` URLs and resolved
+local paths become links), the evidence list and a 44 px **✓ Acknowledge** button. The tick is one `POST /api/answers/ack`
+`{id}` with the `x-cp-control-token` header (`answers-control.ts`, `use-answers-control.ts`); the row hides at once and
+moves to the collapsed **Acknowledged · N** history (read-only). Disabled, with the reason line, unless control is on. It
+sends nothing to the operator session or the parent and never pushes. `screens/answers.css` uses only palette tokens
+(light and dark), no inline styles; rows wrap and long text breaks (`overflow-wrap: anywhere`) at 390 px and sit in the
+page column at 1440 px.
 
 ## Live Data
 
