@@ -164,6 +164,17 @@ export function jobCapRefuses(mandate: Mandate, jobId: string, jobs: readonly Ma
 	return mandateSpend(mandate, matched).jobs >= mandate.job_cap && !matched.some((job) => job.job_id === jobId);
 }
 
+/**
+ * Warning for a fresh project-wide grant (no `job_ids`): `mandateSpend` counts every job in its projects dispatched
+ * after issue, including jobs another active mandate covers, so those fill its job cap too. Undefined for a named or schedule grant.
+ */
+export function projectWideCapWarning(mandate: Mandate, all: readonly Mandate[], now: string): string | undefined {
+	if (mandate.job_ids?.length || mandate.schedule_grant) return undefined;
+	const others = all.filter((other) => other.id !== mandate.id && isActive(other, now) && other.projects.some((project) => mandate.projects.includes(project))).map((other) => other.id);
+	const shared = others.length ? `, including jobs covered by ${others.join(", ")}` : "";
+	return `warning: ${mandate.id} is project-wide, so its job cap ${mandate.job_cap} counts every job dispatched in ${mandate.projects.join(", ")} while it stands${shared}; prefer a named-jobs grant (job_ids) with home-default bounds`;
+}
+
 /** Why `mandate` cannot take a tracker import (B4) into `project`/`kind`: only an active, uncapped named-jobs (batch) grant can. */
 export function batchRefusal(mandate: Mandate | undefined, id: string, job: { project: string; kind: JobKind }, jobs: readonly MandateUsageJob[], now: string): string | undefined {
 	if (!mandate) return `no mandate ${id}`;

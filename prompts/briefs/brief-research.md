@@ -32,6 +32,8 @@ You may not: change any file in this repository, commit, push, open a PR, run
 is yours alone to do. Never kill a process by name or pattern (no `pkill`,
 `killall`, `kill -f`) — kill only a PID you started yourself.
 
+**Agent isolation.** A run of pi or any agent that your investigation needs gets a throwaway agent directory, never `~/.pi` or the installed home, which stay unchanged. Copy only `models.json` into it by default; add authentication only when the run truly needs it. Create it outside the worktree with `mktemp -d` (mode `0700`; the one place besides the artifact you may write) and remove it in a `trap ... EXIT` or `finally`. Name that temp path and its cleanup in the artifact, and never print a credential you come across.
+
 **A written artifact is not delivery.** `report_result` is the only channel
 between you and the operator: the parent sleeps until an envelope arrives and
 polls nothing, so until you call it your artifact is a file nobody knows

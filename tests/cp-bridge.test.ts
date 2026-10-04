@@ -423,6 +423,8 @@ test("standing orders seed once, survive operator edits, and deliver beyond 8000
 	const seeded = readFileSync(standingOrdersFile(home.path), "utf8");
 	assert.match(seeded, /^# Standing orders/);
 	assert.doesNotMatch(seeded, /wall_clock_seconds|gpt-6-sol|gpt-6.1-sol|hold new work/);
+	assert.match(seeded, /review only on a green pushed head, and merge only that reviewed head[^]*conflict-resolved/i);
+	assert.match(seeded, /state transitions or merge gating goes planner-first/);
 	const edited = `${seeded}\n${"x".repeat(8000)}\nLAST ORDER`;
 	writeFileSync(standingOrdersFile(home.path), edited);
 	assert.equal(deliverStandingOrders(send, home.path), true);

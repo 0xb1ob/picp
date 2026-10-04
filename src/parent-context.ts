@@ -20,7 +20,11 @@ const DEFAULT_STANDING_ORDERS = `# Standing orders
 - While editing, run npm run test:one -- tests/<x>.test.ts and npm run typecheck; never run the full npm test locally (CI is the gate). Push after every commit.
 - A CI-speed timeout raise is acceptable; keep the 5000 ms floor.
 
+## Planning
+- A bead with state transitions or merge gating goes planner-first.
+
 ## Review and merge
+- Start review only on a green pushed head, and merge only that reviewed head. This holds for updated and conflict-resolved heads too.
 - Merge when CI is green and review has passed; check verdicts at their due time.
 - If server-side rebase fails, have the worker make a plain merge of origin/main and push.
 - A cp_decide quote must be one complete operator sentence, verbatim, ending with punctuation.
