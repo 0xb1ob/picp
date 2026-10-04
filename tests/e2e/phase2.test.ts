@@ -548,8 +548,15 @@ test("m2: a budget breach escalates and the worker survives", { skip: SKIP, time
 
 	// A budget breach escalates to the operator; it never severs the channel
 	// (cp-d7y) — the send still reaches the worker.
+	// The worker settled without a report, so the parent nudges it once (cp-settle-without-report)
+	// and that second run races a bare prompt ("Agent is already processing"): let the nudge run settle.
+	await waitFor(
+		() => f.post.manager.get(jobId)?.worker.settledCount ?? 0,
+		(count) => count >= 2,
+		{ timeoutMs: 60_000, what: "the report nudge's run to settle" },
+	);
 	const sent = await f.post.send({ jobId, message: "keep going" });
-	assert.equal(sent.receipt, "delivered", "a breach escalates; it does not block delivery");
+	assert.equal(sent.receipt, "delivered", `a breach escalates; it does not block delivery ${JSON.stringify(sent)}`);
 	assert.equal(sent.budget?.state, "exceeded", `ratio ${sent.budget?.ratio}`);
 	assert.equal(f.post.manager.get(jobId)?.worker.alive, true, "escalation never kills a worker");
 	const markers = readEventLog(f.home, jobId)
