@@ -1309,6 +1309,18 @@ not a parent wake and never authorization. An unreadable ledger or store sets
 the `escalation-backstop` status line and relays nothing. Two edges are
 accepted: the ledger is claimed before the push, so a session that dies in
 between loses that one relay; two operator sessions on one home can both relay.
+**Direct host relay** ([`src/escalation-relay-watch.ts`](../src/escalation-relay-watch.ts)).
+An escalation raised by code (`raiseRiskHigh`, `raiseForGate`, `raiseMissionEnd`, …) has no
+`cp_escalate` relay, so the parent host (the single writer of `relay-outbox.json`) checks every
+`HOST_ESCALATION_TICK_MS` (10 s) for escalations open longer than a 10 s grace that no open
+operator ask represents, that are not in the escalation-relay ledger, and of which the outbox
+holds no `esc:<id>` or `esc:<id>#n` entry, and enqueues each as `esc:<id>`, text
+`<id> (<kind>) — <question>`, so it reaches the main session within about 20 s through the same
+outbox, ack and open-at-delivery recheck as any relay, at most once (the outbox entry is the
+idempotence key, so a host restart adds nothing). The host only reads the ledger and store;
+the operator consumer notes `bridge` in the ledger on delivery. The 600 s backstop above is
+unchanged and still relays anything never delivered. A store, ledger or outbox read failure is
+a `parent-host.log` line and the next tick retries. `service_health` has no grace.
 A `wake` whose stamped job ids (wake-up stamps, and a `cp-schedule` fire
 message's `details.job_id`) are all scheduled jobs (ledger label
 `schedule:<id>`) is not relayed: scheduled jobs are independent jobs, and their

@@ -9,10 +9,11 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import bridgeExtension from "../extensions/cp-bridge/index.ts";
 import { probeHost } from "../src/bridge-reattach.ts";
-import { layoutForHome } from "../src/contracts.ts";
+import { layoutForHome, SCHEMA_VERSION } from "../src/contracts.ts";
 import { isPidAlive } from "../src/fleet.ts";
-import { OperatorRelayAcks, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
+import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { attachParentHost, currentHost, ParentHostClient, parentHostPaths } from "../src/parent-host.ts";
+import { EscalationStore, raiseForGate } from "../src/escalation.ts";
 import { createScratchHome } from "./harness/index.ts";
 import "./harness/fake-parent-tracker.ts";
 
@@ -113,6 +114,24 @@ test("a wake relayed with no operator attached survives a host SIGKILL and enter
 	await b.start();
 	await sleep(500);
 	assert.equal(b.sent.filter((message) => message.content.includes("Wake while nobody listened")).length, 0, "acked: a new session never sees it again");
+});
+
+test("PR1: a code-raised escalation reaches the relay outbox from the real host within ~25 s, as one esc:<id> entry", { timeout: 180_000 }, async (t) => {
+	const { home, state } = scratch(t);
+	const raised = await raiseForGate(new EscalationStore({ home: home.path }), {
+		schema_version: SCHEMA_VERSION, job_id: "cp-gjva", attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["conflicting acceptance"], revisions: [], model: "mock/one", decided_at: new Date().toISOString(),
+	});
+	assert.ok(raised);
+	const client = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+	t.after(() => client.disconnect());
+	const begin = Date.now();
+	const entries = () => { try { return new OperatorRelayOutbox(operatorRelayOutboxFile(state)).read().entries.filter((entry) => entry.id === `esc:${raised.id}`); } catch { return []; } };
+	await until("the escalation is in the relay outbox", () => entries().length > 0, 40_000);
+	assert.ok(Date.now() - begin < 25_000, `relayed in ${Date.now() - begin} ms`);
+	assert.equal(entries().length, 1);
+	assert.match(entries()[0]?.relay.text ?? "", new RegExp(`${raised.id} \\(conflicting_acceptance\\)`));
 });
 
 test("I1: a relay whose outbox write failed while nobody listened still reaches a {backlog:false} subscriber, id-less", { timeout: 180_000 }, async (t) => {
