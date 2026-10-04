@@ -34,10 +34,10 @@ export function handleOperatorRestart(req: IncomingMessage, options: ControlRout
 		const reply = await controlRequest(record.record, "restart", { peer });
 		if (reply.ok) return { status: 202, body: reply.result as OperatorRestartResponse };
 		start.restartAt = previous;
-		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
+		// The bridge journals its own request/outcome once the frame reached it; transport failures are ours.
 		if (reply.status === 503 || reply.status === 504) return refuse(reply.status, reply.error);
-		// An older cp-bridge has no restart op: the same unsupported answer, with the manual way.
-		if (reply.status === 400 && /^unknown op/.test(reply.error)) return { status: 409, body: { state: "refused", error: `unsupported: ${RESTART_PREDATES}` } };
+		// An older cp-bridge has no restart op and journals nothing for it: our refused line is the only record.
+		if (reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, `unsupported: ${RESTART_PREDATES}`, undefined, { state: "refused" });
 		return { status: reply.status, body: { state: "refused", error: reply.error } };
 	});
 }

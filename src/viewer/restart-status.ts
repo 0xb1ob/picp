@@ -5,7 +5,7 @@
 import type { RestartStatus } from "./api-types.ts";
 
 export const OPERATOR_RESTART_PATH = "/api/operator/restart";
-/** At most one restart frame per 60 s per viewer. */
+/** At most one accepted restart per 60 s per viewer (a refused frame frees the window). */
 export const OPERATOR_RESTART_WINDOW_MS = 60_000;
 export const RESTART_PREDATES = "this session's cp-bridge predates Restart session; restart it once by hand: /quit, then cp-operator -c";
 

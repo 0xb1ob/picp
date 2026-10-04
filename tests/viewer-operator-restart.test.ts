@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { type AddressInfo, createServer } from "node:net";
 import { dirname, join } from "node:path";
@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
 import { type ControlPorts, type DashboardControl, startDashboardControl } from "../src/dashboard-control.ts";
 import { RESTART_UNSUPPORTED } from "../src/dashboard-restart.ts";
-import { controlRecordFile, controlSocketFile, readControlRecord } from "../src/viewer/control-files.ts";
+import { controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord } from "../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
 import { OPERATOR_RESTART_PATH, RESTART_PREDATES } from "../src/viewer/restart-status.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
@@ -21,6 +21,7 @@ import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const ORIGIN = "https://cp.example.ts.net";
 const put = (file: string, text: string) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); };
+const journal = (stateDir: string): Array<Record<string, unknown>> => existsSync(controlJournalFile(stateDir)) ? readFileSync(controlJournalFile(stateDir), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: Record<string, unknown> }
 function call(port: number, path: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<Reply> {
@@ -64,34 +65,52 @@ async function bridge(t: import("node:test").TestContext, stateDir: string, port
 	return (record as { record: { csrf: string } }).record.csrf;
 }
 
-test("restart route: body, offline, token in order; the bridge's refusal passes through and leaves the 60 s window free; accepted is 202, then 429 with retry-after", async (t) => {
+/** Runs one call and returns what it appended to the audit journal (a refused line is the viewer's; request/outcome the bridge's). */
+async function journaled(stateDir: string, send: () => Promise<Reply>): Promise<{ reply: Reply; lines: Array<Record<string, unknown>> }> {
+	const before = journal(stateDir).length;
+	const reply = await send();
+	return { reply, lines: journal(stateDir).slice(before) };
+}
+/** Exactly one viewer `refused` line, kind restart, carrying the reply's status and reason. */
+function oneRefused(result: { reply: Reply; lines: Array<Record<string, unknown>> }, status: number, label: string): void {
+	assert.equal(result.reply.status, status, `${label}: ${JSON.stringify(result.reply.body)}`);
+	assert.deepEqual(result.lines.map((line) => [line.type, line.by, line.kind, line.status, line.reason]), [["refused", "viewer", "restart", status, result.reply.body.error]], label);
+}
+
+test("restart route: body, offline, token in order; the bridge's refusal passes through and leaves the 60 s window free; accepted is 202, then 429 with retry-after; each viewer refusal is one refused line", async (t) => {
 	const { stateDir, session, port } = await setup(t);
-	const offline = await call(port, OPERATOR_RESTART_PATH, post("x".repeat(64), { restart: true }));
-	assert.deepEqual([offline.status, offline.body.state], [409, "offline"]);
+	const restart = (token: string | null, body: unknown = { restart: true }) => () => call(port, OPERATOR_RESTART_PATH, post(token, body));
+	const offline = await journaled(stateDir, restart("x".repeat(64)));
+	oneRefused(offline, 409, "offline");
+	assert.equal(offline.reply.body.state, "offline");
 
 	const state = { idle: false, shutdowns: 0 };
 	const csrf = await bridge(t, stateDir, {
 		inject: () => {}, abort: () => {}, isIdle: () => state.idle, hasPendingMessages: () => false, sessionFile: () => session,
 		shutdown: () => { state.shutdowns += 1; }, relaunchFile: () => join(stateDir, "operator", "relaunch.json"), parentSends: () => ({ ids: [], error: null }),
 	});
-	for (const body of [{}, { restart: "yes" }, { restart: true, extra: 1 }, "[]"]) assert.equal((await call(port, OPERATOR_RESTART_PATH, post(csrf, body))).status, 400, JSON.stringify(body));
-	assert.equal((await call(port, OPERATOR_RESTART_PATH, post(null, { restart: true }))).status, 403);
-	assert.equal((await call(port, OPERATOR_RESTART_PATH, post("0".repeat(64), { restart: true }))).status, 403);
-	assert.equal((await call(port, OPERATOR_RESTART_PATH, { method: "GET" })).status, 405);
+	for (const body of [{}, { restart: "yes" }, { restart: true, extra: 1 }, "[]"]) oneRefused(await journaled(stateDir, restart(csrf, body)), 400, JSON.stringify(body));
+	oneRefused(await journaled(stateDir, restart(null)), 403, "no token");
+	oneRefused(await journaled(stateDir, restart("0".repeat(64))), 403, "stale token");
+	const get = await journaled(stateDir, () => call(port, OPERATOR_RESTART_PATH, { method: "GET" }));
+	assert.equal(get.reply.status, 405);
+	assert.deepEqual(get.lines, [], "the method check precedes the journal, as for every control route");
 
 	const status = await call(port, "/api/operator/control");
 	assert.deepEqual(status.body.restart, { supported: true, blockers: ["the session is busy with a turn"], reason: "not now: the session is busy with a turn" });
 	assert.equal(typeof status.body.session_started_at, "string", "the page tells a relaunched session from the old one");
 
-	const busy = await call(port, OPERATOR_RESTART_PATH, post(csrf, { restart: true }));
-	assert.deepEqual([busy.status, busy.body], [409, { state: "refused", error: "not now: the session is busy with a turn" }]);
+	const busy = await journaled(stateDir, restart(csrf));
+	assert.deepEqual([busy.reply.status, busy.reply.body], [409, { state: "refused", error: "not now: the session is busy with a turn" }]);
+	assert.deepEqual(busy.lines.map((line) => [line.type, line.by, line.kind ?? line.state]), [["request", "bridge", "restart"], ["outcome", "bridge", "refused"]], "the bridge journals its own refusal; the viewer adds no second line");
 	state.idle = true;
-	const accepted = await call(port, OPERATOR_RESTART_PATH, post(csrf, { restart: true }));
-	assert.equal(accepted.status, 202, JSON.stringify(accepted.body));
-	assert.deepEqual({ ...accepted.body, id: undefined }, { state: "restarting", id: undefined, session_file: "2026-01-01T00-00-00-000Z_0123abcd.jsonl" });
-	const again = await call(port, OPERATOR_RESTART_PATH, post(csrf, { restart: true }));
-	assert.equal(again.status, 429);
-	assert.match(String(again.headers["retry-after"]), /^\d+$/);
+	const accepted = await journaled(stateDir, restart(csrf));
+	assert.equal(accepted.reply.status, 202, JSON.stringify(accepted.reply.body));
+	assert.deepEqual({ ...accepted.reply.body, id: undefined }, { state: "restarting", id: undefined, session_file: "2026-01-01T00-00-00-000Z_0123abcd.jsonl" });
+	assert.deepEqual(accepted.lines.map((line) => [line.type, line.kind ?? line.state]), [["request", "restart"], ["outcome", "restarting"]]);
+	const again = await journaled(stateDir, restart(csrf));
+	oneRefused(again, 429, "second restart within 60 s");
+	assert.match(String(again.reply.headers["retry-after"]), /^\d+$/);
 	await new Promise((done) => setTimeout(done, 150));
 	assert.equal(state.shutdowns, 1, "one accepted restart, one shutdown");
 });
@@ -118,8 +137,9 @@ test("restart route: an older bridge answering `unknown op restart` is 409 unsup
 	await new Promise<void>((resolve) => old.listen(socketFile, resolve));
 	t.after(() => old.close());
 	put(controlRecordFile(stateDir), JSON.stringify({ version: 1, pid: process.pid, socket: socketFile, token, csrf, started_at: "2026-01-01T00:00:00.000Z" }));
-	const reply = await call(port, OPERATOR_RESTART_PATH, post(csrf, { restart: true }));
-	assert.deepEqual([reply.status, reply.body], [409, { state: "refused", error: `unsupported: ${RESTART_PREDATES}` }]);
+	const reply = await journaled(stateDir, () => call(port, OPERATOR_RESTART_PATH, post(csrf, { restart: true })));
+	assert.deepEqual([reply.reply.status, reply.reply.body], [409, { state: "refused", error: `unsupported: ${RESTART_PREDATES}` }]);
+	oneRefused(reply, 409, "unknown op: the older bridge journals nothing, so the viewer's line is the record");
 	const status = await call(port, "/api/operator/control");
 	assert.deepEqual(status.body.restart, { supported: false, blockers: [], reason: RESTART_PREDATES });
 });

@@ -64,7 +64,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Reports / Schedules / Files | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` |
 | Search | Shell dialog (f7g.7), available from every screen |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
-| Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` (only under `--require-tailnet`) |
+| Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 
 Native `hashchange` drives routing, including Back/Forward. Empty, malformed and
@@ -119,7 +119,7 @@ from `state/main-ci.json`, "red since <sha> <time>" while latched and otherwise 
 never "green", since a missing row is no proof of green, and the viewer re-reads the file rather
 than importing `src/main-ci.ts`; workers live / slots summed from active grants'
 `dispatch_parallelism`; quota tightness only once a quota was observed), one line with the
-watchdog's last run (Start session beside it while the operator is offline), Needs you (count plus
+watchdog's last run (Start session beside it while the operator is offline, Restart session while it runs), Needs you (count plus
 at most three lines, or one Nothing needs you line), Blocked & failed (dependency blocks plus every
 `failed` fleet job with its failure headline in 80 chars; hidden when empty), In flight (one line
 per job with its PR, a project tag once more than one project has work, and for a held job the one
@@ -274,6 +274,27 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   answer or reason. Without control the card falls back to Copy reply.
 - Dashboard-sent messages show as `Operator (dashboard)`, tagged `dashboard`, with
   their `dc-…` id and the ask a click answered.
+- **Restart session** (cp-aqxl; `components/RestartSession.tsx`, `use-restart.ts`,
+  `restart-control.ts`; docs/contracts.md §Dashboard control): shown above the composer and on the
+  Overview services line **while an operator session runs**, and while its own restart is under way;
+  offline, Start session / Resume last session own that space. Two taps: `Restart session` opens the
+  confirm, `Tap again to restart · resumes <session file>` sends (`Cancel` backs out), so a stray tap
+  never stops the session. The button is disabled, with the reason as its title and on the line
+  beside it, when no session is running, when the status carries no `restart` field ("reload the
+  page"), when the session cannot restart (`restart.supported` false: not started by a relaunching
+  `cp-operator` — restart it once by hand: `/quit`, then `cp-operator -c` — or its bridge predates the
+  feature), or while it must wait (`not now: <blockers>`: busy, queued messages, an unseen dashboard
+  message or answer click, a pending `cp_parent send`). One `POST /api/operator/restart`
+  `{"restart": true}` with the `x-cp-control-token` header; then the status every 2 s for up to 90 s.
+  The line reads `Restarting…` (the POST), `Stopping the session…` (the same session still serves:
+  same `session_started_at`), `Relaunching · resumes <file>` (no session serves), `Operator session
+  restarted · <file>` (a new session serves), `Refused: <reason>` (a 4xx: the viewer's or the
+  bridge's) or `Failed: <reason>` (a 5xx, the network, or no session back within 90 s, with where to
+  look: the `cp-operator` herdr workspace or `tmux attach -t cp-operator`, or Resume last session);
+  Refused/Failed is `role="alert"`. The composer is held from the POST until a final state. The page
+  only posts and reads: it spawns, signals and locates no process. `.operator-restart*` in
+  `components/control.css` wraps the button and the line (`overflow-wrap: anywhere`, `max-width:
+  100%`) at 390 px and keeps them on one row at 1440 px.
 - `use-control.ts` (route-level, in `app.tsx`) reads `/api/operator/control` on
   mount and on every refresh of the transcript, and sends with the
   `x-cp-control-token` header; `control.ts` holds the fetch and the one-line texts.

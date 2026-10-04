@@ -13,6 +13,8 @@ import { RESTART_UNSUPPORTED } from "../src/dashboard-restart.ts";
 import { controlRequest } from "../src/viewer/control-api.ts";
 import { controlConfigFile, controlJournalFile, readControlRecord } from "../src/viewer/control-files.ts";
 import { createScratchHome } from "./harness/index.ts";
+import bridgeExtension, { saveOperatorTarget } from "../extensions/cp-bridge/index.ts";
+import { RELAUNCH_ENV } from "../src/operator-relaunch.ts";
 
 function scratch(t: import("node:test").TestContext) {
 	const home = createScratchHome();
@@ -20,7 +22,7 @@ function scratch(t: import("node:test").TestContext) {
 	const stateDir = join(home.path, LAYOUT.state);
 	const session = join(home.path, "2026-01-01T00-00-00-000Z_0123abcd.jsonl");
 	writeFileSync(session, "");
-	return { stateDir, session, relaunch: join(stateDir, "operator", "relaunch.json") };
+	return { home: home.path, stateDir, session, relaunch: join(stateDir, "operator", "relaunch.json") };
 }
 const journal = (stateDir: string): Array<Record<string, unknown>> => existsSync(controlJournalFile(stateDir)) ? readFileSync(controlJournalFile(stateDir), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
 
@@ -135,4 +137,40 @@ test("restart accepted: 202-shaped reply, a 0600 marker naming this pid and the 
 	await new Promise((done) => setTimeout(done, 150));
 	assert.equal(state.shutdowns, 1, "then the session's own shutdown, once");
 	assert.deepEqual(journal(stateDir).map((line) => [line.type, line.kind ?? line.state, line.peer]), [["request", "restart", "100.64.0.9"], ["outcome", "restarting", "100.64.0.9"]]);
+});
+
+test("cp-bridge wiring: with CP_OPERATOR_RELAUNCH_FILE set, the real extension reports restart supported and a `restart` frame calls ctx.shutdown exactly once, after the reply; unset, it is unsupported and never shuts down", async (t) => {
+	const { home, stateDir, session, relaunch } = scratch(t);
+	const saved = { PI_HOME: process.env.PI_HOME, [RELAUNCH_ENV]: process.env[RELAUNCH_ENV] };
+	process.env.PI_HOME = join(home, "pi-home");
+	delete process.env[RELAUNCH_ENV];
+	t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+	saveOperatorTarget({ home, mode: "multi", hostPid: 0, parentPid: 0 });
+	const handlers = new Map<string, Array<(event: unknown, ctx?: unknown) => unknown>>();
+	const emit = async (event: string, payload: unknown, ctx?: unknown) => { for (const handler of handlers.get(event) ?? []) await handler(payload, ctx); };
+	bridgeExtension({
+		registerTool: () => {},
+		registerCommand: () => {},
+		on: (event: string, handler: (event: unknown, ctx?: unknown) => unknown) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
+		sendMessage: () => {},
+		sendUserMessage: () => {},
+	} as never);
+	let shutdowns = 0;
+	const ctx = { hasUI: false, isIdle: () => true, abort: () => {}, hasPendingMessages: () => false, shutdown: () => { shutdowns += 1; }, sessionManager: { getSessionFile: () => session } };
+	await emit("session_start", {}, ctx);
+	t.after(() => emit("session_shutdown", {}));
+	const record = () => (readControlRecord(stateDir) as { record: Parameters<typeof controlRequest>[0] }).record;
+
+	const plain = await controlRequest(record(), "restart", {});
+	assert.deepEqual(plain, { ok: false, status: 409, error: `unsupported: ${RESTART_UNSUPPORTED}` }, "a pi no relaunching cp-operator started");
+
+	process.env[RELAUNCH_ENV] = relaunch;
+	const status = await controlRequest(record(), "status", {});
+	assert.deepEqual((status as { result: { restart: unknown } }).result.restart, { supported: true, blockers: [], reason: null });
+	const reply = await controlRequest(record(), "restart", { peer: "100.64.0.9" });
+	assert.equal(reply.ok, true, JSON.stringify(reply));
+	assert.equal(shutdowns, 0, "not before the reply");
+	assert.deepEqual({ ...JSON.parse(readFileSync(relaunch, "utf8")), id: undefined, at: undefined }, { version: 1, id: undefined, pid: process.pid, session_file: session, at: undefined });
+	await new Promise((done) => setTimeout(done, 150));
+	assert.equal(shutdowns, 1, "the session's own ctx.shutdown, exactly once");
 });
