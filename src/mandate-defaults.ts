@@ -60,7 +60,7 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 		spend_usd: "USD spend cap across every job the grant covers, before it pauses and escalates",
 		spend_tokens: "non-cached token cap (input + output + cache_write; cache reads excluded) across every job the grant covers; at the cap the grant pauses and the parent may raise it itself up to token_ceiling",
 		token_ceiling: "the highest token cap the parent may raise a grant to on its own (journaled with a reason); reaching it, or the USD cap, escalates budget_exhausted to the operator",
-		job_cap: "max jobs the grant covers before it pauses; raise for a mandate meant to run a whole backlog",
+		job_cap: "max jobs the grant covers (new dispatches only); a project-wide grant's cap also counts other mandates' jobs in the project, so prefer named job_ids with these defaults",
 		dispatch_parallelism: "jobs under the grant that may run at once; set 1 for serial",
 		allowed_actions: "every action a mandate may auto-decide; merge is granted by default and is gated only by the repository's own rules and ask_on — add ask_on: [\"risk:high\",\"merge\"] to require a human look before merge",
 		ask_on: "still asks the operator for these even inside an active mandate; risk:high is the one this ships with",

@@ -34,9 +34,10 @@ test("cp_mandate issue expands the sentinel from the array current at call time,
 		ledger: () => ({}),
 		escalations: {},
 		mandates: {
+			list: () => [],
 			issue: (input: { job_ids?: string[] }) => {
 				issued = input;
-				return { id: "md-1", expiry: "2099-01-01T00:00:00Z" };
+				return { id: "md-1", expiry: "2099-01-01T00:00:00Z", projects: ["demo"], job_cap: 3 };
 			},
 		},
 	};

@@ -17,7 +17,7 @@ import {
 	ESCALATION_QUESTION_MAX_CHARS,
 	type EscalationKind,
 } from "../../src/contracts.ts";
-import { MandateError, MANDATE_JOBS_THIS_TURN, resolveMandateJobIds, resolveMandateObjectiveRef } from "../../src/mandate.ts";
+import { MandateError, MANDATE_JOBS_THIS_TURN, projectWideCapWarning, resolveMandateJobIds, resolveMandateObjectiveRef } from "../../src/mandate.ts";
 import { formatMandateDefaults, loadMandateDefaults, MANDATE_HOME_ONLY_FIELDS, resolveMandateGrant, sameProjectMandateOverride, setMandateDefault } from "../../src/mandate-defaults.ts";
 import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
 import { cpNext, dedupeNext, formatNext } from "../../src/next.ts";
@@ -53,7 +53,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"risk:high stays pending unless ask_on omits it and the objective names the job. Merge stays pending when ask_on includes merge.",
 			"cp_mandate show lists every auto-decision taken under the grant, and which source (explicit/project/home) set each field. pause/revoke stop new auto-decisions; in-flight workers are not killed.",
 			"A token cap reached (pause_reason token_cap) is yours to decide, never an operator ask: cp_mandate raise_tokens mandate_id spend_tokens reason, up to the home's token_ceiling; the grant resumes and in-flight work continues. The USD cap is never yours to raise \u2014 it, and the ceiling, are budget_exhausted.",
-			"The job cap limits new dispatches only; it never pauses a grant or stalls review, repair or merge of a job it already covers.",
+			"The job cap limits new dispatches only; it never pauses a grant or stalls review, repair or merge of a job it already covers. A project-wide grant's job cap counts other mandates' jobs in its projects (src/mandate-accounting.ts), so prefer named job_ids with home-default bounds; issue warns on a project-wide grant.",
 			"Revoke, expiry and a replacing grant close that grant's open escalations as superseded, no answer needed; cp_mandate supersede_stale does the same on demand for records left open before this rule.",
 		],
 		parameters: Type.Object({
@@ -211,9 +211,10 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 							type: "text",
 							text:
 								`issued ${mandate.id} until ${mandate.expiry}\n` +
-								Object.entries(resolved.provenance)
-									.map(([field, source]) => `  ${field}: ${source}`)
-									.join("\n"),
+								[
+									...Object.entries(resolved.provenance).map(([field, source]) => `  ${field}: ${source}`),
+									projectWideCapWarning(mandate, post.mandates.list(), isoTimestamp()),
+								].filter(Boolean).join("\n"),
 						},
 					],
 					// SAFETY: The mandate is a JSON record returned through the extension API.

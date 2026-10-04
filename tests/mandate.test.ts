@@ -26,6 +26,7 @@ import {
 	MANDATE_JOBS_THIS_TURN,
 	type MandateSubject,
 	MandateStore,
+	projectWideCapWarning,
 	resolveMandateJobIds,
 	resolveMandateObjectiveRef,
 } from "../src/mandate.ts";
@@ -305,6 +306,19 @@ test("a project-wide grant: history never fills the job cap; new dispatches and 
 
 	const named = issue(store, { job_ids: ["cp-h1"], job_cap: 1 }, history);
 	assert.match(store.show(named.id, history), /job cap: 1 \/ 1/, "a named grant counts every job it names");
+});
+
+test("projectWideCapWarning: a project-wide grant is warned that its job cap counts other mandates' jobs; a named grant is not", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const named = issue(store, { job_ids: ["cp-h1"], job_cap: 1 });
+	const wide = issue(store, { job_cap: 3 });
+	const now = isoTimestamp();
+	assert.equal(projectWideCapWarning(named, store.list(), now), undefined);
+	const warning = projectWideCapWarning(wide, store.list(), now) ?? "";
+	assert.match(warning, new RegExp(`${wide.id} is project-wide.*job cap 3 counts every job.*including jobs covered by ${named.id}.*named-jobs grant`));
+	assert.doesNotMatch(projectWideCapWarning(wide, [wide], now) ?? "", /including jobs covered by/);
 });
 
 test("a shrinking reading on one baselined job never funds another job's growth", (t) => {
@@ -813,14 +827,16 @@ test("cp_mandate objective ref is verified into a job but never pins the grant; 
 		// The objective's issue job already exists, so no gh call is made.
 		ledger: () => ({ findDuplicate: (input: { externalRef?: string }) => (lookedUp++, input.externalRef === "https://github.com/o/demo/issues/17" ? { id: "cp-issue" } : undefined) }),
 		escalations: {},
-		mandates: { issue: (input: { job_ids?: string[] }) => (issued.push(input), { id: "md-1", expiry: "2099-01-01T00:00:00Z" }) },
+		mandates: { list: () => [], issue: (input: { job_ids?: string[] }) => (issued.push(input), { id: "md-1", expiry: "2099-01-01T00:00:00Z", projects: ["demo"], job_cap: 3, ...(input.job_ids ? { job_ids: input.job_ids } : {}) }) },
 	};
 	const deps = { commandPost: () => post, setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined, createdThisTurn };
 	registerMandateTools(pi as never, deps as never);
 	const run = (job_ids?: string[]) =>
 		tools.get("cp_mandate")?.execute("c", { action: "issue", projects: ["demo"], objective: "fix issue #17", ...(job_ids ? { job_ids } : {}) }, undefined, undefined, {});
-	await run();
-	await run(["cp-x"]);
+	const wide = (await run()) as { content: Array<{ text: string }> };
+	assert.match(wide.content[0]!.text, /warning: md-1 is project-wide, so its job cap 3 counts every job/);
+	const named = (await run(["cp-x"])) as { content: Array<{ text: string }> };
+	assert.doesNotMatch(named.content[0]!.text, /warning/);
 	await run([MANDATE_JOBS_THIS_TURN]);
 	assert.equal(lookedUp, 3, "the objective ref is resolved every time");
 	assert.deepEqual(issued.map((input) => input.job_ids), [undefined, ["cp-x"], ["cp-issue"]]);
