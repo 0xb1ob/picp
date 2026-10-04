@@ -222,12 +222,18 @@ export class Sender {
 		}
 
 		// 4b-1: never deliver into a worker HeldRelease is stopping; wait for its observed exit, then restore it.
-		await manager.whenStopped(request.jobId)?.catch(() => undefined); // a failed stop is HeldRelease's to report; the re-read below decides
+		// Draining wins first: waiting out a stop or restoring a released worker would start new work.
+		const stopping = manager.whenStopped(request.jobId);
+		if (stopping) {
+			assertNotDraining(home, `promotion or send to stopping ${request.jobId}`);
+			await stopping.catch(() => undefined); // a failed stop is HeldRelease's to report; the re-read below decides
+		}
 		let managed = manager.get(request.jobId);
 		const noLiveWorker = () =>
 			`${request.jobId} has no live worker in this session (fleet phase ${record.phase}, pid ${record.worker.pid}). ` +
 			`cp_revive ${request.jobId} to relaunch it from ${record.worker.session_file || "its session file"}, or tear the job down.`;
 		if (!managed && this.#options.revive && this.#options.released?.(request.jobId)) {
+			assertNotDraining(home, `restore of released ${request.jobId}`);
 			try {
 				await this.#options.revive(request.jobId);
 			} catch (error) {

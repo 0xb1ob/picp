@@ -209,11 +209,20 @@ test("drain gates every process start with the drain named: next, dispatch, prom
 	assert.equal(next.action.kind, "draining");
 	assert.match(new IntegrationHolds(home.path).get("cp-held")?.reason ?? "", /draining/, "the next merge step waits");
 
-	const idle = { get: () => ({ model: "m/x", worker: { alive: true, busy: false } }) } as unknown as WorkerManager;
+	const idle = { get: () => ({ model: "m/x", worker: { alive: true, busy: false } }), whenStopped: () => undefined } as unknown as WorkerManager;
 	const sender = new Sender({ fleet: post.fleet, manager: idle, runs: new RunRegistry(home.path), home: home.path });
 	await assert.rejects(sender.send({ jobId: "cp-idle", message: "new brief" }), named);
+	// 4b-1: a released author is never restored and a stopping one never waited out while draining.
+	let restored = 0;
+	const released = { get: () => undefined, whenStopped: () => undefined } as unknown as WorkerManager;
+	const restoring = new Sender({ fleet: post.fleet, manager: released, runs: new RunRegistry(home.path), home: home.path, released: () => true, revive: async () => void restored++ });
+	await assert.rejects(restoring.send({ jobId: "cp-idle", message: "repair" }), named);
+	const pending = new Promise<void>(() => {});
+	const stopping = { get: () => ({ model: "m/x", worker: { alive: true, busy: false } }), whenStopped: () => pending } as unknown as WorkerManager;
+	await assert.rejects(new Sender({ fleet: post.fleet, manager: stopping, runs: new RunRegistry(home.path), home: home.path }).send({ jobId: "cp-idle", message: "repair" }), named, "refused before waiting on the stop");
+	assert.equal(restored, 0);
 	await assert.rejects(sender.send({ jobId: "cp-idle", message: "steer", mode: "steer" }), /no promotion or steer send to idle cp-idle starts/);
-	const busy = { get: () => ({ model: "m/x", worker: { alive: true, busy: true } }) } as unknown as WorkerManager;
+	const busy = { get: () => ({ model: "m/x", worker: { alive: true, busy: true } }), whenStopped: () => undefined } as unknown as WorkerManager;
 	const busySender = new Sender({ fleet: post.fleet, manager: busy, runs: new RunRegistry(home.path), home: home.path });
 	await assert.rejects(busySender.send({ jobId: "cp-idle", message: "after", mode: "follow_up" }), /no promotion or follow_up send to busy cp-idle starts/, "a follow_up queues a turn after the settle point");
 	await assert.rejects(busySender.send({ jobId: "cp-idle", message: "brief", task: "new scope" }), /no promotion or auto send to busy cp-idle starts/);

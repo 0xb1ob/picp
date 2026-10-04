@@ -134,6 +134,9 @@ test("4B2-T1: ownership is read at the start and per entry; a home drain and a f
 	writeFileSync(file, JSON.stringify({ state: "draining", started_at: isoTimestamp(), deadline: isoTimestamp(), timeout_s: 60, jobs: [] }));
 	await draining.queue.drain();
 	assert.deepEqual(draining.calls, [], "no dispatch during a home drain");
+	const kept = draining.bytes();
+	assert.throws(() => draining.queue.enqueue("cp-aaa2", {}), /refused: the parent is draining for a restart \(since .*\)/);
+	assert.equal(draining.bytes(), kept, "nothing is queued while draining");
 
 	const full = queueBench(t, { capacityFree: () => false });
 	full.queue.enqueue("cp-aaa1", {});

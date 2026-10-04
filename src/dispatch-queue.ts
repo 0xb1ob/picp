@@ -20,7 +20,7 @@ import {
 	validateDispatchQueueFile,
 } from "./contracts.ts";
 import type { DispatchRequest } from "./dispatch.ts";
-import { readDrain } from "./drain.ts";
+import { assertNotDraining, readDrain } from "./drain.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { MandateError } from "./mandate-accounting.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
@@ -100,6 +100,7 @@ export class DispatchQueue {
 
 	/** Append; refuses a duplicate or a full queue. Returns the new position. */
 	enqueue(jobId: string, request: QueuedDispatchRequest): number {
+		assertNotDraining(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
 		const file = this.read();
 		const at = file.entries.findIndex((entry) => entry.job_id === jobId);
 		if (at >= 0) throw new DispatchQueueError(`${jobId} is already queued at position ${at + 1} — it starts when a worker slot frees; do not re-dispatch`);
