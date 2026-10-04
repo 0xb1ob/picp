@@ -415,7 +415,7 @@ export const EnvelopeSchema = Type.Object(
 			Type.String({
 				minLength: 40,
 				maxLength: 40,
-				description: "The full commit SHA you pushed (git rev-parse HEAD). Report it and stop — never wait for CI; the parent verifies CI against this sha before it merges.",
+				description: "The full commit SHA of HEAD in your worktree (git rev-parse HEAD), pushed. Required when a ship job reports done. Report it and stop — never wait for CI; the parent verifies CI against this sha before it merges.",
 			}),
 		),
 		blockers: Type.Optional(

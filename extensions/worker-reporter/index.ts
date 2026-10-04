@@ -35,6 +35,7 @@ import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
+import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
 export {
 	BASH_COMMAND_ECHO_MAX,
 	classifyEditFailure,
@@ -155,8 +156,14 @@ function atomicWriteJson(file: string, value: unknown): void {
 }
 
 /** Checks the worker can make itself, so the model gets a chance to fix them. */
-export function localChecks(envelope: Envelope, context: JobContext): string[] {
+export function localChecks(
+	envelope: Envelope,
+	context: JobContext,
+	observeHead: (cwd: string) => ObservedHead = worktreeHead,
+): string[] {
 	const errors: string[] = [];
+	const cwd = context.worktree ?? process.cwd();
+	errors.push(...headShaErrors(envelope, cwd, () => observeHead(cwd)));
 	if (envelope.status !== "done") return errors;
 
 	// pi-command-post-uad: any envelope that NAMES an artifact is checked here,
@@ -641,7 +648,7 @@ export default function (pi: ExtensionAPI): void {
 				"`blockers` is required and non-empty when status is \"blocked\". A planner's blockers are objects " +
 				"{question, why, options, recommended, assume_if_unanswered}, at most 3, each field one line; " +
 				"an implementer's blockers are strings. `self_assessment` carries exactly the documented keys and no others; " +
-				"`head_sha`/`base_sha` are full 40-character shas, never abbreviated. " +
+				"`head_sha`/`base_sha` are full 40-character shas, never abbreviated; a completed ship job must send `head_sha` = `git rev-parse HEAD` of its worktree. " +
 				"A completed research plan includes plan_summary. A missing or oversize summary is repaired, not filed.",
 			promptSnippet: "Report the final job envelope to the command post (final action)",
 			promptGuidelines: [
