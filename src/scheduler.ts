@@ -66,6 +66,8 @@ export interface SchedulerPorts {
 	now?: () => Date;
 	/** When this parent came up; a slot before it was missed. Defaults to construction time. */
 	startedAt?: Date;
+	/** Registered but archived projects (the registry's `archivedNames`): refused at add and at every fire. */
+	archivedProjects?: () => readonly string[];
 	runWatch?: (cwd: string, scriptPath: string, timeoutMs: number) => Promise<WatchRun>;
 }
 
@@ -111,6 +113,8 @@ export function mandateRefusal(mandate: Mandate | undefined, id: string, project
 }
 
 const minuteIso = (at: Date): string => `${at.toISOString().slice(0, 16)}Z`;
+
+const archivedRefusal = (project: string, prefix?: string): string => `${prefix ? `${prefix}: ` : ""}archived project ${project} — unarchive with cp_project unarchive first`;
 
 export class Scheduler {
 	readonly file: string;
@@ -159,6 +163,7 @@ export class Scheduler {
 		assertScriptIntake({ kind: input.kind, delivery: input.delivery, ...(input.script_path !== undefined ? { scriptPath: input.script_path } : {}) });
 		const known = this.#ports.ledger().knownProjects;
 		if (known && !known.includes(input.project)) throw new SchedulerError(`unknown project ${JSON.stringify(input.project)}; known: ${known.join(", ") || "(none)"}`);
+		if (this.#ports.archivedProjects?.().includes(input.project)) throw new SchedulerError(archivedRefusal(input.project, "cp_schedule add refused"));
 		const now = this.#now();
 		const mandate = this.#ports.mandates.sweep(now.toISOString(), this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
 		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, now.toISOString(), undefined, this.list());
@@ -325,6 +330,7 @@ export class Scheduler {
 		const refuse = (why: string) => manual !== undefined
 			? Promise.resolve<ScheduleEvent>({ ...base, outcome: "skipped", reason: `run now not recorded: ${why}`, manual })
 			: this.#skip(schedule, now, `fire at ${minuteIso(slot)} not recorded: ${why}`);
+		if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
 		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
 		if (refusal) return refuse(refusal);

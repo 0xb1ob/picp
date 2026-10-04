@@ -32,6 +32,7 @@ export function registerScheduleTools(
 		return new Scheduler({
 			home: post.home, ledger: () => post.ledger(), mandates: post.mandates,
 			usageJobs: () => post.fleet.read().jobs, cloneOf: (project) => post.registry.pathOf(project), startedAt,
+			archivedProjects: () => post.registry.archivedNames(),
 		});
 	};
 	const buildRunner = (): ScheduleRunner => {

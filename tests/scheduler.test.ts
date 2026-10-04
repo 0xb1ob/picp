@@ -409,6 +409,28 @@ test("cp-hhuf P6: a tick fire and a run now started together create exactly one 
 	assert.equal((await ledger.list({ all: true })).length, 1);
 });
 
+test("an archived project: cp_schedule add is refused, and a schedule saved before the archive never fires", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const archived: string[] = [];
+	const { clock, ledger, ports, grant } = bench(home, { archivedProjects: () => archived });
+	const mandate = grant();
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "UTC", ...job });
+	archived.push("demo");
+	await assert.rejects(
+		scheduler.add({ name: "other", project: "demo", mandate_id: grant().id, cron: "0 * * * *", tz: "UTC", ...job }),
+		/cp_schedule add refused: archived project demo — unarchive with cp_project unarchive first/,
+	);
+	assert.equal(scheduler.list().length, 1, "the refused add wrote nothing");
+	clock.now = new Date("2026-07-01T07:00:05Z");
+	const [event] = await scheduler.tick();
+	assert.equal(event?.outcome, "skipped");
+	assert.match(event?.reason ?? "", /archived project demo/);
+	assert.match((await scheduler.fireNow(schedule.id, "sc-1")).reason, /run now not recorded: archived project demo/);
+	assert.equal((await ledger.list({ all: true })).length, 0, "no job was recorded");
+});
+
 test("cp_schedule is parent-only", () => {
 	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_schedule"));
 });
