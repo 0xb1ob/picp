@@ -290,8 +290,11 @@ this home in multi mode. It is not named `cp` (that would shadow coreutils in
 
 - At `session_start` the session attaches **read-only** to the running host: it
   never spawns one. The host's relay backlog (≤ 200 relays, kept while nobody
-  was subscribed) arrives as `cp-bridge` messages. A closed connection
-  re-attaches after 5, 15 and 45 s; after that the next `cp_parent` call does.
+  was subscribed) arrives as `cp-bridge` messages. A closed connection (a
+  `cp-daemon reload`, a host restart) re-attaches read-only on its own, with a 1 s backoff doubling to a 30 s
+  cap, for as long as the session lives; it never starts a host or parent and needs no `cp_parent` call. The
+  status line says `cp-parent: reattached (pid <host>)` once, and every open escalation the session never
+  received (raised in the gap) is relayed once through the escalation relay ledger.
 - `CP_OPERATOR_VIEWER=service`: `cp-view.service` serves the dashboard, so the
   session starts no competing viewer.
 - **No session running** (P3): the dashboard says *operator session offline · N

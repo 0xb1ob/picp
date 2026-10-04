@@ -17,6 +17,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
+import { reattachLoop } from "../../src/bridge-reattach.ts";
 import { CpBridgeError, formatBridgeRelay, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
 import { currentEscalationRelay } from "../../src/escalation-relay.ts";
 import { OperatorRelayQueue } from "../../src/operator-relays.ts";
@@ -207,15 +208,12 @@ export default function (pi: ExtensionAPI): void {
 			if (readOnly && !record) throw new CpBridgeError("parent is not running; call cp_parent start");
 			const attached = record ? await ParentHostClient.connect(record)
 				: await attachParentHost({ home: runtime.home, mode: runtime.mode });
-			client = attached;
-			// A closed connection is dropped, so the next call reattaches instead of failing forever.
-			void attached.closed.then(() => {
-				if (client === attached) client = undefined;
-				if (!client && !shuttingDown) sayParent("cp-parent: not attached (host connection closed)");
-			});
-			if (hasLiveTarget && (client.hostPid !== runtime.hostPid || client.parentPid !== runtime.parentPid)) throw new CpBridgeError(`operator target pid mismatch for ${runtime.home}`);
-			await client.onRelay(onRelay);
-			sayParent(attachedLine(attached.hostPid, attached.parentPid));
+			if (client) { attached.disconnect(); return client; } // the reattach loop (or a racing call) attached first
+			track(attached);
+			if (hasLiveTarget && (attached.hostPid !== runtime.hostPid || attached.parentPid !== runtime.parentPid)) throw new CpBridgeError(`operator target pid mismatch for ${runtime.home}`);
+			await attached.onRelay(onRelay);
+			afterAttach(attached);
+			return attached;
 		}
 		return client;
 	};
@@ -280,13 +278,15 @@ export default function (pi: ExtensionAPI): void {
 		if (control && Array.isArray(messages)) for (const message of messages) control.observe(message);
 	});
 	// cp-daemon P2: attach read-only at session start (never spawning a host) so the host's relay backlog
-	// arrives now; a closed connection re-attaches after 5, 15 and 45 s, then waits for the next cp_parent call.
-	let attachTimer: NodeJS.Timeout | undefined;
+	// arrives now. cp-bridge-auto-reattach: a connection the host closed re-attaches read-only (never starting a
+	// host or parent; 1 s backoff, 30 s cap) while the session lives, then replays the escalations raised in the gap.
+	let lost = false;
+	const reattach = reattachLoop(() => reattachOnce());
 	let shuttingDown = false;
 	// cp-gb8d: an escalation open 10 min with no open ask that never reached this session is relayed once.
 	let backstopTimer: NodeJS.Timeout | undefined;
 	let backstopRunning = false;
-	const backstopTick = (): void => {
+	const backstopTick = (afterSeconds?: number): void => {
 		if (backstopRunning || shuttingDown) return;
 		backstopRunning = true;
 		try {
@@ -297,6 +297,7 @@ export default function (pi: ExtensionAPI): void {
 				asks: () => operatorAsks().list(),
 				ledger: new EscalationRelayLedger(escalationRelayLedgerFile(target.home, target.mode)),
 				relay: (relay) => { seenRelays.add(`escalation:${relay.escalationId}`); relays.push(relay, true); },
+				...(afterSeconds !== undefined ? { afterSeconds } : {}),
 			});
 		} catch (error) {
 			setStatusLine(sessionCtx, "escalation-backstop", `escalation backstop: paused (${(error as Error).message})`);
@@ -304,32 +305,49 @@ export default function (pi: ExtensionAPI): void {
 			backstopRunning = false;
 		}
 	};
-	let watched: ParentHostClient | undefined;
-	const attachReadOnly = async (say: (line: string) => void, delays: readonly number[]): Promise<void> => {
+	/** `attached` is now the client: drop it when the host closes it, and re-attach unless that was deliberate. */
+	const track = (attached: ParentHostClient): void => {
+		client = attached;
+		void attached.closed.then(() => {
+			const unexpected = client === attached;
+			if (unexpected) client = undefined;
+			if (client || shuttingDown) return;
+			if (!unexpected) return sayParent("cp-parent: not attached (host connection closed)");
+			lost = true;
+			sayParent("cp-parent: host connection closed; re-attaching read-only");
+			reattach.schedule();
+		});
+	};
+	// After a loss: say it once, then relay every open escalation the ledger never saw (the live relay and this replay share seenRelays and the ledger).
+	const afterAttach = (attached: ParentHostClient): void => {
+		if (!lost) return sayParent(attachedLine(attached.hostPid, attached.parentPid));
+		lost = false;
+		sayParent(`cp-parent: reattached (pid ${attached.hostPid})`);
+		backstopTick(0);
+	};
+	const reattachOnce = async (): Promise<void> => {
+		if (client || shuttingDown) return;
+		const target = backstopTarget();
+		const { record } = currentHost(parentHostPaths(target.home, target.mode));
+		if (!record) throw new CpBridgeError("parent host is not running");
+		const attached = await ParentHostClient.connect(record);
+		try { await attached.onRelay(onRelay); }
+		catch (error) { attached.disconnect(); throw error; }
+		if (client || shuttingDown) return attached.disconnect();
+		track(attached);
+		afterAttach(attached);
+	};
+	const attachReadOnly = async (): Promise<void> => {
 		if (shuttingDown) return;
-		const retry = (ms: number, rest: readonly number[]) => {
-			attachTimer = setTimeout(() => void attachReadOnly(say, rest), ms);
-			attachTimer.unref();
-		};
 		try {
-			const attached = await ensureClient(undefined, undefined, true);
-			say(attachedLine(attached.hostPid, attached.parentPid));
-			if (watched === attached) return;
-			watched = attached;
-			void attached.closed.then(() => {
-				if (shuttingDown) return;
-				say("cp-parent: host connection closed; re-attaching in 5s");
-				retry(5_000, [15_000, 45_000]);
-			});
+			await ensureClient(undefined, undefined, true);
 		} catch (error) {
-			const [next, ...rest] = delays;
-			if (next === undefined) return say(`cp-parent: not attached (${(error as Error).message})`);
-			retry(next, rest);
+			sayParent(`cp-parent: not attached (${(error as Error).message})`);
 		}
 	};
 	pi.on("session_shutdown", async () => {
 		shuttingDown = true;
-		clearTimeout(attachTimer);
+		reattach.cancel();
 		clearInterval(backstopTimer);
 		backstopTimer = undefined;
 		control?.stop();
@@ -399,7 +417,7 @@ export default function (pi: ExtensionAPI): void {
 			setStatusLine(ctx, "operator-context", `operator context: not loaded (${(error as Error).message})`);
 		}
 		shuttingDown = false;
-		await attachReadOnly(sayParent, []);
+		await attachReadOnly();
 		clearInterval(backstopTimer);
 		backstopTick();
 		backstopTimer = setInterval(backstopTick, ESCALATION_BACKSTOP_TICK_MS);
