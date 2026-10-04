@@ -29,7 +29,6 @@ import { deliverStandingOrders } from "../../src/parent-context.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
 import { formatSweep, sweepJobIdRename } from "../../src/state-migrations.ts";
-import { SuggestionCache } from "../../src/suggest.ts";
 import { type WakeupCarrier } from "../../src/wakeups.ts";
 import { WedgedWatch } from "../../src/wedged.ts";
 import { collapseOutputLines, currentRuntime, deliverUserContext, type OutputEntry, runtimeOrRefusal, WIDGET_REFRESH_MS } from "./helpers.ts";
@@ -200,8 +199,6 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// Not reset here: the Shipped memory is keyed by session id and persisted, so
 		// a genuinely new session starts empty by construction, and a reload of this
 		// same session keeps what it already reported (cp-b5eg).
-		s.awaitingSnoozed = new Set<string>();
-		s.suggestionCache = new SuggestionCache();
 		// A fresh session re-announces a still-wedged call on purpose: it is the
 		// session most likely to be the one that finally acts on it.
 		s.wedgedWatch = new WedgedWatch();

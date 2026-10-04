@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### The unreachable Awaiting-you overlay is deleted
+
+The `agent_settled` hook already returned before opening anything, so the questionnaire overlay, its plain-dialog fallback, the suggestion generator and the session snooze/latch/cache state behind them could never run. They are removed (`questionnaire.ts`, `suggest-model.ts`, `awaiting-questionnaire.ts`, `awaiting-dialog.ts`, `CommandPost.suggestionModel`/`suggestConfig`, `decisionPaneFactory`); `/cp-awaiting` still lists, `cp_decide` still answers, and `HumanPrompt`/`applyPromptWorking` stay. No contract export changed. Migration: none.
+
 ### A ship report must name its worktree HEAD
 
 The worker reporter now rejects, repairably (`localChecks`, `extensions/worker-reporter/head.ts`), a `report_result` with `status: done` whose `head_sha` is not `git rev-parse HEAD` of the worker's own worktree (`CP_WORKTREE`, else the cwd), and a ship/done report with no `head_sha` at all. The rejection names the observed sha, so the model copies it within the 3-attempt repair budget; a `git rev-parse` that fails (not a repo, git missing, 10 s timeout) fails closed with `head_sha: cannot verify`. Research, answer, board and blocked envelopes without `head_sha` trigger no git call. `validateEnvelope` and intake are unchanged, and `head_sha` keeps its schema shape (only its description changed). Migration: none — stored envelopes are not re-validated against the new rule.

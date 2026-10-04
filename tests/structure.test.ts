@@ -166,7 +166,6 @@ const R1_ALLOWED = [
 ];
 /** R2: the only sanctioned reads of `$HOME`/`$TMPDIR` in runtime code. */
 const R2_ALLOWED = [
-	"extensions/command-post/questionnaire.ts",
 	"extensions/cp-bridge/index.ts",
 	"src/home.ts",
 	"src/projects.ts",

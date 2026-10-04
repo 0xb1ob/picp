@@ -134,8 +134,8 @@
  * "answering twice must not wake twice" holds even if a caller retries.
  *
  * Skip is not an answer: it writes nothing, anywhere, so nothing is enqueued
- * and nobody is woken. That invariant lives in `resolveAwaitingResponse` and
- * this module simply never hears about a skip.
+ * and nobody is woken. Skip never reaches a writer, so this
+ * module simply never hears about it.
  */
 
 import { randomUUID } from "node:crypto";

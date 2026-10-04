@@ -4,7 +4,7 @@
  * module always reads the current one rather than a copy taken at registration.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { HumanPrompt, SingleRunLatch } from "../../src/awaiting-ui.ts";
+import { HumanPrompt } from "../../src/awaiting-ui.ts";
 import type { CommandPost } from "../../src/command-post.ts";
 import type { ThinkingLevel } from "../../src/contracts.ts";
 import type { ParentLock } from "../../src/parent-lock.ts";
@@ -12,7 +12,6 @@ import type { PlanTarget } from "../../src/plan-view.ts";
 import type { ScheduleRunner } from "../../src/schedule-runner.ts";
 import type { ProjectOf } from "../../src/project-report.ts";
 import type { RecordedSessionTool } from "../../src/session-tools.ts";
-import { SuggestionCache } from "../../src/suggest.ts";
 import { WedgedWatch } from "../../src/wedged.ts";
 import type { OpenPlanViewerDeps } from "./plan-viewer.ts";
 
@@ -32,10 +31,6 @@ export interface ExtensionDeps {
 	}) => Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }>;
 	/** An accessor like the rest: a module reads the session's current array at call time, never a registration-time copy. */
 	readonly createdThisTurn: string[];
-	awaitingLatch: SingleRunLatch;
-	humanPrompt: HumanPrompt;
-	awaitingSnoozed: Set<string>;
-	readonly suggestionCache: SuggestionCache;
 	readonly sessionTools: RecordedSessionTool[] | undefined;
 	readonly widgetTimer: NodeJS.Timeout | undefined;
 	readonly ciWatchTimer: NodeJS.Timeout | undefined;
@@ -97,22 +92,7 @@ export interface SessionState {
 	// block replay the session's whole shipped history. Keying the persisted set
 	// by session id keeps the contract ("new since the block you last rendered
 	// this session") without depending on this closure surviving.
-	//
-	// cp-awaiting-autoopen: "do not nag" state and the mutual-exclusion guard so
-	// an auto-opened dialog and a manual /cp-decide can never stack. Session-
-	// scoped and reset at session_start alongside `shownShipped` — never
-	// persisted, so a restart forgets every snooze, which is the desired
-	// reappearance (docs/contracts.md §Awaiting you).
-	awaitingSnoozed: Set<string>;
-	// cp-gb3w review 2: the latch is an object whose release lives in its own
-	// `finally`, so no path out of the loop — an answer, an error, or the
-	// unattended overlay's deadline — can leave it held.
-	readonly awaitingLatch: SingleRunLatch;
 	readonly humanPrompt: HumanPrompt;
-	// cp-7t7: one session-scoped cache, reset at session_start alongside the
-	// other session-only state above. Memoises a generator call by the item's
-	// fingerprint (unchanged item, one call per session) and is never persisted.
-	suggestionCache: SuggestionCache;
 	// cp-wedged-tool-call: the parent's memory of which open-but-silent tool
 	// calls it has already announced, so a wedge is news once instead of every
 	// widget tick. Recreated per session on purpose (see src/wedged.ts).
@@ -146,10 +126,7 @@ export function createSessionState(): SessionState {
 		sessionTools: undefined,
 		reconcileInProgress: false,
 		parentLock: undefined,
-		awaitingSnoozed: new Set<string>(),
-		awaitingLatch: new SingleRunLatch(),
 		humanPrompt: new HumanPrompt(),
-		suggestionCache: new SuggestionCache(),
 		wedgedWatch: new WedgedWatch(),
 		ciWatchDisabledShown: false,
 		createdThisTurn: [],

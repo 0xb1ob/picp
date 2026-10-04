@@ -25,7 +25,8 @@ import {
 	AnsweredError,
 	formatAnsweredNotice,
 } from "../src/answered.ts";
-import { deriveFromCheckpoints, deriveFromHeldResearch, resolveAwaitingResponse, type AwaitingWriters, type ResolvedAwaitingItem } from "../src/awaiting.ts";
+import { deriveFromCheckpoints, deriveFromHeldResearch, type ResolvedAwaitingItem } from "../src/awaiting.ts";
+import { type AwaitingWriters, resolveAwaitingResponse } from "./harness/awaiting-resolve.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { acquireParentLock, holdsParentLock } from "../src/parent-lock.ts";

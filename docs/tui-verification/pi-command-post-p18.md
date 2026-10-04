@@ -1,5 +1,7 @@
 # Real-TUI verification — one surface at a time (pi-command-post-p18)
 
+> **Retired.** The overlay, its latch and the auto-open this record verified were removed; `HumanPrompt` and `applyPromptWorking` remain. Kept as history.
+
 AGENTS.md (cur-20260901-5) says a TUI change is not verified by a green suite:
 it has to be reproduced on a real pi TUI. This is the record of that run for the
 overlay latch, taken on **pi 0.85.1** with

@@ -6,8 +6,7 @@
  * imports pi, never touches a session, and never reads anything but its own
  * config file (`data/suggest.json`) — exactly the "new, tested, inert" shape
  * `src/diff-review.ts` shipped first. The pi-facing half (the actual model
- * call) lives in `extensions/command-post/suggest-model.ts`, mirroring the
- * `plan-view.ts` / `plan-viewer.ts` split (Constraints §C1).
+ * call) was removed with the decide overlay, which was its only caller.
  *
  * The permitted input is a closed type (`SuggestionInput`): a whitelisted
  * projection of an awaiting item plus cheap job metadata already carried on
@@ -22,7 +21,7 @@
  * model can never mint a second "Skip"), duplicates of the item's own options
  * are dropped, and — belt for invariant 4 — every candidate offered on an
  * `authorization` item is required to already match the same anchored verdict
- * vocabulary `resolveAwaitingResponse` uses (`authorizationVerdict`, exported
+ * vocabulary the answering path uses (`authorizationVerdict`, exported
  * from `./awaiting.ts`), so a phrase like "approve — the gate passed" (which
  * would resolve to an unwritable *note*, not a verdict) can never be offered
  * as a selectable option. In practice `suggestionsEnabled` refuses to call a

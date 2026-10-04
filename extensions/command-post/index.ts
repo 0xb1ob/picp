@@ -55,17 +55,6 @@ export function extensionDeps(s: SessionState, session: SessionPost, projectOf: 
 		get createdThisTurn() {
 			return s.createdThisTurn;
 		},
-		awaitingLatch: s.awaitingLatch,
-		humanPrompt: s.humanPrompt,
-		get awaitingSnoozed() {
-			return s.awaitingSnoozed;
-		},
-		set awaitingSnoozed(value) {
-			s.awaitingSnoozed = value;
-		},
-		get suggestionCache() {
-			return s.suggestionCache;
-		},
 		get sessionTools() {
 			return s.sessionTools;
 		},
