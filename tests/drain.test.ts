@@ -427,3 +427,19 @@ test("restartActivity: idle live workers are not blockers; mid-turn, unknown-sta
 	assert.deepEqual(restartActivity(records, (jobId) => phases[jobId]), { working: ["cp-working", "cp-unknown"], scripts: ["cp-script"] });
 	assert.ok(liveWorkerJobs(records).includes("cp-idle"), "liveWorkerJobs keeps its meaning: what a restart kills");
 });
+
+test("unload-parent PR2: the live continuation takes no step while drain.json is on disk, and acts once it is cleared", async (t) => {
+	const home = createScratchHome();
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true, continuation: true });
+	t.after(async () => {
+		await post.shutdown();
+		home.cleanup();
+	});
+	post.drain.start();
+	const held = await post.continuation.trigger({ jobId: "cp-held", event: "startup" });
+	assert.equal(held.action, "draining", held.reason);
+	writeFileSync(drainFile(home.path), "{ not json");
+	assert.equal((await post.continuation.trigger({ jobId: "cp-held", event: "startup" })).action, "draining", "an unreadable drain fails closed");
+	rmSync(drainFile(home.path));
+	assert.equal((await post.continuation.trigger({ jobId: "cp-held", event: "startup" })).action, "stale", "after the restart the same trigger reaches the step gates");
+});

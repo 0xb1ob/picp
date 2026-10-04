@@ -63,7 +63,7 @@ import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
 import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact } from "./failure-announcer.ts";
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
-import { assertNotDraining, DrainControl, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
+import { assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
@@ -590,6 +590,7 @@ export class CommandPost {
 			discard: (ids) => this.durableWakeups.discard(ids.map((id) => ({ id: boundedWakeupId(id), reason: "the parent restarted after the drain" }))) });
 		this.continuation = new HeldContinuation({
 			enabled: () => options.continuation === true && this.#ownsHome(),
+			draining: () => readDrain(options.home) !== undefined, // unload-parent PR2; a throw (unreadable) reads as draining
 			fleet: this.fleet,
 			advance: (jobId) => this.#advance({ jobId }),
 			review: (jobId) => this.diffReview({ jobId }),
