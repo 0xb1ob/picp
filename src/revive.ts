@@ -166,6 +166,10 @@ export interface ReviverOptions {
 	fileExists?: (path: string) => boolean;
 	git?: GitRunner;
 	now?: () => Date;
+	/** 4b-1: at the spawn cap, release another idle held author and reserve its slot (HeldRelease.makeRoom). */
+	makeRoom?: (jobId: string, role: Role) => Promise<(() => void) | undefined>;
+	/** 4b-1: this job's process was stopped by HeldRelease; its revival journals `continuation: "held_release"`. */
+	released?: (jobId: string) => boolean;
 }
 
 async function safely(fn: () => Promise<unknown>): Promise<void> {
@@ -438,22 +442,30 @@ export class Reviver {
 
 		// cp-mub7: two processes on one session file fork it — the stale worker goes first.
 		if (plan.closesWorker) await this.#options.manager.shutdown(jobId);
-		await this.#options.manager.ready();
-		const managed = this.#options.manager.spawn({
-			identity: {
-				jobId,
-				kind: record.kind,
-				delivery: record.delivery,
-				runDir: this.#options.runs.open(jobId).runDir,
-				worktree: record.worktree,
-			},
-			profile,
-			model: plan.model,
-			...(plan.thinking ? { thinking: plan.thinking } : {}),
-			sessionFile: plan.session_file,
-			// No `brief`: a revived worker resumes idle. `report_result` stays
-			// write-once (worker-reporter), so nothing here can double-report.
-		});
+		const restoring = !continuing && this.#options.released?.(jobId) === true;
+		const reservation = await this.#options.makeRoom?.(jobId, plan.role);
+		let managed: ReturnType<WorkerManager["spawn"]>;
+		try {
+			await this.#options.manager.ready();
+			managed = this.#options.manager.spawn({
+				identity: {
+					jobId,
+					kind: record.kind,
+					delivery: record.delivery,
+					runDir: this.#options.runs.open(jobId).runDir,
+					worktree: record.worktree,
+				},
+				profile,
+				model: plan.model,
+				...(plan.thinking ? { thinking: plan.thinking } : {}),
+				sessionFile: plan.session_file,
+				// No `brief`: a revived worker resumes idle. `report_result` stays
+				// write-once (worker-reporter), so nothing here can double-report.
+			});
+		} catch (error) {
+			reservation?.();
+			throw error;
+		}
 
 		try {
 			const recorder = this.#options.runs.open(jobId);
@@ -468,7 +480,7 @@ export class Reviver {
 				...(plan.interruptedTool ? { interrupted_tool: plan.interruptedTool } : {}),
 				...(continuing
 					? { continuation: options?.recovering ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
-					: {}),
+					: restoring ? { continuation: "held_release" } : {}),
 			});
 			attachWorkerObservers({
 				recorder,

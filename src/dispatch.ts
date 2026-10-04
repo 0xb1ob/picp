@@ -387,6 +387,8 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	mandates?: MandateStore;
 	/** node_modules refresh ports (`prepareNodeDeps`), injected in tests: no real npm. */
 	deps?: DepsPorts;
+	/** 4b-1: at the spawn cap, release one idle held author and reserve its slot (HeldRelease.makeRoom); the returned release frees it on failure. */
+	makeRoom?: (jobId: string, role: Role) => Promise<(() => void) | undefined>;
 }
 
 export class Dispatcher {
@@ -572,6 +574,7 @@ export class Dispatcher {
 		// --- 4. lease, then everything that can fail must clean up -----------
 		const lease = await options.leases.acquire(clone, { holder: issue.id, project: labels.project });
 		let recorder: RunRecorder | undefined;
+		let reservation: (() => void) | undefined;
 		// cp-bw4: only THIS call's branch may be cleaned up on the error path. A
 		// leftover branch from an older failure (or from a human) is somebody
 		// else's state and is refused loudly by `#createJobBranch` instead.
@@ -630,6 +633,7 @@ export class Dispatcher {
 			// --- 6. spawn + first prompt ------------------------------------
 			recorder = this.#runs.open(issue.id);
 			if (kind === "research") mkdirSync(join(options.home, paths.artifactDir(issue.id)), { recursive: true });
+			reservation = await options.makeRoom?.(issue.id, profile.frontmatter.role);
 			await options.manager.ready();
 			const managed = options.manager.spawn({
 				identity: {
@@ -762,6 +766,7 @@ export class Dispatcher {
 				...(gate.warning ? { risk_warning: gate.warning } : {}),
 			};
 		} catch (error) {
+			reservation?.();
 			// Nothing half-dispatched survives: kill the worker, drop the branch this
 			// call created (only when it provably holds no work), return the lease.
 			// Order matters: the branch goes before the lease, because after the

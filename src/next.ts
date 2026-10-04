@@ -44,8 +44,12 @@ export interface NextPorts {
 	/** When present, a ready job with a pipeline record recommends `cp_pipeline advance`, not `cp_dispatch`. */
 	pipelines?: PipelineStore;
 	now?: () => Date;
-	/** Live worker processes against the manager's `spawn_cap`; `held` are job ids whose fleet phase is `held`. */
-	capacity?: () => { active: number; cap: number; held: string[] };
+	/**
+	 * Live worker processes against the manager's `spawn_cap`; `held` are job ids whose fleet phase is `held`,
+	 * `releasable` how many of their live, idle processes a dispatch may release (4b-1), `reserved` slots already
+	 * held for a dispatch in progress.
+	 */
+	capacity?: () => { active: number; cap: number; held: string[]; releasable?: number; reserved?: number };
 }
 
 export type NextActionKind = "dispatch" | "pipeline" | "wait" | "no_mandate" | "paused" | "mission_end" | "draining";
@@ -142,7 +146,8 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	// recommended at the cap. `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (gate/quality, inside
 	// the manager's +3 review reserve) or nothing, and its implementer dispatch meets the same refusal with rollback.
 	const capacity = results.some((result) => result.action.kind === "dispatch") ? ports.capacity?.() : undefined;
-	if (capacity && capacity.active >= capacity.cap) {
+	// 4b-1: an idle held author's slot is released on demand, so it counts as free; a reserved slot counts as taken.
+	if (capacity && capacity.active + (capacity.reserved ?? 0) - (capacity.releasable ?? 0) >= capacity.cap) {
 		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
 		for (const result of results) {
 			if (result.action.kind !== "dispatch") continue;

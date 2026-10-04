@@ -69,7 +69,8 @@ import { trackersFile } from "../src/trackers/config.ts";
 import { MergeStore } from "../src/merges.ts";
 import { RunRegistry } from "../src/runs.ts";
 import type { TeardownResult } from "../src/teardown.ts";
-import { createScratchHome, readRunEvents } from "./harness/index.ts";
+import { createScratchHome, fakeWorkerManager, readRunEvents } from "./harness/index.ts";
+import { HeldRelease } from "../src/held-release.ts";
 
 const BR = "cp-int1";
 const PR_URL = "https://github.com/o/r/pull/61";
@@ -1502,6 +1503,41 @@ test("duplicate red CI does not send again while promotion is in flight", async 
 		release.resolve();
 		await first;
 	}
+});
+
+test("4B1-T4: promoting(job) is true while the repair send is in flight, and HeldRelease never releases it then", async (t) => {
+	const b = await benchOf(t);
+	const entered = { resolve: () => { }, promise: Promise.resolve() };
+	entered.promise = new Promise<void>((resolve) => { entered.resolve = resolve; });
+	const release = { resolve: () => { }, promise: Promise.resolve() };
+	release.promise = new Promise<void>((resolve) => { release.resolve = resolve; });
+	const integrator = b.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }, {
+		send: async () => {
+			entered.resolve();
+			await release.promise;
+			return { receipt: "delivered" };
+		},
+	});
+	const workers = fakeWorkerManager(b.home, 5);
+	workers.spawn(BR);
+	const held = new HeldRelease({
+		home: b.home, fleet: b.fleet, manager: workers.manager,
+		busy: { sending: () => false, promoting: (id) => integrator.promoting(id), driving: () => false },
+		integration: () => undefined, journal: () => {},
+	});
+	await b.fleet.patch(BR, { phase: "held" });
+	assert.equal(integrator.promoting(BR), false);
+	assert.deepEqual(held.releasable(), [BR]);
+	const first = integrator.advance({ jobId: BR });
+	await entered.promise;
+	try {
+		assert.equal(integrator.promoting(BR), true);
+		assert.deepEqual(held.releasable(), []);
+	} finally {
+		release.resolve();
+		await first;
+	}
+	assert.equal(integrator.promoting(BR), false);
 });
 
 test("a conflict is handed back once, with the resync the server-side rebase requires", async (t) => {

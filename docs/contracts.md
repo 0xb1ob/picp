@@ -1400,6 +1400,11 @@ idle, which is what a resumed session does anyway); change the model, profile
 or thinking level from what was recorded at dispatch (Constraint 10); rewrite
 `session_id` or `session_file` on the fleet record (only `pid` and
 `started_at` move); happen without an explicit operator action (Constraint 1).
+There are two code doors to revival besides `cp_revive`: bounded recovery, and
+a `cp_send` to a held author this home released for its slot (§Trust policy,
+"release on demand"). The send runs the same `Reviver.revive` (same session,
+worktree, model), journals `continuation: "held_release"`, then delivers; a
+dead job that was never released keeps the `cp_revive` refusal.
 
 **Continuing a failed job (`continue_failed`, pi-command-post-epic-pr-c-zh7.5).**
 A `phase: failed` non-script job is continued on its **original** session,
@@ -1758,8 +1763,22 @@ Other spawn-time policy, all fail-closed:
   three additional slots above the cap, so held authors cannot block their
   own reviews. Other roles cannot use this reserve; total live workers remain
   bounded by `spawn_cap + 3`. Refusals distinguish the ordinary cap from an
-  exhausted review reserve. Held authors stay live for `cp_send` repairs;
-  stopping them would require an explicit revive before promotion.
+  exhausted review reserve. Refusals carry a typed `SpawnSafetyError.code`
+  (`spawn_cap`, `review_reserve`, `closing`, `duplicate`); messages are unchanged.
+- **Release on demand (cp-itl4 4b-1).** Held authors stay live for `cp_send`
+  repairs until a fresh dispatch or revive needs their slot. At the cap,
+  `HeldRelease.makeRoom` (`src/held-release.ts`) releases the oldest-reported
+  *releasable* author — phase `held`, ship/pr, no script, no failure, a
+  **live, idle, not-stopping** managed worker, not mid-promotion, mid-send or
+  mid-continuation, and no `resolve` integration newer than its report — and
+  reserves the freed slot for the caller (`WorkerManager.reserve`). Selection,
+  reserve, the re-check and the `shutdown` call run with no `await` between
+  them; `stopping(id)` then excludes the victim everywhere. The release journals
+  `held_released` and never changes phase, lease or branch. The reservation is
+  consumed by the caller's spawn of the same key or released (idempotently,
+  notifying once) on any failure; while it is held every other non-reviewer
+  spawn is refused `spawn_cap`. A later `cp_send` waits out a shutdown in
+  flight, then restores a released author before delivering (§Revival).
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent
   never leaves orphaned children behind. From its first call `closing` is true:
   the failure monitor still runs intake but classifies no close as a death, the
@@ -3763,7 +3782,7 @@ recommendation:
 | every job the mandate names (`job_ids`) is closed | `mission_end` — raises one `mission_end` escalation (`landed`, `dropped`, `cost`); a repeat call returns the same escalation id, never a second one. A clean finish (nothing dropped, no fleet record `failed`) closes itself: the escalation is answered `close` by `mandate:<id>` (basis `{mandate, clause}` on the record) and the grant is revoked, so Map and Board show it closed; a messy one stays open and the bridge relays it to the main session as an escalation. Once that grant's mission end is answered (`close` or `extend`) the call returns the answered id, reason `already answered … not re-asked`, and raises nothing — a replacement grant has its own id and its own mission end |
 | nothing is ready under the mandate | `wait` |
 | live workers already meet `dispatch_parallelism` | `wait` |
-| live worker processes (every manager-owned process, held authors and reviewers included) ≥ `spawn_cap` | `wait` for every grant's `dispatch`, `others` included — names the cap, the live count and up to three held job ids; nothing is queued, the job dispatches on a later `cp_next` once one tears down. A `pipeline` recommendation stands: `cp_pipeline advance` spawns a gate-reviewer (inside the manager's review reserve) or nothing, and its implementer dispatch meets the manager's own refusal |
+| live worker processes (every manager-owned process, held authors and reviewers included) plus outstanding slot reservations, minus releasable held authors (§Trust policy, release on demand), ≥ `spawn_cap` | `wait` for every grant's `dispatch`, `others` included — names the cap, the live count and up to three held job ids; nothing is queued, the job dispatches on a later `cp_next` once one tears down. A `pipeline` recommendation stands: `cp_pipeline advance` spawns a gate-reviewer (inside the manager's review reserve) or nothing, and its implementer dispatch meets the manager's own refusal |
 | every ready job is new and the job cap is reached | `wait` \u2014 no new dispatch; the grant stays active for the jobs it counts |
 | a ready job has a `PipelineStore` record | `pipeline` \u2014 `cp_pipeline advance <id>` |
 | otherwise, the first ready job | `dispatch` \u2014 `cp_dispatch <id>` |

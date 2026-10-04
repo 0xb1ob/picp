@@ -74,7 +74,7 @@ CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
 CI_WATCH_INTERVAL_MS	value	7167448c735abb91	d55d01d0341ed0ba
 CI_WATCH_KEEP_ANNOUNCED	value	565599989d7b8406	1a6562590ef19d10
 CI_WATCH_MAX_BACKOFF_MS	value	6ecd5f312ec3ee6a	d1d282f04815e254
-CP_EVENT_KINDS	value	44cb604f96d2b553	d905ceb17817a1ae
+CP_EVENT_KINDS	value	a991abc433ac0ca9	17c8695ba1acd0e3
 Checkpoint	type	d1c462e0c6aa9937	-
 CheckpointDecision	type	1a7bb07fade60614	-
 CheckpointDecisionSchema	value	e4ce39719c2509de	fc45a9911b41c900
@@ -91,7 +91,7 @@ CiWatchJobSchema	value	bdb72f0e135d76ef	898debb712735da7
 Confidence	type	b626807470740910	-
 ContractError	class	e6cbe92ed1ab171c	e200d9d8db2fc02b
 CpEventKind	type	d73f96cfd2161fd9	-
-CpEventKindSchema	value	28b4ba70f9a2809b	577ed6bfc090ba90
+CpEventKindSchema	value	28b4ba70f9a2809b	2b3f69a8ef8fd82b
 CurrentToolSchema	value	8ac5ec202fe7c032	cbcc4590e0baed94
 DEATH_MESSAGE_TYPE	value	0bd493782cc0def1	210bdf086fd1826b
 DECISION_CONTEXT_LINE_MAX_CHARS	value	5a616797cd2968ab	a512db2741cd2069

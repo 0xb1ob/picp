@@ -49,7 +49,16 @@ import {
 	type WorkerSpawnOptions,
 } from "./worker-process.ts";
 
-export class SpawnSafetyError extends Error {}
+/** Why a spawn was refused; the message text is unchanged, the code is for callers that branch (cp_dispatch queues `spawn_cap`). */
+export type SpawnRefusalCode = "spawn_cap" | "review_reserve" | "closing" | "duplicate";
+
+export class SpawnSafetyError extends Error {
+	readonly code?: SpawnRefusalCode;
+	constructor(message: string, options?: { code?: SpawnRefusalCode }) {
+		super(message);
+		if (options?.code !== undefined) this.code = options.code;
+	}
+}
 
 /**
  * The terminating tool a role must hold — and the ones it must not. Exactly
@@ -410,6 +419,11 @@ export class WorkerManager {
 	readonly #workers = new Map<string, ManagedWorker>();
 	/** Set by `shutdownAll`: a closing manager spawns nothing, ever again. */
 	#closing = false;
+	/** Slots held for a dispatch/revive between makeRoom and its spawn. */
+	readonly #reserved = new Set<string>();
+	/** Keys mid-shutdown → the shutdown's promise. */
+	readonly #stoppingDone = new Map<string, Promise<void>>();
+	readonly #slotFree = new Set<() => void>();
 
 	/** The settled package resolution; a still-pending one reads as an error, never as "nothing installed". */
 	#packages: WorkerPackageResolution;
@@ -568,7 +582,7 @@ export class WorkerManager {
 		if (this.#closing) {
 			// A worker stopped by shutdown looks like a death; bounded recovery would
 			// otherwise revive it after the snapshot below and orphan a live child.
-			throw new SpawnSafetyError(`job ${key}: the worker manager is shutting down — nothing is spawned during shutdown`);
+			throw new SpawnSafetyError(`job ${key}: the worker manager is shutting down — nothing is spawned during shutdown`, { code: "closing" });
 		}
 		// Backstop for every process start (dispatch, revive, recovery, reviewers): a drain spawns nothing.
 		assertNotDraining(this.#options.home, `worker process for ${key}`);
@@ -576,21 +590,26 @@ export class WorkerManager {
 		if (existing) {
 			throw new SpawnSafetyError(
 				`job ${key} already has a live worker (pid ${existing.worker.pid ?? "?"}) — promote it instead of spawning a second worker`,
+				{ code: "duplicate" },
 			);
 		}
 		const cap = this.spawnCap;
 		const reviewer = request.profile.frontmatter.role === "gate-reviewer";
 		// Held authors keep their process for repairs; reviews must still be able to start.
 		const limit = cap + (reviewer ? 3 : 0);
-		if (this.#workers.size >= limit) {
+		// A slot reserved for another job (HeldRelease.makeRoom) counts as taken.
+		const taken = this.#workers.size + this.#reservedFor(key);
+		if (taken >= limit) {
 			const reason = reviewer
 				? "review reserve exhausted"
 				: "spawn cap reached";
 			const next = reviewer
 				? "The three extra review slots are full. Finish a review first."
 				: "Three extra slots are reserved for gate-reviewer (review/gate/quality). Finish or tear down a job first.";
+			const reserved = this.#reservedFor(key) > 0 ? `, reserved for ${[...this.#reserved].filter((k) => k !== key).join(", ")}` : "";
 			throw new SpawnSafetyError(
-				`${reason} (${this.#workers.size}/${limit} workers): ${[...this.#workers.keys()].join(", ")}. ${next}`,
+				`${reason} (${taken}/${limit} workers): ${[...this.#workers.keys()].join(", ")}${reserved}. ${next}`,
+				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
 		const plan = this.plan(request);
@@ -642,9 +661,13 @@ export class WorkerManager {
 			startedAt: Date.now(),
 		};
 		this.#workers.set(key, managed);
+		// The reserved slot (if any) is now this worker's: consumed, no notify.
+		this.#reserved.delete(key);
 		// The registry follows observed reality, not intent.
 		void worker.closed.then(() => {
-			if (this.#workers.get(key) === managed) this.#workers.delete(key);
+			if (this.#workers.get(key) !== managed) return;
+			this.#workers.delete(key);
+			this.notifySlotFree();
 		});
 		return managed;
 	}
@@ -661,12 +684,85 @@ export class WorkerManager {
 		return this.#closing;
 	}
 
-	/** Graceful shutdown of one worker slot; resolves with the observed exit. */
-	async shutdown(key: string): Promise<void> {
+	/**
+	 * Graceful shutdown of one worker slot; resolves with the observed exit. The key is
+	 * `stopping` from the synchronous prefix until the exit, so nothing selects it (HeldRelease)
+	 * or delivers into it (Sender awaits `whenStopped`) in between.
+	 */
+	shutdown(key: string): Promise<void> {
 		const managed = this.#workers.get(key);
-		if (!managed) return;
-		await managed.worker.shutdown();
-		this.#workers.delete(key);
+		if (!managed) return Promise.resolve();
+		const pending = this.#stoppingDone.get(key);
+		if (pending) return pending;
+		const done = (async () => {
+			try {
+				await managed.worker.shutdown();
+			} finally {
+				this.#stoppingDone.delete(key);
+				// The close handler may have dropped it (and notified) first; notify once either way.
+				if (this.#workers.get(key) === managed) {
+					this.#workers.delete(key);
+					this.notifySlotFree();
+				}
+			}
+		})();
+		this.#stoppingDone.set(key, done);
+		return done;
+	}
+
+	/** True while `shutdown(key)` is awaiting the worker's exit. */
+	stopping(key: string): boolean {
+		return this.#stoppingDone.has(key);
+	}
+
+	/** The in-flight shutdown of `key`, or undefined when it is not stopping. */
+	whenStopped(key: string): Promise<void> | undefined {
+		return this.#stoppingDone.get(key);
+	}
+
+	/** Slots reserved by `reserve` and not yet consumed or released. */
+	get reserved(): number {
+		return this.#reserved.size;
+	}
+
+	/** Reservations held for keys other than `key` (a key's own reservation is its slot). */
+	#reservedFor(key: string): number {
+		return this.#reserved.size - (this.#reserved.has(key) ? 1 : 0);
+	}
+
+	/**
+	 * Hold one slot for `key` (HeldRelease.makeRoom only). The returned release is
+	 * idempotent: its first call frees the slot and notifies; a successful
+	 * `spawn(key)` consumes the slot silently instead.
+	 */
+	reserve(key: string): () => void {
+		if (this.#reserved.has(key)) throw new SpawnSafetyError(`job ${key} already holds a reserved slot`, { code: "duplicate" });
+		this.#reserved.add(key);
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			if (this.#reserved.delete(key)) this.notifySlotFree();
+		};
+	}
+
+	/** Subscribe to "a slot may have freed"; returns the unsubscribe. */
+	onSlotFree(listener: () => void): () => void {
+		this.#slotFree.add(listener);
+		return () => {
+			this.#slotFree.delete(listener);
+		};
+	}
+
+	/** Tell every slot-free listener; a throwing listener is recorded, never rethrown. */
+	notifySlotFree(): void {
+		for (const listener of [...this.#slotFree]) {
+			try {
+				listener();
+			} catch (error) {
+				this.#options.recordEvent?.("", "failure", { reason: `slot-free listener failed: ${(error as Error).message}` });
+			}
+		}
 	}
 
 	/** session_shutdown cleanup: never leave orphaned children behind. */

@@ -11,7 +11,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
-import { type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
+import { HeldRelease } from "../src/held-release.ts";
+import { RunRegistry } from "../src/runs.ts";
 import {
 	cleanupCreatedJobBranch,
 	Dispatcher,
@@ -46,6 +48,7 @@ import {
 	git,
 	MockProvider,
 	readFleet,
+	fakeWorkerManager,
 	readRunEvents,
 	readRunStatus,
 	REPO_ROOT,
@@ -181,6 +184,54 @@ test("a failed npm ci is logged once and the worker still starts, told in its br
 	assert.equal(logged.length, 1);
 	assert.match(JSON.stringify(logged[0]?.payload), /failed.*EINTEGRITY/);
 	assert.match(readFileSync(join(b.home, paths.briefFile(job.id)), "utf8"), /Dependencies in this worktree may be stale/);
+});
+
+test("4B1-T7: at the cap dispatch releases the one idle held author into a reserved slot; a failed spawn rolls back; nothing releasable lets spawn_cap escape", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const workers = fakeWorkerManager(b.home, 1);
+	t.after(() => workers.manager.shutdownAll());
+	const runs = new RunRegistry(b.home);
+	t.after(() => runs.closeAll());
+	const idle = workers.spawn("cp-aaa1");
+	await b.fleet.add({
+		job_id: "cp-aaa1", project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held",
+		worker: { pid: 4242, session_id: "s", session_file: join(b.home, "s.jsonl"), profile: "implementer", role: "implementer", model: b.model, started_at: isoTimestamp() },
+		worktree: b.home, branch: "cp-aaa1", dispatched_at: isoTimestamp(), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
+	});
+	const held = new HeldRelease({
+		home: b.home, fleet: b.fleet, manager: workers.manager,
+		busy: { sending: () => false, promoting: () => false, driving: () => false },
+		integration: () => undefined, journal: (id, kind, payload) => runs.open(id).cp(kind, payload),
+	});
+	const dispatcher = b.makeDispatcher({ manager: workers.manager, makeRoom: (id, role) => held.makeRoom(id, role) });
+
+	// Nothing releasable (the author is busy): spawn_cap escapes, nothing reserved, no record.
+	const blocked = await b.ledger.create({ title: "blocked", project: "demo", kind: "ship", delivery: "local", slug: "t7-blocked" });
+	const busy = idle as { busy: boolean };
+	busy.busy = true;
+	await assert.rejects(dispatcher.dispatch({ jobId: blocked.id, task: "Bump x.", model: b.model, fetch: false }), (error: unknown) => (error as SpawnSafetyError).code === "spawn_cap");
+	assert.equal(workers.manager.reserved, 0);
+	assert.equal(b.fleet.get(blocked.id), undefined);
+	busy.busy = false;
+
+	// A spawn that throws after makeRoom: the author is released, the reservation is not leaked, the same error escapes.
+	const failing = await b.ledger.create({ title: "failing", project: "demo", kind: "ship", delivery: "local", slug: "t7-failing" });
+	workers.failNext();
+	await assert.rejects(dispatcher.dispatch({ jobId: failing.id, task: "Bump x.", model: b.model, fetch: false }), /spawn failed/);
+	assert.equal(idle.shutdownCalls, 1);
+	assert.equal(workers.manager.reserved, 0);
+	assert.equal(b.fleet.get(failing.id), undefined);
+	assert.equal(b.fleet.require("cp-aaa1").phase, "held", "a release never changes phase");
+
+	// At the cap with one releasable author: it is released and the dispatch spawns into its slot.
+	const second = workers.spawn("cp-aaa1");
+	const job = await b.ledger.create({ title: "reserved", project: "demo", kind: "ship", delivery: "local", slug: "t7-ok" });
+	const result = await dispatcher.dispatch({ jobId: job.id, task: "Bump x.", model: b.model, fetch: false });
+	assert.equal(result.state, "dispatched");
+	assert.equal(second.shutdownCalls, 1);
+	assert.equal(workers.manager.reserved, 0);
+	assert.ok(workers.manager.get(job.id));
+	assert.equal(readRunEvents(b.home, "cp-aaa1").filter((event) => event.type === "held_released").length, 2);
 });
 
 test("dispatch snapshots referenced beads for the worker and reviewers, including missing refs", { skip: SKIP, timeout: 180_000 }, async (t) => {

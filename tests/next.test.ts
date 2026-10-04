@@ -144,10 +144,11 @@ test("spawn cap: the cp_next tool reads the manager's live processes and held jo
 	await ports.fleet.add(fleetRecord({ job_id: "cp-a1", phase: "held", reported_at: isoTimestamp() }));
 	// Nine authors plus one reviewer keyed under cp-a1: ten processes, as the manager's own cap check counts them.
 	const active = [...Array.from({ length: 9 }, (_, n) => ({ jobId: `cp-w${n}` })), { jobId: "cp-a1" }];
-	const manager = { active, spawnCap: 10 };
+	const manager = { active, spawnCap: 10, reserved: 0 };
+	const heldRelease = { releasable: () => [] as string[] };
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
 	registerMandateTools({ on: () => {}, registerTool: (tool: { name: string; execute: never }) => tools.set(tool.name, tool) } as never, {
-		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager }),
+		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager, heldRelease }),
 		setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined,
 	} as never);
 	const call = async () => (await tools.get("cp_next")!.execute("c", { project: "demo", full: true }, undefined, undefined, { hasUI: false, modelRegistry: undefined })).content[0]!.text;
@@ -155,6 +156,28 @@ test("spawn cap: the cp_next tool reads the manager's live processes and held jo
 	assert.match(await call(), new RegExp(`action: wait \u2014 spawn cap 10 reached: 10 live worker processes \\(held: cp-a1\\) \u2014 ${job.id} dispatches`));
 	active.pop();
 	assert.match(await call(), new RegExp(`action: dispatch ${job.id}`));
+	// 4b-1: back at the cap, one releasable held author makes room; a reservation already taken does not.
+	active.push({ jobId: "cp-a1" });
+	heldRelease.releasable = () => ["cp-a1"];
+	assert.match(await call(), new RegExp(`action: dispatch ${job.id}`));
+	manager.reserved = 1;
+	assert.match(await call(), /action: wait \u2014 spawn cap 10 reached/);
+});
+
+test("spawn cap (4b-1): the wait is decided by active + reserved - releasable >= cap", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const job = await ports.ledger.create({ title: "capped", project: "demo", delivery: "pr", kind: "ship" });
+	ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+	const at = async (active: number, reserved: number, releasable: number) =>
+		(await cpNext({ ...ports, capacity: () => ({ active, cap: 3, held: [], reserved, releasable }) }, "demo")).action.kind;
+	assert.equal(await at(3, 0, 1), "dispatch", "a releasable author frees a slot");
+	assert.equal(await at(3, 0, 0), "wait");
+	assert.equal(await at(2, 1, 0), "wait", "a reserved slot is taken");
+	assert.equal(await at(3, 1, 1), "wait");
+	assert.equal(await at(2, 0, 0), "dispatch");
+	assert.ok(job.id);
 });
 
 test("an objective-issue grant without job_ids covers a second same-project job and never invents a mission end on the first close", async (t) => {

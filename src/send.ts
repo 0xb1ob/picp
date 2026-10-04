@@ -130,6 +130,10 @@ export interface SenderOptions {
 	 * follow_up, or a send that failed. Returns whether a watch was rearmed.
 	 */
 	onPromptDelivered?: (jobId: string) => boolean;
+	/** 4b-1: relaunch a job whose idle worker HeldRelease stopped; used only when `released(jobId)` is true. */
+	revive?: (jobId: string) => Promise<unknown>;
+	/** 4b-1: was this job's process last stopped by HeldRelease (and not revived since)? */
+	released?: (jobId: string) => boolean;
 }
 
 const MARKER_FOR_MODE: Readonly<Record<DeliveryMode, "prompt_sent" | "steer_sent" | "follow_up_sent">> = Object.freeze({
@@ -140,12 +144,30 @@ const MARKER_FOR_MODE: Readonly<Record<DeliveryMode, "prompt_sent" | "steer_sent
 
 export class Sender {
 	readonly #options: SenderOptions;
+	/** In-flight sends per job (a counter: two concurrent sends to one job both count). */
+	readonly #sending = new Map<string, number>();
 
 	constructor(options: SenderOptions) {
 		this.#options = options;
 	}
 
+	/** True while a send to this job is in flight (HeldRelease never releases it then). */
+	sending(jobId: string): boolean {
+		return (this.#sending.get(jobId) ?? 0) > 0;
+	}
+
 	async send(request: SendRequest): Promise<SendResult> {
+		this.#sending.set(request.jobId, (this.#sending.get(request.jobId) ?? 0) + 1);
+		try {
+			return await this.#send(request);
+		} finally {
+			const left = (this.#sending.get(request.jobId) ?? 1) - 1;
+			if (left > 0) this.#sending.set(request.jobId, left);
+			else this.#sending.delete(request.jobId);
+		}
+	}
+
+	async #send(request: SendRequest): Promise<SendResult> {
 		const { fleet, manager, runs } = this.#options;
 		let message = request.message.trim();
 		if (message.length === 0) throw new SendError(`cp_send ${request.jobId}: empty message`);
@@ -190,12 +212,31 @@ export class Sender {
 		const reopen = decideReopen(record);
 		if (reopen.kind === "refuse") throw new SendError(reopen.reason);
 
-		const managed = manager.get(request.jobId);
+		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
+		if (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined && this.#options.mandates) {
+			try {
+				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
+			} catch (error) {
+				throw new SendError((error as Error).message);
+			}
+		}
+
+		// 4b-1: never deliver into a worker HeldRelease is stopping; wait for its observed exit, then restore it.
+		await manager.whenStopped(request.jobId)?.catch(() => undefined); // a failed stop is HeldRelease's to report; the re-read below decides
+		let managed = manager.get(request.jobId);
+		const noLiveWorker = () =>
+			`${request.jobId} has no live worker in this session (fleet phase ${record.phase}, pid ${record.worker.pid}). ` +
+			`cp_revive ${request.jobId} to relaunch it from ${record.worker.session_file || "its session file"}, or tear the job down.`;
+		if (!managed && this.#options.revive && this.#options.released?.(request.jobId)) {
+			try {
+				await this.#options.revive(request.jobId);
+			} catch (error) {
+				throw new SendError(`${noLiveWorker()} Restoring the released worker failed: ${(error as Error).message}`);
+			}
+			managed = manager.get(request.jobId);
+		}
 		if (!managed || !managed.worker.alive) {
-			throw new SendError(
-				`${request.jobId} has no live worker in this session (fleet phase ${record.phase}, pid ${record.worker.pid}). ` +
-					`cp_revive ${request.jobId} to relaunch it from ${record.worker.session_file || "its session file"}, or tear the job down.`,
-			);
+			throw new SendError(noLiveWorker());
 		}
 		if (request.model && request.model !== managed.model) {
 			throw new SendError(
@@ -263,13 +304,6 @@ export class Sender {
 		// Checked here \u2014 validated, nothing mutated yet \u2014 from the new brief's own
 		// words, the same signal set `cp_dispatch` reads.
 		let riskWarning: string | undefined;
-		if (request.purpose === "repair" && !resolvedTask && this.#options.mandates) {
-			try {
-				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
-			} catch (error) {
-				throw new SendError((error as Error).message);
-			}
-		}
 		if (resolvedTask && record.kind === "ship" && this.#options.mandates) {
 			const assessed = inferScopeAndRisk(resolvedTask.forInference);
 			const routing = record.routing;
