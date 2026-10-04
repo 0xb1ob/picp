@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { registerDispatchTools } from "../extensions/command-post/tools-dispatch.ts";
-import { type Job, LAYOUT } from "../src/contracts.ts";
+import { DISPATCH_QUEUE_MAX, type Job, LAYOUT } from "../src/contracts.ts";
 import { DispatchQueue } from "../src/dispatch-queue.ts";
 import { MandateError } from "../src/mandate-accounting.ts";
 import { SpawnSafetyError } from "../src/worker-manager.ts";
@@ -64,4 +64,14 @@ test("4B2-T2: spawn_cap queues with a position; a re-dispatch is refused untouch
 	await assert.rejects(b.call({ job_id: "cp-aaa5" }), /spawn cap reached/);
 	assert.deepEqual(b.dispatchQueue.ids(), ["cp-aaa1", "cp-aaa2"], "none of those was queued");
 	assert.equal(readFileSync(b.file, "utf8"), before);
+
+	// An invalid request is refused before disk: the original refusal stands, naming why it was not queued.
+	b.state.script = false;
+	await assert.rejects(b.call({ job_id: "cp-aaa6", scope: "XL" }), (error: unknown) => error instanceof SpawnSafetyError && /spawn cap reached .*not queued: refusing to write an invalid/.test(error.message));
+	assert.equal(readFileSync(b.file, "utf8"), before, "the queue stays readable for every later cp_dispatch");
+	assert.equal(b.dispatchQueue.position("cp-aaa2"), 2);
+
+	// A full queue keeps today's spawn_cap refusal and says the queue is full.
+	for (let n = 3; n <= DISPATCH_QUEUE_MAX; n++) b.dispatchQueue.enqueue(`cp-fill${n}`, {});
+	await assert.rejects(b.call({ job_id: "cp-aaa7" }), (error: unknown) => error instanceof SpawnSafetyError && error.code === "spawn_cap" && /not queued: the dispatch queue is full/.test(error.message));
 });

@@ -183,7 +183,10 @@ export class DispatchQueue {
 		return this.#options.now?.() ?? new Date();
 	}
 
+	/** Validated before it touches disk: one bad entry would otherwise refuse every later read (and every cp_dispatch). */
 	#write(file: DispatchQueueFile): void {
+		const result = validateDispatchQueueFile(JSON.parse(JSON.stringify(file)));
+		if (!result.ok) throw new DispatchQueueError(`refusing to write an invalid ${this.#file}:\n  ${result.errors.join("\n  ")}`);
 		atomicWriteJson(this.#file, file);
 	}
 }

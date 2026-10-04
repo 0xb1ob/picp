@@ -128,6 +128,22 @@ test("4B1-T2: releasable keeps only live, idle, not-stopping held ship/pr author
 	await stopping;
 });
 
+test("4B1-T2: a script record is never releasable, even one shaped as a held ship/pr author", (t) => {
+	// The fleet schema refuses this shape, so a stub fleet feeds it: the filter must not depend on that.
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const workers = fakeWorkerManager(home.path, 4);
+	workers.spawn("cp-script");
+	workers.spawn("cp-model");
+	const records = [held("cp-script", { executor: "script", script_path: "scripts/run.sh" } as Partial<FleetRecord>), held("cp-model")];
+	const release = new HeldRelease({
+		home: home.path, fleet: { list: () => records }, manager: workers.manager,
+		busy: { sending: () => false, promoting: () => false, driving: () => false },
+		integration: () => undefined, journal: () => {},
+	});
+	assert.deepEqual(release.releasable(), ["cp-model"]);
+});
+
 test("4B1-T2: capacityFree counts only releasable authors as free (dead, busy, stopping never)", async (t) => {
 	const b = await bench(t, 2, [held("cp-busy"), held("cp-idle")]);
 	b.workers.spawn("cp-busy", fakeWorker({ busy: true }));

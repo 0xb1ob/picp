@@ -696,6 +696,9 @@ export class WorkerManager {
 		if (pending) return pending;
 		const done = (async () => {
 			try {
+				// Deferred one microtask: a synchronous throw from shutdown() must reach `finally` only after
+				// `#stoppingDone.set` below, or the key would stay `stopping` forever.
+				await Promise.resolve();
 				await managed.worker.shutdown();
 			} finally {
 				this.#stoppingDone.delete(key);

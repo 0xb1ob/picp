@@ -1784,7 +1784,9 @@ Other spawn-time policy, all fail-closed:
   `state/dispatch-queue.json` (`src/dispatch-queue.ts`, at most
   `DISPATCH_QUEUE_MAX` = 32 entries, one per job) and answers
   `state: "queued"` with its position; a second `cp_dispatch` of a queued job
-  is refused. Only the parent-lock owner drains it (ownership re-read per
+  is refused. Every write is schema-validated first, so a bad request never
+  reaches disk; a full queue or an invalid request keeps the `spawn_cap`
+  refusal, suffixed `(not queued: …)`. Only the parent-lock owner drains it (ownership re-read per
   entry, never during a home drain), on every slot-free notification
   (`WorkerManager.onSlotFree`: an observed close, a shutdown, a released
   reservation) and on every scheduler tick as the backstop. A drain runs

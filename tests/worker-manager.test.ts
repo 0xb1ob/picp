@@ -793,6 +793,18 @@ test("4b-1: a stopping worker is marked from shutdown's first tick until its exi
 	await assert.rejects(rejected, /kill failed/);
 	assert.equal(manager.stopping("cp-r"), false);
 	assert.equal(notified, 2);
+
+	// A shutdown() that throws synchronously still clears `stopping` (the call is deferred past the map write).
+	const sync = fakeWorker();
+	sync.shutdown = () => {
+		throw new Error("sync kill failed");
+	};
+	spawn("cp-s", sync);
+	const thrown = manager.shutdown("cp-s");
+	assert.equal(manager.stopping("cp-s"), true);
+	await assert.rejects(thrown, /sync kill failed/);
+	assert.equal(manager.stopping("cp-s"), false, "never left stopping forever");
+	assert.equal(manager.whenStopped("cp-s"), undefined);
 });
 
 test("4b-1: slot-free fires after an observed close; unsubscribe works; a throwing listener breaks nothing", async (t) => {

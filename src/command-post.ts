@@ -117,7 +117,7 @@ import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
-import { ProjectRegistry } from "./projects.ts";
+import { ProjectRegistry, projectDirResolver } from "./projects.ts";
 import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
 import { ALWAYS_AVAILABLE, isAllowed, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { loadSuggestConfig } from "./suggest.ts";
@@ -577,11 +577,7 @@ export class CommandPost {
 			merges: this.merges,
 			teardown: this.teardown,
 			ledger: () => this.ledger(),
-			projectDir: (project, worktree) => {
-				const clone = this.registry.pathOf(project);
-				if (existsSync(clone)) return clone;
-				return worktree && existsSync(worktree) ? worktree : this.home;
-			},
+			projectDir: projectDirResolver(this.registry, this.home),
 			runs: this.runs,
 			send: async (jobId, message) => {
 				const result = await this.sender.send({ jobId, message, purpose: "repair" });

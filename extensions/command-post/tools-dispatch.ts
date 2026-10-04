@@ -195,7 +195,14 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				if (!(error instanceof SpawnSafetyError && error.code === "spawn_cap") || params.queue === false) throw error;
 				if ((await post.ledger().show(params.job_id).catch(() => undefined))?.script) throw error;
 				const { job_id: _id, dry_run: _dry, queue: _queue, ...request } = params;
-				const position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
+				let position: number;
+				try {
+					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
+				} catch (queueError) {
+					// Today's refusal stands; the queue failure is named on it.
+					(error as Error).message += ` (not queued: ${(queueError as Error).message.split("\n")[0]})`;
+					throw error;
+				}
 				refreshWidget(ctx);
 				return {
 					content: [{ type: "text", text: `queued (position ${position}): ${params.job_id} starts when a worker slot frees; the outcome arrives as a wake-up — do not re-dispatch` }],

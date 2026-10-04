@@ -49,6 +49,10 @@ test("4B2-T1: FIFO, positions, the duplicate and 32-entry caps, and persistence 
 	assert.throws(() => b.queue.enqueue("cp-aaa1", {}), /already queued at position 1/);
 	assert.equal(b.queue.position("cp-aaa2"), 2);
 	assert.equal(b.reopen().position("cp-aaa2"), 2, "the file persists across instances");
+	const two = b.bytes();
+	assert.throws(() => b.queue.enqueue("cp-bad", { scope: "XL" } as never), /refusing to write an invalid/);
+	assert.equal(b.bytes(), two, "an invalid request never reaches disk");
+	assert.equal(b.queue.position("cp-aaa2"), 2, "the queue stays readable");
 	for (let n = 3; n <= DISPATCH_QUEUE_MAX; n++) b.queue.enqueue(`cp-aaa${n}`, {});
 	assert.throws(() => b.queue.enqueue("cp-full", {}), /queue is full \(32 entries\)/);
 	await b.queue.drain();
