@@ -1614,3 +1614,64 @@ test("an alternate-kind (merge) linked checkpoint answered through the escalatio
 		home.cleanup();
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Self-answers do not echo
+// ---------------------------------------------------------------------------
+
+test("operator-quote and operator-delegated answers record but queue and wake nothing, and a restart replays nothing", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const checkpoints = parent.post.pipeline().checkpoints;
+		for (const [index, by] of ["operator-quote", "operator-delegated"].entries()) {
+			checkpoints.request({ jobId: `cp-self${index}`, question: "ship?" });
+			checkpoints.decide(`cp-self${index}`, true, { by });
+			assert.equal(checkpoints.get(`cp-self${index}`)?.decision, "approved", `${by}: the answer is still recorded`);
+		}
+		const raised = await parent.post.escalations.raise({ job_ids: ["cp-synth1"], kind: "product_ambiguity", question: "which copy?", options: ESC_OPTIONS, recommended: "approve" });
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "operator-quote" });
+		assert.equal(parent.post.escalations.get(raised.id)?.status, "answered", "the escalation record is kept");
+		assert.deepEqual(parent.sent, [], "no wake for an answer recorded inside the parent's turn");
+		assert.deepEqual(parent.post.answered.pending(), [], "and nothing queued");
+		assert.equal(existsSync(join(home.path, LAYOUT.answeredFile)), false, "no outbox file at all");
+
+		const restarted = parentOn(home.path);
+		assert.deepEqual(restarted.post.drainAnswered(() => assert.fail("a restart must replay nothing")), []);
+		assert.deepEqual(restarted.post.answered.pending(), []);
+	} finally {
+		home.cleanup();
+	}
+});
+
+test("a mandate:* answer and another channel still queue and wake, and an answer recorded with no parent is replayed after a restart", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const checkpoints = parent.post.pipeline().checkpoints;
+		checkpoints.request({ jobId: "cp-mandate", question: "ship?" });
+		checkpoints.decide("cp-mandate", true, { by: "mandate:md-synth1" });
+		const raised = await parent.post.escalations.raise({ job_ids: ["cp-synth1"], kind: "mission_end", question: "close?", options: ESC_OPTIONS, recommended: "approve" });
+		await parent.post.escalations.answer(raised.id, { answer: "approve", by: "mandate:md-synth1" });
+		checkpoints.request({ jobId: "cp-other", question: "ship?" });
+		checkpoints.decide("cp-other", true, { by: "operator command" });
+		assert.deepEqual(
+			flat(parent.sent).map((decision) => decision.id),
+			["aw-checkpoint-cp-mandate", raised.id, "aw-checkpoint-cp-other"],
+			"mandate auto-decisions and other channels wake, one each",
+		);
+
+		// A mandate decision landing while no parent is attached stays queued, and the next parent delivers it once.
+		const headless = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+		headless.pipeline().checkpoints.request({ jobId: "cp-late", question: "ship?" });
+		headless.pipeline().checkpoints.decide("cp-late", true, { by: "mandate:md-synth1" });
+		assert.deepEqual(headless.answered.pending().map((decision) => decision.id), ["aw-checkpoint-cp-late"]);
+		const restarted = parentOn(home.path);
+		restarted.drain();
+		assert.deepEqual(flat(restarted.sent).map((decision) => decision.id), ["aw-checkpoint-cp-late"], "replayed by the next parent");
+		assert.deepEqual(restarted.post.answered.pending(), []);
+		assert.deepEqual(restarted.post.drainAnswered(() => assert.fail("delivered once")), []);
+	} finally {
+		home.cleanup();
+	}
+});

@@ -133,6 +133,18 @@
  * `enqueue` refuses an id that is already pending or already delivered, so
  * "answering twice must not wake twice" holds even if a caller retries.
  *
+ * ## Self-answers do not echo
+ *
+ * `cp_decide` records an operator-quoted answer inside the parent's own turn, so
+ * `answered_by` exactly `operator-quote` or exactly `operator-delegated`
+ * (`isSelfAnswered`) is recorded by its writer as always, but `CommandPost.#recordAnswered`
+ * neither enqueues it nor fires the `onAnswered` wake: the parent that made the call needs no
+ * `cp-answered` turn to learn it. Every other `answered_by` is queued and woken exactly as
+ * above — in particular `mandate:<id>`: a mandate auto-decision (`#tryMandate` →
+ * `autoDecideCheckpoint`, mandate auto-close) can land outside any parent turn, when a gate or
+ * review finishes, so suppressing it could strand a dispatch or merge. Nothing is queued for a
+ * suppressed answer, so a restart replays nothing; a queued one is replayed as before.
+ *
  * Skip is not an answer: it writes nothing, anywhere, so nothing is enqueued
  * and nobody is woken. Skip never reaches a writer, so this
  * module simply never hears about it.
@@ -574,6 +586,15 @@ function noticeText(content: unknown): string {
 	return content
 		.map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : ""))
 		.join("\n");
+}
+
+/**
+ * The parent's own `cp_decide` answers: `operator-quote` / `operator-delegated`, recorded inside its
+ * turn, so echoing them back as a `cp-answered` wake is noise. `mandate:<id>` is deliberately NOT
+ * here: an auto-decision can run outside a parent turn and must still wake it.
+ */
+export function isSelfAnswered(answeredBy: string): boolean {
+	return answeredBy === "operator-quote" || answeredBy === "operator-delegated";
 }
 
 /** `by: mandate:<id>` is a mandate's auto-decision, never a human's answer. */

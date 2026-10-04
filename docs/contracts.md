@@ -3918,8 +3918,8 @@ failures, next job, merge when the repository permits, bounded recovery, a
 token-cap raise within the ceiling (`cp_mandate raise_tokens`, journaled).
 
 Auto-decision: when a checkpoint is minted and evaluation permits, `decide()`
-runs with `decided_by: mandate:<id>` and the clause in `note`; the existing
-`cp-answered` wake-up fires. `cp_mandate show` lists every auto-decision.
+runs with `decided_by: mandate:<id>` and the clause in `note`,
+and the `cp-answered` wake-up still fires: unlike an operator-quoted `cp_decide`, an auto-decision can run outside a parent turn. `cp_mandate show` lists every auto-decision.
 Expiry/revoke: no new auto-decisions (except an expired grant's diff/merge for an in-flight job, see
 *one permission rule*); workers are not killed. Merge authority
 stays the repository's — the mandate may only allow the parent to proceed when
@@ -5060,6 +5060,18 @@ made is still an emission, and a restart that forgets it is a restart that
 repeats it. Both writers report only an answer they actually recorded (an
 idempotent repeat returns early), and `enqueue` refuses an id that is already
 pending or delivered: answering twice never wakes twice.
+
+**Self-answers do not echo.** `cp_decide` records an operator-quoted answer inside
+the parent's own turn. When `answered_by` is exactly `operator-quote` or exactly
+`operator-delegated` (`isSelfAnswered`, `src/answered.ts`), the writer records it
+as always but `CommandPost.#recordAnswered` neither enqueues it nor fires
+`onAnswered`: the parent that made the call needs no `cp-answered` turn to learn
+it. **`mandate:<id>` still wakes** (including mandate auto-close), as does every
+other `answered_by`: a mandate auto-decision (`#tryMandate` → `autoDecideCheckpoint`)
+can run outside a parent turn when a gate or review lands, so suppressing it could
+strand a dispatch or merge. The escalation, awaiting and checkpoint records are
+untouched; a suppressed answer queues nothing, so a restart replays nothing, while
+a queued one is replayed as before (`tests/answered.test.ts`).
 
 **Skip still writes nothing and wakes nobody.** It never reaches a writer, so
 there is nothing to queue — `state/answered.json` may not even exist afterwards.
