@@ -35,7 +35,7 @@ import {
 	reviewWakeups,
 } from "../src/wakeups.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
-import { boundedWakeupId, DurableWakeupOutbox } from "../src/wakeup-outbox.ts";
+import { boundedCauseId, boundedWakeupId, DurableWakeupOutbox } from "../src/wakeup-outbox.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const DOCS = readFileSync(join(REPO_ROOT, "docs/contracts.md"), "utf8");
@@ -90,6 +90,17 @@ test("a recovery id longer than 160 chars does not collapse distinct sets", () =
 	assert.ok(a.length <= 160);
 	assert.ok(b.length <= 160);
 	assert.notEqual(a, b);
+});
+
+test("N7: ci-watch-failed causes sharing a long prefix keep their distinguishing tail", () => {
+	const head = `gh run list --branch main --json conclusion ${"x".repeat(200)}`;
+	const a = boundedCauseId("ci-watch-failed:", `${head} HTTP 403`);
+	const b = boundedCauseId("ci-watch-failed:", `${head} HTTP 502`);
+	assert.ok(a.length <= 160 && b.length <= 160);
+	assert.notEqual(a, b);
+	assert.match(a, /HTTP 403/);
+	assert.match(b, /HTTP 502/);
+	assert.equal(boundedCauseId("ci-watch-failed:", "short"), "ci-watch-failed:short");
 });
 
 test("AGENTS.md tells the parent to act on death and recovery wake-ups", () => {

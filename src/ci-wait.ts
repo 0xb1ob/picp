@@ -148,7 +148,7 @@ export function ciWaitRefusal(finding: CiWaitFinding): string {
 	return [
 		`Refused: ${finding.what} (${finding.shape}: ${finding.matched}).`,
 		"A worker never waits for CI. Your job ends at: rebase onto the base branch your brief names",
-		"(`origin/<base>`), run the full suite locally,",
+		"(`origin/<base>`), run `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts` (never `npm test`),",
 		"push, and report the pushed head sha (`git rev-parse HEAD`) in report_result's `head_sha`.",
 		"The parent re-verifies CI against that sha before it merges anything, so waiting here duplicates a",
 		"check the parent redoes and does not take your word for — it only burns your turn and the lease.",
@@ -188,7 +188,7 @@ export function ciStatusQuery(command: string): boolean {
 export function ciStatusRepeatRefusal(): string {
 	return [
 		"Refused: this worker already took its one CI status snapshot; a second one tells you nothing new.",
-		"Rebase, run the suite, push, and report the pushed head sha (`git rev-parse HEAD`) in report_result's",
+		"Rebase, run `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts` (never `npm test`), push, and report the pushed head sha (`git rev-parse HEAD`) in report_result's",
 		"`head_sha`; the parent re-verifies CI itself. Failure logs (`gh run view <id> --log-failed`) are still allowed.",
 	].join("\n");
 }

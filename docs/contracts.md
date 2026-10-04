@@ -432,6 +432,11 @@ bare `sleep 5`; a single non-blocking `gh run list`; and any of these words
 inside a quoted string (`grep "sleep 270; gh run list" …`), because the `sleep`
 must be in command position (start of command, or after `;`, `&&`, `||`, `|`,
 `(`, a newline, `do`, `then`).
+The refusal text itself sends the worker to `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts`
+(never `npm test`), and `detectCiWait` still does not classify `npm test` as a wait.
+A worker `bash` call that copies the host `auth.json` (`cp ~/.pi/agent/auth.json …`, or a
+`for f in auth.json …; do cp ~/.pi/agent/$f` loop) is refused by `src/worker-credential-guard.ts`
+under the same command-position and heredoc rule; only `models.json` may be copied.
 
 Why this option and not the alternatives the issue weighed: a per-tool-call
 timeout cannot distinguish a 6-minute suite from a 6-minute sleep (the 30-minute

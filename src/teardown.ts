@@ -314,7 +314,7 @@ export class Teardown {
 			closed_reason: options.force ? "forced" : "gated",
 			...(isScriptFleetRecord(record) ? {} : { worker: {
 				...record.worker,
-				exited_at: exitCode !== undefined ? closedAt : record.worker.exited_at,
+				exited_at: (!managed && record.worker.exited_at) || (exitCode !== undefined ? closedAt : undefined),
 				...(exitCode !== undefined ? { exit_code: exitCode } : {}),
 			} }),
 			...(runStatus ? { usage: runStatus.usage } : {}),

@@ -34,6 +34,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../../src/worker-merge-guard.ts";
+import { detectHostAuthCopy, hostAuthCopyRefusal } from "../../src/worker-credential-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
@@ -470,6 +471,8 @@ export default function (pi: ExtensionAPI): void {
 			if (finding) return { block: true, reason: ciWaitRefusal(finding) };
 			const merge = typeof command === "string" ? detectWorkerMerge(command) : undefined;
 			if (merge) return { block: true, reason: workerMergeRefusal(merge) };
+			const authCopy = typeof command === "string" ? detectHostAuthCopy(command) : undefined;
+			if (authCopy) return { block: true, reason: hostAuthCopyRefusal(authCopy) };
 			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
 			// One CI status snapshot per worker process (revive = new process = one more).
 			if (typeof command === "string" && ciStatusQuery(command)) {

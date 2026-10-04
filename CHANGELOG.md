@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Log-review fixes, PR-A (N1, N6, N7, P1)
+
+CI-wait refusals name `npm run typecheck` and `npm run test:one` (never `npm test`) instead of ordering the full suite. Teardown keeps an already-recorded `worker.exited_at` (`closed_at` still carries the teardown clock). `ci-watch-failed` durable ids keep the head and tail of a long cause plus a hash (`boundedCauseId`), so the gh error survives truncation; one old cause may be delivered once more after deploy. A worker `bash` call copying the host `auth.json` is refused (`src/worker-credential-guard.ts`). Migration: none.
+
 ### Direct host relay of code-raised escalations (unload-parent PR1)
 
 The parent host checks every 10 s for open escalations that no `cp_escalate` relay carried (`raiseRiskHigh`, `raiseForGate`, `raiseMissionEnd`, …) and enqueues each, after a 10 s grace, as `esc:<id>` in `state/operator/relay-outbox.json`: it reaches the main session within about 20 s through the existing outbox, ack and open-at-delivery recheck, at most once (any `esc:<id>` entry, pending or acked, suppresses it, so a host restart adds nothing). New `src/escalation-relay-watch.ts`; `escalationRelay` is now exported from `src/escalation-backstop.ts`. The 600 s operator-session backstop is unchanged and still relays anything never delivered. Migration: none; no new file or schema.
