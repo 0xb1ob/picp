@@ -60,7 +60,9 @@ prints `treehouse --version` into the log; the installer tracks upstream
 latest, so that line is the version record. The sentinel
 `tests/ci-host-tools.test.ts` fails the run when `GITHUB_ACTIONS=true` and
 treehouse is not on `PATH`. Off CI a missing treehouse still only skips. The
-live suites stay skipped (`CP_LIVE_TESTS` is empty).
+live suites stay skipped (`CP_LIVE_TESTS` is empty). After the suite, a separate
+step runs `npm run eval:check` (offline, 5-minute timeout, no `CP_EVAL_LIVE`) and
+fails when `evals/results/contract.json` is stale.
 
 ## Several homes on one machine
 
