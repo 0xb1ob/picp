@@ -33,6 +33,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
+import { detectWorkerMerge, workerMergeRefusal } from "../../src/worker-merge-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
@@ -467,6 +468,8 @@ export default function (pi: ExtensionAPI): void {
 			const command = (event.input as { command?: unknown } | undefined)?.command;
 			const finding = typeof command === "string" ? detectCiWait(command) : undefined;
 			if (finding) return { block: true, reason: ciWaitRefusal(finding) };
+			const merge = typeof command === "string" ? detectWorkerMerge(command) : undefined;
+			if (merge) return { block: true, reason: workerMergeRefusal(merge) };
 			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
 			// One CI status snapshot per worker process (revive = new process = one more).
 			if (typeof command === "string" && ciStatusQuery(command)) {

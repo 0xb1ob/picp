@@ -13,7 +13,7 @@
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-qa.md": "sha256:3abe3a39b49f70c1f50d6eca6a39fb17d296782b7d5bd70eaaa8615a34e7a04f",
       "prompts/briefs/brief-research.md": "sha256:f42fd7c834a85ab6b4cf02ae3c595be53604c4d4e70d1323816e3db212cc14ae",
-      "prompts/briefs/brief-ship.md": "sha256:f8bd63267bc1d7df0d6b725befef3d5639d1bb72de8a2db71e1b21c3a347bbcf",
+      "prompts/briefs/brief-ship.md": "sha256:007043a8daf7847d37f0ffbba39e6cd8fa23285404191b0787f39de362d63f8e",
       "prompts/briefs/diff-review-rubric.md": "sha256:766b4b93f35e2c1de080bdf46dc4134344c832ac3007a083510025f86e5ceea7",
       "prompts/briefs/gate-rubric.md": "sha256:908ba286759f2ab16dd55e180be93004bf9be5cc839407141c6d64b16ed33431",
       "prompts/briefs/quality-completeness.md": "sha256:ab88d30ce35a3e261d0171307a5b91734fbb0bc3f43324b6e48a408782fd79c8",
