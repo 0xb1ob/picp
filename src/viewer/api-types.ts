@@ -242,7 +242,9 @@ export interface OverviewResponse {
  mandates: {active_count: number | null; paused_count: number | null; paused_projects: string[]; revoked_hidden_count: number | null; items: OverviewMandate[]};
  fleet: {parent: ParentHealth; workers: {live: number | null; working: number | null; idle_held: number | null; unknown: number}; operator: OperatorHealth};
  /** cp-daemon P3: the watchdog's last run (`state/health.json`); null when it never ran. */
- services: {health: {last_run_at: string; failing: {check: string; detail: string}[]} | null};
+ services: {health: {last_run_at: string; failing: {check: string; detail: string; since: string}[]} | null};
+ /** cp-6fyl PR2: did the operator session see what the parent sent (`state/operator/relay-{outbox.json,acks.jsonl}`)? Null counts: unreadable, never zero. */
+ delivery: {availability: SourceAvailability; unseen: number | null; oldest_id: string | null; oldest_kind: string | null; oldest_age_seconds: number | null; consumer_seen_at: string | null; alarm: boolean};
  quota: QuotaObservation | null;
  navigation: {project_count: number; worktree_count: number};
  warnings: {section: string; message: string}[];

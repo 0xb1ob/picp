@@ -3964,6 +3964,19 @@ It exposes evidence paths, never artifact bodies.
 | integrate `surface` / repo refuses merge | `merge_refused` |
 | mission end | `mission_end` |
 | plan approval | `plan_approval` |
+| service health (cp-health failing / `rollback_failed`) | `service_health` |
+
+**Service health** (cp-6fyl PR2). cp-health only pushed, so a failing service could sit unseen for most of an hour. The
+parent (the single writer of `state/escalations.json`; `service-alert-tick`, every 60 s while it holds the lock) reads
+`state/health.json` and raises one `service_health` escalation per failing check
+([`src/service-alerts.ts`](../src/service-alerts.ts)): `rollback_failed:*` at once, any other check after it has failed
+900 s (three watchdog runs). The synthetic anchor is `SERVICE_HEALTH_JOB_ID` (`cp-service-health`; the schema needs one
+job id), the question names the check, its `since` and its key and carries no live numbers, so identity dedupes every
+re-tick. A check that recovers or changes key withdraws its open record; an answered (`ack`) or withdrawn one is never
+raised again for the same failure. The kind is pushed (`PUSH_ESCALATION_KINDS`, project `command-post`), relayed to the
+operator session at age 0 (`dueEscalations`), and an unreadable `health.json` withdraws nothing. **Downgrade:** an older
+binary's escalation schema rejects the unknown kind and so the whole file; roll back only after removing the
+`service_health` items from `state/escalations.json` (from a backup copy, with the parent stopped).
 
 Ask the human when: mandate creation, product ambiguity, scope expansion,
 risk:high, loop exhausted, budget exhausted (the USD cap, or a token
@@ -5254,7 +5267,8 @@ dashboard half (subscribe control, service worker, Home Screen manifest) is §We
     pushed directly (open human-only escalation, or a `sent`/`pending` ledger record) is not pushed again;
   - a new **open human-only escalation** — `PUSH_ESCALATION_KINDS`: `risk_high_irreversible`,
     `budget_exhausted`, `merge_refused` (only the operator's own words close them, even with the main session
-    down);
+    down), and `service_health` (cp-6fyl PR2; raised by the parent from cp-health's record, withdrawn when the
+    check recovers);
   - a pending **`final_fix` checkpoint** (keyed by its Awaiting-you id);
   - a new **open merge ask**: an Awaiting-you row `isMergeAsk` recognises. A `deferred` row pushes when it is
     promoted to `open`, not before; a `merge-pending pr <url>` reminder never pushes (its `merge_refused`
@@ -5269,13 +5283,28 @@ sources hold then is `skipped` ("open before the push rule changed"), never repl
 **Health, from the watchdog, not this sweep** (cp-daemon v1 P3; `PUSH_RULE` ends `; health (cp-health, once per
 failure/recovery)`). cp-health ([`src/service/health.ts`](../src/service/health.ts), run by cp-daemon every 5
 min) pushes `{project: "command-post", kind: "health: <parent down | viewer down | crash-looping |
-disk low | git credential | gh credential | update failed>", headline}` once when a check starts failing (parent and
+disk low | git credential | gh credential | update failed | relay unseen>", headline}` once when a check starts failing (parent and
 viewer only after 2 runs in a row, never while `state/update.json` `phase` is not idle unless it is a `held` rollback with no run in flight), nothing while it stays
 failed, once more for each distinct updater failure (keyed `result:to`: `failed`, `drain_timeout`, `rolled_back`,
 `rollback_failed`, `config_invalid`, `fetch_failed` three times), and `health: <name> recovered` once. It sends
 directly to the subscribed devices with the same RFC code; its only record is `state/health.json`. A failed push
 is retried on the next ≤ 3 runs, then logged and given up. It never writes `state/push-deliveries.json` and never
 deletes a subscription, even on 404/410.
+
+**The `relay` check** (cp-6fyl PR2, the last line of defense for parent→operator delivery; independent of the parent and
+the operator session). It reads the host's `state/operator/relay-outbox.json`, the operator's
+`state/operator/relay-acks.jsonl`, the open escalations and the open asks, and fails in two cases: a relay unacked and
+not discarded for `RELAY_UNSEEN_SECONDS` (600 s; key `relay:<oldest id>`), or an open escalation older than
+`ESCALATION_UNSEEN_SECONDS` (1200 s: the 600 s backstop plus one alarm window) that no ack, discard or open ask accounts
+for (key `escalation:<es-id>`). The detail is `<n> relay(s) unseen by the main session, oldest <id> <m> min (<kind>)`; with
+no live ack-capable operator session (no `consumer` line newer than the relay, and no live consumer pid — an old bridge
+writes none) it adds `— no ack-capable operator session; relaunch it (dashboard: Restart session)`. A missing outbox is no
+signal (`skip`); an unreadable file fails with key `unreadable`, never reads as empty; an outbox above its cap fails as
+`over-cap`. It pushes once per key and once on recovery, like every check. `/api/overview` carries `delivery`
+(`availability`, `unseen`, `oldest_id`, `oldest_kind`, `oldest_age_seconds`, `consumer_seen_at`, `alarm`; counts are null when a
+file is unreadable, never 0) and `services.health.failing[].since`; the Overview renders a `role="alert"` banner above all
+other sections for an unseen relay of 600 s or more, or a health check failing 900 s or more — one line per cause. No new
+endpoint; both fields extend the existing authenticated `/api/overview`.
 
 **A sweep of the durable records, not a hook in the raise path.** `runPushSweep` runs every
 `PUSH_TICK_MS` (15 s, plus one catch-up pass at `session_start`) only while this session holds the parent
@@ -5323,7 +5352,7 @@ only ([`src/push/webpush.ts`](../src/push/webpush.ts)); no dependency.
 | `data/push/vapid.key` (0600) | `npm run push:init`, once, never overwritten | the sweep and cp-health only; never printed, logged or quoted |
 | `data/push/subscriptions/<sha256(endpoint)[0:32]>.json` (0600) | the dashboard; the sweep deletes on 404/410 (cp-health never deletes) | the sweep, cp-health, `/doctor` |
 | `state/push-deliveries.json` | the sweep (parent-lock holder) | `/doctor` |
-| `state/health.json` | cp-health (run by cp-daemon, its only writer) | `/doctor` `service.health`, the Overview status line |
+| `state/health.json` | cp-health (run by cp-daemon, its only writer) | `/doctor` `service.health`, the Overview status line and alarm banner, the parent's `service-alert-tick` |
 
 One file per device, so two processes (the viewer adding, the parent deleting) never read-modify-write the
 same file.

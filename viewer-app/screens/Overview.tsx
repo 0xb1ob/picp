@@ -60,6 +60,19 @@ function heldFact(j: FlightJob): string {
  if (j.review_attempts) return `review ${j.review_attempts}/5 ${j.review === "revise" ? "changes requested" : j.review ?? "not recorded"}`;
  return j.ci === "green" || j.ci === "unreviewed" ? "CI green" : "held";
 }
+/** cp-6fyl PR2: a health check failing this long is an alarm (matches src/service-alerts.ts); an unacked relay's own 600 s is `delivery.alarm`. */
+const HEALTH_ALARM_SECONDS = 900;
+/** The last line of defense: what the parent sent and the main session never saw, or a service failing for a quarter hour. One line per cause. */
+function Alarm({data}: {data:OverviewResponse}) {
+ const lines: string[] = [];
+ const relay = data.delivery;
+ if (relay.alarm && relay.oldest_age_seconds !== null) lines.push(`${relay.unseen} parent message${relay.unseen === 1 ? "" : "s"} not seen by the main session, oldest ${elapsed(relay.oldest_age_seconds)} (${relay.oldest_kind} ${relay.oldest_id})`);
+ for (const f of data.services.health?.failing ?? []) {
+  const age = (Date.parse(data.generated_at) - Date.parse(f.since)) / 1000;
+  if (age >= HEALTH_ALARM_SECONDS) lines.push(`health check ${f.check} failing ${elapsed(age)}: ${f.detail}`);
+ }
+ return lines.length ? <section class="overview-alarm" role="alert">{lines.map(line => <p key={line}>{line}</p>)}</section> : null;
+}
 const LANDED_ROWS = 5;
 function Block({id,title,children}: {id?:string;title:ComponentChildren;children:ComponentChildren}) {
  return <section id={id} tabIndex={id ? -1 : undefined} class="overview-block"><h2>{title}</h2>{children}</section>;
@@ -71,7 +84,7 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
  const manyProjects = new Set(data.in_flight.map(j => j.project)).size > 1;
  const costs = data.shipped_today.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  const more = data.shipped_today.length - LANDED_ROWS;
- return <div class="overview"><div class="overview-heading"><div><h1>Overview</h1>{paused.length > 0 && <p class="overview-subtitle overview-amber">{paused.join(", ")} paused</p>}</div><code class="overview-updated">updated {time(data.generated_at,true)}</code></div>
+ return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><h1>Overview</h1>{paused.length > 0 && <p class="overview-subtitle overview-amber">{paused.join(", ")} paused</p>}</div><code class="overview-updated">updated {time(data.generated_at,true)}</code></div>
   {data.warnings.length > 0 && <div role="status" class="overview-error">{data.warnings.map(w => <p key={w.section}>{w.section}: {w.message}</p>)}</div>}
   <Health data={data}/>
   <Services data={data} control={control}/>

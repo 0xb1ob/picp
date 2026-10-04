@@ -341,3 +341,15 @@ test("PUSH_RULE names the watchdog's pushes (cp-daemon P3), which never go throu
 	assert.ok(PUSH_RULE.length <= 200, "one /doctor line");
 	assert.doesNotMatch(readFileSync(new URL("../src/service/health.ts", import.meta.url), "utf8"), /PushDeliveryStore|pushDeliveriesFile|subscriptionFile|rmSync|unlinkSync/, "the watchdog neither writes the ledger nor deletes a subscription");
 });
+
+test("an open service_health escalation is pushed once as a decision needed", async (t) => {
+	const b = bench(t);
+	b.subscribe(FCM);
+	await b.sweep(); // the first sweep baselines
+	const raised = await b.escalations.raise(raiseInput("cp-daemon health check \"update\" failing since 2026-09-27T00:00:00Z (key rollback_failed:abc)", { kind: "service_health", job_ids: ["cp-service-health"], recommended: "ack", options: [{ id: "ack", label: "Acknowledged", consequence: "closes", cost: "none" }] }));
+	await b.sweep();
+	await b.sweep();
+	assert.equal(b.calls.length, 1, "once, however often it sweeps");
+	assert.equal(b.ledger()?.items.find((item) => item.id === raised.id)?.source, "escalation");
+	assert.equal((b.payloads()[0] as { kind: string }).kind, "decision needed: service health");
+});

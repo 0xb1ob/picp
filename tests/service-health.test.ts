@@ -7,6 +7,10 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
+import type { BridgeRelay } from "../src/cp-bridge.ts";
+import { EscalationStore } from "../src/escalation.ts";
+import { OperatorAsks } from "../src/operator-asks.ts";
+import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { initPush } from "../src/push/keys.ts";
 import type { PushFetch } from "../src/push/webpush.ts";
 import { directPush, HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, hostProbes, type Observation, readHealth, runHealth } from "../src/service/health.ts";
@@ -286,4 +290,71 @@ test("doctor: every service finding, fed maximal inputs (long paths, all 7 units
 		}
 	}
 	assert.deepEqual([...seen].sort(), ["service.daemon", "service.health", "service.launchers", "service.legacy_home", "service.legacy_units", "service.node", "service.update"], "every service check was exercised");
+});
+
+// cp-6fyl PR2: the `relay` check — the last line of defense for parent→operator delivery. Synthetic relays only.
+function relayBench(t: import("node:test").TestContext) {
+	const b = bench(t);
+	const T0 = Date.parse("2026-09-28T10:00:00Z");
+	const outboxFile = operatorRelayOutboxFile(b.stateDir);
+	const acks = new OperatorRelayAcks(operatorRelayAcksFile(b.stateDir));
+	mkdirSync(dirname(outboxFile), { recursive: true });
+	const relay = (text: string, extra: Partial<BridgeRelay> = {}): BridgeRelay => ({ kind: "wake", jobId: "cp-demo1", stale: false, text, receipt: { level: null, reached: [] }, paths: [], ...extra });
+	const enqueue = (r: BridgeRelay, atSeconds = 0) => new OperatorRelayOutbox(outboxFile, () => new Date(T0 + atSeconds * 1000)).enqueue(r, "1.1");
+	const probe = (atSeconds: number) => hostProbes({ home: b.home, now: () => new Date(T0 + atSeconds * 1000) }).relay(undefined);
+	return { ...b, T0, outboxFile, acks, relay, enqueue, probe };
+}
+
+test("relay: a relay unacked 599 s is ok, 600 s fails once under relay:<id>; acking it recovers with its own push", async (t) => {
+	const b = relayBench(t);
+	assert.deepEqual(await b.probe(0), { skip: "no relay outbox" }, "no outbox: no signal");
+	const id = b.enqueue(b.relay("[demo] cp-1: wake"));
+	assert.deepEqual(await b.probe(599), { ok: true });
+	const failing = await b.probe(600) as { ok: false; key: string; detail: string };
+	assert.equal(failing.key, `relay:${id}`);
+	assert.match(failing.detail, new RegExp(`^1 relay\\(s\\) unseen by the main session, oldest ${id} 10 min \\(wake\\)`));
+	await b.run({ relay: failing });
+	await b.run({ relay: failing });
+	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: relay unseen"], "pushed once per key");
+	b.acks.append([{ type: "ack", id, at: "2026-09-28T10:11:00Z" }]);
+	await b.run({ relay: await b.probe(660) });
+	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: relay unseen", "health: relay recovered"]);
+});
+
+test("relay: a discarded relay is closed; no consumer line names the relaunch, a newer one does not", async (t) => {
+	const b = relayBench(t);
+	const id = b.enqueue(b.relay("old"));
+	const bare = await b.probe(700) as { detail: string };
+	assert.match(bare.detail, /no ack-capable operator session; relaunch it \(dashboard: Restart session\)$/);
+	b.acks.append([{ type: "consumer", owner: "o1", pid: 1, at: "2026-09-28T10:05:00Z", protocol: 1 }]);
+	assert.doesNotMatch((await b.probe(700) as { detail: string }).detail, /relaunch/, "a session started after the relay: ack-capable");
+	b.acks.append([{ type: "discard", id, reason: "superseded: answered", at: "2026-09-28T10:06:00Z" }]);
+	assert.deepEqual(await b.probe(700), { ok: true }, "discarded is closed");
+});
+
+test("relay: an open escalation 1200 s old with no ack and no open ask fails escalation:<id>; an ack or an ask accounts for it", async (t) => {
+	const b = relayBench(t);
+	// The only relay is acked, so only the escalation rule can fire.
+	const only = b.enqueue(b.relay("unrelated"));
+	b.acks.append([{ type: "ack", id: only, at: "2026-09-28T10:00:01Z" }]);
+	const store = new EscalationStore({ home: b.home });
+	const es = await store.raise({ job_ids: ["cp-demo1"], kind: "plan_approval", question: "approve?", options: [{ id: "ok", label: "ok", consequence: "go", cost: "none" }], recommended: "ok", at: "2026-09-28T10:00:00Z" });
+	assert.deepEqual(await b.probe(1199), { ok: true });
+	const failing = await b.probe(1200) as { key: string; detail: string };
+	assert.equal(failing.key, `escalation:${es.id}`);
+	assert.match(failing.detail, /open 20 min and unseen by the main session/);
+	const asks = new OperatorAsks(join(b.stateDir, "operator", "asks.jsonl"));
+	asks.open({ project: "demo", question: "approve?", options: [{ label: "ok", consequence: "go" }], recommendation: "ok", source_escalation: es.id });
+	assert.deepEqual(await b.probe(1200), { ok: true }, "an open ask represents it");
+	rmSync(join(b.stateDir, "operator", "asks.jsonl"));
+	b.acks.append([{ type: "ack", id: `esc:${es.id}#2`, at: "2026-09-28T10:20:00Z" }]);
+	assert.deepEqual(await b.probe(1200), { ok: true }, "an ack of the escalation (any refresh) accounts for it");
+});
+
+test("relay: an unreadable outbox fails as unreadable, never as empty", async (t) => {
+	const b = relayBench(t);
+	writeFileSync(b.outboxFile, "{not json");
+	const bad = await b.probe(0) as { ok: boolean; key: string; detail: string };
+	assert.deepEqual([bad.ok, bad.key], [false, "unreadable"]);
+	assert.ok(bad.detail.includes(b.outboxFile));
 });

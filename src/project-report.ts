@@ -7,6 +7,7 @@
  * record, then its `project:` ledger label, then the mandates: one naming the
  * job, else the only project the active mandates cover.
  */
+import { SERVICE_HEALTH_JOB_ID } from "./contracts.ts";
 import { FleetStore } from "./fleet.ts";
 import { parseJobLabels, readJobsDocument } from "./ledger.ts";
 import { MandateStore } from "./mandate.ts";
@@ -41,6 +42,8 @@ export function escalationProjects(
 	projectOf: ProjectOf,
 	mandateProjects?: MandateProjects,
 ): string[] {
+	// cp-6fyl PR2: a service-health alert names no real job; it belongs to the health push's own project.
+	if (escalation.job_ids.length > 0 && escalation.job_ids.every((id) => id === SERVICE_HEALTH_JOB_ID)) return ["command-post"];
 	const known = escalation.job_ids.map((id) => projectOf(id)).filter((project): project is string => project !== undefined);
 	if (known.length > 0) return [...new Set(known)];
 	const granted = escalation.mandate_id ? mandateProjects?.(escalation.mandate_id) : undefined;

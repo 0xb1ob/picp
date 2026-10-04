@@ -27,10 +27,10 @@ import { readVapidKeys, type VapidKeys } from "./keys.ts";
 import { deliver, encryptPayload, type PushFetch, type PushOutcome, vapidAuthorization } from "./webpush.ts";
 
 /** Escalation kinds only the operator's own words can close, even while the main session is down: pushed directly. */
-export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["risk_high_irreversible", "budget_exhausted", "merge_refused"];
+export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["risk_high_irreversible", "budget_exhausted", "merge_refused", "service_health"];
 /** The active rule, one line, for `/doctor` and `/api/push`. */
 export const PUSH_RULE =
-	"pushes only: mandate complete (on mission end), decision needed (open operator asks, risk:high, budget, merge refused, final fix, merge asks); health (cp-health, once per failure/recovery)";
+	"pushes only: mandate complete (on mission end), decision needed (open asks, risk:high, budget, merge refused, final fix, merge asks, service health); health (cp-health, once per failure/recovery)";
 export const PUSH_MAX_RECORDS_PER_SWEEP = 10;
 export const PUSH_HEADLINE_MAX_CHARS = 100;
 const PUSH_PROJECT_MAX_CHARS = 80;

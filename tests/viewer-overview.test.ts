@@ -219,3 +219,32 @@ test("a deferred ledger job is a valid status: the ledger stays available instea
  assert.equal(overview(state, now).closed_today, 1, "a deferred row must not make the whole ledger unavailable");
  assert.ok(boardView(state, now).jobs.some(j => j.id === "cp-later"), "the deferred job is listed");
 });
+
+test("cp-6fyl PR2 delivery: unseen relays, the oldest and the 600 s alarm come from the outbox and acks; a torn last ack line is skipped; malformed files are unavailable, never zero", t => {
+ const {state, put} = fixture(t);
+ const entry = (id: string, queued_at: string, kind = "wake") => ({id, relay:{kind, stale:false, text:"x", receipt:{level:null, reached:[]}, paths:[]}, queued_at, producer:"1.1"});
+ const outbox = "operator/relay-outbox.json", acks = "operator/relay-acks.jsonl";
+ const file = (name: string) => join(LAYOUT.state, name);
+ const delivery = () => overview(state, now).delivery;
+ const none = {unseen:null, oldest_id:null, oldest_kind:null, oldest_age_seconds:null, consumer_seen_at:null, alarm:false};
+ assert.deepEqual(delivery(), {availability:"missing", ...none, unseen:0}, "no outbox: nothing relayed, no alarm");
+ put(file(outbox), {schema_version:1, updated_at:"2026-09-26T11:59:00Z", entries:[entry("esc:es-1", "2026-09-26T11:50:01Z", "escalation"), entry("wake:a", "2026-09-26T11:55:00Z")]});
+ assert.deepEqual(delivery(), {availability:"ok", unseen:2, oldest_id:"esc:es-1", oldest_kind:"escalation", oldest_age_seconds:599, consumer_seen_at:null, alarm:false}, "599 s: no alarm");
+ put(file(outbox), {schema_version:1, updated_at:"2026-09-26T11:59:00Z", entries:[entry("esc:es-1", "2026-09-26T11:50:00Z", "escalation"), entry("wake:a", "2026-09-26T11:55:00Z")]});
+ assert.equal(delivery().alarm, true, "600 s: alarm");
+ put(file(acks), `${JSON.stringify({type:"consumer", owner:"o", pid:1, at:"2026-09-26T11:40:00Z", protocol:1})}\n${JSON.stringify({type:"ack", id:"esc:es-1", at:"2026-09-26T11:56:00Z"})}\n{"type":"ack","id":"wake:`);
+ assert.deepEqual(delivery(), {availability:"ok", unseen:1, oldest_id:"wake:a", oldest_kind:"wake", oldest_age_seconds:300, consumer_seen_at:"2026-09-26T11:40:00Z", alarm:false}, "an acked id is closed; the torn last line is skipped");
+ put(file(acks), `${JSON.stringify({type:"discard", id:"wake:a", reason:"x", at:"2026-09-26T11:56:00Z"})}\n`);
+ assert.equal(delivery().unseen, 1, "a discard closes its id too");
+ put(file(acks), "garbage\n");
+ assert.deepEqual(delivery(), {availability:"unavailable", ...none}, "a malformed ack line is unavailable, never 0");
+ put(file(acks), "");
+ put(file(outbox), "{not json");
+ assert.deepEqual(delivery(), {availability:"unavailable", ...none}, "a malformed outbox is unavailable");
+});
+
+test("cp-6fyl PR2 services: a failing check carries its since", t => {
+ const {state, put} = fixture(t);
+ put(join(LAYOUT.state, "health.json"), {schema_version:1, last_run_at:"2026-09-26T11:59:00Z", checks:{disk:{status:"fail", detail:"3 GiB", since:"2026-09-26T11:30:00Z"}, gh:{status:"ok", detail:"ok", since:"2026-09-26T11:00:00Z"}}});
+ assert.deepEqual(overview(state, now).services, {health:{last_run_at:"2026-09-26T11:59:00Z", failing:[{check:"disk", detail:"3 GiB", since:"2026-09-26T11:30:00Z"}]}});
+});
