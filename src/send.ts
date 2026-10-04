@@ -38,7 +38,7 @@ import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { MandateStore } from "./mandate.ts";
-import { decidePlanSend, recordPlanRevise } from "./plan-followup.ts";
+import { decidePlanSend, recordPlanRevise, vetoedReviseRefusal } from "./plan-followup.ts";
 import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
 import { assertNotDraining } from "./drain.ts";
@@ -186,6 +186,9 @@ export class Sender {
 		});
 		if (planDecision.kind === "refuse") throw new SendError(planDecision.reason);
 		if (planDecision.kind !== "ignore") message = planDecision.message;
+		// N4: a veto-forced escalate already spent the one revise; free text must not reopen it.
+		const vetoed = vetoedReviseRefusal(home, request.jobId, message);
+		if (vetoed) throw new SendError(vetoed);
 
 		const record = fleet.get(request.jobId);
 		if (!record) {

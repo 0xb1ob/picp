@@ -1999,7 +1999,14 @@ Policy applied between them (implemented in T20, constants here):
    exceeded what was asked, and where that boundary sits is a human's call. DiffReview passes `vetoFlags: []`.
 2. A `revise` when a prior revise exists becomes `escalate` with
    `cause: "policy"` (`GATE_MAX_REVISE = 1`) — always policy, never `flagged`:
-   the plan was never judged sound in the first place.
+   the plan was never judged sound in the first place. A reviewer `revise` that
+   rule 1 already rewrote to `escalate`/`policy` spends that one revise too
+   (`gateCapExhausted` counts a stored `escalate`/`policy` row with a veto flag
+   true; never `flagged` or `operational`), and the next reviewer `revise`
+   records the `attempt cap` reason even when a veto fires again. `cp_send`
+   refuses a non-negated `revise` message to a job whose latest `gate-<n>.json`
+   is that veto-policy row, naming the file (`vetoedReviseRefusal`,
+   `src/plan-followup.ts`); any other message still delivers.
 3. A reviewer that dies, **settles without reporting**, never reports before
    the deadline, or exhausts its in-worker repairs (`verdict-rejected.json`) is
    `escalate` with `cause: "operational"`; if the immediately prior attempt was
@@ -4473,6 +4480,9 @@ send wins. A present delegated tag whose rule cannot be decoded or validated rem
 matching a later quote. Untagged sends remain `operator-quote`, and old records need no migration. Operator-text
 requirements, including the review-cap final fix, still accept these quotes and record delegation
 without adding a new refusal.
+An escalation (`es-…`) answer is stricter: the latest operator send containing the quote must also
+name that escalation id (the quote itself need not), or `cp_decide` refuses and the escalation stays
+open — a mandate brief or an answer naming another id is never consent to it.
 Refusals name the fix (`no active mandate covers project X`, `quote not found in
 operator messages`, `risk:high requires operator text`). Merge checkpoints need
 an operator quote unless the mandate's `ask_on` omits `merge`. `cp_awaiting`

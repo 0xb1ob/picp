@@ -74,14 +74,16 @@ test("delegated sends record provenance for checkpoints, awaiting rows and linke
 	const escalations = new EscalationStore({ home: home.path, checkpoints: () => ship, awaiting: () => awaiting });
 	ship.request({ jobId: "cp-linked", question: "Approve linked?" });
 	const raised = await escalations.raise({ job_ids: ["cp-linked"], kind: "plan_approval", question: "Approve linked?", options: [{ id: "approve", label: "approve", consequence: "ship", cost: "none" }], recommended: "approve", checkpoint_job_id: "cp-linked", awaiting_id: linkedRow.id });
-	const escalationDeps = { ...bundle, items: deriveFromEscalations(escalations.open()), answerEscalation: (id: string, answer: string, by: string, basis: DecisionBasis, provenance?: DelegationProvenance) => escalations.answer(id, { answer, by, basis, provenance }) };
+	const linked = outbox.enqueue(`Approve the delegated plan for ${raised.id}.`, { delegated: true, delegation_rule: "approvals: operator standing delegation" });
+	const escalationDeps = { ...bundle, operatorTexts: [frameBatch([human, entry]), frameBatch([linked])], items: deriveFromEscalations(escalations.open()), answerEscalation: (id: string, answer: string, by: string, basis: DecisionBasis, provenance?: DelegationProvenance) => escalations.answer(id, { answer, by, basis, provenance }) };
 	await assert.rejects(() => decide({ target: raised.id, decision: "approve", basis: { operator_quote: "tampered approval" } }, escalationDeps), /quote not found/);
-	await decide({ target: raised.id, decision: "approve", basis: { operator_quote: entry.text } }, escalationDeps);
+	await assert.rejects(() => decide({ target: raised.id, decision: "approve", basis: { operator_quote: human.text } }, escalationDeps), /does not name/);
+	await decide({ target: raised.id, decision: "approve", basis: { operator_quote: linked.text } }, escalationDeps);
 	assert.equal(escalations.get(raised.id)?.answered_by, "operator-delegated");
 	assert.equal(escalations.get(raised.id)?.delegation_rule, provenance.delegation_rule);
-	assert.equal(escalations.get(raised.id)?.send_id, entry.id);
-	assert.equal(ship.get("cp-linked")?.send_id, entry.id);
-	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.send_id, entry.id);
+	assert.equal(escalations.get(raised.id)?.send_id, linked.id);
+	assert.equal(ship.get("cp-linked")?.send_id, linked.id);
+	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.send_id, linked.id);
 	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.answered_by, "operator-delegated");
 });
 
@@ -320,7 +322,7 @@ test("close dismiss from a user message answers the named escalation", async (t)
 	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: [] });
 	const { bundle } = deps(home.path, {
 		items: deriveFromEscalations(escalations.open()),
-		operatorTexts: ["close dismiss"],
+		operatorTexts: [`close dismiss ${raised.id}`],
 		answerEscalation: async (id, answer, by) => {
 			await escalations.answer(id, { answer, by });
 		},
@@ -482,25 +484,37 @@ test("an expired grant decides diff and merge for an already-dispatched job, nev
 // pi-command-post-autonomy-programme-cur.2.4: a risk_high_irreversible
 // escalation is answered directly, never through the checkpoint/awaiting path.
 
-test("cp_decide answers a risk_high escalation with an operator quote", async (t) => {
+test("cp_decide answers a risk_high escalation only from an operator message that names it (N3)", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const escalations = new EscalationStore({ home: home.path });
 	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: ["risk high: the task names production"] });
 	const items = deriveFromEscalations(escalations.open());
 	const answered: [string, string, string][] = [];
+	// The mandate brief: operator words, but not an answer to this escalation.
+	const brief = "Please approve the plan. Ship it today.";
+	const texts = [brief];
 	const { bundle } = deps(home.path, {
 		items,
+		operatorTexts: texts,
 		answerEscalation: async (id, answer, by) => {
 			answered.push([id, answer, by]);
 			await escalations.answer(id, { answer, by });
 		},
 	});
-	const result = await decide(
-		{ target: raised.id, decision: "approve", basis: { operator_quote: "Please approve the plan. Ship it today." } },
-		bundle,
-	);
+	const call = () => decide({ target: raised.id, decision: "approve", basis: { operator_quote: brief } }, bundle);
+	await assert.rejects(call, new RegExp(`does not name ${raised.id}`));
+	assert.equal(escalations.get(raised.id)?.status, "open", "a refused quote leaves the escalation open");
+	assert.deepEqual(answered, []);
+	// The latest message holding the quote wins; one naming a different id fails closed.
+	const other = raised.id === "es-000000" ? "es-ffffff" : "es-000000";
+	texts.push(`${other}: ${brief}`);
+	await assert.rejects(call, /does not name/);
+	assert.equal(escalations.get(raised.id)?.status, "open");
+	texts.push(`${raised.id}: ${brief}`);
+	const result = await call();
 	assert.equal(result.decided_by, "operator-quote");
+	assert.deepEqual(result.basis, { operator_quote: brief }, "the quote itself need not contain the id");
 	assert.match(result.text, new RegExp(`${raised.id} answered: approve by operator-quote`));
 	assert.deepEqual(answered, [[raised.id, "approve", "operator-quote"]]);
 	assert.equal(escalations.get(raised.id)?.status, "answered");
@@ -543,7 +557,7 @@ async function missionEndBench(home: string) {
 	const bundle = (): Parameters<typeof decide>[1] => ({
 		...base.bundle,
 		items: deriveFromEscalations(escalations.open()),
-		operatorTexts: ["close", "extend"],
+		operatorTexts: [`close ${raised.id}`, `extend ${raised.id}`],
 		answerEscalation: (id, answer, by) => escalations.answer(id, { answer, by }),
 		getEscalation: (id) => escalations.get(id),
 	});

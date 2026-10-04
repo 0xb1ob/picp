@@ -14,7 +14,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import { paths, SCHEMA_VERSION } from "../src/contracts.ts";
+import { type GateFlags, type GateReview, paths, SCHEMA_VERSION } from "../src/contracts.ts";
+import { decideGate } from "../src/gate.ts";
 import { atomicWriteJson } from "../src/json-store.ts";
 import {
 	decidePlanSend,
@@ -25,6 +26,8 @@ import {
 	planReviseBrief,
 	recordPlanRevise,
 	reviseStillOpen,
+	revisesVetoedGate,
+	vetoedReviseRefusal,
 } from "../src/plan-followup.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -202,4 +205,40 @@ test("decisionReviseAt: absent until a revise is recorded", () => {
 	recordPlanRevise(home.path, "cp-research", "split step 3", "2026-01-01T00:00:00.000Z");
 	assert.equal(decisionReviseAt(home.path, "cp-research"), "2026-01-01T00:00:00.000Z");
 	home.cleanup();
+});
+
+// N4 (cp-itl4): a veto-rewritten revise already spent the one revise; free-text cp_send must not reopen it.
+function gateDecision(verdict: "pass" | "revise", flags: Partial<GateFlags>) {
+	const review = { job_id: "cp-research", verdict, flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false, ...flags }, reasons: ["r"], revisions: ["v"] } as GateReview;
+	return decideGate({ jobId: "cp-research", attempt: 1, prior: { priorRevise: false, priorCause: null }, model: "m", review });
+}
+
+test("revisesVetoedGate: a non-negated revise on a veto-policy gate, nothing else", () => {
+	const vetoPolicy = gateDecision("revise", { destructive_scope: true });
+	assert.deepEqual([vetoPolicy.verdict, vetoPolicy.cause], ["escalate", "policy"]);
+	assert.equal(revisesVetoedGate(vetoPolicy, "Revise ONLY 4b"), true);
+	assert.equal(revisesVetoedGate(vetoPolicy, "add a citation"), false);
+	assert.equal(revisesVetoedGate(vetoPolicy, "do not revise; answer the question"), false);
+	assert.equal(revisesVetoedGate(vetoPolicy, "Don't revise yet"), false);
+	assert.equal(revisesVetoedGate(vetoPolicy, "never revise the plan"), false);
+	assert.equal(revisesVetoedGate(undefined, "Revise ONLY 4b"), false, "no gate file, no refusal");
+	assert.equal(revisesVetoedGate(gateDecision("pass", { destructive_scope: true }), "Revise ONLY 4b"), false, "flagged is not veto-policy");
+	assert.equal(revisesVetoedGate(gateDecision("revise", {}), "Revise ONLY 4b"), false, "a plain revise is the gate's own round");
+});
+
+test("vetoedReviseRefusal: reads the latest gate file and names it", () => {
+	const home = createScratchHome();
+	try {
+		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), undefined, "a job with no gate file is unchanged");
+		mkdirSync(join(home.path, paths.runDir("cp-research")), { recursive: true });
+		writeFileSync(join(home.path, paths.gateFile("cp-research", 1)), JSON.stringify(gateDecision("revise", {})));
+		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), undefined);
+		writeFileSync(join(home.path, paths.gateFile("cp-research", 2)), JSON.stringify({ ...gateDecision("revise", { scope_growth: true }), attempt: 2 }));
+		const refusal = vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b");
+		assert.ok(refusal?.includes(paths.gateFile("cp-research", 2)), refusal);
+		assert.match(refusal ?? "", /scope_growth/);
+		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "add a citation"), undefined, "a message without revise still delivers");
+	} finally {
+		home.cleanup();
+	}
 });

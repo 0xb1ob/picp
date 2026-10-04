@@ -42,6 +42,7 @@ import {
 	copyOriginalTask,
 	decideGate,
 	formatGate,
+	gateCapExhausted,
 	Gate,
 	GateError,
 	isGateWait,
@@ -446,6 +447,44 @@ test("one revise max: a second revise becomes escalate on policy, and drops revi
 	assert.equal(decision.cause, "policy");
 	assert.equal(decision.revisions, undefined, "an escalate carries no revisions");
 	assert.ok(decision.reasons.some((reason) => reason.includes("attempt cap")));
+});
+
+test("a veto-rewritten revise spends the one revise: the next revise records the attempt cap (N4, cp-itl4)", () => {
+	const vetoed = { ...NO_FLAGS, destructive_scope: true };
+	const first = decideGate({
+		jobId: "cp-a",
+		attempt: 1,
+		prior: NO_PRIOR,
+		model: "m",
+		review: review({ job_id: "cp-a", verdict: "revise", flags: vetoed, revisions: ["drop the migration"] }),
+	});
+	assert.deepEqual([first.verdict, first.cause], ["escalate", "policy"]);
+	assert.ok(!first.reasons.some((reason) => reason.includes("attempt cap")), "the first round is not capped");
+	assert.equal(gateCapExhausted([first]), true, "the stored row is never `revise`, yet it spent the revise");
+
+	const second = decideGate({
+		jobId: "cp-a",
+		attempt: 2,
+		prior: { priorRevise: gateCapExhausted([first]), priorCause: first.cause },
+		model: "m",
+		review: review({ job_id: "cp-a", verdict: "revise", flags: vetoed, revisions: ["again"] }),
+	});
+	assert.deepEqual([second.verdict, second.cause], ["escalate", "policy"]);
+	assert.ok(second.reasons.some((reason) => reason.includes("attempt cap")), "the veto fired again and the cap is still named");
+
+	// Only a veto-policy row counts: flagged (reviewer pass) and operational do not.
+	const flagged = decideGate({ jobId: "cp-a", attempt: 1, prior: NO_PRIOR, model: "m", review: review({ job_id: "cp-a", verdict: "pass", flags: vetoed }) });
+	assert.equal(flagged.cause, "flagged");
+	const operational = decideGate({ jobId: "cp-a", attempt: 1, prior: NO_PRIOR, model: "m", operational: "no verdict" });
+	const unknowns = decideGate({
+		jobId: "cp-a",
+		attempt: 1,
+		prior: NO_PRIOR,
+		model: "m",
+		review: review({ job_id: "cp-a", verdict: "escalate", flags: { ...NO_FLAGS, blocking_unknowns: true } }),
+	});
+	assert.equal(unknowns.cause, "policy");
+	assert.equal(gateCapExhausted([flagged, operational, unknowns]), false);
 });
 
 test("no usable verdict is operational, then operational_persistent", () => {

@@ -7,7 +7,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CheckpointStore } from "./checkpoint.ts";
-import { isSafeJobId, LAYOUT, paths, SCHEMA_VERSION } from "./contracts.ts";
+import { GATE_VETO_FLAGS, type GateVerdict, GateVerdictSchema, isSafeJobId, LAYOUT, paths, SCHEMA_VERSION, validate } from "./contracts.ts";
+import { isVetoPolicy } from "./gate.ts";
 import { atomicWriteJson } from "./json-store.ts";
 
 export const PLAN_REVISE_MARK = "Revision requested on the filed plan:";
@@ -215,4 +216,34 @@ export function decidePlanSend(input: {
 		shipId: link.shipId,
 		message: trimmed.startsWith(PLAN_QUESTION_MARK) ? trimmed : planQuestionBrief(text),
 	};
+}
+
+/**
+ * N4 (cp-itl4): the latest plan-gate decision is a veto-rewritten revise (`escalate`/`policy`
+ * with a veto flag) and the message still asks for a revise. That row already spent the one
+ * revise (`gateCapExhausted`), so a free-text promote must not start another round.
+ */
+export function revisesVetoedGate(latest: Pick<GateVerdict, "verdict" | "cause" | "flags"> | undefined, message: string): boolean {
+	return latest !== undefined && isVetoPolicy(latest) && /\brevise\b/i.test(message) && !/\b(?:do not|don't|never) revise\b/i.test(message);
+}
+
+/** The refusal `cp_send` throws for `revisesVetoedGate`, naming the gate file; undefined when it does not apply. */
+export function vetoedReviseRefusal(home: string, jobId: string, message: string): string | undefined {
+	if (!isSafeJobId(jobId)) return undefined;
+	let file: string | undefined;
+	for (let attempt = 1; existsSync(join(home, paths.gateFile(jobId, attempt))); attempt += 1) file = paths.gateFile(jobId, attempt);
+	if (!file) return undefined;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(join(home, file), "utf8"));
+	} catch {
+		return undefined; // A torn gate file is not a decision; the gate itself reports it on the next read.
+	}
+	const decision = validate<GateVerdict>(GateVerdictSchema, parsed);
+	if (!decision.ok || !revisesVetoedGate(decision.value, message)) return undefined;
+	const vetoed = GATE_VETO_FLAGS.filter((flag) => decision.value.flags[flag]).join(", ");
+	return (
+		`${jobId}: ${file} is a veto-forced escalate (policy, ${vetoed}) that already spent the one revise. ` +
+		"Refusing another revise round on that gate: relay its escalation to the operator; a further plan change is a new research job."
+	);
 }

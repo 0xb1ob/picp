@@ -246,9 +246,18 @@ export interface PriorAttemptsOptions {
 	capExhausted?: (decisions: readonly GateVerdict[]) => boolean;
 }
 
-/** The plan gate's rule: one revise per artifact, then escalate. */
+/**
+ * The plan gate's rule: one revise per artifact, then escalate. A reviewer revise that a veto
+ * flag rewrote to `escalate`/`policy` spends that revise too (its stored row is never `revise`);
+ * `flagged` and `operational` rows do not.
+ */
 export function gateCapExhausted(decisions: readonly GateVerdict[]): boolean {
-	return decisions.filter((decision) => decision.verdict === "revise").length >= GATE_MAX_REVISE;
+	return decisions.filter((decision) => decision.verdict === "revise" || isVetoPolicy(decision)).length >= GATE_MAX_REVISE;
+}
+
+/** A stored `escalate`/`policy` decision with a `GATE_VETO_FLAGS` flag raised. */
+export function isVetoPolicy(decision: Pick<GateVerdict, "verdict" | "cause" | "flags">): boolean {
+	return decision.verdict === "escalate" && decision.cause === "policy" && GATE_VETO_FLAGS.some((flag) => decision.flags[flag]);
 }
 
 /**
@@ -393,6 +402,7 @@ export function decideGate(
 		verdict = "pass";
 		pushOnce(reasons, "downgraded: no high/high finding");
 	}
+	const revising = verdict === "revise";
 
 	// 1. A veto flag is not advice: a true one forces escalate. When the
 	// reviewer judged the artifact sound on every other criterion (`pass`), the
@@ -420,8 +430,9 @@ export function decideGate(
 
 	// 2. The revise budget, counted by the parent (one revise per artifact for a
 	// plan gate; `REVIEW_MAX_ATTEMPTS` reviews per branch for a diff review). An
-	// exhausted budget is always policy: the subject was never judged sound.
-	if (verdict === "revise" && input.prior.priorRevise) {
+	// exhausted budget is always policy: the subject was never judged sound. A revise
+	// the veto above already rewrote still names the cap, so a re-gate shows why it stopped.
+	if (revising && input.prior.priorRevise) {
 		verdict = "escalate";
 		cause = "policy";
 		pushOnce(
