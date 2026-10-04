@@ -81,6 +81,12 @@ test("parsers: config defaults on and opts out with enabled:false; record and ma
 	assert.equal(parseDashboardText(`${dashboardMarker(id)}\nmore text after`), undefined, "the marker must be the last line");
 	assert.equal(parseDashboardText("x\n[cp-dashboard dc-1 — from the dashboard]"), undefined, "a malformed id is not a marker");
 	assert.equal(parseDashboardText("x\n[cp-dashboard dc-20260927080000-0123abcd — from the dashboard; ask=nope]"), undefined);
+	const one = "im-20261004-0123456789abcdef01234567.png";
+	const eight = Array.from({ length: 8 }, (_, i) => `im-20261004-${String(i).repeat(24)}.${["png", "jpg", "webp", "gif"][i % 4]}`);
+	assert.deepEqual(parseDashboardText(`look\n\n${dashboardMarker(id, null, [one])}`), { body: "look", id, askId: null, images: [one] });
+	assert.deepEqual(parseDashboardText(dashboardMarker(id, null, eight)), { body: "", id, askId: null, images: eight }, "eight ids, no text");
+	assert.equal(parseDashboardText(`x\n\n[cp-dashboard ${id} — from the dashboard; images=im-1.png]`), undefined, "a malformed image id is not a marker");
+	assert.equal(parseDashboardText(dashboardMarker(id, null, [...eight, one])), undefined, "nine ids are not a marker");
 });
 
 test("lifecycle: {enabled:false} opens nothing; on (default) binds a 0600 socket and record; a bad socket token journals nothing; stop removes both", async (t) => {

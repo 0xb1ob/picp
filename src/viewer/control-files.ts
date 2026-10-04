@@ -18,6 +18,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pushDataDir, readPushConfig } from "./push-files.ts";
+import { UPLOAD_ID_SOURCE } from "./uploads.ts";
 
 export const CONTROL_PROTOCOL = 1;
 /** Composer text cap; with its JSON envelope it fits the body cap. */
@@ -230,18 +231,18 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The last line of every message the dashboard injects: an id, never an instruction. */
-export function dashboardMarker(id: string, askId?: string | null): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}]`;
+/** The last line of every message the dashboard injects: an id, never an instruction; attached images list their upload ids. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[]): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}]`;
 }
 
-const MARKER_RE = /(?:^|\n)\[cp-dashboard (dc-\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?\]\s*$/;
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; images=(${UPLOAD_ID_SOURCE}(?:,${UPLOAD_ID_SOURCE}){0,7}))?\\]\\s*$`);
 
-/** A dashboard-sent user message: its body without the marker, the request id and the ask a click answered. */
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null } | undefined {
+/** A dashboard-sent user message: its body without the marker, the request id, the ask a click answered and its image ids. */
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; images?: string[] } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
-	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null };
+	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { images: match[3].split(",") } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
@@ -249,9 +250,13 @@ export const isAskId = (value: unknown): value is string => typeof value === "st
 export type ControlKind = "message" | "answer" | "abort" | "restart";
 export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restart";
 
-/** One audit line. The bridge writes request/outcome; the viewer writes refused (after the --require-tailnet guard). */
+/**
+ * One audit line. The bridge writes request/outcome; the viewer writes refused (after the --require-tailnet guard)
+ * and one `upload` line per stored image. Image lines carry upload ids, mime types and byte counts, never bytes.
+ */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[] }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string }
+	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };

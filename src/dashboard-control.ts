@@ -9,6 +9,9 @@
  *  - `status` → busy, pending, session file, last outcomes (no side effect, no journal line);
  *  - `send` → a composer message or a decision-card click, injected as a **user message**, exactly what the
  *    human could type: never a `cp_decide`, never a parent call, never a write to the ask journal;
+ *  - `send_images` → a composer message with image attachments (src/viewer/uploads.ts ids): each upload is read,
+ *    resized by `prepareImage` and injected as image parts (`userMessageContent`); only a bridge with `prepareImage`
+ *    knows the op, so an older one answers `unknown op` and the viewer asks for a restart instead of dropping images;
  *  - `abort` → abort the running turn;
  *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
@@ -28,6 +31,7 @@ import {
 	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, readControlConfig, readControlRecord,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
+import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, isUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, uploadRoot } from "./viewer/uploads.ts";
 
 /** Linux `sun_path` is 108 bytes including the NUL. */
 const MAX_SOCKET_PATH = 107;
@@ -35,9 +39,24 @@ const MAX_FRAME_CHARS = 64 * 1024;
 const RECENT_KEEP = 10;
 const OPEN_KEEP = 100;
 
+/** One image part as pi takes it: base64 `data` (already within the inline budget) and its mime type. */
+export interface InlineImage { data: string; mimeType: string }
+export type UserMessageContent = string | Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+
+/**
+ * What the bridge hands `pi.sendUserMessage`: the text alone, or with images one text part then one image part per
+ * image (pi joins the text parts and passes the images to the prompt, never expanding templates).
+ */
+export function userMessageContent(text: string, images?: readonly InlineImage[]): UserMessageContent {
+	if (!images?.length) return text;
+	return [{ type: "text", text }, ...images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType }))];
+}
+
 export interface ControlPorts {
-	/** Deliver `text` as a user message; `deliverAs` undefined when the session is idle. May return a promise that rejects on failure. */
-	inject(text: string, deliverAs: "steer" | "followUp" | undefined): void | Promise<unknown>;
+	/** Deliver `text` (and inlined images) as a user message; `deliverAs` undefined when the session is idle. May return a promise that rejects on failure. */
+	inject(text: string, deliverAs: "steer" | "followUp" | undefined, images?: InlineImage[]): void | Promise<unknown>;
+	/** Image attachments: resize to the long edge and base64 budget, or null when that cannot be done. Absent: `send_images` is an unknown op. */
+	prepareImage?(bytes: Uint8Array, mimeType: string, limits: { maxEdge: number; maxBytes: number }): Promise<InlineImage | null>;
 	abort(): void;
 	isIdle(): boolean;
 	hasPendingMessages(): boolean;
@@ -66,6 +85,10 @@ export interface StartOptions {
 	duplicateWindowMs?: number;
 	log?: (line: string) => void;
 	append?: (line: ControlAuditLine) => { ok: true } | { ok: false; error: string };
+	/** Image attachments' upload root (src/viewer/uploads.ts `uploadRoot`); default `CP_UPLOAD_ROOT`, else the production root. */
+	uploadRoot?: string;
+	/** How long preparing a message's images may take before nothing is sent (default 15 s). A test seam. */
+	imagePrepMs?: number;
 }
 
 type Reply = { ok: true; result: unknown } | { ok: false; status: number; error: string };
@@ -124,17 +147,52 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (state === "failed" && askId && clicks.get(askId)?.id === id) clicks.delete(askId);
 	};
 
-	const request = async (args: Record<string, unknown>, op: "send" | "abort"): Promise<Reply> => {
+	const root = uploadRoot(options.uploadRoot);
+	const prepMs = options.imagePrepMs ?? IMAGE_PREP_MS;
+	type Prepared = { inline: InlineImage[]; paths: string[] } | { status: number; error: string };
+	const unreadable = (image: string, stat: { state: "missing" } | { state: "invalid"; reason: string }): Prepared =>
+		stat.state === "missing" ? { status: 410, error: `image ${image} expired or was never uploaded; attach it again` } : { status: 400, error: `image ${image} is not a readable upload: ${stat.reason}` };
+	/** Every id must exist before any work; then each is read and resized in turn, all within `prepMs` or nothing is sent. */
+	const prepareImages = async (ids: string[]): Promise<Prepared> => {
+		for (const image of ids) {
+			const stat = statUpload(root, image, now());
+			if (stat.state !== "ok") return unreadable(image, stat);
+		}
+		const work = (async (): Promise<Prepared> => {
+			const inline: InlineImage[] = [];
+			const paths: string[] = [];
+			for (const image of ids) {
+				const read = readUpload(root, image, now());
+				if (read.state !== "ok") return unreadable(image, read);
+				const out = await ports.prepareImage!(read.bytes, read.mime, { maxEdge: IMAGE_LONG_EDGE, maxBytes: inlineBudget(ids.length) }).catch(() => null);
+				// pi could not take it as an image part: the model still gets the file, by path (the task's fallback).
+				if (out) inline.push(out);
+				else paths.push(`[image ${image} could not be attached inline; file: ${read.path}]`);
+			}
+			return { inline, paths };
+		})();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<Prepared>((resolve) => { timer = setTimeout(() => resolve({ status: 504, error: `image preparation exceeded ${prepMs / 1000} s; nothing was sent` }), prepMs); });
+		try {
+			return await Promise.race([work, late]);
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+
+	const request = async (args: Record<string, unknown>, op: "send" | "abort", withImages = false): Promise<Reply> => {
 		const kind: ControlKind = op === "abort" ? "abort" : args.kind === "answer" ? "answer" : "message";
 		const peer = typeof args.peer === "string" ? args.peer.slice(0, 100) : null;
 		const askId = kind === "answer" && isAskId(args.ask_id) ? args.ask_id : null;
 		const label = typeof args.label === "string" ? args.label : "";
 		const text = kind === "message" ? (typeof args.text === "string" ? args.text.trim() : "") : kind === "answer" ? `${askId ?? String(args.ask_id)}: ${label}` : null;
+		// `send_images` only: the ids as sent (clipped), journaled with the request; never bytes.
+		const images = withImages ? (Array.isArray(args.images) ? args.images.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((image) => String(image).slice(0, 64)) : []) : undefined;
 		const idle = ports.isIdle();
 		const deliverAs = kind === "abort" || idle ? undefined : args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
 		const id = newControlId(now());
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver });
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
@@ -148,7 +206,9 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			outcome(id, kind, null, peer, "delivered", null);
 			return { ok: true, result: { id, state: "delivered", deliver } };
 		}
-		if (kind === "message" && (!text || text.length > CONTROL_TEXT_MAX)) return refuse(400, `text must be 1-${CONTROL_TEXT_MAX} characters`);
+		if (images && (kind !== "message" || images.length < 1 || images.length > UPLOAD_MAX_PER_MESSAGE || new Set(images).size !== images.length || !images.every(isUploadId))) return refuse(400, `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`);
+		// With images the text may be empty: the marker alone carries them.
+		if (kind === "message" && ((!text && !images) || (text ?? "").length > CONTROL_TEXT_MAX)) return refuse(400, `text must be 1-${CONTROL_TEXT_MAX} characters`);
 		if (kind === "answer") {
 			if (!askId) return refuse(400, "ask_id must be an ask id");
 			let ask;
@@ -161,17 +221,25 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			if (prior && now().getTime() - prior.at < duplicateMs) return refuse(409, `${askId} was already answered from the dashboard (${prior.id}); wait for the session to record it`);
 			clicks.set(askId, { at: now().getTime(), id });
 		}
+		let prepared: { inline: InlineImage[]; paths: string[] } = { inline: [], paths: [] };
+		if (images) {
+			const out = await prepareImages(images);
+			if ("status" in out) return refuse(out.status, out.error);
+			prepared = out;
+		}
+		const { inline, paths } = prepared;
 		const seen = new Promise<"delivered">((resolve) => open.set(id, { kind, askId, peer, seen: () => resolve("delivered") }));
 		if (open.size > OPEN_KEEP) open.delete(open.keys().next().value!);
 		let result: Promise<unknown> | void;
 		try {
-			result = ports.inject(`${text}\n\n${dashboardMarker(id, askId)}`, deliverAs);
+			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${dashboardMarker(id, askId, images)}`, deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
 			return { ok: false, status: 502, error: `failed: ${(error as Error).message}` };
 		}
-		outcome(id, kind, askId, peer, "injected", null);
+		outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : null);
 		const failed = Promise.resolve(result).then(() => new Promise<never>(() => {}), (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const settled = await Promise.race([seen, failed, new Promise<"queued">((resolve) => { timer = setTimeout(() => resolve("queued"), waitMs); })]);
@@ -194,9 +262,11 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), ...(ports.prepareImage ? { images: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
+		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
+		if (frame.op === "send_images" && ports.prepareImage) return request(args, "send", true);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		return { ok: false, status: 400, error: `unknown op ${String(frame.op)}` };
 	};

@@ -52,6 +52,7 @@ import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from ".
 import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
+import { isUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
 export const CONTROL_STATUS_PATH = "/api/operator/control";
 export const CONTROL_MESSAGE_PATH = "/api/operator/message";
@@ -97,6 +98,9 @@ export interface ControlRouteOptions {
 	port: number;
 	requireTailnet?: boolean;
 	controlLimiter?: ControlLimiter;
+	/** Image attachments: the upload root (default `CP_UPLOAD_ROOT`, else /tmp/cp-dashboard-uploads) and the upload rate limiter (24 per 60 s). */
+	uploadRoot?: string;
+	uploadLimiter?: ControlLimiter;
 	operatorStart?: OperatorStart;
 	log?: (line: string) => void;
 }
@@ -110,12 +114,17 @@ export interface ControlRouteResult {
 /** Sliding window per client address, counting refused requests too, plus one request in flight. */
 export class ControlLimiter {
 	readonly #hits = new Map<string, { at: number[]; busy: boolean; loggedWindow: number }>();
+	/** Requests per window: 20 for the JSON routes; image uploads get their own limiter (24). */
+	readonly limit: number;
+	constructor(limit = CONTROL_RATE_LIMIT) {
+		this.limit = limit;
+	}
 	take(key: string, now: number): { ok: true; release: () => void } | { ok: false; retryAfterS: number; firstInWindow: boolean } {
 		const row = this.#hits.get(key) ?? { at: [], busy: false, loggedWindow: -1 };
 		row.at = row.at.filter((t) => now - t < CONTROL_RATE_WINDOW_MS);
 		this.#hits.set(key, row);
 		if (this.#hits.size > 256) for (const [k, v] of this.#hits) if (!v.busy && !v.at.length) this.#hits.delete(k);
-		if (row.at.length >= CONTROL_RATE_LIMIT || row.busy) {
+		if (row.at.length >= this.limit || row.busy) {
 			const oldest = row.at[0] ?? now;
 			const firstInWindow = row.loggedWindow < oldest;
 			if (firstInWindow) row.loggedWindow = now;
@@ -240,12 +249,13 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			busy: typeof status.busy === "boolean" ? status.busy : null, pending: typeof status.pending === "boolean" ? status.pending : null,
 			session_file: typeof status.session_file === "string" ? status.session_file : null, recent: Array.isArray(status.recent) ? status.recent : [],
 			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
+			...(status.images === true ? { images: true } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string };
-type Body = { kind: "message"; text: string; deliver?: "followUp" | "steer" } | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
+type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string };
+type Body = { kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[] } | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
@@ -253,8 +263,9 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
 	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" ? value.kind : null;
 	const text = typeof value?.text === "string" ? value.text : kind === "answer" && typeof value?.label === "string" ? value.label : null;
-	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null };
-	const keys = { message: ["kind", "text", "deliver"], answer: ["kind", "ask_id", "label"], abort: ["kind"] };
+	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
+	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}) };
+	const keys = { message: ["kind", "text", "deliver", "images"], answer: ["kind", "ask_id", "label"], abort: ["kind"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
@@ -264,15 +275,23 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 		if (typeof value.label !== "string" || !value.label) return { ok: false, reason: "label must be one of the ask's options", parsed };
 		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label }, parsed };
 	}
+	const ids = value.images;
+	if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > UPLOAD_MAX_PER_MESSAGE || new Set(ids).size !== ids.length || !ids.every(isUploadId))) return { ok: false, reason: `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`, parsed };
 	const trimmed = typeof value.text === "string" ? value.text.trim() : "";
-	if (!trimmed) return { ok: false, reason: "text is empty", parsed };
+	if (!trimmed && !ids) return { ok: false, reason: "text is empty", parsed };
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}) }, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}) }, parsed };
 }
 
-/** The shared refusal chain up to a parsed JSON body: method, --require-tailnet, rate, opt-out, Origin, Sec-Fetch-Site, JSON, size. */
-export async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>): Promise<ControlRouteResult> {
+const IMAGE_CONTENT_TYPE = /^image\/(png|jpeg|webp|gif)\s*(?:;|$)/i;
+
+/**
+ * The shared refusal chain up to a parsed body: method, --require-tailnet, rate, opt-out, Origin, Sec-Fetch-Site,
+ * type, size. `{ image: max }` (POST /api/operator/upload) takes raw image bytes on its own limiter and hands
+ * `next` the Buffer; otherwise the body is JSON within CONTROL_BODY_MAX_BYTES.
+ */
+export async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>, mode: "json" | { image: number } = "json"): Promise<ControlRouteResult> {
 	const peer = peerOf(req);
 	if (req.method !== "POST") {
 		log(options)(`viewer: dashboard control refused 405: ${req.method} (${peer ?? "unknown peer"})\n`);
@@ -290,10 +309,11 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		return { status, body: { ...extra, error: reason, ...(audit.ok ? {} : { audit: `unwritten: ${audit.error}` }) }, ...(headers ? { headers } : {}) };
 	};
 	// Rate first: every refusal after it is journaled, so the limiter is what bounds the journal.
-	const limiter = (options.controlLimiter ??= new ControlLimiter());
+	const image = mode === "json" ? undefined : mode.image;
+	const limiter = image === undefined ? (options.controlLimiter ??= new ControlLimiter()) : (options.uploadLimiter ??= new ControlLimiter(UPLOAD_RATE_LIMIT));
 	const slot = limiter.take(peer ?? "unknown", now.getTime());
 	if (!slot.ok) {
-		const reason = `too many dashboard requests: ${CONTROL_RATE_LIMIT} per ${CONTROL_RATE_WINDOW_MS / 1000} s and one at a time; retry in ${slot.retryAfterS} s`;
+		const reason = `too many dashboard ${image === undefined ? "requests" : "uploads"}: ${limiter.limit} per ${CONTROL_RATE_WINDOW_MS / 1000} s and one at a time; retry in ${slot.retryAfterS} s`;
 		if (slot.firstInWindow) return refuse(429, reason, { "retry-after": String(slot.retryAfterS) });
 		log(options)(`viewer: dashboard control refused 429 (${peer ?? "unknown peer"})\n`);
 		return { status: 429, body: { error: reason }, headers: { "retry-after": String(slot.retryAfterS) } };
@@ -307,11 +327,21 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		if (!origins.includes(req.headers.origin ?? "")) return refuse(403, origin ? `Origin must be ${origin}` : "Origin refused: no public origin is configured (npm run push:init -- --origin https://<dashboard host>)");
 		const site = req.headers["sec-fetch-site"];
 		if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
-		if (!/^application\/json\s*(?:;|$)/i.test(req.headers["content-type"] ?? "")) return refuse(415, "Content-Type must be application/json");
-		const raw = await readBody(req, CONTROL_BODY_MAX_BYTES);
+		const type = req.headers["content-type"] ?? "";
+		if (image !== undefined) {
+			parsed = { ...parsed, mime: type.slice(0, 100) };
+			if (/^image\/hei[cf]\b/i.test(type)) return refuse(415, "HEIC/HEIF is not supported; share the photo as JPEG");
+			if (!IMAGE_CONTENT_TYPE.test(type)) return refuse(415, "Content-Type must be image/png, image/jpeg, image/webp or image/gif");
+		} else if (!/^application\/json\s*(?:;|$)/i.test(type)) return refuse(415, "Content-Type must be application/json");
+		const max = image ?? CONTROL_BODY_MAX_BYTES;
+		const raw = await readBody(req, max);
 		if (raw === "too_large") {
-			parsed = { ...parsed, bytes: Number(req.headers["content-length"]) || CONTROL_BODY_MAX_BYTES + 1 };
-			return refuse(413, `body is larger than ${CONTROL_BODY_MAX_BYTES} bytes`, { connection: "close" });
+			parsed = { ...parsed, bytes: Number(req.headers["content-length"]) || max + 1 };
+			return refuse(413, `body is larger than ${max} bytes`, { connection: "close" });
+		}
+		if (image !== undefined) {
+			parsed = { ...parsed, bytes: raw.length };
+			return await next(raw, { peer, refuse, parsed: (value) => { parsed = value; } });
 		}
 		let json: unknown;
 		try {
@@ -332,12 +362,30 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		parsed(shape.parsed);
 		if (!shape.ok) return refuse(400, shape.reason);
 		const record = readControlRecord(options.stateDir);
-		if (record.state !== "ok" || !operatorSession(options.stateDir).running) return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse);
+		const running = record.state === "ok" && operatorSession(options.stateDir).running;
+		const images = shape.body.kind === "message" ? shape.body.images : undefined;
+		if (images) {
+			// Never held in the inbox: a later session could not be sure the uploads still exist.
+			if (!running) return refuse(409, "image attachments need a running operator session (they are never held in the inbox); start it, or send text only");
+			const root = uploadRoot(options.uploadRoot);
+			let total = 0;
+			for (const image of images) {
+				const stat = statUpload(root, image, now);
+				if (stat.state !== "ok") return refuse(410, `image ${image} expired or was never uploaded; attach it again`);
+				total += stat.size;
+			}
+			if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `images total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
+		}
+		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse);
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
-		const reply = await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", { ...shape.body, peer });
+		const reply = images
+			? await controlRequest(record.record, "send_images", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
+			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", { ...shape.body, peer });
 		if (reply.ok) return { status: 202, body: reply.result as ControlSendResponse };
 		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
-		if (reply.status === 503 || reply.status === 504) return refuse(reply.status, reply.error);
+		if (reply.status === 503 || (reply.status === 504 && reply.error.startsWith("session "))) return refuse(reply.status, reply.error);
+		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
+		if (images && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates image attachments; restart the session (⋮ → Restart session) and attach again");
 		return { status: reply.status, body: { error: reply.error } };
 	});
 }

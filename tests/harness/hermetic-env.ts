@@ -49,6 +49,10 @@ process.env.GIT_COMMITTER_EMAIL ??= "cp@test.invalid";
 // may still set PI_HOME to their own scratch dir; this is only the default floor.
 const scratchHome = mkdtempSync(join(tmpdir(), "cp-hermetic-pi-home-"));
 process.env.PI_HOME = scratchHome;
+// Dashboard image uploads (src/viewer/uploads.ts) default to /tmp/cp-dashboard-uploads; no test may touch that
+// shared production root, so the floor here is a scratch dir. Tests that upload still pass their own uploadRoot.
+const scratchUploads = mkdtempSync(join(tmpdir(), "cp-hermetic-uploads-"));
+process.env.CP_UPLOAD_ROOT = scratchUploads;
 
 // pi-command-post-6wn: guard the real selector across the whole process, not just one
 // test file — any test process (this file is preloaded into every one of them) that
@@ -67,6 +71,7 @@ const before = selectorSnapshot();
 
 process.on("exit", () => {
 	rmSync(scratchHome, { recursive: true, force: true });
+	rmSync(scratchUploads, { recursive: true, force: true });
 	const after = selectorSnapshot();
 	const changed = before === undefined ? after !== undefined : after === undefined || after.mtimeMs !== before.mtimeMs || after.hash !== before.hash;
 	if (changed) {

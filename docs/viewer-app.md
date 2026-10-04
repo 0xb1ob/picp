@@ -260,6 +260,19 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   delivery line reads Sending, Queued, Delivered to the session, or
   `Failed: <reason>`; `Session not running` or `Dashboard control is off (…)`
   replaces the controls when they cannot work.
+- **Image attachments** (cp-br81; docs/contracts.md §Image attachments): a 44 px
+  paperclip before the textarea (only when the status says `images: true`, i.e. the
+  session's bridge takes them) opens a hidden `<input type=file multiple
+  accept=image/*>`; pasting image files into the textarea attaches them too (a paste
+  that also carries text keeps the text). Each file uploads at once, one at a time,
+  with `POST /api/operator/upload` (raw bytes, `x-cp-control-token`) and shows as a
+  62 px thumbnail from `/api/operator/uploads/<id>` (same origin, so `img-src 'self'`
+  holds) with a 44 px-target × to remove it. The composer refuses before uploading
+  HEIC/HEIF, a type that is not PNG/JPEG/WebP/GIF, a file over 10 MiB and a 9th image,
+  and shows the reason (or the server's) on the failed tile. Send needs text or at
+  least one image, no tile still uploading and no failed tile; the send body carries
+  `images: [id…]` and the tiles clear. Styles: `.operator-composer-attach*`,
+  `.operator-composer-thumb*` in `components/control.css` (wrapping row at 390 px).
 - **Mobile layout** (below 900 px, every Sessions view): the global header and the
   bottom nav give way to one 48 px top bar — back to Overview, a menu of every
   session (Operator ↔ you, CP parent, each worker), the view's name, the live dot,
@@ -318,7 +331,7 @@ opt-out (`data/dashboard-control.json` `{"enabled": false}`), `Origin` (the orig
 record, its CSRF token, and the socket. Every refusal after the
 `--require-tailnet` guard appends one `refused` line to
 `state/operator/dashboard.jsonl` (`src/viewer/control-audit.ts`, append-only,
-imported only by `control-api.ts`); the operator session journals what it
+imported only by `control-api.ts` and the image upload route `operator-upload-api.ts`); the operator session journals what it
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at

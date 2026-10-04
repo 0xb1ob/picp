@@ -155,12 +155,14 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `${XDG_CONFIG_HOME:-~/.config}/systemd/user/cp-daemon.service` | `src/service/install.ts` (rendered by `src/service/units.ts`; the systemd backend only) | the thin unit that runs cp-daemon (`docs/service.md`). The legacy `cp-parent`/`cp-view`/`cp-health`/`cp-update` units are removed by the migration (`daemon-backend.ts`); a generated `cp-operator.service`/`cp-operator-resume.service` an older install wrote is removed, never stopped, by the install (on a legacy home: by the migration at its success) (cp-rrye: Start in tmux runs tmux directly) | M | the install only; a changed unit is replaced only with `--force` |
 | `~/.local/bin/cp-operator` | `src/service/install.ts` | the generated operator wrapper (`CP_HOME`, multi mode, the service viewer, the pinned `CP_PARENT_MODEL`/`CP_OPERATOR_MODEL`) | M | the install only; same `--force` rule |
 | `${XDG_CONFIG_HOME:-~/.config}/pi-command-post/gateway.env` (0600, dir 0700) | `src/service/gateway.ts` (`cp-install --gateway-key-file`, atomic replace) | the optional gateway admin key, `CP_GATEWAY_ADMIN_KEY=<key>`; read by the parent host (`src/gateway-key.ts`), never by a unit or a worker; kept by `--uninstall` | M | the install; the operator |
+| `/tmp/cp-dashboard-uploads/<yyyymmdd>/<24 hex>.<ext>` (dirs 0700, files 0600) or `$CP_UPLOAD_ROOT` | `src/viewer/uploads.ts`, via `POST /api/operator/upload` (`src/viewer/operator-upload-api.ts`) | composer image attachments, read back by the operator session's bridge; swept after 7 days, capped at 256 MiB (`docs/contracts.md` § Image attachments) | T | the viewer only; `rm -rf` is safe at any time |
 
 ### Temp and shell redirections
 
 | Path | Writer | What | Class | Who may write |
 |---|---|---|---|---|
 | `$TMPDIR/cp-hermetic-pi-home-*` | `tests/harness/hermetic-env.ts` (removed on exit) | scratch `PI_HOME` per test process | T | tests |
+| `$TMPDIR/cp-hermetic-uploads-*` | `tests/harness/hermetic-env.ts` (removed on exit) | `CP_UPLOAD_ROOT` per test process, so no test reaches `/tmp/cp-dashboard-uploads` | T | tests |
 | `$TMPDIR/cp-home-*`, `cp-wt-*`, `cp-bridge-*`, … | `tests/harness/state.ts`; `mkdtempSync(join(tmpdir(), …))` in test files | test homes, repos, worktrees | T | tests |
 | `cat > "${artifact_path}" <<'EOF'` | `brief-research.md`, `brief-qa.md` (recognized by `src/watch.ts`) | the sanctioned planner/QA write | — | worker |
 | commit / PR body file | `brief-ship.md`: written with the `write` tool for `git commit -F` / `gh pr create --body-file`, location not stated | ship worker scratch | — | worker (see Known gaps) |
@@ -179,7 +181,9 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 ## Temp
 
 One `mkdtempSync(join(tmpdir(), "cp-<purpose>-"))` root per process, removed
-on exit. Never a fixed `/tmp/<name>`. Runtime code uses none.
+on exit. Never a fixed `/tmp/<name>`. Runtime code uses one: `/tmp/cp-dashboard-uploads`
+(composer images), fixed because the viewer and the operator session must find the same files whatever their
+`TMPDIR`; it is a store with a sweep, not scratch, and tests override it with `CP_UPLOAD_ROOT`.
 
 ## Adding a path
 

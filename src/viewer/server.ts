@@ -36,6 +36,7 @@ import { sidebar, type ViewerState } from "./sessions.ts";
 import { handlePushSubscription, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, pushStatus } from "./push-api.ts";
 import { ANSWER_ACK_PATH, ANSWERS_CONTROL_PATH, CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleAnswerAck, handleAnswersControlStatus, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
+import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, serveOperatorUpload } from "./operator-upload-api.ts";
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
@@ -53,6 +54,9 @@ export interface ViewerOptions extends ViewerState {
 	requireTailnet?: boolean;
 	/** Dashboard-control rate limiter (20 per 60 s per client address); created on first use. A test seam. */
 	controlLimiter?: ControlLimiter;
+	/** Image attachments: upload root (default `CP_UPLOAD_ROOT`, else /tmp/cp-dashboard-uploads) and the 24/60 s upload limiter. Test seams. */
+	uploadRoot?: string;
+	uploadLimiter?: ControlLimiter;
 	/** Start session (`POST /api/operator/start`): test seams and the last start's time. */
 	operatorStart?: OperatorStart;
 	/** Where a skipped board is reported, once per (slug, reason). Default stderr. */
@@ -140,8 +144,8 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		return;
 	}
 	const requestPath = (req.url ?? "/").split("?")[0];
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : handleOperatorStart(req, options))
 			.then((out) => sendJson(res, out.status, out.body, out.headers))
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -169,6 +173,11 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 	// passes); the Host guard above still runs first, for every route.
 	if (url.searchParams.get("transcript") === "1" && options.requireTailnet !== true) {
 		sendJson(res, 403, { error: "the operator transcript is served only under --require-tailnet" });
+		return;
+	}
+	if (url.pathname.startsWith(OPERATOR_UPLOADS_PREFIX)) {
+		const out = serveOperatorUpload(req, options, url.pathname.slice(OPERATOR_UPLOADS_PREFIX.length));
+		send(res, out.status, out.type, out.body, out.headers);
 		return;
 	}
 	switch (url.pathname) {
