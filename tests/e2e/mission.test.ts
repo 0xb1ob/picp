@@ -394,7 +394,19 @@ test(
 				},
 				{
 					kind: "tool_calls",
-					calls: [{ name: "report_result", args: { job_id: jobTwo.id, kind: "ship", status: "done", summary: "Landed the second job.", branch: jobTwo.id } }],
+					calls: [
+						{
+							name: "report_result",
+							args: () => ({
+								job_id: jobTwo.id,
+								kind: "ship",
+								status: "done",
+								summary: "Landed the second job.",
+								branch: jobTwo.id,
+								head_sha: execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${jobTwo.id}`], { encoding: "utf8" }).split("\t")[0]?.trim(),
+							}),
+						},
+					],
 				},
 				{ kind: "text", text: "standing by" },
 			],

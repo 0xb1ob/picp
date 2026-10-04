@@ -594,6 +594,7 @@ test("intake fires from the worker's own event stream", { timeout: 120_000 }, as
 		summary: "Reported through the tool, not through prose.",
 		branch: jobId,
 		pr_url: "https://github.com/o/r/pull/42",
+		head_sha: repo.head(),
 	};
 	const model = provider.addScript("intake", [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }]);
 	agentDir.writeModels(provider);

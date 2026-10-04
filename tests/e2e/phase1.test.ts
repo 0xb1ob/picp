@@ -85,7 +85,8 @@ test("m1: full worker lifecycle on the mock provider", { timeout: 120_000 }, asy
 			],
 			usage: { prompt_tokens: 1500, completion_tokens: 80 },
 		},
-		{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }], usage: { prompt_tokens: 1800, completion_tokens: 60 } },
+		// head_sha is read at serve time: the commit happens in the previous step.
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ ...envelope, head_sha: repo.head() }) }], usage: { prompt_tokens: 1800, completion_tokens: 60 } },
 	]);
 	agentDir.writeModels(provider);
 
@@ -156,7 +157,7 @@ test("m1: full worker lifecycle on the mock provider", { timeout: 120_000 }, asy
 		worktree: repo.path,
 	});
 	assert.ok(validation.ok, validation.ok ? "" : validation.errors.join("; "));
-	assert.deepEqual(record.envelope, envelope);
+	assert.deepEqual(record.envelope, { ...envelope, head_sha: repo.head() });
 	recorder.markEnvelope({ status: record.envelope.status, attempt: record.attempt });
 
 	// --- run artifacts are the read surface ------------------------------

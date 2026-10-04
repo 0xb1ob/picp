@@ -29,6 +29,7 @@ import {
 	VERDICT_REJECTION_FILE,
 } from "../extensions/worker-reporter/index.ts";
 import workerReporter from "../extensions/worker-reporter/index.ts";
+import { headShaErrors } from "../extensions/worker-reporter/head.ts";
 import {
 	ANSWER_MAX_BYTES,
 	ENVELOPE_REPAIR_MAX_ATTEMPTS,
@@ -49,6 +50,7 @@ import {
 	createScratchRepo,
 	MockProvider,
 	type RecordedRequest,
+	type ScratchRepo,
 	type ScriptStep,
 	WORKER_REPORTER_EXTENSION,
 } from "./harness/index.ts";
@@ -359,6 +361,61 @@ test("local checks protect the artifact and research porcelain", () => {
 	}
 });
 
+test("headShaErrors: ship/done needs the worktree HEAD; others untouched", () => {
+	const a = "a".repeat(40);
+	const b = "b".repeat(40);
+	let calls = 0;
+	const observe = (result: { sha: string } | { error: string } = { sha: a }) => () => {
+		calls += 1;
+		return result;
+	};
+	const ship: Envelope = { job_id: "cp-ship9", kind: "ship", status: "done", summary: "s", branch: "cp-ship9" };
+	const research: Envelope = { job_id: "cp-res1", kind: "research", status: "done", summary: "s" };
+
+	const missing = headShaErrors(ship, "/leases/1/repo", observe());
+	assert.equal(missing.length, 1);
+	assert.ok(missing[0]?.includes(a));
+
+	const mismatch = headShaErrors({ ...ship, head_sha: b }, "/leases/1/repo", observe());
+	assert.equal(mismatch.length, 1);
+	assert.ok(mismatch[0]?.includes(a) && mismatch[0].includes(b) && mismatch[0].includes("/leases/1/repo"));
+
+	assert.deepEqual(headShaErrors({ ...ship, head_sha: a }, "/leases/1/repo", observe()), []);
+
+	calls = 0;
+	assert.deepEqual(headShaErrors(research, "/leases/1/repo", observe()), []);
+	assert.deepEqual(headShaErrors({ ...ship, status: "blocked", head_sha: b }, "/leases/1/repo", observe()), []);
+	assert.equal(calls, 0, "no git call when there is nothing to check");
+
+	assert.equal(headShaErrors({ ...research, head_sha: b }, "/leases/1/repo", observe()).length, 1);
+
+	const failed = headShaErrors(ship, "/leases/1/repo", observe({ error: "fatal: not a git repository" }));
+	assert.equal(failed.length, 1);
+	assert.match(failed[0] ?? "", /cannot verify.*fatal: not a git repository/);
+});
+
+test("localChecks compares a ship report against the real worktree HEAD", () => {
+	const repo = createScratchRepo({ name: "head-check", withRemote: false });
+	try {
+		const context = {
+			job_id: "cp-ship9",
+			kind: "ship" as const,
+			delivery: "local" as const,
+			role: "implementer" as const,
+			runDir: "/tmp/run",
+			worktree: repo.path,
+			mayAskOperator: false,
+		};
+		const ship: Envelope = { job_id: "cp-ship9", kind: "ship", status: "done", summary: "s", branch: "cp-ship9" };
+		assert.deepEqual(localChecks({ ...ship, head_sha: repo.head() }, context), []);
+		assert.match(localChecks({ ...ship, head_sha: "0".repeat(40) }, context).join(";"), /is not HEAD of your worktree/);
+		assert.match(localChecks(ship, context).join(";"), /head_sha: required/);
+		assert.match(localChecks(ship, { ...context, worktree: join(repo.path, "no-such-dir") }).join(";"), /cannot verify/);
+	} finally {
+		repo.cleanup();
+	}
+});
+
 test("cp-u3o4: an answer over the bound is refused repairably; at the bound it is accepted", () => {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "answer", withRemote: false });
@@ -477,11 +534,13 @@ async function startReporterWorker(
 		delivery: "pr" | "local" | "pipeline" | "answer";
 		role?: "planner" | "implementer" | "gate-reviewer";
 		artifactPath?: string;
+		/** A pre-made scratch repo (so the report can name its real HEAD); cleaned up with the fixture. */
+		repo?: ScratchRepo;
 		onDialog?: (request: WorkerDialogRequest) => Promise<WorkerDialogAnswer>;
 	},
 ): Promise<WorkerFixture> {
 	const provider = await MockProvider.start();
-	const repo = createScratchRepo({ name: scriptName, withRemote: false });
+	const repo = job.repo ?? createScratchRepo({ name: scriptName, withRemote: false });
 	const home = createScratchHome();
 	const runDir = join(home.path, paths.runDir(job.jobId));
 	mkdirSync(runDir, { recursive: true });
@@ -533,10 +592,13 @@ const VALID_SHIP: Envelope = {
 };
 
 test("a worker session produces a valid envelope file", { timeout: 90_000 }, async (t) => {
-	const fixture = await startReporterWorker("report-ok", [reportCall(VALID_SHIP)], {
+	const repo = createScratchRepo({ name: "report-ok", withRemote: false });
+	const shipped = { ...VALID_SHIP, head_sha: repo.head() };
+	const fixture = await startReporterWorker("report-ok", [reportCall(shipped)], {
 		jobId: "cp-ship9",
 		kind: "ship",
 		delivery: "pr",
+		repo,
 	});
 	t.after(fixture.cleanup);
 
@@ -545,7 +607,7 @@ test("a worker session produces a valid envelope file", { timeout: 90_000 }, asy
 	await fixture.worker.waitForSettled(60_000);
 
 	const record = JSON.parse(readFileSync(join(fixture.runDir, ENVELOPE_FILE), "utf8")) as EnvelopeRecord;
-	assert.deepEqual(record.envelope, VALID_SHIP);
+	assert.deepEqual(record.envelope, shipped);
 	assert.equal(record.job_id, "cp-ship9");
 	assert.equal(record.attempt, 1);
 	assert.match(record.received_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -555,7 +617,31 @@ test("a worker session produces a valid envelope file", { timeout: 90_000 }, asy
 	assert.equal(fixture.provider.requests("report-ok").length, 1);
 });
 
+test("a head_sha that is not worktree HEAD is repaired in-run", { timeout: 90_000 }, async (t) => {
+	const repo = createScratchRepo({ name: "report-head", withRemote: false });
+	const shipped = { ...VALID_SHIP, head_sha: repo.head() };
+	const fixture = await startReporterWorker(
+		"report-head",
+		[reportCall({ ...VALID_SHIP, head_sha: "f".repeat(40) }), reportCall(shipped)],
+		{ jobId: "cp-ship9", kind: "ship", delivery: "pr", repo },
+	);
+	t.after(fixture.cleanup);
+
+	await fixture.worker.getState(30_000);
+	await fixture.worker.prompt("do the job");
+	await fixture.worker.waitForSettled(60_000);
+
+	const record = JSON.parse(readFileSync(join(fixture.runDir, ENVELOPE_FILE), "utf8")) as EnvelopeRecord;
+	assert.deepEqual(record.envelope, shipped);
+	assert.equal(record.attempt, 2, "attempt 2 is the one filed");
+	const repair = JSON.stringify(fixture.provider.requests("report-head")[1]?.body.messages ?? []);
+	assert.match(repair, /is not HEAD of your worktree/);
+	assert.ok(repair.includes(repo.head()), "the repair prompt names the observed sha");
+});
+
 test("an invalid envelope is repaired within the cap", { timeout: 90_000 }, async (t) => {
+	const repo = createScratchRepo({ name: "report-repair", withRemote: false });
+	const shipped = { ...VALID_SHIP, head_sha: repo.head() };
 	const fixture = await startReporterWorker(
 		"report-repair",
 		[
@@ -568,9 +654,9 @@ test("an invalid envelope is repaired within the cap", { timeout: 90_000 }, asyn
 				branch: "cp-ship9",
 				pr_url: "https://github.com/org/repo/pull/9",
 			}),
-			reportCall(VALID_SHIP),
+			reportCall(shipped),
 		],
-		{ jobId: "cp-ship9", kind: "ship", delivery: "pr" },
+		{ jobId: "cp-ship9", kind: "ship", delivery: "pr", repo },
 	);
 	t.after(fixture.cleanup);
 
@@ -579,7 +665,7 @@ test("an invalid envelope is repaired within the cap", { timeout: 90_000 }, asyn
 	await fixture.worker.waitForSettled(60_000);
 
 	const record = JSON.parse(readFileSync(join(fixture.runDir, ENVELOPE_FILE), "utf8")) as EnvelopeRecord;
-	assert.deepEqual(record.envelope, VALID_SHIP);
+	assert.deepEqual(record.envelope, shipped);
 	assert.equal(record.attempt, 2, "the repair attempt is recorded");
 	assert.ok(!existsSync(join(fixture.runDir, REJECTION_FILE)));
 	assert.equal(fixture.provider.requests("report-repair").length, 2);
@@ -690,15 +776,17 @@ test("blocked reports are first-class", { timeout: 90_000 }, async (t) => {
 });
 
 test("re-reporting is idempotent, and contradicting a report is refused", { timeout: 120_000 }, async (t) => {
+	const repo = createScratchRepo({ name: "report-twice", withRemote: false });
+	const shipped = { ...VALID_SHIP, head_sha: repo.head() };
 	const fixture = await startReporterWorker(
 		"report-twice",
 		[
-			reportCall(VALID_SHIP),
-			reportCall(VALID_SHIP),
-			reportCall({ ...VALID_SHIP, pr_url: "https://github.com/org/repo/pull/10" }),
+			reportCall(shipped),
+			reportCall(shipped),
+			reportCall({ ...shipped, pr_url: "https://github.com/org/repo/pull/10" }),
 			{ kind: "text", text: "I will stop." },
 		],
-		{ jobId: "cp-ship9", kind: "ship", delivery: "pr" },
+		{ jobId: "cp-ship9", kind: "ship", delivery: "pr", repo },
 	);
 	t.after(fixture.cleanup);
 
@@ -1203,10 +1291,12 @@ test("review: an answer job never asks for review", { timeout: 90_000 }, async (
 
 test("review: an implementer never asks for review", { timeout: 90_000 }, async (t) => {
 	let asked = 0;
-	const fixture = await startReporterWorker("review-skip", [reportCall(VALID_SHIP)], {
+	const repo = createScratchRepo({ name: "review-skip", withRemote: false });
+	const fixture = await startReporterWorker("review-skip", [reportCall({ ...VALID_SHIP, head_sha: repo.head() })], {
 		jobId: "cp-ship9",
 		kind: "ship",
 		delivery: "pr",
+		repo,
 		onDialog: async () => {
 			asked += 1;
 			return { cancelled: true };
