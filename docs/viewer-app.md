@@ -331,7 +331,7 @@ opt-out (`data/dashboard-control.json` `{"enabled": false}`), `Origin` (the orig
 record, its CSRF token, and the socket. Every refusal after the
 `--require-tailnet` guard appends one `refused` line to
 `state/operator/dashboard.jsonl` (`src/viewer/control-audit.ts`, append-only,
-imported only by `control-api.ts`); the operator session journals what it
+imported only by `control-api.ts` and the image upload route `operator-upload-api.ts`); the operator session journals what it
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
