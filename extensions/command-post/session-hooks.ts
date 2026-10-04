@@ -60,6 +60,10 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	});
 	pi.on("agent_end", (event) => wakeGate.agentEnd(event.messages));
 	pi.on("agent_settled", () => wakeGate.agentSettled());
+	// unload-parent PR3: a clean turn_end answered the landed operator sends; held wakes go out.
+	pi.on("turn_end", (event) => {
+		wakeGate.turnEnd(event as unknown as { type: string; [key: string]: unknown });
+	});
 
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
 		try {
@@ -378,6 +382,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		confirmCiArrival(message);
 		confirmVerdictArrival(message);
 		confirmDurableArrival(message);
+		// unload-parent PR3: an operator send landing here holds later fleet wakes until it is answered.
+		wakeGate.messageStart(message);
 	});
 
 	// The same evidence, from the one place it cannot be missed: the context handed

@@ -17,9 +17,11 @@ import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AnswerCardRecord, type 
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { type DeferredRecheckTrigger, formatRaisedNotice, recheckDeferredBounded } from "../../src/deferred-recheck.ts";
 import { readPriorAttempts, reviewCapExhausted } from "../../src/gate.ts";
+import { messageText } from "../../src/parent-outbox.ts";
 import { operatorNotify } from "../../src/parent-session.ts";
 import { durableWakeupProjects, homeMandateProjects, homeProjectResolver, type ProjectOf, projectsOf } from "../../src/project-report.ts";
 import { scheduledJobIds } from "../../src/relay-scope.ts";
+import { SendFirstGate } from "../../src/send-first-gate.ts";
 import { durableIdsFromMessage } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
 import { formatWedgedNotice } from "../../src/wedged.ts";
@@ -194,6 +196,11 @@ export function createWakeupSurfaces(
 	 * after an operator abort, where the notices wait for the next prompt.
 	 */
 	const gate = { busy: false, triggered: false, aborted: false, nonTriggeringSent: 0, seenUpTo: 0 };
+	// unload-parent PR3 (src/send-first-gate.ts): wakes held while a landed operator send is unanswered.
+	const sendFirst = new SendFirstGate<() => void>();
+	const releaseHeld = (): void => {
+		for (const deliver of sendFirst.flush()) deliver();
+	};
 	const wakeGate = {
 		agentStart: (): void => {
 			gate.busy = true;
@@ -203,6 +210,16 @@ export function createWakeupSurfaces(
 		providerRequest: (): void => {
 			gate.seenUpTo = gate.nonTriggeringSent;
 		},
+		/** A message reached the parent: release expired holds, then note any operator send it carries. */
+		messageStart: (message: unknown): void => {
+			releaseHeld();
+			sendFirst.userMessage((message as { role?: unknown } | null)?.role, messageText(message));
+		},
+		/** A clean turn_end answered the landed sends: their held wakes go now. */
+		turnEnd: (event: { type: string; [key: string]: unknown }): void => {
+			sendFirst.turnEnd(event);
+			releaseHeld();
+		},
 		agentEnd: (messages: readonly unknown[]): void => {
 			const last = [...messages].reverse().find((m) => (m as { role?: unknown } | null)?.role === "assistant");
 			if ((last as { stopReason?: unknown } | undefined)?.stopReason === "aborted") gate.aborted = true;
@@ -211,6 +228,9 @@ export function createWakeupSurfaces(
 			// Idle first (F6): anything sent from here on triggers its own turn.
 			gate.busy = false;
 			gate.triggered = false;
+			sendFirst.settled();
+			// After an abort held wakes wait for the next message or wake, like the nudge below.
+			if (!gate.aborted) releaseHeld();
 			const unseen = gate.nonTriggeringSent - gate.seenUpTo;
 			gate.seenUpTo = gate.nonTriggeringSent;
 			if (unseen <= 0 || gate.aborted) return;
@@ -228,19 +248,24 @@ export function createWakeupSurfaces(
 		const notifier = new WakeupNotifier({
 			facts: wakeupFactsNow(),
 			send: (message: WakeupMessage) => {
-				const quiet = gate.busy && gate.triggered && stamp.kind !== "answered";
-				pi.sendMessage(
-					{
-						customType: message.customType,
-						content: message.content,
-						display: message.display,
-						// SAFETY: WakeupMessage.details is already a string-keyed record.
-						details: message.details as unknown as Record<string, unknown>,
-					},
-					quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
-				);
-				if (quiet) gate.nonTriggeringSent++;
-				else if (gate.busy) gate.triggered = true;
+				const deliver = (): void => {
+					const quiet = gate.busy && gate.triggered && stamp.kind !== "answered";
+					pi.sendMessage(
+						{
+							customType: message.customType,
+							content: message.content,
+							display: message.display,
+							// SAFETY: WakeupMessage.details is already a string-keyed record.
+							details: message.details as unknown as Record<string, unknown>,
+						},
+						quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
+					);
+					if (quiet) gate.nonTriggeringSent++;
+					else if (gate.busy) gate.triggered = true;
+				};
+				// unload-parent PR3: an unanswered operator send goes first; held wakes count as sent (not acked).
+				releaseHeld();
+				if (sendFirst.offer(stamp.kind, deliver) === "send") deliver();
 			},
 			onSuppressed: (suppressed, verdict) => recordStaleWakeup(suppressed, verdict, "send"),
 			projectOf: projectOf(),

@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
 import type { BridgeRelay } from "../src/cp-bridge.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
-import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText } from "../src/parent-outbox.ts";
+import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText, sharedReplyPointer } from "../src/parent-outbox.ts";
 import { OUTER_RETRY_DELAYS_MS } from "../src/provider-retry.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
 
@@ -132,13 +132,33 @@ test("a send answered only by tool calls is not settled empty by a later send's 
 	const { first, second } = await interleaved();
 	assert.equal(first.level, "owner_observed");
 	assert.equal(first.reply, "Answer B.");
-	assert.equal(second.reply, "Answer B.");
+	assert.equal(second.level, "owner_observed");
+	assert.equal(second.reply, sharedReplyPointer(first.send_id as string), "one answer, one copy: B points at A");
 });
 
 test("an interleaved send's reply keeps its own commentary and shares the next finished answer", async () => {
 	const { first, second } = await interleaved("Checking A now.");
 	assert.equal(first.reply, "Checking A now.\nAnswer B.");
-	assert.equal(second.reply, "Answer B.");
+	assert.equal(second.reply, sharedReplyPointer(first.send_id as string));
+});
+
+test("unload-parent PR3: 12 sends absorbed into one span get one full reply and 11 pointers, each settled once", async () => {
+	const ctx = scripted();
+	const entries = Array.from({ length: 12 }, (_, n) => ctx.box.enqueue(`SYNTH-SEND ${n}`));
+	const turn = ctx.turn();
+	ctx.delivery.landed(frameBatch(entries), turn);
+	turn.texts.push("One answer to all twelve.");
+	turn.assistantCount += 1;
+	ctx.delivery.segmentEnd(turn);
+	ctx.delivery.settle(turn);
+	const [lead, ...rest] = entries.map((entry) => entry.id);
+	assert.deepEqual(
+		ctx.relays.map((relay) => [relay.sendId, relay.text]),
+		[[lead, "One answer to all twelve."], ...rest.map((id) => [id, sharedReplyPointer(lead as string)])],
+	);
+	assert.equal(ctx.relays.filter((relay) => relay.text.includes("One answer")).length, 1, "the answer text is relayed once");
+	assert.deepEqual(ctx.counted, Array(12).fill(false), "each send settles and counts exactly once");
+	assert.ok(ctx.box.list().every((entry) => entry.state === "settled"));
 });
 
 test("an interleaved send gets the run's error when no answer finished", async () => {

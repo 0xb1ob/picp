@@ -1048,6 +1048,20 @@ under their own rules). Two consequences:
   `turn_end` flush, ahead of an earlier triggering follow-up that pi drains only
   after the current turn.
 
+**Send-first hold (unload-parent PR3, `src/send-first-gate.ts`).** An operator
+send is answered before bulk wake-ups land on top of it. A parent `role: "user"`
+message carrying a `[cp-send <ps-id> …]` marker (`message_start`) marks that send
+unanswered; while any is, every wake-up except `cp-answered` passes the staleness
+check and is then held in memory instead of sent. A clean `turn_end` (the
+bridge's segment end) answers them and releases the held wake-ups in order,
+through the busy-wake gate above; `agent_settled` releases too (not after an
+abort, where they wait for the next message or wake-up), and a hold never
+outlasts `SEND_FIRST_HOLD_MS` (90 s) — checked on the next `message_start`,
+`turn_end` or wake-up. A held wake-up counts as sent, never as a stale
+suppression, and nothing is acked by the hold: durable wake-ups are confirmed
+only on arrival and re-sent by their outbox after 120 s (the hold stays under
+that), CI/verdict facts by their own re-derive rules.
+
 **`ctx.ui.*` audit** (headless path produces the same information as a plain
 message):
 
@@ -1238,7 +1252,12 @@ one `wake` with the jobs stamped since the last wake relay. `agent_settled`
 handles only what is left: sends still open (a failed span, or the transient
 resume ladder), the remaining wake text, the run's model error when no send is
 open, refused escalations and automatic context control. No send settles or
-counts twice.
+counts twice. **One answer, one copy** (unload-parent PR3): sends whose spans
+end at the same place (several sends absorbed into one turn, or a send that
+shares the next finished answer) were answered by one text. The earliest landing
+keeps it; each other send settles with `answered together with <ps-id> — see that
+reply` (`sharedReplyPointer`, `landedOutcomes` in `src/parent-outbox.ts`), so N
+sends in one span relay one full reply and N-1 pointers, each settled once.
 
 Receipts are `injected | turn_settled | http_accepted | owner_observed |
 turn_failed`. Never overload those as `accepted`. This channel is RPC, so

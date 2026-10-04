@@ -7,6 +7,7 @@ import { createSessionState } from "../extensions/command-post/shared.ts";
 import { createWakeupSurfaces, WAKEUP_NUDGE_TYPE } from "../extensions/command-post/wakeup-surfaces.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
+import { frameBatch } from "../src/parent-outbox.ts";
 import type { WakeupCarrier } from "../src/wakeups.ts";
 import { createScratchHome, readRunEvents } from "./harness/index.ts";
 
@@ -169,4 +170,51 @@ test("cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges
 	const context = handlers.get("context") as unknown as ContextHook;
 	const nudge: WakeupCarrier = { ...nudges()[0]!.message, role: "custom" };
 	assert.equal(await context({ messages: [{ role: "user", content: "go" }, nudge] }), undefined);
+});
+
+// unload-parent PR3: the send-first hold through the real hook wiring.
+test("unload-parent PR3: wakes wait while a landed operator send is unanswered; answered never waits", async (t) => {
+	const post = scratchPost(t);
+	const handlers = new Map<string, (event?: unknown) => unknown>();
+	const sent: Array<{ message: WakeupCarrier & { content: string }; options: { triggerTurn?: boolean; deliverAs?: string } }> = [];
+	const pi = {
+		on(name: string, handler: (event?: unknown) => unknown) { handlers.set(name, handler); },
+		registerEntryRenderer() {},
+		sendMessage(message: WakeupCarrier & { content: string }, options: { triggerTurn?: boolean; deliverAs?: string }) { sent.push({ message, options }); },
+	} as unknown as ExtensionAPI;
+	const state = createSessionState();
+	state.post = post;
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
+	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
+	const fire = async (name: string, event: unknown = {}) => handlers.get(name)?.(event);
+	const wake = (tag: string) => wakeups.sendWakeup({ kind: "ci" }, `SYNTH-NOTICE ${tag}`, {});
+	const contents = () => sent.map((entry) => entry.message.content);
+	const operatorSend = { role: "user", content: [{ type: "text", text: frameBatch([{ id: "ps-20300101000000-0000000a", text: "SYNTH operator question" }]) }] };
+	const turnEnd = (stopReason: string, toolResults: unknown[] = []) => ({ type: "turn_end", message: { role: "assistant", stopReason }, toolResults });
+	const triggering = { deliverAs: "followUp", triggerTurn: true };
+
+	await fire("agent_start");
+	await fire("before_provider_request");
+	await fire("message_start", { message: operatorSend });
+	assert.equal(wake("W1"), true, "a held wake counts as sent: it is not a stale suppression");
+	assert.equal(wake("W2"), true);
+	assert.deepEqual(contents(), [], "held while the operator send is unanswered");
+	wakeups.sendWakeup({ kind: "answered", keys: ["aw-synth"] }, "SYNTH-ANSWER", { answered: [] });
+	assert.equal(contents().length, 1, "answered is never held");
+	await fire("turn_end", turnEnd("toolUse", [{ role: "toolResult" }]));
+	assert.equal(contents().length, 1, "a tool-call turn is not the answer");
+	await fire("turn_end", turnEnd("stop"));
+	assert.deepEqual(contents().slice(1).map((text) => text.match(/SYNTH-NOTICE (W\d)/)?.[1]), ["W1", "W2"], "the answer releases both, in order");
+	assert.deepEqual(sent.slice(1).map((entry) => entry.options), [{ triggerTurn: false }, { triggerTurn: false }], "the busy-wake gate still applies to released wakes");
+	assert.ok(wake("W3"));
+	assert.equal(contents().length, 4, "answered: the next wake goes straight out");
+
+	// A run that settles without a clean answer releases what it held, triggering (idle).
+	await fire("agent_start");
+	await fire("message_start", { message: operatorSend });
+	assert.ok(wake("W4"));
+	assert.equal(contents().length, 4);
+	await fire("agent_settled");
+	assert.ok(contents()[4]?.includes("W4"));
+	assert.deepEqual(sent[4]?.options, triggering);
 });
