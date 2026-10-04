@@ -63,6 +63,18 @@ test("API: open asks carry context, jobs, mandate objective, the parent's escala
 	assert.equal(sessionsView(state, "you", null, { now })?.open_asks, undefined, "the Decisions view pins nothing");
 });
 
+test("N11: a stored 'label: rationale' recommendation matches its option, so differs stays false; a real mismatch still differs", (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const state = { home: home.path, stateDir: join(home.path, LAYOUT.state) };
+	const recs = ["approve: read the plan first", "Approve. The plan is sound.", "ok", "drop: the plan is stale", "approved"];
+	mkdirSync(join(state.stateDir, "operator"), { recursive: true });
+	// Written raw: these rows predate open()'s label check, which would refuse every sentence here.
+	writeFileSync(join(state.stateDir, "operator", "asks.jsonl"), recs.map((recommendation, n) => JSON.stringify({ type: "open", id: `ask-a${n}`, project: "demo", question: "Approve the plan?", created_at: at, options: [{ label: "approve", consequence: "Proceeds" }, { label: "drop", consequence: "Closes" }], recommendation, source_escalation: "es-plan" })).join("\n") + "\n");
+	writeFileSync(join(state.stateDir, "escalations.json"), JSON.stringify({ items: [{ id: "es-plan", created_at: at, question: "Approve the plan?", status: "open", kind: "plan_approval", job_ids: [], recommended: "ok", options: [{ id: "ok", label: "approve" }, { id: "no", label: "drop" }] }] }));
+	const differs = awaitingScreen(state, now).items.map((item) => [item.recommendation, item.escalation?.differs]);
+	assert.deepEqual(differs, [[recs[0], false], [recs[1], false], [recs[2], false], [recs[3], true], [recs[4], true]], "label or id, exact or followed by ':'/'.', case-insensitive; a longer word is not a prefix match");
+});
+
 test("component: Awaiting renders option buttons, never CopyReply; disabled with the reason when control is down; Other answer sends a message body", async (t) => {
 	const { state, first } = fixture(t);
 	const built = await build({ stdin: { contents: 'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {AwaitingScreen} from "./viewer-app/screens/Awaiting.tsx"; export {act}; export const screen=(data,control)=>render(h(AwaitingScreen,{data,control})); export const mount=(root,data,control)=>domRender(h(AwaitingScreen,{data,control}),root); export const unmount=root=>domRender(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });

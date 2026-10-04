@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Log-review fixes, PR-D (N8, N10, N11)
+
+`cp_next` appends one advisory warning naming a `kind: research` job left `held` or `waiting` with `reported_at` set and a dead worker pid, with `cp_teardown <id>` (three ids, then `+N more`), joined after the checkout warning; a ship hold in that shape never warns, and the recommendation is unchanged. The ask guard also reads a tail sentence with `still waiting` or `your (two) choice(s)` as a question. `cp_parent ask` refuses a `recommendation` that is not exactly one option label after trim (the rationale goes in `context`); for asks already stored, the Awaiting card's `differs` matches the escalation option's id or label exactly or followed by `:` / `.`, case-insensitive, so a real mismatch still shows the automatic default. Migration: none; stored sentence recommendations stay on disk.
+
 ### Self-review analyses context usage and compactions
 
 `skills/cp-self-review/SKILL.md` now asks every reader to look at context growth, compactions and rotations (parent, operator session, workers, daemon/bridge logs), requires a "Context usage" section in each reader report, and a "Context & compaction" section in the S1 synthesis. Model, thinking, window and redaction/report-only rules are unchanged. Migration: none; skill text only.

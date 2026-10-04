@@ -10,7 +10,7 @@ export const OperatorAskInputSchema = Type.Object({
 	project: Text,
 	question: Type.String({ minLength: 1, pattern: "\\S", description: "One short question; the background goes in context" }),
 	options: Type.Array(Type.Object({ label: Text, consequence: Text }), { minItems: 1, maxItems: 5 }),
-	recommendation: Text,
+	recommendation: Type.String({ minLength: 1, pattern: "\\S", description: "Exactly one options[].label; the rationale goes in context" }),
 	source_escalation: Type.Optional(Type.String({ pattern: "^es-[A-Za-z0-9_-]+$" })),
 	job_ids: Type.Optional(Type.Array(Text)),
 	evidence_paths: Type.Optional(Type.Array(Text)),
@@ -46,6 +46,9 @@ export class OperatorAsks {
 		if (input === undefined) return this.list().filter((ask) => ask.state === "open");
 		const checked = validate<OperatorAskInput>(OperatorAskInputSchema, input);
 		if (!checked.ok) throw new Error(`invalid operator ask: ${JSON.stringify(checked.errors)}`);
+		// N11: a sentence recommendation never matches an option, so the card would show a red default against it.
+		const labels = checked.value.options.map((option) => option.label.trim());
+		if (!labels.includes(checked.value.recommendation.trim())) throw new Error(`invalid operator ask: recommendation must be exactly one option label (${labels.map((label) => JSON.stringify(label)).join(", ")}); put the rationale in context`);
 		const event: Static<typeof OpenEvent> = {
 			...checked.value,
 			options: checked.value.options.map((option) => ({ ...option, consequence: option.consequence.length > 200 ? `${option.consequence.slice(0, 199)}\u2026` : option.consequence })),

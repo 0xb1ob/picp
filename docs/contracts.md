@@ -1146,7 +1146,7 @@ at `agent_settled`: pi emits `agent_start` for each forced continuation, so it i
 a run boundary. *Heuristic, not guaranteed:* `detectHumanQuestion` reads the last 600
 chars minus code fences and `>` quotes, and fires on a sentence ending in `?` or one
 matching `should I | do you want | would you like | which option/one | please
-confirm/choose/decide | your call | let me know`. It misses a question with neither
+confirm/choose/decide | your call | let me know | still waiting | your (two) choice(s)`. It misses a question with neither
 (an imperative "tell me which") and fires on a rhetorical or quoted one (the model
 answers `NO-ASK`). No pi hook can stop the model writing prose, so the guarantee is
 only that a detected question gets a nudge and then a card, whatever the model does;
