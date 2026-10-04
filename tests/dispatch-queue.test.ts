@@ -144,6 +144,17 @@ test("4B2-T1: ownership is read at the start and per entry; a home drain and a f
 	assert.deepEqual(full.calls, []);
 });
 
+test("a closed head is dropped even when the cap is full; the next open entry is kept", async (t) => {
+	const b = queueBench(t, { capacityFree: () => false, jobs: { "cp-aaa1": { status: "closed", close_reason: "dropped: superseded" } } });
+	b.queue.enqueue("cp-aaa1", {});
+	b.queue.enqueue("cp-aaa2", {});
+	await b.queue.drain();
+	assert.deepEqual(b.calls, [], "nothing is dispatched while the cap is full");
+	assert.deepEqual(b.queue.ids(), ["cp-aaa2"], "the stale head is dropped, the waiting one stays");
+	assert.equal(b.wakes.length, 1);
+	assert.match(b.wakes[0]!.content.split("\n")[0]!, /^QUEUED DISPATCH DROPPED: the job is closed .* cp-aaa1/);
+});
+
 test("4B2-T1: concurrent drains dispatch each entry once", async (t) => {
 	const b = queueBench(t, { dispatch: async () => (await new Promise((resolve) => setImmediate(resolve)), { state: "dispatched" }) });
 	b.queue.enqueue("cp-aaa1", {});

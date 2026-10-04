@@ -131,13 +131,14 @@ export class DispatchQueue {
 		} catch {
 			return; // an unreadable drain record fails closed, like every other gate
 		}
-		for (let head = this.read().entries[0]; head && this.#options.capacityFree(); head = this.read().entries[0]) {
+		for (let head = this.read().entries[0]; head; head = this.read().entries[0]) {
 			if (!this.#owns()) return; // re-read per entry: a lock reclaimed mid-drain stops it
 			const dropped = await this.#stale(head);
 			if (dropped) {
-				this.#finish(head, "dropped", dropped);
+				this.#finish(head, "dropped", dropped); // a stale head is dropped even when the cap is full
 				continue;
 			}
+			if (!this.#options.capacityFree()) return;
 			try {
 				const result = await this.#options.dispatch(toDispatchRequest(head));
 				if (result.state === "promote") this.#finish(head, "dropped", "the job already has a live worker — promote it (cp_send)");
