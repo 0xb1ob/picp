@@ -99,7 +99,13 @@ test("cp-ukqv: a list after a directly negated destructive verb shares the negat
 		["Never force-push or rotate credentials", ["credentials"]],
 		["Never delete. Force-push main", ["force-push"]],
 		["Delete the table instead, then force-push", ["delete", "force-push"]],
-		["Avoid downtime by deleting rows; purge the cache", ["purge"]],
+		["Avoid downtime by deleting rows; purge the cache", ["deleting", "purge"]],
+		// Standalone: no second verb in the text can mask a false negative behind avoid/instead of/rather than.
+		["Avoid downtime by deleting rows", ["deleting"]],
+		["Instead of migrating we will drop the table", ["drop the table"]],
+		["Rather than patching it we purge the cache", ["purge"]],
+		["Avoid the outage window and truncate the table", ["truncate"]],
+		["Avoid any downtime when deleting the rows", ["deleting"]],
 	] as const) {
 		assert.equal(inferScopeAndRisk(text).risk, "high", text);
 		assert.deepEqual(riskKeywords(text), words, text);

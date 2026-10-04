@@ -238,7 +238,7 @@ const PIPELINE_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.free
  * plan, while "this deletes data" argues for a better model.
  */
 export const RISK_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.freeze([
-	{ re: /\b(migrat\w*|backfill|drop (the )?(table|column|index)|delete|destroy|truncate|purge)\b/i, why: "the task is destructive or irreversible" },
+	{ re: /\b(migrat\w*|backfill|drop (the )?(table|column|index)|delet(e[sd]?|ing)|destroy(s|ed|ing)?|truncat(e[sd]?|ing)|purg(e[sd]?|ing))\b/i, why: "the task is destructive or irreversible" },
 	{ re: /\b(force[- ]?push(es|ed|ing)?|rewrit(e|es|ing) ((the|shared|git|branch|public) )*history|rebase (the )?(main|master|trunk))\b/i, why: "the task rewrites shared history" },
 	// Access work only: `authority`/`author` are ordinary prose, never credentials (bead b-qbi.2).
 	{ re: /\b(secrets?|credentials?|tokens?|password|auth([nz]|entication|enticat(e[sd]?|ing)|ori[sz]ation|ori[sz](e[sd]?|ing))?|permissions?|access control)\b/i, why: "the task touches credentials or access" },
@@ -275,8 +275,9 @@ export function acceptedRiskMatches(text: string, alsoBenign?: (text: string, in
 	let head: (typeof found)[number] | undefined;
 	for (const match of [...found].sort((a, b) => a.at - b.at)) {
 		const listed = head !== undefined && listedAfter(text, head.at + head.word.length, match.at);
-		if (listed || negatedAt(text, match.at, match.word)) negated.add(match);
-		head = listed || negatedHeadAt(text, match.at) ? match : undefined;
+		const adjacent = negatedHeadAt(text, match.at);
+		if (listed || adjacent || negatedAt(text, match.at, match.word)) negated.add(match);
+		head = listed || adjacent ? match : undefined;
 	}
 	return found.filter((match) => !negated.has(match) && !benignSenseAt(text, match.at, match.word) && !alsoBenign?.(text, match.at, match.word)).map(({ word, why }) => ({ word, why }));
 }

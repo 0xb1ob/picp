@@ -7384,8 +7384,13 @@ between (cp-ukqv): "do not force-push or rewrite history", "never delete data,
 force-push, or rewrite history" and "avoid force-pushing" are not evidence,
 while "never force-push; delete the table", "never force-push and delete the
 branch", "never force-push or rotate credentials" and a determiner `no`
-("no migration or bulk delete the table") still are. A bare comma splice after a
-negated verb reads as a list; that is the known ceiling of a clause pattern.
+("no migration or bulk delete the table") still are. `avoid`, `instead of` and
+`rather than` negate only the risk word right after them, never across
+intervening words: "avoid downtime by deleting rows" and "instead of migrating we
+will drop the table" are evidence. The destructive verbs match their inflections
+(`deletes`/`deleted`/`deleting`, likewise `destroy`, `truncate`, `purge`). A bare
+comma splice after a negated verb reads as a list; that is the known ceiling of a
+clause pattern.
 Markdown sections headed `Constraints`, `Non-goals`, `Test plan`, `Evidence`, `Unknowns`
 (`Unknowns/Blockers`), `Self-assessment` or `Acceptance` are excluded, including
 subsections, until the next same-level or higher heading (bead dbn, cp-wkv1); the
