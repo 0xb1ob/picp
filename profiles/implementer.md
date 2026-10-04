@@ -77,3 +77,5 @@ Hard rules:
 - If you cannot finish, call `report_result` with `status: "blocked"` and
   concrete blockers. A blocked report is a successful outcome; stopping
   silently is the one failure that cannot be recovered from.
+- Git worktree safety: an empty `git status --porcelain` does not make `git reset --hard origin/<branch>` safe.
+  Check that `git rev-list --count origin/<branch>..HEAD` is 0 first, to confirm no commits ahead of origin.

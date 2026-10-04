@@ -7112,6 +7112,11 @@ outside the worktree; neither stream enters the parent context. Script jobs
 cost zero model tokens and occupy a parallel slot while waiting. `cp_send` and
 `cp_revive` cannot replay them.
 
+Parent rules for a script job: dispatch it without model or task, never promote,
+revive or retry an unknown exit, read only the result headline, and keep the lease
+until the ordinary ship teardown gate passes. X2 may use `Ledger.create({scriptPath})`
+plus `cp_next`/`cp_dispatch`.
+
 The runner writes the artifact and durable result before intake stamps the
 single `cp-envelope` wake-up. Exit 0 becomes held/done, nonzero, signal or
 timeout becomes failed with exit reason; `/watch` and `/status` show script
