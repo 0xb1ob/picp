@@ -635,6 +635,13 @@ was drained, or warn how many live workers they will kill. **Cancel:** `/cp-drai
 removes a `draining` or `timeout` record — never a `drained` one, the restart already
 prepared — and journals one wake `DRAIN: cancelled — … open again` (id
 `drain:<started>:cancelled`), after which every gate is open.
+A cancel also retracts its own drain's undelivered outcome wake (same `started_at`), and at
+delivery the durable sweep drops a `drain:<started>:drained|timeout` wake when the live
+`state/drain.json` is missing, carries another `started_at`, or is in another state; a
+`cancelled` wake is always delivered. Every drain wake names its `started_at` (in its id
+and text), so the parent checks the live file and any known cancel before acting on a
+notice; a stale one is relayed in one line and never held, deferred or turned into a
+worker stop — the drain gate refuses new starts, a notice stops nothing.
 
 (`cp-unreported` is a settle-boundary fact rather than a
 message type of its own machinery — see

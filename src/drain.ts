@@ -134,6 +134,27 @@ function outcomeWakeId(record: Pick<DrainRecord, "started_at">, state: "drained"
 	return `drain:${record.started_at}:${state}`;
 }
 
+/**
+ * Delivery-time check of a drain outcome wake (`drain:<started_at>:drained|timeout`): a reason when it is stale,
+ * else undefined. Stale = the live `state/drain.json` is gone, a different drain started, or its state moved on.
+ * A `:cancelled` wake and every non-drain id are never stale; an unreadable file stays draining, so it is delivered.
+ * Synchronous inside the sweep, so a drain written by this process cannot slip between this read and the send.
+ */
+export function staleDrainOutcome(home: string, wakeId: string): string | undefined {
+	const match = /^drain:(.+):(drained|timeout)$/.exec(wakeId);
+	if (!match) return undefined;
+	let live: DrainRecord | undefined;
+	try {
+		live = readDrain(home);
+	} catch {
+		return undefined;
+	}
+	if (!live) return `no drain is on disk any more (${drainFile(home)} is gone); the ${match[2]} notice for the drain started ${match[1]} is history`;
+	if (live.started_at !== match[1]) return `a different drain is on disk (started ${live.started_at}); the ${match[2]} notice for the drain started ${match[1]} is history`;
+	if (live.state !== match[2]) return `the drain started ${match[1]} is now ${live.state}; its ${match[2]} notice is history`;
+	return undefined;
+}
+
 /** The parent's drain: start it, advance it on the ordinary tick, report it once at the next startup. */
 export class DrainControl {
 	readonly #deps: DrainControlDeps;
@@ -250,6 +271,8 @@ export class DrainControl {
 		const content = `${DRAIN_PREFIX}cancelled \u2014 the drain started ${record.started_at} (${record.state}) is withdrawn; dispatch, promotion, revive, review and merge steps are open again`;
 		// Journaled before the file goes: a failed journal leaves the drain (and every gate) in place.
 		this.#deps.journal({ id: `drain:${record.started_at}:cancelled`, content });
+		// The cancel supersedes this drain's own undelivered outcome wake (same started_at), so only the cancel is delivered. Idempotent: a retry after a throw here is safe.
+		this.#deps.discard?.([outcomeWakeId(record, "drained"), outcomeWakeId(record, "timeout")]);
 		rmSync(drainFile(this.#deps.home), { force: true });
 		return content;
 	}
@@ -280,7 +303,7 @@ export function formatDrain(record: DrainRecord, home: string): string {
 			: `${DRAIN_PREFIX}draining since ${record.started_at}: waiting for live workers and reviewers to settle; one wake follows when drained, or at ${record.deadline} naming the survivors`;
 	return [
 		head,
-		`  ${record.jobs.length} job(s) in flight recorded in ${drainFile(home)}`,
+		`  ${record.jobs.length} job(s) in flight (drain started_at ${record.started_at}) recorded in ${drainFile(home)}`,
 		...jobLines(record),
 		"  every new process (dispatch, promotion, revive, review) and every new merge step stays refused until the parent restarts.",
 	].join("\n");

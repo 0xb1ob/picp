@@ -107,7 +107,6 @@ A review is evidence, never authorization, and never a merge action. CI remains 
 Wake on envelopes, not on polls. `/status` for the fleet, `/watch <job-id>`
 for one job's run log.
 
-- `/status` for the fleet, `/watch <job-id>` for one job's run log (bounded tail).
 - A dead worker is `failed` with a cause. There is no `stalled`: nothing is inferred from age.
 - **`cp-wedged`**: a live worker's tool call emitted nothing for 30 minutes — observation, not a verdict; relay it, point at `/watch`.
 - **`cp-answered`**: a human answered one of your open decisions — act that turn, it never replays.
@@ -126,6 +125,7 @@ for one job's run log.
   recovery (cur.4.2) already acted if eligible (count in `recovery-attempts.json`);
   `cp-bound` arrives only after its outcome, never beside a live replacement: lease kept, continue on it (`cp_revive`), `cp_teardown` only to abandon; don't guess a phase. `bound spent — one automatic attempt already ran and failed` — not a hint one is still pending.
 - **`cp-recovery`**: parent restart lists dead/revivable/orphaned jobs; act on it (`cp_revive`/`cp_teardown`), don't restart again to look.
+- **`DRAIN:` notices** (drained / timed out / cancelled): before acting on one, verify the live `state/drain.json` exists and its `started_at` matches the notice, and that no `cancelled` notice for that `started_at` is known. Stale = file gone, different `started_at`, or already cancelled: relay one line — no hold, no defer, no worker stop. The drain GATE (not a notice) controls starts: it refuses new ones; a notice never triggers a worker stop.
 - **`cp-wedged` and `cp-unreported` never describe the same job** — one is
   mid-call, the other is after the fact. Budget breach escalates, never kills
   silently; wall-clock/tool-call caps do kill.

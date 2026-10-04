@@ -6,7 +6,8 @@
  * nothing here drains a live parent.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { atomicWriteJson } from "../src/json-store.ts";
 import { join } from "node:path";
 import { test } from "node:test";
 import { EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, type RunPhase, SCHEMA_VERSION } from "../src/contracts.ts";
@@ -190,6 +191,99 @@ test("drain cancel (cp-update's drain timeout): owner-only, withdraws draining o
 	assert.equal(owner.drain.start().state, "drained");
 	assert.throws(() => owner.drain.cancel(), /finished drained; that restart is prepared/, "a drained drain is the restart already prepared");
 	assert.equal(readDrain(home.path)?.state, "drained");
+});
+
+test("drain cancel retracts this drain's undelivered outcome wake; plain timeout and restart retraction are unchanged", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const plain = control(home.path, fleet);
+	plain.setBusy(["cp-busy"]);
+	const started = plain.drain.start(5);
+	plain.advance(5000);
+	assert.equal(plain.drain.check()?.state, "timeout");
+	assert.deepEqual(plain.discarded, [], "a plain timeout retracts nothing");
+	plain.drain.cancel();
+	assert.deepEqual(plain.discarded, [`drain:${started.started_at}:drained`, `drain:${started.started_at}:timeout`], "the cancel retracts only its own started_at");
+
+	const restarted = control(home.path, fleet);
+	restarted.setBusy(["cp-busy"]);
+	const second = restarted.drain.start();
+	const next = control(home.path, fleet);
+	next.drain.startup();
+	assert.deepEqual(next.discarded, [`drain:${second.started_at}:drained`, `drain:${second.started_at}:timeout`], "restart retraction unchanged");
+});
+
+test("durable delivery: a drain outcome wake is dropped when state/drain.json is missing, replaced or moved on; a cancel is still delivered", async (t) => {
+	const home = createScratchHome();
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => {
+		await post.shutdown();
+		home.cleanup();
+	});
+	const A = "2026-09-27T12:00:00.000Z";
+	const B = "2026-09-27T13:00:00.000Z";
+	const live = (started_at: string, state: "draining" | "drained" | "timeout") => atomicWriteJson(drainFile(home.path), { state, started_at, deadline: B, timeout_s: 5, jobs: [], reported: true });
+	const sweep = (): { sent: string[]; dropped: string[] } => {
+		const sent: string[] = [];
+		const dropped = post.sweepDurableWakeups((entry) => {
+			sent.push(entry.id);
+			return true;
+		});
+		return { sent, dropped };
+	};
+	const enqueue = (id: string) => post.durableWakeups.enqueue({ id, kind: "recovery", content: `DRAIN: ${id}` });
+
+	enqueue(`drain:${A}:timeout`);
+	live(A, "timeout");
+	assert.deepEqual(sweep(), { sent: [`drain:${A}:timeout`], dropped: [] }, "the live drain's own outcome is delivered");
+	post.durableWakeups.confirmDelivered([`drain:${A}:timeout`]);
+
+	enqueue(`drain:${A}:drained`);
+	rmSync(drainFile(home.path));
+	assert.deepEqual(sweep(), { sent: [], dropped: [`drain:${A}:drained`] }, "no live file: dropped");
+
+	enqueue(`drain:${B}:timeout`);
+	live(A, "timeout");
+	assert.deepEqual(sweep(), { sent: [], dropped: [`drain:${B}:timeout`] }, "another drain's file: dropped");
+
+	enqueue("drain:2026-09-27T14:00:00.000Z:drained");
+	live("2026-09-27T14:00:00.000Z", "draining");
+	assert.deepEqual(sweep().dropped, ["drain:2026-09-27T14:00:00.000Z:drained"], "state moved on: dropped");
+
+	rmSync(drainFile(home.path));
+	enqueue(`drain:${A}:cancelled`);
+	assert.deepEqual(sweep(), { sent: [`drain:${A}:cancelled`], dropped: [] }, "a cancel is delivered with no live file");
+	assert.match((post.durableWakeups.read().discarded ?? []).map((item) => item.reason).join("\n"), /no drain is on disk any more/);
+});
+
+test("drain: a timeout then a cancel delivers only the cancel, even through a replacement drain", async (t) => {
+	const home = createScratchHome();
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => {
+		await post.shutdown();
+		home.cleanup();
+	});
+	const c = control(home.path, post.fleet, {
+		journal: (wake) => void post.durableWakeups.enqueue({ ...wake, kind: "recovery" }),
+		discard: (ids) => void post.durableWakeups.discard(ids.map((id) => ({ id, reason: "retracted" }))),
+	});
+	c.setBusy(["cp-busy"]);
+	const first = c.drain.start(5);
+	c.advance(5000);
+	c.drain.check();
+	assert.deepEqual(post.durableWakeups.pending().map((entry) => entry.id), [`drain:${first.started_at}:timeout`]);
+	c.drain.cancel();
+	assert.deepEqual(post.durableWakeups.pending().map((entry) => entry.id), [`drain:${first.started_at}:cancelled`], "the timeout was retracted");
+	c.advance(1000);
+	c.drain.start(5); // a replacement drain: the cancelled drain's notice still travels
+	const sent: string[] = [];
+	post.sweepDurableWakeups((entry) => {
+		sent.push(entry.id);
+		return true;
+	});
+	assert.deepEqual(sent, [`drain:${first.started_at}:cancelled`]);
+	assert.match(post.durableWakeups.read().discarded?.[0]?.reason ?? "", /retracted/);
 });
 
 test("drain gates every process start with the drain named: next, dispatch, promotion, steer to idle, merge, review, gate, revive, spawn", async (t) => {
