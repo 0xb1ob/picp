@@ -325,6 +325,9 @@ test("dispatch: ledger -> routing -> lease -> branch -> brief -> worker -> fleet
 	assert.ok(record?.worker.session_file.startsWith(join(b.home, ".pi-command-post", "state", "sessions") + sep), record?.worker.session_file);
 	assert.ok(record?.budget?.tokens);
 	assert.ok(record?.lease_id, "the lease identity travels into the fleet");
+	// t3code adoption 7: the dispatch-time HEAD is held at a hidden ref, outside refs/heads.
+	assert.equal(record?.checkpoint_ref, `refs/cp-checkpoints/${job.id}`);
+	assert.equal(git(result.worktree, "rev-parse", `refs/cp-checkpoints/${job.id}`), git(b.clone, "rev-parse", "origin/main"));
 	// cp-status-scope-risk: the same scope/risk/thinking decision recorded on
 	// cp:routing_resolved is persisted on the fleet record itself, so /status
 	// can read it back without re-inferring anything. Neither scope nor risk

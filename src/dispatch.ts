@@ -17,6 +17,7 @@
  * This module composes; the policy lives in the modules it calls (ledger T9,
  * projects T10, leases T11, preflight T12, routing T13, spawn safety T7).
  */
+import { captureCheckpoint, checkpointRef, deleteCheckpoint } from "./checkpoint-ref.ts";
 import { referencedMaterial } from "./task-references.ts";
 import { repoMap } from "./repo-map.ts";
 import type { CommandRunner } from "./merge-ask.ts";
@@ -598,6 +599,8 @@ export class Dispatcher {
 			if (blocking.length > 0) {
 				throw new DispatchError(`preflight refused the leased worktree:\n${formatPreflight(post)}`, post);
 			}
+			// t3code adoption 7: the dispatch-time HEAD, held at a hidden ref (never pushed, never restored; teardown deletes it).
+			const checkpoint = await captureCheckpoint(options.git ?? defaultGit, lease.path, issue.id);
 
 			// A pooled worktree keeps node_modules from its last job: refresh it before the worker starts. Never throws; a failure rides in the brief.
 			const deps = await prepareNodeDeps(lease.path, options.deps);
@@ -668,6 +671,7 @@ export class Dispatcher {
 					clamped: managed.plan.budgetClamp,
 				});
 			}
+			recorder.cp("checkpoint_captured", checkpoint);
 			recorder.cp("deps_prepared", { outcome: deps.outcome, detail: deps.detail });
 			recorder.cp("original_task_frozen", {
 				path: paths.originalTaskFile(issue.id),
@@ -729,6 +733,7 @@ export class Dispatcher {
 				},
 				worktree: lease.path,
 				...(lease.lease_id ? { lease_id: lease.lease_id } : {}),
+				...("ref" in checkpoint ? { checkpoint_ref: checkpoint.ref } : {}),
 				...scheduleRecord(issue.labels),
 				branch: issue.id,
 				dispatched_at: isoTimestamp(now()),
@@ -801,6 +806,7 @@ export class Dispatcher {
 				});
 			}
 			if (recorder) this.#runs.close(issue.id);
+			if (branchCreatedHere) await deleteCheckpoint(options.git ?? defaultGit, lease.path, checkpointRef(issue.id));
 			await safely(() => options.leases.release(lease, { ignoreErrors: true }));
 			throw error;
 		}

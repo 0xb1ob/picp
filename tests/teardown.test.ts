@@ -1063,6 +1063,24 @@ test("a normal (gated) teardown is marked closed_reason:gated, never left ambigu
 	assert.equal(b.fleet.require("cp-gated").closed_reason, "gated");
 });
 
+test("t3code adoption 7: teardown deletes the job's checkpoint ref; a missing one is not a failure", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	for (const jobId of ["cp-ckpt", "cp-ckpt-gone"]) {
+		const worktree = b.worktree(jobId);
+		await b.addJob(jobId, worktree);
+		await b.fleet.patch(jobId, { checkpoint_ref: `refs/cp-checkpoints/${jobId}` });
+		git(worktree, "push", "--quiet", "-u", "origin", jobId);
+	}
+	git(b.repo.path, "update-ref", "refs/cp-checkpoints/cp-ckpt", "HEAD");
+
+	const torn = await b.teardown.teardown("cp-ckpt");
+	assert.equal(torn.torn_down, true);
+	assert.equal(git(b.repo.path, "for-each-ref", "refs/cp-checkpoints/"), "", "the clone's git dir keeps no checkpoint ref");
+	const missing = await b.teardown.teardown("cp-ckpt-gone");
+	assert.equal(missing.torn_down, true, missing.failure?.message);
+	assert.equal(missing.lease_returned, true);
+});
+
 test("teardown is idempotent and refuses unknown jobs", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
 	const worktree = b.worktree("cp-twice");
