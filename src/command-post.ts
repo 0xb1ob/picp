@@ -63,7 +63,7 @@ import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
 import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact } from "./failure-announcer.ts";
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
-import { assertNotDraining, DrainControl, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
+import { assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
@@ -112,8 +112,10 @@ import {
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
+import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
+import { ArmedDispatches } from "./dependency-dispatch.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
@@ -245,6 +247,7 @@ export class CommandPost {
 	readonly continuation: HeldContinuation;
 	readonly heldRelease: HeldRelease; // 4b-1: release an idle held author's slot on demand (src/held-release.ts)
 	readonly dispatchQueue: DispatchQueue; // 4b-2: spawn-cap refusals, drained by the lock owner only (src/dispatch-queue.ts)
+	readonly armedDispatches: ArmedDispatches; // unload-parent PR2: blocker refusals, released by the lock owner only (src/dependency-dispatch.ts)
 	readonly drain: DrainControl; // graceful drain before a restart (src/drain.ts)
 	/** cp-uug: the per-PR, per-head merge authorization. Answered only by a human. */
 	readonly mergeCheckpoints: CheckpointStore;
@@ -583,6 +586,7 @@ export class CommandPost {
 			},
 			awaiting: () => this.awaiting,
 			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs }), // merge_policy by record.project through this registry; no fleet lookup
+			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home) }), // unload-parent PR2: one rerun per job+head
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(),
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.
@@ -590,6 +594,7 @@ export class CommandPost {
 			discard: (ids) => this.durableWakeups.discard(ids.map((id) => ({ id: boundedWakeupId(id), reason: "the parent restarted after the drain" }))) });
 		this.continuation = new HeldContinuation({
 			enabled: () => options.continuation === true && this.#ownsHome(),
+			draining: () => readDrain(options.home) !== undefined, // unload-parent PR2; a throw (unreadable) reads as draining
 			fleet: this.fleet,
 			advance: (jobId) => this.#advance({ jobId }),
 			review: (jobId) => this.diffReview({ jobId }),
@@ -598,10 +603,21 @@ export class CommandPost {
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
+			onLanded: () => void this.armedDispatches.release(), // unload-parent PR2: a landed blocker may release armed dependents
 		});
 		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
 		this.dispatchQueue = new DispatchQueue({ home: options.home, dispatch: (r) => this.dispatch(r), capacityFree: () => this.heldRelease.capacityFree(), owns: () => this.#ownsHome(), ledger: () => this.ledger(), fleet: this.fleet, journal: (w) => this.#journalDurable(w) });
 		wireSlotFree(this.manager, this.dispatchQueue);
+		this.armedDispatches = new ArmedDispatches({
+			home: options.home,
+			dispatch: (r) => this.dispatch(r),
+			enqueue: (id, request) => this.dispatchQueue.enqueue(id, request),
+			owns: () => this.#ownsHome(),
+			ledger: () => this.ledger(),
+			fleet: this.fleet,
+			pipelineOwned: (id) => this.pipelines.get(id) !== undefined || this.pipelines.findByShipId(id) !== undefined,
+			journal: (w) => this.#journalDurable(w),
+		});
 		this.awaiting = new AwaitingStore({
 			home: options.home,
 			onAnswered: (decision) => this.#recordAnswered(decision),

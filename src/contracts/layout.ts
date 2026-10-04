@@ -37,6 +37,10 @@ export interface Layout {
 	ciWatchFile: string;
 	/** `cp_dispatch` requests refused only by the spawn cap, drained FIFO by the lock owner (cp-itl4 4b-2). */
 	dispatchQueueFile: string;
+	/** The one infra-only CI rerun claimed per job + head (unload-parent PR2, src/ci-infra-rerun.ts). */
+	ciRerunsFile: string;
+	/** `cp_dispatch` requests refused only by open blockers, released by the lock owner (src/dependency-dispatch.ts). */
+	armedDispatchFile: string;
 	/** What the status block has already reported under Shipped, per session (cp-b5eg). */
 	shippedSeenFile: string;
 	/**
@@ -130,6 +134,8 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		answerCardsFile: `${state}/answer-cards.json`,
 		ciWatchFile: `${state}/ci-watch.json`,
 		dispatchQueueFile: `${state}/dispatch-queue.json`,
+		ciRerunsFile: `${state}/ci-reruns.json`,
+		armedDispatchFile: `${state}/armed-dispatches.json`,
 		shippedSeenFile: `${state}/status-block-shipped.json`,
 		parentLock: `${state}/parent.lock`,
 		migrationsDir: `${state}/.migrations`,

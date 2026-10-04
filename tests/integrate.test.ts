@@ -61,9 +61,11 @@ import {
 	formatIntegration,
 	Integrator,
 	isSalvageRef,
+	type IntegratorOptions,
 	type LedgerLike,
 	type TeardownLike,
 } from "../src/integrate.ts";
+import { CiRerunStore, maybeRerunInfra } from "../src/ci-infra-rerun.ts";
 import type { CommandRunner } from "../src/merges.ts";
 import { trackersFile } from "../src/trackers/config.ts";
 import { MergeStore } from "../src/merges.ts";
@@ -495,6 +497,8 @@ interface BenchOptions {
 	noAwaiting?: boolean;
 	/** Wires the human-handoff port with a registry that knows only the bench's project ("demo"). */
 	policy?: "repo" | "human_handoff";
+	/** unload-parent PR2: the infra-rerun port, as CommandPost wires it. */
+	infraRerun?: IntegratorOptions["infraRerun"];
 }
 
 async function benchOf(
@@ -599,6 +603,7 @@ async function benchOf(
 				runs,
 				run,
 				...(options.noAwaiting ? {} : { awaiting: () => new AwaitingStore({ home: home.path }) }),
+				...(options.infraRerun ? { infraRerun: options.infraRerun } : {}),
 				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs }) } : {}),
 				...(options.noSender
 					? {}
@@ -1457,6 +1462,46 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 		undefined,
 		"a red head is never a merge ask at all",
 	);
+});
+
+test("unload-parent PR2: an infra-only red head is rerun once and waits; a second attempt, or a test failure, promotes the implementer as today", async (t) => {
+	const b = await benchOf(t);
+	const gh: string[] = [];
+	const view = (step: string) => JSON.stringify({ jobs: [{ name: "suite", conclusion: "failure", steps: [{ name: "Set up job", conclusion: "success" }, { name: step, conclusion: "failure" }] }] });
+	let failedStep = "Install treehouse";
+	const rerunFor = (home: string): IntegratorOptions["infraRerun"] => (input) =>
+		maybeRerunInfra({
+			...input,
+			home,
+			store: new CiRerunStore(home),
+			run: async (_cwd, _bin, args) => {
+				gh.push(args.slice(0, 3).join(" "));
+				return { status: 0, stdout: args[1] === "view" ? view(failedStep) : "", stderr: "" };
+			},
+		});
+	const infraRerun = rerunFor(b.home);
+	const red = (attempt: number) => ({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 77, attempt }] });
+
+	const first = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
+	assert.deepEqual([first.step, first.next], ["ci", "wait"], first.reason);
+	assert.match(first.reason, /reran the failed jobs once/);
+	assert.deepEqual(gh, ["run view 77", "run rerun 77"]);
+	assert.equal(b.sent.length, 0, "no implementer promote for an infra failure");
+
+	const again = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
+	assert.equal(again.next, "resolve", "the claim is spent: the same head never gets a second rerun");
+	assert.ok(again.facts.some((fact) => /was spent at/.test(fact)), again.facts.join("\n"));
+	assert.equal(b.sent.length, 1);
+
+	const fresh = await benchOf(t);
+	const secondAttempt = await fresh.integrator(red(2), { infraRerun: rerunFor(fresh.home) }).advance({ jobId: BR });
+	assert.equal(secondAttempt.next, "resolve", "attempt 2 failing is the parent's");
+	failedStep = "Run suite (typecheck + tests)";
+	const tests = await benchOf(t);
+	const testFailure = await tests.integrator(red(1), { infraRerun: rerunFor(tests.home) }).advance({ jobId: BR });
+	assert.equal(testFailure.next, "resolve");
+	assert.ok(testFailure.facts.some((fact) => /a test\/build failure is the implementer's/.test(fact)), testFailure.facts.join("\n"));
+	assert.equal(tests.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
 test("duplicate red CI waits for the active repair, then surfaces a completed failure", async (t) => {

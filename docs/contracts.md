@@ -99,6 +99,8 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
   state/                  runtime truth
     fleet.json            the fleet: one record per in-flight job
     ci-watch.json         what the CI/PR watch has observed and announced (cp-e2d)
+    ci-reruns.json        one infra-only CI rerun claimed per job + head (unload-parent PR2)
+    armed-dispatches.json  cp_dispatch requests waiting for their blockers to land (unload-parent PR2)
     main-ci.json          per-project red-main latch; pauses cp_integrate (k52)
     answer-cards.json     answer cards the operator is owed, and the ones shown (cp-6lg7)
     status-block-shipped.json  Shipped rows already reported, per session (cp-b5eg)
@@ -1933,6 +1935,23 @@ Other spawn-time policy, all fail-closed:
   drops the entry. Every start or drop is one `recovery` wake-up
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
   entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
+- **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
+  blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
+  or script job) is armed in `state/armed-dispatches.json`
+  (`src/dependency-dispatch.ts`, at most `ARMED_DISPATCH_MAX` = 32, one per job,
+  re-arming replaces the request) and answers `state: "armed"`; a refused arm
+  keeps the blocked refusal, suffixed `(not armed: …)`, and a dispatch that
+  starts disarms. Only the parent-lock owner releases (ownership re-read per
+  entry, never during a drain), when a held PR lands (the continuation's
+  `done`), at startup and on every scheduler tick. An entry whose blockers are
+  still open stays silently; otherwise the full `CommandPost.dispatch` runs
+  again — mandate, risk (PR0 pre-approval only), routing, preflight. `spawn_cap`
+  hands it to the dispatch queue (`ARMED DISPATCH QUEUED`); `parallelism_full`
+  or a blocker that reopened keeps it; a start, a `promote`, any other refusal,
+  or an entry gone stale (in the fleet, closed, script, pipeline-owned,
+  unreadable) is one `recovery` wake-up (`ARMED DISPATCH STARTED`/`DROPPED`).
+  A release that throws keeps every entry and wakes `ARMED DISPATCH RELEASE
+  FAILED` once per cause.
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent
   never leaves orphaned children behind. From its first call `closing` is true:
   the failure monitor still runs intake but classifies no close as a death, the
@@ -2887,6 +2906,29 @@ wake-up whose id is job, generation, head, step and `next`, so the same outcome
 is delivered once and a new head or generation is new news). An operational
 fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.
+
+**A drain stops the cadence (unload-parent PR2).** While `state/drain.json`
+exists — or cannot be read, which fails closed — a trigger acts on nothing and
+answers `draining` (journaled, never coalesced, so the same trigger acts once
+the drain clears), and a sequence already running stops before its next step.
+On `done` the continuation calls `onLanded`, which releases armed dependents
+(§Trust policy, *Armed dispatch*); a throw there never touches the landing.
+
+**One infra-only CI rerun per job + head (unload-parent PR2).** Where a red
+head would promote its implementer, `Integrator` first asks
+`src/ci-infra-rerun.ts`: only a first attempt (`attempt` 1) whose every failed
+run concluded `failure` (never `cancelled`/`timed_out`), not during a drain,
+and whose `gh run view <id> --json jobs` shows each failed job's first failed
+step to be setup (`Set up job`, `Checkout`, `Set up …`, `Install …`, a
+package-manager install or cache restore) with no failed step naming tests,
+suite, build, typecheck, lint or eval. The claim
+(`state/ci-reruns.json`, the last `CI_RERUNS_MAX` = 200) is written **before**
+`gh run rerun <id> --failed` runs, so a crash or a refused rerun never earns a
+second try; the step answers `next: wait` and the watcher's next CI fact
+re-drives it. Every other path — an unreadable claim file or listing
+included — names why in a fact and falls through to today's `resolve`.
+Green-on-the-current-head, review, holds, merge permission and
+`human_handoff` are untouched: a rerun only replaces a promote with a wait.
 
 **Serial per project.** Every continuation step and every manual `cp_integrate`
 share one lane per project, so a second PR's step reads the base the first merge

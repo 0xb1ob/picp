@@ -805,7 +805,7 @@ function heldRecord(jobId: string, overrides: Partial<FleetRecord> = {}): FleetR
 	} as unknown as FleetRecord;
 }
 
-function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string } = {}): ContinuationBench {
+function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } = {}): ContinuationBench {
 	const records = options.records ?? [heldRecord("cp-4wz")];
 	const bench: Omit<ContinuationBench, "continuation"> = {
 		records,
@@ -848,6 +848,8 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		head: (jobId) => bench.heads.get(jobId) ?? HEAD,
 		notify: (notice) => void bench.notices.push(notice),
 		...(options.writeBack ? { writeBack: options.writeBack } : {}),
+		...(options.draining ? { draining: options.draining } : {}),
+		...(options.onLanded ? { onLanded: options.onLanded } : {}),
 	});
 	return { ...bench, continuation };
 }
@@ -1020,6 +1022,57 @@ test("jje.2 restart: startup resumes every held PR once, and a fresh process res
 	const off = continuationBench({ records, enabled: false });
 	assert.deepEqual(await off.continuation.resume(), [], "a session without the continuation (or the lock) touches nothing");
 	assert.equal((await off.continuation.trigger({ jobId: "cp-h1", event: "ci_green", head: HEAD })).action, "disabled");
+});
+
+test("unload-parent PR2 drain: no step while draining, the key is not consumed, and resume after the restart acts", async () => {
+	let draining = true;
+	const b = continuationBench({ draining: () => draining });
+	b.script.set("cp-4wz", ["review"]);
+	const held = await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.equal(held.action, "draining");
+	assert.equal((await b.continuation.resume())[0]?.action, "draining", "startup during a drain takes no step either");
+	assert.deepEqual(b.advances, [], "no integration step, so no merge and no CI rerun");
+	assert.deepEqual(b.reviews, [], "no review starts");
+	assert.equal(b.notices.length, 0);
+	draining = false; // the restart cleared state/drain.json
+	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD })).action, "review_started", "the same fact was never consumed");
+	const unreadable = continuationBench({
+		draining: () => {
+			throw new Error("drain.json is unreadable");
+		},
+	});
+	assert.equal((await unreadable.continuation.trigger({ jobId: "cp-4wz", event: "startup" })).action, "draining", "an unreadable drain fails closed");
+	assert.deepEqual(unreadable.advances, []);
+});
+
+test("unload-parent PR2 drain: a drain that starts mid-sequence stops before the next step", async () => {
+	let draining = false;
+	const b = continuationBench({ draining: () => draining });
+	b.script.set("cp-4wz", ["advance", "done"]);
+	b.during.step = () => {
+		draining = true;
+	};
+	const outcome = await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", attempt: 1, head: HEAD });
+	assert.equal(outcome.action, "draining");
+	assert.deepEqual(b.advances, ["cp-4wz"], "the step already running finished; no merge step follows it");
+});
+
+test("unload-parent PR2: a landing calls onLanded once; a stop does not, and a throwing onLanded never undoes the landing", async () => {
+	const landed: string[] = [];
+	const b = continuationBench({ onLanded: (jobId) => void landed.push(jobId) });
+	b.script.set("cp-4wz", ["surface"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.deepEqual(landed, []);
+	b.script.set("cp-4wz", ["done"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "pr_merged", head: HEAD });
+	assert.deepEqual(landed, ["cp-4wz"]);
+	const throwing = continuationBench({
+		onLanded: () => {
+			throw new Error("release broke");
+		},
+	});
+	throwing.script.set("cp-4wz", ["done"]);
+	assert.equal((await throwing.continuation.trigger({ jobId: "cp-4wz", event: "pr_merged", head: HEAD })).action, "done");
 });
 
 test("jje.2: a CI/PR watch tick that throws is journaled durably, once per cause", async (t) => {

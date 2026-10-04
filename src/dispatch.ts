@@ -84,6 +84,15 @@ export class DispatchError extends Error {
 	}
 }
 
+/** Refused only because open blockers remain: `cp_dispatch` arms it (src/dependency-dispatch.ts). */
+export class BlockedDispatchError extends DispatchError {
+	readonly blockers: string[];
+	constructor(message: string, blockers: string[]) {
+		super(message);
+		this.blockers = blockers;
+	}
+}
+
 export interface WorkerObserverOptions {
 	recorder: RunRecorder;
 	worker: WorkerProcess;
@@ -496,9 +505,7 @@ export class Dispatcher {
 		const delivery: Delivery = labels.delivery;
 		const blockers = await options.ledger.blockersOf(issue.id);
 		if (blockers.length > 0) {
-			throw new DispatchError(
-				`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`,
-			);
+			throw new BlockedDispatchError(`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`, blockers);
 		}
 
 		// --- 2. profile + model, both before anything is taken ---------------

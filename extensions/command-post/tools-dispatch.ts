@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
-import { formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
+import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
@@ -88,6 +88,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			"cp_dispatch with dry_run:true answers 'which model and effort would this job get, and why' and takes nothing. It is optional — never a required step before a dispatch — and it reserves nothing: the dispatch recomputes from the live config. Reach for it when a job is uncertain or expensive, not as a habit.",
 			"Leave scope or risk absent when you do not know it: the axis is then assessed from the task's own words and recorded as inferred or defaulted. Never invent S/low to fill the schema, and never dispatch an extra worker just to classify a task.",
 			"cp_dispatch returning state:queued means the spawn cap was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
+			"cp_dispatch returning state:armed means open blockers refused it: it is dispatched with the same request once they land, and an ARMED DISPATCH STARTED/QUEUED/DROPPED wake-up reports it. Never re-dispatch an armed job to wait for it.",
 		],
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The job id; it is also the branch and the run directory" }),
@@ -138,6 +139,13 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					description:
 						"Default true: a dispatch refused only by the spawn cap is queued (state/dispatch-queue.json) and started, fully re-gated, " +
 						"when a worker slot frees. false keeps the plain refusal. Script jobs are never queued.",
+				}),
+			),
+			when_ready: Type.Optional(
+				Type.Boolean({
+					description:
+						"Default true: a dispatch refused only by open blockers is armed (state/armed-dispatches.json) with this request and " +
+						"dispatched, fully re-gated, once every blocker has landed. false keeps the plain refusal. Pipeline and script jobs are never armed.",
 				}),
 			),
 		}),
@@ -191,10 +199,27 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
 				});
 			} catch (error) {
+				// unload-parent PR2: only open blockers arm, unless when_ready:false.
+				if (error instanceof BlockedDispatchError && params.when_ready !== false) {
+					const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
+					let armed: { rearmed: boolean };
+					try {
+						armed = post.armedDispatches.arm(params.job_id, request as QueuedDispatchRequest, error.blockers);
+					} catch (armError) {
+						// The blocked refusal stands; why it was not armed is named on it.
+						error.message += ` (not armed: ${(armError as Error).message.split("\n")[0]})`;
+						throw error;
+					}
+					refreshWidget(ctx);
+					return {
+						content: [{ type: "text", text: `${armed.rearmed ? "re-armed" : "armed"}: ${params.job_id} starts when ${error.blockers.join(", ")} land(s); every gate re-runs then, and the outcome arrives as a wake-up — do not re-dispatch` }],
+						details: { state: "armed", job_id: params.job_id, blockers: error.blockers, rearmed: armed.rearmed },
+					};
+				}
 				// Only the spawn cap queues, only for a non-script job, and only unless queue:false.
 				if (!(error instanceof SpawnSafetyError && error.code === "spawn_cap") || params.queue === false) throw error;
 				if ((await post.ledger().show(params.job_id).catch(() => undefined))?.script) throw error;
-				const { job_id: _id, dry_run: _dry, queue: _queue, ...request } = params;
+				const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 				let position: number;
 				try {
 					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
@@ -209,9 +234,16 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					details: { state: "queued", position, job_id: params.job_id },
 				};
 			}
+			// A dispatch that started supersedes any armed request for the same job; a fault there never hides the dispatch.
+			let armedLine = "";
+			try {
+				post.armedDispatches.disarm(params.job_id);
+			} catch (error) {
+				armedLine = `\n  armed entry not cleared (its release drops it as already in the fleet): ${(error as Error).message.split("\n")[0]}`;
+			}
 			refreshWidget(ctx);
 			return {
-				content: [{ type: "text", text: `${formatDispatchResult(result)}${trackerLine ? `\n  tracker: ${trackerLine}` : ""}` }],
+				content: [{ type: "text", text: `${formatDispatchResult(result)}${trackerLine ? `\n  tracker: ${trackerLine}` : ""}${armedLine}` }],
 				details: { ...result },
 			};
 		},

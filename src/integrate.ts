@@ -60,6 +60,7 @@ import {
 import { awaitingId } from "./awaiting.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { type CiConfiguredVerdict, ghWorkflowsArgs, readCiConfigured } from "./ci-configured.ts";
+import type { InfraRerunInput, InfraRerunOutcome } from "./ci-infra-rerun.ts";
 import type { FleetStore } from "./fleet.ts";
 import { finalFixMessage, recordFinalFixPromotion, resolveFinalFix } from "./final-fix.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -167,6 +168,8 @@ export interface IntegratorOptions {
 	 */
 	awaiting?: () => AwaitingLike;
 	handoff?: HandoffPort;
+	/** unload-parent PR2: one rerun of an infra-only failure (src/ci-infra-rerun.ts); absent resolves every red head. */
+	infraRerun?: (input: InfraRerunInput) => Promise<InfraRerunOutcome | undefined>;
 }
 
 export interface IntegrateRequest {
@@ -428,6 +431,9 @@ export class Integrator {
 		/** Set only when the repository itself answered "no workflows" (`src/ci-configured.ts`). */
 		let noCi: CiConfiguredVerdict | undefined;
 		if (ci.ci === "failed") {
+			const rerun = await this.#options.infraRerun?.({ jobId, head, runs: runsParsed, cwd, run: (dir, bin, args, opts) => this.#run(dir, bin, args, opts) });
+			if (rerun) facts.push(rerun.fact);
+			if (rerun?.rerun) return this.#write({ jobId, branch, step: "ci", next: "wait", facts, prUrl, headSha: head, reason: `${jobId}: ${rerun.fact}. Nothing was merged; the new attempt's CI fact resumes this.` });
 			return this.#resolve({
 				jobId,
 				branch,

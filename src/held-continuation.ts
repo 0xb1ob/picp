@@ -23,6 +23,10 @@
  *    fact; `review` starts one `cp_review` (never while one is pending — its
  *    verdict resumes this); resolve/surface/retry/done leave one durable notice.
  *    An operational fault is never retried here.
+ *  - **Respects a drain** (unload-parent PR2): while `state/drain.json` is on disk
+ *    (or unreadable) no step is taken and the key is not consumed; the restart's
+ *    startup `resume()` re-triggers. A landing (`done`) calls `onLanded`, which
+ *    releases dispatches armed on that job (src/dependency-dispatch.ts).
  */
 
 import { isWatched } from "./ci-watch.ts";
@@ -69,6 +73,7 @@ export type ContinuationAction =
 	| "review_pending"
 	| "stopped"
 	| "done"
+	| "draining"
 	| "error";
 
 export interface ContinuationOutcome {
@@ -97,6 +102,10 @@ export interface HeldContinuationDeps {
 	maxSteps?: number;
 	/** One line naming the tracker write-back for a landed job (laf); never throws. */
 	writeBack?: (jobId: string) => string;
+	/** True while `state/drain.json` is on disk: no step is taken (no review, merge or rerun); a throw reads as draining. */
+	draining?: () => boolean;
+	/** A held PR landed (`done`): its dependents may be released (`ArmedDispatches.release`); never throws into the step. */
+	onLanded?: (jobId: string) => void;
 }
 
 const NEXT_HINT: Readonly<Record<string, string>> = Object.freeze({
@@ -173,6 +182,12 @@ export class HeldContinuation {
 		const key = continuationKey(trigger);
 		const skip = (action: ContinuationAction, reason: string): ContinuationOutcome => ({ job_id: trigger.jobId, key, action, steps: 0, reason });
 		if (!this.#deps.enabled()) return skip("disabled", "the continuation is off in this process");
+		// Not added to #seen: the drain ends in a restart, and startup `resume()` owes this job its pass.
+		if (this.#draining()) {
+			const draining = skip("draining", `${trigger.jobId}: the home is draining for a restart — no review, merge or rerun starts; startup resumes it`);
+			this.#journal(trigger, draining);
+			return draining;
+		}
 		if (this.#seen.has(key)) return skip("coalesced", `${key} was already handled or is queued`);
 		if (this.#seen.size >= CONTINUATION_KEY_MEMORY) this.#seen.clear();
 		this.#seen.add(key);
@@ -189,7 +204,7 @@ export class HeldContinuation {
 			}
 		});
 		// Re-armed only after it settles: while queued or running the key still coalesces.
-		if (outcome.action === "wait") this.#seen.delete(key);
+		if (outcome.action === "wait" || outcome.action === "draining") this.#seen.delete(key);
 		this.#journal(trigger, outcome);
 		return outcome;
 	}
@@ -266,6 +281,7 @@ export class HeldContinuation {
 			// two awaited steps, and a stale trigger must not keep reviewing or merging.
 			const stale = this.#stale(trigger);
 			if (stale) return out(stale.action, step - 1, stale.reason, stale.action === "wait" ? "wait" : undefined);
+			if (this.#draining()) return out("draining", step - 1, `${jobId}: a drain started mid-sequence — no further step; startup resumes it`);
 			const result = await this.#deps.advance(jobId);
 			if (result.next === "advance") continue;
 			if (result.next === "wait") return out("wait", step, result.reason, "wait");
@@ -299,11 +315,29 @@ export class HeldContinuation {
 				return out("stopped", step, reason, "surface");
 			}
 			this.#notice(jobId, result.next === "done" ? "done" : `${tag}:${result.next}`, result.next, result.reason, result.pr_url);
+			if (result.next === "done") this.#landed(jobId);
 			return out(result.next === "done" ? "done" : "stopped", step, result.reason, result.next);
 		}
 		const reason = `${jobId}: ${max} integration steps advanced without settling`;
 		this.#notice(jobId, "exhausted", "surface", reason);
 		return out("stopped", max, reason, "surface");
+	}
+
+	/** Fail closed: a drain flag that cannot be read is a drain (`readDrain` throws on an unreadable file). */
+	#draining(): boolean {
+		try {
+			return this.#deps.draining?.() === true;
+		} catch {
+			return true;
+		}
+	}
+
+	#landed(jobId: string): void {
+		try {
+			this.#deps.onLanded?.(jobId);
+		} catch {
+			// The landing already happened; a release fault is the scheduler tick's to retry.
+		}
 	}
 
 	#notice(jobId: string, tag: string, next: string, reason: string, prUrl?: string): void {
