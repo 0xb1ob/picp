@@ -43,13 +43,20 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 		home.cleanup();
 	});
 
-	// Generation 1: a started parent and one send whose outcome relays (HANG, then RELEASE settles it).
+	// Generation 1: a started parent. A send outcome relays when its wait ran out (HANG, then RELEASE settles it).
 	const first = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
 	await first.request("start", { home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
-	const hung = await first.request("send", "HANG", 300) as { send_id?: string; pending?: string };
-	const sendId = hung.send_id ?? hung.pending;
-	assert.ok(sendId, JSON.stringify(hung));
-	await first.request("send", "RELEASE");
+	const settledSend = async (label: string): Promise<string> => {
+		const hung = await first.request("send", `HANG ${label}`, 300) as { send_id?: string; pending?: string };
+		const id = hung.send_id ?? hung.pending;
+		assert.ok(id, JSON.stringify(hung));
+		await first.request("send", `RELEASE ${label}`);
+		return id;
+	};
+	// This test client is the host's only subscriber while the first send settles: the outcome is relayed (and stamped
+	// relayed by host 1), but never reaches the operator session, which attaches afterwards. Settled, unobserved, unseen.
+	await first.onRelay(() => {});
+	const unseenId = await settledSend("unseen");
 	const generation = currentHost(paths).gen;
 
 	const messages: string[] = [];
@@ -73,7 +80,9 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	const mentions = (needle: string) => messages.filter((text) => text.includes(needle)).length;
 	await emit("session_start", ctx);
 	await until("attached to generation 1", () => statuses.some((line) => line.startsWith("cp-parent: attached")));
-	await until("the send outcome relayed", () => mentions(sendId) >= 1);
+	assert.equal(mentions(unseenId), 0, "the first outcome never reached the session");
+	const sendId = await settledSend("seen"); // relayed to the attached session live, still unobserved by it
+	await until("the live send outcome relayed", () => mentions(sendId) >= 1);
 
 	// The host dies; nothing may start a host or parent while the loop retries.
 	process.kill(first.hostPid, "SIGKILL");
@@ -102,12 +111,16 @@ test("a killed and restarted host is re-attached read-only: relays resume with n
 	await until("reattached", () => statuses.some((line) => line === `cp-parent: reattached (pid ${second.hostPid})`));
 	await until("the new generation's wake", () => mentions("Wake from the new generation") >= 1);
 	await until("the gap escalation", () => mentions("id=es-0001") >= 1);
+	await until("the unseen send outcome replayed by host 2", () => mentions(unseenId) >= 1);
 
-	// The live relay of the same escalation races the replay: still one. The host replays the unseen send outcome too: still one.
+	// Gap escalation: the live relay of the same id races the replay, still one.
 	await second.request("send", "ESCALATE");
 	await sleep(500);
 	assert.equal(mentions("id=es-0001"), 1, JSON.stringify(messages));
-	assert.equal(mentions(sendId), 1, "the send outcome reached the session once across the reattach");
+	// Send outcomes: host 2 re-emits every settled, unobserved one (relaysDue). The unseen one arrives once; the one the session
+	// already saw live (same id) is deduplicated, not shown twice.
+	assert.equal(mentions(unseenId), 1, "the unseen outcome is replayed once");
+	assert.equal(mentions(sendId), 1, "the already-seen outcome is not shown again");
 	assert.equal(statuses.filter((line) => line.startsWith("cp-parent: reattached")).length, 1);
 	assert.equal(currentHost(paths).gen, generation + 1, "no further host generation");
 });
