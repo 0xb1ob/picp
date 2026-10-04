@@ -21,13 +21,13 @@ function resultSummary(text: string, failed: boolean): string {
  return String(summary || (failed ? "Failed" : "Completed")).replace(/\s+/g," ").slice(0,140);
 }
 
-function textOf(content: unknown): string {
+function textOf(content: unknown, images = true): string {
  if (typeof content === "string") return content;
  if (!Array.isArray(content)) return "";
  return content.map(block => {
   const b = obj(block);
   if (b?.type === "text" && typeof b.text === "string") return b.text;
-  return b?.type === "image" ? "[image]" : "";
+  return images && b?.type === "image" ? "[image]" : "";
  }).filter(Boolean).join("\n");
 }
 
@@ -104,9 +104,11 @@ function parseTranscript(file: string, sides: {user:string;assistant:string}): {
   } else {
    const text=textOf(message.content);
    if (!text.trim()) continue; // an empty system/prompt record is nothing the CLI showed
-   const dashboard=role === "user" && sides === SIDES.you ? parseDashboardText(text) : undefined;
+   // Image parts follow the text, so the end-anchored marker is read from the text parts alone; the parts stay `[image]`.
+   const dashboard=role === "user" && sides === SIDES.you ? parseDashboardText(textOf(message.content,false)) : undefined;
    if (dashboard) {
-    const e=entry(base,at,"via","Operator (dashboard)",dashboard.body); e.tag="dashboard"; e.dashboard_id=dashboard.id;
+    const shown=Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
+    const e=entry(base,at,"via","Operator (dashboard)",[dashboard.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;
     if (dashboard.askId) e.ask_id=dashboard.askId;
     entries.push(e); continue;
    }

@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, resizeImage } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
@@ -34,7 +34,7 @@ import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
 import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
-import { type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
+import { type DashboardControl, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
 
 import { atomicWriteJson } from "../../src/json-store.ts";
@@ -459,10 +459,12 @@ export default function (pi: ExtensionAPI): void {
 			const started = await startDashboardControl({
 				stateDir: join(resolve(target.home), layout.state),
 				ports: {
-					inject: (text, deliverAs) => new Promise<void>((done, fail) => compaction.whenIdle(() => {
-						try { Promise.resolve(pi.sendUserMessage(text, deliverAs ? { deliverAs } : undefined) as unknown).then(() => done(), fail); }
+					inject: (text, deliverAs, images) => new Promise<void>((done, fail) => compaction.whenIdle(() => {
+						try { Promise.resolve(pi.sendUserMessage(userMessageContent(text, images), deliverAs ? { deliverAs } : undefined) as unknown).then(() => done(), fail); }
 						catch (error) { fail(error); }
 					})),
+					// Image attachments: pi's own resize (Photon, in a worker) to the long edge and the inline budget.
+					prepareImage: (bytes, mimeType, { maxEdge, maxBytes }) => resizeImage(bytes, mimeType, { maxWidth: maxEdge, maxHeight: maxEdge, maxBytes }).then((out) => out && { data: out.data, mimeType: out.mimeType }),
 					abort: () => sessionCtx?.abort(),
 					isIdle: () => sessionCtx?.isIdle() ?? true,
 					hasPendingMessages: () => sessionCtx?.hasPendingMessages() ?? false,

@@ -1,4 +1,4 @@
-import type { ControlSendResponse, ControlStatusResponse, OperatorStartResponse } from "../src/viewer/api-types.ts";
+import type { ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse } from "../src/viewer/api-types.ts";
 import type { Restarting } from "./restart-control.ts";
 
 /** Dashboard control (cp-dashboard-operator-control): what the Full transcript's composer and decision cards can say and do. */
@@ -11,14 +11,20 @@ export const START_WAIT_MS = 60_000;
 export type Launcher = "herdr" | "tmux";
 /** Where to find the started session, per mode: the text, then the part shown as code. */
 export const START_HINTS: Record<Launcher, [string, string]> = {herdr: ["open herdr → workspace", "cp-operator"], tmux: ["attach from a terminal:", "tmux attach -t cp-operator"]};
+/** Image attachments: the server's limits (src/viewer/uploads.ts, which the browser bundle never imports) as client pre-checks. */
+export const OPERATOR_UPLOAD_URL = "/api/operator/upload";
+export const uploadUrl = (id: string): string => `/api/operator/uploads/${encodeURIComponent(id)}`;
+export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+export const UPLOAD_MAX_PER_MESSAGE = 8;
 
-export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"} | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
+export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]} | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
-/** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void }
+/** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images. */
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 async function failure(response: Response): Promise<string> {
@@ -52,6 +58,31 @@ export const controlReady = (status: ControlStatus | null | undefined): status i
 
 /** The token a send carries: the session's CSRF token, or this viewer's inbox token while offline. */
 export const controlToken = (status: ControlStatusResponse): string => status.token ?? status.inbox_token ?? "";
+
+/** Attachments: a running session whose bridge takes images (`images: true`); never while offline, nothing is held. */
+export const controlImages = (status: ControlStatus | null | undefined): boolean =>
+ controlReady(status) && status.running && !!status.token && status.images === true;
+
+/** Why `file` cannot be attached as the `count + 1`th image, or null. HEIC is named, since iPhones make it. */
+export function attachRefusal(file: {name: string; type: string; size: number}, count: number): string | null {
+ if (count >= UPLOAD_MAX_PER_MESSAGE) return `At most ${UPLOAD_MAX_PER_MESSAGE} images per message`;
+ if (/^image\/hei[cf]$/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return "HEIC/HEIF is not supported; share the photo as JPEG";
+ if (!UPLOAD_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG, WebP or GIF image`;
+ if (file.size > UPLOAD_MAX_BYTES) return `${file.name || "This image"} is larger than 10 MiB`;
+ return null;
+}
+
+/** `POST /api/operator/upload`: the file's bytes with its own type and the session's token; the stored id, or the refusal. */
+export async function uploadImage(fetch: Fetch, token: string, file: File): Promise<OperatorUploadResponse | {error: string}> {
+ let response: Response;
+ try {
+  response = await fetch(OPERATOR_UPLOAD_URL, {method: "POST", headers: {"content-type": file.type, "x-cp-control-token": token}, body: file});
+ } catch {
+  return {error: "Could not reach this home"};
+ }
+ if (response.status === 201) return await response.json() as OperatorUploadResponse;
+ return {error: await failure(response)};
+}
 
 /** Offline, and Start session can work here. */
 export const canStart = (status: ControlStatus | null | undefined): status is ControlStatusResponse =>

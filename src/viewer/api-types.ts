@@ -49,7 +49,11 @@ export interface ControlStatusResponse {
  restart?: RestartStatus;
  /** The running session's dashboard record `started_at`: a new value after a restart is the relaunched session. */
  session_started_at?: string | null;
+ /** Running only: true when this session's cp-bridge takes image attachments (`send_images`); absent otherwise. */
+ images?: boolean;
 }
+/** `POST /api/operator/upload` stored one image: 201 with its upload id (the composer sends ids, never bytes). */
+export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string }
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }
 /** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
 export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }

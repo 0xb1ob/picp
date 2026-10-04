@@ -231,6 +231,8 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
   ...askCall("call-a","ask-abcd"), ...askCall("call-b","ask-bbbb"),
   message({role:"user",content:[{type:"text",text:"ask-abcd: Keep\n\n[cp-dashboard dc-20260927082500-0123abcd — from the dashboard; ask=ask-abcd]"}]}),
   message({role:"user",content:[{type:"text",text:"steer: stop the merge\n\n[cp-dashboard dc-20260927082600-4567cdef — from the dashboard]"}]}),
+  message({role:"user",content:[{type:"text",text:"look\n\n[cp-dashboard dc-20260927082700-89abcdef — from the dashboard; images=im-20260927-0123456789abcdef01234567.png]"},{type:"image",data:"aGk=",mimeType:"image/png"}]}),
+  message({role:"user",content:[{type:"text",text:"from the CLI"},{type:"image",data:"aGk=",mimeType:"image/png"}]}),
  ].join("\n")+"\n");
  const open=(id:string,created_at:string)=>({type:"open",id,project:"demo",question:`Question ${id}`,created_at,recommendation:"Keep",options:[{label:"Keep",consequence:"Paused"},{label:"Raise",consequence:"Spends"}]});
  put(join(stateDir,"operator/asks.jsonl"),open("ask-abcd",at));
@@ -241,7 +243,7 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve)); options.port=(server.address() as AddressInfo).port; t.after(()=>server.close());
  const full=await (await fetch(`http://127.0.0.1:${options.port}/api/sessions?view=you&transcript=1`)).json();
  assert.deepEqual(full.entries.map((e:any)=>e.kind === "ask" ? `card:${e.ask.id}:${e.ask.state}` : e.kind === "tool" ? `tool:${e.ask_id}` : e.kind),
-  ["card:ask-dddd:open","say","tool:ask-abcd","card:ask-abcd:open","tool:ask-bbbb","card:ask-bbbb:answered","via","via"],
+  ["card:ask-dddd:open","say","tool:ask-abcd","card:ask-abcd:open","tool:ask-bbbb","card:ask-bbbb:answered","via","via","via","say"],
   "a card follows the call that raised it; an older unanchored open ask sits at the top; a settled unanchored one is omitted");
  const card=full.entries[3];
  assert.deepEqual(card.ask.options.map((o:any)=>[o.label,o.consequence,o.reply]),[["Keep","Paused","ask-abcd: Keep"],["Raise","Spends","ask-abcd: Raise"]]);
@@ -250,6 +252,8 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
  const click=full.entries[6];
  assert.deepEqual([click.who,click.tag,click.text,click.dashboard_id,click.ask_id],["Operator (dashboard)","dashboard","ask-abcd: Keep","dc-20260927082500-0123abcd","ask-abcd"],"the marker is stripped and read");
  assert.deepEqual([full.entries[7].text,full.entries[7].dashboard_id,full.entries[7].ask_id],["steer: stop the merge","dc-20260927082600-4567cdef",undefined]);
+ assert.deepEqual([full.entries[8].tag,full.entries[8].text,full.entries[8].dashboard_id],["dashboard","look\n[image]","dc-20260927082700-89abcdef"],"image parts follow the marker: still a dashboard message, the image still shown as [image]");
+ assert.equal(full.entries[9].text,"from the CLI\n[image]","a CLI message with an image is unchanged");
 });
 
 test("operator Full transcript: the 300-entry window never drops an open decision card", async t => {

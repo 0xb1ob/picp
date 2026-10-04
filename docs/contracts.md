@@ -5619,17 +5619,18 @@ session's CSRF token, which the page fetches itself; it never writes. `POST /api
 | the session's own checks | 202 `{id, state, deliver}` (state `queued` or `delivered`), or 400/403/409/500/502 with the reason |
 
 `APP_CSP`, `hostAllowed`, the push route and every read route are unchanged; a POST to any other `/api/*` route is
-still 405. The Full transcript itself stays served only under `--require-tailnet`.
+still 405 (the image upload route below is the one addition). The Full transcript itself stays served only under
+`--require-tailnet`.
 
 **Audit journal** `state/operator/dashboard.jsonl` (0600, append-only, one `O_APPEND` write + `fsync` per line, two
 writers). The session appends a `request` line (`by:"bridge"`, `id`, `at`, `peer` — the client address — `kind`,
-`text`, `ask_id`, `deliver`) **before** anything happens — a request line that cannot be written refuses the request
+`text`, `ask_id`, `deliver`, and `images` — upload ids, never bytes — for a message with image attachments) **before** anything happens — a request line that cannot be written refuses the request
 (500) and nothing is injected — then `outcome` lines (`injected`, then `delivered` once the marker is seen in a
 `message_start` or `context` event, `queued` when it is not seen within 2 s, `failed` or `refused` with the reason).
-The viewer appends one `refused` line (`by:"viewer"`, `status`, `reason`, `peer`, and whatever `kind`/`text`/`ask_id`
+The viewer appends one `refused` line (`by:"viewer"`, `status`, `reason`, `peer`, and whatever `kind`/`text`/`ask_id`/`images`/`mime`
 it parsed; an unreadable or oversized body records `bytes`, never the bytes) for every POST it refuses after the
-`--require-tailnet` guard ([`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts), the viewer's only other
-request-time writer besides push subscriptions, imported only by `control-api.ts`); only the first 429 per window is journaled. A viewer audit
+`--require-tailnet` guard, and one `upload` line per stored image ([`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts); with
+push subscriptions and the image uploads below, the viewer's only request-time writers); only the first 429 per window is journaled. A viewer audit
 line that cannot be written still answers the refusal, with `audit: "unwritten: …"` in the body and one stderr
 line. `text` is clipped to 16,000 characters. No rotation yet; the rate limit bounds its growth.
 
@@ -5726,6 +5727,71 @@ operator's own browser, not a local process. **Recovery:** write `{"enabled": fa
 socket closes at the next session start; the state files are home-local and may be deleted while no operator
 session runs.
 
+### Image attachments (cp-br81)
+
+The composer attaches images: a paperclip button or a paste, up to **8 per message**, each uploaded at once and shown
+as a removable thumbnail; a message may be text, images or both. The images reach the operator session as pi
+user-message **image parts** (`pi.sendUserMessage([{type:"text"}, {type:"image", data, mimeType}…])`, built by
+`userMessageContent` in [`src/dashboard-control.ts`](../src/dashboard-control.ts)), resized by pi's own
+`resizeImage`. Storage, ids and limits: [`src/viewer/uploads.ts`](../src/viewer/uploads.ts); routes:
+[`src/viewer/operator-upload-api.ts`](../src/viewer/operator-upload-api.ts).
+
+**Storage.** `/tmp/cp-dashboard-uploads/<yyyymmdd>/<24 hex>.<png|jpg|webp|gif>` — a fixed path, because the viewer
+and the operator session may see different `TMPDIR`s ([`docs/storage.md`](storage.md#outside-the-home)); the root is
+`CP_UPLOAD_ROOT` when set (tests). Root and day directories are created 0700 and checked on every use (`lstat`: a real
+directory, not a symlink, owned by this uid; group/other bits are removed, anything else is 503 `upload directory
+<path> is not safe: <why>`); files are written 0600 through `O_EXCL|O_NOFOLLOW` and read through `O_NOFOLLOW` + `fstat`
+(a regular file of ours, ≤ 10 MiB) and a re-sniff that must match the extension. An id is `im-<yyyymmdd>-<24 hex>.<ext>`;
+a path is only ever rebuilt from an id's regex captures. Files older than **7 days** are removed by the sweep that runs
+before every upload (then empty day directories; only id-shaped names are touched) and are treated as gone by every
+read; the directory is capped at **256 MiB** (tmpfs is RAM). Known gap: with no uploads, old files stay until the next
+upload, a reboot or the host's tmpfiles. The feature needs the viewer and the operator session to share `/tmp` (no
+`PrivateTmp`); otherwise the bridge answers 410.
+
+**`POST /api/operator/upload`** — the raw file bytes, `Content-Type` its image type, `x-cp-control-token` the
+running session's CSRF token → 201 `{id, mime, bytes, expires_at, url}`. Refused, in order:
+
+| Check | Refusal |
+|---|---|
+| method, `--require-tailnet` | as in the Dashboard control table (kind `upload`) |
+| 24 uploads per 60 s and one in flight per client address, on its **own** limiter (the 20/60 s text quota is untouched) | 429 with `retry-after` |
+| opt-out, Origin, Sec-Fetch-Site | as in the Dashboard control table |
+| `Content-Type` `image/png`, `image/jpeg`, `image/webp` or `image/gif` | 415 (`image/heic`/`heif`: `HEIC/HEIF is not supported; share the photo as JPEG`) |
+| body ≤ 10 MiB | 413 |
+| a running operator session (images are never held in the inbox) | 409 |
+| `x-cp-control-token` equals the record's `csrf` | 403 |
+| magic bytes: PNG, JPEG, GIF or WebP; never SVG | 415 `not a PNG, JPEG, WebP or GIF image` (HEIC brands: the HEIC refusal) |
+| a safe upload directory | 503 |
+| ≤ 256 MiB after the sweep | 507 `upload space full: …` |
+| the `upload` journal line is written **first** (`id`, `mime`, `bytes`, never bytes) | 500, nothing stored |
+| the write | 500 (503 for an unsafe directory) |
+
+**`GET|HEAD /api/operator/uploads/<id>`** — the composer's thumbnail: only under `--require-tailnet` (403, like the
+Full transcript), `Sec-Fetch-Site` absent, `same-origin` or `none` (403), an id (400 `not an upload id`); missing,
+expired or invalid is 404 `{error: "image expired"}`. 200 serves the bytes with the sniffed type, `nosniff`,
+`cross-origin-resource-policy: same-origin`, `content-security-policy: default-src 'none'; img-src 'self'; sandbox`
+and `cache-control: private, max-age=604800, immutable`.
+
+**Sending.** `POST /api/operator/message` takes `images: [id…]` (1–8 distinct ids, else 400) on a `kind: "message"`;
+the text may then be empty. After the body checks the viewer refuses images while offline (409 `image attachments need a
+running operator session (they are never held in the inbox); start it, or send text only`), an id that is missing or
+expired (410 `image <id> expired or was never uploaded; attach it again`) and more than 32 MiB in total (413), then
+checks the CSRF token and sends the socket op **`send_images`** (25 s), never `send`, so an older bridge cannot drop the
+images silently: its `unknown op` becomes 409 `unsupported: this session's cp-bridge predates image attachments;
+restart the session (⋮ → Restart session) and attach again`. `GET /api/operator/control` carries `images: true` only
+when the session's bridge has the capability, and the composer shows the paperclip only then.
+
+**The bridge** (`send_images`): it journals its `request` line with `images` first, refuses bad ids (400), checks
+control is on, stats every upload (410 missing, 400 unreadable), then reads and resizes each in turn — long edge
+1568 px, at most `min(768 KiB, 2 MiB / n)` of base64 per image — within **15 s** in total, or 504 `image preparation
+exceeded 15 s; nothing was sent` and nothing is injected. An image pi cannot resize is sent as a line `[image <id> could
+not be attached inline; file: <absolute path>]` instead, and the `injected` outcome says how many. The marker gains
+`; images=<id>,…` (`[cp-dashboard dc-… — from the dashboard; images=im-…]`), so the transcript still tags the message
+`dashboard`; its image parts show as `[image]`.
+
+**Recovery.** `rm -rf /tmp/cp-dashboard-uploads` is safe at any time (a pending send then answers 410); the opt-out
+stops uploads with every other control. **Migration:** restart the operator session once (⋮ → Restart session) so its
+bridge advertises `images`.
 ### Schedule controls (cp-hhuf P6)
 
 The Schedules page offers **Enable/Disable, Run now and Remove** per schedule, and an **Add schedule…** link that
