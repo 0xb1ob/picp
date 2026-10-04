@@ -99,7 +99,7 @@ import {
 export class DoctorError extends Error {}
 
 // The finding caps live in `./doctor-caps.ts`, shared with src/service/status.ts.
-import { CHECK_MAX, cappedCheck, cappedFix, cappedWhat, DETAIL_MAX, FIX_MAX, WHAT_MAX } from "./doctor-caps.ts";
+import { CHECK_MAX, cappedCheck, cappedFinding, cappedFix, cappedWhat, DETAIL_MAX, FIX_MAX, WHAT_MAX } from "./doctor-caps.ts";
 export { CHECK_MAX, DETAIL_MAX, FIX_MAX };
 
 // REQUIRED_TOOLS is re-exported here so existing imports of it from
@@ -289,7 +289,7 @@ export class Doctor {
 	/** Run every check. Never throws for a broken environment — that is the output. */
 	async run(): Promise<DoctorReport> {
 		const checkout = homeCheckoutFinding(this.#options.home, this.#options.packageRoot, this.#run);
-		const findings: DoctorFinding[] = [
+		const raw: DoctorFinding[] = [
 			...(checkout ? [checkout] : []),
 			...this.#hostTools(),
 			...this.#piLensTools(),
@@ -309,6 +309,9 @@ export class Doctor {
 			...pushFindings(this.#options.home, this.#now()),
 			...storageFindings(this.#options.home, this.#run),
 		];
+		// The one place every finding passes before the contract sees it: no source check, present or
+		// future, can turn a long path, message or list into a crashed diagnosis (doctor-caps.ts).
+		const findings = raw.map(cappedFinding);
 		const counts = {
 			ok: findings.filter((finding) => finding.severity === "ok").length,
 			warn: findings.filter((finding) => finding.severity === "warn").length,
@@ -1421,7 +1424,8 @@ export class Doctor {
 				check: `pool.${name}`,
 				severity: "warn",
 				what: `${foreign.length} worktree(s) in ${name}'s pool belong to another clone, not ${clone}`,
-				detail: `${foreign.join(" | ")} (expected git-common-dir ${cloneCommon})`,
+				// Up to 20 probed paths of ~100 chars each outgrew the 2000-char contract bound: list what fits, count the rest.
+				detail: `${boundedList(foreign, { max: MAX_POOL_PROBES, cap: DETAIL_MAX - 300, separator: " | " })} (expected git-common-dir ${cloneCommon})`,
 				fix: `another home shares this pool: give each home its own by setting ${ENV_TREEHOUSE_ROOT} to a directory per home (a lease from a foreign clone is refused at dispatch, so this shows up as an unexplained lease failure)`,
 			});
 		}
