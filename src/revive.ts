@@ -39,6 +39,7 @@ import type { RunRegistry } from "./runs.ts";
 import { resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import type { WorkerManager } from "./worker-manager.ts";
+import { readCheckpoint } from "./checkpoint-ref.ts";
 
 export class ReviveError extends Error {}
 
@@ -105,6 +106,8 @@ export interface RevivePlan {
 	 * process; `revive` shuts it down before spawning on the session file.
 	 */
 	closesWorker?: true;
+	/** t3code adoption 7: the dispatch-time checkpoint ref and its sha (absent when the ref is gone). Never restored. */
+	checkpoint?: { ref: string; sha?: string };
 }
 
 export type RevivePlanResult = RevivePlan | ReviveRefusal;
@@ -453,6 +456,8 @@ export class Reviver {
 		}
 
 		const interruptedTool = readInterruptedTool(record.worker.session_file, fileExists);
+		// t3code adoption 7: shown, never restored. A missing ref does not refuse.
+		const checkpointSha = record.checkpoint_ref ? await readCheckpoint(git, record.worktree, record.checkpoint_ref) : undefined;
 		return {
 			ok: true,
 			job_id: jobId,
@@ -466,6 +471,7 @@ export class Reviver {
 			...(interruptedTool ? { interruptedTool } : {}),
 			...(record.phase === "failed" && record.failure ? { continuesFailure: record.failure } : {}),
 			...(closesWorker ? { closesWorker: true as const } : {}),
+			...(record.checkpoint_ref ? { checkpoint: { ref: record.checkpoint_ref, ...(checkpointSha ? { sha: checkpointSha } : {}) } } : {}),
 		};
 	}
 
@@ -594,7 +600,10 @@ export function formatRevivePlan(result: RevivePlanResult): string {
 		? ` \u2014 continues failed job (${result.continuesFailure.class}: ${result.continuesFailure.message}) on its original ` +
 			"worktree and lease; the automatic recovery counter is not reset"
 		: "";
-	return `${result.job_id}: revivable (${result.model}, session ${result.session_file})${failed}${tool}${dirty}`;
+	const checkpoint = result.checkpoint
+		? ` \u2014 checkpoint ${result.checkpoint.ref} ${result.checkpoint.sha ? `at ${result.checkpoint.sha}` : "missing"} (dispatch-time HEAD; shown, never restored)`
+		: "";
+	return `${result.job_id}: revivable (${result.model}, session ${result.session_file})${failed}${tool}${dirty}${checkpoint}`;
 }
 
 export function formatReviveResult(result: ReviveResult): string {

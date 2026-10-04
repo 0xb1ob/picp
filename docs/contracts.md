@@ -1469,6 +1469,7 @@ worktree's `.git` file):
 | a live child of the stored worker pid (`/proc/<pid>/task/*/children`) | refused (`tool_child_alive`) — a tool it started may still be changing the worktree while the revived worker is told the call failed; checked before `pid_alive`, the stored pid only, nothing signalled. Bounded recovery decides it before `recordRecoveryAttempt`: one escalation, `revive_refused` with `attempted: false`, the attempt not spent (every other plan refusal still spends, then escalates) |
 | detached HEAD | refused (`repo_detached_head`) — the job branch is not even checked out |
 | uncommitted changes | **not refused** — the ordinary shape of a ship job mid-work; surfaced as `worktreeDirty` on the plan and the revive result instead, so the operator sees it without every real revival being blocked by it |
+| the dispatch-time checkpoint ref (`refs/cp-checkpoints/<job-id>`, `src/checkpoint-ref.ts`) | **not refused**, present or missing — the plan and its text carry the ref and its sha (or `missing`); never restored, no `git reset`, never pushed. Dispatch captures it after the worktree preflight and stores it as `checkpoint_ref`; teardown deletes it before the lease returns, a missing ref is not a teardown failure |
 
 **The refusal ladder** (`Reviver.plan`, re-checked at revive time, never trusted
 from a startup classification): no fleet record; phase is neither `held` nor

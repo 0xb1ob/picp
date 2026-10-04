@@ -12,9 +12,11 @@ import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { loadProfile } from "../src/profiles.ts";
+import { captureCheckpoint, deleteCheckpoint } from "../src/checkpoint-ref.ts";
 import {
 	childPids,
 	formatRevivePlan,
+	type GitRunner,
 	inspectWorktree,
 	readInterruptedTool,
 	ReviveError,
@@ -305,6 +307,54 @@ test("formatRevivePlan names the refusal code and, on success, the interrupted t
 	assert.match(plan, /cp-y: revivable/);
 	assert.match(plan, /interrupted tool: bash/);
 	assert.match(plan, /told this call produced no result/);
+});
+
+test("plan shows the dispatch-time checkpoint ref and its sha, HEAD unchanged; a deleted ref is shown missing, not refused (t3code adoption 7)", async (t) => {
+	const b = bench(t);
+	const repo: ScratchRepo = createScratchRepo({ name: "revive-checkpoint" });
+	t.after(() => repo.cleanup());
+	const runGit: GitRunner = async (cwd, args) => {
+		try {
+			return { status: 0, stdout: git(cwd, ...args), stderr: "" };
+		} catch (error) {
+			return { status: 1, stdout: "", stderr: (error as Error).message };
+		}
+	};
+	const worktree = join(b.home, "worktrees", "cp-ckpt");
+	git(repo.path, "clone", "--quiet", repo.path, worktree);
+	const captured = await captureCheckpoint(runGit, worktree, "cp-ckpt");
+	assert.ok("ref" in captured, JSON.stringify(captured));
+	assert.equal(captured.ref, "refs/cp-checkpoints/cp-ckpt");
+	assert.equal(git(worktree, "branch", "--list", "--all").includes("cp-checkpoints"), false, "the ref is outside refs/heads and refs/remotes");
+
+	// The worker moved on after dispatch: the checkpoint is behind HEAD.
+	writeFileSync(join(worktree, "later.txt"), "later\n");
+	git(worktree, "add", "later.txt");
+	git(worktree, "commit", "--quiet", "-m", "later");
+	const head = git(worktree, "rev-parse", "HEAD");
+	assert.notEqual(head, captured.sha);
+
+	const sessionFile = join(b.home, "cp-ckpt.jsonl");
+	writeFileSync(sessionFile, "{}\n");
+	await b.fleet.add(makeRecord({ job_id: "cp-ckpt", worktree, checkpoint_ref: captured.ref, worker: { ...makeRecord({}, b.home).worker, session_file: sessionFile } }, b.home));
+	const reviver = new Reviver({ home: b.home, profilesDir: PROFILES_DIR, fleet: b.fleet, manager: b.manager, runs: b.runs, isPidAlive: () => false, git: runGit });
+
+	const plan = await reviver.plan("cp-ckpt");
+	assert.equal(plan.ok, true, formatRevivePlan(plan));
+	if (plan.ok) assert.deepEqual(plan.checkpoint, { ref: captured.ref, sha: captured.sha });
+	assert.match(formatRevivePlan(plan), new RegExp(`checkpoint refs/cp-checkpoints/cp-ckpt at ${captured.sha} \\(dispatch-time HEAD; shown, never restored\\)`));
+	assert.equal(git(worktree, "rev-parse", "HEAD"), head, "plan never resets HEAD");
+	assert.equal(git(worktree, "status", "--porcelain"), "");
+
+	// Teardown's delete; a second delete of a missing ref is not an error, and the plan still stands.
+	assert.equal(await deleteCheckpoint(runGit, worktree, captured.ref), true);
+	await deleteCheckpoint(runGit, worktree, captured.ref);
+	assert.equal(git(worktree, "for-each-ref", "refs/cp-checkpoints/"), "");
+	const missing = await reviver.plan("cp-ckpt");
+	assert.equal(missing.ok, true, formatRevivePlan(missing));
+	if (missing.ok) assert.deepEqual(missing.checkpoint, { ref: captured.ref });
+	assert.match(formatRevivePlan(missing), /checkpoint refs\/cp-checkpoints\/cp-ckpt missing/);
+	assert.equal(git(worktree, "rev-parse", "HEAD"), head);
 });
 
 // ---------------------------------------------------------------------------

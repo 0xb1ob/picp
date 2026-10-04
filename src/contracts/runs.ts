@@ -191,6 +191,8 @@ export const CP_EVENT_KINDS = [
 	"wakeup_source_failed",
 	/** Dispatch refreshed (or skipped, or failed to refresh) a leased worktree's node_modules before the worker started. */
 	"deps_prepared",
+	/** Dispatch held the worktree's HEAD at its hidden checkpoint ref (`{ ref, sha }`), or could not (`{ error }`); t3code adoption 7. */
+	"checkpoint_captured",
 	/**
 	 * The CI/PR watcher observed a new fact about a held job's PR (cp-e2d): CI
 	 * finished for the branch's current pushed head, or the PR merged or closed.

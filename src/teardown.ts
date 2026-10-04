@@ -72,6 +72,7 @@ import {
 	paths,
 	validate,
 } from "./contracts.ts";
+import { deleteCheckpoint } from "./checkpoint-ref.ts";
 import { resolveDefaultBase } from "./default-base.ts";
 import { isPidAlive, type FleetStore } from "./fleet.ts";
 import { resolveFinalFix } from "./final-fix.ts";
@@ -290,6 +291,7 @@ export class Teardown {
 			project: record.project,
 			...(record.lease_id ? { lease_id: record.lease_id } : {}),
 		});
+		if (record.checkpoint_ref) await deleteCheckpoint((c, args) => this.#git(c, args), record.worktree, record.checkpoint_ref); // missing ref: not a failure
 		// cp-a9fq: lease_returned is what treehouse confirmed, never assumed; a failed return (forced or not) keeps the job open.
 		const released = await leases.release(lease, { ignoreErrors: true });
 		if (!released.ok) {

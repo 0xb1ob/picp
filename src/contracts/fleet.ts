@@ -214,6 +214,8 @@ export const FleetRecordSchema = Type.Object(
 		 * pool still shows this identity.
 		 */
 		lease_id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+		/** Dispatch-time HEAD kept at this ref outside refs/heads (src/checkpoint-ref.ts): never pushed, never restored, deleted by teardown. */
+		checkpoint_ref: Type.Optional(Type.String({ pattern: "^refs/cp-checkpoints/[^\\s]+$", maxLength: 300 })),
 		branch: Type.String({ minLength: 1 }),
 		dispatched_at: IsoTimestampSchema,
 		/**
