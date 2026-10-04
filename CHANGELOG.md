@@ -6,7 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-### A ship report must name its worktree HEAD (cp-ap3y)
+### A ship report must name its worktree HEAD
 
 The worker reporter now rejects, repairably (`localChecks`, `extensions/worker-reporter/head.ts`), a `report_result` with `status: done` whose `head_sha` is not `git rev-parse HEAD` of the worker's own worktree (`CP_WORKTREE`, else the cwd), and a ship/done report with no `head_sha` at all. The rejection names the observed sha, so the model copies it within the 3-attempt repair budget; a `git rev-parse` that fails (not a repo, git missing, 10 s timeout) fails closed with `head_sha: cannot verify`. Research, answer, board and blocked envelopes without `head_sha` trigger no git call. `validateEnvelope` and intake are unchanged, and `head_sha` keeps its schema shape (only its description changed). Migration: none — stored envelopes are not re-validated against the new rule.
 
