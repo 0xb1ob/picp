@@ -71,6 +71,8 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
    finished_at:finished,finished_today:today(finished,now),merge_sha:merged ? String(receipt.merge_commit_sha) : null,
    // A failure is shown only while the job is failed: a revived, held or landed job's old failure is history, not state (audit P2 #10).
    failure:phase==="failed" ? str(obj(status?.failure)?.message) ?? str(obj(entry?.failure)?.message) ?? null : null,
+   // The envelope headline: one line, 80 chars like the failure headline. Never the artifact body.
+   summary:(()=>{const line=str(envelope?.summary)?.split("\n").find(l=>l.trim())?.trim();return line ? line.length>80 ? `${line.slice(0,79)}…` : line : null;})(),
    blockers:base.blocked.items.find(j=>j.id===id)?.blockers.map(b=>b.id) ?? [],context:entry ? workerContext(state,id,detail?.model,windows) : null};
  });
  return {generated_at:base.generated_at,awaiting_count:base.awaiting.count,jobs,

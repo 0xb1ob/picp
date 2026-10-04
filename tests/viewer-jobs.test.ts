@@ -20,7 +20,7 @@ test("jobs, detail and board join the ledger with observed phases without writin
  put(join(LAYOUT.runs, "cp-working/status.json"),{phase:"working",started_at:at});
  put(join(LAYOUT.runs, "cp-launching/status.json"),{phase:"starting",started_at:at});
  put(join(LAYOUT.projects, "demo/report ?&.md"),"Recorded artifact");
- put(join(LAYOUT.runs, "cp-held/envelope.json"),{envelope:{head_sha:head,artifact_path:join(home.path, LAYOUT.projects, "demo/report ?&.md")}});
+ put(join(LAYOUT.runs, "cp-held/envelope.json"),{envelope:{head_sha:head,summary:`\n  ${"x".repeat(100)}\nsecond line`,artifact_path:join(home.path, LAYOUT.projects, "demo/report ?&.md")}});
  put(LAYOUT.ciWatchFile,{jobs:[{job_id:"cp-held",head_sha:head,last_ci:"red"}]});
  put(join(LAYOUT.runs, "cp-held/review-1.json"),{head_sha:"b".repeat(40),verdict:"pass",diff_stat:{truncated:false}});
  put(join(LAYOUT.runs, "cp-held/events.jsonl"),JSON.stringify({source:"cp",job_id:"cp-held",ts:at,type:"spawned",payload:{model:"test-model",secret:"not-for-the-api"}})+"\n"+JSON.stringify({source:"pi",ts:at,type:"message_update",payload:{text:"private prompt"}})+"\n");
@@ -35,6 +35,8 @@ test("jobs, detail and board join the ledger with observed phases without writin
  const data=await response.json() as JobsResponse;
  assert.deepEqual(data.jobs.map(j=>[j.id,j.phase]).sort(),[["cp-done","done"],["cp-failed","failed"],["cp-held","held"],["cp-launching","launching"],["cp-old","done"],["cp-queued","queued"],["cp-working","working"]]);
  assert.equal(data.jobs.find(j=>j.id==="cp-old")?.finished_today,false);
+ assert.equal(data.jobs.find(j=>j.id==="cp-held")?.summary,`${"x".repeat(79)}…`,"first non-empty line, 80 chars");
+ assert.equal(data.jobs.find(j=>j.id==="cp-working")?.summary,null);
  assert.equal(data.jobs.find(j=>j.id==="cp-held")?.review,null);
  const detail=await (await get("/api/job/cp-held")).json() as JobResponse;
  assert.equal(detail.job.ci,"red"); assert.equal(detail.timeline[0]?.label,"Spawned");

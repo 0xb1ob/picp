@@ -17,6 +17,7 @@
 .board-card-heading { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); }
 .board-card-heading code { font-size: 12.5px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .board-card-title { font-size: 13.5px; line-height: 1.4; color: var(--secondary); }
+.board-card-summary { font-size: 12px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .board-card-mandate { font-size: 10.5px; color: var(--dim); }
 .board-card-done { opacity: 0.75; }
 .board-tag { align-self: flex-start; font-size: 11.5px; line-height: 1.3; padding: 2px 8px; border: 1px solid var(--tag-border); border-radius: 999px; color: var(--subtle); }

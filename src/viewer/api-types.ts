@@ -83,6 +83,8 @@ export interface ViewerJob extends FlightJob {
  phase: JobPhase; ledger_status: string | null; ledger_disagrees: boolean; mandate_id: string | null;
  cost_usd: number | null; pr_url: string | null; pr_status: string | null; finished_at: string | null;
  finished_today: boolean; merge_sha: string | null; failure: string | null; blockers: string[];
+ /** The envelope headline, one line of at most 80 chars; null until the run reports. */
+ summary: string | null;
  /** The live or last worker's context; null when the job never had a worker session. */
  context?: ContextUsage | null;
 }
