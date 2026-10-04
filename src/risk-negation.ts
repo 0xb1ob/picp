@@ -5,8 +5,23 @@
 // drops LLM/design `tokens` and a delete/backfill identifier, step or quoted
 // mention (riskkw-f10), plus spend `tokens`, "Migration: none" and a read-only audit's history-rewrite fix (cp-wkv1).
 // ponytail: bounded clause patterns, not a grammar parser; see docs/contracts.md.
-const NEGATION_TAIL_RE = /\b(?:(?:do\s+not|must\s+not|don't|no|never|stop\s+(?:advising|recommending|suggesting|telling))(?!\W+wait\b)(?:\W+[\w'-]+){0,3}|(?:not|without)(?:\W+(?:[\w'-]+ing|expose|touch|change|modify|reveal|leak))?(?:\W+(?:the|a|an|any))?)\W*$/i;
-const CLAUSE_BREAK_RE = /[.;:!?,\n]|\b(but|and|then|instead|however)\b/gi;
+const NEGATION_TAIL_RE = /\b(?:(?:do\s+not|must\s+not|don't|no|never|avoid(?:ing)?|instead\s+of|rather\s+than|stop\s+(?:advising|recommending|suggesting|telling))(?!\W+wait\b)(?:\W+[\w'-]+){0,3}|(?:not|without)(?:\W+(?:[\w'-]+ing|expose|touch|change|modify|reveal|leak))?(?:\W+(?:the|a|an|any))?)\W*$/i;
+const CLAUSE_BREAK_RE = /[.;:!?,\n]|\b(but|and|then|instead(?!\s+of\b)|however)\b/gi;
+// cp-ukqv: a risk word negated directly by a verbal cue ("never force-push") lends that negation to the risk words
+// listed right after it ("or rewrite history", ", purge"), with up to three object words before the join.
+// ponytail: a bare-comma splice ("never migrate, delete X") reads as a list too; a parser would tell them apart.
+const NEGATED_HEAD_RE = /\b(?:do\s+not|must\s+not|don't|never|avoid(?:ing)?|instead\s+of|rather\s+than)[\s`*_"']*$/i;
+const LIST_JOIN_RE = /^[`*_"']*(?:\s+(?!(?:but|and|then|instead|however)\b)[^\s,.;:!?()]+){0,3}(?:\s*,\s*(?:(?:or|nor)\s+)?|\s+(?:or|nor)\s+)[`*_"']*$/i;
+
+/** A risk word with a verbal negation cue right before it: the head a following list shares. */
+export function negatedHeadAt(text: string, index: number): boolean {
+	return NEGATED_HEAD_RE.test(text.slice(0, index));
+}
+
+/** The text between a previous risk word (ending at `prevEnd`) and this one is only a list join. */
+export function listedAfter(text: string, prevEnd: number, index: number): boolean {
+	return prevEnd <= index && LIST_JOIN_RE.test(text.slice(prevEnd, index));
+}
 
 export function negatedAt(text: string, index: number, word: string): boolean {
 	let before = text.slice(0, index);

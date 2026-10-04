@@ -617,6 +617,9 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 		["a killed-unreported durable wake is relayed as is", {
 			FAKE_PARENT_WAKE_DURABLE: JSON.stringify({ id: "killed-unreported:cp-o0mm:2026-10-03T05:24:46Z", content: "[demo] cp-o0mm: killed_unreported — no report" }),
 		}],
+		["a drain outcome wake reaches the operator with its drain id for the delivery-time recheck (cp-ukqv)", {
+			FAKE_PARENT_WAKE_DURABLE: JSON.stringify({ id: "drain:2026-10-04T00:00:00.000Z:timeout", content: "DRAIN: drain timed out after 5s: still busy cp-busy; a restart now kills them" }),
+		}],
 	] as const;
 	for (const [name, env] of cases) {
 		await t.test(name, async (t) => {
@@ -624,8 +627,8 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 			initJobsDocument(home.path, "cp");
 			Object.assign(process.env, { FAKE_PARENT_WAKE: "1", ...env });
 			const bridge = new CpBridge();
-			const wakes: Array<{ jobId?: string; text: string }> = [];
-			bridge.onRelay((relay) => { if (relay.kind === "wake") wakes.push({ ...(relay.jobId ? { jobId: relay.jobId } : {}), text: relay.text }); });
+			const wakes: Array<{ jobId?: string; drainId?: string; text: string }> = [];
+			bridge.onRelay((relay) => { if (relay.kind === "wake") wakes.push({ ...(relay.jobId ? { jobId: relay.jobId } : {}), ...(relay.drainId ? { drainId: relay.drainId } : {}), text: relay.text }); });
 			t.after(async () => {
 				for (const key of ["FAKE_PARENT_WAKE", "FAKE_PARENT_WAKE_TEXT", "FAKE_PARENT_WAKE_ENVELOPE", "FAKE_PARENT_WAKE_DURABLE"]) delete process.env[key];
 				await bridge.stop();
@@ -637,8 +640,10 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 				assert.equal(wakes[0]?.jobId, "cp-9b9f");
 				assert.ok(wakes[0]?.text.includes("The worker confirmed: pnpm 9"), wakes[0]?.text);
 				assert.ok(wakes[0]?.text.includes("envelope cp-9b9f (done), verbatim: npm, Node v24 (.nvmrc)"), wakes[0]?.text);
+			} else if (name.startsWith("a drain")) {
+				assert.ok(wakes.some((wake) => wake.drainId === "drain:2026-10-04T00:00:00.000Z:timeout" && wake.text.startsWith("DRAIN: drain timed out")), JSON.stringify(wakes));
 			} else {
-				assert.ok(wakes.some((wake) => wake.text === "[demo] cp-o0mm: killed_unreported — no report"), JSON.stringify(wakes));
+				assert.ok(wakes.some((wake) => wake.text === "[demo] cp-o0mm: killed_unreported — no report" && wake.drainId === undefined), JSON.stringify(wakes));
 			}
 		});
 	}

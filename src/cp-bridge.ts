@@ -68,6 +68,7 @@ export interface BridgeRelay {
 	jobIds?: string[];
 	sendId?: string;
 	escalationId?: string;
+	drainId?: string; // a drain wake's durable id: recheckRelay re-reads the live drain at delivery (cp-ukqv)
 	stale: boolean;
 	text: string;
 	receipt: BridgeReceipt;
@@ -639,9 +640,10 @@ export class CpBridge {
 		if (event.type === "message_end") {
 			// Only assistant messages count as replies; custom fleet notices relay directly.
 			const message = event.message as { role?: unknown; customType?: unknown } | undefined;
-			// Idle-bead notices, the one drain outcome wake (durable id `drain:<started>:<outcome>`) and a `killed-unreported:` notice (issue #2) reach the operator directly.
-			const directWake = durableIdsFromMessage(message).some((id) => id.startsWith("drain:") || id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
-			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
+			// Idle-bead notices, the one drain outcome wake (durable id `drain:<started>:<outcome>`, kept as `drainId` for the delivery recheck) and a `killed-unreported:` notice (issue #2) reach the operator directly.
+			const durableIds = durableIdsFromMessage(message), drainId = durableIds.find((id) => id.startsWith("drain:"));
+			const directWake = drainId !== undefined || durableIds.some((id) => id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
+			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [], ...(drainId ? { drainId } : {}) });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
 			if (stamped) { this.#turn.jobId = stamped; for (const ids of [this.#turn.jobIds, this.#turn.segJobIds]) if (!ids.includes(stamped)) ids.push(stamped); }
 			const envelope = envelopeSummaryOf(message);

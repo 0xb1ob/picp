@@ -73,6 +73,39 @@ test("modified destructive actions after or remain risk evidence", () => {
 	}
 });
 
+test("cp-ukqv: a list after a directly negated destructive verb shares the negation; a positive action still trips high", () => {
+	for (const text of [
+		"Do not force-push or rewrite history",
+		"never force-push or delete branches",
+		"Never delete data, force-push, or rewrite history",
+		"Do not delete or purge anything",
+		"never destroy, delete or truncate the table",
+		"Must not delete, drop the table, or purge",
+		"never `force-push` or `rewrite history`",
+		"Avoid force-pushing",
+		"Use --force-with-lease rather than force-push",
+		"Merge instead of force-pushing",
+	]) {
+		assert.equal(inferScopeAndRisk(text).risk, undefined, text);
+		assert.deepEqual(riskKeywords(text), [], text);
+	}
+	for (const [text, words] of [
+		["Force-push main", ["force-push"]],
+		["Delete the stale rows and purge the cache", ["delete", "purge"]],
+		["Never force-push; delete the table", ["delete"]],
+		["Never force-push or delete branches, then truncate the table", ["truncate"]],
+		["Do not purge, but drop the table", ["drop the table"]],
+		["never force-push and delete the branch", ["delete"]],
+		["Never force-push or rotate credentials", ["credentials"]],
+		["Never delete. Force-push main", ["force-push"]],
+		["Delete the table instead, then force-push", ["delete", "force-push"]],
+		["Avoid downtime by deleting rows; purge the cache", ["purge"]],
+	] as const) {
+		assert.equal(inferScopeAndRisk(text).risk, "high", text);
+		assert.deepEqual(riskKeywords(text), words, text);
+	}
+});
+
 test("independent credential and access actions after or remain risk evidence", () => {
 	for (const [text, words] of [
 		["No migration or rotate credentials", ["credentials"]],

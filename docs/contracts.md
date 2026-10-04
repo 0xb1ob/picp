@@ -642,7 +642,13 @@ delivery the durable sweep drops a `drain:<started>:drained|timeout` wake when t
 `cancelled` wake is always delivered. Every drain wake names its `started_at` (in its id
 and text), so the parent checks the live file and any known cancel before acting on a
 notice; a stale one is relayed in one line and never held, deferred or turned into a
-worker stop — the drain gate refuses new starts, a notice stops nothing.
+worker stop — the drain gate refuses new starts, a notice stops nothing. The operator
+relay makes the same check in code (cp-ukqv): the bridge stamps a drain wake's relay with
+its durable id (`drainId`), and `recheckRelay` re-reads the live `state/drain.json` at
+delivery; when `staleDrainOutcome` names it stale (file gone after a cancel or restart,
+another `started_at`, or another state) the operator receives one `stale` line —
+`DRAIN: stale notice <id>: <reason>; nothing to act on.` — instead of the restart or
+refusal wording of the original.
 
 (`cp-unreported` is a settle-boundary fact rather than a
 message type of its own machinery — see
@@ -7370,7 +7376,16 @@ match elsewhere still are. Coordinated credential nouns share the negation
 ("never expose secrets or tokens"), but a new action does not ("or delete rows"
 or "or rotate credentials"). `or` starts a fresh clause by default, except
 for coordinated credential nouns and schema/data/database migration modifiers;
-unrecognized noun coordination may conservatively warn.
+unrecognized noun coordination may conservatively warn. A risk word negated
+directly by a verbal cue (`do not`, `must not`, `don't`, `never`, `avoid`,
+`instead of`, `rather than`) lends that negation to the risk words listed right
+after it — joined by `,`, `or` or `nor`, with up to three object words in
+between (cp-ukqv): "do not force-push or rewrite history", "never delete data,
+force-push, or rewrite history" and "avoid force-pushing" are not evidence,
+while "never force-push; delete the table", "never force-push and delete the
+branch", "never force-push or rotate credentials" and a determiner `no`
+("no migration or bulk delete the table") still are. A bare comma splice after a
+negated verb reads as a list; that is the known ceiling of a clause pattern.
 Markdown sections headed `Constraints`, `Non-goals`, `Test plan`, `Evidence`, `Unknowns`
 (`Unknowns/Blockers`), `Self-assessment` or `Acceptance` are excluded, including
 subsections, until the next same-level or higher heading (bead dbn, cp-wkv1); the

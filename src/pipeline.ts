@@ -32,7 +32,7 @@
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { benignSenseAt, negatedAt } from "./risk-negation.ts";
+import { benignSenseAt, listedAfter, negatedAt, negatedHeadAt } from "./risk-negation.ts";
 import { recordAssessedRisk } from "./ledger-filter.ts";
 import type { ArtifactStore } from "./artifacts.ts";
 import type { AnsweredSink } from "./answered.ts";
@@ -269,14 +269,16 @@ export function acceptedRiskMatches(text: string, alsoBenign?: (text: string, in
 		}
 		return excludedLevel === undefined ? line : "";
 	}).join("\n");
-	const out: Array<{ word: string; why: string }> = [];
-	for (const { re, why } of RISK_SIGNALS) {
-		for (const match of text.matchAll(new RegExp(re.source, "gi"))) {
-			const at = match.index ?? 0;
-			if (!negatedAt(text, at, match[0]) && !benignSenseAt(text, at, match[0]) && !alsoBenign?.(text, at, match[0])) out.push({ word: match[0], why });
-		}
+	const found = RISK_SIGNALS.flatMap(({ re, why }) => [...text.matchAll(new RegExp(re.source, "gi"))].map((match) => ({ at: match.index ?? 0, word: match[0], why })));
+	// Text order decides negation, so a list after a negated head shares it (cp-ukqv); output keeps signal order.
+	const negated = new Set<(typeof found)[number]>();
+	let head: (typeof found)[number] | undefined;
+	for (const match of [...found].sort((a, b) => a.at - b.at)) {
+		const listed = head !== undefined && listedAfter(text, head.at + head.word.length, match.at);
+		if (listed || negatedAt(text, match.at, match.word)) negated.add(match);
+		head = listed || negatedHeadAt(text, match.at) ? match : undefined;
 	}
-	return out;
+	return found.filter((match) => !negated.has(match) && !benignSenseAt(text, match.at, match.word) && !alsoBenign?.(text, match.at, match.word)).map(({ word, why }) => ({ word, why }));
 }
 
 /** Signals that splitting would be ceremony (ported: "do not split small jobs"). */

@@ -1,10 +1,12 @@
 /** cp-6fyl A2–A4 (I3–I6): the operator relay consumer against real outbox and ack files. */
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { BridgeRelay } from "../src/cp-bridge.ts";
+import { type DrainRecord, drainFile, formatDrain } from "../src/drain.ts";
+import { atomicWriteJson } from "../src/json-store.ts";
 import { OperatorRelayConsumer, RELAY_COALESCE_MAX, type RelayMessage, type RelayVerdict, recheckRelay } from "../src/operator-delivery.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
@@ -162,6 +164,45 @@ test("(g) a send outcome a tool result already returned is discarded 'returned i
 	c.instance.poke();
 	assert.equal(c.sent.length, 0);
 	assert.equal(h.acks.fold().discarded.get(id)?.reason, "returned in tool result");
+});
+
+test("(g2) cp-ukqv: a drain wake is rechecked against the live state/drain.json; a stale one arrives as one line with no stop or hold to act on", () => {
+	const dir = mkdtempSync(join(tmpdir(), "operator-delivery-drain-"));
+	const sends = parentSendFile(join(dir, "cp-parent.jsonl"));
+	const A = "2030-01-01T00:00:00.000Z";
+	const record = (started_at: string, state: DrainRecord["state"]): DrainRecord => ({ state, started_at, deadline: A, timeout_s: 5, survivors: ["cp-busy"], reported: true, jobs: [] });
+	const text = formatDrain(record(A, "timeout"), dir);
+	assert.match(text, /a restart now kills them/, "fixture: the live notice carries the restart wording");
+	const wake = relay({ text, drainId: `drain:${A}:timeout` });
+	const check = (label: string, expectStale: boolean) => {
+		const verdict = recheckRelay(dir, sends, wake);
+		assert.ok("deliver" in verdict, label);
+		if (!expectStale) return assert.deepEqual(verdict.deliver, wake, label);
+		assert.equal(verdict.deliver.stale, true, label);
+		assert.equal(verdict.deliver.text.split("\n").length, 1, `${label}: one line`);
+		assert.match(verdict.deliver.text, new RegExp(`^DRAIN: stale notice drain:${A}:timeout: .*nothing to act on\\.$`), label);
+		assert.doesNotMatch(verdict.deliver.text, /\b(stop|hold|defer|kill|restart|refused)/i, `${label}: no instruction`);
+	};
+
+	atomicWriteJson(drainFile(dir), record(A, "timeout"));
+	check("the live drain's own outcome", false);
+	atomicWriteJson(drainFile(dir), record("2030-01-01T01:00:00.000Z", "timeout"));
+	check("another drain's started_at", true);
+	atomicWriteJson(drainFile(dir), record(A, "drained"));
+	check("its state moved on", true);
+	rmSync(drainFile(dir));
+	check("no live drain.json (cancelled or restarted)", true);
+	const cancelled = relay({ text: "DRAIN: cancelled", drainId: `drain:${A}:cancelled` });
+	assert.deepEqual(recheckRelay(dir, sends, cancelled), { deliver: cancelled }, "a cancel is never stale");
+
+	// Round trip through the real outbox: the drain id survives, and the operator gets the one line.
+	const h = home();
+	h.outbox.enqueue(wake, "h");
+	const c = consumer(h, { recheck: (item) => recheckRelay(dir, sends, item) });
+	c.instance.poke();
+	assert.equal(c.sent.length, 1);
+	assert.match(c.sent[0]?.content ?? "", /DRAIN: stale notice/);
+	assert.doesNotMatch(c.sent[0]?.content ?? "", /a restart now kills them/);
 });
 
 test("(h) a 2 h old wake is delivered headline-only under stale — do not act, and still acked", () => {
