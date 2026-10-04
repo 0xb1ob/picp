@@ -324,6 +324,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			const { report, intake } = await commandPost().reconcile();
 			// jje.2: startup reconciliation resumes every held PR in its project's lane; outcomes are durable notices.
 			void commandPost().continuation.resume();
+			void commandPost().armedDispatches.release(); // unload-parent PR2: blockers that landed while down
 			if (report.changed === 0 && report.needs_intake.length === 0 && report.revivable.length === 0) return;
 			const summary = [summarizeReconcile(report), ...intake.map((result) => `  ${formatIntake(result)}`)].join("\n");
 			if (ctx.hasUI) {
