@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useContext, useEffect, useState } from "preact/hooks";
 import type { DecisionsResponse, OverviewResponse, BoardResponse, JobResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse } from "../src/viewer/api-types.ts";
 import { type Route, decisionsFallback, screenDataUrl } from "./routes.ts";
 import { useControl } from "./use-control.ts";
@@ -13,7 +13,7 @@ import { Reports } from "./screens/Reports.tsx";
 import { Schedules } from "./screens/Schedules.tsx";
 import { useRoute } from "./use-route.ts";
 import { useScreenData } from "./use-screen-data.ts";
-import { Shell } from "./components/Shell.tsx";
+import { Shell, ShellContext } from "./components/Shell.tsx";
 import { Overview } from "./screens/Overview.tsx";
 import { More } from "./screens/More.tsx";
 import { DependencyMap } from "./screens/DependencyMap.tsx";
@@ -30,7 +30,10 @@ export function DetailScreen({current:asked}: {current:Route}) {
  useEffect(() => { if (current.defaulted && resource.code === 403) setRefused(true); },[current.defaulted,resource.code]);
  const transcript=sessions && query.get("view") === "you" && query.get("transcript") === "1";
  const data=sessions ? resource.data as SessionsResponse | null : null;
- const control=useControl(transcript,data?.generated_at ?? null,data?.entries ?? []);
+ // Restart session lives in the shell's ⋮ menu: the composer stays held while that restart runs, and re-reads its token once the state moves.
+ const restarting=useContext(ShellContext).control?.restarting ?? null;
+ const own=useControl(transcript,`${data?.generated_at ?? ""}|${restarting?.state ?? ""}`,data?.entries ?? []);
+ const control=own && restarting ? {...own,restarting} : own;
  if (current.defaulted && resource.code === 403) return <p role="status">Loading</p>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
  return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;

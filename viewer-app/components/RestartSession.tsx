@@ -7,12 +7,17 @@ import { restartDisabled, restartInFlight, restartLine } from "../restart-contro
  * confirm naming the session file it resumes; disabled with the reason when the session cannot restart or must
  * wait. The page never stops or starts a process: the session stops itself and its cp-operator relaunches it.
  */
+/** RestartSession has something to show: a running session, or its own restart under way. */
+export const restartShown = (control: ControlView): boolean => {
+ const status = control.status;
+ return (!!status && !("error" in status) && status.running && !!status.token) || !!control.restarting;
+};
 export function RestartSession({control}: {control:ControlView}) {
  const [confirm,setConfirm] = useState(false);
  const status = control.status;
  const restarting = control.restarting ?? null;
  const running = !!status && !("error" in status) && status.running && !!status.token;
- if (!running && !restarting) return null;
+ if (!restartShown(control)) return null;
  const busy = restartInFlight(restarting);
  const disabled = restartDisabled(status);
  const file = (status && !("error" in status) ? status.session_file : null) ?? restarting?.session_file ?? "this session";

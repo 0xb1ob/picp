@@ -280,12 +280,15 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 - Dashboard-sent messages show as `Operator (dashboard)`, tagged `dashboard`, with
   their `dc-…` id and the ask a click answered.
 - **Restart session** (cp-aqxl; `components/RestartSession.tsx`, `use-restart.ts`,
-  `restart-control.ts`; docs/contracts.md §Dashboard control): shown above the composer and on the
-  Overview services line **while an operator session runs**, and while its own restart is under way;
-  offline, Start session / Resume last session own that space. Two taps: `Restart session` opens the
+  `restart-control.ts`; docs/contracts.md §Dashboard control): lives in the shell header's far-right
+  **⋮ More actions** menu (`components/MoreMenu.tsx`, after Search on phone; beside the clock on desktop; in
+  the ⋯ sheet on the mobile Sessions top bar, which replaces the shell header) — never inline in the composer or the Overview. The
+  button (44 px) shows only when the operator control view is available **and a session runs**, or while its own restart is under way
+  (a dot on the button, the status line inside the menu); Esc or a tap outside closes the menu, and a half-made confirm with it.
+  Offline, Start session / Resume last session own that space. Two taps: `Restart session` opens the
   confirm, `Tap again to restart · resumes <session file>` sends (`Cancel` backs out), so a stray tap
   never stops the session. The button is disabled, with the reason as its title and on the line
-  beside it, when no session is running, when the status carries no `restart` field ("reload the
+  beside it, when the status carries no `restart` field ("reload the
   page"), when the session cannot restart (`restart.supported` false: not started by a relaunching
   `cp-operator` — restart it once by hand: `/quit`, then `cp-operator -c` — or its bridge predates the
   feature), or while it must wait (`not now: <blockers>`: busy, queued messages, an unseen dashboard
@@ -299,7 +302,10 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   Refused/Failed is `role="alert"`. The composer is held from the POST until a final state. The page
   only posts and reads: it spawns, signals and locates no process. `.operator-restart*` in
   `components/control.css` wraps the button and the line (`overflow-wrap: anywhere`, `max-width:
-  100%`) at 390 px and keeps them on one row at 1440 px.
+  100%`) at 390 px; `.more-menu*` in `styles/shell.css` sizes the ⋮ button (44 px) and a popover that stays
+  inside the viewport (`max-width: calc(100vw - 16px)`, theme tokens for light and dark), stacking the
+  button and the line in one column. The shell owns one `useControl` for the menu (`ShellContext.control`);
+  the transcript composer stays held while that restart runs.
 - `use-control.ts` (route-level, in `app.tsx`) reads `/api/operator/control` on
   mount and on every refresh of the transcript, and sends with the
   `x-cp-control-token` header; `control.ts` holds the fetch and the one-line texts.

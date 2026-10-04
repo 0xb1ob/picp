@@ -11,6 +11,7 @@ import { OperatorComposer } from "../components/OperatorComposer.tsx";
 import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { ShellContext } from "../components/Shell.tsx";
+import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 
@@ -120,6 +121,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
     {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{files.map(s=><option key={s.id} value={s.id}>{s.id} · {time(s.at)}</option>)}</select>}
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
+    {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
    </div>
   </details>
  </header>;

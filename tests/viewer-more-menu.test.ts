@@ -1,0 +1,73 @@
+/** Restart session in the shell's ⋮ menu: shown only with a control view, Esc / outside tap close it, no inline copies remain. */
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { build } from "esbuild";
+import { parseHTML } from "linkedom";
+import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
+import type { ControlView } from "../viewer-app/control.ts";
+import type { Restarting } from "../viewer-app/restart-control.ts";
+import { REPO_ROOT } from "./harness/index.ts";
+
+const status = (over: Partial<ControlStatusResponse> = {}): ControlStatusResponse => ({ generated_at: "2026-01-01T08:30:00Z", enabled: true, running: true, reason: null, token: "t".repeat(64), busy: false, pending: false, session_file: "op.jsonl", recent: [], offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: true, herdr: false }, resume: { tmux: false, herdr: false }, restart: { supported: true, blockers: [], reason: null }, session_started_at: "2026-01-01T08:00:00.000Z", ...over });
+const restarting = (state: Restarting["state"]): Restarting => ({ state, reason: null, started_at: null, session_file: "op.jsonl" });
+const view = (s: ControlStatusResponse, r: Restarting | null = null, restart: () => void = () => {}): ControlView => ({ status: s, delivery: null, send: () => {}, restarting: r, restart });
+
+const built = await build({ stdin: { contents: 'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {MoreMenu} from "./viewer-app/components/MoreMenu.tsx"; export {act}; export const draw=(control)=>render(h(MoreMenu,{control})); export const mount=(root,control)=>domRender(h(MoreMenu,{control}),root); export const unmount=root=>domRender(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const { act, draw, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: (fn: () => unknown) => Promise<void>; draw: (control: ControlView | undefined) => string; mount: (root: unknown, control: ControlView) => void; unmount: (root: unknown) => void };
+
+test("⋮ menu: only with a control view and a session; labelled; a dot while a restart runs", () => {
+	assert.equal(draw(undefined), "", "no control view: no button");
+	assert.equal(draw(view(status({ running: false, token: null }))), "", "offline and not restarting: nothing to put in it");
+	const idle = draw(view(status()));
+	assert.match(idle, /<summary aria-label="More actions" title="More actions">/);
+	assert.doesNotMatch(idle, /more-menu-dot|Restart session/, "closed: no panel, no dot");
+	assert.match(draw(view(status(), restarting("stopping"))), /more-menu-dot/, "a compact dot, not a block");
+	assert.doesNotMatch(draw(view(status(), restarting("restarted"))), /more-menu-dot/);
+});
+
+test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc and an outside tap close it", async t => {
+	const { window, document } = parseHTML("<html><body><div id='root'></div><p id='elsewhere'>x</p></body></html>");
+	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
+	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+	t.after(() => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
+	const root = document.getElementById("root")!;
+	let restarts = 0;
+	await act(() => mount(root, view(status(), null, () => { restarts++; })));
+	const details = root.querySelector("details")!;
+	const toggle = async (open: boolean) => { details.open = open; await act(() => details.dispatchEvent(new window.Event("toggle"))); };
+	assert.equal(root.querySelector(".more-menu-panel"), null);
+	await toggle(true);
+	const item = () => root.querySelector<HTMLButtonElement>(".operator-restart-button")!;
+	assert.equal(item().textContent, "Restart session");
+	await act(() => item().click());
+	assert.match(item().textContent!, /^Tap again to restart/);
+	assert.equal(restarts, 0, "one tap sends nothing");
+	await act(() => item().click());
+	assert.equal(restarts, 1);
+
+	const key = (k: string) => { const e = new window.Event("keydown", { bubbles: true }); Object.defineProperty(e, "key", { value: k }); return e; };
+	await act(() => document.dispatchEvent(key("Enter")));
+	assert.equal(details.open, true, "other keys leave it open");
+	await act(() => document.dispatchEvent(key("Escape")));
+	assert.equal(details.open, false, "Esc closes");
+	await toggle(true);
+	await act(() => document.getElementById("elsewhere")!.dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
+	assert.equal(details.open, false, "an outside tap closes");
+	await toggle(true);
+	await act(() => item().dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
+	assert.equal(details.open, true, "a tap inside keeps it open");
+	await act(() => unmount(root));
+});
+
+test("Restart session no longer renders inline; the ⋮ button is 44px and the panel stays inside the viewport", () => {
+	for (const file of ["viewer-app/components/OperatorComposer.tsx", "viewer-app/screens/Overview.tsx"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT, file), "utf8"), /RestartSession/, file);
+	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/Shell.tsx"), "utf8"), /<MoreMenu control=\{control\}\/><\/div>\n/, "far right of the header, after Search");
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/styles/shell.css"), "utf8");
+	const rule = (selector: string) => new RegExp(`\\${selector} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+	assert.match(rule(".more-menu > summary"), /width: 44px; height: 44px/);
+	assert.match(rule(".more-menu-panel"), /max-width: calc\(100vw - 16px\)/);
+	assert.match(rule(".more-menu-panel"), /var\(--surface\)/, "theme tokens, so light and dark both hold");
+});
