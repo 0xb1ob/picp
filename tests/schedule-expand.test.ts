@@ -59,5 +59,6 @@ test("the cp-self-review skill documents the recipe the plan fixes", () => {
 	for (const part of [
 		"name: cp-self-review", "L1", "L2", "L3-L5", "L6", "S1", "xai/grok-4.7", "xhigh", "10800", "36", "NEW", "ALREADY COVERED", "PARTIALLY COVERED",
 		"[REDACTED]", "schedule:<id>", "expanded:", "window_hours", "never bare `br`", "no builds",
+		"Context usage", "Context & compaction", "compactAtTokens", "self_compact", "cp-parent-control.json",
 	]) assert.ok(text.includes(part), `SKILL.md mentions ${part}`);
 });

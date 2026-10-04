@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Self-review analyses context usage and compactions
+
+`skills/cp-self-review/SKILL.md` now asks every reader to look at context growth, compactions and rotations (parent, operator session, workers, daemon/bridge logs), requires a "Context usage" section in each reader report, and a "Context & compaction" section in the S1 synthesis. Model, thinking, window and redaction/report-only rules are unchanged. Migration: none; skill text only.
+
 ### Parent turn hygiene (unload-parent PR3)
 
 Sends absorbed into one parent span get one reply: the earliest landing keeps the text and every other send settles with `answered together with <ps-id> — see that reply` (`sharedReplyPointer` in `src/parent-outbox.ts`), so the main session no longer receives one identical copy per send. While a landed operator send is unanswered, the parent's wake-ups (all but `cp-answered`) are held in memory and released at the send's clean `turn_end`, at `agent_settled`, or after 90 s (`src/send-first-gate.ts`); held wake-ups are never acked or suppressed by the hold. Migration: none.
