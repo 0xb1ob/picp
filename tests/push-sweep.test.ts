@@ -15,7 +15,7 @@ import { decisions } from "../src/viewer/overview-decisions.ts";
 import { pushDeliveriesFile, subscriptionFile, subscriptionId } from "../src/viewer/push-files.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { type TestDevice, testDevice } from "./harness/push.ts";
-import { LAYOUT } from "../src/contracts.ts";
+import { checkpointAwaitingId, LAYOUT } from "../src/contracts.ts";
 
 const OPTIONS = [
 	{ id: "approve", label: "Approve", consequence: "go", cost: "none" },
@@ -314,18 +314,24 @@ test("budget and merge refused never push; every push that does lands on a desti
 	];
 	// Operator-only: an ask card, a final fix (operator quote), a merge ask, and the no-session downtime alert.
 	const ask = b.asks.open({ ...ASK, question: "Which base?" });
-	b.finalFix.request({ jobId: "cp-demo1", scope: "abcdef123456", prUrl: "https://github.com/o/r/pull/1", question: "One final fix?", evidence: [] });
+	b.finalFix.request({ jobId: "cp-demo2", scope: "abcdef123456", prUrl: "https://github.com/o/r/pull/2", question: "One final fix?", evidence: [] });
 	const merge = await b.awaiting.declare({ type: "approval", decision: "Merge PR #12 for cp-demo1?", why: "w", blocks: "b", job_id: "cp-demo1" });
 	const down = await b.escalations.raise(raiseInput("Down?", { kind: "service_health", job_ids: ["cp-service-health"] }));
 	await b.sweep();
 	assert.equal(b.calls.length, 4);
 	const pushed = b.ledger()?.items ?? [];
 	assert.equal(pushed.some((item) => delegated.some((raised) => raised.id === item.id)), false);
+	assert.deepEqual(pushed.map((item) => item.id).sort(), [ask.id, checkpointAwaitingId("cp-demo2", "final_fix", "abcdef123456"), merge.id, down.id].sort());
+	// The dashboard has no card kind of its own for a merge ask or a final fix: the main session opens an ask card for the
+	// job, and that card (never the store row) is the destination. Opened after the sweep, so it adds no push here.
+	b.asks.open({ ...ASK, question: "Merge PR #12 for cp-demo1?", job_ids: ["cp-demo1"] });
+	b.asks.open({ ...ASK, question: "One final fix for cp-demo2?", job_ids: ["cp-demo2"] });
 	const dashboard = decisions({ stateDir: b.stateDir } as ViewerState, Date.now());
+	const cardFor = (job: string): boolean => dashboard.awaiting.items.some((item) => item.job_ids.includes(job));
 	const destination: Record<string, boolean> = {
 		ask: dashboard.awaiting.items.some((item) => item.id === ask.id),
-		merge_ask: b.awaiting.list("open").some((item) => item.id === merge.id),
-		checkpoint: b.finalFix.listPending().some((item) => item.job_id === "cp-demo1"),
+		merge_ask: cardFor("cp-demo1"),
+		checkpoint: cardFor("cp-demo2"),
 		escalation: dashboard.parent_questions.some((item) => item.id === down.id),
 	};
 	assert.deepEqual(pushed.map((item) => item.source).sort(), Object.keys(destination).sort());
@@ -365,6 +371,26 @@ test("a ledger from before the rule change baselines what its sources hold now; 
 	b.asks.open({ ...ASK, question: "New ask?" });
 	await b.sweep();
 	assert.equal(b.calls.length, 1);
+});
+
+test("pending legacy records for removed push kinds settle skipped without a fetch", async (t) => {
+	const b = bench(t);
+	b.subscribe(FCM);
+	const legacy = [
+		{ id: "md-old123", source: "mandate", kind: "mission_end" },
+		{ id: "es-aaaaaa", source: "escalation", kind: "risk_high_irreversible" },
+		{ id: "es-bbbbbb", source: "escalation", kind: "budget_exhausted" },
+		{ id: "es-cccccc", source: "escalation", kind: "merge_refused" },
+	].map((item) => ({ ...item, status: "pending", attempts: 0, delivered: 0, created_at: "2026-09-26T00:00:00Z" }));
+	writeFileSync(pushDeliveriesFile(b.stateDir), JSON.stringify({ schema_version: 1, baseline_at: "2026-09-26T00:00:00Z", rule_baseline_at: "2026-09-26T00:00:00Z", items: legacy }));
+	// Still open under their old rule; none is a candidate any more.
+	await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" }));
+	await b.escalations.raise(raiseInput("Merge refused?", { kind: "merge_refused" }));
+	await b.sweep();
+	assert.equal(b.calls.length, 0);
+	const items = b.ledger()?.items.filter((item) => legacy.some((old) => old.id === item.id)) ?? [];
+	assert.equal(items.length, 4);
+	for (const item of items) assert.deepEqual([item.status, item.last_error], ["skipped", "no longer open before delivery"]);
 });
 
 test("PUSH_RULE names the watchdog's pushes (cp-daemon P3), which never go through this sweep's ledger", () => {
