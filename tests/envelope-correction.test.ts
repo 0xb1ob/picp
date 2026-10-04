@@ -455,11 +455,13 @@ test("a ship envelope naming an artifact that is not there is repairable at the 
 	// cp-o77y filed exactly this shape (a ship envelope naming `docs/evals.md`,
 	// which was not there) and nothing noticed until the parent, by which time
 	// the slot was shut. The worker can still fix it here.
-	const errors = localChecks(shipEnvelope({ artifact_path: missing }), context);
+	// The head_sha rule has its own tests; this one is about the artifact, so HEAD is stubbed to match.
+	const head = () => ({ sha: "0".repeat(40) });
+	const errors = localChecks(shipEnvelope({ artifact_path: missing }), context, head);
 	assert.equal(errors.length, 1);
 	assert.match(errors[0] ?? "", /docs\/evals\.md/);
 	assert.match(errors[0] ?? "", /does not exist/);
 
 	// A ship envelope that names no artifact is unaffected.
-	assert.deepEqual(localChecks(shipEnvelope(), context), []);
+	assert.deepEqual(localChecks(shipEnvelope(), context, head), []);
 });
