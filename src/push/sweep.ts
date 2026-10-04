@@ -1,12 +1,10 @@
 /**
- * The Web Push sweep (Pier 1.1): push the operator for exactly two things (`PUSH_RULE`) and nothing else —
- *  - **mandate complete**: once per mandate id, when its mission_end escalation is raised (the one trigger; answered
- *    or not, it is informational and asks nothing);
- *  - **decision needed**: something waits on the human specifically — an open operator ask (`state/operator/asks.jsonl`,
- *    written by the main session), a human-only escalation (`PUSH_ESCALATION_KINDS`), a pending final_fix checkpoint,
- *    or an open merge-ask row (per-head human authorization).
- * Kinds the main session may decide under delegation (plan_approval, conflicting_acceptance, …) reach the human only
- * through an operator ask.
+ * The Web Push sweep (Pier 1.1): push the operator only when something waits on the human (`PUSH_RULE`), never for an
+ * informational event (a mandate completing, a risk:high flag the main session decides under delegation):
+ *  - an open operator ask (`state/operator/asks.jsonl`, written by the main session; risk that needs the human arrives here),
+ *  - a human-only escalation (`PUSH_ESCALATION_KINDS`: budget, merge refused, service health),
+ *  - a pending final_fix checkpoint, or an open merge-ask row (per-head human authorization).
+ * Every other kind reaches the human only through an operator ask.
  *
  * It reads the durable ask records the raise paths already write rather than hooking a raise path: the record is the
  * queue, so a crash between a raise and a push loses nothing, code raised through a fresh store is seen too, and the
@@ -27,10 +25,10 @@ import { readVapidKeys, type VapidKeys } from "./keys.ts";
 import { deliver, encryptPayload, type PushFetch, type PushOutcome, vapidAuthorization } from "./webpush.ts";
 
 /** Escalation kinds only the operator's own words can close, even while the main session is down: pushed directly. */
-export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["risk_high_irreversible", "budget_exhausted", "merge_refused", "service_health"];
+export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["budget_exhausted", "merge_refused", "service_health"];
 /** The active rule, one line, for `/doctor` and `/api/push`. */
 export const PUSH_RULE =
-	"pushes only: mandate complete (on mission end), decision needed (open asks, risk:high, budget, merge refused, final fix, merge asks, service health); health (cp-health, once per failure/recovery)";
+	"pushes only actionable: open asks, budget, merge refused, final fix, merge asks, service health; health (cp-health, once per failure/recovery)";
 export const PUSH_MAX_RECORDS_PER_SWEEP = 10;
 export const PUSH_HEADLINE_MAX_CHARS = 100;
 const PUSH_PROJECT_MAX_CHARS = 80;
@@ -53,27 +51,13 @@ export interface PushCandidate {
 export interface PushCandidateInput {
 	/** Open escalations. */
 	escalations: readonly Escalation[];
-	/** Every mission_end escalation, whatever its status. */
-	missionEnds?: readonly Escalation[];
 	awaiting: readonly AwaitingItem[];
 	asks?: readonly OperatorAsk[];
 	finalFix?: readonly Checkpoint[];
 }
 
-/** `raiseMissionEnd` words it `<id>: every job it names is closed — landed N, dropped M, cost $X`. */
-const missionSummary = (question: string): string => {
-	const at = question.indexOf(" — ");
-	return at < 0 ? question : question.slice(at + 3).replace(/\bcost \$/, "$");
-};
-
 export function pushCandidates(input: PushCandidateInput): PushCandidate[] {
 	const out: PushCandidate[] = [];
-	const mandates = new Set<string>();
-	for (const item of [...(input.missionEnds ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
-		if (item.kind !== "mission_end" || !item.mandate_id || mandates.has(item.mandate_id)) continue;
-		mandates.add(item.mandate_id);
-		out.push({ id: item.mandate_id, source: "mandate", kind: "mission_end", text: `${item.mandate_id} complete: ${missionSummary(item.question)}`, job_ids: item.job_ids, mandate_id: item.mandate_id });
-	}
 	const pushedEscalations = new Set<string>();
 	for (const item of input.escalations) {
 		if (item.status !== "open" || !PUSH_ESCALATION_KINDS.includes(item.kind)) continue;
@@ -114,7 +98,7 @@ const clip = (text: string, max: number): string => {
 export function pushPayload(candidate: PushCandidate, projects: readonly string[]): string {
 	const project = clip(projects.join(", "), PUSH_PROJECT_MAX_CHARS) || UNKNOWN_PROJECT;
 	const detail = candidate.source === "merge_ask" ? "merge ask" : candidate.source === "ask" ? "" : candidate.kind.replace(/_/g, " ");
-	const kind = candidate.source === "mandate" ? "mandate complete" : detail ? `decision needed: ${detail}` : "decision needed";
+	const kind = detail ? `decision needed: ${detail}` : "decision needed";
 	return JSON.stringify({ project, kind, headline: clip(candidate.text, PUSH_HEADLINE_MAX_CHARS) });
 }
 
@@ -123,8 +107,6 @@ export interface PushSweepPorts {
 	/** Default: the `data/` beside `stateDir`. */
 	dataDir?: string;
 	openEscalations(): readonly Escalation[];
-	/** Every mission_end escalation, whatever its status: the mandate-complete trigger. */
-	missionEnds(): readonly Escalation[];
 	openAwaiting(): readonly AwaitingItem[];
 	/** Pending final_fix checkpoints. */
 	pendingFinalFix(): readonly Checkpoint[];
@@ -166,7 +148,6 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 	try {
 		candidates = pushCandidates({
 			escalations: ports.openEscalations(),
-			missionEnds: ports.missionEnds(),
 			awaiting: ports.openAwaiting(),
 			asks: ports.openAsks ? ports.openAsks() : new OperatorAsks(join(ports.stateDir, "operator", "asks.jsonl")).open(),
 			finalFix: ports.pendingFinalFix(),

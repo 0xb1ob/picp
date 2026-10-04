@@ -218,6 +218,11 @@ first (iPhone/iPad: Share → Add to Home Screen; Turn on appears only when
 browser, not set up on this home, or blocked in browser settings. It also shows
 the device count and pushes undelivered in the last 24 h from `/api/push`.
 
+Pushes are actionable-only (`PUSH_RULE`): open asks, budget, merge refused, final fix, merge asks and service health.
+A completed mandate (`mission_end`) and `risk_high_irreversible` never push; a risk that needs the human appears as an
+ask. Asks are the Awaiting you cards; the escalation kinds show as open questions under Decisions "Being handled".
+The separate cp-health failure push has no card: the Overview `health failing: <check>` line shows the same failure.
+
 - `/manifest.webmanifest`: `display: standalone`, `start_url: /#awaiting`, theme
   and background `--background`; icons at 192/512 px and a 180 px apple-touch-icon
   are drawn at request time from the Awaiting-you glyph in `--amber`
