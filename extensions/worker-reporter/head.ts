@@ -5,7 +5,7 @@ import type { Envelope } from "../../src/contracts.ts";
 export type ObservedHead = { sha: string } | { error: string };
 
 /**
- * cp-0von Rank 5: a ship/done report must name the commit it delivers, and that
+ * A ship/done report must name the commit it delivers, and that
  * commit must be HEAD of the worker's own worktree. Worker-side only (the
  * reporter's repair loop) — `validateEnvelope` and intake stay lenient so
  * envelopes filed before this rule are never re-judged on settle or restart.
