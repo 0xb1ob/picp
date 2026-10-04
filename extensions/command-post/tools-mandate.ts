@@ -413,7 +413,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		promptGuidelines: [
 			"Call cp_decide with target (checkpoint id, awaiting id, or job id + kind), decision, and basis {mandate, clause} or {operator_quote}.",
 			"A mandate basis is re-evaluated; a stale or revoked grant is refused. risk:high and merge need operator text unless the mandate explicitly allows them.",
-			"An operator_quote is copied verbatim from a user message in this session; a short reply like 'yes' or 'approve' is enough — never ask the operator to retype a sentence.",
+			"An operator_quote is copied verbatim from a user message in this session; a short reply like 'yes' or 'approve' is enough — never ask the operator to retype a sentence. For an escalation (es-…), the latest message containing the quote must also name that escalation id.",
 		],
 		parameters: Type.Object({
 			target: Type.String({ description: "checkpoint id (aw-checkpoint-…), awaiting id, or job id" }),

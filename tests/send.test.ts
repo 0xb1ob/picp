@@ -17,7 +17,7 @@ import { CheckpointStore } from "../src/checkpoint.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, SCHEMA_VERSION } from "../src/contracts.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
-import { copyOriginalTask } from "../src/gate.ts";
+import { copyOriginalTask, decideGate } from "../src/gate.ts";
 import { EnvelopeIntake } from "../src/intake.ts";
 import { atomicWriteJson } from "../src/json-store.ts";
 import { MandateStore } from "../src/mandate.ts";
@@ -1014,6 +1014,32 @@ test("cp_send refuses a conversation revise once the plan checkpoint is approved
 			return true;
 		},
 	);
+});
+
+test("N4: cp_send refuses a revise after a veto-forced gate escalate, naming the gate file; other text passes the guard", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const jobId = "cp-veto-research";
+	const vetoed = decideGate({
+		jobId,
+		attempt: 1,
+		prior: { priorRevise: false, priorCause: null },
+		model: "m",
+		review: { job_id: jobId, verdict: "revise", flags: { destructive_scope: true, scope_growth: false, blocking_unknowns: false }, reasons: ["drops a table"], revisions: ["keep it"] },
+	});
+	atomicWriteJson(join(home.path, paths.gateFile(jobId, 1)), vetoed);
+	const sender = new Sender({
+		fleet: new FleetStore({ home: home.path }),
+		manager: new WorkerManager({ home: home.path, workerReporterPath: "unused" }),
+		runs: new RunRegistry(home.path),
+		home: home.path,
+	});
+	await assert.rejects(() => sender.send({ jobId, message: "Revise ONLY 4b" }), (error: SendError) => {
+		assert.ok(error.message.includes(paths.gateFile(jobId, 1)), error.message);
+		return true;
+	});
+	// No fleet record here, so a message without `revise` reaches the next check instead of this guard.
+	await assert.rejects(() => sender.send({ jobId, message: "add a citation" }), /no fleet record/);
 });
 
 test("conversation revise: delivered, recorded, and refused a second time until re-gated", { timeout: 120_000 }, async (t) => {

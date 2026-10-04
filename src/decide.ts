@@ -163,7 +163,7 @@ function storeFor(deps: DecideDeps, kind: CheckpointKind): CheckpointStore {
  * before matching, so they never reach a decision. A short reply ("yes",
  * "approve") is valid: it must still occur verbatim in a user message.
  */
-export function requireOperatorQuote(quote: string, deps: Pick<DecideDeps, "operatorTexts">): { decidedBy: "operator-quote" | "operator-delegated"; stored: { operator_quote: string }; provenance?: DelegationProvenance } {
+export function requireOperatorQuote(quote: string, deps: Pick<DecideDeps, "operatorTexts">): { decidedBy: "operator-quote" | "operator-delegated"; stored: { operator_quote: string }; provenance?: DelegationProvenance; source: string } {
 	const clean = stripSendMarkers(quote);
 	if (clean.length === 0) {
 		throw new DecideError("quote is empty");
@@ -175,6 +175,7 @@ export function requireOperatorQuote(quote: string, deps: Pick<DecideDeps, "oper
 		decidedBy: source.provenance ? "operator-delegated" : "operator-quote",
 		stored: { operator_quote: clean },
 		...(source.provenance ? { provenance: source.provenance } : {}),
+		source: source.text,
 	};
 }
 
@@ -245,6 +246,10 @@ async function decideEscalation(id: string, input: DecideInput, deps: DecideDeps
 		throw new DecideError(`${id} is an escalation: answer it with an operator quote`);
 	}
 	const verified = requireOperatorQuote(input.basis.operator_quote, deps);
+	// N3: the message the quote came from must name this escalation; a mandate brief or another id's answer is not consent to it.
+	if (!verified.source.includes(id)) {
+		throw new DecideError(`${id}: the operator message containing that quote does not name ${id}; relay the escalation and quote the operator's reply to it`);
+	}
 	if (!deps.answerEscalation) {
 		throw new DecideError(`${id} is an escalation: wire answerEscalation on the writers`);
 	}

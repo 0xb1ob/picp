@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { AwaitingStore, deriveFromEscalations, type ResolvedAwaitingItem } from "../src/awaiting.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { type DecisionBasis, type DelegationProvenance, WORKER_FORBIDDEN_TOOLS, isoTimestamp } from "../src/contracts.ts";
-import { decide, DecideError, operatorTextsFromEntries } from "../src/decide.ts";
+import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
+import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { frameBatch, ParentSendOutbox, sendMarker } from "../src/parent-outbox.ts";
@@ -74,14 +75,16 @@ test("delegated sends record provenance for checkpoints, awaiting rows and linke
 	const escalations = new EscalationStore({ home: home.path, checkpoints: () => ship, awaiting: () => awaiting });
 	ship.request({ jobId: "cp-linked", question: "Approve linked?" });
 	const raised = await escalations.raise({ job_ids: ["cp-linked"], kind: "plan_approval", question: "Approve linked?", options: [{ id: "approve", label: "approve", consequence: "ship", cost: "none" }], recommended: "approve", checkpoint_job_id: "cp-linked", awaiting_id: linkedRow.id });
-	const escalationDeps = { ...bundle, items: deriveFromEscalations(escalations.open()), answerEscalation: (id: string, answer: string, by: string, basis: DecisionBasis, provenance?: DelegationProvenance) => escalations.answer(id, { answer, by, basis, provenance }) };
+	const linked = outbox.enqueue(`Approve the delegated plan for ${raised.id}.`, { delegated: true, delegation_rule: "approvals: operator standing delegation" });
+	const escalationDeps = { ...bundle, operatorTexts: [frameBatch([human, entry]), frameBatch([linked])], items: deriveFromEscalations(escalations.open()), answerEscalation: (id: string, answer: string, by: string, basis: DecisionBasis, provenance?: DelegationProvenance) => escalations.answer(id, { answer, by, basis, provenance }) };
 	await assert.rejects(() => decide({ target: raised.id, decision: "approve", basis: { operator_quote: "tampered approval" } }, escalationDeps), /quote not found/);
-	await decide({ target: raised.id, decision: "approve", basis: { operator_quote: entry.text } }, escalationDeps);
+	await assert.rejects(() => decide({ target: raised.id, decision: "approve", basis: { operator_quote: human.text } }, escalationDeps), /does not name/);
+	await decide({ target: raised.id, decision: "approve", basis: { operator_quote: linked.text } }, escalationDeps);
 	assert.equal(escalations.get(raised.id)?.answered_by, "operator-delegated");
 	assert.equal(escalations.get(raised.id)?.delegation_rule, provenance.delegation_rule);
-	assert.equal(escalations.get(raised.id)?.send_id, entry.id);
-	assert.equal(ship.get("cp-linked")?.send_id, entry.id);
-	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.send_id, entry.id);
+	assert.equal(escalations.get(raised.id)?.send_id, linked.id);
+	assert.equal(ship.get("cp-linked")?.send_id, linked.id);
+	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.send_id, linked.id);
 	assert.equal(awaiting.read().items.find((item) => item.id === linkedRow.id)?.answered_by, "operator-delegated");
 });
 
@@ -320,7 +323,7 @@ test("close dismiss from a user message answers the named escalation", async (t)
 	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: [] });
 	const { bundle } = deps(home.path, {
 		items: deriveFromEscalations(escalations.open()),
-		operatorTexts: ["close dismiss"],
+		operatorTexts: [`close dismiss ${raised.id}`],
 		answerEscalation: async (id, answer, by) => {
 			await escalations.answer(id, { answer, by });
 		},
@@ -482,29 +485,82 @@ test("an expired grant decides diff and merge for an already-dispatched job, nev
 // pi-command-post-autonomy-programme-cur.2.4: a risk_high_irreversible
 // escalation is answered directly, never through the checkpoint/awaiting path.
 
-test("cp_decide answers a risk_high escalation with an operator quote", async (t) => {
+test("cp_decide answers a risk_high escalation only from an operator message that names it (N3)", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const escalations = new EscalationStore({ home: home.path });
 	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: ["risk high: the task names production"] });
 	const items = deriveFromEscalations(escalations.open());
 	const answered: [string, string, string][] = [];
+	// The mandate brief: operator words, but not an answer to this escalation.
+	const brief = "Please approve the plan. Ship it today.";
+	const texts = [brief];
 	const { bundle } = deps(home.path, {
 		items,
+		operatorTexts: texts,
 		answerEscalation: async (id, answer, by) => {
 			answered.push([id, answer, by]);
 			await escalations.answer(id, { answer, by });
 		},
 	});
-	const result = await decide(
-		{ target: raised.id, decision: "approve", basis: { operator_quote: "Please approve the plan. Ship it today." } },
-		bundle,
-	);
+	const call = () => decide({ target: raised.id, decision: "approve", basis: { operator_quote: brief } }, bundle);
+	await assert.rejects(call, new RegExp(`does not name ${raised.id}`));
+	assert.equal(escalations.get(raised.id)?.status, "open", "a refused quote leaves the escalation open");
+	assert.deepEqual(answered, []);
+	// The latest message holding the quote wins; one naming a different id fails closed.
+	const other = raised.id === "es-000000" ? "es-ffffff" : "es-000000";
+	texts.push(`${other}: ${brief}`);
+	await assert.rejects(call, /does not name/);
+	assert.equal(escalations.get(raised.id)?.status, "open");
+	texts.push(`${raised.id}: ${brief}`);
+	const result = await call();
 	assert.equal(result.decided_by, "operator-quote");
+	assert.deepEqual(result.basis, { operator_quote: brief }, "the quote itself need not contain the id");
 	assert.match(result.text, new RegExp(`${raised.id} answered: approve by operator-quote`));
 	assert.deepEqual(answered, [[raised.id, "approve", "operator-quote"]]);
 	assert.equal(escalations.get(raised.id)?.status, "answered");
 	assert.equal(escalations.get(raised.id)?.answer, "approve");
+});
+
+test("N3 (a): a delegated send that names the escalation answers it with operator words that carry no id", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const escalations = new EscalationStore({ home: home.path });
+	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: [] });
+	const outbox = new ParentSendOutbox({ file: `${home.path}/sends.json` });
+	const rule = "approvals: operator standing delegation";
+	// The operator's own words (the mandate brief) first, then the main session's delegated answer naming the id.
+	const brief = outbox.enqueue("build all except N12");
+	const relayed = outbox.enqueue(`Operator answer to ${raised.id}, verbatim: "build all except N12"`, { delegated: true, delegation_rule: rule });
+	const { bundle } = deps(home.path, {
+		items: deriveFromEscalations(escalations.open()),
+		operatorTexts: [frameBatch([brief]), frameBatch([relayed])],
+		answerEscalation: (id, answer, by, basis, provenance) => escalations.answer(id, { answer, by, basis, provenance }),
+	});
+	const quote = "build all except N12";
+	assert.ok(!quote.includes("es-"), "the quoted operator words contain no escalation id");
+	const result = await decide({ target: raised.id, decision: "approve", basis: { operator_quote: quote } }, bundle);
+	assert.equal(result.decided_by, "operator-delegated");
+	assert.deepEqual(result.basis, { operator_quote: quote });
+	assert.equal(escalations.get(raised.id)?.status, "answered");
+	assert.equal(escalations.get(raised.id)?.send_id, relayed.id, "attributed to the send that named the id");
+	assert.equal(escalations.get(raised.id)?.delegation_rule, rule);
+});
+
+test("N3 (b): risk pre-approval and checkpoint quotes need no escalation id", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	// cp_mandate preapprove_risk (and issue's risk_preapproval) call requireOperatorQuote, never decideEscalation.
+	const verified = requireOperatorQuote("build 0-3", { operatorTexts: ["build 0-3"] });
+	assert.equal(verified.source, "build 0-3");
+	const record = preapprovalRecord(verified, ["cp-a"], isoTimestamp());
+	assert.equal(record.operator_quote, "build 0-3");
+	assert.equal(record.decided_by, "operator-quote");
+	// A plan checkpoint answered by quote is not an escalation either: no id check.
+	const { ship, bundle } = deps(home.path, { operatorTexts: ["build 0-3"] });
+	ship.request({ jobId: "cp-ship1", question: "Authorize implementation?" });
+	const decided = await decide({ target: "cp-ship1", decision: "approve", basis: { operator_quote: "build 0-3" } }, bundle);
+	assert.equal(decided.checkpoint?.decision, "approved");
 });
 
 test("cp_decide refuses a mandate basis for an escalation, and a forged quote", async (t) => {
@@ -543,7 +599,7 @@ async function missionEndBench(home: string) {
 	const bundle = (): Parameters<typeof decide>[1] => ({
 		...base.bundle,
 		items: deriveFromEscalations(escalations.open()),
-		operatorTexts: ["close", "extend"],
+		operatorTexts: [`close ${raised.id}`, `extend ${raised.id}`],
 		answerEscalation: (id, answer, by) => escalations.answer(id, { answer, by }),
 		getEscalation: (id) => escalations.get(id),
 	});
