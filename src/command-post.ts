@@ -119,9 +119,7 @@ import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./m
 import { Preflight } from "./preflight.ts";
 import { ProjectRegistry, projectDirResolver } from "./projects.ts";
 import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
-import { ALWAYS_AVAILABLE, isAllowed, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
-import { loadSuggestConfig } from "./suggest.ts";
-import { SUGGEST_DEFAULT_MODEL, type SuggestConfig } from "./contracts.ts";
+import { ALWAYS_AVAILABLE, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { type Asker, QuestionRelay } from "./questions.ts";
 import { type PlanTarget, type ResolvePlanOptions, resolvePlanTarget } from "./plan-view.ts";
 import { BoundedRecovery } from "./recovery.ts";
@@ -1076,27 +1074,6 @@ export class CommandPost {
 	probe(): ModelProbe {
 		const registry = this.#registry();
 		return registry ? registryProbe(registry) : ALWAYS_AVAILABLE;
-	}
-
-	/** `data/suggest.json`, re-read per call (cp-sr5's rule). Never cached. */
-	suggestConfig(): SuggestConfig {
-		return loadSuggestConfig(this.home);
-	}
-
-	/**
-	 * The model cp-7t7's suggestion generator may use, or `undefined` when
-	 * suggestions are off, the model is not allowlisted, or the probe refuses it.
-	 * Resolution only — the actual one-shot call lives in
-	 * `extensions/command-post/suggest-model.ts`, which is the only place that
-	 * needs `ModelRegistry.complete`.
-	 */
-	suggestionModel(): string | undefined {
-		const config = this.suggestConfig();
-		if (config.enabled === false) return undefined;
-		const modelRef = config.model ?? SUGGEST_DEFAULT_MODEL;
-		if (!isAllowed(loadRoutingConfig(this.home), modelRef)) return undefined;
-		if (!this.probe().isAvailable(modelRef)) return undefined;
-		return modelRef;
 	}
 
 	dispatcher(): Dispatcher {

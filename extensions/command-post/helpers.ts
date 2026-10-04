@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ResolvedAwaitingItem } from "../../src/awaiting.ts";
 import type { CommandPost } from "../../src/command-post.ts";
-import { configureLayout, DECISION_PANE_MIN_ROWS, DECISION_PANE_RESERVED_ROWS, type DiffVerdict, DiffVerdictSchema, type Escalation, type Runtime, validate } from "../../src/contracts.ts";
+import { configureLayout, type DiffVerdict, DiffVerdictSchema, type Escalation, type Runtime, validate } from "../../src/contracts.ts";
 import { type DiffReviewResult, formatDiffReview } from "../../src/diff-review.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { ModeError, resolveRuntime } from "../../src/mode.ts";
@@ -529,68 +529,8 @@ export function sourceFailureRecorder(
 }
 
 // ---------------------------------------------------------------------------
-// The decision details pane, as wiring (pi-command-post-4mn)
+// The /cp-awaiting listing text
 // ---------------------------------------------------------------------------
-
-/** The slice of the command post the pane reads. Structural, so a test supplies its own. */
-export interface DecisionPanePost {
-	decisionContext(item: ResolvedAwaitingItem, options?: { columns?: number; maxRows?: number }): { lines: string[] };
-}
-
-/** The terminal the pane has to share with the decision it is context for. */
-export interface PaneScreen {
-	columns?: number;
-	rows?: number;
-}
-
-/**
- * The pane's budget on **this** terminal (pi-command-post-4mn, real-TUI round).
- *
- * A bounded pane is not a small pane: on a 40x24 terminal a 20-line pane wrapped
- * to more rows than the screen had, and the overlay's answer rows went off the
- * bottom — navigable, but invisible. So the pane is budgeted in **screen rows**
- * whenever the terminal size is known (`process.stdout` in the pi process), with
- * `DECISION_PANE_RESERVED_ROWS` kept for the question, the answer rows and the
- * legend. On a terminal that reports nothing, the line budget alone applies,
- * exactly as before.
- */
-export function decisionPaneBudget(screen: PaneScreen): { columns?: number; maxRows?: number } {
-	const columns = typeof screen.columns === "number" && screen.columns > 0 ? screen.columns : undefined;
-	const rows = typeof screen.rows === "number" && screen.rows > 0 ? screen.rows : undefined;
-	if (columns === undefined || rows === undefined) return {};
-	return { columns, maxRows: Math.max(DECISION_PANE_MIN_ROWS, rows - DECISION_PANE_RESERVED_ROWS) };
-}
-
-/**
- * The production `context` dependency both Awaiting-you loops are given
- * (pi-command-post-4mn): the overlay questionnaire and the plain dialogs it
- * degrades to. Memoised per run, so a redraw — including the plan-view round
- * trip — re-reads no files, and a home that cannot answer degrades to an empty
- * pane rather than taking the decision down.
- *
- * Exported so the wiring is *exercised* by a test at this path rather than
- * eyeballed inside the closure below (PR #151 review, finding 2).
- */
-export function decisionPaneFactory(
-	post: DecisionPanePost,
-	options: { screen?: () => PaneScreen } = {},
-): (item: ResolvedAwaitingItem) => readonly string[] {
-	const panes = new Map<string, readonly string[]>();
-	const screen = options.screen ?? (() => ({ columns: process.stdout.columns, rows: process.stdout.rows }));
-	return (item: ResolvedAwaitingItem): readonly string[] => {
-		const cached = panes.get(item.id);
-		if (cached) return cached;
-		let lines: readonly string[] = [];
-		try {
-			lines = post.decisionContext(item, decisionPaneBudget(screen())).lines;
-		} catch {
-			// A pane is context, never the decision: an unreadable home shows none.
-			lines = [];
-		}
-		panes.set(item.id, lines);
-		return lines;
-	};
-}
 
 /** How to read the whole record when the pane is only its bounded head. */
 export const DECIDE_INSPECT_HINT =

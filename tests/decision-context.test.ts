@@ -1,16 +1,11 @@
 /**
  * pi-command-post-4mn — the decision details pane.
  *
- * Acceptance, in one sentence: a "review found 3 issues" decision displays all
- * three actionable findings and a clearly labelled recommendation *before* the
- * operator submits an answer. The first test asserts exactly that, through the
- * question the overlay actually renders — not through the builder's internals.
- *
- * Everything else here is the safety envelope around that: the pane is tied to
- * the job, the head and the attempt it describes (stale evidence is labelled,
- * never shown as current), credential-shaped values are redacted, no artifact
- * or diff body can reach it, and the option list — what a stray Enter lands on
- * — is byte-identical with and without a pane.
+ * Acceptance, in one sentence: a "review found 3 issues" decision's context shows all
+ * three actionable findings and a clearly labelled recommendation. Everything else
+ * here is the safety envelope around that: the pane is tied to the job, the head and
+ * the attempt it describes (stale evidence is labelled, never shown as current),
+ * credential-shaped values are redacted, and no artifact or diff body can reach it.
  */
 
 import assert from "node:assert/strict";
@@ -25,11 +20,8 @@ import {
 	EMPTY_DECISION_CONTEXT,
 	readDecisionEvidence,
 } from "../src/decision-context.ts";
-import { answerMenuOptions, driveAwaitingDialog } from "../src/awaiting-dialog.ts";
-import { buildAwaitingQuestions, questionOptions } from "../src/awaiting-questionnaire.ts";
 import type { ResolvedAwaitingItem } from "../src/awaiting.ts";
 import {
-	AWAITING_SKIP_OPTION,
 	type Checkpoint,
 	DECISION_CONTEXT_LINE_MAX_CHARS,
 	DECISION_CONTEXT_MAX_LINES,
@@ -119,63 +111,8 @@ test("acceptance: a 'review found 3 issues' decision shows all three findings an
 	);
 	assert.deepEqual(context.stale, []);
 	assert.ok(context.sources.includes("review-2"));
-
-	// …and it is on screen *before* submission: the pane is part of the question
-	// the overlay renders, not something the operator has to go and find.
-	const built = buildAwaitingQuestions({ items: [SHIP_ITEM], context: () => context.lines });
-	const question = built.questions[0];
-	assert.ok(question, "the item is renderable");
-	for (const reason of reviewVerdict().reasons) {
-		assert.ok(question.question.includes(reason.slice(0, 40)), "every finding is in the question body");
-	}
-	assert.ok(question.question.includes(DECISION_CONTEXT_RECOMMENDATION_LABEL));
 });
 
-test("the recommendation is never an option: options are byte-identical with and without a pane", () => {
-	const context = buildDecisionContext(SHIP_ITEM, { review: reviewVerdict(), ci: { head_sha: HEAD } });
-	const withPane = buildAwaitingQuestions({ items: [SHIP_ITEM], context: () => context.lines });
-	const without = buildAwaitingQuestions({ items: [SHIP_ITEM] });
-	assert.deepEqual(
-		withPane.questions[0]?.options,
-		without.questions[0]?.options,
-		"a pane changes the question, never the answer rows",
-	);
-	assert.deepEqual(
-		questionOptions(SHIP_ITEM, { planViewable: true, planViewed: false }),
-		questionOptions(SHIP_ITEM, { planViewable: true, planViewed: false }),
-	);
-	// The plain menu too: the first option (what a stray Enter lands on) cannot
-	// move because evidence appeared, and no line of the pane is selectable.
-	const menu = answerMenuOptions(SHIP_ITEM, { planViewable: true, planViewed: false });
-	assert.equal(menu[0], "View the plan\u2026");
-	for (const line of context.lines) assert.ok(!menu.includes(line), "no evidence line is ever an option");
-});
-
-test("the plain dialog renders the pane in the title and keeps the same menu", async () => {
-	const context = buildDecisionContext(SHIP_ITEM, { review: reviewVerdict(), ci: { head_sha: HEAD } });
-	const titles: string[] = [];
-	const menus: string[][] = [];
-	const outcome = await driveAwaitingDialog({
-		snapshot: () => [SHIP_ITEM],
-		formatLine: (item) => item.id,
-		select: async (title, options) => {
-			titles.push(title);
-			menus.push(options);
-			// First prompt is the item list; then the item's own menu, which we skip.
-			return options.includes(SHIP_ITEM.id) ? SHIP_ITEM.id : AWAITING_SKIP_OPTION;
-		},
-		input: async () => undefined,
-		answer: async () => {
-			throw new Error("a skip must never reach a writer");
-		},
-		context: () => context.lines,
-	});
-	assert.equal(outcome.steps.at(-1)?.kind, "skipped", "skip is still no answer");
-	const itemTitle = titles[1] ?? "";
-	assert.ok(itemTitle.startsWith(`${SHIP_ITEM.decision}\n${SHIP_ITEM.why}`), "the decision still leads");
-	assert.ok(itemTitle.includes(DECISION_CONTEXT_RECOMMENDATION_LABEL));
-	assert.deepEqual(menus[1], answerMenuOptions(SHIP_ITEM, { planViewable: false, planViewed: false }));
-});
 
 // ---------------------------------------------------------------------------
 // Tied to job, head and attempt

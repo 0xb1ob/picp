@@ -1372,105 +1372,12 @@ export function awaitingRowsNotSupplied(
 	return items.filter((item) => !keys.has(itemSubjectKey(item)));
 }
 
-// ---------------------------------------------------------------------------
-// Auto-open (cp-awaiting-autoopen) — settle-triggered, never forced
-// ---------------------------------------------------------------------------
-
-/** The subset of an extension `ExtensionContext` the auto-open gate needs. */
-export interface AutoOpenEnv {
-	mode: string;
-	hasUI: boolean;
-}
-
-/**
- * True only for a real interactive terminal. RPC's dialogs are functional
- * (docs/rpc.md's `extension_ui_request` sub-protocol renders them exactly as
- * TUI does), but an RPC client may be a program with nobody watching, and
- * `json`/`print` have no UI at all. Auto-open is conservative on purpose:
- * forcing a surface nobody asked for onto a mode that cannot be proven to
- * have a human behind it is worse than the existing degradation (the marker
- * plus `/cp-decide`), which every mode already has and this never removes.
- */
-export function canAutoOpenDialog(env: AutoOpenEnv): boolean {
-	return env.mode === "tui" && env.hasUI;
-}
-
-/**
- * Whether the merged set holds anything worth auto-opening a dialog for right
- * now: at least one item not already `snoozed` this session. A snoozed item
- * is still rendered by every other surface (the marker, `/cp-decide`'s
- * listing, the status block) — only *auto*-opening is suppressed for it,
- * matching `mergeAwaiting`'s own rule that a snooze suppresses re-prompting,
- * never rendering.
- */
-export function hasAutoOpenCandidate(items: readonly ResolvedAwaitingItem[]): boolean {
-	return items.some((item) => !item.snoozed);
-}
-
-/**
- * "Do not nag" (requirement 4): once an auto-opened dialog has offered an
- * item this session — answered, skipped, or the whole dialog dismissed
- * outright — record it here so the very next settle does not reopen for the
- * same batch. A brand-new item (never in the returned set) is untouched and
- * still triggers the next auto-open; nothing here is persisted, so a fresh
- * session starts with a clean slate and every still-open item is fair game
- * again. Pure: given a set and the batch just offered, returns the next set.
- */
-export function snoozeOffered(current: ReadonlySet<string>, offered: readonly ResolvedAwaitingItem[]): Set<string> {
-	const next = new Set(current);
-	for (const item of offered) next.add(item.id);
-	return next;
-}
-
-/** An answered item may free its id: harmless, and keeps the set from growing
- * without bound across a long session (an id that never reappears in the
- * merged set is simply never looked up again either way). */
-export function forgetSnoozed(current: ReadonlySet<string>, id: string): Set<string> {
-	if (!current.has(id)) return current as Set<string>;
-	const next = new Set(current);
-	next.delete(id);
-	return next;
-}
-
-// ---------------------------------------------------------------------------
-// Answering policy — pure, injected channel (mirrors questions.ts' Asker)
-// ---------------------------------------------------------------------------
-
-/** One operator response to one open item. */
-export type AwaitingResponse =
-	| { id: string; kind: "answer"; value: string; by: string }
-	| { id: string; kind: "skip" }
-	| { id: string; kind: "cancel" };
-
-export interface AwaitingWriters {
-	/**
-	 * Only channel that may record an authorization (T21's `decide`). `kind`
-	 * (cp-khf) selects which of the job's checkpoints is being answered; an
-	 * implementation that ignores it answers the ship one, as every caller did
-	 * before the diff checkpoint existed. `scope` (cp-uug) is the merge kind's
-	 * head sha — a merge authorization names the commit it approves, and a writer
-	 * that ignored it would answer the wrong file or none at all.
-	 */
-	decideCheckpoint: (
-		jobId: string,
-		approved: boolean,
-		by: string,
-		kind: CheckpointKind,
-		scope?: string,
-	) => Promise<void> | void;
-	/** Takes the whole resolved row, not just its id: a derived row does not exist
-	 * in the store yet, and the writer needs its fields to materialise it under
-	 * the id the operator was shown. */
-	answerDeclared: (item: ResolvedAwaitingItem, answer: string, by: string) => Promise<void> | void;
-	answerEscalation?: (id: string, answer: string, by: string) => Promise<void> | void;
-}
-
 const APPROVE_WORDS = /^(?:approve|approved|yes|y|ok|okay)$/i;
 const DECLINE_WORDS = /^(?:decline|declined|no|n)$/i;
 
 /**
  * The one definition of the verdict vocabulary an authorization item answers
- * to. `resolveAwaitingResponse` calls this so there is exactly one place that
+ * to, so there is exactly one place that
  * knows what "approve" and "decline" mean; `parseSuggestions` (src/suggest.ts)
  * calls the very same function to filter a generated candidate before it can
  * ever be offered on an authorization row (cp-7t7 invariant 4: a candidate
@@ -1482,61 +1389,4 @@ export function authorizationVerdict(text: string): "approve" | "decline" | unde
 	if (APPROVE_WORDS.test(value)) return "approve";
 	if (DECLINE_WORDS.test(value)) return "decline";
 	return undefined;
-}
-
-/**
- * Resolve one response against the two real writers. `skip`/`cancel` write
- * nothing, anywhere — the item simply stays open, derived or declared alike
- * (a derived row is not even created, so "write nothing" is literal). A
- * free-text response to an `authorization` item that is not recognisably
- * approve/decline is recorded as a **note only**: the checkpoint stays pending,
- * because free text is never a verdict on an authorization item.
- *
- * The response id must be the offered item's id — the identity invariant the
- * whole surface rests on. A mismatch throws rather than answering whichever row
- * the writer happens to find.
- */
-export async function resolveAwaitingResponse(
-	response: AwaitingResponse,
-	item: ResolvedAwaitingItem,
-	writers: AwaitingWriters,
-): Promise<{ wrote: boolean; note?: string }> {
-	if (response.kind === "skip" || response.kind === "cancel") return { wrote: false };
-	if (response.id !== item.id) {
-		throw new AwaitingError(
-			`answer is for ${response.id} but the item offered is ${item.id} — the id shown is the id answered. ` +
-				"Re-list with /cp-decide and answer the id it prints.",
-		);
-	}
-	if (item.type === "escalation" || item.id.startsWith("es-")) {
-		if (!writers.answerEscalation) {
-			throw new AwaitingError(`${item.id} is an escalation: wire answerEscalation on the writers`);
-		}
-		await writers.answerEscalation(item.id, response.value, response.by);
-		return { wrote: true };
-	}
-	if (item.type === "authorization") {
-		if (!item.job_id) throw new AwaitingError("an authorization item must carry a job_id");
-		const value = response.value.trim();
-		const verdict = authorizationVerdict(value);
-		// cp-khf: the row says which question it is, so an answer to the diff
-		// checkpoint can never land on the pre-implementation one (or the reverse).
-		// cp-uug: a merge row additionally names the head it authorizes.
-		const kind: CheckpointKind = item.checkpoint_kind ?? "ship";
-		const scope = item.checkpoint_scope;
-		if (verdict === "approve") {
-			await writers.decideCheckpoint(item.job_id, true, response.by, kind, scope);
-			return { wrote: true };
-		}
-		if (verdict === "decline") {
-			await writers.decideCheckpoint(item.job_id, false, response.by, kind, scope);
-			return { wrote: true };
-		}
-		// Free text on an authorization item is a note, never a verdict: the
-		// checkpoint stays pending. There is nowhere durable to park a note that
-		// belongs to nobody's item, so it is returned for the caller to surface.
-		return { wrote: false, note: value };
-	}
-	await writers.answerDeclared(item, response.value, response.by);
-	return { wrote: true };
 }

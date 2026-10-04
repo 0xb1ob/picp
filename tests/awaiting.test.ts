@@ -15,20 +15,15 @@ import {
 	decisionSubject,
 	itemSubjectKey,
 	repairAwaitingItems,
-	canAutoOpenDialog,
 	isDerivedAwaitingId,
 	materialiseDerived,
 	deriveFromCheckpoints,
 	deriveFromHeldResearch,
-	forgetSnoozed,
-	hasAutoOpenCandidate,
 	mergeAwaiting,
 	researchApprovalIneligibleReason,
-	resolveAwaitingResponse,
-	snoozeOffered,
-	type AwaitingWriters,
 	type ResolvedAwaitingItem,
 } from "../src/awaiting.ts";
+import { type AwaitingWriters, resolveAwaitingResponse } from "./harness/awaiting-resolve.ts";
 import {
 	CheckpointError,
 	CheckpointStore,
@@ -749,10 +744,6 @@ test("ledger audit: answering a declared item with a job_id adds exactly one com
 	assert.equal((await scratch.ledger.show(job.id)).comments.length, 1);
 });
 
-// ---------------------------------------------------------------------------
-// Auto-open policy (cp-awaiting-autoopen): pure, no pi process needed
-// ---------------------------------------------------------------------------
-
 function resolvedItem(overrides: Partial<ResolvedAwaitingItem> & { id: string }): ResolvedAwaitingItem {
 	return {
 		type: "design",
@@ -763,118 +754,6 @@ function resolvedItem(overrides: Partial<ResolvedAwaitingItem> & { id: string })
 		...overrides,
 	};
 }
-
-test("canAutoOpenDialog: only a real interactive TUI qualifies", () => {
-	assert.equal(canAutoOpenDialog({ mode: "tui", hasUI: true }), true);
-	// RPC dialogs are functional, but an RPC client may have nobody attached —
-	// the settle path stays conservative and falls back to the marker + /cp-decide.
-	assert.equal(canAutoOpenDialog({ mode: "rpc", hasUI: true }), false);
-	// json/print: no UI at all, and hasUI is false there regardless of mode.
-	assert.equal(canAutoOpenDialog({ mode: "json", hasUI: false }), false);
-	assert.equal(canAutoOpenDialog({ mode: "print", hasUI: false }), false);
-	// A hypothetical tui-labelled context with no UI helpers still refuses.
-	assert.equal(canAutoOpenDialog({ mode: "tui", hasUI: false }), false);
-});
-
-test("hasAutoOpenCandidate: false on empty or all-snoozed, true with one unsnoozed item", () => {
-	assert.equal(hasAutoOpenCandidate([]), false);
-	assert.equal(hasAutoOpenCandidate([resolvedItem({ id: "aw-1", snoozed: true })]), false);
-	assert.equal(
-		hasAutoOpenCandidate([resolvedItem({ id: "aw-1", snoozed: true }), resolvedItem({ id: "aw-2" })]),
-		true,
-		"one fresh item among snoozed ones is still worth auto-opening for",
-	);
-});
-
-test("snoozeOffered: do not nag — adds every offered id, is pure, and a fresh item is untouched", () => {
-	const before = new Set<string>();
-	const after = snoozeOffered(before, [resolvedItem({ id: "aw-1" }), resolvedItem({ id: "aw-2" })]);
-	assert.deepEqual(before, new Set(), "the input set is never mutated");
-	assert.deepEqual([...after].sort(), ["aw-1", "aw-2"]);
-	// A batch that reoffers an already-snoozed id plus a brand-new one keeps both.
-	const again = snoozeOffered(after, [resolvedItem({ id: "aw-1" }), resolvedItem({ id: "aw-3" })]);
-	assert.deepEqual([...again].sort(), ["aw-1", "aw-2", "aw-3"]);
-});
-
-test("forgetSnoozed: frees an id (answered items may leave the set), no-op when absent", () => {
-	const before = new Set(["aw-1", "aw-2"]);
-	const after = forgetSnoozed(before, "aw-1");
-	assert.deepEqual(before, new Set(["aw-1", "aw-2"]), "the input set is never mutated");
-	assert.deepEqual([...after].sort(), ["aw-2"]);
-	// Absent id: returns a set with the same contents (may be the same reference).
-	const unchanged = forgetSnoozed(after, "aw-does-not-exist");
-	assert.deepEqual([...unchanged].sort(), ["aw-2"]);
-});
-
-test("do-not-nag rule end to end: skip an item, then a later settle with the same item is not a candidate; a new item still is", () => {
-	let snoozed = new Set<string>();
-	const itemA = resolvedItem({ id: "aw-a" });
-
-	// First settle: nothing snoozed yet, so it is a candidate and the dialog opens.
-	const firstItems = mergeSnoozeView([itemA], snoozed);
-	assert.equal(hasAutoOpenCandidate(firstItems), true);
-
-	// The operator skips it (item stays open — resolveAwaitingResponse's skip
-	// path already proves nothing is written); the auto-open loop records the
-	// batch it offered as "do not nag" state.
-	snoozed = snoozeOffered(snoozed, firstItems);
-
-	// Next settle: the same still-open item must not retrigger.
-	const secondItems = mergeSnoozeView([itemA], snoozed);
-	assert.equal(hasAutoOpenCandidate(secondItems), false, "a skipped item must not nag on the very next settle");
-
-	// A genuinely new item appears alongside it: the batch is a candidate again,
-	// and the previously-skipped item is still open and answerable (not hidden).
-	const itemB = resolvedItem({ id: "aw-b", opened_at: "2026-08-30T13:00:00Z" });
-	const thirdItems = mergeSnoozeView([itemA, itemB], snoozed);
-	assert.equal(hasAutoOpenCandidate(thirdItems), true, "a new item must still trigger auto-open");
-	assert.equal(
-		thirdItems.find((item) => item.id === "aw-a")?.snoozed,
-		true,
-		"the earlier item is still rendered, just tagged, never hidden",
-	);
-});
-
-/** Test-only helper mirroring what `command-post.ts#awaitingSnapshot` does with
- * a snooze set: tag matching ids, never drop them. */
-function mergeSnoozeView(items: readonly ResolvedAwaitingItem[], snoozed: ReadonlySet<string>): ResolvedAwaitingItem[] {
-	return items.map((item) => (snoozed.has(item.id) ? { ...item, snoozed: true } : item));
-}
-
-test("skip-then-settle: a real declared item stays open in AwaitingStore, and does not re-trigger the very next auto-open check", async () => {
-	const home = createScratchHome();
-	try {
-		const store = new AwaitingStore({ home: home.path });
-		const declared = await store.declare({ type: "design", decision: "postgres or sqlite?", why: "schema", blocks: "cp-db" });
-		const writers = fakeWriters();
-
-		// The auto-open loop offers it; the operator picks Skip (`kind: "skip"`,
-		// exactly what the dialog loop sends when the operator picks "Skip").
-		const merged = mergeAwaiting({ checkpoints: [], heldResearch: [], declared: store.list("open") });
-		assert.equal(hasAutoOpenCandidate(merged), true, "a freshly declared item is a candidate the first time");
-		const result = await resolveAwaitingResponse({ id: declared.id, kind: "skip" }, merged[0]!, writers);
-		assert.equal(result.wrote, false, "skip writes nothing");
-		assert.equal(writers.answerCalls.length, 0);
-		assert.equal(writers.checkpointCalls.length, 0);
-
-		// The item is still open on disk — skip never touched the store.
-		assert.equal(store.get(declared.id)!.state, "open");
-
-		// The auto-open gate records the batch it offered ("do not nag").
-		const snoozed = snoozeOffered(new Set<string>(), merged);
-
-		// A later settle re-merges the same still-open item: it renders (never
-		// hidden) but is no longer a candidate for auto-opening.
-		const second = mergeAwaiting({ checkpoints: [], heldResearch: [], declared: store.list("open"), snoozed });
-		assert.equal(second.length, 1, "the item is still rendered, everywhere else");
-		assert.equal(second[0]!.id, declared.id);
-		assert.equal(second[0]!.snoozed, true);
-		assert.equal(hasAutoOpenCandidate(second), false, "a skipped item must not nag on the very next settle");
-		assert.equal(store.get(declared.id)!.state, "open", "still open — a snooze never answers anything");
-	} finally {
-		home.cleanup();
-	}
-});
 
 // ---------------------------------------------------------------------------
 // Derived rows are answerable (cp-derived-awaiting-unanswerable)

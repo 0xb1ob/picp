@@ -177,8 +177,7 @@ export const AWAITING_SKIP_OPTION = "Skip";
 /** The item-list option that ends the dialog. */
 export const AWAITING_DONE_OPTION = "Done";
 /**
- * Every sentinel the Awaiting-you dialog may show. `resolveAwaitingResponse`
- * never sees one of these: the dialog compares by identity first.
+ * Every sentinel the Awaiting-you dialog may show; compared by identity before anything is written.
  */
 export const AWAITING_SENTINEL_OPTIONS = [
 	PLAN_VIEW_OPTION,
