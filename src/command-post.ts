@@ -63,7 +63,7 @@ import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
 import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact } from "./failure-announcer.ts";
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
-import { assertNotDraining, DrainControl, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
+import { assertNotDraining, DrainControl, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
@@ -922,7 +922,7 @@ export class CommandPost {
 	 * throw — transport failure; entry stays pending and the next sweep retries it.
 	 */
 	sweepDurableWakeups(send: (entry: DurableWakeupEntry) => boolean | string): string[] {
-		return sweepDurableWakeupsHelper(this.durableWakeups, () => this.#ownsHome(), send);
+		return sweepDurableWakeupsHelper(this.durableWakeups, () => this.#ownsHome(), (entry) => staleDrainOutcome(this.home, entry.id) ?? send(entry));
 	}
 
 	confirmDurableWakeups(ids: readonly string[]): string[] {
