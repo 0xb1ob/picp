@@ -1201,7 +1201,9 @@ the newest 200 and never an unacked one. Operator sessions only append to
 `emit`, `emit_failed`, `ack`, `discard` lines; a torn last line is skipped, and
 the file is compacted at `session_start` past 512 KiB. Invariants:
 (I1) an enqueue failure is logged to `parent-host.log` and the frame still goes
-out without an id; (I2) one writer per file; (I3) an `ack` is written only when
+out without an id — with nobody subscribed it waits in the memory backlog and goes to
+the next subscriber, `{backlog: false}` included (a full backlog dropping one is logged);
+an id-less frame goes through the consumer in memory and is not replayed after a restart; (I2) one writer per file; (I3) an `ack` is written only when
 `message_start`/`context` shows a `cp-bridge` message carrying that id in
 `details.relay_ids` — a hand-off is an `emit`; (I4) an acked id never enters
 context again, across restarts; (I5) an unacked id is due unless this process

@@ -234,7 +234,8 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	const bridge = new CpBridge();
 	const connections = new Set<Socket>();
 	const subscribers = new Set<Socket>();
-	const backlog: BridgeRelay[] = [];
+	// `durable: false` — the outbox write failed: that relay exists only here, so every subscriber gets it (id-less).
+	const backlog: Array<{ relay: BridgeRelay; durable: boolean }> = [];
 	// cp-6fyl A1: on disk under a stable id before any frame; the frame is only a poke for a new client.
 	const relayOutbox = new OperatorRelayOutbox(operatorRelayOutboxFile(paths.dir));
 	const relayAcks = new OperatorRelayAcks(operatorRelayAcksFile(paths.dir));
@@ -246,8 +247,9 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 			console.error(`parent host ${process.pid}: relay outbox write failed (${(error as Error).message}); framed without an id`);
 		}
 		if (subscribers.size === 0) {
-			backlog.push(relay);
-			if (backlog.length > RELAY_BACKLOG) backlog.shift();
+			backlog.push({ relay, durable: relayId !== undefined });
+			const dropped = backlog.length > RELAY_BACKLOG ? backlog.shift() : undefined;
+			if (dropped && !dropped.durable) console.error(`parent host ${process.pid}: relay backlog full; dropped a ${dropped.relay.kind} relay that is not in the outbox`);
 		}
 		for (const socket of subscribers) frame(socket, { relay, ...(relayId ? { relay_id: relayId } : {}) });
 	});
@@ -330,10 +332,11 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 				result = { pid: process.pid, protocol: PARENT_HOST_PROTOCOL, parent: status.alive ? status.pid : null };
 			} else if (op === "subscribe") {
 				subscribers.add(socket);
-				// A client that reads the relay outbox from disk passes `{backlog: false}`: the memory backlog is only for an older one.
+				// A client that reads the relay outbox from disk passes `{backlog: false}`: it still gets every relay the outbox
+				// write lost (id-less, delivered in memory); the rest of the memory backlog is only for an older client.
 				const backlogWanted = (args[0] as { backlog?: unknown } | undefined)?.backlog !== false;
-				for (const relay of backlog.splice(0)) {
-					const current = backlogWanted ? deliverableRelay(home, relay) : undefined;
+				for (const held of backlog.splice(0)) {
+					const current = backlogWanted || !held.durable ? deliverableRelay(home, held.relay) : undefined;
 					if (current) frame(socket, { relay: current });
 				}
 				result = true;

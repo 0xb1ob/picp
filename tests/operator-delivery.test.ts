@@ -210,6 +210,17 @@ test("(j) an escalation named in a send reply is a discard line; an overdue back
 	assert.equal(c.sent.length, 1, "a direct id is delivered once");
 });
 
+test("cp-gb8d: an overdue backstop relay survives a send-reply mention, never the answered recheck", () => {
+	const h = home();
+	const answered = new Set<string>();
+	const c = consumer(h, { recheck: (item) => (item.escalationId && answered.has(item.escalationId) ? { discard: "superseded: answered" } : { deliver: item }) });
+	c.instance.replied("reply: es-dddd44 was mentioned in prose");
+	answered.add("es-dddd44");
+	c.instance.direct(relay({ kind: "escalation", escalationId: "es-dddd44", text: "q" }), "esc:es-dddd44", true);
+	assert.equal(c.sent.length, 0, "the recheck still drops an answered id, overdue or not");
+	assert.equal(h.acks.fold().discarded.get("esc:es-dddd44")?.reason, "superseded: answered");
+});
+
 test("a send reply that names an escalation queued in the same pass retires it (replied rule before classify)", () => {
 	const h = home();
 	const esc = h.outbox.enqueue(relay({ kind: "escalation", escalationId: "es-same01", text: "q" }), "h");

@@ -4,7 +4,7 @@
  * (SIGSTOPped) host fails the liveness probe.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import bridgeExtension from "../extensions/cp-bridge/index.ts";
@@ -113,6 +113,22 @@ test("a wake relayed with no operator attached survives a host SIGKILL and enter
 	await b.start();
 	await sleep(500);
 	assert.equal(b.sent.filter((message) => message.content.includes("Wake while nobody listened")).length, 0, "acked: a new session never sees it again");
+});
+
+test("I1: a relay whose outbox write failed while nobody listened still reaches a {backlog:false} subscriber, id-less", { timeout: 180_000 }, async (t) => {
+	const { home, paths, state } = scratch(t, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_JOB: "cp-lost", FAKE_PARENT_WAKE_TEXT: "Wake the outbox could not hold" });
+	mkdirSync(operatorRelayOutboxFile(state), { recursive: true }); // a directory where the file goes: every enqueue throws
+	const first = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+	await first.request("start", { home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
+	const log = () => { try { return readFileSync(paths.log, "utf8"); } catch { return ""; } };
+	await until("the failed outbox write is logged", () => log().includes("relay outbox write failed"));
+	first.disconnect();
+	const client = await ParentHostClient.connect(currentHost(paths).record!, 5_000);
+	t.after(() => client.disconnect());
+	const got: Array<{ text: string; relayId: string | undefined }> = [];
+	await client.onRelay((relay, relayId) => got.push({ text: relay.text, relayId }), { backlog: false });
+	await until("the lost relay framed at subscribe", () => got.some((item) => item.text.includes("Wake the outbox could not hold")));
+	assert.equal(got.find((item) => item.text.includes("Wake the outbox could not hold"))?.relayId, undefined, "no id: the consumer delivers it in memory");
 });
 
 test("a SIGSTOPped host fails the liveness probe within 6 s and passes again once it continues", { timeout: 120_000 }, async (t) => {
