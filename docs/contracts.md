@@ -509,6 +509,7 @@ Job phases — policy level, derived from facts:
 
 | phase | meaning | entered by |
 |---|---|---|
+| `launching` | script job only: record written and ledger claimed before the spawn, no observed pid yet | `cp_dispatch` (script launch) |
 | `waiting` | dispatched, no envelope yet | `cp_dispatch` |
 | `held` | envelope accepted, worker + lease still alive | envelope intake |
 | `done` | torn down: lease returned, worker close observed | `cp_teardown` |
