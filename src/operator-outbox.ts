@@ -47,6 +47,7 @@ const RelaySchema = Type.Object({
 	jobIds: Type.Optional(Type.Array(Type.String())),
 	sendId: Type.Optional(Type.String()),
 	escalationId: Type.Optional(Type.String()),
+	drainId: Type.Optional(Type.String()),
 	stale: Type.Boolean(),
 	text: Type.String(),
 	receipt: Type.Object({ level: Type.Union([Type.String(), Type.Null()]), reached: Type.Array(Type.String()) }),

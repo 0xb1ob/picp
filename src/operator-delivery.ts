@@ -17,6 +17,7 @@
  */
 import type { BridgeRelay } from "./cp-bridge.ts";
 import { formatBridgeRelay } from "./cp-bridge.ts";
+import { DRAIN_PREFIX, staleDrainOutcome } from "./drain.ts";
 import { EscalationStore } from "./escalation.ts";
 import { type AckLine, OPERATOR_RELAY_OWNER, OPERATOR_RELAY_PROTOCOL, type OperatorRelayAcks, type OperatorRelayEntry, type OperatorRelayOutbox, pendingRelays, relayIdsOfMessage } from "./operator-outbox.ts";
 import { ParentSendOutbox, receiptOf } from "./parent-outbox.ts";
@@ -61,6 +62,9 @@ export function recheckRelay(home: string, sendsFile: string, relay: BridgeRelay
 			// An unreadable sends file never hides an outcome: deliver it.
 		}
 	}
+	// cp-ukqv: a drain outcome re-reads the live state/drain.json; a stale one is one line with nothing to stop, hold or defer.
+	const staleDrain = relay.drainId ? staleDrainOutcome(home, relay.drainId) : undefined;
+	if (staleDrain) return { deliver: { ...relay, stale: true, text: `${DRAIN_PREFIX}stale notice ${relay.drainId}: ${staleDrain}; nothing to act on.`, paths: [] } };
 	if (!relay.escalationId) return { deliver: relay };
 	try {
 		const current = new EscalationStore({ home }).get(relay.escalationId);
