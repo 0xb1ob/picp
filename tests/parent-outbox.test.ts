@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	frameBatch,
+	landedOutcomes,
 	operatorSendTexts,
 	PARENT_SEND_KEEP_OBSERVED,
 	PARENT_SEND_MAX_ATTEMPTS,
@@ -19,6 +20,7 @@ import {
 	sendIdsInText,
 	sendIdsInTranscript,
 	sendMarker,
+	sharedReplyPointer,
 } from "../src/parent-outbox.ts";
 
 function outbox(options: { now?: () => Date; owner?: string } = {}): ParentSendOutbox {
@@ -305,4 +307,31 @@ test("pending_notice_at round-trips the schema; markPendingNotice writes once an
 	const done = box.enqueue("done");
 	box.markUndeliverable([done.id], "gone");
 	assert.equal(box.markPendingNotice(done.id), false);
+});
+
+test("unload-parent PR3: sends sharing a span end share one reply; separate spans and failed marks keep their own", () => {
+	const ids = ["ps-20300101000000-0000000a", "ps-20300101000000-0000000b", "ps-20300101000000-0000000c", "ps-20300101000000-0000000d"];
+	const [a, b, c, d] = ids as [string, string, string, string];
+	// a and b land together, one answer; c lands after that answer and gets its own; d lands after the last text.
+	const outcomes = landedOutcomes({
+		texts: ["Answer AB.", "Answer C."],
+		assistantCount: 2,
+		landed: [
+			{ id: a, index: 0, assistants: 0 },
+			{ id: b, index: 0, assistants: 0 },
+			{ id: c, index: 1, assistants: 1 },
+			{ id: d, index: 2, assistants: 2 },
+		],
+		answers: [1, 2],
+	});
+	assert.deepEqual(
+		outcomes.map((outcome) => [outcome.id, outcome.failed, outcome.reply]),
+		[
+			[a, false, "Answer AB."],
+			[b, false, sharedReplyPointer(a)],
+			[c, false, "Answer C."],
+			[d, true, ""],
+		],
+	);
+	assert.match(sharedReplyPointer(a), new RegExp(`^answered together with ${a} — see that reply$`));
 });

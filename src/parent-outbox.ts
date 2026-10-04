@@ -285,20 +285,31 @@ export function markSpan(turn: SpanTurn, mark: SpanMark): { end: number; endAssi
 	};
 }
 
+/** The reply of a send that shared its span with an earlier one: the text went out once, under that id. */
+export function sharedReplyPointer(firstId: string): string {
+	return `answered together with ${firstId} — see that reply`;
+}
+
 /**
  * Each landed send's reply is the assistant text from its landing to the end
  * of its span (`markSpan`). No assistant message in that span, or a last one
- * that errored, is a failed turn.
+ * that errored, is a failed turn. Sends whose spans end at the same place were
+ * answered by one text: the earliest landing keeps it, the others point at it
+ * (`sharedReplyPointer`), so one answer is relayed once, not once per send.
  */
 export function landedOutcomes(turn: SpanTurn & { error?: { message: string } }): Array<{ id: string; failed: boolean; reply: string; error: string }> {
+	const firstBySpanEnd = new Map<string, string>();
 	return turn.landed.map((mark) => {
 		const span = markSpan(turn, mark);
 		const modelError = span.last ? turn.error : undefined;
 		const failed = span.endAssistants - mark.assistants === 0 || modelError !== undefined;
+		const key = `${span.end}:${span.endAssistants}`;
+		const first = failed ? undefined : firstBySpanEnd.get(key);
+		if (!failed && first === undefined) firstBySpanEnd.set(key, mark.id);
 		return {
 			id: mark.id,
 			failed,
-			reply: failed ? "" : turn.texts.slice(mark.index, span.end).join("\n"),
+			reply: failed ? "" : first !== undefined ? sharedReplyPointer(first) : turn.texts.slice(mark.index, span.end).join("\n"),
 			error: failed ? (modelError?.message ?? "parent settled without an assistant message") : "",
 		};
 	});

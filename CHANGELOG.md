@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Parent turn hygiene (unload-parent PR3)
+
+Sends absorbed into one parent span get one reply: the earliest landing keeps the text and every other send settles with `answered together with <ps-id> — see that reply` (`sharedReplyPointer` in `src/parent-outbox.ts`), so the main session no longer receives one identical copy per send. While a landed operator send is unanswered, the parent's wake-ups (all but `cp-answered`) are held in memory and released at the send's clean `turn_end`, at `agent_settled`, or after 90 s (`src/send-first-gate.ts`); held wake-ups are never acked or suppressed by the hold. Migration: none.
+
 ### Log-review fixes, PR-B (N3, N4)
 
 `cp_decide` on an escalation (`es-…`) now requires the latest operator message containing the quote to name that escalation id; a mandate-brief sentence, or a later message naming a different id, is refused and the escalation stays open (`requireOperatorQuote` returns its source text). Delegated answers that name the id while quoting id-free operator words, risk pre-approval quotes and checkpoint quotes are unchanged. A gate reviewer `revise` that a veto flag rewrote to `escalate`/`policy` now spends the one-revise budget (`gateCapExhausted`), the next reviewer `revise` records `attempt cap`, and `cp_send` refuses a non-negated `revise` message to a job whose latest `gate-<n>.json` is that row, naming the file (`vetoedReviseRefusal`), until the operator answers that gate's escalation. Migration: none; existing veto-policy gate rows count toward the cap on the next re-gate.
