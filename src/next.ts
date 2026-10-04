@@ -50,6 +50,8 @@ export interface NextPorts {
 	 * held for a dispatch in progress.
 	 */
 	capacity?: () => { active: number; cap: number; held: string[]; releasable?: number; reserved?: number };
+	/** 4b-2: job ids in the persisted dispatch queue (`DispatchQueue.ids`). */
+	queued?: () => string[];
 }
 
 export type NextActionKind = "dispatch" | "pipeline" | "wait" | "no_mandate" | "paused" | "mission_end" | "draining";
@@ -142,16 +144,16 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	// Uncovered dependencies still need a visible explanation, but never an automatic question.
 	const uncovered = blocked.filter(({ job }) => !candidates.some((mandate) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) })));
-	// The manager refuses a non-reviewer spawn at its cap (held authors keep their process), so no grant's `dispatch` is
-	// recommended at the cap. `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (gate/quality, inside
-	// the manager's +3 review reserve) or nothing, and its implementer dispatch meets the same refusal with rollback.
+	// The manager refuses a non-reviewer spawn at its cap (held authors keep their process); 4b-2: cp_dispatch then
+	// queues the job and starts it when a slot frees, so `dispatch` stays the recommendation and the reason says so.
+	// `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (inside the +3 review reserve) or nothing.
 	const capacity = results.some((result) => result.action.kind === "dispatch") ? ports.capacity?.() : undefined;
 	// 4b-1: an idle held author's slot is released on demand, so it counts as free; a reserved slot counts as taken.
 	if (capacity && capacity.active + (capacity.reserved ?? 0) - (capacity.releasable ?? 0) >= capacity.cap) {
 		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
 		for (const result of results) {
 			if (result.action.kind !== "dispatch") continue;
-			result.action = { kind: "wait", reason: `spawn cap ${capacity.cap} reached: ${capacity.active} live worker processes${held} — ${result.action.job_id} dispatches when one tears down` };
+			result.action.reason = `spawn cap ${capacity.cap} full: ${capacity.active} live worker processes${held} — cp_dispatch queues it; ${result.action.job_id} starts when one frees`;
 		}
 	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
@@ -162,12 +164,16 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 }
 
 async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], scopeOf: (job: Job) => ScheduleScope): Promise<NextResult> {
-	const ready = readyAll.filter((job) => {
+	const queued = new Set(ports.queued?.() ?? []);
+	const covered = readyAll.filter((job) => {
 		const jobProj = jobProject(job);
 		// A runner-owned scheduled job (answer/board/local) is dispatched by the schedule runner in code, never offered here.
 		// A schedule grant covers only its own schedule's jobs, so it never recommends unrelated work (and no other grant a scheduled job).
 		return jobProj !== undefined && !runnerOwns(job) && covers(mandate, { jobId: job.id, project: jobProj, jobKind: jobKind(job), ...scopeOf(job) });
 	});
+	// 4b-2: a queued job is already dispatched as far as the parent is concerned: never ready, and it holds a slot.
+	const ready = covered.filter((job) => !queued.has(job.id));
+	const queuedCovered = covered.length - ready.length;
 	const counted = ports.mandates.withReviewerSpend(fleetJobs, [mandate]);
 	const spend = mandateSpend(mandate, counted);
 	const parallelism = mandate.dispatch_parallelism ?? 1;
@@ -245,11 +251,11 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 	if (ready.length === 0) {
 		return { mandate: view, ready, action: { kind: "wait", reason: "nothing ready under this mandate" } };
 	}
-	if (spend.inFlight >= parallelism) {
+	if (spend.inFlight + queuedCovered >= parallelism) {
 		return {
 			mandate: view,
 			ready,
-			action: { kind: "wait", reason: `${mandate.id} dispatch-parallelism ${parallelism} is full — waiting on an in-flight job` },
+			action: { kind: "wait", reason: `${mandate.id} dispatch-parallelism ${parallelism} is full — waiting on an in-flight job${queuedCovered ? ` (${queuedCovered} queued)` : ""}` },
 		};
 	}
 

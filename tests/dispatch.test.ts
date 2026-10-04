@@ -12,7 +12,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
+import { DispatchQueue } from "../src/dispatch-queue.ts";
 import { HeldRelease } from "../src/held-release.ts";
+import { MandateError } from "../src/mandate-accounting.ts";
 import { RunRegistry } from "../src/runs.ts";
 import {
 	cleanupCreatedJobBranch,
@@ -632,6 +634,34 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 	assert.equal(result.state, "dispatched");
 });
 
+test("4B2-T1c: a real Dispatcher's parallelism_full refusal reaches the queue coded; the head stays byte-identical, and a freed slot starts it", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "ship the queue", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, dispatch_parallelism: 1 });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const first = await b.ledger.create({ title: "first", project: "demo", kind: "ship", delivery: "local", slug: "t1c-first" });
+	assert.equal((await dispatcher.dispatch({ jobId: first.id, task: "Bump x.", model: b.model, fetch: false })).state, "dispatched");
+	const job = await b.ledger.create({ title: "queued", project: "demo", kind: "ship", delivery: "local", slug: "t1c-queued" });
+	const errors: unknown[] = [];
+	const wakes: unknown[] = [];
+	const queue = new DispatchQueue({
+		home: b.home, owns: () => true, capacityFree: () => true, ledger: () => b.ledger, fleet: b.fleet, journal: (wake) => void wakes.push(wake),
+		dispatch: (request) => dispatcher.dispatch({ jobId: request.jobId, task: request.task!, model: b.model, fetch: false }).catch((error: unknown) => {
+			errors.push(error);
+			throw error;
+		}),
+	});
+	queue.enqueue(job.id, { task: "Bump x." });
+	const file = join(b.home, LAYOUT.dispatchQueueFile);
+	const before = readFileSync(file, "utf8");
+	await queue.drain();
+	assert.ok(errors[0] instanceof MandateError && errors[0].code === "parallelism_full", `coded refusal, got ${String(errors[0])}`);
+	assert.equal(readFileSync(file, "utf8"), before, "the kept head is byte-identical");
+	assert.deepEqual(queue.ids(), [job.id]);
+	assert.equal(b.fleet.get(job.id), undefined, "no record");
+	assert.ok(!treehouse(b.clone, "status").includes(job.id), "no lease");
+	assert.equal(wakes.length, 0, "no wake-up");
+});
 // cp-itl4 6b (6B-T4): a refused dispatch of a job in an open batch raises nothing new and names the batch.
 test("risk:high batch: a refused dispatch of a batched job names the batch and raises nothing; one approve dispatches every listed job", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);

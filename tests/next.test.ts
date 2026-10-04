@@ -100,7 +100,7 @@ test("two dependent jobs: the second dispatches once the first closes, no operat
 	assert.equal(after.action.job_id, second.id, "the second job dispatches with no operator message");
 });
 
-test("spawn cap: cp_next waits when live worker processes reach spawn_cap, dispatches below it", async (t) => {
+test("spawn cap (4B2-T6): at spawn_cap cp_next still recommends dispatch and says cp_dispatch queues it; below it, a plain dispatch", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const ports = bench(home);
@@ -108,16 +108,14 @@ test("spawn cap: cp_next waits when live worker processes reach spawn_cap, dispa
 	ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
 
 	const full = await cpNext({ ...ports, capacity: () => ({ active: 10, cap: 10, held: ["cp-a1"] }) }, "demo");
-	assert.equal(full.action.kind, "wait");
-	assert.equal(full.action.job_id, undefined);
-	assert.match(full.action.reason, /spawn cap 10 reached: 10 live worker processes \(held: cp-a1\)/);
-	assert.match(full.action.reason, new RegExp(`${job.id} dispatches when one tears down`));
+	assert.deepEqual([full.action.kind, full.action.job_id], ["dispatch", job.id]);
+	assert.match(full.action.reason, /spawn cap 10 full: 10 live worker processes \(held: cp-a1\) — cp_dispatch queues it/);
 
 	const room = await cpNext({ ...ports, capacity: () => ({ active: 9, cap: 10, held: [] }) }, "demo");
-	assert.deepEqual([room.action.kind, room.action.job_id], ["dispatch", job.id]);
+	assert.deepEqual([room.action.kind, room.action.job_id, room.action.reason], ["dispatch", job.id, `dispatch ${job.id}`]);
 });
 
-test("spawn cap: every grant's dispatch waits, others included; a pipeline step (gate-reviewer reserve) keeps its recommendation", async (t) => {
+test("spawn cap: every grant's dispatch carries the queue reason, others included; a pipeline step (gate-reviewer reserve) keeps its recommendation", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const ports = bench(home);
@@ -128,11 +126,30 @@ test("spawn cap: every grant's dispatch waits, others included; a pipeline step 
 	const capped = { ...ports, capacity: () => ({ active: 10, cap: 10, held: [] }) };
 
 	const both = await cpNext(capped, "demo");
-	assert.deepEqual([both.action.kind, ...(both.others ?? []).map((other) => other.action.kind)], ["wait", "wait"], "no grant recommends a refused spawn");
+	const all = [both, ...(both.others ?? [])];
+	assert.deepEqual(all.map((result) => result.action.kind), ["dispatch", "dispatch"]);
+	for (const result of all) assert.match(result.action.reason, /cp_dispatch queues it/);
 
 	const piped = await cpNext({ ...capped, pipelines: { get: (id: string) => (id === second.id ? {} : undefined) } as never }, "demo");
-	assert.deepEqual([piped.action.kind, piped.action.job_id], ["pipeline", second.id], "the pipeline grant leads; its advance is not refused at spawn_cap");
-	assert.deepEqual(piped.others?.map((other) => other.action.kind), ["wait"]);
+	const kinds = [piped, ...(piped.others ?? [])].map((result) => `${result.action.kind} ${result.action.job_id}`).sort();
+	assert.deepEqual(kinds, [`dispatch ${first.id}`, `pipeline ${second.id}`].sort(), "a pipeline step (gate-reviewer reserve) is never rewritten at spawn_cap");
+});
+
+test("4B2-T6: queued ids are never ready and count toward dispatch_parallelism", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const first = await ports.ledger.create({ title: "first", project: "demo", delivery: "pr", kind: "ship" });
+	const second = await ports.ledger.create({ title: "second", project: "demo", delivery: "pr", kind: "ship" });
+	ports.mandates.issue({ projects: ["demo"], objective: "ship both", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, dispatch_parallelism: 1 });
+	const free = await cpNext(ports, "demo");
+	assert.equal(free.action.kind, "dispatch");
+	const head = free.action.job_id!;
+	const other = head === first.id ? second.id : first.id;
+	const queued = await cpNext({ ...ports, queued: () => [head] }, "demo");
+	assert.deepEqual(queued.ready.map((job) => job.id), [other], "a queued job is not ready");
+	assert.equal(queued.action.kind, "wait", "the queued job holds the only slot");
+	assert.match(queued.action.reason, /dispatch-parallelism 1 is full — waiting on an in-flight job \(1 queued\)/);
 });
 
 test("spawn cap: the cp_next tool reads the manager's live processes and held job ids", async (t) => {
@@ -148,20 +165,20 @@ test("spawn cap: the cp_next tool reads the manager's live processes and held jo
 	const heldRelease = { releasable: () => [] as string[] };
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
 	registerMandateTools({ on: () => {}, registerTool: (tool: { name: string; execute: never }) => tools.set(tool.name, tool) } as never, {
-		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager, heldRelease }),
+		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager, heldRelease, dispatchQueue: { ids: () => [] } }),
 		setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined,
 	} as never);
 	const call = async () => (await tools.get("cp_next")!.execute("c", { project: "demo", full: true }, undefined, undefined, { hasUI: false, modelRegistry: undefined })).content[0]!.text;
 
-	assert.match(await call(), new RegExp(`action: wait \u2014 spawn cap 10 reached: 10 live worker processes \\(held: cp-a1\\) \u2014 ${job.id} dispatches`));
+	assert.match(await call(), new RegExp(`action: dispatch ${job.id} \u2014 spawn cap 10 full: 10 live worker processes \\(held: cp-a1\\) \u2014 cp_dispatch queues it`));
 	active.pop();
-	assert.match(await call(), new RegExp(`action: dispatch ${job.id}`));
+	assert.doesNotMatch(await call(), /cp_dispatch queues it/);
 	// 4b-1: back at the cap, one releasable held author makes room; a reservation already taken does not.
 	active.push({ jobId: "cp-a1" });
 	heldRelease.releasable = () => ["cp-a1"];
-	assert.match(await call(), new RegExp(`action: dispatch ${job.id}`));
+	assert.doesNotMatch(await call(), /cp_dispatch queues it/);
 	manager.reserved = 1;
-	assert.match(await call(), /action: wait \u2014 spawn cap 10 reached/);
+	assert.match(await call(), /cp_dispatch queues it/);
 });
 
 test("spawn cap (4b-1): the wait is decided by active + reserved - releasable >= cap", async (t) => {
@@ -170,13 +187,13 @@ test("spawn cap (4b-1): the wait is decided by active + reserved - releasable >=
 	const ports = bench(home);
 	const job = await ports.ledger.create({ title: "capped", project: "demo", delivery: "pr", kind: "ship" });
 	ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
-	const at = async (active: number, reserved: number, releasable: number) =>
-		(await cpNext({ ...ports, capacity: () => ({ active, cap: 3, held: [], reserved, releasable }) }, "demo")).action.kind;
-	assert.equal(await at(3, 0, 1), "dispatch", "a releasable author frees a slot");
-	assert.equal(await at(3, 0, 0), "wait");
-	assert.equal(await at(2, 1, 0), "wait", "a reserved slot is taken");
-	assert.equal(await at(3, 1, 1), "wait");
-	assert.equal(await at(2, 0, 0), "dispatch");
+	const full = async (active: number, reserved: number, releasable: number) =>
+		/cp_dispatch queues it/.test((await cpNext({ ...ports, capacity: () => ({ active, cap: 3, held: [], reserved, releasable }) }, "demo")).action.reason);
+	assert.equal(await full(3, 0, 1), false, "a releasable author frees a slot");
+	assert.equal(await full(3, 0, 0), true);
+	assert.equal(await full(2, 1, 0), true, "a reserved slot is taken");
+	assert.equal(await full(3, 1, 1), true);
+	assert.equal(await full(2, 0, 0), false);
 	assert.ok(job.id);
 });
 
@@ -734,7 +751,7 @@ test("the cp_next tool: an identical second call is one line, full/compaction/ro
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
 	const hooks = new Map<string, () => void>();
 	registerMandateTools({ on: (event: string, fn: () => void) => hooks.set(event, fn), registerTool: (tool: { name: string; execute: never }) => tools.set(tool.name, tool) } as never, {
-		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager: post.manager, curationPlan: () => post.curationPlan() }),
+		commandPost: () => ({ packageRoot: REPO_ROOT, ledger: () => ports.ledger, registry: undefined, fleet: ports.fleet, mandates: ports.mandates, escalations: ports.escalations, pipelines: undefined, manager: post.manager, heldRelease: post.heldRelease, dispatchQueue: post.dispatchQueue, curationPlan: () => post.curationPlan() }),
 		setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined,
 	} as never);
 	const call = async (params: Record<string, unknown> = { project: "demo" }) => (await tools.get("cp_next")!.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined })).content[0]!.text;

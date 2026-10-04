@@ -261,6 +261,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 						const held = new Set(cmdPost.fleet.read().jobs.filter((job) => job.phase === "held").map((job) => job.job_id));
 						return { active: active.length, cap: cmdPost.manager.spawnCap, held: [...new Set(active.map((w) => w.jobId))].filter((id) => held.has(id)), releasable: cmdPost.heldRelease.releasable().length, reserved: cmdPost.manager.reserved };
 					},
+					queued: () => cmdPost.dispatchQueue.ids(),
 				},
 				params.project,
 			);

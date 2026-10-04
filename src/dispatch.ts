@@ -63,7 +63,7 @@ import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
-import { scheduleRecord } from "./mandate-accounting.ts";
+import { MandateError, scheduleRecord } from "./mandate-accounting.ts";
 import { watchOuterProviderRetry } from "./provider-retry.ts";
 import type { PipelineRecordedRisk } from "./risk-warning.ts";
 import { composeRoutingInputs, riskGate } from "./dispatch-inputs.ts";
@@ -568,7 +568,7 @@ export class Dispatcher {
 				options.fleet.read().jobs,
 			);
 		} catch (error) {
-			throw new DispatchError((error as Error).message);
+			throw error instanceof MandateError && error.code ? error : new DispatchError((error as Error).message); // a coded refusal keeps its code (dispatch queue)
 		}
 
 		// --- 4. lease, then everything that can fail must clean up -----------

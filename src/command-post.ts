@@ -113,6 +113,7 @@ import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
 import { HeldRelease } from "./held-release.ts";
+import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { makeHandoff } from "./human-handoff.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
@@ -245,6 +246,7 @@ export class CommandPost {
 	/** Serial, coalesced progression of held PRs; `integrate()` shares its per-project lane. */
 	readonly continuation: HeldContinuation;
 	readonly heldRelease: HeldRelease; // 4b-1: release an idle held author's slot on demand (src/held-release.ts)
+	readonly dispatchQueue: DispatchQueue; // 4b-2: spawn-cap refusals, drained by the lock owner only (src/dispatch-queue.ts)
 	readonly drain: DrainControl; // graceful drain before a restart (src/drain.ts)
 	/** cp-uug: the per-PR, per-head merge authorization. Answered only by a human. */
 	readonly mergeCheckpoints: CheckpointStore;
@@ -604,6 +606,8 @@ export class CommandPost {
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 		});
 		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
+		this.dispatchQueue = new DispatchQueue({ home: options.home, dispatch: (r) => this.dispatch(r), capacityFree: () => this.heldRelease.capacityFree(), owns: () => this.#ownsHome(), ledger: () => this.ledger(), fleet: this.fleet, journal: (w) => this.#journalDurable(w) });
+		wireSlotFree(this.manager, this.dispatchQueue);
 		this.awaiting = new AwaitingStore({
 			home: options.home,
 			onAnswered: (decision) => this.#recordAnswered(decision),

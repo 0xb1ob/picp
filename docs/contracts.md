@@ -1779,6 +1779,23 @@ Other spawn-time policy, all fail-closed:
   notifying once) on any failure; while it is held every other non-reviewer
   spawn is refused `spawn_cap`. A later `cp_send` waits out a shutdown in
   flight, then restores a released author before delivering (§Revival).
+- **Dispatch queue (cp-itl4 4b-2).** A `cp_dispatch` refused only by
+  `spawn_cap` (non-script job, `queue` not `false`) is appended to
+  `state/dispatch-queue.json` (`src/dispatch-queue.ts`, at most
+  `DISPATCH_QUEUE_MAX` = 32 entries, one per job) and answers
+  `state: "queued"` with its position; a second `cp_dispatch` of a queued job
+  is refused. Only the parent-lock owner drains it (ownership re-read per
+  entry, never during a home drain), on every slot-free notification
+  (`WorkerManager.onSlotFree`: an observed close, a shutdown, a released
+  reservation) and on every scheduler tick as the backstop. A drain runs
+  FIFO while `HeldRelease.capacityFree()` — so a reserved slot is never
+  taken — and each entry goes through the full `CommandPost.dispatch` again
+  (preflight, mandate, risk, routing). A `spawn_cap` or a coded
+  `MandateError` `parallelism_full` keeps the head byte-identical and stops
+  the drain; any other refusal, a `promote`, a closed or fleet-known job
+  drops the entry. Every start or drop is one `recovery` wake-up
+  (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
+  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent
   never leaves orphaned children behind. From its first call `closing` is true:
   the failure monitor still runs intake but classifies no close as a death, the
@@ -3781,8 +3798,8 @@ recommendation:
 | mandate is paused | `paused` \u2014 no new dispatch; in-flight continues; on `token_cap` under the ceiling the reason tells the parent to `cp_mandate raise_tokens` |
 | every job the mandate names (`job_ids`) is closed | `mission_end` — raises one `mission_end` escalation (`landed`, `dropped`, `cost`); a repeat call returns the same escalation id, never a second one. A clean finish (nothing dropped, no fleet record `failed`) closes itself: the escalation is answered `close` by `mandate:<id>` (basis `{mandate, clause}` on the record) and the grant is revoked, so Map and Board show it closed; a messy one stays open and the bridge relays it to the main session as an escalation. Once that grant's mission end is answered (`close` or `extend`) the call returns the answered id, reason `already answered … not re-asked`, and raises nothing — a replacement grant has its own id and its own mission end |
 | nothing is ready under the mandate | `wait` |
-| live workers already meet `dispatch_parallelism` | `wait` |
-| live worker processes (every manager-owned process, held authors and reviewers included) plus outstanding slot reservations, minus releasable held authors (§Trust policy, release on demand), ≥ `spawn_cap` | `wait` for every grant's `dispatch`, `others` included — names the cap, the live count and up to three held job ids; nothing is queued, the job dispatches on a later `cp_next` once one tears down. A `pipeline` recommendation stands: `cp_pipeline advance` spawns a gate-reviewer (inside the manager's review reserve) or nothing, and its implementer dispatch meets the manager's own refusal |
+| live workers plus the grant's queued jobs (§Trust policy, dispatch queue; a queued job is never in `ready`) already meet `dispatch_parallelism` | `wait` — the reason counts the queued ones |
+| live worker processes (every manager-owned process, held authors and reviewers included) plus outstanding slot reservations, minus releasable held authors (§Trust policy, release on demand), ≥ `spawn_cap` | `dispatch` still, for every grant's `dispatch`, `others` included — the reason names the cap, the live count and up to three held job ids and says `cp_dispatch queues it`: the dispatch is queued and starts when a slot frees (cp-itl4 4b-2). A `pipeline` recommendation stands: `cp_pipeline advance` spawns a gate-reviewer (inside the manager's review reserve) or nothing, and its implementer dispatch meets the manager's own refusal |
 | every ready job is new and the job cap is reached | `wait` \u2014 no new dispatch; the grant stays active for the jobs it counts |
 | a ready job has a `PipelineStore` record | `pipeline` \u2014 `cp_pipeline advance <id>` |
 | otherwise, the first ready job | `dispatch` \u2014 `cp_dispatch <id>` |

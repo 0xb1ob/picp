@@ -659,7 +659,7 @@ export class MandateStore {
 				const spend = mandateSpend(mandate, counted);
 				if (spend.inFlight >= mandate.dispatch_parallelism) {
 					throw new MandateError(
-						`${job.jobId}: mandate ${mandate.id} dispatch-parallelism ${mandate.dispatch_parallelism} is full`,
+						`${job.jobId}: mandate ${mandate.id} dispatch-parallelism ${mandate.dispatch_parallelism} is full`, { code: "parallelism_full" },
 					);
 				}
 			}
