@@ -30,6 +30,7 @@ import {
 	Doctor,
 	type DoctorOptions,
 	DoctorError,
+	DETAIL_MAX,
 	formatDoctor,
 	formatDoctorJson,
 	MAX_LINT_DETAIL,
@@ -1690,6 +1691,38 @@ test("pool: a foreign worktree in a project's pool is a finding naming both path
 	assert.ok(finding?.detail?.includes(foreign), "the finding names the foreign worktree");
 	assert.ok(finding?.detail?.includes("/somewhere/else/demo/.git"), "and the clone it really belongs to");
 	assert.match(finding?.fix ?? "", /CP_TREEHOUSE_ROOT/);
+});
+
+test("pool: twenty foreign worktrees stay inside the 2000-char detail bound and the rest are counted", async (t) => {
+	// Live shape (cp-tkl2): a pool listing ~20 foreign worktrees; the joined paths passed 2000 chars
+	// and validateDoctorReport refused the whole report.
+	const home = fixture(t);
+	const clone = join(home.home.path, LAYOUT.projects, "demo");
+	mkdirSync(clone, { recursive: true });
+	registerDemo(home.home.path);
+	const foreign = Array.from({ length: 20 }, (_, i) => join(home.home.path, "pool", String(i), "demo", "x".repeat(60)));
+	for (const dir of foreign) mkdirSync(dir, { recursive: true });
+	const run: CommandRunner = (command, args, cwd) => {
+		if (command === "treehouse" && args.includes("status")) return { status: 0, stdout: JSON.stringify(foreign.map((path) => ({ path }))), stderr: "" };
+		if (command === "git" && args[0] === "rev-parse") return { status: 0, stdout: `${cwd === clone ? clone : "/somewhere/else"}/.git\n`, stderr: "" };
+		return healthyRunner()(command, args, cwd);
+	};
+	const finding = find(await home.doctor({ run }), "pool.demo")[0];
+	assert.match(finding?.what ?? "", /20 worktree\(s\) in demo's pool/);
+	assert.ok((finding?.detail?.length ?? 0) > 1000 && (finding?.detail?.length ?? 0) <= DETAIL_MAX, `detail is ${finding?.detail?.length} chars`);
+	assert.match(finding?.detail ?? "", /\(\+\d+ more\) \(expected git-common-dir /);
+});
+
+test("Doctor.run caps every finding centrally: a source that overflows cannot crash the diagnosis", async (t) => {
+	// host.pi.conflict joins up to five probed paths with no bound of its own: long enough paths pass 2000.
+	const paths = Array.from({ length: 5 }, (_, i) => `/shims/${i}/${"p".repeat(450)}/pi`);
+	const report = await fixture(t).doctor({
+		which: (command) => (command === "pi" ? paths : ALL_PRESENT(command)),
+		run: (command, args) => (args[0] === "--version" ? { status: 0, stdout: `pi 0.${paths.indexOf(command)}.0\n`, stderr: "" } : healthyRunner()(command, args, "/")),
+	});
+	const finding = find(report, "host.pi.conflict")[0];
+	assert.equal(finding?.severity, "error", "the conflict is still reported");
+	assert.equal(finding?.detail?.length, DETAIL_MAX, "the detail was 2200+ chars and is held at the contract bound");
 });
 
 test("pool: a pool that is all ours is ok, and no pool at all is silent", async (t) => {
