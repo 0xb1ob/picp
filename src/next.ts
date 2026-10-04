@@ -32,6 +32,7 @@ import type { CommandRunner } from "./merge-ask.ts";
 import { formatReadyBeads, readReadyBeads, type ReadyBeads } from "./ready-beads.ts";
 import { readDrain } from "./drain.ts";
 import { runnerOwns } from "./schedule-runner.ts";
+import { readParentExpanded } from "./schedule-expand.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -136,9 +137,10 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	const readyAll = await ports.ledger.ready(project ? { project } : {});
 	const results: NextResult[] = [];
+	const expanded = readParentExpanded(ports.fleet.home);
 	for (const mandate of candidates) {
 		const ownBlocked = blocked.filter(({ job }) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) }));
-		const result = await nextForMandate(ports, mandate, readyAll, fleetJobs, scopeOf);
+		const result = await nextForMandate(ports, mandate, readyAll, fleetJobs, scopeOf, expanded);
 		if (result.action.kind === "wait" && result.ready.length === 0 && ownBlocked.length) result.action.reason = blockedReason(ownBlocked);
 		results.push({ ...result, blocked: ownBlocked });
 	}
@@ -163,13 +165,14 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}) };
 }
 
-async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], scopeOf: (job: Job) => ScheduleScope): Promise<NextResult> {
+async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], scopeOf: (job: Job) => ScheduleScope, expanded: ReadonlySet<string>): Promise<NextResult> {
 	const queued = new Set(ports.queued?.() ?? []);
 	const covered = readyAll.filter((job) => {
 		const jobProj = jobProject(job);
-		// A runner-owned scheduled job (answer/board/local) is dispatched by the schedule runner in code, never offered here.
+		// A runner-owned scheduled job (answer/board/local) is dispatched by the schedule runner in code, never offered here;
+		// a parent-expanded schedule's fan-out jobs (`expanded`) are the parent's, so they are offered.
 		// A schedule grant covers only its own schedule's jobs, so it never recommends unrelated work (and no other grant a scheduled job).
-		return jobProj !== undefined && !runnerOwns(job) && covers(mandate, { jobId: job.id, project: jobProj, jobKind: jobKind(job), ...scopeOf(job) });
+		return jobProj !== undefined && !runnerOwns(job, expanded) && covers(mandate, { jobId: job.id, project: jobProj, jobKind: jobKind(job), ...scopeOf(job) });
 	});
 	// 4b-2: a queued job is already dispatched as far as the parent is concerned: never ready, and it holds a slot.
 	const ready = covered.filter((job) => !queued.has(job.id));

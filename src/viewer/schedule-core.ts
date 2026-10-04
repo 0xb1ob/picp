@@ -1,6 +1,7 @@
 /**
  * The dependency-free core of saved schedules, shared by `src/scheduler.ts`
- * (which re-exports all of it) and the viewer's Schedules page: the
+ * (which re-exports all of it) and the viewer's Schedules page: the cron, watch and manual triggers, the optional
+ * manual-only `job.skill`, the
  * `state/schedules.json` schema and reader, and the cron engine. It lives under
  * `src/viewer/` because viewer modules may import only `node:` and `./` (see
  * tests/viewer-workbench.test.ts); nothing here writes, spawns or touches typebox.
@@ -20,14 +21,17 @@ export const SCHEDULE_DELIVERIES = ["pr", "local", "pipeline", "answer", "board"
 export const SCHEDULE_MANDATE_ID = /^md-[a-z0-9]{4,16}$/;
 export const SCHEDULE_ID = /^sch-[0-9a-f]{6}$/;
 export const SCHEDULE_SCHEMA_VERSION = 1;
+/** Skills a manual schedule may name: its fire records a deferred anchor and wakes the parent to expand it. */
+export const SCHEDULE_SKILLS = ["cp-self-review"] as const;
 
 export interface Schedule {
 	id: string;
 	name: string;
 	project: string;
 	mandate_id: string;
-	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" };
-	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string };
+	/** `manual`: no tick ever fires it; only Run now does. */
+	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" } | { type: "manual" };
+	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string; skill?: (typeof SCHEDULE_SKILLS)[number] };
 	enabled: boolean;
 	created_at: string;
 	/** Cron: the instant slots were last evaluated up to. Watch: when the script last ran. */
@@ -58,17 +62,18 @@ const object = (shape: Record<string, Check>): Check => (v, path, errors) => {
 };
 
 const cronTrigger = object({ type: oneOf(["cron"]), cron: line(200), tz: line(64) });
+const manualTrigger = object({ type: oneOf(["manual"]) });
 const watchTrigger = object({
 	type: oneOf(["watch"]), script_path: line(1000), on: oneOf(["exit0", "changed"]),
 	every_seconds: (v, path, errors) => { if (!Number.isInteger(v) || (v as number) < 30 || (v as number) > 86_400) errors.push(`${path}: must be an integer 30-86400`); },
 });
 const schedule = object({
 	id: pattern(SCHEDULE_ID), name: line(80), project: line(64), mandate_id: pattern(SCHEDULE_MANDATE_ID),
-	trigger: (v, path, errors) => (isObject(v) && v.type === "watch" ? watchTrigger : cronTrigger)(v, path, errors),
+	trigger: (v, path, errors) => (isObject(v) && v.type === "watch" ? watchTrigger : isObject(v) && v.type === "manual" ? manualTrigger : cronTrigger)(v, path, errors),
 	job: object({
 		title: line(200), kind: oneOf(SCHEDULE_JOB_KINDS), delivery: oneOf(SCHEDULE_DELIVERIES),
 		"description?": (v, path, errors) => { if (typeof v !== "string" || v.length > 4000) errors.push(`${path}: must be a string of at most 4000 characters`); },
-		"script_path?": line(1000),
+		"script_path?": line(1000), "skill?": oneOf(SCHEDULE_SKILLS),
 	}),
 	enabled: boolean, created_at: string, "last_checked_at?": string, "last_output_sha?": string,
 	"last_fire?": object({ at: string, slot: string, job_id: string, missed: boolean }),

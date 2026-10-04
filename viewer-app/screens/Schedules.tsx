@@ -11,11 +11,12 @@ const LANDS: Record<string, string> = {pr:"a pull request", local:"a pushed bran
 
 export function triggerText(s: ScheduleItem): string {
  const t = s.trigger;
+ if (t.type === "manual") return `manual (Run now only)${s.job.skill ? `, expanded by skill ${s.job.skill}` : ""}`;
  return t.type === "cron" ? `cron ${t.cron} (${t.tz})` : `watch ${t.script_path} every ${t.every_seconds} s, fires on ${t.on === "changed" ? "changed output" : "exit 0"}`;
 }
 
 function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) {
- const next = s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
+ const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
  return <article class="job-row schedule-card">
   <div class="job-row-heading"><strong class="job-title">{s.name}</strong><span class="job-ledger">{s.enabled ? "enabled" : "disabled"}</span><span class="job-meta">{s.project}</span></div>
   <p class="job-meta"><code>{triggerText(s)}</code></p>
@@ -23,6 +24,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
   {control && <ScheduleControls s={s} control={control}/>}
   <p class="job-meta">Mandate <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_status !== "active" && <strong> · fires are skipped while this grant is {s.mandate_status}</strong>}</p>
   <p class="job-meta">Each fire records a <code>{s.job.kind}</code>/<code>{s.job.delivery}</code> job “{s.job.title}”; its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>
+  {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under this grant.</p>}
   <p class="job-meta">Last fire: {s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)} for slot {observedTime(s.last_fire.slot)}{s.last_fire.missed && " (missed)"}</> : "never"}</p>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
   <details><summary class="job-meta">Runs · {s.history.length}</summary>

@@ -217,9 +217,11 @@ test("an objective-issue grant without job_ids covers a second same-project job 
 });
 
 /** A saved cron schedule naming `mandateId` (state/schedules.json), the S3 link from a scheduled job to its grant. */
-function saveSchedule(home: string, id: string, mandateId: string): void {
-	const job = { title: "nightly", kind: "ship", delivery: "pr" };
-	const schedule = { id, name: id, project: "demo", mandate_id: mandateId, trigger: { type: "cron", cron: "0 9 * * *", tz: "UTC" }, job, enabled: true, created_at: "2026-01-01T00:00:00Z" };
+function saveSchedule(
+	home: string, id: string, mandateId: string,
+	trigger: object = { type: "cron", cron: "0 9 * * *", tz: "UTC" }, job: object = { title: "nightly", kind: "ship", delivery: "pr" },
+): void {
+	const schedule = { id, name: id, project: "demo", mandate_id: mandateId, trigger, job, enabled: true, created_at: "2026-01-01T00:00:00Z" };
 	mkdirSync(join(home, LAYOUT.state), { recursive: true });
 	writeFileSync(join(home, LAYOUT.state, "schedules.json"), JSON.stringify({ schema_version: 1, schedules: [schedule] }));
 }
@@ -234,6 +236,22 @@ test("schedlater S1: a schedule:/delivery:answer job is the runner's, not cp_nex
 	saveSchedule(home.path, "sch-def456", grant.id);
 	const next = await cpNext(ports, "demo");
 	assert.deepEqual([next.action.kind, next.action.job_id, next.ready.map((job) => job.id)], ["dispatch", pr.id, [pr.id]]);
+});
+
+test("a parent-expanded schedule: cp_next offers its fan-out jobs (research/local) and never the deferred anchor", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const anchor = await ports.ledger.create({ title: "Self-review (run now)", project: "demo", delivery: "local", kind: "research", labels: ["schedule:sch-def456"] });
+	await ports.ledger.update(anchor.id, { status: "deferred" });
+	const child = await ports.ledger.create({ title: `L1 [${anchor.id}]`, project: "demo", delivery: "local", kind: "research", labels: ["schedule:sch-def456"] });
+	const grant = ports.mandates.issue({ projects: ["demo"], objective: "self-review", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, schedule_grant: true });
+	saveSchedule(home.path, "sch-def456", grant.id, { type: "manual" }, { title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review" });
+	const next = await cpNext(ports, "demo");
+	assert.deepEqual([next.action.kind, next.action.job_id, next.ready.map((job) => job.id)], ["dispatch", child.id, [child.id]]);
+	// An unreadable schedules.json fails closed: the grant covers nothing, so nothing is offered.
+	writeFileSync(join(home.path, LAYOUT.state, "schedules.json"), "not json");
+	assert.deepEqual((await cpNext(ports, "demo")).ready, []);
 });
 
 test("schedlater S3: cp_next never recommends an unrelated job under a schedule's grant, nor a scheduled job under a project-wide one", async (t) => {

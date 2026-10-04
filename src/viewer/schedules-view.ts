@@ -18,6 +18,7 @@ export const SCHEDULE_HISTORY = 10;
 
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
 	const trigger = schedule.trigger;
+	if (trigger.type === "manual") return { next_at: null, next_note: "manual: fires only on Run now" };
 	if (trigger.type === "watch") {
 		const due = schedule.last_checked_at ? Date.parse(schedule.last_checked_at) + trigger.every_seconds * 1000 : Date.parse(schedule.created_at);
 		return Number.isFinite(due) ? { next_at: new Date(due).toISOString(), next_note: null } : { next_at: null, next_note: "no recorded check time" };

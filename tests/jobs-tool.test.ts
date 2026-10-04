@@ -130,6 +130,28 @@ test("riskkw-f10: cp_job create records risk as a label", async (t) => {
 	}
 });
 
+test("a schedule: label is refused on create and update unless a parent-expanded schedule has a deferred anchor; fan-out create is idempotent", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const create: JobActionInput = { action: "create", title: "L1 [x]", project: "demo", delivery: "local", kind: "research", labels: ["schedule:sch-abc123"] };
+	await assert.rejects(runJobAction(create, p), /cp_job create refused: .*schedule:sch-abc123/);
+	await assert.rejects(runJobAction({ ...create, labels: ["schedule:nope"] }, p), /cp_job create refused: .*schedule:nope/);
+	const plain = await runJobAction({ action: "create", title: "plain", project: "demo", delivery: "local", kind: "research" }, p);
+	const plainId = (plain.details.job as { id: string }).id;
+	await assert.rejects(runJobAction({ action: "update", job_id: plainId, add_labels: ["schedule:sch-abc123"] }, p), /cp_job update refused: .*schedule:sch-abc123/);
+	// A parent-expanded schedule without an open anchor is still refused.
+	const schedule = { id: "sch-abc123", name: "self-review", project: "demo", mandate_id: "md-abcd", trigger: { type: "manual" }, job: { title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review" }, enabled: true, created_at: "2026-01-01T00:00:00Z" };
+	mkdirSync(join(scratch.path, LAYOUT.state), { recursive: true });
+	writeFileSync(join(scratch.path, LAYOUT.state, "schedules.json"), JSON.stringify({ schema_version: 1, schedules: [schedule] }));
+	await assert.rejects(runJobAction(create, p), /no open run of schedule sch-abc123/);
+	const anchor = await scratch.ledger.create({ title: "Self-review (run now)", project: "demo", delivery: "local", kind: "research", labels: ["schedule:sch-abc123"] });
+	await scratch.ledger.update(anchor.id, { status: "deferred" });
+	const first = await runJobAction(create, p);
+	const again = await runJobAction(create, p);
+	assert.equal((again.details.job as { id: string }).id, (first.details.job as { id: string }).id);
+	assert.equal(again.details.existing, true);
+	await runJobAction({ action: "update", job_id: plainId, add_labels: ["schedule:sch-abc123"] }, p);
+});
+
 test("intake: three-item list with one dep; re-run creates nothing", async (t) => {
 	const created: string[] = [];
 	const { ports: base, scratch } = ports(t);

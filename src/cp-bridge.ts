@@ -154,14 +154,10 @@ export function operatorPiArgs(packageRoot: string, extra: readonly string[] = [
 	return ["--no-extensions", "-e", join(packageRoot, "extensions/cp-bridge/index.ts"), ...webExtensions.flatMap((path) => ["-e", path]), ...extra];
 }
 
-/**
- * The parent's only skill: `<home>/skills/cp-memory`. A managed home
- * (`~/.pi/command-post`) holds state, not the package, so it falls back to the
- * copy shipped in the package root.
- */
+/** The parent's skills, each `<home>/skills/<name>` when present, else the copy shipped in the package root (a managed home holds state, not the package). */
+export const PARENT_SKILLS = ["cp-memory", "cp-self-review"] as const;
 export function parentSkillPaths(home: string, packageRoot: string = PACKAGE_ROOT): string[] {
-	const fromHome = join(home, "skills/cp-memory");
-	return [existsSync(join(fromHome, "SKILL.md")) ? fromHome : join(packageRoot, "skills/cp-memory")];
+	return PARENT_SKILLS.map((name) => (existsSync(join(home, "skills", name, "SKILL.md")) ? join(home, "skills", name) : join(packageRoot, "skills", name)));
 }
 
 export function buildParentArgv(options: {
