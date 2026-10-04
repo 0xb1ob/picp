@@ -36,6 +36,10 @@ import { fileURLToPath } from "node:url";
 import { configureLayout, layoutForHome, type Mode } from "./contracts.ts";
 import { type BridgeRelay, CpBridge, CpBridgeError, type ParentStartOptions } from "./cp-bridge.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "./operator-outbox.ts";
+import { OperatorAsks } from "./operator-asks.ts";
+import { EscalationStore } from "./escalation.ts";
+import { EscalationRelayLedger, escalationRelayLedgerFile } from "./escalation-backstop.ts";
+import { runEscalationRelayWatch } from "./escalation-relay-watch.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { isPidAlive } from "./fleet.ts";
 import { deliverableRelay } from "./relay-scope.ts";
@@ -49,6 +53,8 @@ const RELAY_BACKLOG = 200;
 const MAX_FRAME_CHARS = 1_000_000;
 /** Prune the relay outbox, sweep sends (cp-6fyl B1), confirm acked send outcomes. */
 export const HOST_RELAY_TICK_MS = 60_000;
+/** Direct relay of code-raised escalations (`escalation-relay-watch.ts`): 10 s grace + this tick ≤ ~20 s. */
+export const HOST_ESCALATION_TICK_MS = 10_000;
 /** A host relay frame; `relayId` is absent from a host older than the relay outbox. */
 export type HostRelayListener = (relay: BridgeRelay, relayId?: string) => void;
 /** Linux `sun_path` is 108 bytes including the NUL. */
@@ -239,7 +245,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	// cp-6fyl A1: on disk under a stable id before any frame; the frame is only a poke for a new client.
 	const relayOutbox = new OperatorRelayOutbox(operatorRelayOutboxFile(paths.dir));
 	const relayAcks = new OperatorRelayAcks(operatorRelayAcksFile(paths.dir));
-	bridge.onRelay((relay) => {
+	const publish = (relay: BridgeRelay): void => {
 		let relayId: string | undefined;
 		try {
 			relayId = relayOutbox.enqueue(relay, `${process.pid}.${gen}`, relayAcks.fold());
@@ -252,7 +258,24 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 			if (dropped && !dropped.durable) console.error(`parent host ${process.pid}: relay backlog full; dropped a ${dropped.relay.kind} relay that is not in the outbox`);
 		}
 		for (const socket of subscribers) frame(socket, { relay, ...(relayId ? { relay_id: relayId } : {}) });
-	});
+	};
+	bridge.onRelay(publish);
+	// Escalations raised by code never reach the bridge relay: relay the open ones directly, after a short grace.
+	const escalationSent = new Set<string>();
+	const escalationTick = setInterval(() => {
+		try {
+			runEscalationRelayWatch({
+				home, publish, sent: escalationSent,
+				open: () => new EscalationStore({ home }).open(),
+				asks: () => new OperatorAsks(join(paths.dir, "operator", "asks.jsonl")).list(),
+				ledgerIds: () => new EscalationRelayLedger(escalationRelayLedgerFile(home, mode)).ids(),
+				outboxIds: () => relayOutbox.read().entries.map((entry) => entry.id),
+			});
+		} catch (error) {
+			console.error(`parent host ${process.pid}: escalation relay watch failed: ${(error as Error).message}`);
+		}
+	}, HOST_ESCALATION_TICK_MS);
+	escalationTick.unref();
 	const confirmed = new Set<string>();
 	const relayTick = setInterval(() => {
 		try {

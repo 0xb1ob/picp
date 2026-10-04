@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Direct host relay of code-raised escalations (unload-parent PR1)
+
+The parent host checks every 10 s for open escalations that no `cp_escalate` relay carried (`raiseRiskHigh`, `raiseForGate`, `raiseMissionEnd`, …) and enqueues each, after a 10 s grace, as `esc:<id>` in `state/operator/relay-outbox.json`: it reaches the main session within about 20 s through the existing outbox, ack and open-at-delivery recheck, at most once (any `esc:<id>` entry, pending or acked, suppresses it, so a host restart adds nothing). New `src/escalation-relay-watch.ts`; `escalationRelay` is now exported from `src/escalation-backstop.ts`. The 600 s operator-session backstop is unchanged and still relays anything never delivered. Migration: none; no new file or schema.
+
 ### Operator answers journal: cp_parent answer (cp-mxk4 PR1)
 
 The main session can post an answer the human asked for with `cp_parent answer` (`project`, `question`, `answer`, optional `evidence_paths` and `job_id`). It appends one `posted` line to the new `state/operator/answers.jsonl` (0600) straight away, with no parent turn, no push and no relay. Text is redacted and refused if a secret shape survives; a `job_id` must be a landed `kind:research` job of the same project (any delivery: local, answer, board) and is posted once. The dashboard list and the acknowledge tick follow in PR2. Migration: none.

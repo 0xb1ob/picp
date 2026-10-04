@@ -120,7 +120,11 @@ export function dueEscalations(input: {
 
 export function overdueRelay(home: string, escalation: Escalation, now: Date): BridgeRelay {
 	const minutes = Math.floor((now.getTime() - Date.parse(escalation.created_at)) / 60_000);
-	const text = `${escalation.id} (${escalation.kind}) has been open ${minutes} min and was never relayed to this session — ${escalation.question}`;
+	return escalationRelay(home, escalation, `${escalation.id} (${escalation.kind}) has been open ${minutes} min and was never relayed to this session — ${escalation.question}`);
+}
+
+/** A project-tagged escalation relay carrying `text`; shared by the backstop and the host's direct relay. */
+export function escalationRelay(home: string, escalation: Escalation, text: string): BridgeRelay {
 	let tagged: string;
 	try {
 		tagged = withProjectTag(escalationProjects(escalation, homeProjectResolver(home), homeMandateProjects(home)), text);

@@ -9,10 +9,13 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import bridgeExtension from "../extensions/cp-bridge/index.ts";
 import { probeHost } from "../src/bridge-reattach.ts";
-import { layoutForHome } from "../src/contracts.ts";
+import { layoutForHome, SCHEMA_VERSION } from "../src/contracts.ts";
 import { isPidAlive } from "../src/fleet.ts";
-import { OperatorRelayAcks, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
+import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { attachParentHost, currentHost, ParentHostClient, parentHostPaths } from "../src/parent-host.ts";
+import { EscalationStore, raiseForGate } from "../src/escalation.ts";
+import { EscalationRelayLedger, escalationRelayLedgerFile } from "../src/escalation-backstop.ts";
+import { runEscalationRelayWatch } from "../src/escalation-relay-watch.ts";
 import { createScratchHome } from "./harness/index.ts";
 import "./harness/fake-parent-tracker.ts";
 
@@ -113,6 +116,69 @@ test("a wake relayed with no operator attached survives a host SIGKILL and enter
 	await b.start();
 	await sleep(500);
 	assert.equal(b.sent.filter((message) => message.content.includes("Wake while nobody listened")).length, 0, "acked: a new session never sees it again");
+});
+
+test("PR1: a code-raised escalation reaches the relay outbox from the real host within ~25 s, as one esc:<id> entry", { timeout: 180_000 }, async (t) => {
+	const { home, state } = scratch(t);
+	const raised = await raiseForGate(new EscalationStore({ home: home.path }), {
+		schema_version: SCHEMA_VERSION, job_id: "cp-gjva", attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["conflicting acceptance"], revisions: [], model: "mock/one", decided_at: new Date().toISOString(),
+	});
+	assert.ok(raised);
+	const client = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+	t.after(() => client.disconnect());
+	const begin = Date.now();
+	const entries = () => { try { return new OperatorRelayOutbox(operatorRelayOutboxFile(state)).read().entries.filter((entry) => entry.id === `esc:${raised.id}`); } catch { return []; } };
+	await until("the escalation is in the relay outbox", () => entries().length > 0, 60_000);
+	assert.ok(Date.now() - begin < 40_000, `relayed in ${Date.now() - begin} ms (10 s grace + 10 s tick; slack for a slow runner)`);
+	assert.equal(entries().length, 1);
+	assert.match(entries()[0]?.relay.text ?? "", new RegExp(`${raised.id} \\(conflicting_acceptance\\)`));
+});
+
+test("PR1: delivered and acked, then the host prunes the entry and a fresh host tick: the ledger the consumer noted stops any re-enqueue", { timeout: 180_000 }, async (t) => {
+	const { home, state, cleanups } = scratch(t);
+	const raised = await raiseForGate(new EscalationStore({ home: home.path }), {
+		schema_version: SCHEMA_VERSION, job_id: "cp-gjva", attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["conflicting acceptance"], revisions: [], model: "mock/one", decided_at: new Date().toISOString(),
+	});
+	assert.ok(raised);
+	const client = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+	t.after(() => client.disconnect());
+	const outbox = new OperatorRelayOutbox(operatorRelayOutboxFile(state));
+	const id = `esc:${raised.id}`;
+	await until("the escalation is in the relay outbox", () => { try { return outbox.read().entries.some((entry) => entry.id === id); } catch { return false; } }, 60_000);
+	const a = operator(home.path, "operator-a.jsonl", cleanups);
+	await a.start();
+	await until("the operator session got it from the outbox", () => a.sent.some((message) => message.content.includes(raised.id)), 60_000);
+	await a.enterContext();
+	const acks = new OperatorRelayAcks(operatorRelayAcksFile(state));
+	assert.ok(acks.fold().acked.has(id), "acked at message_start");
+	const ledger = new EscalationRelayLedger(escalationRelayLedgerFile(home.path, "multi"));
+	assert.ok(ledger.ids().has(raised.id), "the consumer noted the delivery in the escalation-relay ledger");
+
+	// The host keeps the newest 200 closed entries and drops older ones past 24 h: 200 later acked relays push this one out.
+	// From then on only the ledger can stop a re-enqueue.
+	const fillers = Array.from({ length: 200 }, (_, i) => outbox.enqueue({ kind: "wake", stale: false, text: `filler ${i}`, receipt: { level: null, reached: [] }, paths: [] }, "test"));
+	acks.append(fillers.map((filler, i) => ({ type: "ack" as const, id: filler, at: new Date(Date.now() + 1_000 + i).toISOString() })));
+	assert.ok(outbox.prune(acks.fold(), new Date(Date.now() + 48 * 3_600_000)) >= 1);
+	assert.equal(outbox.read().entries.some((entry) => entry.id === id), false);
+	const published: string[] = [];
+	const tick = () => runEscalationRelayWatch({
+		home: home.path, sent: new Set(), now: () => new Date(Date.now() + 60_000),
+		open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledgerIds: () => ledger.ids(),
+		outboxIds: () => outbox.read().entries.map((entry) => entry.id), publish: (relay) => { published.push(relay.text); },
+	});
+	assert.deepEqual(tick(), [], "a fresh-memory tick relays nothing");
+	assert.deepEqual(published, []);
+	assert.equal(outbox.read().entries.some((entry) => entry.id.startsWith(id)), false, "no new esc:<id> entry");
+	// Control: without the ledger line the same tick would relay it again.
+	assert.deepEqual(runEscalationRelayWatch({
+		home: home.path, sent: new Set(), now: () => new Date(Date.now() + 60_000),
+		open: () => new EscalationStore({ home: home.path }).open(), asks: () => [], ledgerIds: () => new Set(),
+		outboxIds: () => [], publish: () => {},
+	}), [raised.id]);
 });
 
 test("I1: a relay whose outbox write failed while nobody listened still reaches a {backlog:false} subscriber, id-less", { timeout: 180_000 }, async (t) => {
