@@ -1,91 +1,37 @@
 /**
- * `cp_integrate` — the merge sequence as a resumable, parent-owned state
- * machine (cp-uug).
- * ## Why this is a tool and not a role
- * Every step between "the PR is green" and "the job is closed" is a git or `gh`
- * fact with a checkable postcondition: does GitHub require the branch updated, has CI
- * finished on the *pushed* head, did GitHub say `MERGED`, is the lease back, is
- * the br issue closed. A model placed in that loop cannot add evidence — it can
- * only add a claim, and this home has two recorded instances of exactly that
- * (`data/learnings.md`, 2026-08-31: "two of three ship envelopes claimed a
- * rebase or report that never happened"). So the sequence is code, and the only
- * judgment left in it is the one that must be a human's: whether to merge.
- * Three further reasons an *integrator worker* was rejected, all structural:
- *  - it could not wait for CI at all. `src/ci-wait.ts` refuses `gh run watch`
- *    and `gh pr checks --watch` **by name** for every worker, enforced in
- *    `extensions/worker-reporter/index.ts`'s `tool_call` hook, and that guard
- *    exists precisely because the same rule as prose already failed once. A
- *    worker-based integrator would need it weakened. A parent-side tool needs
- *    nothing weakened: the hook is a worker hook and does not run here. This
- *    module changes no line of `src/ci-wait.ts`.
- *  - it would need `cp_teardown` and a br-close capability, both in
- *    `WORKER_FORBIDDEN_TOOLS`, so the recursion guard would have to be reopened.
- *  - it would be a **second writer** to a branch whose implementer is still
- *    `held` and promotable. Here the branch has exactly one writer at any
- *    moment (§The two-writer boundary, below).
- * ## The two-writer boundary
- * 1. The implementer owns the branch while its `pr` receipt is `open` — that is
- *    what the `delivery:pr` hold is *for*.
- * 2. This tool performs only server-side or read-only git: `gh pr update-branch
- *    --rebase`, `git ls-remote`, `git merge-base --is-ancestor`, `gh run list`.
- *    It never pushes commits from a worktree.
- * 3. A conflict, or CI red after a rebase, is handed **back** to the job's own
- *    implementer with `cp_send` and a message generated in code (the shape
- *    `diffReviseMessage` established). One promote, then a human — never a
- *    third automated attempt, and never a re-dispatch behind the operator's
- *    back.
- * 4. `cp_merged` writes the receipt, which moves the `pr` receipt to `merged`,
- *    which is exactly the point at which `decideReopen` (`src/supersede.ts`)
- *    refuses any further `cp_send`. Recording the merge is a code-enforced
- *    handoff, not a convention — which is why `record` must run *after* the
- *    last promote and *before* teardown.
- * ## Authorization and holds (cp-e0c, cp-x7i, cp-4r4)
- * `cp_integrate` never forces a repository refusal: CLEAN or HAS_HOOKS after
- * green CI permits a merge; a refusal becomes an Awaiting-you reminder.
- * Unreadable permission falls back to a human CheckpointStore approval bound
- * to one PR and one head (`state/checkpoints/<job-id>.merge-<head>.json`).
- * There is no standing or blanket merge authority; a moved head needs fresh
- * CI, review and permission. See docs/contracts.md, Integration.
+ * `cp_integrate` — the merge sequence as a resumable, parent-owned state machine (cp-uug).
+ * Every step between "the PR is green" and "the job is closed" is a git or `gh` fact with a
+ * checkable postcondition, so the sequence is code; the one judgment left is whether to merge.
  *
- * IntegrationHolds stores an explicit operator pause beside the job's run.
- * Both manual and automatic calls read it at entry and immediately before
- * either merge command. A hold (or an unreadable hold) returns next: wait.
- * Release removes only the pause, never any CI, review or permission gate.
- * A merge command already issued cannot be cancelled by a later hold.
+ * Two-writer boundary: the implementer owns the branch while its `pr` receipt is `open`. This
+ * tool runs only server-side or read-only git (`gh pr update-branch --rebase`, `git ls-remote`,
+ * `git merge-base --is-ancestor`, `gh run list`) and never pushes from a worktree. A conflict or
+ * red CI is handed back to the job's own implementer with `cp_send` (one promote, then a human).
+ * Recording the merge moves the `pr` receipt to `merged`, after which `decideReopen`
+ * (`src/supersede.ts`) refuses any further `cp_send`, so `record` runs after the last promote
+ * and before teardown.
  *
- * With zero CI runs, an authoritative empty workflow list (ci-configured.ts)
- * means no CI configured and still requires repository permission. Unreadable
- * workflow configuration keeps the per-head human-checkpoint fallback.
+ * Authorization and holds: a repository refusal is never forced; it becomes an Awaiting-you
+ * reminder. Unreadable permission falls back to a human CheckpointStore approval bound to one PR
+ * and one head (`state/checkpoints/<job-id>.merge-<head>.json`). No standing or blanket merge
+ * authority; a moved head needs fresh CI, review and permission. IntegrationHolds stores an
+ * operator pause, read at entry and immediately before either merge command; a hold (or an
+ * unreadable one) returns next: wait, and removes no CI, review or permission gate. With zero CI
+ * runs, an authoritative empty workflow list (ci-configured.ts) means no CI configured and still
+ * requires repository permission. See docs/contracts.md, Integration.
  *
- * ## Waiting for CI
+ * CI: one non-blocking `gh run list` feeds readCiForHead (src/merge-ask.ts); unfinished CI returns
+ * next: wait. This tool never waits inside `gh run watch`.
  *
- * One non-blocking `gh run list` feeds readCiForHead (src/merge-ask.ts).
- * Unfinished CI returns next: wait; the CI watcher supplies the next fact.
- * This tool never waits inside a blocking `gh run watch` call.
+ * Rescue refs: sync keeps every head it discards at `refs/cp-salvage/<job-id>/<utc>` before
+ * resetting and refuses the reset if the ref cannot be written. `#pruneSalvageRefs` deletes one
+ * only once its commit is provably reachable from the base tip origin names; every unreadable
+ * answer keeps it. See docs/contracts.md, Integration.
  *
- * ## Rescue refs, and their retention (cp-8vf6, cp-wcy5)
- *
- * The sync step keeps every head it is about to discard at
- * `refs/cp-salvage/<job-id>/<utc>` *before* it resets, and refuses the reset if
- * that ref cannot be written. Those refs are pruned at the end of a successful
- * integration by `#pruneSalvageRefs`, under one rule: **a rescue ref is deleted
- * only once its commit is provably reachable from the tip origin names for the
- * base** — never on age, never on count, never on a timer, and never for a ref
- * outside that namespace. Every unreadable answer keeps the ref, so the policy
- * is bounded where deletion is provably lossless and *reporting* everywhere
- * else: what was pruned, what was kept and why both land in the integration
- * record's facts and the run log.
- *
- * ## Shape
- *
- * `advance` performs **at most one mutating step per call** and recomputes
- * which step is due from git, `gh`, and the review store every time — never from the stored step.
- * Before merge (both `repo_derived` and `human_checkpoint`), a passing `cp_review`
- * on this head or a recorded patch-equivalent is required; otherwise `next: "review"` and nothing mutates.
- * That is what makes it resumable across a parent restart, idempotent when
- * called twice, and unable to re-merge anything on a stale record. Same pattern
- * as `Gate.gate` and `DiffReview.review`: an attempt record on disk, read back
- * to decide what already happened.
+ * Shape: `advance` performs at most one mutating step per call and recomputes which step is due
+ * from git, `gh` and the review store, never from the stored step. Before merge (both
+ * `repo_derived` and `human_checkpoint`) a passing `cp_review` on this head or a recorded
+ * patch-equivalent is required; otherwise `next: "review"` and nothing mutates.
  */
 
 import { execFile } from "node:child_process";
@@ -1370,41 +1316,11 @@ export class Integrator {
 	}
 
 	/**
-	 * Bring the leased worktree back to the sha origin reports for `<branch>`
-	 * when a server-side rebase left it behind. Only ever a **fast-forward** to
-	 * what origin already holds — this never invents a commit and never pushes.
-	 *
-	 * Which sha that is comes from **origin itself** (`git ls-remote`), and the
-	 * reset names that sha rather than `refs/remotes/origin/<branch>` (cp-vk1,
-	 * cp-p0r): the guard below already compares HEAD against the `ls-remote` sha,
-	 * so acting on a ref would act on a different answer from the one that was
-	 * verified. It fails closed the same way #71 does — an unreadable or absent
-	 * answer from origin is not permission to move anything, and there is
-	 * deliberately no fallback to the tracking ref.
-	 *
-	 * `git reset --hard` is the one destructive call in this module, so it is
-	 * guarded twice and both guards fail closed:
-	 *
-	 *  - a **dirty** tree is never reset — uncommitted work is not this tool's to
-	 *    discard;
-	 *  - a tree holding **commits origin does not have** is never reset either,
-	 *    *unless* those commits can be proven lossless (below). A clean worktree
-	 *    is not the same as a worktree with nothing to lose: an implementer that
-	 *    committed and did not push has work that exists in exactly one place,
-	 *    and `reset --hard` would be the only event that ever destroyed work in
-	 *    this system. `rev-list --count <remote>..HEAD` must be 0 — i.e. HEAD is
-	 *    an ancestor of the remote tip — and a count that cannot be read is
-	 *    treated as "do not touch it", not as zero.
-	 *
-	 * **The losslessness proof (cp-8vf6).** That second guard refused 7 times on
-	 * 2026-09-01 (cp-p0r, cp-rs1, cp-jqk3, cp-bw4, cp-nz95 among them) — a 33%
-	 * refusal rate — and every one of those refusals was literally correct and
-	 * substantively a false alarm: the commits the worktree held were the
-	 * branch's own **pre-rebase** versions, whose content origin had already
-	 * absorbed through the server-side rebase and the squash merge. The parent
-	 * then proved losslessness by hand, seven times for seven. The guard is right
-	 * to refuse without proof; what it now does is *obtain* the proof, with
-	 * `#absorbedIntoBase`, and refuse exactly as before when it cannot.
+	 * Bring the leased worktree back to the sha origin names for `<branch>` (`git ls-remote`,
+	 * never the tracking ref; cp-vk1) after a server-side rebase left it behind. Never pushes.
+	 * `reset --hard` is guarded and fails closed: a dirty tree, or unreadable ahead-count, is
+	 * never reset; commits origin lacks are reset only if `#absorbedIntoBase` proves their
+	 * content is already in the base (cp-8vf6), and only after the head is kept on a rescue ref.
 	 */
 	async #syncWorktree(input: {
 		jobId: string;
@@ -1504,28 +1420,10 @@ export class Integrator {
 	}
 
 	/**
-	 * Is everything the worktree holds already in the base — content-wise?
-	 *
-	 * The proof is the **cumulative branch diff's patch-id**: for the local head
-	 * and for the sha origin names, `git diff <merge-base with the base tip> <head>
-	 * | git patch-id --stable`, compared. Equal, non-empty ids mean the two heads
-	 * carry the same change against the same base — which is exactly what a
-	 * server-side rebase produces and what the 7 refusals of 2026-09-01 all were
-	 * (validated 7-for-7 against that history, plus three constructed controls).
-	 *
-	 * Cheaper questions were tried and are not sound: `git cherry` compares
-	 * per-commit patch-ids and a squash merge collapses N commits into one, so it
-	 * still refused 3 of the 7; `git diff <stale head> <merge commit>` is never
-	 * empty because the stale head sits on an older base; and `git diff --raw`
-	 * blob shas differ under a rebase whenever the *pre*-image moved, refusing 4
-	 * of the 7. `patch-id --stable` ignores line numbers, blob shas and
-	 * whitespace, which is why it survives the base moving underneath.
-	 *
-	 * What it proves is **content**, not history: a passing proof discards commit
-	 * identity (shas, boundaries, committer times). In a squash-merge repository
-	 * the merge already discarded those. It also refuses, correctly, when a
-	 * server-side rebase resolved a conflict — the cumulative diff genuinely
-	 * changed then, and no reset is licensed.
+	 * Is everything the worktree holds already in the base, content-wise? The proof is equal,
+	 * non-empty cumulative patch-ids (`git diff <merge-base> <head> | git patch-id --stable`)
+	 * for the local head and the sha origin names. It proves content, not history, and refuses
+	 * when a server-side rebase resolved a conflict.
 	 */
 	async #absorbedIntoBase(input: {
 		worktree: string;
@@ -1617,44 +1515,11 @@ export class Integrator {
 	}
 
 	/**
-	 * The retention policy for `refs/cp-salvage/*` (cp-wcy5), run at the end of a
-	 * successful integration — the same tool that wrote those refs, at the one
-	 * moment the base has demonstrably moved.
-	 *
-	 * **The single rule: a rescue ref is deleted only once its commit is provably
-	 * reachable from the tip origin names for the base.** Never on age, never on
-	 * count, never on a timer. The ref exists because a commit was discarded from
-	 * a worktree; if it is not reachable from somewhere else, that ref may be the
-	 * only thing keeping it alive, and deleting it would be the one operation in
-	 * this system that destroys work — the same asymmetry `#syncWorktree` is built
-	 * around. `SALVAGE_PRUNE_MAX` bounds the work per call and nothing else: the
-	 * listing is sorted by refname, so the refs beyond it are kept and are the
-	 * same remainder the next integration examines first. So this is deliberately
-	 * a *policy that usually keeps*: in a
-	 * squash-merge repository a pre-rebase head is never an ancestor of the base,
-	 * so the refs the 2026-09-01 shape produces are kept and **reported**, not
-	 * quietly deleted. What is bounded is the litter that is provably redundant.
-	 *
-	 * Why here and not in `/doctor`: this is the writer's own scope, it already
-	 * holds the job's base and its clone, it runs exactly once per merge (no
-	 * timer, no sweep), and its facts land in the integration record and the run
-	 * log the parent already relays. `/doctor` would have to re-derive the base
-	 * and would report a deletion nobody asked for at a moment nothing changed.
-	 *
-	 * Every question is the authoritative one, and every unreadable answer keeps
-	 * the ref:
-	 *
-	 *  - the base tip comes from **origin itself** (`git ls-remote`), never
-	 *    `origin/<base>` — PR #71 (cp-p0r) and PR #85 (cp-uv5) are exactly this
-	 *    lesson, and here it decides whether a rescue ref is destroyed;
-	 *  - reachability is `git merge-base --is-ancestor <ref sha> <base tip>`;
-	 *    exit 0 prunes, exit 1 keeps, and **any other exit keeps** — an
-	 *    unanswerable question is not permission;
-	 *  - the delete is `git update-ref -d <ref> <sha>`, which git applies only if
-	 *    the ref still points at the sha that was proven, so a ref another lease
-	 *    moved in between is not deleted on a stale proof;
-	 *  - only names under `refs/cp-salvage/` are ever passed to a delete, checked
-	 *    in code (`isSalvageRef`) after `for-each-ref` already scoped the listing.
+	 * Retention for `refs/cp-salvage/*` (cp-wcy5): delete a rescue ref only once its commit is
+	 * provably reachable from the base tip origin names (`ls-remote`, never `origin/<base>`).
+	 * Never on age or count; any unreadable answer keeps the ref. `update-ref -d <ref> <sha>`
+	 * deletes only if the ref still points at the proven sha; only `isSalvageRef` names are passed.
+	 * `SALVAGE_PRUNE_MAX` bounds the work per call; the refname-sorted remainder is kept.
 	 */
 	async #pruneSalvageRefs(input: { cwd: string; base: string; jobId: string }): Promise<string[]> {
 		const { cwd, base, jobId } = input;
