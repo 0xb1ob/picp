@@ -30,10 +30,10 @@ existing ids (create dedupes on project + title).
 
 | Job | Title | Reads (read-only) | Looks for |
 |---|---|---|---|
-| L1 | Review parent session errors | `state/sessions/cp-parent*.jsonl` | protocol errors, self-resolved gates, wrong relays, long turns, duplicate relays |
-| L2 | Review main-session delivery and operator asks | operator session files listed in `state/sessions/operator-sessions.jsonl` (pi session dir for the home cwd), `state/operator/dashboard.jsonl`, `state/operator/asks.jsonl` | missed or late messages, chat-only questions, hung turns, wrong delegations |
-| L3-L5 | Review worker session failures, slice 1/2/3 | `state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/` | tool errors, waste, CI, treehouse, wrong repo (including bare `br`), rebase, caps, cost outliers |
-| L6 | Review daemon health and delivery failures | `state/daemon.log`, `daemon.prev.log`, `escalations.json`, `wakeups.json`, `answered.json`, `update.json` (+ `update-before-reset-*.json`), `health.json`, `runs/*/events.jsonl` | updater rollbacks, missing alerts, stale held rows |
+| L1 | Review parent session errors | `state/sessions/cp-parent*.jsonl` | protocol errors, self-resolved gates, wrong relays, long turns, duplicate relays; context growth per turn, compactions and rotations (when, tokens before/after, duration, failures/timeouts like 'timeout waiting for response to compact'), what fills the context (relays, wake bodies, tool output, duplicated sends), turns started near/over `compactAtTokens` |
+| L2 | Review main-session delivery and operator asks | operator session files listed in `state/sessions/operator-sessions.jsonl` (pi session dir for the home cwd), `state/operator/dashboard.jsonl`, `state/operator/asks.jsonl` | missed or late messages, chat-only questions, hung turns, wrong delegations; operator-session context size, compactions and `self_compact` handoffs, what filled it (duplicate relays, long reports) |
+| L3-L5 | Review worker session failures, slice 1/2/3 | `state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/` | tool errors, waste, CI, treehouse, wrong repo (including bare `br`), rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs) |
+| L6 | Review daemon health and delivery failures | `state/daemon.log`, `daemon.prev.log`, `escalations.json`, `wakeups.json`, `answered.json`, `update.json` (+ `update-before-reset-*.json`), `health.json`, `runs/*/events.jsonl` | updater rollbacks, missing alerts, stale held rows; compaction/rotation events in daemon/bridge logs and `state/sessions/cp-parent-control.json` history |
 | S1 | Synthesize self-review against current work | the six L reports; the dedupe sources below | merge, prioritize, classify |
 
 ## Order
@@ -62,6 +62,9 @@ The window or slice, the sources and the focus from the table. Then:
   order); effort S/M/L."
 - "Redact: never quote tokens, keys, cookies, auth headers or the contents of auth/models-store/daemon.json/
   dashboard.json/vapid.key — write [REDACTED]."
+- Required section "Context usage": per session, peak context tokens, the number of compactions/rotations, tokens
+  before→after each, and failed compactions. Quote message `usage` fields and compaction entries from the JSONL
+  (path:line + ISO time). Include a top-5 list of the largest single contributors (entry type + approximate tokens).
 
 ## S1 task template
 
@@ -77,6 +80,10 @@ Dedupe against (all read-only): active and paused mandates (`state/mandates/*.js
 (`br --db <absolute beads.db> list --json`, never bare `br`), `data/learnings.md`, and non-closed ledger jobs
 (`jobs.json`). Respect the current statuses over any older list. Keep the finding shape, the redaction, the report-only
 and the no-builds rules.
+
+Add a "Context & compaction" section: fleet-wide totals, the worst sessions, the cost attributable to re-sending large
+context, and concrete fixes (e.g. trimming relay bodies, tool-output caps, compaction threshold or rotate policy),
+classified NEW/COVERED as usual.
 
 ## Do not
 
