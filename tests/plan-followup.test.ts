@@ -15,6 +15,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { type GateFlags, type GateReview, paths, SCHEMA_VERSION } from "../src/contracts.ts";
+import { EscalationStore, raiseForGate } from "../src/escalation.ts";
 import { decideGate } from "../src/gate.ts";
 import { atomicWriteJson } from "../src/json-store.ts";
 import {
@@ -226,18 +227,28 @@ test("revisesVetoedGate: a non-negated revise on a veto-policy gate, nothing els
 	assert.equal(revisesVetoedGate(gateDecision("revise", {}), "Revise ONLY 4b"), false, "a plain revise is the gate's own round");
 });
 
-test("vetoedReviseRefusal: reads the latest gate file and names it", () => {
+test("vetoedReviseRefusal: reads the latest gate file and names it, until the operator answers its escalation", async () => {
 	const home = createScratchHome();
 	try {
 		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), undefined, "a job with no gate file is unchanged");
 		mkdirSync(join(home.path, paths.runDir("cp-research")), { recursive: true });
 		writeFileSync(join(home.path, paths.gateFile("cp-research", 1)), JSON.stringify(gateDecision("revise", {})));
 		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), undefined);
-		writeFileSync(join(home.path, paths.gateFile("cp-research", 2)), JSON.stringify({ ...gateDecision("revise", { scope_growth: true }), attempt: 2 }));
+		const vetoed = { ...gateDecision("revise", { scope_growth: true }), attempt: 2 };
+		writeFileSync(join(home.path, paths.gateFile("cp-research", 2)), JSON.stringify(vetoed));
 		const refusal = vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b");
 		assert.ok(refusal?.includes(paths.gateFile("cp-research", 2)), refusal);
 		assert.match(refusal ?? "", /scope_growth/);
 		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "add a citation"), undefined, "a message without revise still delivers");
+
+		// The gate's own escalation, still open: the parent may not self-authorize the revise.
+		const escalations = new EscalationStore({ home: home.path });
+		const raised = await raiseForGate(escalations, vetoed);
+		assert.ok(raised);
+		assert.ok(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), "an open escalation keeps the refusal");
+		// The operator answered it (replan is the sanctioned revise): the human decided, the guard steps aside.
+		await escalations.answer(raised.id, { answer: "replan", by: "operator-quote" });
+		assert.equal(vetoedReviseRefusal(home.path, "cp-research", "Revise ONLY 4b"), undefined);
 	} finally {
 		home.cleanup();
 	}

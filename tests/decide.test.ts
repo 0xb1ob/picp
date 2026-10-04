@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { AwaitingStore, deriveFromEscalations, type ResolvedAwaitingItem } from "../src/awaiting.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { type DecisionBasis, type DelegationProvenance, WORKER_FORBIDDEN_TOOLS, isoTimestamp } from "../src/contracts.ts";
-import { decide, DecideError, operatorTextsFromEntries } from "../src/decide.ts";
+import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
+import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { frameBatch, ParentSendOutbox, sendMarker } from "../src/parent-outbox.ts";
@@ -519,6 +520,47 @@ test("cp_decide answers a risk_high escalation only from an operator message tha
 	assert.deepEqual(answered, [[raised.id, "approve", "operator-quote"]]);
 	assert.equal(escalations.get(raised.id)?.status, "answered");
 	assert.equal(escalations.get(raised.id)?.answer, "approve");
+});
+
+test("N3 (a): a delegated send that names the escalation answers it with operator words that carry no id", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const escalations = new EscalationStore({ home: home.path });
+	const raised = await raiseRiskHigh(escalations, { jobId: "cp-prod", evidence: [] });
+	const outbox = new ParentSendOutbox({ file: `${home.path}/sends.json` });
+	const rule = "approvals: operator standing delegation";
+	// The operator's own words (the mandate brief) first, then the main session's delegated answer naming the id.
+	const brief = outbox.enqueue("build all except N12");
+	const relayed = outbox.enqueue(`Operator answer to ${raised.id}, verbatim: "build all except N12"`, { delegated: true, delegation_rule: rule });
+	const { bundle } = deps(home.path, {
+		items: deriveFromEscalations(escalations.open()),
+		operatorTexts: [frameBatch([brief]), frameBatch([relayed])],
+		answerEscalation: (id, answer, by, basis, provenance) => escalations.answer(id, { answer, by, basis, provenance }),
+	});
+	const quote = "build all except N12";
+	assert.ok(!quote.includes("es-"), "the quoted operator words contain no escalation id");
+	const result = await decide({ target: raised.id, decision: "approve", basis: { operator_quote: quote } }, bundle);
+	assert.equal(result.decided_by, "operator-delegated");
+	assert.deepEqual(result.basis, { operator_quote: quote });
+	assert.equal(escalations.get(raised.id)?.status, "answered");
+	assert.equal(escalations.get(raised.id)?.send_id, relayed.id, "attributed to the send that named the id");
+	assert.equal(escalations.get(raised.id)?.delegation_rule, rule);
+});
+
+test("N3 (b): risk pre-approval and checkpoint quotes need no escalation id", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	// cp_mandate preapprove_risk (and issue's risk_preapproval) call requireOperatorQuote, never decideEscalation.
+	const verified = requireOperatorQuote("build 0-3", { operatorTexts: ["build 0-3"] });
+	assert.equal(verified.source, "build 0-3");
+	const record = preapprovalRecord(verified, ["cp-a"], isoTimestamp());
+	assert.equal(record.operator_quote, "build 0-3");
+	assert.equal(record.decided_by, "operator-quote");
+	// A plan checkpoint answered by quote is not an escalation either: no id check.
+	const { ship, bundle } = deps(home.path, { operatorTexts: ["build 0-3"] });
+	ship.request({ jobId: "cp-ship1", question: "Authorize implementation?" });
+	const decided = await decide({ target: "cp-ship1", decision: "approve", basis: { operator_quote: "build 0-3" } }, bundle);
+	assert.equal(decided.checkpoint?.decision, "approved");
 });
 
 test("cp_decide refuses a mandate basis for an escalation, and a forged quote", async (t) => {

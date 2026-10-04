@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CheckpointStore } from "./checkpoint.ts";
 import { GATE_VETO_FLAGS, type GateVerdict, GateVerdictSchema, isSafeJobId, LAYOUT, paths, SCHEMA_VERSION, validate } from "./contracts.ts";
+import { EscalationStore } from "./escalation.ts";
 import { isVetoPolicy } from "./gate.ts";
 import { atomicWriteJson } from "./json-store.ts";
 
@@ -227,7 +228,12 @@ export function revisesVetoedGate(latest: Pick<GateVerdict, "verdict" | "cause" 
 	return latest !== undefined && isVetoPolicy(latest) && /\brevise\b/i.test(message) && !/\b(?:do not|don't|never) revise\b/i.test(message);
 }
 
-/** The refusal `cp_send` throws for `revisesVetoedGate`, naming the gate file; undefined when it does not apply. */
+/**
+ * The refusal `cp_send` throws for `revisesVetoedGate`, naming the gate file; undefined when it does not apply.
+ * It holds only until the operator answers that gate's escalation (`replan`, `override`, `drop` — the record
+ * whose evidence names this gate file): after that the human has decided, and a revise that carries out a
+ * `replan` answer, or any later message once the job moved on, is not the parent re-opening the round on its own.
+ */
 export function vetoedReviseRefusal(home: string, jobId: string, message: string): string | undefined {
 	if (!isSafeJobId(jobId)) return undefined;
 	let file: string | undefined;
@@ -241,9 +247,12 @@ export function vetoedReviseRefusal(home: string, jobId: string, message: string
 	}
 	const decision = validate<GateVerdict>(GateVerdictSchema, parsed);
 	if (!decision.ok || !revisesVetoedGate(decision.value, message)) return undefined;
+	const gateFile = file;
+	const answered = new EscalationStore({ home }).list({ jobId, status: "answered" }).find((item) => item.evidence_paths.includes(gateFile));
+	if (answered) return undefined;
 	const vetoed = GATE_VETO_FLAGS.filter((flag) => decision.value.flags[flag]).join(", ");
 	return (
 		`${jobId}: ${file} is a veto-forced escalate (policy, ${vetoed}) that already spent the one revise. ` +
-		"Refusing another revise round on that gate: relay its escalation to the operator; a further plan change is a new research job."
+		"Refusing another revise round on that gate until the operator answers its escalation (replan is the sanctioned revise); relay it, do not self-authorize."
 	);
 }

@@ -8,7 +8,7 @@ are recorded here with the migration; the binding detail lives in
 
 ### Log-review fixes, PR-B (N3, N4)
 
-`cp_decide` on an escalation (`es-…`) now requires the latest operator message containing the quote to name that escalation id; a mandate-brief sentence, or a later message naming a different id, is refused and the escalation stays open (`requireOperatorQuote` returns its source text). A gate reviewer `revise` that a veto flag rewrote to `escalate`/`policy` now spends the one-revise budget (`gateCapExhausted`), the next reviewer `revise` records `attempt cap`, and `cp_send` refuses a non-negated `revise` message to a job whose latest `gate-<n>.json` is that row, naming the file (`vetoedReviseRefusal`). Migration: none; existing veto-policy gate rows count toward the cap on the next re-gate.
+`cp_decide` on an escalation (`es-…`) now requires the latest operator message containing the quote to name that escalation id; a mandate-brief sentence, or a later message naming a different id, is refused and the escalation stays open (`requireOperatorQuote` returns its source text). Delegated answers that name the id while quoting id-free operator words, risk pre-approval quotes and checkpoint quotes are unchanged. A gate reviewer `revise` that a veto flag rewrote to `escalate`/`policy` now spends the one-revise budget (`gateCapExhausted`), the next reviewer `revise` records `attempt cap`, and `cp_send` refuses a non-negated `revise` message to a job whose latest `gate-<n>.json` is that row, naming the file (`vetoedReviseRefusal`), until the operator answers that gate's escalation. Migration: none; existing veto-policy gate rows count toward the cap on the next re-gate.
 
 ### Log-review fixes, PR-A (N1, N6, N7, P1)
 

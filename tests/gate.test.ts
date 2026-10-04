@@ -485,6 +485,13 @@ test("a veto-rewritten revise spends the one revise: the next revise records the
 	});
 	assert.equal(unknowns.cause, "policy");
 	assert.equal(gateCapExhausted([flagged, operational, unknowns]), false);
+
+	// Intended, per the N4 spec: a reviewer's OWN escalate with a veto flag stores the same
+	// escalate/policy row and counts too. It is already a `surface` that only the operator can
+	// answer; cp_send's revise guard lifts once that escalation is answered (replan).
+	const ownEscalate = decideGate({ jobId: "cp-a", attempt: 1, prior: NO_PRIOR, model: "m", review: review({ job_id: "cp-a", verdict: "escalate", flags: vetoed }) });
+	assert.deepEqual([ownEscalate.verdict, ownEscalate.cause], ["escalate", "policy"]);
+	assert.equal(gateCapExhausted([ownEscalate]), true);
 });
 
 test("no usable verdict is operational, then operational_persistent", () => {

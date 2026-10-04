@@ -158,3 +158,19 @@ test("cp_mandate preapprove_risk verifies the quote against operator messages be
 	assert.deepEqual(store.require(mandate.id).risk_preapproval?.job_ids, [job.id]);
 	assert.match(store.show(mandate.id), /Pre-approve risk high for this mission's jobs\./);
 });
+
+test("N3 (b): cp_mandate preapprove_risk accepts an operator quote with no es- id while a risk_high escalation is open", async (t) => {
+	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");
+	const { raiseRiskHigh } = await import("../src/escalation.ts");
+	const { store, mandate, job } = await setup(t);
+	const open = await raiseRiskHigh(new EscalationStore({ home: store.home }), { jobId: job.id, evidence: [] });
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	const pi = { on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) };
+	const post = { home: store.home, mandates: store, fleet: { read: () => ({ jobs: [] }) }, runs: {} };
+	registerMandateTools(pi as never, { commandPost: () => post, setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined, createdThisTurn: [] } as never);
+	const quote = "build all except N12";
+	const ctx = { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: quote } }] } };
+	assert.ok(!quote.includes(open.id) && !quote.includes("es-"));
+	await tools.get("cp_mandate")!.execute("c", { action: "preapprove_risk", mandate_id: mandate.id, operator_quote: quote, job_ids: [job.id] }, undefined, undefined, ctx);
+	assert.equal(store.require(mandate.id).risk_preapproval?.operator_quote, quote);
+});

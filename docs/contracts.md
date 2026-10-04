@@ -2006,7 +2006,10 @@ Policy applied between them (implemented in T20, constants here):
    records the `attempt cap` reason even when a veto fires again. `cp_send`
    refuses a non-negated `revise` message to a job whose latest `gate-<n>.json`
    is that veto-policy row, naming the file (`vetoedReviseRefusal`,
-   `src/plan-followup.ts`); any other message still delivers.
+   `src/plan-followup.ts`) until the operator answers that gate's escalation
+   (`replan` is the sanctioned revise); any other message still delivers. A
+   reviewer's own `escalate` with a veto flag stores the same row and counts the
+   same way: it is already a `surface` only the operator can answer.
 3. A reviewer that dies, **settles without reporting**, never reports before
    the deadline, or exhausts its in-worker repairs (`verdict-rejected.json`) is
    `escalate` with `cause: "operational"`; if the immediately prior attempt was
