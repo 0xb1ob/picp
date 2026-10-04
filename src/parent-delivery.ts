@@ -11,6 +11,7 @@ import {
 	frameResume,
 	landedOutcomes,
 	markSpan,
+	resumedIdsInTranscript,
 	PARENT_SEND_MAX_AGE_HOURS,
 	type ParentSendEntry,
 	type ParentSendDelegation,
@@ -21,7 +22,7 @@ import {
 	sendRelay,
 } from "./parent-outbox.ts";
 import { isTransientProviderError, MAX_OUTER_RETRIES, OUTER_RETRY_DELAYS_MS, RESUME_NUDGE } from "./provider-retry.ts";
-import type { WorkerProcess } from "./worker-process.ts";
+import type { WorkerProcess, WorkerTranscript } from "./worker-process.ts";
 
 /** A send still not terminal this long after `queued_at` gets one visible notice (cp-6fyl B1). */
 export const SEND_NOTICE_SECONDS = 600;
@@ -241,7 +242,8 @@ export class ParentDelivery {
 	/**
 	 * After every spawn: `injected` sends from a dead process are checked against
 	 * the parent's own transcript (`ParentSendOutbox.reconcile`); landed-unanswered
-	 * ones get one resume nudge, never the body; then the queue drains. An
+	 * ones get one resume nudge, never the body, and none when the transcript
+	 * already holds that id's nudge from a predecessor; then the queue drains. An
 	 * unreadable transcript re-injects nothing and is retried on the next settle.
 	 * A call whose process was superseded meanwhile stops.
 	 */
@@ -254,14 +256,21 @@ export class ParentDelivery {
 				new Set(this.outbox.list().filter((entry) => entry.state === state && !this.#live.has(entry.id)).map((entry) => entry.id));
 			const injected = crossed("injected");
 			const landed = crossed("landed");
-			if (injected.size > 0) {
-				const transcript = await proc.getEntries(undefined, this.#host.requestTimeoutMs);
+			let transcript: WorkerTranscript | undefined;
+			if (injected.size > 0 || landed.size > 0) {
+				try {
+					transcript = await proc.getEntries(undefined, this.#host.requestTimeoutMs);
+				} catch (error) {
+					if (injected.size > 0) throw error; // landed-only: an unreadable transcript still nudges once, as before
+				}
 				if (this.#host.liveProc() !== proc) return; // superseded: the new process reconciles from disk
-				for (const entry of this.outbox.reconcile(transcript, injected)) this.relay(entry);
 			}
+			if (transcript && injected.size > 0) for (const entry of this.outbox.reconcile(transcript, injected)) this.relay(entry);
+			// N5: a predecessor process already sent this id's resume line; a successor never sends it twice.
+			const resumed = transcript ? resumedIdsInTranscript(transcript.entries) : new Set<string>();
 			const resume = this.outbox
 				.list()
-				.filter((entry) => entry.state === "landed" && (landed.has(entry.id) || injected.has(entry.id)) && !this.#live.has(entry.id))
+				.filter((entry) => entry.state === "landed" && (landed.has(entry.id) || injected.has(entry.id)) && !this.#live.has(entry.id) && !resumed.has(entry.id))
 				.map((entry) => entry.id);
 			if (resume.length > 0) {
 				if (this.#host.liveProc() !== proc) return;

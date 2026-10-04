@@ -140,6 +140,22 @@ export function detectCiWait(command: string): CiWaitFinding | undefined {
 }
 
 /**
+ * N2, for the operator session only (never the worker hook, which pins a bare
+ * `sleep` and long commands as allowed): a shell loop that sleeps — the
+ * updater/CI poll that holds the operator's turn while dashboard answers
+ * queue behind it. Both the loop header and the `sleep` must be in command
+ * position, the same quoted-string rule as `detectCiWait`; heredoc bodies are
+ * prose. Returns the matched fragment, bounded.
+ */
+export function detectSleepLoop(command: string): string | undefined {
+	if (typeof command !== "string") return undefined;
+	const code = command.replace(HEREDOC_BODY_RE, "$1");
+	const loop = LOOP_RE.exec(code)?.[0];
+	const sleep = loop ? SLEEP_RE.exec(code)?.[0] : undefined;
+	return loop && sleep ? bound(`${loop.trim()} … ${sleep.trim()}`) : undefined;
+}
+
+/**
  * The refusal a worker sees. It names the shape, the reason it is refused, and
  * the sanctioned path — a refusal that does not say what to do instead is how
  * a worker ends up inventing a second workaround for the first one.

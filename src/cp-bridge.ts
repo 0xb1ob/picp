@@ -33,6 +33,7 @@ import { isPidAlive } from "./fleet.ts";
 import { asEscalation, openMissionEnds } from "./escalation-relay.ts";
 import { deliverableRelay, type EnvelopeSummary, envelopeSummaryOf, scheduleJobIdOf, withEnvelopeSummaries } from "./relay-scope.ts";
 import { readParentLock } from "./parent-lock.ts";
+import { existingSavedSession, recordSpawnedSession } from "./parent-control.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
 import type { ModelProbe } from "./routing.ts";
 import { STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
@@ -326,7 +327,7 @@ export class CpBridge {
 		let saved: { sessionFile?: string; model?: string } = {};
 		try { if (existsSync(controlFile)) saved = JSON.parse(readFileSync(controlFile, "utf8")); }
 		catch (error) { throw new CpBridgeError(`parent control unreadable: ${controlFile}: ${(error as Error).message}`); }
-		const sessionFile = options.sessionFile ?? saved.sessionFile ?? join(home, LAYOUT.sessions, "cp-parent.jsonl");
+		const sessionFile = options.sessionFile ?? existingSavedSession(saved.sessionFile) ?? join(home, LAYOUT.sessions, "cp-parent.jsonl");
 		const model = saved.model ?? options.model;
 		mkdirSync(join(sessionFile, ".."), { recursive: true });
 		this.#options = { ...options, model };
@@ -565,6 +566,7 @@ export class CpBridge {
 			if (typeof state.sessionFile === "string" && state.sessionFile.length > 0) {
 				this.#sessionFile = state.sessionFile;
 			}
+			recordSpawnedSession(this.#home, sessionFile, state.sessionFile, this.#model);
 			this.#ready = true;
 			this.#deathsBeforeReady = 0;
 			this.#booting = false;

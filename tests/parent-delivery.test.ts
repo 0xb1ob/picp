@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
 import type { BridgeRelay } from "../src/cp-bridge.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
-import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText, sharedReplyPointer } from "../src/parent-outbox.ts";
+import { frameBatch, frameResume, parentSendFile, ParentSendOutbox, sendIdsInText, sharedReplyPointer } from "../src/parent-outbox.ts";
 import { OUTER_RETRY_DELAYS_MS } from "../src/provider-retry.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
 
@@ -353,6 +353,43 @@ test("H3c: a settled (never relayed) send is not nudged as 'reached you before t
 	await ready;
 	const resumes = ctx.sent.filter((text) => text.includes("\u2014 resume]"));
 	assert.deepEqual(resumes, [], "a settled send already has its answer; it must never get a restart nudge");
+});
+
+test("N5: a successor whose transcript already holds an id's resume line does not nudge it again; an empty transcript still nudges once", async () => {
+	const ctx = scripted();
+	const done = ctx.box.enqueue("D");
+	ctx.box.markInjected([done.id]);
+	ctx.box.markLanded([done.id]);
+	const fresh = ctx.box.enqueue("F");
+	ctx.box.markInjected([fresh.id]);
+	ctx.box.markLanded([fresh.id]);
+	const user = (text: string) => ({ type: "message", message: { role: "user", content: [{ type: "text", text }] } });
+	// A predecessor nudged D (its frameResume line is in the transcript); F only has its delivery marker.
+	const ready = ctx.delivery.afterReady(ctx.proc);
+	ctx.answer({ entries: [user(frameBatch([fresh])), user(frameResume([done.id]))], dropped: 0 });
+	await ready;
+	const resumes = ctx.sent.filter((text) => text.includes("— resume]"));
+	assert.equal(resumes.length, 1);
+	assert.deepEqual(sendIdsInText(resumes[0] as string), [fresh.id], "D's resume line is already in the transcript");
+	// A third process with an empty transcript window: F (and D) have no resume line there, so each is nudged once.
+	ctx.delivery.failWaiters();
+	ctx.sent.length = 0;
+	const again = ctx.delivery.afterReady(ctx.proc);
+	ctx.answer({ entries: [], dropped: 0 });
+	await again;
+	assert.deepEqual(ctx.sent.filter((text) => text.includes("— resume]")).map((text) => sendIdsInText(text)), [[done.id, fresh.id]]);
+});
+
+test("N5: a landed-only resume whose transcript read fails still nudges once and drains", async () => {
+	const ctx = scripted();
+	const entry = ctx.box.enqueue("L");
+	ctx.box.markInjected([entry.id]);
+	ctx.box.markLanded([entry.id]);
+	(ctx.proc as unknown as { getEntries: () => Promise<never> }).getEntries = () => Promise.reject(new Error("get_entries timed out"));
+	await ctx.delivery.afterReady(ctx.proc);
+	const resumes = ctx.sent.filter((text) => text.includes("— resume]"));
+	assert.equal(resumes.length, 1);
+	assert.deepEqual(sendIdsInText(resumes[0] as string), [entry.id]);
 });
 
 test("H3c: a relay that throws is journaled, never aborts the rest of the replay loop, and is retried until it lands", () => {

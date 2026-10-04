@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -43,6 +43,7 @@ import { OPERATOR_NOTE } from "../../src/operator-note.ts";
 import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
+import { detectCiWait, detectSleepLoop } from "../../src/ci-wait.ts";
 
 export const BRIDGE_TOOL = "cp_parent";
 
@@ -175,6 +176,38 @@ export function observedSendStubs(messages: unknown): Array<{ customType: "cp-br
 	});
 }
 
+/**
+ * N2: the operator's own tool calls. Its turn never sleeps or polls inside a call (dashboard answers queue behind
+ * it; wakes arrive as cp-bridge messages), and it writes only its own files: `<runtime root>/operator/`,
+ * `<runtime root>/state/task-files/`, and exactly `<runtime root>/data/standing-orders.md`. Undefined = allowed.
+ */
+export function operatorToolRefusal(toolName: string, input: unknown, cwd: string, target: () => { home: string; mode: Mode }): string | undefined {
+	const field = (name: string): unknown => (input && typeof input === "object" ? (input as Record<string, unknown>)[name] : undefined);
+	if (toolName === "bash") {
+		const command = field("command");
+		if (typeof command !== "string") return undefined;
+		const wait = detectCiWait(command);
+		const loop = wait ? undefined : detectSleepLoop(command);
+		if (!wait && !loop) return undefined;
+		return `Refused: ${wait ? `${wait.what} (${wait.shape}: ${wait.matched})` : `this sleep loop holds the operator turn (${loop})`}. ` +
+			"Dashboard answers queue behind a running turn. Do not poll CI or state/update.json: end the turn and wait for the cp-bridge wake (CI, merge and update outcomes arrive as messages). " +
+			"A single non-blocking `gh run list` is still allowed.";
+	}
+	if (toolName !== "write" && toolName !== "edit") return undefined;
+	const raw = field("path");
+	if (typeof raw !== "string" || raw.length === 0) return undefined;
+	let home: { home: string; mode: Mode };
+	try { home = target(); }
+	catch (error) { return `Refused: ${toolName} ${raw}: no command-post home resolves for the operator's writable paths (${(error as Error).message}).`; }
+	const layout = layoutForHome(home.mode, home.home);
+	const path = resolve(cwd, raw.replace(/^@/, "").replace(/^~(?=$|\/)/, homedir()));
+	const dirs = [resolve(home.home, layout.operatorWorkspace), resolve(home.home, layout.state, "task-files")];
+	const orders = resolve(home.home, layout.data, "standing-orders.md");
+	if (path === orders || dirs.some((dir) => path.startsWith(`${dir}${sep}`))) return undefined;
+	return `Refused: ${toolName} ${path}: the operator session writes only under ${dirs.map((dir) => `${dir}${sep}`).join(" or ")}, or exactly ${orders}. ` +
+		"Anything else (state, data, mandates, projects) changes through `cp_parent`, never by hand.";
+}
+
 export default function (pi: ExtensionAPI): void {
 	let client: ParentHostClient | undefined;
 	let connectedTarget: OperatorTarget | undefined;
@@ -279,6 +312,12 @@ export default function (pi: ExtensionAPI): void {
 	// mz0: relays raised during the operator's own turn wait for it to settle, then go out as one message.
 	pi.on("agent_start", async (_event, ctx) => { sessionCtx = ctx ?? sessionCtx; consumer.started(); });
 	pi.on("tool_execution_end", async (event) => askGuard.toolEnded(event as never));
+	pi.on("tool_call", async (event, ctx) => {
+		const reason = operatorToolRefusal(event.toolName, event.input, ctx?.cwd ?? process.cwd(), backstopTarget);
+		if (!reason) return undefined;
+		setStatusLine(ctx ?? sessionCtx, "operator-guard", `operator guard: refused ${event.toolName}`);
+		return { block: true, reason };
+	});
 	pi.on("agent_before_settle", async (event) => {
 		const { context, outcome } = event as { context?: { contextMessages?: unknown }; outcome?: string };
 		if (outcome !== undefined && outcome !== "completed") return undefined; // an aborted or failed run is never nudged
