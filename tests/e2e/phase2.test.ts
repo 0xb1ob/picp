@@ -143,7 +143,14 @@ async function fleet(
 	};
 }
 
-function shipSteps(jobId: string, options: { push?: boolean; prUrl?: string } = {}): ScriptStep[] {
+/** HEAD of the job's own worktree, read when the step is served (the commit happens in the step before). */
+function worktreeHeadOf(home: string, jobId: string): string {
+	const worktree = readFleet(home).jobs.find((j) => j.job_id === jobId)?.worktree;
+	assert.ok(worktree, `no worktree recorded for ${jobId}`);
+	return execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+function shipSteps(home: string, jobId: string, options: { push?: boolean; prUrl?: string } = {}): ScriptStep[] {
 	const push = options.push === false ? "" : ` && git push -q -u origin ${jobId}`;
 	return [
 		{
@@ -163,14 +170,15 @@ function shipSteps(jobId: string, options: { push?: boolean; prUrl?: string } = 
 			calls: [
 				{
 					name: "report_result",
-					args: {
+					args: () => ({
 						job_id: jobId,
 						kind: "ship",
 						status: "done",
 						summary: "Bumped x to 2 and pushed the branch.",
 						branch: jobId,
+						head_sha: worktreeHeadOf(home, jobId),
 						...(options.prUrl ? { pr_url: options.prUrl } : {}),
-					},
+					}),
 				},
 			],
 			usage: { prompt_tokens: 1200, completion_tokens: 80 },
@@ -186,7 +194,7 @@ test("m2: intake → dispatch → envelope → promote → unreported head needs
 	const f = await fleet(t);
 	const jobId = await f.intake("bump x", { delivery: "pr", slug: "bump-x" });
 	const model = f.script("m2-ship", [
-		...shipSteps(jobId, { prUrl: "https://github.com/o/r/pull/42" }),
+		...shipSteps(f.home, jobId, { prUrl: "https://github.com/o/r/pull/42" }),
 		// promote: a CI fix on the held worker, same model, same worktree
 		{
 			kind: "tool_calls",
@@ -298,7 +306,7 @@ test("m2: a dirty worktree keeps everything until it is clean", { skip: SKIP, ti
 			calls: [
 				{
 					name: "report_result",
-					args: { job_id: jobId, kind: "ship", status: "done", summary: "Left a note behind.", branch: jobId },
+					args: () => ({ job_id: jobId, kind: "ship", status: "done", summary: "Left a note behind.", branch: jobId, head_sha: worktreeHeadOf(f.home, jobId) }),
 				},
 			],
 		},
@@ -409,7 +417,7 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	git(f.clone, "branch", "-D", jobId);
 
 	const firstLeaseId = failed?.lease_id;
-	const secondModel = f.script("m2-crash-2", shipSteps(jobId, { push: false }));
+	const secondModel = f.script("m2-crash-2", shipSteps(f.home, jobId, { push: false }));
 	const second = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model: secondModel, fetch: false });
 	assert.equal(second.state, "dispatched");
 	// The pool may hand back the same slot (it is free again); the LEASE is what
@@ -433,7 +441,7 @@ test("m2: an unspent crash is revived once, in place, on the same lease", { skip
 	// Step 1 hangs in a short tool and is killed (its orphaned sleep holds the pipe open until it ends); the revived worker answers with step 2 onward.
 	const model = f.script("m2-revive", [
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
-		...shipSteps(jobId, { push: false }),
+		...shipSteps(f.home, jobId, { push: false }),
 	]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);
@@ -464,7 +472,7 @@ test("m2: a forced teardown racing an automatic revive never claims a lease it d
 	const jobId = await f.intake("tear down mid-revive", { delivery: "local", slug: "raced" });
 	const model = f.script("m2-race", [
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
-		...shipSteps(jobId, { push: false }),
+		...shipSteps(f.home, jobId, { push: false }),
 	]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);

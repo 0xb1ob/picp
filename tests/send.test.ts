@@ -35,6 +35,7 @@ import {
 	readRunEvents,
 	readRunStatus,
 	REPO_ROOT,
+	type ScratchRepo,
 	type ScriptStep,
 	waitFor,
 	WORKER_REPORTER_EXTENSION,
@@ -59,11 +60,11 @@ interface Bench {
 async function bench(
 	t: { after(fn: () => void | Promise<void>): void },
 	script: ScriptStep[],
-	options: { jobId?: string } = {},
+	options: { jobId?: string; repo?: ScratchRepo } = {},
 ): Promise<Bench> {
 	const jobId = options.jobId ?? "cp-send";
 	const home = createScratchHome();
-	const repo = createScratchRepo({ name: "send" });
+	const repo = options.repo ?? createScratchRepo({ name: "send" });
 	const provider = await MockProvider.start();
 	const agentDir = createAgentDir({ provider });
 	const model = provider.addScript("send", script);
@@ -368,7 +369,9 @@ test("a promoted held job can still report: the superseding envelope is accepted
 		summary: "Blocked: the migration needs owner sign-off.",
 		blockers: ["migration needs owner sign-off"],
 	};
+	const repo = createScratchRepo({ name: "send" });
 	const shipped = {
+		head_sha: repo.head(),
 		job_id: jobId,
 		kind: "ship" as const,
 		status: "done" as const,
@@ -381,7 +384,7 @@ test("a promoted held job can still report: the superseding envelope is accepted
 			{ kind: "tool_calls", calls: [{ name: "report_result", args: blocked }] },
 			{ kind: "tool_calls", calls: [{ name: "report_result", args: shipped }] },
 		],
-		{ jobId },
+		{ jobId, repo },
 	);
 
 	// 1. the worker reports blocked, its turn ends, and the job is held.
@@ -428,14 +431,15 @@ test("a promoted held job can still report: the superseding envelope is accepted
 test("a failed job continues on its original lease: cp_send refuses it failed, then the resumed worker's report supersedes the accepted envelope", { timeout: 120_000 }, async (t) => {
 	const jobId = "cp-continue";
 	const blocked = { job_id: jobId, kind: "ship" as const, status: "blocked" as const, summary: "Blocked: needs a hand.", blockers: ["needs a hand"] };
-	const shipped = { job_id: jobId, kind: "ship" as const, status: "done" as const, summary: "Continued and pushed.", branch: jobId };
+	const repo = createScratchRepo({ name: "send" });
+	const shipped = { job_id: jobId, kind: "ship" as const, status: "done" as const, summary: "Continued and pushed.", branch: jobId, head_sha: repo.head() };
 	const b = await bench(
 		t,
 		[
 			{ kind: "tool_calls", calls: [{ name: "report_result", args: blocked }] },
 			{ kind: "tool_calls", calls: [{ name: "report_result", args: shipped }] },
 		],
-		{ jobId },
+		{ jobId, repo },
 	);
 
 	// 1. the worker reports, then dies, and the job is failed.
@@ -497,14 +501,16 @@ test("a failed job continues on its original lease: cp_send refuses it failed, t
 
 test("a landed delivery is refused, not silently reopened", { timeout: 120_000 }, async (t) => {
 	const jobId = "cp-landed";
+	const repo = createScratchRepo({ name: "send" });
 	const envelope = {
+		head_sha: repo.head(),
 		job_id: jobId,
 		kind: "ship" as const,
 		status: "done" as const,
 		summary: "Shipped it.",
 		branch: jobId,
 	};
-	const b = await bench(t, [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }], { jobId });
+	const b = await bench(t, [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }], { jobId, repo });
 
 	await b.sender.send({ jobId, message: "do the job" });
 	await waitFor(() => b.fleet.require(jobId), (job) => job.phase === "held", { what: "the envelope" });
@@ -535,8 +541,9 @@ test("a landed delivery is refused, not silently reopened", { timeout: 120_000 }
 
 test("human_handoff change request: cp_send to the handed-off job reopens it on the same branch; a dead worker points at cp_revive", { timeout: 120_000 }, async (t) => {
 	const jobId = "cp-aaa1";
-	const envelope = { job_id: jobId, kind: "ship" as const, status: "done" as const, summary: "Pushed and opened the PR.", branch: jobId };
-	const b = await bench(t, [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }, { kind: "text", text: "on it" }], { jobId });
+	const repo = createScratchRepo({ name: "send" });
+	const envelope = { job_id: jobId, kind: "ship" as const, status: "done" as const, summary: "Pushed and opened the PR.", branch: jobId, head_sha: repo.head() };
+	const b = await bench(t, [{ kind: "tool_calls", calls: [{ name: "report_result", args: envelope }] }, { kind: "text", text: "on it" }], { jobId, repo });
 	await b.sender.send({ jobId, message: "do the job" });
 	await settled(b.worker, 1);
 	await waitFor(() => b.fleet.require(jobId), (job) => job.phase === "held", { what: "the envelope" });

@@ -253,8 +253,13 @@ Cross-field policy (all fail-closed, all in code):
   worktree** (that is why research keeps a clean tree). research may never
   carry `pr_url`.
 - **ship/done** requires `branch`; `delivery:pr` additionally requires an
-  https `pr_url`. It should carry `head_sha` (the commit it pushed,
-  `git rev-parse HEAD`) and `base_sha` (the `origin/<base>` it rebased onto,
+  https `pr_url`. It must carry `head_sha`: the HEAD of its own worktree
+  (`git rev-parse HEAD`), pushed. The worker reporter enforces this before
+  filing (`headShaErrors`, repairable): a missing `head_sha`, or one that is not
+  the worktree's HEAD, is rejected with the observed sha. `validateEnvelope` and
+  intake still accept a stored envelope without it, so envelopes filed before
+  this rule stay valid. It should also carry
+  `base_sha` (the `origin/<base>` it rebased onto,
   where `<base>` is the repository's resolved base branch), so
   the run is self-describing: the parent verifies CI against exactly that head,
   on exactly that base. Intake resolves that url from gh rather than trusting it, and
@@ -351,9 +356,11 @@ and the job is an `envelope_invalid` failure the operator sees.
 
 The worker also runs the checks only it can run before accepting a report
 (`localChecks`): the research artifact must exist, be non-empty, and match the
-predeclared path, and a research worktree must be clean
-(`git status --porcelain` empty). Failing those is repairable, so the model can
-fix the tree or report `blocked` instead.
+predeclared path, a research worktree must be clean
+(`git status --porcelain` empty), and a `done` report's `head_sha` must be HEAD of
+the worker's own worktree (required for ship; checked with `git rev-parse HEAD`,
+failing closed if git cannot answer). Failing those is repairable, so the model can
+fix the tree, copy the observed sha, or report `blocked` instead.
 
 ### Ship worker final step: rebase, run focused checks, push, report the head sha
 
