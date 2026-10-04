@@ -20,7 +20,7 @@
 import { type Escalation, type FleetRecord, isoTimestamp, type Mandate } from "./contracts.ts";
 import { raiseMissionEnd } from "./escalation.ts";
 import type { EscalationStore } from "./escalation.ts";
-import type { FleetStore } from "./fleet.ts";
+import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { type BlockedJob, blockedJobs, raiseDroppedDependencies } from "./blocked-jobs.ts";
 import { type Job, type Ledger, parseJobLabels, wasDropped } from "./ledger.ts";
 import { covers, jobCapRefuses, mandateSpend, type MandateStore, type ScheduleScope, scheduleIdOf, scheduleScope } from "./mandate.ts";
@@ -106,13 +106,26 @@ function blockedReason(rows: readonly BlockedJob[]): string {
 	return rows.slice(0, 3).map((row) => `${row.job.id}: waiting on ${row.waiting_on}`).join("; ") + (rows.length > 3 ? `; +${rows.length - 3} more blocked jobs` : "");
 }
 
+/**
+ * A reported research job left held or waiting after its worker died: nothing is left to deliver, only `cp_teardown`.
+ * Never a ship hold — a `delivery:pr` ship with a dead worker is the contract until its PR lands. Advisory only.
+ */
+function deadReportedResearch(jobs: readonly FleetRecord[]): string | undefined {
+	const ids = jobs
+		.filter((job) => job.kind === "research" && (job.phase === "held" || job.phase === "waiting") && job.reported_at && typeof job.worker?.pid === "number" && !isPidAlive(job.worker.pid))
+		.map((job) => job.job_id);
+	if (!ids.length) return undefined;
+	return `reported research with a dead worker: ${ids.slice(0, 3).map((id) => `${id} — cp_teardown ${id}`).join("; ")}${ids.length > 3 ? `; +${ids.length - 3} more` : ""}`;
+}
+
 export async function cpNext(ports: NextPorts, project?: string): Promise<NextResult> {
 	const checkout = homeCheckoutFinding(ports.fleet.home, ports.packageRoot ?? PACKAGE_ROOT, execRunner);
-	const warning = checkout ? { warning: `${checkout.what}: ${checkout.fix}` } : {};
+	const fleetJobs = ports.fleet.read().jobs;
+	const notes = [checkout ? `${checkout.what}: ${checkout.fix}` : undefined, deadReportedResearch(fleetJobs)].filter((note) => note !== undefined);
+	const warning = notes.length ? { warning: notes.join("\n") } : {};
 	const drain = readDrain(ports.fleet.home);
 	if (drain) return { ...warning, ready: [], action: { kind: "draining", reason: `draining since ${drain.started_at} (${drain.state}): no dispatch, promotion or new merge step until the parent restarts` } };
 	const now = isoTimestamp((ports.now ?? (() => new Date()))());
-	const fleetJobs = ports.fleet.read().jobs;
 	const fleetLive = fleetJobs.filter((job) => job.phase === "waiting" || job.phase === "launching").length;
 	const grants = ports.mandates.sweep(now, fleetJobs);
 	const beads = ports.registry ? await readReadyBeads(ports.registry, ports.ledger, project, ports.beadExec) : [];

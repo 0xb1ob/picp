@@ -427,6 +427,29 @@ test("at the job cap cp_next recommends no new dispatch, and the grant stays act
 	assert.match(next.action.reason, /job cap 1 reached .* no new dispatch/);
 });
 
+test("N8: reported research held with a dead worker is named for cp_teardown; a ship hold in that shape and a live pid are not", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const job = await ports.ledger.create({ title: "next", project: "demo", delivery: "pr", kind: "ship" });
+	ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+	const dead = 999_999_999; // above any pid_max: kill(pid, 0) is ESRCH
+	const held = (job_id: string, kind: FleetRecord["kind"], pid: number) => fleetRecord({ job_id, kind, delivery: kind === "ship" ? "pr" : "local", phase: "held", reported_at: isoTimestamp(), branch: job_id, worktree: `/wt/${job_id}`, worker: { ...fleetRecord().worker!, pid } });
+	await ports.fleet.add(held("cp-ship", "ship", dead)); // cp-b686's shape: a delivery:pr hold whose worker exited
+	await ports.fleet.add(held("cp-live", "research", process.pid));
+	const quiet = await cpNext(ports, "demo");
+	assert.doesNotMatch(quiet.warning ?? "", /dead worker/, "a ship hold and a live research worker never warn");
+	assert.deepEqual([quiet.action.kind, quiet.action.job_id], ["dispatch", job.id]);
+
+	for (const id of ["cp-r1", "cp-r2", "cp-r3", "cp-r4"]) await ports.fleet.add(held(id, "research", dead));
+	const warned = await cpNext(ports, "demo");
+	assert.match(warned.warning ?? "", /reported research with a dead worker: cp-r1 — cp_teardown cp-r1; cp-r2 — cp_teardown cp-r2; cp-r3 — cp_teardown cp-r3; \+1 more$/m);
+	assert.doesNotMatch(warned.warning ?? "", /cp-ship|cp-live/);
+	assert.deepEqual([warned.action.kind, warned.action.job_id], ["dispatch", job.id], "the recommendation is unchanged");
+	assert.match(formatNext(warned), /^warning: .*cp_teardown cp-r1/m);
+	assert.equal(ports.fleet.get("cp-r1")?.phase, "held", "cp_next never tears anything down");
+});
+
 test("a project-wide grant on a project with history recommends dispatch: earlier usage never fills its caps", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

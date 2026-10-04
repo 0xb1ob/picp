@@ -20,7 +20,12 @@ function screen(data: ReturnType<typeof decisions>, now: number): DecisionScreen
   decided_today:{count:complete ? today.length : null, worth_count:complete ? today.filter(d => d.worth.length).length : null},
  };
 }
-const same = (a: unknown, b: unknown) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase();
+/** N11: the operator's recommendation matches an escalation option (its id or label) exactly, or as `label:` / `label.` plus a rationale (rows stored before open() refused sentences). */
+const same = (option: unknown, rec: unknown) => {
+ if (typeof option !== "string" || typeof rec !== "string") return false;
+ const a = option.trim().toLowerCase(), b = rec.trim().toLowerCase();
+ return b === a || (a !== "" && (b.startsWith(`${a}:`) || b.startsWith(`${a}.`)));
+};
 
 /** The job a run path names, only when it is really under this home's state/runs and the viewer lists that job. */
 function runUnderState(state: ViewerState, path: string): string | undefined {

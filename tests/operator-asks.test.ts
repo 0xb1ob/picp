@@ -46,3 +46,12 @@ test("operator asks validate before append and shorten consequences with an elli
 	assert.throws(() => asks.withdraw(opened.id, " "));
 	assert.equal(asks.open().length, 1);
 });
+
+test("N11: a recommendation must be exactly one option label; a sentence is refused before append", (t) => {
+	const asks = store(t);
+	const options = [{ label: "approve", consequence: "Plan proceeds" }, { label: "drop", consequence: "Job closes" }];
+	assert.throws(() => asks.open({ ...input, options, recommendation: "approve: because the plan is sound" }), /recommendation must be exactly one option label \("approve", "drop"\); put the rationale in context/);
+	assert.equal(asks.list().length, 0, "nothing is journaled");
+	assert.equal(asks.open({ ...input, options, recommendation: " approve " }).recommendation, " approve ", "a label after trim is accepted as given");
+	assert.equal(asks.open({ ...input, options, recommendation: "approve" }).recommendation, "approve");
+});

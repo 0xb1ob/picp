@@ -33,6 +33,14 @@ test("the detector ignores a ? inside a code fence or a > quote, and a URL query
 	assert.equal(detectHumanQuestion("```\nunclosed fence: really?"), undefined);
 });
 
+test("N10: a choice with no ? — 'still waiting' or 'your (two) choices' — is the question; fenced it still is not", () => {
+	const tail = "Still waiting on your two choices: hand-off merges, and the beads backlog.";
+	assert.equal(detectHumanQuestion(`PR #12 merged.\n${tail}`), tail);
+	assert.equal(detectHumanQuestion("Both landed. Over to your choice."), "Over to your choice.");
+	assert.equal(detectHumanQuestion(`Done.\n\`\`\`\n${tail}\n\`\`\`\nAll merged.`), undefined);
+	assert.equal(detectHumanQuestion(`> ${tail}\nAll merged.`), undefined);
+});
+
 test("the detector reads only the last 600 characters", () => {
 	assert.equal(detectHumanQuestion(`Should I proceed?\n${"filler. ".repeat(100)}`), undefined);
 });

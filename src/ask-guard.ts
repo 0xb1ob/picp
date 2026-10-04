@@ -14,7 +14,8 @@ export const DETECTED_ASK_PREFIX = "Detected in the main session's reply";
 export const NO_ASK = "NO-ASK";
 const DETECTED_LABEL = "Answer in the operator chat";
 const WINDOW_CHARS = 600;
-const CUE = /\b(should I|do you want|would you like|which (option|one)|please (confirm|choose|decide)|your call|let me know)\b/i;
+// `still waiting` / `your (two) choices` (N10): a choice put to the human with no `?` and no other cue.
+const CUE = /\b(should I|do you want|would you like|which (option|one)|please (confirm|choose|decide)|your call|let me know|still waiting|your (?:\w+ )?choices?)\b/i;
 const DASHBOARD_ASK_CLICK = /\[cp-dashboard [^\]]*\bask=/;
 
 /** The sentence that asks the human something, from the tail of the final text; fences and `>` quotes never count. */
