@@ -1103,9 +1103,9 @@ project in phase `held` or `done`, whatever its `delivery` (`local`, `pipeline`,
 one is refused with the reason. A second post for the same `job_id` writes nothing and returns `state:"duplicate"`
 with the first `ans-` id. Status pings, relays (`[cp-bridge…]`, `[cp-dashboard…]`, `ask-…:` replies), decisions and
 chat are not answers; `id` is `ask_answer`'s. The journal is append-only: the bridge's `posted` lines (`ans-<12 hex>`)
-and, from PR2, the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-files.ts`; a torn last line is
+and the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-files.ts`; a torn last line is
 ignored, bad lines count as skipped, the first `job_id` wins, a repeat ack is ignored). The dashboard list and the
-acknowledge route arrive in PR2 (§Dashboard control → Answers to acknowledge).
+acknowledge route are §Answers to acknowledge.
 
 **Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
 without a `cp_parent ask` is forced back once, then carded by the bridge itself.
@@ -5680,6 +5680,42 @@ fire (see Schedules), whose job goes to the schedule runner (answer/board/local)
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the route and refuses queued requests at
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
 dashboard control one: a same-user local process can already write `state/`.
+
+### Answers to acknowledge (cp-mxk4)
+
+The Decisions page lists the answers the human asked for, posted with `cp_parent answer` (see Operator answers), between
+**Awaiting you** and **Being handled** (`#answers`; absent while `state/operator/answers.jsonl` does not exist). Each row
+shows the project, the question (verbatim, clipped), the short answer (first paragraph, ≤ 280 chars), the time, the job
+and report/board links and the full answer behind an expander. `GET /api/decisions` carries `answers: {availability, open,
+open_count, history, history_total, warning}`: open items are unacknowledged, newest first (≤ 100); history is
+acknowledged items, newest-acked first (≤ 50). Evidence links come only from `evidenceLink` (a board → `/boards/<slug>/`, a
+run → `#job/<id>`, a Files root); anything else stays plain text, and only `http(s)` URLs in the answer become external
+links. No push, no Overview line, no nav badge: the count sits on the section heading.
+
+**An acknowledgement is not an operator decision.** The tick (✓ Acknowledge) is one `POST /api/answers/ack` `{"id":
+"ans-<12 hex>"}` that appends one `{"type":"acked","by":"viewer","id","at","peer"}` line to `state/operator/answers.jsonl`
+(the journal stays append-only; the row moves to the collapsed **Acknowledged** history). It needs no operator session and
+no parent, reaches neither, never pushes and authorizes nothing. `GET /api/answers/control` (403 without
+`--require-tailnet`; never writes) returns `{enabled, reason, token}`: `token` is this viewer process's random answer
+token, only while control is on. The POST refuses, in order:
+
+| Check | Refusal |
+|---|---|
+| method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `answer_ack`) |
+| body shape | 400 `body must be {"id": "ans-<12 hex>"}` |
+| `x-cp-control-token` equals the answer token | 403 `control token missing or stale; reload the page` |
+| the journal is readable | 500 `answers unreadable: …` |
+| the id is in the journal / not yet acknowledged | 404 `no answer <id>` / 409 `<id> was already acknowledged at <iso>` |
+| the `acked` line is appended | 500 `answers journal unwritable (…)` |
+| — | 202 `{id, state: "acked", acked_at}` |
+
+Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "answer_ack"`, `answer_id` once parsed) in
+`state/operator/dashboard.jsonl`; no refusal writes an `acked` line. Two tabs racing can both get 202; the fold keeps the
+first ack.
+
+**Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the ack route; the list still renders
+read-only. Deleting `state/operator/answers.jsonl` clears the list and loses nothing else. An unreadable or over-16-MiB
+journal shows "Answers unavailable".
 
 ## Reading the plan
 

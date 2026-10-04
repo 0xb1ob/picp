@@ -19,6 +19,7 @@ import { More } from "./screens/More.tsx";
 import { DependencyMap } from "./screens/DependencyMap.tsx";
 import { time } from "./format.ts";
 import { usePush } from "./use-push.ts";
+import { useAnswersControl } from "./use-answers-control.ts";
 export function DetailScreen({current:asked}: {current:Route}) {
  // A defaulted Full transcript the server refuses (403) falls back to Decisions, silently (routes.ts).
  // `refused` never outlives its route: DetailScreen is keyed on `${screen}?${query}`, so a route change remounts it.
@@ -52,10 +53,11 @@ function useSection(current: Route, loaded: boolean) {
 function DecisionPage({current}: {current:Route}) {
  const resource = useScreenData<DecisionsResponse>("/api/decisions","/api/stream?view=decisions");
  const control = useControl(true,resource.data?.generated_at ?? null,[]);
+ const answers = useAnswersControl(true,resource.data?.generated_at ?? null);
  useSection(current,resource.data !== null);
  return <Shell current={current} awaiting={resource.data?.awaiting_count ?? null} status={resource.status} updated={resource.data ? time(resource.data.generated_at) : null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{resource.data && " · showing last recorded data"}</p>}
-  {resource.data ? <Decisions data={resource.data} control={control}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  {resource.data ? <Decisions data={resource.data} control={control} answers={answers}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
  </Shell>;
 }
 function JobsRoute({current}:{current:Route}) {

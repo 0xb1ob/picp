@@ -87,6 +87,10 @@ test("audit P4 #24 #26: one Decisions page stacks Awaiting, a collapsed Being ha
  assert.match(empty,/Nothing needs you/); assert.match(empty,/Nothing here for this filter/); assert.doesNotMatch(empty,/Being handled/,"no parent questions: no Being handled line");
  const at = (html:string,needle:string) => { const i = html.indexOf(needle); assert.ok(i >= 0,needle); return i; };
  assert.ok(at(empty,'id="awaiting"') < at(empty,'id="decided"'),"Awaiting sits above the Decided log");
+ assert.doesNotMatch(empty,/id="answers"/,"no answers journal: no Answers section");
+ data.answers = {availability:"ok",open:[{id:"ans-aaaaaaaaaaaa",project:"demo",question:"What?",answer:"Because.",short:"Because.",posted_at:data.generated_at,acked_at:null,job:null,evidence:[],links:{}}],open_count:1,history:[],history_total:0,warning:null};
+ const withAnswers = page(data);
+ assert.ok(at(withAnswers,'id="awaiting"') < at(withAnswers,'id="answers"') && at(withAnswers,'id="answers"') < at(withAnswers,'id="decided"'),"Answers sit between Awaiting and the Decided log");
  data.parent_questions = [{id:"es-a",question:"Close md-x?",kind:"mission_end",created_at:data.generated_at,job_ids:["cp-a"],age_seconds:3470},{id:"es-b",question:"q",kind:"mission_end",created_at:data.generated_at,job_ids:[],age_seconds:60}];
  data.decided = [{id:"es-risk",question:"Risk?",answer:"Proceed",quote:null,answered_at:data.generated_at,job_ids:["cp-demo"],source:"operator-delegated",project:null,source_escalation:"es-risk",rule:"Evidence clears it",worth:[],today:true,kind:null}];
  const html = page(data);

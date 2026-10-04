@@ -1,0 +1,23 @@
+.answers { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.answers-header { display: flex; align-items: center; gap: 10px; }
+.answers-count { min-width: 24px; padding: 1px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 12px; text-align: center; }
+.answers-control, .answers-empty, .answers-acked { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.answers-warning, .answers-failed { font-size: 13px; color: var(--text); border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
+.answers-row { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.answers-done { border-color: var(--divider); }
+.answers-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.answers-project { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.answers-meta a, .answers-evidence a { overflow-wrap: anywhere; }
+.answers-question { font-size: 13px; color: var(--dim); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.answers-short { font-size: 15px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.answers-full summary, .answers-history > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: 13px; }
+.answers-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; color: var(--text); padding: 4px 0 8px; }
+.answers-evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.answers-evidence li { display: flex; flex-wrap: wrap; gap: 4px 10px; overflow-wrap: anywhere; }
+.answers-ack { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid var(--check-border); border-radius: 999px; background: var(--check-background); color: var(--text); font-size: 14px; cursor: pointer; }
+.answers-ack:disabled { opacity: 0.55; cursor: not-allowed; }
+.answers-history { display: flex; flex-direction: column; gap: 10px; }
+.answers-history[open] > summary { margin-bottom: 4px; }
+@media (min-width: 900px) {
+ .answers-row { padding: 18px 22px; }
+}

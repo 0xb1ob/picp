@@ -181,7 +181,22 @@ export interface DecisionScreenResponse {
 export interface AwaitingResponse extends DecisionScreenResponse { items: AwaitingDetail[] }
 export interface DecidedResponse extends DecisionScreenResponse { items: DecisionDetail[] }
 /** The one Decisions page (dashboard audit P4 #24): Awaiting's asks as `items`, then the Decided log. */
-export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[] }
+/** One answer the operator asked for (cp-mxk4): `short` is its first paragraph, `evidence`/`links` only what `evidenceLink` resolves. */
+export interface AnswerItem {
+ id: string; project: string; question: string; answer: string; short: string; posted_at: string; acked_at: string | null;
+ job: {id: string; href: string; read: string | null} | null;
+ evidence: AwaitingDetail["evidence"];
+ links: Record<string, string>;
+}
+export interface AnswersView {
+ availability: SourceAvailability; open: AnswerItem[]; open_count: number | null;
+ history: AnswerItem[]; history_total: number | null; warning: string | null;
+}
+/** `GET /api/answers/control` (--require-tailnet only): the ack CSRF token only while control is on. */
+export interface AnswersControlStatusResponse { generated_at: string; enabled: boolean; reason: string | null; token: string | null }
+/** `POST /api/answers/ack` accepted: 202 once its `acked` line is on disk. */
+export interface AnswerAckResponse { id: string; state: "acked"; acked_at: string }
+export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[]; answers: AnswersView }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
  elapsed_seconds: number | null; limit_seconds: number | null;

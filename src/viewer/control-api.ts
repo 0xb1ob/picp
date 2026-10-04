@@ -27,6 +27,11 @@
  * `POST /api/schedules/request` takes exactly `{op, schedule_id}` behind the same chain (kind `schedule`), then body
  * shape, the parent running, the schedule token, the schedule existing, at most 20 pending, and appends one
  * `request` line to `state/schedule-control.jsonl` before it answers 202. The parent applies it (src/schedule-control.ts).
+ *
+ * cp-mxk4, Decisions page Answers to acknowledge: `GET /api/answers/control` (--require-tailnet only, never writes) reads
+ * the opt-out and this viewer's answer token; `POST /api/answers/ack` takes exactly `{id}` behind the same chain (kind
+ * `answer_ack`), then the answer token, the answer existing and not yet acknowledged, and appends one `acked` line to
+ * `state/operator/answers.jsonl` before it answers 202. No session, no parent: it only moves the answer to the history.
  */
 
 import { execFile } from "node:child_process";
@@ -36,11 +41,11 @@ import type { IncomingMessage } from "node:http";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
-import type { ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
-import { appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
+import type { AnswerAckResponse, AnswersControlStatusResponse, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
+import { appendAnswerLine, appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
-	controlInboxFile, controlOrigin, controlRecordFile, INBOX_MAX_HELD, isAskId, readControlConfig, readControlRecord,
+	controlInboxFile, controlOrigin, controlRecordFile, INBOX_MAX_HELD, isAnswerId, isAskId, operatorAnswersFile, readAnswers, readControlConfig, readControlRecord,
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
@@ -56,6 +61,10 @@ export const SCHEDULE_CONTROL_PATH = "/api/schedules/request";
 /** The Schedules page's CSRF token: per viewer process; a viewer restart rotates it (the page re-reads it with the status). */
 export const SCHEDULE_TOKEN = randomBytes(32).toString("hex");
 const scheduleRequestId = (now: Date): string => `sc-${now.toISOString().replace(/[-:T]/g, "").slice(0, 14)}-${randomBytes(4).toString("hex")}`;
+export const ANSWERS_CONTROL_PATH = "/api/answers/control";
+export const ANSWER_ACK_PATH = "/api/answers/ack";
+/** The Answers section's CSRF token: per viewer process; a viewer restart rotates it (the page re-reads it with the status). */
+export const ANSWER_TOKEN = randomBytes(32).toString("hex");
 export const OPERATOR_START_WINDOW_MS = 60_000;
 /** How long a herdr server check is reused by the control status. */
 export const LAUNCHERS_CACHE_MS = 30_000;
@@ -235,7 +244,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string };
+type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string };
 type Body = { kind: "message"; text: string; deliver?: "followUp" | "steer" } | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
@@ -490,5 +499,38 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 		const written = appendScheduleControlLine(options.stateDir, { type: "request", by: "viewer", id, at: now.toISOString(), peer, op, schedule_id: scheduleId });
 		if (!written.ok) return refuse(500, `schedule control journal unwritable (${scheduleControlFile(options.stateDir)}): ${written.error}`);
 		return { status: 202, body: { id, state: "queued" } satisfies ScheduleControlSendResponse };
+	});
+}
+
+/** `GET /api/answers/control` (cp-mxk4): the opt-out and the ack token while control is on (--require-tailnet only, never writes). */
+export function handleAnswersControlStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
+	if (options.requireTailnet !== true) return { status: 403, body: { error: "answer acknowledgement is served only under --require-tailnet" } };
+	const config = readControlConfig(options.stateDir);
+	const enabled = config.state === "on";
+	const body: AnswersControlStatusResponse = { generated_at: now.toISOString(), enabled, reason: enabled ? null : `Dashboard control is off: ${config.reason}`, token: enabled ? ANSWER_TOKEN : null };
+	return { status: 200, body };
+}
+
+/**
+ * `POST /api/answers/ack` (cp-mxk4): the shared chain, then exactly `{id}`, the answer token, the id known and not yet
+ * acknowledged; 202 only once the `acked` line is appended. Needs no operator session and no parent, reaches neither,
+ * and is not an operator decision: it only moves the answer from the open list to the history.
+ */
+export function handleAnswerAck(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
+	return guarded(req, options, now, "answer_ack", async (json, { peer, refuse, parsed }) => {
+		const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
+		const id = isAnswerId(value?.id) ? value.id : undefined;
+		parsed({ kind: "answer_ack", text: null, ask_id: null, ...(id ? { answer_id: id } : {}) });
+		if (!value || !id || Object.keys(value).length !== 1) return refuse(400, 'body must be {"id": "ans-<12 hex>"}');
+		if (!tokenMatches(req.headers["x-cp-control-token"], ANSWER_TOKEN)) return refuse(403, "control token missing or stale; reload the page");
+		const journal = readAnswers(options.stateDir);
+		if (journal.error) return refuse(500, `answers unreadable: ${journal.error}`);
+		const known = journal.answers.find((answer) => answer.id === id);
+		if (!known) return refuse(404, `no answer ${id}`);
+		if (known.acked_at !== null) return refuse(409, `${id} was already acknowledged at ${known.acked_at}`);
+		const at = now.toISOString().replace(/\.\d{3}Z$/, "Z"); // the journal's timestamp form has no milliseconds
+		const written = appendAnswerLine(options.stateDir, { type: "acked", by: "viewer", id, at, peer });
+		if (!written.ok) return refuse(500, `answers journal unwritable (${operatorAnswersFile(options.stateDir)}): ${written.error}`);
+		return { status: 202, body: { id, state: "acked", acked_at: at } satisfies AnswerAckResponse };
 	});
 }

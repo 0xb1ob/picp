@@ -1,5 +1,7 @@
 import { isAbsolute, join, relative, sep } from "node:path";
-import type { Ask, AwaitingDetail, AwaitingResponse, DecidedResponse, DecisionScreenResponse, DecisionsResponse } from "./api-types.ts";
+import type { AnswerItem, AnswersView, Ask, AwaitingDetail, AwaitingResponse, DecidedResponse, DecisionScreenResponse, DecisionsResponse } from "./api-types.ts";
+import { readAnswers, type RecordedAnswer } from "./control-files.ts";
+import { localPaths } from "./linkify.ts";
 import { listBoards } from "./boards.ts";
 import { listOrRead, roots, resolveRootId } from "./explorer.ts";
 import { dashboard } from "./fleet-view.ts";
@@ -77,7 +79,30 @@ export function decidedScreen(state: ViewerState, now = Date.now()): DecidedResp
  const data = decisions(state,now);
  return {...screen(data,now), items:data.decision_items};
 }
+const SHORT_MAX = 280;
+const OPEN_MAX = 100;
+const HISTORY_MAX = 50;
+
+/** cp-mxk4: the answers journal as the Decisions page's list: open newest first, acknowledged newest-acked first. */
+export function answersView(state: ViewerState): AnswersView {
+ const read = readAnswers(state.stateDir);
+ if (read.error) return {availability:"unavailable", open:[], open_count:null, history:[], history_total:null, warning:"Answers unavailable"};
+ let slugs: string[] | undefined;
+ const boards = () => slugs ??= listBoards(state).map(b => b.slug);
+ const item = (a: RecordedAnswer): AnswerItem => {
+  const paragraph = a.answer.trim().split(/\n\s*\n/)[0]!.replace(/\s+/g," ").trim();
+  const links: Record<string,string> = {};
+  for (const path of localPaths(a.answer)) { const href = evidenceLink(state,path,a.project,boards).href; if (href) links[path] = href; }
+  return {id:a.id, project:a.project, question:a.question, answer:a.answer, short:paragraph.length > SHORT_MAX ? `${paragraph.slice(0,SHORT_MAX)}…` : paragraph, posted_at:a.posted_at, acked_at:a.acked_at,
+   job:a.job_id && isSafeId(a.job_id) ? {id:a.job_id, href:`#job/${encodeURIComponent(a.job_id)}`, read:jobArtifact(state,a.job_id)?.href ?? null} : null,
+   evidence:a.evidence_paths.map(path => evidenceLink(state,path,a.project,boards)), links};
+ };
+ const open = read.answers.filter(a => a.acked_at === null).reverse();
+ const history = read.answers.filter(a => a.acked_at !== null).sort((a,b) => b.acked_at!.localeCompare(a.acked_at!));
+ return {availability:read.exists ? "ok" : "missing", open:open.slice(0,OPEN_MAX).map(item), open_count:open.length, history:history.slice(0,HISTORY_MAX).map(item), history_total:history.length,
+  warning:read.skipped ? `${read.skipped} unreadable line(s) in state/operator/answers.jsonl skipped` : null};
+}
 export function decisionsScreen(state: ViewerState, now = Date.now()): DecisionsResponse {
  const data = decisions(state,now);
- return {...screen(data,now), items:askDetails(state,data.awaiting.items,now,data), decided:data.decision_items};
+ return {...screen(data,now), items:askDetails(state,data.awaiting.items,now,data), decided:data.decision_items, answers:answersView(state)};
 }
