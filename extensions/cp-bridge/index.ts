@@ -36,6 +36,7 @@ import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
+import { startVersionLine, type VersionLine } from "./version-line.ts";
 
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
@@ -298,6 +299,7 @@ export default function (pi: ExtensionAPI): void {
 	const onRelay = (relay: BridgeRelay, relayId?: string) => (relayId ? consumer.poke() : consumer.direct(relay, relayIdOf(relay)));
 
 	let control: DashboardControl | undefined;
+	let version: VersionLine | undefined;
 	let sessionCtx: ExtensionContext | undefined;
 	// Status lines, not toasts: they stay visible and never displace a command's own notice.
 	const setStatusLine = (ctx: ExtensionContext | undefined, key: string, line: string) => { if (ctx?.hasUI) ctx.ui.setStatus(key, line); else process.stderr.write(`${line}\n`); };
@@ -388,6 +390,7 @@ export default function (pi: ExtensionAPI): void {
 	// After a loss: say it once, deliver what the outbox gathered, then relay every open escalation the ledger never saw.
 	const afterAttach = (attached: ParentHostClient): void => {
 		consumer.poke(); // whatever the outbox gathered while this session was not attached
+		void version?.refresh(); // a new host or parent may run other code
 		if (!lost) return sayParent(attachedLine(attached.hostPid, attached.parentPid));
 		lost = false;
 		sayParent(`cp-parent: reattached (pid ${attached.hostPid})`);
@@ -435,6 +438,8 @@ export default function (pi: ExtensionAPI): void {
 		relayTimer = undefined;
 		control?.stop();
 		control = undefined;
+		version?.stop();
+		version = undefined;
 		client?.disconnect();
 	});
 
@@ -518,6 +523,8 @@ export default function (pi: ExtensionAPI): void {
 		backstopTimer = setInterval(backstopTick, ESCALATION_BACKSTOP_TICK_MS);
 		backstopTimer.unref();
 		if (process.env.CP_OPERATOR_WEB_STATUS) setStatusLine(ctx, "operator-web", process.env.CP_OPERATOR_WEB_STATUS);
+		version?.stop();
+		version = startVersionLine({ home: () => backstopTarget().home, ctx: () => sessionCtx });
 	});
 
 	// autonomy-programme-cur.5.3: a bounded, static note so the main LLM knows

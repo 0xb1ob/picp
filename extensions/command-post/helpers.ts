@@ -11,6 +11,8 @@ import type { CommandPost } from "../../src/command-post.ts";
 import { configureLayout, type DiffVerdict, DiffVerdictSchema, type Escalation, type Runtime, validate } from "../../src/contracts.ts";
 import { type DiffReviewResult, formatDiffReview } from "../../src/diff-review.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
+import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
+import { readVersion } from "../../src/viewer/version-view.ts";
 import { ModeError, resolveRuntime } from "../../src/mode.ts";
 import { escalationProjects, type MandateProjects, type ProjectOf, withProjectTag } from "../../src/project-report.ts";
 import { type StatusQuery } from "../../src/status.ts";
@@ -107,6 +109,19 @@ export function runtimeOrRefusal(): { runtime: Runtime } | { refusal: string } {
 /** Single-line, machine-greppable identity banner. */
 export function formatVersionLine(identity: PackageIdentity): string {
 	return `${identity.name} ${identity.version} (root: ${identity.root})`;
+}
+
+/**
+ * `/cp-version`'s third line (cp-kz20): the commit this parent loaded against the checkout's HEAD now, and upstream —
+ * through the version badge's own reader (bounded, cached git; never a fetch).
+ */
+export async function formatCommitLine(home: string | undefined): Promise<string> {
+	const [own, view] = await Promise.all([LOADED_COMMIT, readVersion({ home: home ?? PACKAGE_ROOT })]);
+	const deployed = view.deployed?.sha;
+	const state = !own || !deployed ? "unknown" : own.sha === deployed ? "current" : "stale — rotate at a quiet point (cp_parent rotate)";
+	const u = view.upstream;
+	const upstream = u.state === "behind" || u.state === "diverged" ? `${u.behind} behind` : u.state === "ahead" ? `${u.ahead} ahead` : u.state;
+	return `commit ${own?.sha.slice(0, 7) ?? "unknown"} · deployed ${deployed?.slice(0, 7) ?? "unknown"} (${state}) · upstream ${upstream}${u.state !== "unknown" && !u.checked_at ? " (unchecked)" : ""}`;
 }
 
 /** What `session_start` hands `USER.md` to. `pi.sendMessage`'s shape, narrowed. */

@@ -31,6 +31,7 @@ import {
 	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, readControlConfig, readControlRecord,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
+import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
 import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, isUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, uploadRoot } from "./viewer/uploads.ts";
 
 /** Linux `sun_path` is 108 bytes including the NUL. */
@@ -342,7 +343,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const recordFile = controlRecordFile(stateDir);
 	const tmp = `${recordFile}.${process.pid}.tmp`;
 	try {
-		writeFileSync(tmp, `${JSON.stringify({ version: 1, pid: process.pid, socket: socketPath, token, csrf, started_at: now().toISOString() }, null, 2)}\n`, { mode: 0o600 });
+		const commit = (await LOADED_COMMIT)?.sha;
+		writeFileSync(tmp, `${JSON.stringify({ version: 1, pid: process.pid, socket: socketPath, token, csrf, started_at: now().toISOString(), ...(commit ? { commit } : {}) }, null, 2)}\n`, { mode: 0o600 });
 		renameSync(tmp, recordFile);
 	} catch (error) {
 		server.close();

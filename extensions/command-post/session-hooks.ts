@@ -22,6 +22,7 @@ import { computeInstallNudge } from "../../src/install-nudge.ts";
 import { formatIntake } from "../../src/intake.ts";
 import { contractInjectionOrNone, ModeError, packageContractLoaded } from "../../src/mode.ts";
 import { acquireParentLock, formatParentLock, readParentLock } from "../../src/parent-lock.ts";
+import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
 import { recordModelWindows } from "../../src/model-windows.ts";
 import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
@@ -150,7 +151,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// parents use to erase each other's live jobs. A refusal is therefore
 		// total: notify, and end the startup here.
 		if (!s.parentLock) {
-			const acquired = acquireParentLock({ home });
+			const acquired = acquireParentLock({ home, commit: (await LOADED_COMMIT)?.sha });
 			if (!acquired.ok) {
 				const message = `pi-command-post: ${formatParentLock(acquired)}`;
 				if (ctx.hasUI) ctx.ui.notify(message, "error");

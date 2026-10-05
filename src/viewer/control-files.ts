@@ -211,6 +211,8 @@ export interface ControlRecord {
 	token: string;
 	csrf: string;
 	started_at: string;
+	/** The commit the operator session loaded (src/viewer/loaded-commit.ts); absent in a record written before cp-kz20. */
+	commit?: string;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

@@ -19,7 +19,7 @@ import { formatMandateDefaults, loadMandateDefaults, setMandateDefault } from ".
 import { formatRunView } from "../../src/watch.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_PREFIX, formatDrain } from "../../src/drain.ts";
 import { openPlanViewer } from "./plan-viewer.ts";
-import { runtimeOrRefusal, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
+import { runtimeOrRefusal, formatCommitLine, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -32,7 +32,8 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 			// point of the command, so it reports rather than throws.
 			const resolved = runtimeOrRefusal();
 			const detail = "refusal" in resolved ? resolved.refusal : describeRuntime(resolved.runtime);
-			const line = `${formatVersionLine(readPackageIdentity())}\n${detail}`;
+			const commit = await formatCommitLine("refusal" in resolved ? undefined : resolved.runtime.home).catch((error: Error) => `commit unknown (${error.message})`);
+			const line = `${formatVersionLine(readPackageIdentity())}\n${detail}\n${commit}`;
 			if (ctx.hasUI) {
 				ctx.ui.notify(line, "refusal" in resolved ? "error" : "info");
 			} else {
