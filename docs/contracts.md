@@ -7170,8 +7170,9 @@ open-fire checks above. `skill: cp-self-review` (manual, `research`, `local`, no
 run**: the job it records is a `deferred` anchor (never dispatched, never offered
 by `cp_next`; it holds the open-fire guard until the parent closes it), and the
 parent is woken with `cp-schedule` naming the anchor, the schedule and the skill
-to expand it with that skill (`skills/cp-self-review`: six read-only reader jobs
-and one synthesis job over the last 36 h). Its jobs carry `schedule:<id>`, so only
+to expand it with that skill (`skills/cp-self-review`: six read-only reader jobs,
+delivery `local`, and one synthesis job, delivery `board` — a static web report served
+under `/boards/<synthesis-id>/` — over the last 36 h). Its jobs carry `schedule:<id>`, so only
 the schedule grant covers and counts them; they are the parent's (`cp_next`, the
 envelope wakes), never the schedule runner's (`runnerOwns(job, expanded)` is
 false for them). A deferred anchor with no `expanded:` comment re-wakes the

@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Self-review synthesis delivers a static web report (cp-baau)
+
+`skills/cp-self-review/SKILL.md` now creates S1 as delivery `board` (always) while L1-L6 stay research/local and the schedule's anchor stays research/local. S1 writes `board.json`, `report.md` and `site/index.html` — a static web report linking all six reader jobs (`/#job/<L-id>`) and their artifact paths — and the parent relays the served `/boards/<S1-id>/` URL plus the artifact path. Anchor, grant, job caps, fan-out, 36 h window, context-usage/compaction, report-only and model rules are unchanged. Migration: none; skill text only.
+
 ### Dashboard sent-image thumbnails (cp-br81, PR2)
 
 The Full transcript shows the images a dashboard message sent as 96 px thumbnails in the operator's bubble, read by upload id from the message's `images=` marker through `GET /api/operator/uploads/<id>`; a tap opens one at the bubble's width. An upload the route no longer has (the 7-day sweep, a cleaned `/tmp`) reads "image expired" instead of a broken image. `SessionEntry` gains `images`; a dashboard message no longer repeats its image parts as `[image]` (a CLI message with an image still does). Migration: none.
