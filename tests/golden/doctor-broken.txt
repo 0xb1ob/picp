@@ -1,4 +1,4 @@
-DOCTOR BROKEN · 3 error · 6 warn · 30 ok (at 2026-08-27T12:00:00Z)
+DOCTOR BROKEN · 3 error · 6 warn · 32 ok (at 2026-08-27T12:00:00Z)
 home: <HOME>
 package: <PKG>
 
@@ -34,6 +34,10 @@ package: <PKG>
     fix: install tmux with your package manager (e.g. `sudo apt-get install -y tmux`, `brew install tmux`); sudo is never run here
 ✓ [web.search] web search: unavailable (pi-web-access is not installed or not enabled in pi settings)
     fix: pi install npm:pi-web-access, then restart the parent (optional)
+✓ [mcp.operator] MCP: no servers configured (optional)
+    operator session: builtin:mcp, codemode, tool-search; servers from <HOME>/pi-agent/mcp.json
+✓ [mcp.workers] read-only workers: no MCP servers configured
+    gate-reviewer, planner, qa via mcp_call (servers read in place from <HOME>/pi-agent/mcp.json); implementer, ship workers and the CP parent: no MCP (by design)
 ✓ [session.tools] parent session tools not recorded (not a live parent)
 ✓ [package.worker_reporter] worker-reporter extension present
 ✓ [package.profiles] 4 profile(s) load and validate

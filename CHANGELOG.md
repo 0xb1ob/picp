@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### MCP for the operator session and read-only workers (cp-fl8b)
+
+The operator session now loads pi's built-in MCP, codemode and tool search (`OPERATOR_BUILTIN_EXTENSIONS`), on every start path (manual, tmux/herdr wrapper, dashboard Restart). The `readOnly` profiles (planner, qa, gate-reviewer) get every server of the operator's `<agent dir>/mcp.json`, read in place, through one gateway tool, `mcp_call` (`extensions/worker-mcp`), which lists and calls only tools whose server declares `readOnlyHint: true` and not `destructiveHint: true`. The implementer, ship workers and the CP parent get no MCP. The worker credential guard now also refuses a copy of `mcp-auth.json`. `/doctor` gains `mcp.operator` (a live `pi mcp list --json`, only when a server is enabled) and `mcp.workers`. Migration: none; a home with no `mcp.json` spawns workers exactly as before.
+
 ### Self-review synthesis delivers a static web report (cp-baau)
 
 `skills/cp-self-review/SKILL.md` now creates S1 as delivery `board` (always) while L1-L6 stay research/local and the schedule's anchor stays research/local. S1 writes `board.json`, `report.md` and `site/index.html` — a static web report linking all six reader jobs (`/#job/<L-id>`) and their artifact paths — and the parent relays the served `/boards/<S1-id>/` URL plus the artifact path. Anchor, grant, job caps, fan-out, 36 h window, context-usage/compaction, report-only and model rules are unchanged. Migration: none; skill text only.

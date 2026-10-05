@@ -70,6 +70,7 @@ import { jobIdMigrationFinding } from "./state-migrations.ts";
 import { detectBudgetClamp, resolveJobBudget } from "./worker-manager.ts";
 import { ROLE_PACKAGES, WORKER_PACKAGES_LOADED_AT } from "./worker-packages.ts";
 import { webAccessFindings } from "./web-access.ts";
+import { mcpFindings } from "./mcp-access.ts";
 import { describeHome, homeCheckoutFinding, isManagedInstall } from "./home.ts";
 import { jobsFile } from "./ledger.ts";
 import { describeRuntime } from "./mode.ts";
@@ -294,6 +295,7 @@ export class Doctor {
 			...this.#hostTools(),
 			...this.#piLensTools(),
 			...(await webAccessFindings({ packageRoot: this.#options.packageRoot, ...(this.#options.env ? { env: this.#options.env } : {}) })),
+			...mcpFindings({ packageRoot: this.#options.packageRoot, run: this.#run, ...(this.#options.env ? { env: this.#options.env } : {}) }),
 			...this.#sessionTools(),
 			...this.#ledger(),
 			...this.#packageResources(),

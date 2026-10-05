@@ -12,12 +12,14 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { OPERATOR_SIGNALS, operatorModelArgs, operatorWeb, portInUse, runOperator, startViewer } from "../src/viewer/operator.ts";
+import { OPERATOR_BUILTIN_EXTENSIONS, OPERATOR_SIGNALS, operatorModelArgs, operatorWeb, portInUse, runOperator, startViewer } from "../src/viewer/operator.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import { createViewer } from "../src/viewer/server.ts";
 import { saveOperatorTarget } from "../extensions/cp-bridge/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
+/** cp-fl8b: pi's built-in MCP, codemode and tool search follow the bridge on every operator run. */
+const BUILTINS = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
 const FAKE_PI = join(REPO_ROOT, "tests/fixtures/fake-operator-pi.mjs");
 const FAKE_VIEWER = join(REPO_ROOT, "tests/fixtures/fake-viewer.mjs");
 
@@ -163,7 +165,7 @@ test("explicit --host/--port reach the parent at the viewer's address", async (t
 	});
 	assert.equal(await runOperator(["--host", "127.0.0.1", "--port", String(port), "--model", "test"], { piBin: FAKE_PI, viewer: { command: [process.execPath, FAKE_VIEWER, String(port)] } }), 0);
 	assert.deepEqual(JSON.parse(readFileSync(addressFile, "utf8")), {
-		host: "127.0.0.1", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), "--model", "test"],
+		host: "127.0.0.1", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS, "--model", "test"],
 	});
 });
 
@@ -190,7 +192,7 @@ test("without --host, the operator uses the tailnet address for parent board lin
 	});
 	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { port, command: [process.execPath, FAKE_VIEWER, String(port)] } }), 0);
 	assert.deepEqual(JSON.parse(readFileSync(addressFile, "utf8")), {
-		host: "100.101.102.103", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts")],
+		host: "100.101.102.103", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS],
 	});
 	rmSync(tailscale);
 	process.env.PATH = dir;

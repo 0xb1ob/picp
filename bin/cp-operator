@@ -1,5 +1,5 @@
 #!/bin/sh
-# Main session launcher. Loads only the bridge extension (operatorPiArgs) and
+# Main session launcher. Loads the bridge, pi's built-in MCP extensions (operatorPiArgs) and
 # runs the read-only viewer for this session's lifetime: src/viewer/operator.ts.
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 exec node "$ROOT/src/viewer/operator.ts" "$@"

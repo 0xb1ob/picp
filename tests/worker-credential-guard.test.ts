@@ -11,6 +11,8 @@ test("a copy of the host auth.json is refused, by command position", () => {
 		"cp /home/someone/.pi/agent/auth.json /tmp/a/",
 		"for f in auth.json models.json; do cp ~/.pi/agent/$f /tmp/a/; done",
 		"for f in models.json auth.json; do\n  cp -p $HOME/.pi/agent/${f} /tmp/a/\ndone",
+		"cp ~/.pi/agent/mcp-auth.json /tmp/agent/",
+		"for f in mcp-auth.json models.json; do cp ~/.pi/agent/$f /tmp/a/; done",
 	]) {
 		assert.ok(detectHostAuthCopy(command), command);
 	}

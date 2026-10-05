@@ -1826,6 +1826,26 @@ toward `tool_call_cap` and their results toward token caps like any tool. No
 `cp-web` bash fetch CLI exists: it would be a second egress path outside the
 allowlist, the guard and the package's SSRF protection; `fetch_content` covers it.
 
+**MCP (cp-fl8b).** The operator session loads pi's built-in MCP with
+`-e builtin:mcp -e builtin:codemode -e builtin:tool-search`
+(`OPERATOR_BUILTIN_EXTENSIONS`, `src/viewer/operator.ts`; `--no-extensions` turns built-ins off, and
+pi-web-access registers none of `/mcp`, `codemode` or `tool_search`). The `readOnly` profiles
+(`planner`, `qa`, `gate-reviewer`) get **every** server of the operator's `<agent dir>/mcp.json`,
+read in place through the agent dir they inherit; nothing is copied, OAuth tokens stay in
+`mcp-auth.json` (read in place by pi), and the credential guard refuses a copy of it like
+`auth.json`. The daemon parent and its workers resolve the same `~/.pi/agent`
+(`BASE_ENV_KEYS` in `src/service/daemon-files.ts` passes no `PI_CODING_AGENT_DIR`). A worker's
+`--tools` is an exact allowlist that pi applies to every tool it registers, so runtime-discovered
+`mcp__*` tools cannot be named there: `extensions/worker-mcp` runs pi's own MCP runtime
+(`createMcpExtension`; `autoEnableCodemode: false` in the loaded config, `startupWaitMs` 10 s in the
+options), keeps the tools it registers, and serves them through one allowlisted gateway,
+`mcp_call` (no `tool`: list; `tool`: call). Only tools whose server declares `readOnlyHint: true`
+and not `destructiveHint: true` are listed or callable — a missing hint is refused, at the
+`tool_call` hook and again in `execute`. Accepted risk: the hints are the server's own claim. The
+implementer, ship workers and the CP parent get no MCP; a home with no enabled server spawns
+read-only workers exactly as before. `/doctor` prints `mcp.operator` (a live `pi mcp list --json`,
+bounded at 20 s, run only when a server is enabled; never a config value) and `mcp.workers`.
+
 **No worker gets a `--skill` path (skillreads-vqy).** pi lists every loaded
 skill with "use the read tool to load a skill's file", and some models then
 read each `SKILL.md` at session start (34 gpt-6-sol jobs, about 11.6K tokens

@@ -116,8 +116,10 @@ function managerWith(
 	optionalPackages: DetectedWorkerPackages,
 	spawnFn?: (options: WorkerSpawnOptions) => WorkerProcess,
 ): WorkerManager {
-	// Hermetic: a PI_LENS_HOME the test process inherited (a worker has one) must not read as the pin under test.
-	const { PI_LENS_HOME: _inherited, ...parentEnv } = process.env;
+	// Hermetic: a PI_LENS_HOME the test process inherited (a worker has one) must not read as the pin under test,
+	// nor a host mcp.json add the read-only workers' MCP gateway (cp-fl8b; tests/worker-mcp.test.ts covers it).
+	const { PI_LENS_HOME: _inherited, ...inherited } = process.env;
+	const parentEnv = { ...inherited, PI_CODING_AGENT_DIR: join(tmpdir(), "cp-optpkg-no-agent-dir") };
 	return new WorkerManager({
 		home: "/unused",
 		parentEnv,
