@@ -298,10 +298,16 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   last send's state) and a ⋯ sheet with Decisions / Full transcript, the tool-call
   toggle, Search, the session file picker and the file name. Only the transcript
   scrolls; the shell follows `visualViewport` so the composer sits above the
-  on-screen keyboard. Open decisions collapse to one "N decisions waiting ▾" bar
-  that opens into a sheet and closes after an answer. The whole app disables zoom
+  on-screen keyboard. The whole app disables zoom
   (viewport `maximum-scale=1, user-scalable=no, viewport-fit=cover`,
   `touch-action: manipulation`, 16 px fields on mobile).
+- **Pinned decisions** (cp-6kt6; every width): open asks sit above the composer as one
+  "N decisions waiting ▾" bar (`aria-expanded`) that opens into a sheet of the full cards
+  (45vh, 60dvh below 900 px, scrolling inside) and closes after an answer. The open/collapsed
+  choice is remembered per browser (`localStorage` `cp-sessions-pinned-open`; collapsed by
+  default); the bar opens by itself only when an ask id it has not shown before appears
+  (`cp-sessions-pinned-seen`), never because the count alone changed. A storage that refuses
+  the write warns and the choice holds for the view.
 - **Decision cards** (`components/TranscriptAsk.tsx`): every operator ask sits right
   after the `cp_parent ask` call that raised it (an open ask with no call in the
   file is placed by when it was raised; the 300-entry window never drops one). One

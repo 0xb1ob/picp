@@ -1,7 +1,8 @@
 /** cp-dashboard-operator-control, the UI: decision cards, the composer and its client (plan T5). SSR via preact-render-to-string. */
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
+import { parseHTML } from "linkedom";
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import type { AwaitingDetail, ControlStatusResponse, SessionEntry } from "../src/viewer/api-types.ts";
@@ -42,7 +43,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 
 	const ready = screen(full, view(status({})));
 	const open = pinned(ready);
-	assert.match(open, /<h2><button type="button" aria-expanded="false">2 decisions waiting<span aria-hidden="true"> ▾<\/span><\/button><\/h2>/, "on mobile one compact bar, collapsed until tapped");
+	assert.match(open, /<h2><button type="button" aria-expanded="false">2 decisions waiting<span aria-hidden="true"> ▾<\/span><\/button><\/h2>/, "one compact bar at every width, collapsed until tapped when nothing is remembered");
 	assert.ok(ready.indexOf("session-pinned") < ready.indexOf("operator-composer"), "the pinned block sits directly above the composer");
 	assert.ok(open.indexOf("Question ask-aaaa") < open.indexOf("Older than the window"), "oldest first, as given");
 	assert.equal(open.match(/<button type="button" class="decision-card-option/g)?.length, 4, "one button per option, per card");
@@ -231,13 +232,108 @@ test("client: startOperator posts {via} with the inbox token and maps starting /
 test("layout: the pinned decision block and its cards hold at 390px and 1440px", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8");
 	const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");
-	assert.match(phone ?? "", /\.session-pinned \{ display: flex;[^}]*max-height: 45vh;[^}]*overflow-y: auto;[^}]*padding: 10px 16px;[^}]*\}/, "a bounded, inset pinned block at 390px");
+	assert.match(phone ?? "", /\.session-pinned \{ display: flex;[^}]*max-height: 45vh;[^}]*overflow-y: auto;[^}]*padding: 0 16px;[^}]*\}/, "a bounded, inset pinned block that scrolls inside at 390px");
+	const everyWidth = css.split("@media")[0] ?? "";
+	assert.match(everyWidth, /\.session-pinned:not\(\.session-pinned-open\) > :not\(h2\) \{ display: none; \}/, "collapsed to its one-line bar at every width, not only on phones");
+	assert.match(everyWidth, /\.session-pinned-open > h2 \{ position: sticky;/, "the open sheet keeps its bar in reach while the cards scroll");
+	assert.match(phone ?? "", /@media \(max-width: 899px\) \{\n \.session-pinned-open \{ max-height: 60dvh; \}\n\}/, "the phone sheet caps at 60dvh");
+	assert.doesNotMatch(desktop, /pointer-events: none|\.session-pinned > h2 > button > span/, "at 1440px the bar is a real toggle with its ▾, never a bare heading");
+	assert.match(desktop, /\.session-pinned \{ padding: 0 40px; \}/, "the wide layout keeps its 40px inset around a one-line bar");
 	assert.match(phone ?? "", /\.decision-card \{ display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-wrap: anywhere; \}/, "long text wraps inside the card at 390px");
 	assert.match(phone ?? "", /\.decision-card-options \{ display: grid; grid-template-columns: minmax\(0,1fr\);[^}]*\}/, "one option per row at 390px");
-	assert.match(desktop, /\.session-pinned \{ padding: 12px 40px; \}/, "the wide layout keeps its 40px inset");
 	assert.match(desktop, /\.session-pinned > \* \{ max-width: 780px; \}/, "and the transcript's 780px column at 1440px");
 	assert.match(desktop, /\.decision-card-options \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); \}/, "two options per row from 900px up");
 	assert.match(phone ?? "", /\.start-session \{ display: flex; flex-wrap: wrap;[^}]*min-width: 0; \}/, "Start session wraps at 390px");
 	assert.match(phone ?? "", /\.start-session-line \{ flex: 1 1 220px; min-width: 0;[^}]*overflow-wrap: anywhere; \}/, "a long reason wraps instead of widening the page, and sits beside the button at 1440px");
 	assert.match(phone ?? "", /\.overview-services-line \{[^}]*overflow-wrap: anywhere; \}/);
+});
+
+/** The Sessions screen mounted in a real DOM with a localStorage the test owns; `mount` again re-renders in place. */
+async function pinnedStage(t: TestContext, store: Map<string, string>, refuseWrites = false) {
+	const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; export {act}; export const mount=(root,data)=>render(h(Sessions,{data}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+	const { act, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: (run: () => void) => Promise<void>; mount: (root: Element, data: unknown) => void; unmount: (root: Element) => void };
+	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
+	Object.defineProperty(window, "localStorage", { configurable: true, value: { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { if (refuseWrites) throw new Error("QuotaExceededError"); store.set(key, value); } } });
+	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	for (const [key, value] of [["window", window], ["document", document]] as const) Object.defineProperty(globalThis, key, { configurable: true, value });
+	const root = document.getElementById("root")!;
+	t.after(async () => { await act(() => unmount(root)); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const data = (ids: string[]) => ({ ...sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!, entries: [], open_asks: ids.map(id => detail(id)) });
+	const bar = () => root.querySelector(".session-pinned > h2 > button")!;
+	return {
+		show: (ids: string[]) => act(() => mount(root, data(ids))),
+		remount: async (ids: string[]) => { await act(() => unmount(root)); await act(() => mount(root, data(ids))); },
+		click: () => act(() => { bar().dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); }),
+		bar,
+		expanded: () => bar().getAttribute("aria-expanded"),
+		cls: () => root.querySelector(".session-pinned")!.getAttribute("class"),
+	};
+}
+
+test("pinned decisions: one toggle at every width, a remembered choice, and opening by itself only for a new ask id", async (t) => {
+	const store = new Map<string, string>();
+	const s = await pinnedStage(t, store);
+
+	// First visit: the one-line bar, collapsed; the ids on screen are the baseline, nothing written yet.
+	await s.show(["ask-a", "ask-b"]);
+	assert.equal(s.expanded(), "false");
+	assert.equal(s.cls(), "session-pinned", "collapsed: CSS hides every card at every width");
+	assert.equal(s.bar().textContent, "2 decisions waiting ▾");
+	assert.equal(s.bar().getAttribute("type"), "button", "a real button, so it is focusable and Enter/Space toggle it");
+	assert.equal(s.bar().closest("section")!.getAttribute("aria-label"), "Open decisions");
+	assert.deepEqual([...store.keys()], [], "nothing is remembered before the operator chooses");
+
+	// The toggle (no width check anywhere: the same button at 390px and 1440px) opens, and the choice is remembered.
+	await s.click();
+	assert.equal(s.expanded(), "true");
+	assert.equal(s.cls(), "session-pinned session-pinned-open");
+	assert.equal(store.get("cp-sessions-pinned-open"), "1");
+	await s.remount(["ask-a", "ask-b"]);
+	assert.equal(s.expanded(), "true", "an open choice survives a reload");
+	await s.click();
+	assert.equal(store.get("cp-sessions-pinned-open"), "0");
+	await s.remount(["ask-a", "ask-b"]);
+	assert.equal(s.expanded(), "false", "and so does a collapsed one");
+
+	// The count changing alone never opens it.
+	await s.show(["ask-a"]);
+	assert.equal(s.expanded(), "false", "an answered ask leaving does not open the bar");
+	assert.equal(s.bar().textContent, "1 decision waiting ▾");
+	assert.equal(store.get("cp-sessions-pinned-seen"), '["ask-a"]');
+
+	// A new ask id opens it, even when the count is unchanged.
+	await s.show(["ask-c"]);
+	assert.equal(s.expanded(), "true", "same count, new id: opens");
+	assert.equal(store.get("cp-sessions-pinned-open"), "0", "opening by itself is not the operator's choice");
+	await s.click();
+	await s.show(["ask-c", "ask-d"]);
+	assert.equal(s.expanded(), "true", "a second ask arriving opens it again");
+	await s.click();
+	await s.show(["ask-c", "ask-d"]);
+	assert.equal(s.expanded(), "false", "a refresh with the same ids keeps it collapsed");
+
+	// Across a reload: an ask that arrived while the page was away still opens it; a known set does not.
+	await s.remount(["ask-c", "ask-d"]);
+	assert.equal(s.expanded(), "false");
+	await s.remount(["ask-c", "ask-d", "ask-e"]);
+	assert.equal(s.expanded(), "true", "an unseen id at mount opens the bar");
+});
+
+test("pinned decisions: a localStorage that refuses the write warns and the toggle still works for this view", async (t) => {
+	const warnings: unknown[][] = [];
+	const original = console.warn;
+	console.warn = (...args: unknown[]) => { warnings.push(args); };
+	t.after(() => { console.warn = original; });
+	const s = await pinnedStage(t, new Map(), true);
+	await s.show(["ask-a"]);
+	await s.click();
+	assert.equal(s.expanded(), "true", "the click opens it regardless");
+	await s.show(["ask-b"]);
+	assert.equal(s.expanded(), "true");
+	await s.click();
+	assert.equal(s.expanded(), "false", "and collapses it");
+	await s.show(["ask-b", "ask-c"]);
+	assert.equal(s.expanded(), "true", "new ids still open it from memory");
+	assert.deepEqual(warnings, [["decisions bar not persisted: QuotaExceededError"], ["seen decisions not persisted: QuotaExceededError"], ["decisions bar not persisted: QuotaExceededError"], ["seen decisions not persisted: QuotaExceededError"]]);
 });
