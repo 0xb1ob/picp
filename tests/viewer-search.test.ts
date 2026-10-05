@@ -39,6 +39,8 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  });
  const requests: {signal:AbortSignal;resolve:(response:Response)=>void}[] = [];
  Object.defineProperty(globalThis,"fetch",{configurable:true,value:(url:string,init:{signal:AbortSignal}) => {
+  // The shell's version badge reads /api/version on mount (cp-kz20); it is not search's request.
+  if (url === "/api/version") return new Promise<Response>(() => {});
   assert.equal(url,"/api/overview");
   return new Promise<Response>(resolve => requests.push({signal:init.signal,resolve}));
  }});

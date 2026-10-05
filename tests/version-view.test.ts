@@ -170,7 +170,8 @@ test("version line: refresh = readVersion then formatTerminal into setStatus; no
 	const view = { deployed: { sha: OLD, at: iso(1) }, upstream: { state: "current", behind: 0, ahead: 0, reason: null, checked_at: iso(1), updater: null }, processes: [], bundle: { script: null }, overall: { level: "ok", label: "x" }, generated_at: iso(0) } as VersionResponse;
 	let reads = 0;
 	let hasUI = true;
-	const ctx = () => ({ hasUI, ui: { setStatus: (key: string, text: string | undefined) => statuses.push([key, text]), theme: { fg: (_c: string, text: string) => text } } }) as never;
+	// No `theme`, like the bridge tests' doubles: the line is written plain, never a throw.
+	const ctx = () => ({ hasUI, ui: { setStatus: (key: string, text: string | undefined) => statuses.push([key, text]) } }) as never;
 	const line = startVersionLine({ home: () => "/nonexistent-home", ctx, read: async () => { reads += 1; return view; }, own: async () => OLD, tickMs: 60_000 });
 	await line.refresh();
 	assert.equal(reads, 1, "single-flight: the start refresh and this one share a read");

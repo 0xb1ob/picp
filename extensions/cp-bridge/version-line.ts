@@ -50,7 +50,9 @@ export function startVersionLine(options: VersionLineOptions): VersionLine {
 	const show = (level: VersionLevel, text: string) => {
 		const ctx = options.ctx();
 		if (stopped || !ctx?.hasUI) return;
-		ctx.ui.setStatus(VERSION_STATUS_KEY, ctx.ui.theme.fg(COLOR[level], text));
+		// A ctx without a theme (a test double, an older pi) still gets the plain line.
+		const theme = ctx.ui.theme as typeof ctx.ui.theme | undefined;
+		ctx.ui.setStatus(VERSION_STATUS_KEY, theme ? theme.fg(COLOR[level], text) : text);
 	};
 	const run = async (): Promise<void> => {
 		last = now();
