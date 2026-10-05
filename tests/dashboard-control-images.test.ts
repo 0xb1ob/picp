@@ -77,7 +77,10 @@ test("send_images: the request line names the ids (no bytes), each image is prep
 	assert.equal(state.injected.length, 1);
 	const sent = state.injected[0]!;
 	assert.deepEqual(parseDashboardText(sent.text)?.images, ids, "the marker lists the ids in order");
-	assert.equal(parseDashboardText(sent.text)?.body, "");
+	const lines = ids.map((id) => `image: ${uploadFile(uploadRoot, id)} (deleted after 7 days; copy it if needed longer)`);
+	assert.ok(lines.every((line) => line.startsWith("image: /")), "absolute paths");
+	assert.equal(parseDashboardText(sent.text)?.body, lines.join("\n"), "one path line per image, in order, before the marker; no text");
+	assert.ok(sent.text.split("\n").pop()!.startsWith("[cp-dashboard "), "the marker stays the last line");
 	assert.deepEqual(sent.images?.map((image) => image.mimeType), ["image/png", "image/png", "image/png"]);
 	assert.deepEqual(Buffer.from(sent.images![0]!.data, "base64"), syntheticPng(2, 2), "the upload's bytes reach the image part");
 	assert.deepEqual(state.limits, ids.map(() => ({ maxEdge: 1568, maxBytes: inlineBudget(3) })));
@@ -114,7 +117,8 @@ test("send_images refusals: bad ids 400, a missing upload 410, a resize past the
 	const fallback = await controlRequest(nullRecord, "send_images", { kind: "message", text: "see", images: [kept] });
 	assert.equal(fallback.ok, true);
 	const text = failing.state.injected[0]!.text;
-	assert.ok(text.startsWith(`see\n\n[image ${kept} could not be attached inline; file: ${uploadFile(nulls.uploadRoot, kept!)}]\n\n[cp-dashboard `), text);
+	const pathLine = `image: ${uploadFile(nulls.uploadRoot, kept!)} (deleted after 7 days; copy it if needed longer)`;
+	assert.ok(text.startsWith(`see\n\n[image ${kept} could not be attached inline; file: ${uploadFile(nulls.uploadRoot, kept!)}]\n\n${pathLine}\n\n[cp-dashboard `), text);
 	assert.equal(failing.state.injected[0]!.images, undefined);
 	assert.match(String(journal(nulls.stateDir).find((line) => line.state === "injected")?.reason), /1 image\(s\) sent as a file path \(resize failed\)/);
 });
@@ -166,7 +170,7 @@ test("cp-bridge wiring: index.ts sends userMessageContent; a send_images frame r
 	assert.ok(Array.isArray(parts), "content is a parts array, not a string");
 	assert.equal(parts.length, 2);
 	assert.equal(parts[0]!.type, "text");
-	assert.match(parts[0]!.text!, new RegExp(`^what is this\\?\\n\\n\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard; images=${id!.replace(/\./g, "\\.")}\\]$`));
+	assert.match(parts[0]!.text!, new RegExp(`^what is this\\?\\n\\nimage: ${uploadFile(uploadRoot, id!)!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(deleted after 7 days; copy it if needed longer\\)\\n\\n\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard; images=${id!.replace(/\./g, "\\.")}\\]$`));
 	assert.equal(parts[1]!.type, "image");
 	assert.equal(parts[1]!.mimeType, "image/png");
 	assert.equal(Buffer.from(parts[1]!.data!, "base64").subarray(1, 4).toString("latin1"), "PNG", "a real PNG, base64");
