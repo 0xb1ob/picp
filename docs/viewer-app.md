@@ -85,7 +85,7 @@ three views, and Board and Map light the Jobs item. More holds Schedules, Files 
 both layouts. Decisions is one page (`/api/decisions`, the Awaiting asks as `items` plus the Decided log
 as `decided`): the one-click Awaiting you cards on top, then "Being handled · N (oldest Xm)" — the
 parent's questions the operator session is still handling, collapsed, amber past 10 minutes, and
-hidden when there are none — then the Decided for you log. `/api/awaiting` and `/api/decided` stay.
+hidden when there are none — then the Decided log, two tabs (Decided for you / Answered by you) with counts for the Today/All range. Worth a look filters only the for-you tab, and only rows whose recorded basis is the operator's own judgement. `/api/awaiting` and `/api/decided` stay.
 
 The Sessions **Operator ↔ you** tier opens on the **Full transcript** (the default
 for `#sessions` and `#sessions?view=you`) with no Decisions toggle, since the decision log lives on the
@@ -198,11 +198,7 @@ the history toggle, which uses the browser's local calendar day.
 Ordinary revocations are not completions.
 Board reads the same rule: a grant revoked today by its answered mission-end close is a `closed` lane, so its finished jobs stay grouped under it.
 
-Decided displays the recorded `basis.operator_quote` beneath an answer, never
-an option ID. Newly answered escalations retain this basis; historical records
-without a quote omit the line. Questions clamp to three lines, and Jobs/Board
-escalation notes to two, with the full text available in their titles.
-
+Decided shows each row's basis, computed from the recorded delegation rule only: an `ask-` id of 12 hex digits (your words, ids joined with ` · `), otherwise the word standing or a double-quoted string found verbatim in `data/standing-orders.md` (standing order; ref is that quote, or the rule cut at 80 characters), otherwise `verbatim` or any double-quoted string (your words; a `YYYY-MM-DD` in the rule is shown as `Oct 4 · “quote”`), otherwise the operator's own judgement. A missing or unreadable standing-orders file matches no quote. Answered-by-you rows are your reply, with the ask id. Worth a look is judgement only. The recorded `basis.operator_quote` still sits beneath an answer, never an option ID. Newly answered escalations retain this quote; historical records without one omit the line. Questions clamp to three lines, and Jobs/Board escalation notes to two, with the full text available in their titles.
 Parent activity is recorded transcript activity, never proof of a live process. The
 Overview parent chip probes the recorded lock pid: a lock a crashed parent left behind
 reads `down (stale lock since <t>)`, not alive (`/doctor` names the stale lock, and the

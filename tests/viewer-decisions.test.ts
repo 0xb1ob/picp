@@ -32,7 +32,7 @@ test("awaiting folds only open operator asks, preserves copy replies and links r
  assert.equal(readFileSync(join(state.stateDir,"operator/asks.jsonl"),"utf8"),journal);
 });
 
-test("decided includes delegated and answered asks, excludes other authorities and flags only recorded risk, scope and overrides", t => {
+test("decided includes delegated and answered asks and excludes other authorities", t => {
  const {state,put} = fixture(t);
  put("operator/asks.jsonl",`${JSON.stringify({...ask("ask-aa"),source_escalation:"es-risk"})}\n${JSON.stringify({type:"answer",id:"ask-aa",answer:"Keep",answered_at:at})}\n`);
  put("escalations.json",{items:[
@@ -45,20 +45,54 @@ test("decided includes delegated and answered asks, excludes other authorities a
   escalation("es-human",{answered_by:"operator-quote"}),escalation("es-mandate",{answered_by:"mandate:md-demo"}),escalation("es-withdrawn",{status:"withdrawn"}),
  ]});
  const data = decidedScreen(state,now);
- assert.equal(data.items.length,7); assert.equal(data.decided_today.count,5); assert.equal(data.decided_today.worth_count,3);
+ assert.equal(data.items.length,7); assert.equal(data.decided_today.count,5); assert.equal(data.decided_today.worth_count,5);
  assert.equal(awaitingScreen(state,now).decided_today.count,5);
  assert.equal(data.items.find(d => d.id === "es-risk")?.quote,"Proceed after checking the risk.");
  assert.equal(data.items.find(d => d.id === "es-scope")?.quote,null);
  assert.equal(data.items.at(-1)?.id,"es-old"); assert.equal(data.items.at(-1)?.today,false);
- assert.deepEqual(data.items.find(d => d.id === "es-risk")?.worth,["risk"]);
- assert.deepEqual(data.items.find(d => d.id === "es-scope")?.worth,["scope"]);
+ assert.deepEqual(data.items.find(d => d.id === "es-risk")?.worth,["judgement"]);
+ assert.deepEqual(data.items.find(d => d.id === "es-scope")?.worth,["judgement"]);
  assert.equal(data.items.find(d => d.id === "es-scope")?.kind,"scope_expansion","the escalation kind rides along (Decided folds mission_end closes)");
- assert.deepEqual(data.items.find(d => d.id === "es-override")?.worth,["override"]);
- assert.deepEqual(data.items.find(d => d.id === "es-prose")?.worth,[]);
+ assert.deepEqual(data.items.find(d => d.id === "es-override")?.worth,["judgement"]);
+ assert.deepEqual(data.items.find(d => d.id === "es-prose")?.worth,["judgement"]);
+ assert.deepEqual(data.items.find(d => d.id === "ask-aa")?.worth,[]);
+ assert.deepEqual(data.items.find(d => d.id === "ask-aa")?.basis,{kind:"words",ref:"ask-aa"});
  assert.equal(data.items.find(d => d.id === "es-risk")?.rule,"Evidence clears risk");
  assert.equal(data.items.find(d => d.id === "es-risk")?.answer,"Proceed");
  assert.equal(data.items.find(d => d.id === "ask-aa")?.source,"you");
  assert.equal(data.items.find(d => d.id === "ask-aa")?.rule,null);
+});
+
+test("basis is words, standing, verbatim or judgement, and worth counts only today's judgement", t => {
+ const {state,put} = fixture(t);
+ put("../data/standing-orders.md","If I said to work on something, do it.\n\"do the listed work\"\n");
+ const rule = (id:string, delegation_rule:string, answered_at = at) => escalation(id,{delegation_rule,answered_at});
+ put("operator/asks.jsonl",`${JSON.stringify(ask("ask-aa"))}\n${JSON.stringify({type:"answer",id:"ask-aa",answer:"Keep",answered_at:at})}\n`);
+ put("escalations.json",{items:[
+  rule("es-asks","see ask-0123456789ab and ask-abcdefabcdef"),
+  rule("es-stand","per standing delegation for this"),
+  rule("es-quote","please \"do the listed work\" today"),
+  rule("es-verb","verbatim on 2026-10-04: \"ship the ten\""),
+  rule("es-long",`standing ${"x".repeat(90)}`),
+  rule("es-judge","operator: approve on my behalf"),
+  rule("es-yday","operator: approve on my behalf","2026-09-25T11:00:00Z"),
+ ]});
+ const data = decidedScreen(state,now);
+ const basis = (id:string) => data.items.find(d => d.id === id)?.basis;
+ assert.deepEqual(basis("es-asks"),{kind:"words",ref:"ask-0123456789ab · ask-abcdefabcdef"});
+ assert.deepEqual(basis("es-stand"),{kind:"standing",ref:"per standing delegation for this"});
+ assert.deepEqual(basis("es-quote"),{kind:"standing",ref:"do the listed work"});
+ assert.deepEqual(basis("es-verb"),{kind:"words",ref:"Oct 4 · “ship the ten”"});
+ assert.equal(basis("es-long")?.kind,"standing");
+ assert.equal(basis("es-long")?.ref?.length,80);
+ assert.deepEqual(basis("es-judge"),{kind:"judgement",ref:null});
+ assert.deepEqual(data.items.find(d => d.id === "es-judge")?.worth,["judgement"]);
+ assert.deepEqual(data.items.find(d => d.id === "es-asks")?.worth,[]);
+ assert.deepEqual(basis("ask-aa"),{kind:"words",ref:"ask-aa"});
+ assert.equal(data.decided_today.worth_count,1,"today's judgement rows only");
+ put("../data/standing-orders.md","no matching quote here");
+ const missed = decidedScreen(state,now).items.find(d => d.id === "es-quote")?.basis;
+ assert.deepEqual(missed,{kind:"words",ref:"“do the listed work”"},"a quote absent from standing-orders is your words");
 });
 
 test("awaiting joins recorded mandate caps and accounting without turning a corrupt fleet into zero spend", t => {

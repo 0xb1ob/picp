@@ -39,6 +39,35 @@ function asks(state: ViewerState) {
   return [...records.values()].sort((a,b) => a.ask.created_at.localeCompare(b.ask.created_at));
  }, []);
 }
+/** Basis from the recorded delegation rule only. A missing standing-orders file matches nothing. */
+function standingText(state: ViewerState): string {
+ try { return readBounded(join(state.stateDir, "..", "data", "standing-orders.md")); }
+ catch { return ""; }
+}
+function quoted(rule: string): string[] {
+ return [...rule.matchAll(/"([^"]+)"/g)].map(m => m[1]!).filter(q => q.length > 0);
+}
+function basisFor(rule: string | null, standing: string): NonNullable<DecisionDetail["basis"]> {
+ if (!rule) return {kind:"judgement", ref:null};
+ const ids = rule.match(/ask-[0-9a-f]{12}(?![0-9a-f])/g);
+ if (ids?.length) return {kind:"words", ref:ids.join(" · ")};
+ const quotes = quoted(rule);
+ const hit = quotes.find(q => standing.includes(q));
+ if (/standing/i.test(rule) || hit) return {kind:"standing", ref:hit ?? rule.slice(0, 80)};
+ if (/verbatim/i.test(rule) || quotes.length) {
+  const q = quotes[0];
+  if (!q) return {kind:"words", ref:rule.slice(0, 80)};
+  const date = /(\d{4}-\d{2}-\d{2})/.exec(rule)?.[1];
+  if (!date) return {kind:"words", ref:`“${q}”`};
+  const [y, m, d] = date.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("en", {month:"short", day:"numeric", timeZone:"UTC"}).format(new Date(Date.UTC(y!, (m ?? 1) - 1, d)));
+  return {kind:"words", ref:`${label} · “${q}”`};
+ }
+ return {kind:"judgement", ref:null};
+}
+function worthFor(basis: NonNullable<DecisionDetail["basis"]>): DecisionDetail["worth"] {
+ return basis.kind === "judgement" ? ["judgement"] : [];
+}
 export function decisions(state: ViewerState, now: number) {
  const askHistory = asks(state);
  const askSource = {...askHistory, value:askHistory.value.filter(r => r.state === "open").map(r => r.ask)};
@@ -53,24 +82,19 @@ export function decisions(state: ViewerState, now: number) {
   const option = (Array.isArray(e.options) ? e.options : []).map(obj).find(o => o?.id === e.answer);
   return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId)};
  }).sort((a,b) => b.answered_at.localeCompare(a.answered_at));
+ const standing = standingText(state);
  const decision_items: DecisionDetail[] = escalations.value.filter(e => e.status === "answered" && e.answered_by === "operator-delegated").map(e => {
   const option = (Array.isArray(e.options) ? e.options : []).map(obj).find(o => o?.id === e.answer || o?.label === e.answer);
   const quote = obj(e.basis)?.operator_quote;
-  const worth: DecisionDetail["worth"] = [];
-  if (e.kind === "risk_high_irreversible") worth.push("risk");
-  if (e.kind === "scope_expansion") worth.push("scope");
-  if (String(option?.id ?? e.answer).trim().toLowerCase() === "override") worth.push("override");
-  return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), quote:text(quote) ? quote : null, answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId), source:"operator-delegated", project:null, source_escalation:String(e.id), rule:text(e.delegation_rule) ? e.delegation_rule : null, worth, today:today(e.answered_at,now), kind:text(e.kind) ? e.kind : null};
+  const rule = text(e.delegation_rule) ? e.delegation_rule : null;
+  const basis = basisFor(rule, standing);
+  return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), quote:text(quote) ? quote : null, answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId), source:"operator-delegated" as const, project:null, source_escalation:String(e.id), rule, worth:worthFor(basis), today:today(e.answered_at,now), kind:text(e.kind) ? e.kind : null, basis};
  });
  for (const record of askHistory.value) {
   if (!record.answer || !record.answered_at) continue;
   const linked = escalations.value.find(e => e.id === record.ask.source_escalation);
-  const worth: DecisionDetail["worth"] = [];
-  if (linked?.kind === "risk_high_irreversible") worth.push("risk");
-  if (linked?.kind === "scope_expansion") worth.push("scope");
-  const option = (Array.isArray(linked?.options) ? linked.options : []).map(obj).find(o => o?.id === record.answer || o?.label === record.answer);
-  if (String(option?.id ?? record.answer).trim().toLowerCase() === "override") worth.push("override");
-  decision_items.push({id:record.ask.id, question:record.ask.question, answer:record.answer, quote:record.answer, answered_at:record.answered_at, job_ids:record.ask.job_ids, source:"you", project:record.ask.project, source_escalation:record.ask.source_escalation, rule:null, worth, today:today(record.answered_at,now), kind:text(linked?.kind) ? linked.kind : null});
+  const basis = {kind:"words" as const, ref:record.ask.id};
+  decision_items.push({id:record.ask.id, question:record.ask.question, answer:record.answer, quote:record.answer, answered_at:record.answered_at, job_ids:record.ask.job_ids, source:"you", project:record.ask.project, source_escalation:record.ask.source_escalation, rule:null, worth:worthFor(basis), today:today(record.answered_at,now), kind:text(linked?.kind) ? linked.kind : null, basis});
  }
  decision_items.sort((a,b) => Date.parse(b.answered_at)-Date.parse(a.answered_at) || a.id.localeCompare(b.id));
  return {
