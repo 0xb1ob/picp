@@ -40,7 +40,7 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
 	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
-	window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+	window.matchMedia = (() => ({matches:false}) as MediaQueryList);
 	t.after(() => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
 	const root = document.getElementById("root")!;
 	let restarts = 0;
