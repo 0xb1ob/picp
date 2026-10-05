@@ -3,10 +3,11 @@
 .search-dialog::backdrop { background: var(--page); opacity: 0.8; }
 .search-dialog[open] { display: flex; flex-direction: column; }
 .search-header { display: flex; align-items: center; gap: 10px; padding: 12px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.search-field { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; min-height: 40px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
+.search-field { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; min-height: 40px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--muted); }
 .search-field input { min-width: 0; width: 100%; min-height: 38px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
 .search-header button { min-height: 44px; padding: 0 4px; border: 0; background: none; font-size: 13px; }
-.search-results { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.search-results { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.search-group h2 { margin: 0; padding: 12px 16px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .search-results a { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 8px 16px; border-bottom: 1px solid var(--nav-selected); text-decoration: none; }
 .search-results a:focus-visible { outline-offset: -3px; background: var(--nav-selected); }
 .search-results a:hover { background: var(--nav-selected); }
@@ -14,3 +15,5 @@
 .search-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 15px; overflow-wrap: anywhere; }
 .search-label code { font-size: 12px; color: var(--dim); }
 .search-results p { padding: 12px 16px; font-size: 12px; color: var(--muted); }
+.search-hint { display: none; margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+@media (min-width: 900px) { .search-hint { display: block; } }

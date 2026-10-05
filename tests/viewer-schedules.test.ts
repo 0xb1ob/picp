@@ -275,8 +275,8 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	const noop = { sending: null, failed: null, request: () => {} };
 	const live = controlled(data, { status: ready, ...noop });
 	const [cronCard = "", watchCard = ""] = live.split('<article class="job-row schedule-card">').slice(1);
-	assert.match(cronCard, /<button type="button">Disable<\/button><button type="button">Run now<\/button><button type="button" class="schedule-remove">Remove<\/button>/);
-	assert.match(watchCard, /<button type="button">Enable<\/button><button type="button" class="schedule-remove">Remove<\/button>/);
+	assert.match(cronCard, /<button type="button" class="schedule-primary">Run now<\/button><button type="button">Disable<\/button><button type="button" class="schedule-remove">Remove…<\/button>/);
+	assert.match(watchCard, /<button type="button">Enable<\/button><button type="button" class="schedule-remove">Remove…<\/button>/);
 	assert.doesNotMatch(watchCard, /Run now/, "no run now on a disabled schedule");
 	assert.match(watchCard, /Refused: enable sch-bbbbbb refused: md-paus1 is paused/);
 	assert.match(live, /Controls ready/);

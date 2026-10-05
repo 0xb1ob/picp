@@ -40,7 +40,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
  </article>;
 }
 
-/** Enable/Disable, Run now (enabled only) and a two-tap Remove; disabled unless ready and nothing is pending for this schedule. */
+/** Run now (enabled only), then Enable/Disable, then a two-tap Remove; disabled unless ready and nothing is pending for this schedule. */
 export function ScheduleControls({s, control}: {s:ScheduleItem; control:ScheduleControlView}) {
  const [confirmRemove,setConfirmRemove] = useState(false);
  const latest = latestRequest(control.status, s.id);
@@ -50,17 +50,18 @@ export function ScheduleControls({s, control}: {s:ScheduleItem; control:Schedule
  const remove = () => { if (!confirmRemove) { setConfirmRemove(true); return; } setConfirmRemove(false); control.request("remove", s.id); };
  return <div class="schedule-control">
   <div class="schedule-controls">
+   {s.enabled && <button type="button" class="schedule-primary" disabled={disabled} onClick={() => control.request("run_now", s.id)}>Run now</button>}
    <button type="button" disabled={disabled} onClick={() => control.request(s.enabled ? "disable" : "enable", s.id)}>{s.enabled ? "Disable" : "Enable"}</button>
-   {s.enabled && <button type="button" disabled={disabled} onClick={() => control.request("run_now", s.id)}>Run now</button>}
-   <button type="button" class="schedule-remove" disabled={disabled} onClick={remove}>{confirmRemove ? "Tap again to remove" : "Remove"}</button>
+   <button type="button" class="schedule-remove" disabled={disabled} onClick={remove}>{confirmRemove ? "Tap again to remove" : "Remove…"}</button>
   </div>
   {failed ? <p role="alert" class="job-meta">Refused: {failed}</p> : latest && <p role="status" class="job-meta">{requestLine(latest)}</p>}
  </div>;
 }
 
 export function Schedules({data, control}: {data:SchedulesResponse; control?:ScheduleControlView}) {
- return <div class="jobs-screen"><header class="jobs-heading"><h1>Schedules</h1><p>Saved triggers and the jobs they fired. Enable, disable, run now and remove here while the parent runs: each request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p>
-  <p><a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}>Add schedule…</a></p>
+ return <div class="jobs-screen"><header class="jobs-heading">
+  <div class="schedule-heading"><div><h1>Schedules</h1><p>Saved triggers and the jobs they fired.</p></div><a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}>+ Add</a></div>
+  <details class="schedule-how"><summary>How schedules run</summary><p>Every request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></details>
   {control && <p role="status" class="job-meta">{scheduleControlLine(control.status)}</p>}</header>
   {data.error && <p role="alert" class="overview-error">Schedules unavailable: {data.error}</p>}
   <section class="jobs-group" aria-label="Schedules">
