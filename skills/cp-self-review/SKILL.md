@@ -2,7 +2,8 @@
 name: cp-self-review
 description: >-
   Command post self-review recipe: expands a parent-expanded manual schedule
-  fire (deferred anchor) into six read-only reader jobs and one synthesis job
+  fire (deferred research/local anchor) into six read-only reader jobs
+  (research/local) and one synthesis job (research/board, a static web report)
   over the last N hours (default 36). Use only on a cp-schedule wake that names
   a parent-expanded run of this skill. Parent session only.
 ---
@@ -24,9 +25,10 @@ below is still gated by `cp_dispatch` (mandate, job cap, parallelism, risk).
 
 ## Jobs
 
-Each is `cp_job create` with project = the anchor's project, kind `research`, delivery `local`, labels
-`["schedule:<id>"]` (the schedule id from the wake) and the title suffixed ` [<anchor-id>]`. A re-expansion returns the
-existing ids (create dedupes on project + title).
+Each is `cp_job create` with project = the anchor's project, kind `research`, labels `["schedule:<id>"]` (the schedule
+id from the wake) and the title suffixed ` [<anchor-id>]`. Delivery is per job: L1-L6 are always delivery `local`; S1 is
+always delivery `board`. The anchor itself stays the schedule's research/local job (never dispatched). A re-expansion
+returns the existing ids (create dedupes on project + title).
 
 | Job | Title | Reads (read-only) | Looks for |
 |---|---|---|---|
@@ -34,7 +36,7 @@ existing ids (create dedupes on project + title).
 | L2 | Review main-session delivery and operator asks | operator session files listed in `state/sessions/operator-sessions.jsonl` (pi session dir for the home cwd), `state/operator/dashboard.jsonl`, `state/operator/asks.jsonl` | missed or late messages, chat-only questions, hung turns, wrong delegations; operator-session context size, compactions and `self_compact` handoffs, what filled it (duplicate relays, long reports) |
 | L3-L5 | Review worker session failures, slice 1/2/3 | `state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/` | tool errors, waste, CI, treehouse, wrong repo (including bare `br`), rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs) |
 | L6 | Review daemon health and delivery failures | `state/daemon.log`, `daemon.prev.log`, `escalations.json`, `wakeups.json`, `answered.json`, `update.json` (+ `update-before-reset-*.json`), `health.json`, `runs/*/events.jsonl` | updater rollbacks, missing alerts, stale held rows; compaction/rotation events in daemon/bridge logs and `state/sessions/cp-parent-control.json` history |
-| S1 | Synthesize self-review against current work | the six L reports; the dedupe sources below | merge, prioritize, classify |
+| S1 | Synthesize self-review against current work | the six L reports; the dedupe sources below | merge, prioritize, classify; publish the static web report (board) |
 
 ## Order
 
@@ -43,9 +45,12 @@ existing ids (create dedupes on project + title).
 3. `cp_job comment <anchor> "expanded: L1 <id>, …, L6 <id>, S1 <id>"`.
 4. `cp_dispatch` each of L1-L6 with `model: "xai/grok-4.7"`, `thinking: "xhigh"`, `wall_clock_seconds: 10800` and the
    reader task below (window or slice, sources, focus).
-5. When `cp_next` offers S1, dispatch it with the same three overrides and the S1 task below.
+5. When `cp_next` offers S1, dispatch it (delivery `board`) with the same three overrides and the S1 task below.
 6. Tear each job down on its envelope as usual.
-7. After S1's teardown, `cp_job close <anchor> reason "researched: synthesis <S1-id>"`.
+7. On S1's envelope, relay one line: the served URL from its `board` receipt (`board_url`,
+   `http://<viewer host>/boards/<S1-id>/`) and the artifact path `state/artifacts/<S1-id>/report.md` — never the body.
+   A refused board (intake names why) is relayed, never republished by hand.
+8. After S1's teardown, `cp_job close <anchor> reason "researched: synthesis <S1-id> <served URL>"`.
 
 A model or thinking refusal is relayed, never substituted. Failures follow the ordinary contract (bounded recovery,
 `cp_revive`, the dropped-dependency question). Do not re-run a reader on your own.
@@ -85,10 +90,22 @@ Add a "Context & compaction" section: fleet-wide totals, the worst sessions, the
 context, and concrete fixes (e.g. trimming relay bodies, tool-output caps, compaction threshold or rotate policy),
 classified NEW/COVERED as usual.
 
+Deliver as a board (delivery `board`; the brief's board rules apply), in the S1 artifact directory
+`state/artifacts/<S1-id>/`:
+
+- `board.json` — `title` ("Self-review <start>–<end>"), `description` (window and one-line headline), `job_ids` (the six
+  L ids, then the S1 id), `created_at` (ISO-8601 UTC). Its path is S1's `artifact_path`.
+- `report.md` — the full synthesis above (what `cp_gate` reads).
+- `site/index.html` — the static web report: no scripts, inline `<style>` or `/boards/board.css`; the window, the
+  prioritized findings (NEW first) and the "Context & compaction" section; six L links, one per reader, each its job id,
+  title, a link to `/#job/<L-id>` and its artifact path `state/artifacts/<L-id>/report.md`; and the S1 artifact path. The
+  served URL is `/boards/<S1-id>/` once intake publishes it. Same redaction as the reports: no secret reaches the page.
+
 ## Do not
 
 - dispatch the anchor;
 - create `schedule:` jobs outside an expansion;
 - change the model or effort;
+- change a delivery (L1-L6 `local`, S1 `board`, the anchor stays `local`);
 - read an artifact body yourself (hand S1 the paths);
 - relay bodies.
