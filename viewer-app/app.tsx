@@ -14,6 +14,7 @@ import { Schedules } from "./screens/Schedules.tsx";
 import { useRoute } from "./use-route.ts";
 import { useScreenData } from "./use-screen-data.ts";
 import { Shell, ShellContext } from "./components/Shell.tsx";
+import { NotFound, notFoundFor } from "./components/NotFound.tsx";
 import { Overview } from "./screens/Overview.tsx";
 import { More } from "./screens/More.tsx";
 import { DependencyMap } from "./screens/DependencyMap.tsx";
@@ -31,10 +32,13 @@ export function DetailScreen({current:asked}: {current:Route}) {
  const transcript=sessions && query.get("view") === "you" && query.get("transcript") === "1";
  const data=sessions ? resource.data as SessionsResponse | null : null;
  // Restart session lives in the shell's ⋮ menu: the composer stays held while that restart runs, and re-reads its token once the state moves.
- const restarting=useContext(ShellContext).control?.restarting ?? null;
+ const shell=useContext(ShellContext);
+ const restarting=shell.control?.restarting ?? null;
  const own=useControl(transcript,`${data?.generated_at ?? ""}|${restarting?.state ?? ""}`,data?.entries ?? []);
  const control=own && restarting ? {...own,restarting} : own;
  if (current.defaulted && resource.code === 403) return <p role="status">Loading</p>;
+ const missing = resource.data ? null : notFoundFor(current, resource.code);
+ if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
  return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
 }
@@ -65,10 +69,13 @@ function JobsRoute({current}:{current:Route}) {
  const data = resource.data;
  const summary = data && "awaiting_count" in data ? data : null;
  const scheduleControl = useScheduleControl(current.screen === "schedules", data?.generated_at ?? null);
+ const missing = data ? null : notFoundFor(current, resource.code);
  return <Shell current={current} awaiting={summary?.awaiting_count ?? null} status={resource.status} updatedAt={data?.generated_at ?? null}>
+  {missing ? <NotFound {...missing}/> : <>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{data && " · showing last recorded data"}</p>}
   {summary?.warnings.map(w=><p role="alert" class="overview-error" key={w.section}>{w.section}: {w.message}</p>)}
   {data ? current.screen === "job" ? <JobDetail data={data as JobResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  </>}
  </Shell>;
 }
 function OverviewPage({current}: {current:Route}) {

@@ -140,15 +140,22 @@ one read for every badge. Semantics: `docs/contracts.md`, *Version view*.
 
 Amber and coral are only for an open human decision (an ask or escalation still needing the operator, including the documented amber past 10 minutes) or CI that is actually red. Alarms, failed jobs, context pressure, stranded dependencies, a stale live dot and version warnings stay neutral: the word carries the state. `.overview-alarm` is one of those neutral alarms.
 
-Search filters enabled entries from the current route table plus in-flight job
-titles and IDs. The shell reads `/api/overview` once per opening, aborts on close
+Search is one dialog with three groups: Go to (enabled entries from the current route
+table), In flight (`<id> · <phase>`, and fleet `waiting` reads "no run status") and
+Recently landed (`<id> · #<n> merged`, from the same `/api/overview` response's
+`shipped_today`). The shell reads that response once per opening, aborts on close
 or unmount, and discards late responses. It creates no search API or extra SSE
 connection; failures leave navigation available with an explicit job-data warning.
 Sessions and Files are navigation shortcuts, not transcript or file-content search.
 The native modal dialog supports Ctrl/Cmd+K, arrow-key selection, Enter, Escape,
-and restoring focus to the opener. Its 390px maximum width and scrolling results
-reuse screen 11's Search field and screen 05's menu rows because no separate search
-screen was supplied.
+and restoring focus to the opener. At 900px and up the dialog footer reads
+`↑ ↓ move · ↵ open · esc close`. The field has no border of its own; the dialog's
+border is the only one. Its 390px maximum width and scrolling results reuse screen
+11's Search field and screen 05's menu rows because no separate search screen was
+supplied. An unknown job (`#job/<id>` answered 404) and an unknown worker session
+(`#sessions?view=workers&id=<id>` answered 404) render a calm page with a back link
+and a button that opens this Search, not the recorded-data alert. Any other status
+stays that alert.
 
 ## Recorded Data
 
@@ -358,11 +365,11 @@ inline styles; `components/control.css` wraps long text and the action buttons a
 
 **Schedule controls** (cp-hhuf P6, docs/contracts.md §Schedule controls). The Schedules page reads
 `GET /api/schedules/control` (`use-schedule-control.ts`, on mount, on every refresh and after each send) and shows
-one status line; each card gets Disable/Enable, Run now (enabled schedules only) and Remove (a second, confirming
-tap), disabled unless control is on, the parent holds the home and nothing is pending for that schedule, with the
+one status line; each card gets Run now (a filled primary button, enabled schedules only), then Disable/Enable, then Remove…
+(a second, confirming tap; the confirm text stays "Tap again to remove"), disabled unless control is on, the parent holds the home and nothing is pending for that schedule, with the
 latest request's state under them. A click is one `POST /api/schedules/request` `{op, schedule_id}` with the
-`x-cp-control-token` header; the parent applies it. **Add schedule…** opens
-`#sessions?view=you&transcript=1&draft=…`: the composer starts with that draft (it never reaches the API). The
+`x-cp-control-token` header; the parent applies it. **+ Add** opens
+`#sessions?view=you&transcript=1&draft=…`: the composer starts with that draft (it never reaches the API). The long note on how schedules run sits in a `<details>` ("How schedules run"). The
 buttons wrap (`.schedule-controls`, flex-wrap) at 390 px and sit in the card grid at 1440 px; long reasons wrap with
 the card (`overflow-wrap: anywhere`).
 

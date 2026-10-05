@@ -1,0 +1,7 @@
+.not-found { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 100%; padding: 64px 24px; text-align: center; overflow-wrap: anywhere; }
+.not-found h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.not-found p { margin: 0; max-width: 300px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.not-found-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 300px; }
+.not-found-actions a, .not-found-actions button { min-height: 44px; padding: 0 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.not-found-back { background: var(--text); color: var(--background); border: 1px solid var(--text); }
+.not-found-search { background: transparent; color: var(--text); border: 1px solid var(--border); }

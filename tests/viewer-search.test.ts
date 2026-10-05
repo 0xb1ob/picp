@@ -13,7 +13,11 @@ const {act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.f
 test("shell search filters navigation and recorded in-flight jobs with keyboard and request cleanup", async t => {
  const home = createScratchHome(); t.after(() => home.cleanup());
  const data = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
- data.in_flight = [{id:"cp-search",title:"Repair <script>queue</script>",project:"demo",phase:"held",model:null,script_path:null,elapsed_seconds:null,limit_seconds:null,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null}];
+ data.in_flight = [
+  {id:"cp-search",title:"Repair <script>queue</script>",project:"demo",phase:"held",model:null,script_path:null,elapsed_seconds:null,limit_seconds:null,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null},
+  {id:"cp-wait",title:"Parked work",project:"demo",phase:"waiting",model:null,script_path:null,elapsed_seconds:null,limit_seconds:null,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null},
+ ];
+ data.shipped_today = [{id:"cp-landed",title:"Landed work",merged_at:data.generated_at,merge_sha:"a".repeat(40),pr_url:"https://github.com/acme/repo/pull/80",cost_usd:null}];
  const {window,document} = parseHTML("<html><body><div id='root'></div></body></html>");
  const originals = ["window","document","fetch"].map(key => [key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  for (const [key,value] of [["window",window],["document",document]] as const) Object.defineProperty(globalThis,key,{configurable:true,value});
@@ -64,7 +68,13 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  assert.equal(requests.length,1);
  await answer(Response.json(data));
  // Audit P4 #28: the route table is 10 entries after the nav consolidation, plus the one in-flight job.
- assert.equal(results().length,11);
+ assert.equal(results().length,13);
+ assert.deepEqual([...root.querySelectorAll("dialog h2")].map(node => node.textContent), ["Go to", "In flight", "Recently landed"]);
+ assert.match(results().find(node => node.getAttribute("href") === "#job/cp-search")!.textContent!, /cp-search · held/);
+ assert.match(results().find(node => node.getAttribute("href") === "#job/cp-wait")!.textContent!, /cp-wait · no run status/);
+ assert.match(results().find(node => node.getAttribute("href") === "#job/cp-landed")!.textContent!, /cp-landed · #80 merged/);
+ assert.equal(root.querySelector(".search-hint")!.getAttribute("aria-hidden"), "true");
+ assert.match(root.querySelector(".search-hint")!.textContent!, /↑ ↓ move · ↵ open · esc close/);
  assert.equal(root.querySelector("dialog script"),null,"job titles render as text");
  await query("  QUEUE  ");
  assert.deepEqual(results().map(node => node.getAttribute("href")),["#job/cp-search"]);
