@@ -499,6 +499,8 @@ interface BenchOptions {
 	policy?: "repo" | "human_handoff";
 	/** unload-parent PR2: the infra-rerun port, as CommandPost wires it. */
 	infraRerun?: IntegratorOptions["infraRerun"];
+	/** k52/cp-oc0m: whether a main-CI latch is enforced, as CommandPost wires it. */
+	mainCiScope?: IntegratorOptions["mainCiScope"];
 }
 
 async function benchOf(
@@ -604,6 +606,7 @@ async function benchOf(
 				run,
 				...(options.noAwaiting ? {} : { awaiting: () => new AwaitingStore({ home: home.path }) }),
 				...(options.infraRerun ? { infraRerun: options.infraRerun } : {}),
+				...(options.mainCiScope ? { mainCiScope: options.mainCiScope } : {}),
 				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs }) } : {}),
 				...(options.noSender
 					? {}
@@ -735,13 +738,15 @@ test("integration holds reject missing jobs, unsafe ids, non-PR jobs and empty r
 });
 
 const MAIN_RED_REASON = `${BR}: main is red since ${HEAD_B.slice(0, 12)}: structure; rebase onto origin/main and pass CI to merge`;
+/** cp-oc0m: an active mandate covers "demo" and this machine's gh login is "me". */
+const OWN_SCOPE = { mainCiScope: async () => ({ enforce: true as const, login: "me" }) };
 
 test("k52: a latched-red main holds the merge unless the head contains origin/main and its own CI is green", async (t) => {
 	const b = await benchOf(t);
 	const store = new MainCiStore({ home: b.home });
-	store.setRed("demo", HEAD_B, { failing: "structure" });
+	store.setRed("demo", HEAD_B, { failing: "structure", login: "me" });
 	for (const world of [{ ancestor: false }, { ancestor: "unreadable" as const }, { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }, { runs: [] }]) {
-		const result = await b.integrator(world).advance({ jobId: BR });
+		const result = await b.integrator(world, OWN_SCOPE).advance({ jobId: BR });
 		assert.equal(result.next, "wait", JSON.stringify(world));
 		assert.equal(result.reason, MAIN_RED_REASON);
 	}
@@ -750,7 +755,7 @@ test("k52: a latched-red main holds the merge unless the head contains origin/ma
 	assert.equal(b.calls.some((call) => call.includes("actions/workflows")), false);
 	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
 	// Fix-forward: origin/main is an ancestor of the branch and CI is green on the pushed head.
-	const fix = await b.integrator().advance({ jobId: BR });
+	const fix = await b.integrator({}, OWN_SCOPE).advance({ jobId: BR });
 	assert.notEqual(fix.next, "wait");
 	assert.ok(b.calls.includes(`git merge-base --is-ancestor origin/main origin/${BR}`));
 	assert.ok(fix.facts.some((fact) => /fix-forward/.test(fact)));
@@ -759,13 +764,13 @@ test("k52: a latched-red main holds the merge unless the head contains origin/ma
 test("k52: another project's latch, a corrupt main-ci.json, and a cleared latch never block", async (t) => {
 	const b = await benchOf(t);
 	const store = new MainCiStore({ home: b.home });
-	store.setRed("some-other-project", HEAD_B);
-	assert.notEqual((await b.integrator({ ancestor: false }).advance({ jobId: BR })).next, "wait");
+	store.setRed("some-other-project", HEAD_B, { login: "me" });
+	assert.notEqual((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR })).next, "wait");
 	const c = await benchOf(t);
 	const corruptStore = new MainCiStore({ home: c.home });
-	corruptStore.setRed("demo", HEAD_B);
+	corruptStore.setRed("demo", HEAD_B, { login: "me" });
 	writeFileSync(corruptStore.file, "{not json");
-	const corrupt = await c.integrator({ ancestor: false }).advance({ jobId: BR });
+	const corrupt = await c.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR });
 	assert.notEqual(corrupt.next, "wait");
 	assert.ok(corrupt.facts.some((fact) => fact.includes("main-ci.json unreadable")));
 });
@@ -773,12 +778,29 @@ test("k52: another project's latch, a corrupt main-ci.json, and a cleared latch 
 test("k52: setRed twice then clear resumes the ordinary flow", async (t) => {
 	const b = await benchOf(t);
 	const store = new MainCiStore({ home: b.home });
-	store.setRed("demo", HEAD_B, { failing: "structure" });
-	store.setRed("demo", HEAD_A, { failing: "other" });
-	assert.equal((await b.integrator({ ancestor: false }).advance({ jobId: BR })).reason, MAIN_RED_REASON);
+	store.setRed("demo", HEAD_B, { failing: "structure", login: "me" });
+	store.setRed("demo", HEAD_A, { failing: "other", login: "me" });
+	assert.equal((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR })).reason, MAIN_RED_REASON);
 	store.clear("demo");
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal((await b.integrator({}, OWN_SCOPE).advance({ jobId: BR })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
+});
+
+test("k52/cp-oc0m: no active mandate, an unreadable login, a foreign row or no scope port never blocks", async (t) => {
+	const scopes: Array<[string, IntegratorOptions["mainCiScope"] | undefined, string]> = [
+		["no active mandate", async () => ({ enforce: false, reason: "no active mandate covers demo" }), "me"],
+		["unreadable login", async () => ({ enforce: false, reason: "gh api user --jq .login unreadable: boom" }), "me"],
+		["no scope port", undefined, "me"],
+		["foreign row", OWN_SCOPE.mainCiScope, "other"],
+	];
+	for (const [label, mainCiScope, login] of scopes) {
+		const b = await benchOf(t);
+		new MainCiStore({ home: b.home }).setRed("demo", HEAD_B, { failing: "structure", login });
+		const result = await b.integrator({ ancestor: false }, mainCiScope ? { mainCiScope } : {}).advance({ jobId: BR });
+		assert.notEqual(result.next, "wait", label);
+		assert.ok(result.facts.some((fact) => /^main-ci: .*not blocking/.test(fact)), label);
+		assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1, label);
+	}
 });
 
 type HoldTool = {

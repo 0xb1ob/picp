@@ -501,7 +501,8 @@ export function createWakeupSurfaces(
 
 	/**
 	 * k52: the origin/main half of the CI-watch tick — one job-less `cp-ci` wake
-	 * (`details.main_ci`) per red / green-again transition. Its own catch: a main-CI
+	 * (`details.main_ci`) per red / green-again / released transition, for
+	 * active-mandate projects, own runs only (cp-oc0m). Its own catch: a main-CI
 	 * fault is journaled through `ciWatchFailed` and never stops the held-PR half.
 	 */
 	const surfaceMainCi = async (post: CommandPost): Promise<void> => {
@@ -510,8 +511,10 @@ export function createWakeupSurfaces(
 				home: post.home,
 				projects: post.registry.activeNames(),
 				pathOf: (project) => post.registry.pathOf(project),
+				mandates: () => post.mandates.list(),
+				login: () => post.ghLogin(),
 				...(late.mainCi?.exec ? { exec: late.mainCi.exec } : {}),
-				onError: (project, message) => post.ciWatchFailed(new Error(`main CI (${project}): ${message}`)),
+				onError: (project, message) => post.ciWatchFailed(new Error(`main CI${project ? ` (${project})` : ""}: ${message}`)),
 				notify: (observation, text) => operatorNotify(s.live, text, observation.event === "main_ci_failed" ? "warning" : "info"),
 				send: (observation, text) => sendWakeup({ kind: "ci", projects: [observation.project] }, text, { main_ci: observation }),
 			});

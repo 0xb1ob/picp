@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Main CI latch counts only this machine's own runs in mandated projects (cp-oc0m)
+
+The k52 main-CI watch now reads only projects named by an active mandate (status `active`, unexpired); any other project gets no git or gh call. It reads the tip's runs through `gh api repos/{owner}/{repo}/actions/runs?branch=main&head_sha=<tip>` and counts only runs whose `triggering_actor` is this machine's gh login (`gh api user --jq .login`, resolved once per process): `event: dynamic` runs (Dependabot Updates) and every other user's or bot's run can neither latch red nor block a green clear. A latch row records its `login`; `cp_integrate` waits only on an own row in a mandated project, and an unreadable login fails open (one `ciWatchFailed` recovery wake per cause, an integrate fact saying `not blocking`). The fix-forward exception and merge policy are unchanged. Migration: none — a row written before this change has no login, is not enforced, and is released by the next mandated tick (one `MAIN CI LATCH RELEASED` wake).
+
 ### MCP for the operator session and read-only workers (cp-fl8b)
 
 The operator session now loads pi's built-in MCP, codemode and tool search (`OPERATOR_BUILTIN_EXTENSIONS`), on every start path (manual, tmux/herdr wrapper, dashboard Restart). The `readOnly` profiles (planner, qa, gate-reviewer) get every server of the operator's `<agent dir>/mcp.json`, read in place, through one gateway tool, `mcp_call` (`extensions/worker-mcp`), which lists and calls only tools whose server declares `readOnlyHint: true` and not `destructiveHint: true`. The implementer, ship workers and the CP parent get no MCP. The worker credential guard now also refuses a copy of `mcp-auth.json`. `/doctor` gains `mcp.operator` (a live `pi mcp list --json`, only when a server is enabled) and `mcp.workers`. Migration: none; a home with no `mcp.json` spawns workers exactly as before.
