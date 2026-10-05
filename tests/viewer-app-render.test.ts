@@ -60,9 +60,9 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  assert.match(html,/Needs you · 4/); assert.doesNotMatch(html,/Awaiting you/,"audit P3 #22: Needs you on the Overview"); assert.equal((html.match(/href="#awaiting" class="overview-line"/g) ?? []).length,3,"at most three awaiting lines");
  assert.match(html,/&lt;script>/); assert.doesNotMatch(html,/<script>|style=|onclick=/i); assert.doesNotMatch(html,/Keep|Nothing needs you/);
  assert.match(html,/parent<\/span><strong title="alive">alive/); assert.match(html,/1 live \/ 3 slots/); assert.match(html,/tight: anthropic</);
- assert.match(html,/Blocked &amp; failed · 1/); assert.match(html,/href="#job\/cp-wait"/); assert.match(html,/Blocked title/); assert.match(html,/waiting on .*cp-render.*paused/);
+ assert.match(html,/Blocked &amp; failed · 1/); assert.match(html,/href="#job\/cp-wait"/); assert.match(html,/Blocked title/); assert.match(html,/blocked by .*cp-render.*paused/);
  assert.match(html,/href="#job\/cp-render"/); assert.match(html,/href="https:\/\/github.com\/acme\/repo\/pull\/7"[^>]*>#7</); assert.ok(html.includes(`title="${data.in_flight[0]!.title}"`));
- assert.match(html,/Landed today · 1 merged · 4 closed without PR · \$1\.50/); assert.match(html,/\$1\.50<\/span><a href="https:\/\/github.com\/acme\/repo\/pull\/1">https:\/\/github.com\/acme\/repo\/pull\/1</);
+ assert.match(html,/Landed today · 1 merged · 4 closed without PR · \$1\.50/); assert.match(html,/#1 ↗<\/a><span class="overview-meta">merged <code>bbbbbbb<\/code>/);
  assert.match(html,/CI red</,"audit P3 #21: a held row says why it is held"); assert.doesNotMatch(html,/overview-project/,"one project: no tag");
  assert.match(html,/other paused/);
  data.availability.fleet = "unavailable"; assert.match(screen(data),/Jobs unavailable/); assert.match(screen(data,true),/- live worktrees/);
@@ -90,9 +90,9 @@ test("audit P3: Blocked & failed, the operator and main CI chips, project tags, 
  assert.match(html,/href="#decided" class="overview-chip"><span class="overview-meta"><span class="overview-dot overview-dot-tight"><\/span>operator<\/span><strong title="running · 2 unanswered, oldest 57m">/,"amber once one question waited 10 minutes");
  assert.match(html,/overview-dot-ci-red"><\/span>main CI<\/span><strong title="red since ccccccc [^\n"]+\ndemo: AssertionError: x on c{40}">red since ccccccc /);
  assert.equal((html.match(/class="overview-project"/g) ?? []).length,3,"two projects in flight: every row tagged");
- assert.match(html,/CI running</); assert.match(html,/review 1\/5 pass</); assert.match(html,/overview-meta">working</);
+ assert.match(html,/CI running</); assert.match(html,/review 1\/5 pass</); assert.match(html,/overview-dot-working/); assert.match(html,/0m \/ -</);
  assert.match(html,/Landed today · 7 merged · \$6\.00/,"total over every merged row with a known cost");
- assert.equal((html.match(/pull\/\d">https:\/\/github.com\/acme\/repo\/pull\/\d</g) ?? []).length,5,"five rows, full PR urls");
+ assert.equal((html.match(/↗/g) ?? []).length,5,"five landed rows");
  assert.match(html,/href="#jobs" class="overview-more">2 more in Jobs →</);
  data.main_ci = {availability:"ok",red:[...data.main_ci.red,{project:"beta",red_since_sha:"d".repeat(7),red_since_at:"2026-09-26T05:41:07Z",workflow:null,failing:null}]};
  assert.match(screen(data),/<strong title="demo red since ccccccc [^,]+, beta red since ddddddd /,"per project once more than one is red");
@@ -120,6 +120,7 @@ test("audit P3 #20 #21 end to end: recorded ci-watch values reach the held fact,
  for (const [ci, fact] of cases) assert.match(html, new RegExp(`<code>cp-${ci.replace("_","-")}</code></a><span class="overview-line-text"[^>]*>[^<]*</span><span class="overview-meta">${fact}</span>`), ci);
  assert.deepEqual(data.shipped_today.map(j => j.cost_usd), merged.map(() => 0.5), "all 12 merged rows keep their cost past FINISHED_SHOWN (10)");
  assert.match(html, /Landed today · 12 merged · \$6\.00/);
+ assert.match(html, /#\d+ ↗.*merged <code>[0-9a-f]{7}/);
 });
 
 test("stamp, shortSha, prNumber and phaseText", async t => {

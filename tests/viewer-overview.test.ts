@@ -248,3 +248,20 @@ test("cp-6fyl PR2 services: a failing check carries its since", t => {
  put(join(LAYOUT.state, "health.json"), {schema_version:1, last_run_at:"2026-09-26T11:59:00Z", checks:{disk:{status:"fail", detail:"3 GiB", since:"2026-09-26T11:30:00Z"}, gh:{status:"ok", detail:"ok", since:"2026-09-26T11:00:00Z"}}});
  assert.deepEqual(overview(state, now).services, {health:{last_run_at:"2026-09-26T11:59:00Z", failing:[{check:"disk", detail:"3 GiB", since:"2026-09-26T11:30:00Z"}]}});
 });
+
+test("in_flight context is the worker session when one is recorded, otherwise null", t => {
+ const {state, put} = fixture(t);
+ const file = join(state.stateDir, "sessions", "cp-live.jsonl");
+ put(LAYOUT.fleetFile, {jobs:[
+  {job_id:"cp-live", project:"demo", phase:"held", model:"anthropic/claude", worker:{session_file:file}},
+  {job_id:"cp-none", project:"demo", phase:"waiting"},
+ ]});
+ put(join(LAYOUT.state, "sessions/cp-live.jsonl"), JSON.stringify({type:"message", message:{role:"assistant", provider:"anthropic", model:"claude", stopReason:"stop", usage:{input:10, output:5, cacheRead:0, cacheWrite:0, totalTokens:15}}}) + "\n");
+ put(join(LAYOUT.state, "model-windows.json"), {recorded_at:"2026-09-26T11:00:00Z", windows:{"anthropic/claude":1000}});
+ const data = overview(state, now);
+ const live = data.in_flight.find(j => j.id === "cp-live");
+ const none = data.in_flight.find(j => j.id === "cp-none");
+ assert.equal(live?.context?.tokens, 15);
+ assert.equal(live?.context?.window, 1000);
+ assert.equal(none?.context, null);
+});

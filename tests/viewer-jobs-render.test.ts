@@ -27,7 +27,7 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  const rendered=screen("Board",board);assert.match(rendered,/By mandate/);assert.match(rendered,/Paused &amp; closed/);assert.match(rendered,/href="#job\/cp-render"/);assert.doesNotMatch(rendered,/<script>|style=|onclick=/i);
  // The Mandates page is gone; its name must not survive as the phone heading either (cp-hvbj).
  assert.match(rendered,/board-desktop">Board<\/span><span class="board-phone">Board</);assert.doesNotMatch(rendered,/>Mandates</);
- // Audit P2 #12: the desktop Landed today count covers every lane, a hidden paused one included; Jobs says "Finished today".
+ // Audit P2 #12: the desktop Landed today count covers every lane, a hidden paused one included; Jobs says "Done today".
  board.jobs=[...board.jobs,{...job,id:"cp-landed",phase:"done",mandate_id:"md-paused"}];
  const grid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
  assert.match(grid,/Landed today<span>1<\/span>/); assert.match(grid,/Failed<span>1<\/span>/,"other columns still count the shown lanes");
@@ -35,7 +35,7 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  board.jobs=[{...job,id:"cp-wait",phase:"waiting"},{...job,id:"cp-idle",phase:"idle"},{...job,id:"cp-run",phase:"working"}];
  const waitGrid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
  assert.match(waitGrid,/Working<span>1<\/span>/); assert.match(waitGrid,/Waiting<span>2<\/span>/); assert.match(waitGrid,/needs a person, or the worker is idle/);
- assert.match(screen("Jobs",list),/Finished today<span>1<\/span>/);
+ assert.match(screen("Jobs",list),/Done today<span>1<\/span>/);
  // Audit P4 #23: one Jobs item with a List | Board | Map toggle on each view, the current one marked, on every width.
  for (const [name,data,current] of [["Jobs",list,"#jobs"],["Board",board,"#board"]] as const) {
   const views=/<nav class="board-view jobs-views" aria-label="Jobs view">(.*?)<\/nav>/.exec(screen(name,data))?.[1] ?? "";
@@ -66,4 +66,25 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  assert.match(desktop("jobs.css"),/\.jobs-screen, \.job-detail \{ max-width: none;/);
  assert.match(desktop("jobs.css"),/\.reports-grid \{ display: grid;/);
  assert.match(desktop("job-detail.css"),/\.job-detail \{ display: grid;/);
+});
+
+test("Done today groups newest first, shows five rows, and finished rows have no context chip", async () => {
+ const buildResult=await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Jobs} from "./viewer-app/screens/Jobs.tsx"; export const screen=(data)=>render(h(Jobs,{data}));',loader:"tsx",resolveDir:REPO_ROOT},bundle:true,write:false,platform:"node",format:"esm",jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const {screen}=await import(`data:text/javascript;base64,${Buffer.from(buildResult.outputFiles![0]!.contents).toString("base64")}`);
+ const ctx={tokens:10,window:100,percent:10,level:"ok" as const,reason:null,model:"m",thinking:null,last_compact_at:null};
+ const job=(over:Partial<ViewerJob>):ViewerJob=>({id:"cp",project:"demo",title:"t",phase:"done",model:"m",script_path:null,elapsed_seconds:1,limit_seconds:null,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null,ledger_status:"closed",ledger_disagrees:false,mandate_id:null,cost_usd:1,pr_url:null,pr_status:null,finished_at:"2026-09-27T00:00:00Z",finished_today:true,merge_sha:null,failure:null,summary:null,blockers:[],context:ctx,...over});
+ const demo=["03:00:00","02:50:00","02:40:00","02:30:00","02:20:00","02:10:00"].map((at,i)=>job({id:`cp-d${i}`,finished_at:`2026-09-27T${at}Z`,...(i===0?{pr_status:"merged",merge_sha:"a".repeat(40),cost_usd:2}:{})}));
+ const beta=job({id:"cp-beta",project:"beta",finished_at:"2026-09-27T02:55:00Z"});
+ const live=job({id:"cp-live",phase:"working",finished_today:false,finished_at:null,context:ctx});
+ const waiting=job({id:"cp-wait",phase:"waiting",finished_today:false,finished_at:null,context:null});
+ const html=screen({generated_at:"2026-09-27T04:00:00Z",awaiting_count:0,jobs:[beta,...demo,live,waiting],projects:[{name:"alpha",paused:true},{name:"beta",paused:false},{name:"delta",paused:false},{name:"demo",paused:false},{name:"gamma",paused:false}],warnings:[]});
+ const done=html.split(">Done today ·")[1]!;
+ assert.match(done,/demo · 1 merged · 5 closed without PR · \$7\.00[\s\S]*beta · 0 merged · 1 closed without PR · \$1\.00/,"groups follow the newest job, rows inside a group stay newest first");
+ assert.match(done,/cp-d0[\s\S]*cp-d4/); assert.doesNotMatch(done.split("Show 1 more from demo")[0]!,/cp-d5/);
+ assert.match(done,/Show 1 more from demo/);
+ assert.match(done,/Nothing done today in alpha \(paused\), delta or gamma\./);
+ assert.doesNotMatch(done,/ctx-chip|job-row-ctx/,"finished rows have no context chip");
+ assert.match(html.split(">Done today ·")[0]!,/ctx-chip/);
+ assert.match(html,/job-phase">no run status</); assert.doesNotMatch(html,/job-phase">waiting</);
+ assert.match(readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8"),/\.jobs-segments \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto/);
 });
