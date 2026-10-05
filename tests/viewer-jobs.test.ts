@@ -99,3 +99,19 @@ test("audit P2 #10/#11: a held job's stale failure is not shown, and a lane whos
  put(LAYOUT.fleetFile,{jobs:[{job_id:"cp-held",project:"demo",kind:"ship",phase:"failed",dispatched_at:at,failure}]});
  assert.equal(jobsView(state,now).jobs.find(j=>j.id==="cp-held")?.failure,"503 upstream","a failed job still shows its failure");
 });
+
+test("a merged job's CI fact follows its recorded CI event once ci-watch has pruned the row, and stays unset with no run",t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,typeof value==="string"?value:JSON.stringify(value));};
+ const at="2026-09-26T12:00:00Z";const head="c".repeat(40);
+ put(".pi-command-post/jobs.json",{jobs:["cp-green","cp-none","cp-stale"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"]}))});
+ put(LAYOUT.fleetFile,{jobs:["cp-green","cp-none","cp-stale"].map(id=>({job_id:id,project:"demo",kind:"ship",phase:"done",dispatched_at:at,closed_at:at}))});
+ for(const id of ["cp-green","cp-none","cp-stale"]) put(join(LAYOUT.runs,`${id}/envelope.json`),{envelope:{head_sha:head}});
+ const ev=(id:string,event:string,sha:string)=>JSON.stringify({source:"cp",job_id:id,ts:at,type:"ci_observed",payload:{event,head_sha:sha}})+"\n";
+ put(join(LAYOUT.runs,"cp-green/events.jsonl"),ev("cp-green","ci_green",head)+ev("cp-green","pr_merged",head));
+ put(join(LAYOUT.runs,"cp-none/events.jsonl"),ev("cp-none","pr_merged",head));
+ put(join(LAYOUT.runs,"cp-stale/events.jsonl"),ev("cp-stale","ci_green","d".repeat(40)));
+ assert.equal(jobView(state,"cp-green")?.job.ci,"green");
+ assert.equal(jobView(state,"cp-none")?.job.ci,null,"no CI run recorded: still not run yet");
+ assert.equal(jobView(state,"cp-stale")?.job.ci,null,"a green run on another head is not this head's CI");
+});

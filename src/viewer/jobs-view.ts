@@ -120,6 +120,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const events=source(()=>{if(!file) return null;const start=startOffset(file,undefined);return {start:start.offset,chunk:readLines(file,start.offset)};},null);
  const timeline:JobResponse["timeline"]=[];
  let malformed=false;
+ let seenCi:{ci:string;head:string | undefined} | undefined;
  for(const line of events.value?.chunk.lines ?? []) {
   const event=parseObject(line.text); if(!event) {malformed=true;continue;}
   if(event.source!=="cp" || !timestamp(event.ts) || (event.job_id!==undefined && event.job_id!==id)) continue;
@@ -130,7 +131,10 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   if(event.type==="ci_observed") label=({ci_green:"CI green",ci_failed:"CI red",pr_merged:"PR merged",pr_closed:"PR closed unmerged"} as Record<string,string>)[observation ?? ""] ?? "CI observed";
   const meta=[str(payload?.model),str(payload?.reason),str(payload?.head_sha)].filter(Boolean).join(" · ");
   timeline.push({at:event.ts,label,meta,tone:event.type==="failure" || observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral"});
+  if(observation==="ci_green" || observation==="ci_failed") seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};
  }
+ // ci-watch.json drops a row once the job leaves the watch (merged, closed), so the CI fact falls back to the last recorded CI event for this head, the same source as the timeline.
+ if(!job.ci && seenCi && job.head && seenCi.head===job.head) job.ci=seenCi.ci;
  if(job.merge_sha && job.finished_at) timeline.push({at:job.finished_at,label:"Merge",meta:job.merge_sha,tone:"green"});
  timeline.sort((a,b)=>a.at.localeCompare(b.at));
  const root=jobRoot(state,id); const artifact=jobArtifact(state,id);
