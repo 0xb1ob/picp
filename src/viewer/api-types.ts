@@ -216,6 +216,7 @@ export interface FlightJob {
  routing: string | null; note: string | null; pr_url?: string | null;
  /** The live worker's context, when a screen has it. Overview fills this; absent on older payloads. */
  context?: ContextUsage | null;
+ cost_usd?: number | null;
 }
 export interface ShippedJob { id: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
 /** A fleet job in phase `failed`; `failure` is its headline, one line of at most 80 chars. */

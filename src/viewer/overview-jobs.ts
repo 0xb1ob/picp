@@ -6,10 +6,11 @@ import { SHA } from "./git-read.ts";
 import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
 import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
 import { routingText } from "./overview-health.ts";
-
+import { modelWindows, workerContext } from "./context-usage.ts";
 /** `rows`: the dashboard's job rows, every finished one included (`dashboard(state,now,Infinity)`), computed once by `overview`. */
 export function flights(state: ViewerState, jobs: Json[], escalations: Json[], now: number, rows: readonly JobRow[]): FlightJob[] {
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
+ const windows = modelWindows(state.stateDir);
  const ciRows = Array.isArray(watched) ? watched.map(obj) : [];
  return jobs.filter(j => ["waiting","held","launching"].includes(String(j.phase))).map(job => {
   const id = String(job.job_id); const status = readStatus(state,id);
@@ -32,7 +33,8 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
    ci:head && ci?.head_sha === head ? str(ci.last_ci) ?? null : null,
    review:str(review?.verdict) ?? null, review_attempts:Math.min(5,attempts.length), routing:routingText(state,job),
-   note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null};
+   note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null,
+   context:workerContext(state,id,row?.model,windows), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null};
  });
 }
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
