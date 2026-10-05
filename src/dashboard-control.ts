@@ -22,7 +22,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { OperatorAsks } from "./operator-asks.ts";
 import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
@@ -32,7 +32,7 @@ import {
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
-import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, isUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, uploadRoot } from "./viewer/uploads.ts";
+import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, isUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, uploadFile, uploadRoot } from "./viewer/uploads.ts";
 
 /** Linux `sun_path` is 108 bytes including the NUL. */
 const MAX_SOCKET_PATH = 107;
@@ -234,7 +234,9 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		let result: Promise<unknown> | void;
 		try {
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
-			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${dashboardMarker(id, askId, images)}`, deliverAs, inline.length ? inline : undefined);
+			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
+			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${dashboardMarker(id, askId, images)}`, deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
