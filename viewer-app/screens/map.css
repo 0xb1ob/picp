@@ -80,7 +80,7 @@
 .map-bar-track { fill: var(--border); }
 .map-bar { fill: var(--secondary); }
 .map-uncovered { display: flex; align-items: center; height: 100%; padding: 14px; font-size: 13px; color: var(--muted); }
-.map-selection { width: 288px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; padding: 20px; align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; font-size: 14px; line-height: 1.5; }
+.map-selection { flex: 0 0 288px; display: flex; flex-direction: column; gap: 18px; padding: 20px; align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; font-size: 14px; line-height: 1.5; }
 .map-selection header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .map-selection header code { font-size: 13px; color: var(--muted); }
 .map-selection button { width: 44px; height: 44px; flex-shrink: 0; background: none; border: 0; border-radius: 8px; color: var(--muted); }
@@ -101,5 +101,6 @@
  .map-legend-summary .map-desktop { display: flex; gap: 8px 20px; flex-wrap: wrap; }
  .map-full-legend { grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px 20px; padding: 14px 18px; }
  .map-workspace { display: flex; flex: 1; gap: 24px; min-height: 0; min-width: 0; }
+ .map-graph { min-width: 0; overflow: auto; }
  .map-selection { max-height: 100%; overflow: auto; }
 }

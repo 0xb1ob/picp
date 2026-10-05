@@ -184,7 +184,7 @@ job has a recorded close, and the latest close falls today on the host's calenda
 Missing close records or broad project grants cannot imply completion. Paused and
 revoked grants retain those states; no grant is mutated or authority revoked by
 this projection. Map shows active, paused and closed-today grants first,
-with expired and revoked history behind its toggle.
+with expired and revoked history behind its toggle. Nothing is selected or dimmed until a job or mandate is picked; the aside sits beside the graph and never covers a node. A fleet phase of waiting reads "no run status".
 
 Map also counts revoked grants with a recorded mission-end
 close answer and a revocation timestamp today as closed today. It includes these grants
