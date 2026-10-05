@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Out-of-date wake relays are retired at delivery (cp-nbxo)
+
+The operator relay consumer's delivery-time recheck (`recheckRelay`) now retires a `wake` relay when every escalation its text names was answered or superseded strictly after the relay's `queued_at` and every job it names (its stamp, those escalations' `job_ids`, exact fleet job ids in its text) is `done` or was dispatched, reported or closed after it; the relay becomes a `discard` line `already handled: <ids>`, named once as `retired:` on the next message and on the `cp-relays` status line. A wake with no escalation id, an open, withdrawn, unknown or early-decided escalation, a job with no fleet record or `failed`, an unreadable store, a drain wake or any other relay kind is delivered in full, exactly as before. Migration: none.
+
 ### Main CI latch counts only this machine's own runs in mandated projects (cp-oc0m)
 
 The k52 main-CI watch now reads only projects named by an active mandate (status `active`, unexpired); any other project gets no git or gh call. It reads the tip's runs through `gh api repos/{owner}/{repo}/actions/runs?branch=main&head_sha=<tip>` and counts only runs whose `triggering_actor` is this machine's gh login (`gh api user --jq .login`, resolved once per process): `event: dynamic` runs (Dependabot Updates) and every other user's or bot's run can neither latch red nor block a green clear. A latch row records its `login`; `cp_integrate` waits only on an own row in a mandated project, and an unreadable login fails open (one `ciWatchFailed` recovery wake per cause, an integrate fact saying `not blocking`). The fix-forward exception and merge policy are unchanged. Migration: none — a row written before this change has no login, is not enforced, and is released by the next mandated tick (one `MAIN CI LATCH RELEASED` wake).
