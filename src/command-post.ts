@@ -68,6 +68,7 @@ import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecor
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { MandateStore } from "./mandate.ts";
+import { memoLogin, resolveMainCiScope } from "./main-ci.ts";
 import { EscalationStore } from "./escalation.ts";
 import { Gate, type GateRequest, type GateStart } from "./gate.ts";
 import { ContextGuard, type GuardDecision, type GuardRequest } from "./guards.ts";
@@ -308,6 +309,7 @@ export class CommandPost {
 	readonly shippedSeen: ShippedSeenStore;
 	readonly #options: CommandPostOptions;
 	readonly #announcer: FailureAnnouncer;
+	readonly #ghLogin: () => Promise<string>;
 	readonly #claims: import("./job-claims.ts").JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
 
 	constructor(options: CommandPostOptions) {
@@ -380,6 +382,7 @@ export class CommandPost {
 			...(options.parentEnv ? { parentEnv: options.parentEnv } : {}),
 		});
 		this.mandates = new MandateStore(options.home);
+		this.#ghLogin = memoLogin(runCommand, options.home); // k52/cp-oc0m: whose main CI runs count; resolved once, retried after a failure
 		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
@@ -587,6 +590,7 @@ export class CommandPost {
 			awaiting: () => this.awaiting,
 			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs }), // merge_policy by record.project through this registry; no fleet lookup
 			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home) }), // unload-parent PR2: one rerun per job+head
+			mainCiScope: (project) => resolveMainCiScope({ project, mandates: () => this.mandates.list(), now: isoTimestamp(), login: () => this.ghLogin() }), // cp-oc0m
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(),
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.
@@ -718,6 +722,11 @@ export class CommandPost {
 		const cause = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.slice(0, 300) || "no message";
 		const content = `CI/PR WATCH TICK FAILED — ${cause}\n  The watch keeps ticking and re-derives every unconfirmed fact; held PRs may wake you late until this clears.`;
 		this.#journalDurable({ id: boundedCauseId("ci-watch-failed:", cause), kind: "recovery", content });
+	}
+
+	/** k52/cp-oc0m: this machine's gh login (`gh api user --jq .login`); a method so tests can override it. */
+	ghLogin(): Promise<string> {
+		return this.#ghLogin();
 	}
 
 	/** Evidence that a `cp-ci` wake-up reached the parent: the keys it carried. */

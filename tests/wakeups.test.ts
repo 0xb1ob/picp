@@ -1785,12 +1785,15 @@ test("jje.2: a redelivery with an identical stamp is still a replay in a later c
 const MAIN_T1 = "1111111111111111111111111111111111111111";
 const MAIN_T2 = "2222222222222222222222222222222222222222";
 
-async function mainCiPost(t: { after(fn: () => void | Promise<void>): void }) {
+async function mainCiPost(t: { after(fn: () => void | Promise<void>): void }, options: { mandate?: boolean } = {}) {
 	const b = benchOf(t);
 	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
 	t.after(() => post.shutdown());
 	await post.registry.register({ name: "demo", clone_url: "https://example.invalid/demo.git" });
 	mkdirSync(post.registry.pathOf("demo"), { recursive: true });
+	// cp-oc0m: the main half watches only active-mandate projects, counting this login's own runs.
+	if (options.mandate !== false) post.mandates.issue({ projects: ["demo"], objective: "watch main", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: [] });
+	post.ghLogin = async () => "me";
 	const sent: Array<{ customType: string; content: string; details: Record<string, any> }> = [];
 	const pi = { sendMessage: (message: (typeof sent)[number]) => sent.push(message) } as unknown as ExtensionAPI;
 	return { b, post, sent, pi };
@@ -1799,14 +1802,15 @@ async function mainCiPost(t: { after(fn: () => void | Promise<void>): void }) {
 test("k52: one surfaceCi pass on a latched-red project sends exactly one kind:'ci' wake carrying details.main_ci", async (t) => {
 	const { b, post, sent, pi } = await mainCiPost(t);
 	const store = new MainCiStore({ home: b.home.path });
-	store.setRed("demo", MAIN_T1, { failing: "old" });
+	store.setRed("demo", MAIN_T1, { failing: "old", login: "me" });
 	post.ciTick = async (): Promise<CiWatchTick> => ({ observations: [], checked: [], skipped: [], errors: [] });
-	let runs: unknown[] = [{ status: "completed", conclusion: "success", headSha: MAIN_T2, workflowName: "CI", databaseId: 1 }];
+	const own = { event: "push", triggeringActor: "me" };
+	let runs: unknown[] = [{ status: "completed", conclusion: "success", headSha: MAIN_T2, workflowName: "CI", databaseId: 1, ...own }];
 	const exec: CommandRunner = async (command, args) => {
 		const line = `${command} ${args.join(" ")}`;
 		if (line === "git fetch origin main") return "";
 		if (line === "git rev-parse origin/main") return `${MAIN_T2}\n`;
-		if (line.startsWith("gh run list --branch main")) return JSON.stringify(runs);
+		if (line.startsWith(`gh api repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${MAIN_T2}&`)) return JSON.stringify(runs);
 		if (line.endsWith("--log-failed")) return "tests\tstep\t2026-01-01T00:00:00Z AssertionError: x\n";
 		throw new Error(`unexpected command: ${line}`);
 	};
@@ -1823,7 +1827,7 @@ test("k52: one surfaceCi pass on a latched-red project sends exactly one kind:'c
 	await surface.surfaceCi();
 	assert.equal(sent.length, 1, "transition-only through the real wiring");
 	// Main goes red on T2: exactly one new wake naming the project, sha12 and failing line.
-	runs = [{ status: "completed", conclusion: "failure", headSha: MAIN_T2, workflowName: "CI", databaseId: 2 }];
+	runs = [{ status: "completed", conclusion: "failure", headSha: MAIN_T2, workflowName: "CI", databaseId: 2, ...own }];
 	await surface.surfaceCi();
 	await surface.surfaceCi();
 	assert.equal(sent.length, 2);
@@ -1832,6 +1836,28 @@ test("k52: one surfaceCi pass on a latched-red project sends exactly one kind:'c
 	assert.match(sent[1]?.content ?? "", new RegExp(MAIN_T2.slice(0, 12)));
 	assert.match(sent[1]?.content ?? "", /AssertionError: x/);
 	assert.equal(store.entry("demo")?.red_since_sha, MAIN_T2);
+	assert.equal(store.entry("demo")?.login, "me");
+});
+
+test("k52/cp-oc0m: a project without an active mandate runs no main-CI command and sends no wake", async (t) => {
+	const { b, post, sent, pi } = await mainCiPost(t, { mandate: false });
+	new MainCiStore({ home: b.home.path }).setRed("demo", MAIN_T1, { failing: "old", login: "me" });
+	post.ciTick = async (): Promise<CiWatchTick> => ({ observations: [], checked: [], skipped: [], errors: [] });
+	post.ghLogin = async () => assert.fail("no login without a mandated project");
+	const calls: string[] = [];
+	const exec: CommandRunner = async (command, args) => {
+		calls.push(`${command} ${args.join(" ")}`);
+		return "";
+	};
+	const failed: unknown[] = [];
+	post.ciWatchFailed = (error: unknown) => {
+		failed.push(error);
+	};
+	const surface = createWakeupSurfaces(pi, createSessionState(), { commandPost: () => post, repaintWidget: () => {}, mainCi: { exec } });
+	await surface.surfaceCi();
+	assert.deepEqual(calls, []);
+	assert.equal(sent.length, 0);
+	assert.deepEqual(failed, []);
 });
 
 test("k52: a throwing main tick never blocks the held-PR wake, and is journaled through ciWatchFailed", async (t) => {

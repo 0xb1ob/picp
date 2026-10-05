@@ -67,7 +67,7 @@ import { atomicWriteJson } from "./json-store.ts";
 import { IntegrationHolds } from "./integration-hold.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
 import { ghRunListArgs, parseCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
-import { mainRedHold } from "./main-ci.ts";
+import { type MainCiScope, mainRedHold } from "./main-ci.ts";
 import {
 	type BranchRule,
 	evaluateMergePermission,
@@ -170,6 +170,8 @@ export interface IntegratorOptions {
 	handoff?: HandoffPort;
 	/** unload-parent PR2: one rerun of an infra-only failure (src/ci-infra-rerun.ts); absent resolves every red head. */
 	infraRerun?: (input: InfraRerunInput) => Promise<InfraRerunOutcome | undefined>;
+	/** k52/cp-oc0m: whether a main-CI latch for this project is enforced (active mandate + readable gh login); absent fails open. */
+	mainCiScope?: (project: string) => Promise<MainCiScope>;
 }
 
 export interface IntegrateRequest {
@@ -406,7 +408,8 @@ export class Integrator {
 				reason: `${jobId}: gh reported no head commit for ${prUrl}, so there is no sha to verify CI or an approval against.`,
 			});
 		}
-		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: () => this.#run(cwd, "gh", ghRunListArgs(branch)) });
+		const mainCiScope = async (): Promise<MainCiScope> => (await this.#options.mainCiScope?.(record.project)) ?? { enforce: false, reason: "no main-CI scope wired" };
+		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: () => this.#run(cwd, "gh", ghRunListArgs(branch)), scope: mainCiScope });
 		if (mainRed.fact) facts.push(mainRed.fact); // k52: a red origin/main pauses every merge path below, fix-forward excepted
 		if (mainRed.hold) return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...facts, mainRed.hold], prUrl, headSha: head, reason: `${jobId}: ${mainRed.hold}` });
 

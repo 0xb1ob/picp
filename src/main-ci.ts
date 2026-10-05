@@ -14,16 +14,27 @@
  * - **Per project; fail open, but log.** A missing or unreadable `state/main-ci.json`
  *   never blocks a merge, and the tick never overwrites an unreadable file.
  *
+ * cp-oc0m: only **this machine's own runs in mandated projects** count —
+ * - the tick watches only projects an **active** mandate names (`isActive`:
+ *   status active, unexpired); any other project gets no git/gh command at all;
+ * - a run counts only when its `triggering_actor` is this machine's gh login
+ *   (`gh api user --jq .login`, once per process); `event: dynamic` runs
+ *   (Dependabot Updates) and every other user's or bot's run are ignored;
+ * - a row records the `login` it was latched for; `cp_integrate` enforces only an
+ *   own row in a mandated project, and an unreadable login fails open (logged).
+ *
  * A row in `state/main-ci.json` exists iff that project's main is latched red. The
  * CI-watch tick (`surfaceCi`) is the only writer; `cp_integrate` only reads. Wakes
- * are transition-only: one on red, one on green again.
+ * are transition-only: one on red, one on green again, one when a foreign or
+ * pre-cp-oc0m row is released.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Static, Type } from "typebox";
-import { IsoTimestampSchema, isoTimestamp, LAYOUT, SCHEMA_VERSION, validate } from "./contracts.ts";
+import { IsoTimestampSchema, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION, validate } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
-import { type CiRun, type CommandRunner, evaluateMergeAskCi, ghCiRuns, MERGE_ASK_QUERY_TIMEOUT_MS, parseCiRuns, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
+import { isActive } from "./mandate-accounting.ts";
+import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, parseCiRuns, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 
 const MainCiEntrySchema = Type.Object(
 	{
@@ -32,6 +43,8 @@ const MainCiEntrySchema = Type.Object(
 		red_since_at: IsoTimestampSchema,
 		workflow: Type.Optional(Type.String({ maxLength: 200 })),
 		failing: Type.Optional(Type.String({ maxLength: 300 })),
+		/** cp-oc0m: the gh login whose own run latched this row; absent on rows written before. */
+		login: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
 	},
 	{ additionalProperties: false },
 );
@@ -78,18 +91,20 @@ export class MainCiStore {
 		return read.ok ? read.file.projects.find((row) => row.project === project) : undefined;
 	}
 
-	/** Set the latch. A no-op when already set: `red_since_*` never resets. */
-	setRed(project: string, sha: string, extra: { workflow?: string; failing?: string } = {}): void {
+	/** Set the latch. A no-op when already set for the same login: `red_since_*` never resets. A row for another (or no) login is replaced. */
+	setRed(project: string, sha: string, extra: { workflow?: string; failing?: string; login?: string } = {}): void {
 		const rows = this.#rows();
-		if (rows.some((row) => row.project === project)) return;
+		const existing = rows.find((row) => row.project === project);
+		if (existing && sameLogin(existing.login, extra.login)) return;
 		const row: MainCiEntry = {
 			project,
 			red_since_sha: sha.trim().toLowerCase(),
 			red_since_at: isoTimestamp(this.#now()),
 			...(extra.workflow ? { workflow: extra.workflow.slice(0, 200) } : {}),
 			...(extra.failing ? { failing: extra.failing.slice(0, 300) } : {}),
+			...(extra.login ? { login: extra.login } : {}),
 		};
-		this.#write([...rows, row]);
+		this.#write([...rows.filter((entry) => entry.project !== project), row]);
 	}
 
 	/** Clear the latch. A no-op when it was not set. */
@@ -116,11 +131,88 @@ export class MainCiStore {
 /** One red or green transition for one project. */
 export interface MainCiObservation {
 	project: string;
-	event: "main_ci_failed" | "main_ci_green";
+	event: "main_ci_failed" | "main_ci_green" | "main_ci_released";
 	sha: string;
 	reason: string;
 	workflow?: string;
 	failing?: string;
+}
+
+/** Case-insensitive; two absent logins are the same (a pre-cp-oc0m row set twice). */
+function sameLogin(a: string | undefined, b: string | undefined): boolean {
+	return (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
+}
+
+/** A main-branch run from the REST endpoint: a `CiRun` plus what decides whether it counts. */
+export type MainRun = CiRun & { event?: string; triggeringActor?: string };
+
+const MAIN_RUNS_JQ = "[.workflow_runs[] | {status, conclusion, headSha: .head_sha, workflowName: .name, databaseId: .id, attempt: .run_attempt, event, triggeringActor: .triggering_actor.login}]";
+
+/** One GET for the tip's runs: `gh run list --json` has no triggering actor. `execFile` passes no shell, so nothing needs quoting. */
+export function mainRunsArgs(tip: string): string[] {
+	return ["api", `repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${tip}&per_page=100`, "--jq", MAIN_RUNS_JQ];
+}
+
+/** `parseCiRuns`' tolerance, plus `event` / `triggeringActor` when they are strings. Invalid JSON throws. */
+export function parseMainRuns(stdout: string): MainRun[] {
+	const text = stdout.trim();
+	if (text.length === 0) return [];
+	const parsed: unknown = JSON.parse(text);
+	if (!Array.isArray(parsed)) return [];
+	return parsed.flatMap((entry: unknown): MainRun[] => {
+		const [run] = parseCiRuns(JSON.stringify([entry]));
+		if (!run) return [];
+		const row = entry as Record<string, unknown>;
+		return [{ ...run, ...(typeof row.event === "string" ? { event: row.event } : {}), ...(typeof row.triggeringActor === "string" ? { triggeringActor: row.triggeringActor } : {}) }];
+	});
+}
+
+/** The runs that count: not `dynamic` (Dependabot Updates), triggered by this login (case-insensitive). */
+export function countedMainRuns(runs: readonly MainRun[], login: string): MainRun[] {
+	return runs.filter((run) => run.event !== "dynamic" && run.triggeringActor !== undefined && sameLogin(run.triggeringActor, login));
+}
+
+/** The projects some active mandate (`isActive`: status active, unexpired) names. Paused, revoked or expired grants watch nothing. */
+export function mandatedProjects(projects: Iterable<string>, mandates: readonly Mandate[], now: string): string[] {
+	const covered = new Set(mandates.filter((mandate) => isActive(mandate, now)).flatMap((mandate) => mandate.projects));
+	return [...projects].filter((project) => covered.has(project));
+}
+
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$/;
+
+/** `gh api user --jq .login`, once: cached on success, retried on the next call after a failure. */
+export function memoLogin(exec: CommandRunner, cwd: string, timeoutMs = MERGE_ASK_QUERY_TIMEOUT_MS): () => Promise<string> {
+	let cached: Promise<string> | undefined;
+	const read = async (): Promise<string> => {
+		let out: string;
+		try {
+			out = (await exec("gh", ["api", "user", "--jq", ".login"], { cwd, timeoutMs })).trim();
+		} catch (error) {
+			throw new MainCiError(`gh api user --jq .login unreadable: ${(error as Error).message.slice(0, 200)}`);
+		}
+		if (!LOGIN_RE.test(out)) throw new MainCiError(`gh api user --jq .login unreadable: answered ${JSON.stringify(out.slice(0, 80))}, not a login`);
+		return out;
+	};
+	return () => {
+		cached ??= read().catch((error: unknown) => {
+			cached = undefined;
+			throw error;
+		});
+		return cached;
+	};
+}
+
+/** Whether a project's latch is enforced: an active mandate names it and the login is readable. */
+export type MainCiScope = { enforce: true; login: string } | { enforce: false; reason: string };
+
+/** Fails open: an unreadable mandate store or login is `enforce: false` with the reason. */
+export async function resolveMainCiScope(options: { project: string; mandates: () => readonly Mandate[]; now: string; login: () => Promise<string> }): Promise<MainCiScope> {
+	try {
+		if (mandatedProjects([options.project], options.mandates(), options.now).length === 0) return { enforce: false, reason: `no active mandate covers ${options.project}` };
+		return { enforce: true, login: await options.login() };
+	} catch (error) {
+		return { enforce: false, reason: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 /**
@@ -179,35 +271,42 @@ async function failingTestLine(cwd: string, runId: number, exec: CommandRunner, 
 }
 
 /**
- * One reading for one project. Returns an observation only on a transition
- * (absent → red, red → green on the tip); every other reading leaves the latch
- * untouched. Unreadable state, git or gh throws — the caller logs it.
+ * One reading for one project, counting only `countedMainRuns` for `login`.
+ * Returns an observation only on a transition (absent or foreign → own red,
+ * own red → green on the tip, a foreign or login-less row → released); every
+ * other reading leaves the latch untouched. Unreadable state, git or gh throws — the caller logs it.
  */
-export async function checkMainCi(options: { project: string; cwd: string; store: MainCiStore; exec?: CommandRunner; timeoutMs?: number }): Promise<MainCiObservation | undefined> {
-	const { project, cwd, store } = options;
+export async function checkMainCi(options: { project: string; cwd: string; store: MainCiStore; login: string; exec?: CommandRunner; timeoutMs?: number }): Promise<MainCiObservation | undefined> {
+	const { project, cwd, store, login } = options;
 	const exec = options.exec ?? runCommand;
 	const timeoutMs = options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS;
 	const read = store.read();
 	if (!read.ok) throw new MainCiError(`${read.error}; not overwritten`);
-	const latched = read.file.projects.some((row) => row.project === project);
+	const row = read.file.projects.find((entry) => entry.project === project);
+	const own = row !== undefined && row.login !== undefined && sameLogin(row.login, login);
 	const tip = await readMainTip(cwd, exec, timeoutMs);
-	let runs: CiRun[];
+	let runs: MainRun[];
 	try {
-		runs = await ghCiRuns({ cwd, exec, timeoutMs })("main");
+		runs = parseMainRuns(await exec("gh", mainRunsArgs(tip), { cwd, timeoutMs }));
 	} catch (error) {
-		throw new MainCiError(`gh run list --branch main unreadable: ${(error as Error).message.slice(0, 200)}`);
+		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 200)}`);
 	}
-	const classified = classifyMainTip(tip, runs);
-	if (classified.status === "red" && !latched) {
+	const classified = classifyMainTip(tip, countedMainRuns(runs, login));
+	if (classified.status === "red" && !own) {
 		const id = classified.failingRunId;
 		const failing = id === undefined ? undefined : ((await failingTestLine(cwd, id, exec, timeoutMs)) ?? (await failingJobName(cwd, id, exec, timeoutMs)));
 		const extra = { ...(classified.workflow ? { workflow: classified.workflow } : {}), ...(failing ? { failing } : {}) };
-		store.setRed(project, tip, extra);
+		store.setRed(project, tip, { ...extra, login });
 		return { project, event: "main_ci_failed", sha: tip, reason: classified.reason, ...extra };
 	}
-	if (classified.status === "green" && latched) {
+	if (classified.status === "green" && own) {
 		store.clear(project);
 		return { project, event: "main_ci_green", sha: tip, reason: classified.reason };
+	}
+	if (row && !own) {
+		store.clear(project);
+		const reason = row.login ? `latched for ${row.login}, this machine is ${login}` : "latched before main CI counted only this machine's own runs";
+		return { project, event: "main_ci_released", sha: row.red_since_sha, reason };
 	}
 	return undefined;
 }
@@ -218,6 +317,9 @@ export function formatMainCiNotice(observation: MainCiObservation): string {
 	if (observation.event === "main_ci_green") {
 		return `MAIN IS GREEN AGAIN — ${observation.project}: CI passed on ${sha}. Call cp_integrate for held ${observation.project} PRs.`;
 	}
+	if (observation.event === "main_ci_released") {
+		return `MAIN CI LATCH RELEASED — ${observation.project}: red since ${sha} no longer counts (${observation.reason}). Call cp_integrate for held ${observation.project} PRs.`;
+	}
 	return (
 		`MAIN IS RED — ${observation.project}: CI failed on ${sha}${observation.workflow ? ` (${observation.workflow})` : ""}` +
 		`${observation.failing ? ` — failing: ${observation.failing}` : ""} — ${observation.reason}\n` +
@@ -226,26 +328,41 @@ export function formatMainCiNotice(observation: MainCiObservation): string {
 }
 
 /**
- * The main half of the CI-watch tick: every registered project with a clone, in
- * sequence. A failure for one project never stops the rest and is never dropped:
- * it goes to `onError`. `send` returning false (a wake not sent) is logged too.
+ * The main half of the CI-watch tick: every project an active mandate names, with a
+ * clone, in sequence. No mandated project → no command at all (not even the login).
+ * An unreadable login skips the whole half: one `onError(undefined, …)`, nothing
+ * written, nothing enforced. A failure for one project never stops the rest and is
+ * never dropped: it goes to `onError`. `send` returning false (a wake not sent) is logged too.
  */
 export async function runMainCiTick(options: {
 	home: string;
 	projects: Iterable<string>;
 	pathOf: (project: string) => string;
+	mandates: () => readonly Mandate[];
+	login: () => Promise<string>;
+	now?: () => string;
 	exec?: CommandRunner;
-	onError: (project: string, message: string) => void;
+	onError: (project: string | undefined, message: string) => void;
 	notify: (observation: MainCiObservation, text: string) => void;
 	send: (observation: MainCiObservation, text: string) => boolean;
 }): Promise<MainCiObservation[]> {
+	let projects: string[];
+	let login: string;
+	try {
+		projects = mandatedProjects(options.projects, options.mandates(), (options.now ?? isoTimestamp)());
+		if (projects.length === 0) return [];
+		login = await options.login();
+	} catch (error) {
+		options.onError(undefined, `${error instanceof Error ? error.message : String(error)}; main CI watch skipped, latches not enforced`);
+		return [];
+	}
 	const store = new MainCiStore({ home: options.home });
 	const observations: MainCiObservation[] = [];
-	for (const project of options.projects) {
+	for (const project of projects) {
 		try {
 			const cwd = options.pathOf(project);
 			if (!existsSync(cwd)) continue;
-			const observation = await checkMainCi({ project, cwd, store, ...(options.exec ? { exec: options.exec } : {}) });
+			const observation = await checkMainCi({ project, cwd, store, login, ...(options.exec ? { exec: options.exec } : {}) });
 			if (!observation) continue;
 			observations.push(observation);
 			const text = formatMainCiNotice(observation);
@@ -262,7 +379,9 @@ export async function runMainCiTick(options: {
  * `cp_integrate`'s gate. `hold` set → return `wait` with it; `fact` → record it.
  * Latched red holds unless `origin/main` (freshly fetched by `ancestry`) is an
  * ancestor of the pushed branch AND CI is green on the pushed head. An unreadable
- * latch file fails open, with a fact. The review and permission gates still run after.
+ * latch file fails open, with a fact. cp-oc0m: only a row whose `login` is the current
+ * login, in a project with an active mandate (`scope`), is enforced; any other row,
+ * or an unreadable login, is a `not blocking` fact. The review and permission gates still run after.
  */
 export async function mainRedHold(options: {
 	home: string;
@@ -271,12 +390,16 @@ export async function mainRedHold(options: {
 	head: string;
 	ancestry: () => Promise<boolean | undefined>;
 	runs: () => Promise<{ status: number | null; stdout: string }>;
+	scope: () => Promise<MainCiScope>;
 }): Promise<{ hold?: string; fact?: string }> {
 	const read = new MainCiStore({ home: options.home }).read();
 	if (!read.ok) return { fact: `main-ci: ${read.error} — not blocking` };
 	const row = read.file.projects.find((entry) => entry.project === options.project);
 	if (!row) return {};
 	const sha = row.red_since_sha.slice(0, 12);
+	const scope = await options.scope();
+	if (!scope.enforce) return { fact: `main-ci: red since ${sha} not enforced — ${scope.reason}; not blocking` };
+	if (row.login === undefined || !sameLogin(row.login, scope.login)) return { fact: `main-ci: red since ${sha} latched ${row.login ? `for ${row.login}` : "before own-run filtering"}, not ${scope.login}; not blocking` };
 	const hold = { hold: `main is red since ${sha}: ${row.failing ?? row.workflow ?? "CI failed"}; rebase onto origin/main and pass CI to merge` };
 	if ((await options.ancestry()) !== true) return hold;
 	const runs = await options.runs();
