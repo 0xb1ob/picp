@@ -1,11 +1,14 @@
 /** cp-6fyl A2–A4 (I3–I6): the operator relay consumer against real outbox and ack files. */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { EMPTY_USAGE, type FleetRecord, isoTimestamp } from "../src/contracts.ts";
 import type { BridgeRelay } from "../src/cp-bridge.ts";
 import { type DrainRecord, drainFile, formatDrain } from "../src/drain.ts";
+import { EscalationStore } from "../src/escalation.ts";
+import { FleetStore } from "../src/fleet.ts";
 import { atomicWriteJson } from "../src/json-store.ts";
 import { OperatorRelayConsumer, RELAY_COALESCE_MAX, type RelayMessage, type RelayVerdict, recheckRelay } from "../src/operator-delivery.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
@@ -25,7 +28,7 @@ function home() {
 
 type Home = ReturnType<typeof home>;
 
-function consumer(h: Home, options: { owner?: string; session?: string; recheck?: (relay: BridgeRelay) => RelayVerdict; send?: (message: RelayMessage) => void } = {}) {
+function consumer(h: Home, options: { owner?: string; session?: string; recheck?: (relay: BridgeRelay, queuedAt: string) => RelayVerdict; send?: (message: RelayMessage) => void } = {}) {
 	const sent: RelayMessage[] = [];
 	const status: string[] = [];
 	const instance = new OperatorRelayConsumer({
@@ -284,4 +287,113 @@ test("unreadable files are named on the status line, never treated as empty sile
 		owner: "o1",
 	});
 	c.poke();
+});
+
+// cp-nbxo: a wake held past the operator's turn that reports a decision and jobs already moved on.
+const T = "2030-01-01T00:00:00Z"; // home()'s clock, so the outbox stamps this queued_at
+const at = (seconds: number) => isoTimestamp(new Date(Date.parse(T) + seconds * 1_000));
+const OPTIONS = [{ id: "approve", label: "approve", consequence: "proceed", cost: "none" }, { id: "decline", label: "decline", consequence: "hold", cost: "wait" }];
+
+function fleetRecord(overrides: Partial<FleetRecord>): FleetRecord {
+	return {
+		job_id: "cp-x", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "waiting",
+		worker: { pid: 4242, session_id: "abc", session_file: "/sessions/abc.jsonl", profile: "implementer", role: "implementer", model: "anthropic/claude-sonnet-5", started_at: at(-600) },
+		worktree: "/wt/cp-x", branch: "cp-x", dispatched_at: at(-600), usage: EMPTY_USAGE,
+		...overrides,
+	};
+}
+
+type Esc = { job_ids: string[]; answeredAt?: string; withdraw?: boolean };
+
+/** The incident by default: es answered 16 s after T, cp-oc0m torn down before T, cp-qwn9 dispatched 83 s after T. */
+async function handledHome(
+	escalations: Esc[] = [{ job_ids: ["cp-oc0m", "cp-qwn9"], answeredAt: at(16) }],
+	jobs: Partial<FleetRecord>[] = [{ job_id: "cp-oc0m", phase: "done" }, { job_id: "cp-qwn9", dispatched_at: at(83) }],
+) {
+	const dir = mkdtempSync(join(tmpdir(), "operator-delivery-handled-"));
+	const store = new EscalationStore({ home: dir });
+	const ids: string[] = [];
+	for (const [index, esc] of escalations.entries()) {
+		const raised = await store.raise({ job_ids: esc.job_ids, kind: "product_ambiguity", question: `approve build ${index}?`, options: OPTIONS, recommended: "approve", at: at(-24) });
+		if (esc.answeredAt) await store.answer(raised.id, { answer: "approve", by: "operator", at: esc.answeredAt });
+		if (esc.withdraw) await store.withdraw(raised.id);
+		ids.push(raised.id);
+	}
+	const fleet = new FleetStore({ home: dir });
+	for (const job of jobs) await fleet.add(fleetRecord(job));
+	return { dir, ids, sends: parentSendFile(join(dir, "cp-parent.jsonl")), fleetFile: fleet.file, escalationsFile: store.file };
+}
+
+const incidentWake = (id: string, patch: Partial<BridgeRelay> = {}) =>
+	relay({ jobId: "cp-oc0m", jobIds: ["cp-oc0m"], text: `[picp] **\`${id}\`** requests approval to build. Build \`cp-qwn9\` remains deferred pending your decision.`, ...patch });
+
+test("(k) cp-nbxo incident replay: a wake whose escalation was answered and whose jobs moved on after it was queued is retired, never delivered", async () => {
+	const { dir, ids: [id = ""], sends } = await handledHome();
+	const wake = incidentWake(id);
+	const reason = `already handled: ${id} answered ${at(16)}; cp-oc0m done; cp-qwn9 dispatched ${at(83)}`;
+	assert.deepEqual(recheckRelay(dir, sends, wake, T), { discard: reason });
+	assert.deepEqual(recheckRelay(dir, sends, wake), { deliver: wake }, "no queued_at: delivered as before");
+
+	const h = home();
+	const wakeId = h.outbox.enqueue(wake, "h");
+	const c = consumer(h, { recheck: (item, queuedAt) => recheckRelay(dir, sends, item, queuedAt) });
+	c.instance.poke();
+	assert.equal(c.sent.length, 0, "queued_at flows from the outbox into the recheck");
+	assert.equal(h.acks.fold().discarded.get(wakeId)?.reason, reason);
+	assert.ok(c.status.some((line) => line.includes("1 retired") && line.includes(`${wakeId} (already handled:`)));
+	h.outbox.enqueue(relay({ text: "next wake" }), "h");
+	c.instance.poke();
+	assert.match(c.sent[0]?.content ?? "", /retired: wake:.* \(already handled:/);
+});
+
+test("(k2) cp-nbxo fail-open: no es- id, an undecided, early, withdrawn, unknown or mixed escalation, an unmoved job or an unreadable store delivers the wake in full", async () => {
+	const expectDeliver = (label: string, dir: string, sends: string, wake: BridgeRelay, queuedAt = T) =>
+		assert.deepEqual(recheckRelay(dir, sends, wake, queuedAt), { deliver: wake }, label);
+	const incident = await handledHome();
+	const id = incident.ids[0] ?? "";
+	expectDeliver("no es- id in the text", incident.dir, incident.sends, incidentWake(id, { text: "cp-oc0m torn down; cp-qwn9 deferred" }));
+	expectDeliver("unknown escalation id", incident.dir, incident.sends, incidentWake("es-zzzz9999"));
+	expectDeliver("queued_at unparseable", incident.dir, incident.sends, incidentWake(id), "nope");
+	expectDeliver("stamped job missing from the fleet", incident.dir, incident.sends, incidentWake(id, { jobId: "cp-gone", jobIds: ["cp-gone"] }));
+
+	for (const [label, esc] of [
+		["escalation open", { job_ids: ["cp-oc0m", "cp-qwn9"] }],
+		["answered in the same second as queued_at", { job_ids: ["cp-oc0m", "cp-qwn9"], answeredAt: T }],
+		["answered before queued_at", { job_ids: ["cp-oc0m", "cp-qwn9"], answeredAt: at(-5) }],
+		["withdrawn", { job_ids: ["cp-oc0m", "cp-qwn9"], withdraw: true }],
+	] satisfies [string, Esc][]) {
+		const fixture = await handledHome([esc]);
+		expectDeliver(label, fixture.dir, fixture.sends, incidentWake(fixture.ids[0] ?? ""));
+	}
+
+	const mixed = await handledHome([{ job_ids: ["cp-oc0m", "cp-qwn9"], answeredAt: at(16) }, { job_ids: ["cp-qwn9"] }]);
+	expectDeliver("two ids, one still open", mixed.dir, mixed.sends, incidentWake(mixed.ids[0] ?? "", { text: `${mixed.ids[0]} answered; ${mixed.ids[1]} still waits` }));
+
+	const failed = await handledHome(undefined, [{ job_id: "cp-oc0m", phase: "failed", failure: { class: "crash", message: "exit 1", at: at(-3) } }, { job_id: "cp-qwn9", dispatched_at: at(83) }]);
+	expectDeliver("job failed", failed.dir, failed.sends, incidentWake(failed.ids[0] ?? ""));
+	const held = await handledHome(undefined, [{ job_id: "cp-oc0m", phase: "done" }, { job_id: "cp-qwn9", phase: "held", dispatched_at: at(-60), reported_at: at(-3) }]);
+	expectDeliver("job held, reported before queued_at", held.dir, held.sends, incidentWake(held.ids[0] ?? ""));
+
+	const badFleet = await handledHome();
+	writeFileSync(badFleet.fleetFile, "{");
+	expectDeliver("fleet.json invalid JSON", badFleet.dir, badFleet.sends, incidentWake(badFleet.ids[0] ?? ""));
+	const badEsc = await handledHome();
+	writeFileSync(badEsc.escalationsFile, "{");
+	expectDeliver("escalations.json invalid JSON", badEsc.dir, badEsc.sends, incidentWake(badEsc.ids[0] ?? ""));
+});
+
+test("(k3) cp-nbxo: a fleet job named only in the prose blocks the drop until it moved on", async () => {
+	const { dir, ids: [id = ""], sends } = await handledHome(undefined, [{ job_id: "cp-oc0m", phase: "done" }, { job_id: "cp-qwn9", dispatched_at: at(83) }, { job_id: "cp-zzzz", dispatched_at: at(-60) }]);
+	assert.ok("discard" in recheckRelay(dir, sends, incidentWake(id), T), "fixture: without the mention it is retired");
+	const wake = incidentWake(id, { text: `${id} answered; cp-zzzz is still running` });
+	assert.deepEqual(recheckRelay(dir, sends, wake, T), { deliver: wake });
+});
+
+test("(k4) cp-nbxo: error, escalation and drain relays keep their own rechecks", async () => {
+	const { dir, ids: [id = ""], sends } = await handledHome();
+	const error = incidentWake(id, { kind: "error" });
+	assert.deepEqual(recheckRelay(dir, sends, error, T), { deliver: error });
+	assert.deepEqual(recheckRelay(dir, sends, incidentWake(id, { kind: "escalation", escalationId: id }), T), { discard: "superseded: answered" });
+	const drain = incidentWake(id, { drainId: `drain:${T}:cancelled` });
+	assert.deepEqual(recheckRelay(dir, sends, drain, T), { deliver: drain }, "a drain wake takes the cp-ukqv path only");
 });

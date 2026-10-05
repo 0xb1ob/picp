@@ -14,11 +14,14 @@
  * re-emits, and so does an idle settle with nothing pending in pi (proof pi no
  * longer holds it). Nothing is retired silently: every discard is a line with
  * a reason and a `retired:` note on the next message and the status line.
+ * A wake is also retired when every escalation it names was decided after it
+ * was queued and every job it names moved on (`handledWake`, cp-nbxo).
  */
 import type { BridgeRelay } from "./cp-bridge.ts";
 import { formatBridgeRelay } from "./cp-bridge.ts";
 import { DRAIN_PREFIX, staleDrainOutcome } from "./drain.ts";
 import { EscalationStore } from "./escalation.ts";
+import { FleetStore } from "./fleet.ts";
 import { type AckLine, OPERATOR_RELAY_OWNER, OPERATOR_RELAY_PROTOCOL, type OperatorRelayAcks, type OperatorRelayEntry, type OperatorRelayOutbox, pendingRelays, relayIdsOfMessage } from "./operator-outbox.ts";
 import { ParentSendOutbox, receiptOf } from "./parent-outbox.ts";
 
@@ -43,7 +46,7 @@ export interface RelayConsumerPorts {
 	outbox(): OperatorRelayOutbox;
 	acks(): OperatorRelayAcks;
 	sessionFile(): string | undefined;
-	recheck(relay: BridgeRelay): RelayVerdict;
+	recheck(relay: BridgeRelay, queuedAt: string): RelayVerdict;
 	send(message: RelayMessage): void;
 	status(line: string): void;
 	now?(): Date;
@@ -52,8 +55,52 @@ export interface RelayConsumerPorts {
 
 interface Due { id: string; relay: BridgeRelay; queuedAt: string; overdue: boolean; direct: boolean }
 
-/** Recheck at delivery: an escalation no longer open, or a send outcome a tool result already returned, is retired. */
-export function recheckRelay(home: string, sendsFile: string, relay: BridgeRelay): RelayVerdict {
+/**
+ * cp-nbxo: a wake held past the operator's turn may report a decision and jobs that already moved on.
+ * Delivery-time and synchronous, like `staleDrainOutcome`: a reason only when the text names at least
+ * one `es-` id, every named escalation was answered/superseded strictly after `queuedAt`, and every
+ * named job (stamp, the escalations' `job_ids`, exact fleet ids in the text) is `done` or has a
+ * `dispatched_at`/`reported_at`/`closed_at` after it. Any unknown ref or unreadable store: `undefined` (deliver).
+ */
+export function handledWake(home: string, relay: BridgeRelay, queuedAt: string): string | undefined {
+	const escIds = [...new Set([...relay.text.matchAll(ESCALATION_ID)].map((match) => match[0]))];
+	const queued = Date.parse(queuedAt);
+	if (escIds.length === 0 || Number.isNaN(queued)) return undefined;
+	let escalations, jobs;
+	try {
+		escalations = new EscalationStore({ home }).read().items;
+		jobs = new FleetStore({ home }).read().jobs;
+	} catch {
+		return undefined;
+	}
+	const after = (stamp: string | undefined): boolean => stamp !== undefined && Date.parse(stamp) > queued;
+	const reasons: string[] = [];
+	const named = new Set([...(relay.jobId ? [relay.jobId] : []), ...(relay.jobIds ?? [])]);
+	for (const id of escIds) {
+		const record = escalations.find((item) => item.id === id);
+		const decidedAt = record?.status === "answered" ? record.answered_at : record?.status === "superseded" ? record.superseded_at : undefined;
+		if (!record || !after(decidedAt)) return undefined;
+		reasons.push(`${id} ${record.status} ${decidedAt}`);
+		for (const jobId of record.job_ids) named.add(jobId);
+	}
+	const tokens = new Set(relay.text.split(/[^A-Za-z0-9_-]+/));
+	for (const job of jobs) if (tokens.has(job.job_id)) named.add(job.job_id);
+	for (const jobId of named) {
+		const job = jobs.find((each) => each.job_id === jobId);
+		if (!job || job.phase === "failed") return undefined;
+		if (job.phase === "done") {
+			reasons.push(`${jobId} done`);
+			continue;
+		}
+		const moved = (["dispatched_at", "reported_at", "closed_at"] as const).find((key) => after(job[key]));
+		if (!moved) return undefined;
+		reasons.push(`${jobId} ${moved.replace(/_at$/, "")} ${job[moved]}`);
+	}
+	return reasons.join("; ");
+}
+
+/** Recheck at delivery: an escalation no longer open, a send outcome a tool result already returned, or an already-handled wake is retired. */
+export function recheckRelay(home: string, sendsFile: string, relay: BridgeRelay, queuedAt?: string): RelayVerdict {
 	if (relay.kind === "send" && relay.sendId) {
 		try {
 			const entry = new ParentSendOutbox({ file: sendsFile }).get(relay.sendId);
@@ -65,6 +112,10 @@ export function recheckRelay(home: string, sendsFile: string, relay: BridgeRelay
 	// cp-ukqv: a drain outcome re-reads the live state/drain.json; a stale one is one line with nothing to stop, hold or defer.
 	const staleDrain = relay.drainId ? staleDrainOutcome(home, relay.drainId) : undefined;
 	if (staleDrain) return { deliver: { ...relay, stale: true, text: `${DRAIN_PREFIX}stale notice ${relay.drainId}: ${staleDrain}; nothing to act on.`, paths: [] } };
+	if (relay.kind === "wake" && !relay.drainId && queuedAt) {
+		const handled = handledWake(home, relay, queuedAt);
+		if (handled) return { discard: `already handled: ${handled}` };
+	}
 	if (!relay.escalationId) return { deliver: relay };
 	try {
 		const current = new EscalationStore({ home }).get(relay.escalationId);
@@ -191,7 +242,7 @@ export class OperatorRelayConsumer {
 		for (const item of due.values()) {
 			const verdict: RelayVerdict = item.relay.escalationId && this.#replied.has(item.relay.escalationId) && !item.overdue
 				? { discard: "named in send reply" }
-				: this.#ports.recheck(item.relay);
+				: this.#ports.recheck(item.relay, item.queuedAt);
 			if ("discard" in verdict) {
 				lines.push({ type: "discard", id: item.id, reason: verdict.discard, at: at.toISOString() });
 				this.#retired.push(`${item.id} (${verdict.discard})`);

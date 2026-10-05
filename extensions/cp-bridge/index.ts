@@ -280,7 +280,7 @@ export default function (pi: ExtensionAPI): void {
 		outbox: () => new OperatorRelayOutbox(operatorRelayOutboxFile(relayFiles().state)),
 		acks: () => new OperatorRelayAcks(operatorRelayAcksFile(relayFiles().state)),
 		sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
-		recheck: (relay) => { const files = relayFiles(); return recheckRelay(files.target.home, files.sends, relay); },
+		recheck: (relay, queuedAt) => { const files = relayFiles(); return recheckRelay(files.target.home, files.sends, relay, queuedAt); },
 		send: (message) => {
 			// Recorded so the escalation backstop never relays these ids again; a failed write still delivers.
 			for (const relay of message.relays) if (relay.kind === "escalation" && relay.escalationId) {

@@ -1285,8 +1285,13 @@ context again, across restarts; (I5) an unacked id is due unless this process
 emitted it into the current session file — a new process or session, or an idle
 settle with no pending messages, re-emits it; (I6) nothing is retired silently:
 an escalation no longer open (`superseded: <status>`), one named in a send reply
-(`named in send reply`; a backstop relay keeps today's rule) and a send outcome
-already `owner_observed` (`returned in tool result`) are `discard` lines, named
+(`named in send reply`; a backstop relay keeps today's rule), a send outcome
+already `owner_observed` (`returned in tool result`), and a wake every
+escalation of which was decided after its `queued_at` (`answered_at`/`superseded_at`)
+and every job of which (stamp, the escalations' `job_ids`, fleet ids in its text) is `done`
+or has a `dispatched_at`/`reported_at`/`closed_at` after it (`already handled: <ids>`; no
+escalation id, an open/withdrawn/unknown escalation, a job with no fleet record or
+`failed`, or an unreadable store delivers it in full) are `discard` lines, named
 once on the next message as `retired:` and on the `cp-relays` status line.
 `OperatorRelayConsumer.deliverDue` runs on a frame (a poke only), a 15 s disk
 tick, `session_start`/reattach and `agent_settled`, never during the operator's
