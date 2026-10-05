@@ -1,6 +1,6 @@
 /** Restart session in the shell's ⋮ menu: shown only with a control view, Esc / outside tap close it, no inline copies remain. */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
@@ -22,9 +22,9 @@ test("⋮ menu: only with a control view and a session; labelled; a dot while a 
 	assert.equal(draw(view(status({ running: false, token: null }))), "", "offline and not restarting: nothing to put in it");
 	const idle = draw(view(status()));
 	assert.match(idle, /<summary aria-label="More actions" title="More actions">/);
-	assert.doesNotMatch(idle, /more-menu-dot|Restart session/, "closed: no panel, no dot");
-	assert.match(draw(view(status(), restarting("stopping"))), /more-menu-dot/, "a compact dot, not a block");
-	assert.doesNotMatch(draw(view(status(), restarting("restarted"))), /more-menu-dot/);
+	assert.doesNotMatch(idle, /shell-more-dot|Restart session/, "closed: no panel, no dot");
+	assert.match(draw(view(status(), restarting("stopping"))), /shell-more-dot/, "a compact dot, not a block");
+	assert.doesNotMatch(draw(view(status(), restarting("restarted"))), /shell-more-dot/);
 });
 
 test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc and an outside tap close it", async t => {
@@ -38,7 +38,7 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	await act(() => mount(root, view(status(), null, () => { restarts++; })));
 	const details = root.querySelector("details")!;
 	const toggle = async (open: boolean) => { details.open = open; await act(() => details.dispatchEvent(new window.Event("toggle"))); };
-	assert.equal(root.querySelector(".more-menu-panel"), null);
+	assert.equal(root.querySelector(".shell-more-panel"), null);
 	await toggle(true);
 	const item = () => root.querySelector<HTMLButtonElement>(".operator-restart-button")!;
 	assert.equal(item().textContent, "Restart session");
@@ -67,7 +67,22 @@ test("Restart session no longer renders inline; the ⋮ button is 44px and the p
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/Shell.tsx"), "utf8"), /<MoreMenu control=\{control\}\/><\/div>\n/, "far right of the header, after Search");
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/styles/shell.css"), "utf8");
 	const rule = (selector: string) => new RegExp(`\\${selector} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-	assert.match(rule(".more-menu > summary"), /width: 44px; height: 44px/);
-	assert.match(rule(".more-menu-panel"), /max-width: calc\(100vw - 16px\)/);
-	assert.match(rule(".more-menu-panel"), /var\(--surface\)/, "theme tokens, so light and dark both hold");
+	assert.match(rule(".shell-more > summary"), /width: 44px; height: 44px/);
+	assert.match(rule(".shell-more-panel"), /max-width: calc\(100vw - 16px\)/);
+	assert.match(rule(".shell-more-panel"), /var\(--surface\)/, "theme tokens, so light and dark both hold");
+});
+
+// cp-wuhl: the menu once shared `.more-menu` with the More screen's list; the one bundled stylesheet gave the <details>
+// `overflow: hidden`, so a tap toggled it open and the absolutely placed panel was clipped to nothing.
+test("⋮ menu: its classes are styled by shell.css alone, so no other screen's rule can clip the open panel", () => {
+	const classes = new Set([...draw(view(status(), restarting("stopping"))).matchAll(/class="([^"]+)"/g)].flatMap(m => m[1]!.split(/\s+/)));
+	classes.add("shell-more-panel");
+	assert.ok(classes.has("shell-more") && classes.has("shell-more-dot"), [...classes].join(" "));
+	const dirs = ["viewer-app/components", "viewer-app/screens", "viewer-app/styles"];
+	const sheets = dirs.flatMap(dir => readdirSync(join(REPO_ROOT, dir)).filter(f => f.endsWith(".css")).map(f => `${dir}/${f}`));
+	assert.ok(sheets.includes("viewer-app/screens/more.css"), "the scan covers the More screen's stylesheet");
+	for (const sheet of sheets.filter(s => s !== "viewer-app/styles/shell.css")) {
+		const css = readFileSync(join(REPO_ROOT, sheet), "utf8");
+		for (const cls of classes) assert.doesNotMatch(css, new RegExp(`\\.${cls}(?![\\w-])`), `${sheet} styles .${cls}`);
+	}
 });

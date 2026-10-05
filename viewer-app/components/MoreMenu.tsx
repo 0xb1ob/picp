@@ -23,8 +23,10 @@ export function MoreMenu({control}: {control: ControlView | undefined}) {
  },[open]);
  if (!control || !restartShown(control)) return null;
  const busy = restartInFlight(control.restarting);
- return <details class="more-menu" ref={menu} onToggle={e => setOpen(e.currentTarget.open)}>
-  <summary aria-label="More actions" title="More actions"><Icon name="vmore"/>{busy && <span class="more-menu-dot" role="status" aria-label="Restart in progress"/>}</summary>
-  {open && <div class="more-menu-panel"><RestartSession control={control}/></div>}
+ // `shell-more`, never `more-menu`: that class is the More screen's list (more.css, overflow: hidden), and one bundled
+ // stylesheet let it clip this panel to nothing — the ⋮ toggled but showed no menu (cp-wuhl).
+ return <details class="shell-more" ref={menu} onToggle={e => setOpen(e.currentTarget.open)}>
+  <summary aria-label="More actions" title="More actions"><Icon name="vmore"/>{busy && <span class="shell-more-dot" role="status" aria-label="Restart in progress"/>}</summary>
+  {open && <div class="shell-more-panel"><RestartSession control={control}/></div>}
  </details>;
 }
