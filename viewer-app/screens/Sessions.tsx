@@ -22,14 +22,24 @@ const TOOL_TEXT_MAX = 1200;
 type Worker = SessionsResponse["workers"][number];
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
+function readStored(key: string): string | null {
+ if (typeof window === "undefined") return null;
+ try { return window.localStorage?.getItem(key) ?? null; } catch { return null; }
+}
+function remember(key: string, value: string, what: string) {
+ try { window.localStorage?.setItem(key, value); } catch (error) { console.warn(`${what} not persisted: ${(error as Error).message}`); }
+}
 /** One remembered choice, shared by every view: absent means tool calls are hidden (cp-hidetools). */
 const TOOLS_KEY = "cp-sessions-tool-calls";
-function readToolCalls(): boolean {
- if (typeof window === "undefined") return false;
- try { return window.localStorage?.getItem(TOOLS_KEY) === "1"; } catch { return false; }
-}
-function rememberToolCalls(show: boolean) {
- try { window.localStorage?.setItem(TOOLS_KEY, show ? "1" : "0"); } catch (error) { console.warn(`tool-call toggle not persisted: ${(error as Error).message}`); }
+const readToolCalls = (): boolean => readStored(TOOLS_KEY) === "1";
+const rememberToolCalls = (show: boolean) => remember(TOOLS_KEY, show ? "1" : "0", "tool-call toggle");
+/** The pinned decisions bar (cp-6kt6): the operator's open/collapsed choice, and the open ask ids it last showed. */
+const PINNED_KEY = "cp-sessions-pinned-open", PINNED_SEEN_KEY = "cp-sessions-pinned-seen";
+function readSeen(): string[] | null {
+ const raw = readStored(PINNED_SEEN_KEY);
+ if (raw === null) return null;
+ try { const ids: unknown = JSON.parse(raw); return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null; }
+ catch (error) { console.warn(`seen decisions unreadable, starting over: ${(error as Error).message}`); return null; }
 }
 /** Consecutive tool entries collapse into one run; every other entry stands alone. */
 type Row = {kind:"entry";entry:SessionEntry} | {kind:"run";key:string;entries:SessionEntry[]};
@@ -168,7 +178,19 @@ export function Sessions({data,control,draft}: {data:SessionsResponse;control?:C
  const scrollToEnd=()=>{const el=scroller.current; if(el) el.scrollTop=el.scrollHeight;};
  useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,showTools,openRuns]);
  const follow=useRef(true);
- const [pinOpen,setPinOpen]=useState(false);
+ // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
+ // itself only when an ask id it has not shown before appears — never because the count alone changed.
+ const askIds=data.transcript === true ? (data.open_asks ?? []).map(a=>a.id) : null, askKey=JSON.stringify(askIds);
+ const seen=useRef<string[] | null>(null);
+ if (seen.current === null && askIds) seen.current=readSeen() ?? askIds;
+ const [pinOpen,setPinOpen]=useState(()=>askIds?.some(id=>!seen.current!.includes(id)) === true || readStored(PINNED_KEY) === "1");
+ useEffect(()=>{
+  if (!askIds) return;
+  const shown=seen.current ?? [];
+  if (askIds.some(id=>!shown.includes(id))) setPinOpen(true);
+  if (JSON.stringify(shown) !== askKey) { seen.current=askIds; remember(PINNED_SEEN_KEY,askKey,"seen decisions"); }
+ },[askKey]);
+ const togglePin=()=>{const next=!pinOpen; setPinOpen(next); remember(PINNED_KEY,next ? "1" : "0","decisions bar");};
  // Any answer from the pinned sheet (a button, or "Other answer") collapses it back to its one-line bar.
  const pinControl=control && {...control,send:(body:Parameters<ControlView["send"]>[0],ask?:string)=>{setPinOpen(false); control.send(body,ask);}};
 // The on-screen keyboard shrinks — and, on iOS, pans — the visual viewport: keep the shell on the visible
@@ -215,7 +237,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">
-    <h2><button type="button" aria-expanded={pinOpen} onClick={()=>setPinOpen(!pinOpen)}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
+    <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft}/>}
