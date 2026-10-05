@@ -1,4 +1,10 @@
 .decided-screen { display: flex; flex-direction: column; gap: 24px; }
+.decision-heading > .decided-tabs { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0; min-width: 0; max-width: 100%; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.decided-tabs button { min-height: 44px; min-width: 0; padding: 0 14px; border: 0; border-radius: 7px; font-size: 13px; background: transparent; color: var(--muted); }
+.decided-tabs button[aria-selected=true] { background: var(--toggle); color: var(--text); }
+.decided-basis { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); }
+.decided-basis-standing { border-style: dashed; }
+.decided-basis-ref { display: block; margin-top: 4px; color: var(--subtle); }
 .decided-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .decided-filter-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 8px; }
 .decided-range { display: flex; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
