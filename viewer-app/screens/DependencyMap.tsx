@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import type { MapResponse } from "../../src/viewer/api-types.ts";
-import { amount, count, money } from "../format.ts";
+import { amount, count, money, phaseText } from "../format.ts";
 import { jobHref } from "../routes.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
@@ -9,12 +9,10 @@ import { expiry, MandateHistoryToggle, mapLanes, MapGraph, phaseClass, SourceWar
 const phases=["working","not dispatched","held","failed","launching","done"];
 const relations=["blocked by · open","stranded","blocked by · satisfied","dependency removed","pipeline","waits on PR · CI red","superseded by","repairs"];
 export function DependencyMap({data}:{data:MapResponse}) {
- const [legend,setLegend]=useState(false),[history,setHistory]=useState(false),[selection,setSelection]=useState<string|null|undefined>(undefined);
+ const [legend,setLegend]=useState(false),[history,setHistory]=useState(false),[selection,setSelection]=useState<string|null>(null);
  const lanes=mapLanes(data,history);
- const visibleJobs=lanes.flatMap(l=>l.jobs);
  const visibleIds=new Set(lanes.flatMap(l=>[...(l.mandate ? [l.mandate.id] : []),...l.jobs.map(n=>n.id)]));
- const defaultSelection=visibleJobs.find(n=>n.phase==="working")?.id ?? visibleJobs.find(n=>n.phase==="held")?.id ?? null;
- const selected=selection===undefined ? defaultSelection : selection && visibleIds.has(selection) ? selection : null;
+ const selected=selection && visibleIds.has(selection) ? selection : null;
  const job=data.nodes.find(n=>n.id===selected),mandate=data.items.find(m=>m.id===selected);
  const stranded=data.edges.filter(e=>e.kind==="stranded" && data.nodes.find(n=>n.id===e.to)?.ledger_status!=="closed");
  const relationText=(id:string)=>data.edges.filter(e=>e.from===id || e.to===id).map(e=>({kind:e.kind,text:e.from===id ? `Blocks ${e.to} · ${e.kind}` : `Blocked by ${e.from} · ${e.kind}`}));
@@ -29,8 +27,8 @@ export function DependencyMap({data}:{data:MapResponse}) {
   <div class="map-phone map-mobile-lanes">{lanes.map((lane,i)=><section key={`${lane.project}:${lane.mandate?.id ?? "none"}`}>
    {(i===0 || lanes[i-1]?.project!==lane.project) && <h2>{lane.project}</h2>}
    <div class={`map-lane-head ${lane.mandate && lane.mandate.status!=="active" ? "map-inactive" : ""}`}><div><code>{lane.mandate?.id ?? "No mandate"}</code><span>{lane.mandate ? expiry(lane.mandate,data.generated_at) : ""}</span></div>{lane.mandate && <><p title={lane.mandate.objective}>{lane.mandate.objective}</p><small>{money(lane.mandate.spend?.usd ?? null)} / {money(lane.mandate.spend_cap.usd)} &middot; {amount(lane.mandate.spend?.tokens ?? null)} / {amount(lane.mandate.spend_cap.tokens)} tok &middot; asks on {lane.mandate.ask_on.join(", ") || "-"}</small></>}</div>
-   <div class="map-lane-jobs">{lane.jobs.map(n=><a key={n.id} href={jobHref(n.id)}><span class="map-stem" aria-hidden="true"/><span class="map-mobile-job"><span><i class={phaseClass(n.phase)}/><code>{n.id}</code><small>{n.phase}</small></span><ContextChip usage={n.context} compact/>{relationText(n.id).map((r,i)=><span class={`map-relation-${r.kind}`} key={i}>{r.text}</span>)}{n.phase==="failed" && <span>ledger {n.ledger_status ?? "unknown"} · can continue on its lease</span>}</span></a>)}</div>
+   <div class="map-lane-jobs">{lane.jobs.map(n=><a key={n.id} href={jobHref(n.id)}><span class="map-stem" aria-hidden="true"/><span class="map-mobile-job"><span><i class={phaseClass(n.phase)}/><code>{n.id}</code><small>{phaseText(n.phase)}</small></span><ContextChip usage={n.context} compact/>{relationText(n.id).map((r,i)=><span class={`map-relation-${r.kind}`} key={i}>{r.text}</span>)}{n.phase==="failed" && <span>ledger {n.ledger_status ?? "unknown"} · can continue on its lease</span>}</span></a>)}</div>
   </section>)}</div>
-  <div class="map-desktop map-workspace"><MapGraph data={data} lanes={lanes} selection={selected} onSelect={id=>setSelection(selected===id ? null : id)}/><aside class="map-selection" aria-label="Selection">{job || mandate ? <><header><code>{job ? "job" : "mandate"} · {selected}</code><button aria-label="Clear selection" onClick={()=>setSelection(null)}>×</button></header><h2 title={job?.title ?? mandate?.objective}>{job?.title ?? mandate?.objective}</h2><div><span class="mandate-chip">{job?.phase ?? mandate?.status}</span></div><dl>{facts.map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><div class="map-selection-relations"><h3>{job ? "Relations" : "Jobs it covers"}</h3>{job ? relationText(job.id).length ? relationText(job.id).map((r,i)=><p key={i} class={`map-relation-${r.kind}`}>{r.text}</p>) : <p>No dependencies.</p> : data.nodes.filter(n=>n.mandate_id===mandate?.id).map(n=><p key={n.id}>{n.id} · {n.phase}</p>)}</div>{job && <a href={jobHref(job.id)}>Open job →</a>}</> : <p>Select a mandate or job to see its caps, statuses and relations.</p>}</aside></div>
+  <div class="map-desktop map-workspace"><MapGraph data={data} lanes={lanes} selection={selected} onSelect={id=>setSelection(selected===id ? null : id)}/><aside class="map-selection" aria-label="Selection">{job || mandate ? <><header><code>{job ? "job" : "mandate"} · {selected}</code><button aria-label="Clear selection" onClick={()=>setSelection(null)}>×</button></header><h2 title={job?.title ?? mandate?.objective}>{job?.title ?? mandate?.objective}</h2><div><span class="mandate-chip">{job ? phaseText(job.phase) : mandate?.status}</span></div><dl>{facts.map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><div class="map-selection-relations"><h3>{job ? "Relations" : "Jobs it covers"}</h3>{job ? relationText(job.id).length ? relationText(job.id).map((r,i)=><p key={i} class={`map-relation-${r.kind}`}>{r.text}</p>) : <p>No dependencies.</p> : data.nodes.filter(n=>n.mandate_id===mandate?.id).map(n=><p key={n.id}>{n.id} · {phaseText(n.phase)}</p>)}</div>{job && <a href={jobHref(job.id)}>Open job →</a>}</> : <p>Select a job or mandate — Its details, blockers and what it blocks show here. Nothing is dimmed until you pick one.</p>}</aside></div>
  </div>;
 }

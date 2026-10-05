@@ -51,26 +51,37 @@ test("Map shows today's revoked mission closures and toggles older history in th
   assert.match(root.textContent!,/md-history/);assert.match(root.textContent!,/md-old/);
   await act(()=>{toggle.checked=false;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
   assert.match(root.textContent!,/md-revoked/);assert.doesNotMatch(root.textContent!,/md-history|md-old/);
+  assert.match(root.textContent!,/Select a job or mandate/);
+  assert.equal(root.querySelectorAll(".map-node-dim").length,0);
+  const pick=(id:string)=>[...root.querySelectorAll("button")].find(b=>(b.getAttribute("title")??"").startsWith(`${id}:`))!;
+  await act(()=>{pick("cp-job-2").dispatchEvent(new window.Event("click",{bubbles:true}));});
+  assert.match(root.textContent!,/job · cp-job-2/);
+  assert.ok(root.textContent!.includes(mapTitle));
+  assert.ok(root.querySelector(".map-node-dim"));
+  assert.match(root.innerHTML,/#265 · CI running/);
+  data.nodes.find(n=>n.id==="cp-job-2")!.pr_status="merged";
+  await act(()=>mount(root,data));
+  assert.match(root.innerHTML,/#265 · merged/);
+  assert.doesNotMatch(root.innerHTML,/>https:\/\/github/);
   await act(()=>unmount(root));
  }
 });
 
-test("map prioritizes active projects and working selection, preserves all six jobs and unmodified titles",async()=>{
+test("map prioritizes active projects, selects nothing until a pick, and keeps every job title",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
  assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked/);assert.ok(html.includes(`title="${mapObjective}"`));
  assert.match(html,/<h1>Map<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
  assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
- assert.match(html,/job · cp-job-2/);assert.ok(html.includes(`>${mapTitle}</h2>`));
+ assert.match(html,/Select a job or mandate/);assert.match(html,/Nothing is dimmed until you pick one/);
+ assert.doesNotMatch(html,/map-node-dim/);assert.doesNotMatch(html,/job · cp-job-/);
  assert.match(html,/<svg width="1144"/);assert.match(html,/foreignObject x="1020"[^>]*width="124"/);
  assert.match(html,/d="M282 108L282 123L602 123L602 115"/,"the skipped middle node cannot obscure the dependency endpoints");
  for(let i=0;i<6;i++) assert.ok(html.includes(`title="cp-job-${i}:`));
- assert.match(html,/href="https:\/\/github.com\/acme\/repo\/pull\/265"[^>]*>#265 · CI running<\/a>/);
  assert.doesNotMatch(html,/>https:\/\/github/);
  for(const label of ["working","not dispatched","held","failed","launching","done","blocked by · open","blocked by · satisfied","pipeline"]) assert.ok(html.includes(`>${label}<`),label);
- data.nodes[2]!.pr_status="merged";assert.match(screen(data,true),/>#265 · merged<\/a>/);
- data.nodes.unshift({...data.nodes[2]!,id:"cp-old-working",mandate_id:"md-old"});assert.match(screen(data,true),/job · cp-job-2/);data.nodes.shift();
- data.nodes[2]!.phase="done";assert.match(screen(data,true),/job · cp-job-1/);
- data.nodes[1]!.phase="done";assert.match(screen(data,true),/Select a mandate or job/);
+ data.nodes[3]!.phase="waiting";
+ const waiting=screen(data,true);
+ assert.match(waiting,/no run status/);assert.doesNotMatch(waiting,/>waiting</);
 });
 
 test("More's views keep the phone sub-page header with search, the local clock and no live status",async()=>{

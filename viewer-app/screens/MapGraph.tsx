@@ -1,6 +1,6 @@
 import type { MandateItem, MandatesResponse, MapNode, MapResponse } from "../../src/viewer/api-types.ts";
 import { edgePoints, type GraphBox } from "./map-edges.ts";
-import { count, elapsed, money, percent, time } from "../format.ts";
+import { count, elapsed, money, percent, phaseText, time } from "../format.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
 function closedToday(m:MandateItem,data:MandatesResponse):boolean {
  const day=new Intl.DateTimeFormat("en",{year:"numeric",month:"numeric",day:"numeric"});
@@ -67,7 +67,7 @@ export function MapGraph({data,lanes,selection,onSelect}:{data:MapResponse;lanes
    <foreignObject x={0} y={y} width={180} height={72}>{lane.mandate ? <button class={`map-node map-mandate-node ${lane.mandate.status!=="active" ? "map-inactive" : ""}${lit && !lit.has(lane.mandate.id) ? " map-node-dim" : ""}`} title={lane.mandate.objective} aria-pressed={selection===lane.mandate.id} onClick={()=>onSelect(lane.mandate!.id)}><span><code>{lane.mandate.id}</code><small>{lane.mandate.status}</small></span><svg width="100%" height={3} aria-hidden="true"><rect width="100%" height={3} class="map-bar-track"/>{lane.mandate.spend && lane.mandate.spend_cap.usd!==null && <rect width={`${percent(lane.mandate.spend.usd,lane.mandate.spend_cap.usd)}%`} height={3} class="map-bar"/>}</svg><span><small>{money(lane.mandate.spend?.usd ?? null)} / {money(lane.mandate.spend_cap.usd)}</small><small>{expiry(lane.mandate,data.generated_at)}</small></span></button> : <div class="map-uncovered">No mandate</div>}</foreignObject>
    {lane.jobs.map(job=>{
     const p=positions.get(job.id)!;const stranded=data.edges.some(e=>e.to===job.id && e.kind==="stranded" && job.ledger_status!=="closed");
-    return <foreignObject key={job.id} x={p.x} y={p.y} width={p.w} height={p.h}><button class={`map-node${stranded ? " map-node-stranded" : ""}${lit && !lit.has(job.id) ? " map-node-dim" : ""}`} title={`${job.id}: ${job.title}`} aria-pressed={selection===job.id} onClick={()=>onSelect(job.id)}><span><i class={phaseClass(job.phase)}/><code>{job.id}</code></span><small>{stranded ? "stranded" : job.phase}{job.phase==="failed" && job.ledger_status ? ` · ledger ${job.ledger_status}` : ""}</small><ContextChip usage={job.context} compact/></button></foreignObject>;
+    return <foreignObject key={job.id} x={p.x} y={p.y} width={p.w} height={p.h}><button class={`map-node${stranded ? " map-node-stranded" : ""}${lit && !lit.has(job.id) ? " map-node-dim" : ""}`} title={`${job.id}: ${job.title}`} aria-pressed={selection===job.id} onClick={()=>onSelect(job.id)}><span><i class={phaseClass(job.phase)}/><code>{job.id}</code></span><small>{stranded ? "stranded" : phaseText(job.phase)}{job.phase==="failed" && job.ledger_status ? ` · ledger ${job.ledger_status}` : ""}</small><ContextChip usage={job.context} compact/></button></foreignObject>;
    })}
   </g>)}
  </svg></div>;
