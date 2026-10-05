@@ -49,10 +49,16 @@ export function pushStatus(options: { stateDir: string }, now = new Date()): Pus
 	};
 }
 
+/** This bind's own `http://` origin as a browser serializes it (IPv6 bracketed, port 80 elided). */
+export function bindOrigin(options: { host: string; port: number }): string {
+	const host = options.host.includes(":") ? `[${options.host}]` : options.host;
+	return options.port === 80 ? `http://${host}` : `http://${host}:${options.port}`;
+}
+
 /** Origins allowed to write: the configured HTTPS origin, plus this bind's own origin when it is loopback. */
 export function allowedOrigins(options: PushRouteOptions, configOrigin: string): string[] {
 	if (!LOOPBACK.has(options.host)) return [configOrigin];
-	return [configOrigin, `http://${options.host.includes(":") ? `[${options.host}]` : options.host}:${options.port}`];
+	return [configOrigin, bindOrigin(options)];
 }
 
 /** The request body up to `max` bytes, or "too_large" (declared or streamed past the cap). */

@@ -202,3 +202,20 @@ test("message with images, viewer to bridge: offline 409, unknown id 410, an old
 	assert.equal(plain.status, 202);
 	assert.equal(injected[1]!.images, undefined, "a text-only send stays on the plain send op");
 });
+
+test("no HTTPS origin configured: a tailnet bind's own http:// origin uploads and sends an image; a foreign origin is refused", async (t) => {
+	const { stateDir, uploadRoot, port } = await setup(t, { host: "100.64.0.9" });
+	rmSync(pushConfigFile(pushDataDir(stateDir)));
+	const { csrf, injected } = await bridge(t, stateDir, uploadRoot);
+	const self = { host: `100.64.0.9:${port}`, origin: `http://100.64.0.9:${port}` };
+	const png = syntheticPng();
+	const foreign = await call(port, UPLOAD, image(csrf, png, "image/png", { ...self, origin: "https://evil.example" }));
+	assert.equal(foreign.status, 403);
+	assert.match(String(foreign.body.error), /^Origin must be http:\/\/100\.64\.0\.9:\d+ \(no HTTPS origin is configured/);
+	const stored = await call(port, UPLOAD, image(csrf, png, "image/png", self));
+	assert.equal(stored.status, 201, JSON.stringify(stored.body));
+	const req = message(csrf, { kind: "message", text: "", images: [stored.body.id] });
+	const sent = await call(port, "/api/operator/message", { ...req, headers: { ...req.headers, ...self } });
+	assert.equal(sent.status, 202, JSON.stringify(sent.body));
+	assert.deepEqual(Buffer.from(injected[0]!.images![0]!.data, "base64"), png);
+});

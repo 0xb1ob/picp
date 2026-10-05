@@ -50,7 +50,7 @@ import {
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
 import { restartStatus } from "./restart-status.ts";
-import { allowedOrigins, readBody } from "./push-api.ts";
+import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 import { isUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
@@ -323,8 +323,9 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		if (config.state === "invalid") return refuse(503, `dashboard control config is invalid: ${config.reason}`);
 		if (config.state === "off") return refuse(403, `dashboard control is off (${config.reason})`);
 		const origin = controlOrigin(options.stateDir);
-		const origins = allowedOrigins(options, origin ?? "").filter(Boolean);
-		if (!origins.includes(req.headers.origin ?? "")) return refuse(403, origin ? `Origin must be ${origin}` : "Origin refused: no public origin is configured (npm run push:init -- --origin https://<dashboard host>)");
+		// No HTTPS origin configured: same-origin with this bind (the plain-HTTP origin the Host guard already pinned).
+		const origins = origin ? allowedOrigins(options, origin) : [bindOrigin(options)];
+		if (!origins.includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${origin ?? `${bindOrigin(options)} (no HTTPS origin is configured; npm run push:init -- --origin https://<dashboard host> to use one)`}`);
 		const site = req.headers["sec-fetch-site"];
 		if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
 		const type = req.headers["content-type"] ?? "";
