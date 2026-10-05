@@ -101,5 +101,6 @@
  .map-legend-summary .map-desktop { display: flex; gap: 8px 20px; flex-wrap: wrap; }
  .map-full-legend { grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px 20px; padding: 14px 18px; }
  .map-workspace { display: flex; flex: 1; gap: 24px; min-height: 0; min-width: 0; }
+ .map-graph { min-width: 0; overflow: auto; }
  .map-selection { max-height: 100%; overflow: auto; }
 }
