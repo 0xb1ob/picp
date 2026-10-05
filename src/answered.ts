@@ -141,8 +141,14 @@
  * neither enqueues it nor fires the `onAnswered` wake: the parent that made the call needs no
  * `cp-answered` turn to learn it. Every other `answered_by` is queued and woken exactly as
  * above — in particular `mandate:<id>`: a mandate auto-decision (`#tryMandate` →
- * `autoDecideCheckpoint`, mandate auto-close) can land outside any parent turn, when a gate or
- * review finishes, so suppressing it could strand a dispatch or merge. Nothing is queued for a
+ * `autoDecideCheckpoint`) can land outside any parent turn, when a gate or
+ * review finishes, so suppressing it could strand a dispatch or merge. The one exception is
+ * explicit, never inferred from `answered_by`: a caller that records an answer synchronously
+ * inside the parent's own tool call and reports it in that tool's result passes
+ * `selfAnswered: true` to `EscalationStore.answer`, and the sink honours it the same way.
+ * Today that is only `cp_next` auto-closing its own clean mission end (`src/next.ts`): the
+ * `cp_next` result already says "answered close … grant revoked", so a `cp-answered` echo of it
+ * was a duplicate parent turn. Nothing is queued for a
  * suppressed answer, so a restart replays nothing; a queued one is replayed as before.
  *
  * Skip is not an answer: it writes nothing, anywhere, so nothing is enqueued
@@ -210,8 +216,10 @@ export interface AnsweredInput {
  * and **synchronous on purpose**: `CheckpointStore.decide` is synchronous, and a
  * fire-and-forget promise between "the answer is on disk" and "the wake-up is
  * queued" would be exactly the window in which a decision goes missing again.
+ * `selfAnswered` is the writer's caller saying "recorded inside the parent's own
+ * turn, which already reports it" (see "Self-answers do not echo" above).
  */
-export type AnsweredSink = (decision: AnsweredDecision) => void;
+export type AnsweredSink = (decision: AnsweredDecision, options?: { selfAnswered?: boolean }) => void;
 
 /**
  * Normalise a writer's report into the schema's own bounds. The prose cells are
@@ -591,7 +599,9 @@ function noticeText(content: unknown): string {
 /**
  * The parent's own `cp_decide` answers: `operator-quote` / `operator-delegated`, recorded inside its
  * turn, so echoing them back as a `cp-answered` wake is noise. `mandate:<id>` is deliberately NOT
- * here: an auto-decision can run outside a parent turn and must still wake it.
+ * here: an auto-decision can run outside a parent turn and must still wake it. The one in-turn
+ * mandate answer (`cp_next` closing its own clean mission end) is marked at its call site with the
+ * explicit `selfAnswered` sink option instead, never by widening this check to `mandate:*`.
  */
 export function isSelfAnswered(answeredBy: string): boolean {
 	return answeredBy === "operator-quote" || answeredBy === "operator-delegated";

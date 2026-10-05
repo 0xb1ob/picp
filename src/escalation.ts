@@ -198,7 +198,19 @@ export class EscalationStore {
 
 	async answer(
 		id: string,
-		options: { answer: string; by: string; at?: string; basis?: DecisionBasis; provenance?: DelegationProvenance },
+		options: {
+			answer: string;
+			by: string;
+			at?: string;
+			basis?: DecisionBasis;
+			provenance?: DelegationProvenance;
+			/**
+			 * The caller records this answer synchronously inside the parent's own tool call and reports it
+			 * in that result, so this record's own `onAnswered` wake is marked self-answered (`src/answered.ts`,
+			 * "Self-answers do not echo"). Never set for an answer that can land outside a parent turn.
+			 */
+			selfAnswered?: boolean;
+		},
 	): Promise<Escalation> {
 		const at = options.at ?? isoTimestamp(this.#now());
 		const existing = this.get(id);
@@ -285,7 +297,8 @@ export class EscalationStore {
 			const awaiting = this.#awaiting?.();
 			if (awaiting) {
 				try {
-					await awaiting.answer(answered.awaiting_id, { ...options, at: recordedNow ? at : (answered.answered_at ?? at) });
+					const { selfAnswered: _selfAnswered, ...awaitingOptions } = options;
+					await awaiting.answer(answered.awaiting_id, { ...awaitingOptions, at: recordedNow ? at : (answered.answered_at ?? at) });
 					awaitingReported = true;
 				} catch {
 					// Linked awaiting may already be answered or derived; the escalation still journals.
@@ -306,6 +319,7 @@ export class EscalationStore {
 						answered_by: options.by,
 						answered_at: at,
 					}),
+					options.selfAnswered ? { selfAnswered: true } : undefined,
 				);
 			} catch {
 				// Delivery is retried from state/answered.json; see src/answered.ts.
