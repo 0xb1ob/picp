@@ -5,9 +5,9 @@
 .overview-subtitle { font-size: 13px; margin-top: 4px; line-height: 1.5; }
 .overview-updated { display: none; }
 .overview-meta { font-size: 12px; line-height: 1.5; color: var(--dim); }
-.overview-error { color: var(--coral); font-size: 13px; }
-.overview-amber { color: var(--amber); }
-.overview-alarm { padding: 12px 14px; border: 2px solid var(--coral); border-radius: 12px; background: var(--surface); color: var(--coral); font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.overview-error { color: var(--secondary); font-size: 13px; }
+.overview-amber { color: var(--secondary); }
+.overview-alarm { padding: 12px 14px; border: 2px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .overview-alarm p + p { margin-top: 4px; }
 progress { appearance: none; display: block; border: 0; height: 3px; width: 100%; border-radius: 2px; overflow: hidden; background: var(--border); color: var(--secondary); }
 progress::-webkit-progress-bar { background: var(--border); }
@@ -26,13 +26,14 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-job-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .overview-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid var(--dim); }
 .overview-dot-working { background: var(--green); border-color: var(--green); }
-.overview-failed { color: var(--coral); }
+.overview-failed { color: var(--secondary); }
 .overview-project { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .overview-more { padding: 10px 0; font-size: 13px; color: var(--muted); text-decoration: none; }
 .overview-dot-launching { border-color: var(--green); }
 .overview-dot-held { border-color: var(--blue); }
-.overview-dot-down { background: var(--coral); border-color: var(--coral); }
-.overview-dot-tight { background: var(--amber); border-color: var(--amber); }
+.overview-dot-down { background: transparent; border-color: var(--secondary); }
+.overview-dot-tight { background: var(--text); border-color: var(--text); }
+.overview-dot-ci-red { background: var(--coral); border-color: var(--coral); }
 .overview-dependencies-ok { display: flex; gap: 8px; align-items: center; padding: 10px 0; font-size: 14px; color: var(--subtle); }
 .overview-dependencies-ok svg { color: var(--green); }
 @media (min-width: 900px) {

@@ -32,7 +32,7 @@ function Health({data}: {data:OverviewResponse}) {
  return <section class="overview-health" aria-label="Health">
   <Chip href="#sessions?view=parent" tone={parent.alive ? "working" : "down"} label="parent" value={parentValue}/>
   <Chip href="#decided" tone={!operator.running ? "down" : stuck ? "tight" : "working"} label="operator" value={operatorValue}/>
-  <Chip tone={red.length ? "down" : main.availability === "unavailable" ? "tight" : "idle"} label="main CI" value={mainValue} title={main.red.map(r => `${r.project}: ${r.failing ?? r.workflow ?? "CI failed"} on ${r.red_since_sha}`).join("\n") || undefined}/>
+  <Chip tone={red.length ? "ci-red" : main.availability === "unavailable" ? "tight" : "idle"} label="main CI" value={mainValue} title={main.red.map(r => `${r.project}: ${r.failing ?? r.workflow ?? "CI failed"} on ${r.red_since_sha}`).join("\n") || undefined}/>
   <Chip href="#jobs" tone={!fleet && (data.fleet.workers.live ?? 0) > 0 ? "working" : "idle"} label="workers" value={`${fleet ? "-" : count(data.fleet.workers.live)} live / ${count(slots)} slots`}/>
   {data.quota && <Chip tone={tight.length ? "tight" : "working"} label="quota" value={tight.length ? `tight: ${tight.join(", ")}` : "ok"}/>}
  </section>;

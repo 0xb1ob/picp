@@ -26,17 +26,24 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-header .shell-live { flex-wrap: nowrap; white-space: nowrap; }
 .shell-live > span { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
 .shell-live-live > span { background: var(--green); }
-.shell-live-stale > span, .shell-live-offline > span { background: var(--coral); }
+.shell-live-stale > span, .shell-live-offline > span { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .shell-search, .shell-back { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 10px; }
 .shell-clock { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.shell-corner { display: none; }
+.shell-page-bar { display: none; }
 /* The ⋮ menu (Restart session): a 44px button, and a popover that never outgrows the viewport. */
 .shell-more { position: relative; flex-shrink: 0; }
 .shell-more > summary { width: 44px; height: 44px; position: relative; display: flex; align-items: center; justify-content: center; list-style: none; cursor: pointer; border-radius: 10px; color: var(--muted); }
 .shell-more > summary::-webkit-details-marker { display: none; }
 .shell-more[open] > summary { background: var(--surface); color: var(--text); }
-.shell-more-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
-.shell-more-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; width: 280px; max-width: calc(100vw - 16px); padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.shell-more-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--text); }
+.shell-more-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; width: 280px; max-width: calc(100vw - 16px); padding: 6px; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.shell-more-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 14px; text-align: left; text-decoration: none; overflow-wrap: anywhere; }
+.shell-more-status { min-height: 0; margin: 0; padding: 0 10px; font-size: 12px; color: var(--muted); }
+.shell-more-status:empty { display: none; }
+.shell-more-version { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; }
+.shell-more-version > span { font-size: 14px; }
+.shell-more-version .shell-version { flex: 1; min-width: 0; }
+.shell-more-version .shell-version > summary { width: 100%; justify-content: flex-start; }
 .shell-more-panel .operator-restart { flex-direction: column; align-items: stretch; }
 .shell-more-panel .operator-restart-line { flex-basis: auto; }
 .shell-main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 16px 40px; overflow-wrap: anywhere; }
@@ -90,5 +97,5 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-sidebar-nav .shell-count { left: 130px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
  .shell-main { min-width: 0; padding: 32px 40px 48px; }
- .shell-corner { display: flex; align-items: center; gap: 4px; position: fixed; top: 8px; right: 24px; z-index: 1; padding: 2px 8px; border-radius: 8px; background: var(--background); }
+ .shell-page-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -8px 0 12px; font-size: 12px; color: var(--muted); }
 }

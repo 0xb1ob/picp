@@ -93,6 +93,21 @@ export function pushMeta(phase: PushPhase, status: PushStatusResponse | null | u
   case "off": return `Off for this device${devices}${undelivered}`;
  }
 }
+/** Menu-row label for a push phase: the short state, not pushMeta's full sentence. */
+export function pushShort(phase: PushPhase): string {
+ switch (phase) {
+  case "checking": return "Checking";
+  case "insecure": return "Needs HTTPS";
+  case "install": return "Add to Home Screen";
+  case "unsupported": return "Unavailable";
+  case "unconfigured": return "Not set up";
+  case "denied": return "Blocked";
+  case "busy": return "Waiting";
+  case "error": return "Unavailable";
+  case "on": return "On";
+  case "off": return "Off";
+ }
+}
 
 export async function readSubscribed(deps: PushDeps): Promise<boolean> {
  const registration = await deps.getRegistration();

@@ -5,18 +5,11 @@ import { jobHref } from "../routes.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
 import "./jobs.css";
+import { CiSignal, ModelName, PhaseDot, reviewText, shortModel } from "../components/JobSignals.tsx";
+export { CiSignal, PhaseDot, reviewText };
 export const inFlight = (job:ViewerJob) => !["done","failed","queued"].includes(job.phase);
-export function PhaseDot({phase}:{phase:string}) { return <span aria-hidden="true" class={`job-dot job-dot-${phase}`}/>; }
-export const reviewText = (job:ViewerJob) => job.review_attempts ? `review ${job.review_attempts}/5 · ${job.review === "revise" ? "changes requested" : job.review ?? "not recorded for this head"}` : "review -";
-export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
- const ci=job.ci==="failed" ? "red" : job.ci==="in_progress" ? "running" : job.ci;
- return <span class={`job-ci job-ci-${ci ?? "none"}${badge ? " job-badge" : ""}`}><span class="job-ci-dot" aria-hidden="true"/>CI {ci ?? "-"} <code>{job.head?.slice(0,7) ?? "-"}</code></span>;
-}
 /** A list row's CI and review signals: only once the job has a PR or a head, never placeholder dashes before that. */
 const signalled = (job:ViewerJob) => Boolean(job.pr_url || job.head);
-/** The model without its provider prefix (`anthropic/claude-opus-5-5` → `claude-opus-5-5`); the full id stays in the title. */
-const shortModel = (id:string | null) => id ? id.slice(id.lastIndexOf("/")+1) : "-";
-function ModelName({job}:{job:ViewerJob}) { const id=job.script_path ?? job.model; return <code title={id ?? undefined}>{shortModel(id)}</code>; }
 export function JobSignals({job}:{job:ViewerJob}) {
  return <><span class="job-clock">{elapsed(job.elapsed_seconds)} / {elapsed(job.limit_seconds)}{job.limit_seconds !== null && job.elapsed_seconds !== null && <progress aria-label="Wall clock" max="100" value={percent(job.elapsed_seconds,job.limit_seconds)}/>}</span>{signalled(job) && <><span>{reviewText(job)}</span><CiSignal job={job}/></>}<ModelName job={job}/></>;
 }

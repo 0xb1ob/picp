@@ -88,7 +88,7 @@ test("audit P3: Blocked & failed, the operator and main CI chips, project tags, 
  const html = screen(data);
  assert.match(html,/Blocked &amp; failed · 1/); assert.match(html,/href="#job\/cp-dead"/); assert.match(html,/Died title/); assert.match(html,/overview-failed">failed<\/span> · <span title="provider 503: overloaded">provider 503: overloaded/);
  assert.match(html,/href="#decided" class="overview-chip"><span class="overview-meta"><span class="overview-dot overview-dot-tight"><\/span>operator<\/span><strong title="running · 2 unanswered, oldest 57m">/,"amber once one question waited 10 minutes");
- assert.match(html,/overview-dot-down"><\/span>main CI<\/span><strong title="red since ccccccc [^\n"]+\ndemo: AssertionError: x on c{40}">red since ccccccc /);
+ assert.match(html,/overview-dot-ci-red"><\/span>main CI<\/span><strong title="red since ccccccc [^\n"]+\ndemo: AssertionError: x on c{40}">red since ccccccc /);
  assert.equal((html.match(/class="overview-project"/g) ?? []).length,3,"two projects in flight: every row tagged");
  assert.match(html,/CI running</); assert.match(html,/review 1\/5 pass</); assert.match(html,/overview-meta">working</);
  assert.match(html,/Landed today · 7 merged · \$6\.00/,"total over every merged row with a known cost");
@@ -120,4 +120,19 @@ test("audit P3 #20 #21 end to end: recorded ci-watch values reach the held fact,
  for (const [ci, fact] of cases) assert.match(html, new RegExp(`<code>cp-${ci.replace("_","-")}</code></a><span class="overview-line-text"[^>]*>[^<]*</span><span class="overview-meta">${fact}</span>`), ci);
  assert.deepEqual(data.shipped_today.map(j => j.cost_usd), merged.map(() => 0.5), "all 12 merged rows keep their cost past FINISHED_SHOWN (10)");
  assert.match(html, /Landed today · 12 merged · \$6\.00/);
+});
+
+test("stamp, shortSha, prNumber and phaseText", async t => {
+ const {stamp, shortSha, prNumber, phaseText} = await import("../viewer-app/format.ts");
+ const zone = process.env.TZ; t.after(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });
+ process.env.TZ = "Asia/Bangkok";
+ const at = "2026-09-26T05:41:07Z";
+ assert.match(stamp(at), /^12:41 \S+$/);
+ assert.match(stamp(at, true), /^12:41:07 \S+$/);
+ assert.equal(shortSha(null), null);
+ assert.equal(shortSha("a".repeat(40)), "aaaaaaa");
+ assert.equal(prNumber(null), null);
+ assert.equal(prNumber("https://github.com/acme/repo/pull/265"), "#265");
+ assert.equal(phaseText("waiting"), "no run status");
+ assert.equal(phaseText("working"), "working");
 });

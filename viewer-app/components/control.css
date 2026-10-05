@@ -29,7 +29,7 @@
 .decision-card-option-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
 .decision-card-consequence { font-size: 13px; line-height: 1.45; color: var(--subtle); }
 .decision-card-recommendation, .decision-card-disabled, .decision-card-delivery { font-size: 13px; color: var(--muted); }
-.decision-card-differs, .decision-card-failed { font-size: 13px; color: var(--coral); }
+.decision-card-differs, .decision-card-failed { font-size: 13px; color: var(--secondary); }
 .decision-card-other { display: flex; gap: 8px; min-width: 0; }
 .decision-card-other input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 14px; }
 .decision-card-other button { min-height: 44px; padding: 0 16px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; }
@@ -47,7 +47,7 @@
 /* One row (mobile-chat-layout): auto-growing field, ⋯ steer/abort while busy, round send. ≤ 64 px collapsed, above the safe area. */
 .operator-composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--background); min-width: 0; flex-shrink: 0; }
 .operator-composer-state, .operator-composer-delivery { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.operator-composer-failed { color: var(--coral); }
+.operator-composer-failed { color: var(--secondary); }
 .operator-composer-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
 .operator-composer textarea { flex: 1; min-width: 0; display: block; min-height: 42px; max-height: 122px; resize: none; overflow-y: auto; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 21px; font: inherit; font-size: 15px; line-height: 20px; overflow-wrap: anywhere; }
 .operator-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -61,7 +61,7 @@
 .operator-composer-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; display: flex; flex-direction: column; gap: 6px; min-width: 190px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 32px var(--page); }
 .operator-composer-menu button { min-height: 44px; padding: 0 16px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .operator-composer-menu button:disabled { opacity: 0.5; }
-.operator-composer-menu .operator-composer-abort { background: var(--background); color: var(--coral); border: 1px solid var(--coral); }
+.operator-composer-menu .operator-composer-abort { background: var(--background); color: var(--text); border: 1px solid var(--border); }
 /* Image attachments (cp-br81): a paperclip beside the field, a row of 64 px tiles above it that wraps at 390 px (nothing clipped, no sideways scroll). */
 .operator-composer-attach { position: relative; width: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 50%; cursor: pointer; }
 .operator-composer-attach::after, .operator-composer-thumb-remove::after { content: ""; position: absolute; inset: -1px; }
@@ -70,8 +70,8 @@
 .operator-composer-attachments > li { position: relative; flex-shrink: 0; display: flex; align-items: center; min-height: 64px; min-width: 64px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .operator-composer-thumb { display: block; width: 62px; height: 62px; object-fit: cover; border-radius: 11px; }
 .operator-composer-attachment-state { padding: 0 32px 0 10px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.operator-composer-attachment-failed { max-width: min(240px, 100%); border-color: var(--coral); }
-.operator-composer-attachment-failed .operator-composer-attachment-state { color: var(--coral); white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.operator-composer-attachment-failed { max-width: min(240px, 100%); border-color: var(--border); }
+.operator-composer-attachment-failed .operator-composer-attachment-state { color: var(--secondary); white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .operator-composer-thumb-remove { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; background: var(--text); color: var(--background); border: 0; border-radius: 50%; cursor: pointer; }
 .operator-composer-thumb-remove::after { inset: -10px; }
 /* Start session (cp-daemon P3): offline only; wraps at 390 px, one row with its lines at 1440 px. */
@@ -79,15 +79,15 @@
 .start-session-button { min-height: 44px; padding: 0 18px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .start-session-button:disabled { opacity: 0.5; }
 .start-session-line { flex: 1 1 220px; min-width: 0; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.start-session-failed { color: var(--coral); }
+.start-session-failed { color: var(--secondary); }
 /* Restart session (cp-aqxl): running only; the confirm names a long session file, so the button wraps at 390 px instead of widening the page. */
 .operator-restart { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
 .operator-restart-button { min-height: 44px; max-width: 100%; padding: 6px 18px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 22px; font: inherit; font-size: 14px; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
 .operator-restart-button:disabled { opacity: 0.5; }
-.operator-restart-confirm { color: var(--coral); border-color: var(--coral); }
+.operator-restart-confirm { color: var(--text); border-color: var(--text); }
 .operator-restart-cancel { min-height: 44px; padding: 0 12px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 14px; }
 .operator-restart-line { flex: 1 1 220px; min-width: 0; margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.operator-restart-failed { color: var(--coral); }
+.operator-restart-failed { color: var(--secondary); }
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {

@@ -28,6 +28,10 @@ export interface SessionEntry {
  paths?: { path: string; href: string | null; read: string | null }[];
  /** Each bare `.pi-command-post` path in `text` the viewer can open (src/viewer/linkify.ts), path → href. */
  links?: Record<string, string>;
+ /** Say-entry project chip: a `projects/*` name stripped from a leading `[name]` (slice F). */
+ project?: string | null;
+ /** A cp-bridge notice parsed off its first line (slice F). */
+ bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
 }
 /** An operator ask as its card renders inline in the Full transcript; state comes from the ask journal only. */
 export interface TranscriptAsk {
@@ -166,6 +170,8 @@ export interface DecisionDetail extends Decision {
  quote: string | null; rule: string | null; worth: ("risk" | "scope" | "override")[]; today: boolean;
  /** The escalation kind behind it (`mission_end`, `scope_expansion`, …); null when none is recorded. */
  kind: string | null;
+ /** How the delegation was authorized, from the recorded rule only. Slice A fills it; absent until then. */
+ basis?: {kind:"words"|"standing"|"judgement"; ref:string|null};
 }
 export interface AwaitingDetail extends Ask {
  reason: string | null; source_created_at: string | null; mandate_id: string | null;
@@ -182,7 +188,7 @@ export interface DecisionScreenResponse {
  generated_at: string;
  availability: Record<"asks" | "escalations", SourceAvailability>;
  awaiting_count: number | null; parent_questions: Question[];
- decided_today: {count: number | null; worth_count: number | null};
+ decided_today: {count: number | null; worth_count: number | null; by_you?: number | null};
 }
 export interface AwaitingResponse extends DecisionScreenResponse { items: AwaitingDetail[] }
 export interface DecidedResponse extends DecisionScreenResponse { items: DecisionDetail[] }
@@ -208,6 +214,8 @@ export interface FlightJob {
  elapsed_seconds: number | null; limit_seconds: number | null;
  head: string | null; ci: string | null; review: string | null; review_attempts: number;
  routing: string | null; note: string | null; pr_url?: string | null;
+ /** The live worker's context, when a screen has it. Overview fills this; absent on older payloads. */
+ context?: ContextUsage | null;
 }
 export interface ShippedJob { id: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
 /** A fleet job in phase `failed`; `failure` is its headline, one line of at most 80 chars. */
@@ -253,7 +261,7 @@ export interface OverviewResponse {
  generated_at: string;
  availability: Record<"asks" | "escalations" | "fleet" | "ledger" | "mandates", SourceAvailability>;
  awaiting: {count: number | null; items: Ask[]}; parent_questions: Question[];
- decided_today: {count: number | null; items: Decision[]; worth_count: null}; all_questions_delegated: boolean;
+ decided_today: {count: number | null; items: Decision[]; worth_count: null; by_you?: number | null}; all_questions_delegated: boolean;
  in_flight: FlightJob[]; shipped_today: ShippedJob[];
  /** Jobs done today without a merge receipt; with `shipped_today`, the Board's "Landed today". Null: fleet or ledger unreadable. */
  closed_today: number | null;

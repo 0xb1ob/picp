@@ -28,3 +28,53 @@ test("palette guard rejects short, alpha, uppercase and functional bypasses", ()
  assert.equal(violations("styles/tokens.css","color:#123456;").length,1);
  assert.equal(violations("routes.ts",'"#decided"').length,0);
 });
+/** Amber/coral (and the ask/error/stranded tokens that paint them) only on an open human decision or CI that is actually red. */
+const KEEP = [
+ /^\.awaiting-(?:card|index|reason|origin)(?![\w-])/,
+ /^\.session-pinned(?![\w-])/,
+ /^\.session-pinned-open(?![\w-])/,
+ /^\.decision-card-option\.decision-card-recommended(?![\w-])/,
+ /^\.shell-count(?![\w-])/,
+ /^\.overview-square(?![\w-])/,
+ /^\.job-question-awaiting(?![\w-])/,
+ /^\.session-notice:has\(\.session-awaiting\)/,
+ /^\.session-awaiting(?![\w-])/,
+ /^\.session-notice \.session-awaiting(?![\w-])/,
+ /^\.decision-overdue(?![\w-])/,
+ /^\.decisions-handled-overdue(?![\w-])/,
+ /^\.job-ci-red(?![\w-])/,
+ /^\.job-badge\.job-ci-red(?![\w-])/,
+ /^\.job-event-red(?![\w-])/,
+ /^\.map-red-text(?![\w-])/,
+ /^\.overview-dot-ci-red(?![\w-])/,
+ // Light Sessions reassigns the same tokens; it is not a coloured surface.
+ /^\.shell-main:has\(> \.sessions\)/,
+];
+const PAINT = /var\(--(?:amber|coral|ask-border|ask-background|error-border|map-stranded-border)\)/;
+function painted(css: string): {selector:string; body:string}[] {
+ const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+ const out: {selector:string; body:string}[] = [];
+ let i = 0;
+ while (i < text.length) {
+  const open = text.indexOf("{", i);
+  if (open < 0) break;
+  const selector = text.slice(i, open).trim();
+  let depth = 1, j = open + 1;
+  while (j < text.length && depth) { if (text[j] === "{") depth++; else if (text[j] === "}") depth--; j++; }
+  const inner = text.slice(open + 1, j - 1);
+  if (selector.startsWith("@") || inner.includes("{")) out.push(...painted(inner));
+  else if (PAINT.test(inner)) out.push({selector, body:inner});
+  i = j;
+ }
+ return out;
+}
+const allowed = (selector: string) => selector.split(",").every(part => KEEP.some(re => re.test(part.trim())));
+test("amber and coral only on open human decisions and CI that is red", () => {
+ const root = join(REPO_ROOT, "viewer-app");
+ const offenders = files(root).filter(path => path.endsWith(".css")).flatMap(path => painted(readFileSync(path, "utf8")).filter(rule => !allowed(rule.selector)).map(rule => `${relative(root, path)}: ${rule.selector}`));
+ assert.deepEqual(offenders, []);
+ assert.equal(allowed(".overview-alarm"), false);
+ assert.equal(allowed(".job-failure"), false);
+ assert.equal(allowed(".job-ci-red > span"), true);
+ assert.equal(allowed(".overview-dot-ci-red"), true);
+});

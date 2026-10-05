@@ -14,17 +14,25 @@ const status = (over: Partial<ControlStatusResponse> = {}): ControlStatusRespons
 const restarting = (state: Restarting["state"]): Restarting => ({ state, reason: null, started_at: null, session_file: "op.jsonl" });
 const view = (s: ControlStatusResponse, r: Restarting | null = null, restart: () => void = () => {}): ControlView => ({ status: s, delivery: null, send: () => {}, restarting: r, restart });
 
-const built = await build({ stdin: { contents: 'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {MoreMenu} from "./viewer-app/components/MoreMenu.tsx"; export {act}; export const draw=(control)=>render(h(MoreMenu,{control})); export const mount=(root,control)=>domRender(h(MoreMenu,{control}),root); export const unmount=root=>domRender(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
-const { act, draw, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: (fn: () => unknown) => Promise<void>; draw: (control: ControlView | undefined) => string; mount: (root: unknown, control: ControlView) => void; unmount: (root: unknown) => void };
+const built = await build({ stdin: { contents: 'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {MoreMenu} from "./viewer-app/components/MoreMenu.tsx"; export {act}; export const draw=(control, extra)=>render(h(MoreMenu,{control, ...extra})); export const mount=(root,control, extra)=>domRender(h(MoreMenu,{control, ...extra}),root); export const unmount=root=>domRender(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const { act, draw, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: (fn: () => unknown) => Promise<void>; draw: (control: ControlView | undefined, extra?: {version?: {view: unknown; error: string | null}; updatedAt?: string | null}) => string; mount: (root: unknown, control: ControlView | undefined, extra?: object) => void; unmount: (root: unknown) => void };
 
-test("⋮ menu: only with a control view and a session; labelled; a dot while a restart runs", () => {
-	assert.equal(draw(undefined), "", "no control view: no button");
-	assert.equal(draw(view(status({ running: false, token: null }))), "", "offline and not restarting: nothing to put in it");
+test("⋮ menu: always rendered; Restart only with a session; a dot while a restart runs", () => {
+	assert.match(draw(undefined), /aria-label="More actions"/, "no control view: the menu still renders");
+	assert.doesNotMatch(draw(undefined), /Restart session/);
+	assert.match(draw(view(status({ running: false, token: null }))), /More actions/);
+	assert.doesNotMatch(draw(view(status({ running: false, token: null }))), /Restart session/, "offline and not restarting: no Restart row");
 	const idle = draw(view(status()));
 	assert.match(idle, /<summary aria-label="More actions" title="More actions">/);
 	assert.doesNotMatch(idle, /shell-more-dot|Restart session/, "closed: no panel, no dot");
 	assert.match(draw(view(status(), restarting("stopping"))), /shell-more-dot/, "a compact dot, not a block");
 	assert.doesNotMatch(draw(view(status(), restarting("restarted"))), /shell-more-dot/);
+});
+test("⋮ dot shows on a version alert and Restart stays hidden without a control view", () => {
+	const version = { view: { generated_at: "2026-01-01T00:00:00Z", deployed: null, upstream: { state: "unknown" as const, behind: null, ahead: null, reason: null, checked_at: null, updater: null }, processes: [], bundle: { script: null }, overall: { level: "alert" as const, label: "update failed" } }, error: null };
+	assert.match(draw(undefined, {version}), /shell-more-dot/);
+	assert.doesNotMatch(draw(undefined, {version}), /Restart session/);
+	assert.doesNotMatch(draw(undefined, {version: {...version, view: {...version.view, overall: {level: "ok" as const, label: "current"}}}}), /shell-more-dot/);
 });
 
 test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc and an outside tap close it", async t => {
@@ -32,6 +40,7 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
 	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+	window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
 	t.after(() => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
 	const root = document.getElementById("root")!;
 	let restarts = 0;
@@ -41,6 +50,8 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	assert.equal(root.querySelector(".shell-more-panel"), null);
 	await toggle(true);
 	const item = () => root.querySelector<HTMLButtonElement>(".operator-restart-button")!;
+	const text = root.querySelector(".shell-more-panel")!.textContent ?? "";
+	assert.ok(text.indexOf("Refresh now") < text.indexOf("Copy link to this view") && text.indexOf("Copy link to this view") < text.indexOf("Notifications") && text.indexOf("Notifications") < text.indexOf("Viewer"), text);
 	assert.equal(item().textContent, "Restart session");
 	await act(() => item().click());
 	assert.match(item().textContent!, /^Tap again to restart/);
@@ -64,7 +75,7 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 
 test("Restart session no longer renders inline; the ⋮ button is 44px and the panel stays inside the viewport", () => {
 	for (const file of ["viewer-app/components/OperatorComposer.tsx", "viewer-app/screens/Overview.tsx"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT, file), "utf8"), /RestartSession/, file);
-	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/Shell.tsx"), "utf8"), /<MoreMenu control=\{control\}\/><\/div>\n/, "far right of the header, after Search");
+	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/Shell.tsx"), "utf8"), /class="shell-search"[\s\S]*?<MoreMenu control=\{control\} version=\{version\} updatedAt=\{updatedAt\}\/>/, "far right of the header, after Search");
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/styles/shell.css"), "utf8");
 	const rule = (selector: string) => new RegExp(`\\${selector} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
 	assert.match(rule(".shell-more > summary"), /width: 44px; height: 44px/);

@@ -21,13 +21,13 @@
 .map-dot-held { border: 1.5px solid var(--blue); }
 .map-dot-done { background: var(--faint); border: 0; }
 .map-dot-failed { border-radius: 2px; background: var(--muted); border: 0; }
-.map-stranded-text, .map-relation-stranded { color: var(--amber); }
+.map-stranded-text, .map-relation-stranded { color: var(--secondary); }
 .map-red-text { color: var(--coral); }
 .map-relation-satisfied, .map-relation-unknown { color: var(--muted); }
 .map-status { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
 .map-check { color: var(--green); }
-.map-stranded { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; background: var(--ask-background); border: 1px solid var(--ask-border); border-radius: 14px; }
-.map-stranded h2 { color: var(--amber); font-size: 14px; }
+.map-stranded { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; background: var(--surface); border: 1px dashed var(--tag-border); border-radius: 14px; }
+.map-stranded h2 { color: var(--secondary); font-size: 14px; }
 .map-stranded p { font-size: 13px; line-height: 1.5; color: var(--secondary); }
 .map-mobile-lanes { display: flex; flex-direction: column; gap: 12px; }
 .map-mobile-lanes section h2 { font-size: 15px; color: var(--text); padding-top: 4px; margin-bottom: 12px; }
@@ -58,7 +58,7 @@
 .map-edge path { stroke: currentColor; stroke-width: 1.5; fill: none; }
 .map-edge polygon { fill: currentColor; }
 .map-edge-open { color: var(--text); }
-.map-edge-stranded { color: var(--amber); }
+.map-edge-stranded { color: var(--secondary); }
 .map-edge-stranded path { stroke-width: 2; stroke-dasharray: 5 3; }
 .map-edge-unknown path { stroke-dasharray: 4 4; }
 .map-edge-dim { opacity: 0.2; }
@@ -73,8 +73,8 @@
 .map-node > small { width: 100%; }
 .map-mandate-node { border-radius: 12px; background: var(--button); }
 .map-mandate-node > span { justify-content: space-between; gap: 6px; }
-.map-node-stranded { border-color: var(--map-stranded-border); background: var(--ask-background); }
-.map-node-stranded > small { color: var(--amber); }
+.map-node-stranded { border-color: var(--tag-border); border-style: dashed; background: var(--surface); }
+.map-node-stranded > small { color: var(--secondary); }
 .map-node-dim { opacity: 0.3; }
 .map-node[aria-pressed=true] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
 .map-bar-track { fill: var(--border); }

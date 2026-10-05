@@ -17,7 +17,7 @@ function screen(data: ReturnType<typeof decisions>, now: number): DecisionScreen
   generated_at:new Date(now).toISOString(),
   availability:{asks:data.askSource.availability, escalations:data.escalations.availability},
   awaiting_count:data.awaiting.count, parent_questions:data.parent_questions,
-  decided_today:{count:complete ? today.length : null, worth_count:complete ? today.filter(d => d.worth.length).length : null},
+  decided_today:{count:complete ? today.length : null, worth_count:complete ? today.filter(d => d.worth.length).length : null, by_you:data.decided_today.by_you},
  };
 }
 /** N11: the operator's recommendation matches an escalation option (its id or label) exactly, or as `label:` / `label.` plus a rationale (rows stored before open() refused sentences). */

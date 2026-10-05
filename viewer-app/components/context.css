@@ -6,7 +6,7 @@
 .ctx-chip progress::-webkit-progress-bar { background: var(--border); }
 .ctx-chip progress::-webkit-progress-value { background: var(--dim); }
 .ctx-chip progress::-moz-progress-bar { background: var(--dim); }
-.ctx-warn progress::-webkit-progress-value { background: var(--amber); }
-.ctx-warn progress::-moz-progress-bar { background: var(--amber); }
-.ctx-high progress::-webkit-progress-value { background: var(--coral); }
-.ctx-high progress::-moz-progress-bar { background: var(--coral); }
+.ctx-warn progress::-webkit-progress-value { background: var(--secondary); }
+.ctx-warn progress::-moz-progress-bar { background: var(--secondary); }
+.ctx-high progress::-webkit-progress-value { background: var(--text); }
+.ctx-high progress::-moz-progress-bar { background: var(--text); }
