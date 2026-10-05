@@ -12,6 +12,7 @@ import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObje
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
+import { recordedReview } from "./overview-jobs.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -51,6 +52,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const detail=rows.get(id); const live=base.in_flight.find(j=>j.id===id);
   const ci=ciRows.find(j=>j?.job_id===id); const envelope=obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
   const head=[ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
+  const {review,attempts}=recordedReview(state,id,head ?? null);
   const labels=strings(job?.labels); const project=str(entry?.project) ?? labels.find(l=>l.startsWith("project:"))?.slice(8) ?? "Unassigned";
   const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
   const status=readStatus(state,id); const receipt=readObject(join(state.stateDir,"runs",id,"merge.json"));
@@ -65,7 +67,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
-   ci:head && ci?.head_sha===head ? str(ci.last_ci) ?? null : null,review:live?.review ?? null,review_attempts:live?.review_attempts ?? 0,
+   ci:head && ci?.head_sha===head ? str(ci.last_ci) ?? null : null,review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,
    cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : null,pr_url:merged ? String(receipt.pr_url) : detail?.pr_url ?? null,pr_status:merged ? "merged" : detail?.pr_status ?? null,
    finished_at:finished,finished_today:today(finished,now),merge_sha:merged ? String(receipt.merge_commit_sha) : null,

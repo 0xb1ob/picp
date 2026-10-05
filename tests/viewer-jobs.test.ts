@@ -115,3 +115,18 @@ test("a merged job's CI fact follows its recorded CI event once ci-watch has pru
  assert.equal(jobView(state,"cp-none")?.job.ci,null,"no CI run recorded: still not run yet");
  assert.equal(jobView(state,"cp-stale")?.job.ci,null,"a green run on another head is not this head's CI");
 });
+
+test("a merged job's Review fact reads its recorded review files; no review stays not started",t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};
+ const at="2026-09-26T12:00:00Z";const head="c".repeat(40);const ids=["cp-pass","cp-equiv","cp-bare"];
+ put(".pi-command-post/jobs.json",{jobs:ids.map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"]}))});
+ put(LAYOUT.fleetFile,{jobs:ids.map(id=>({job_id:id,project:"demo",kind:"ship",phase:"done",dispatched_at:at,closed_at:at}))});
+ for(const id of ids) put(join(LAYOUT.runs,`${id}/envelope.json`),{envelope:{head_sha:head}});
+ put(join(LAYOUT.runs,"cp-pass/review-1.json"),{head_sha:head,verdict:"pass",decided_at:at,diff_stat:{truncated:false}});
+ put(join(LAYOUT.runs,"cp-equiv/review-equivalent-"+head+".json"),{head_sha:head,verdict:"pass",decided_at:at,diff_stat:{truncated:false}});
+ const job=(id:string)=>jobView(state,id)!.job;
+ assert.deepEqual([job("cp-pass").review,job("cp-pass").review_attempts],["pass",1]);
+ assert.deepEqual([job("cp-equiv").review,job("cp-equiv").review_attempts],["pass",0]);
+ assert.deepEqual([job("cp-bare").review,job("cp-bare").review_attempts],[null,0]);
+});

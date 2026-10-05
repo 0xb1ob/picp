@@ -7,6 +7,15 @@ import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState
 import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
 import { routingText } from "./overview-health.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
+/** The job's recorded reviews: attempt count, and the latest untruncated verdict for `head` (or a patch-equivalent pass). */
+export function recordedReview(state: ViewerState, id: string, head: string | null): {review: Json | undefined; attempts: string[]} {
+ let names: string[] = []; try { names = readdirSync(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
+ const attempts = names.filter(n => /^review-[1-9]\d*\.json$/.test(n));
+ const reviews = attempts.map(name => readObject(join(state.stateDir,"runs",id,name))).filter((v): v is Json => !!v);
+ if (head) { const equivalent = readObject(join(state.stateDir,"runs",id,`review-equivalent-${head}.json`)); if (equivalent) reviews.push(equivalent); }
+ const review = reviews.filter(r => head && r.head_sha === head && obj(r.diff_stat)?.truncated === false).sort((a,b) => (str(a.decided_at) ?? "").localeCompare(str(b.decided_at) ?? "")).at(-1);
+ return {review, attempts};
+}
 /** `rows`: the dashboard's job rows, every finished one included (`dashboard(state,now,Infinity)`), computed once by `overview`. */
 export function flights(state: ViewerState, jobs: Json[], escalations: Json[], now: number, rows: readonly JobRow[]): FlightJob[] {
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
@@ -20,11 +29,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
   const started = status?.started_at ?? job.dispatched_at;
   const exited = status?.exited_at ?? obj(job.worker)?.exited_at;
   const elapsed = timestamp(started) ? Math.max(0, ((timestamp(exited) ? Date.parse(exited) : now) - Date.parse(started))/1000) : null;
-  let names: string[] = []; try { names = readdirSync(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
-  const attempts = names.filter(n => /^review-[1-9]\d*\.json$/.test(n));
-  const reviews = attempts.map(name => readObject(join(state.stateDir,"runs",id,name))).filter((v): v is Json => !!v);
-  if (head) { const equivalent = readObject(join(state.stateDir,"runs",id,`review-equivalent-${head}.json`)); if (equivalent) reviews.push(equivalent); }
-  const review = reviews.filter(r => head && r.head_sha === head && obj(r.diff_stat)?.truncated === false).sort((a,b) => (str(a.decided_at) ?? "").localeCompare(str(b.decided_at) ?? "")).at(-1);
+  const {review, attempts} = recordedReview(state,id,head);
   const row = rows.find(r => r.job_id === id);
   const runPhase = str(status?.phase);
   return {id, project:String(job.project), title:row?.title ?? null,
