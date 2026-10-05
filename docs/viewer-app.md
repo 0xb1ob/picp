@@ -98,7 +98,7 @@ calls*; the choice is remembered in `localStorage` under one key shared by every
 run of consecutive calls collapses to one faint *· N tool calls ·* line that opens that run
 alone. Messages, notices, system entries and ask cards are never hidden. A
 result truncated behind one *show all*, `cp-bridge` messages marked `bridge`,
-compaction markers, timestamps). The cp-bridge appends each `PI_SESSION_FILE` it
+compaction markers, timestamps). A bridge notice is one line, `bridge <verb> <job> · <receipt>` (`wake` reads `woke`; underscores in a receipt become spaces), and a body of more than one line stays in a collapsed disclosure. A say line in this transcript that starts `[<project>] ` drops that prefix when `<project>` is a directory under `projects/`; the name shows as a chip, and any other bracket stays in the text. The session file picker labels each file with its date and time, marks the newest `current`, and puts the file id on the option title. The desktop heading is padded evenly; the tool-call toggle stays in that row and is not clipped. The cp-bridge appends each `PI_SESSION_FILE` it
 runs under to `state/sessions/operator-sessions.jsonl` on `cp_parent start`,
 `cp_parent send` and (with dashboard control on) `session_start`, so a relaunch is a new file and the older ones stay
 selectable, newest first. Read-only: a recorded file that is missing or is not a

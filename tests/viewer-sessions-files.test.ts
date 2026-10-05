@@ -110,7 +110,7 @@ test("operator tier: decisions is still the default, and Full transcript renders
  assert.equal(full.entries[1].text,"weighing options","thinking is its own collapsed entry");
  assert.match(full.entries[3].text,/Arguments\n\{\n  "path": "src\/a\.ts"\n\}/);
  assert.match(full.entries[3].text,/Result\nRead 42 lines/,"the result pairs with its call, not a second entry");
- assert.equal(full.entries[4].tag,"bridge"); assert.match(full.entries[4].text,/cp-bridge send/); assert.equal(full.entries[4].paths,undefined,"a notice with no paths: block carries no links at all");
+ assert.equal(full.entries[4].tag,"bridge"); assert.equal(full.entries[4].text,"Approved","the bridge header line is stripped"); assert.deepEqual(full.entries[4].bridge,{kind:"send",job:null,id:null,receipt:null}); assert.equal(full.entries[4].paths,undefined,"a notice with no paths: block carries no links at all");
  assert.match(full.entries[5].text,/260000 tokens before/);
  assert.ok(!full.entries.some((e:any)=>e.text==="hidden from the CLI"),"a display:false custom message stays hidden");
  assert.ok(!full.entries.some((e:any)=>!e.text.trim()),"the empty system record adds nothing");
@@ -165,7 +165,43 @@ test("operator Full transcript: a bridge notice's paths: block becomes viewer li
   [join(home.path, "gone/nothing.md"), null],
  ], "each path resolves once, by the viewer's own evidence rules; an unreadable one is not a link");
  assert.equal(full.entries[1].paths, undefined, "a notice with no paths: block is left alone");
+ assert.equal(full.entries[0].bridge.kind,"wake"); assert.equal(full.entries[0].bridge.job,"cp-xrhq"); assert.equal(full.entries[0].bridge.id,null); assert.equal(full.entries[0].bridge.receipt,"owner_observed"); assert.ok(full.entries[0].text.startsWith("Mobile chat landed.")); assert.doesNotMatch(full.entries[0].text,/^\[cp-bridge/);
  assert.deepEqual(full.entries[0].links, { [join(run, "artifact.md")]: "#job/cp-xrhq", [run]: "#job/cp-xrhq" }, "bare .pi-command-post paths in the text resolve by the same helper; an unreadable one is not a link");
+});
+
+test("operator Full transcript: bridge fields parse, and a project chip only for a known projects/* dir", async t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const stateDir=join(home.path, LAYOUT.state), dir=mkdtempSync(join(tmpdir(),"cp-session-project-"));
+ t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const at="2026-09-27T18:00:00Z";
+ mkdirSync(join(home.path, LAYOUT.projects, "picp"),{recursive:true});
+ writeFileSync(join(home.path, LAYOUT.projects, "notes.txt"), "not a project\n");
+ const message=(text:string)=>JSON.stringify({type:"message",timestamp:at,message:{role:"assistant",content:[{type:"text",text}]}});
+ const bridge=(content:string)=>JSON.stringify({type:"custom_message",timestamp:at,customType:"cp-bridge",display:true,content});
+ const file=join(dir,"session.jsonl");
+ writeFileSync(file,[
+  message("[picp] landed the chip"),
+  message("[notes.txt] stays in the text"),
+  message("[unknown] stays too"),
+  bridge("[cp-bridge escalation job=cp-1 id=es-abcd stale receipt=turn_settled]\nbody line"),
+  bridge("[cp-bridge wake extra]\nstill the header"),
+ ].join("\n")+"\n");
+ const record=operatorSessionsFile(join(stateDir,"sessions")); mkdirSync(dirname(record),{recursive:true});
+ writeFileSync(record,JSON.stringify({at,session_file:file})+"\n");
+ const options={home:home.path,stateDir,host:"127.0.0.1",port:0,requireTailnet:true}; const server=createViewer(options);
+ await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve)); options.port=(server.address() as AddressInfo).port;
+ t.after(()=>server.close());
+ const full=await (await fetch(`http://127.0.0.1:${options.port}/api/sessions?view=you&transcript=1`)).json() as any;
+ const says=full.entries.filter((e:any)=>e.kind==="say");
+ assert.equal(says[0].project,"picp"); assert.equal(says[0].text,"landed the chip");
+ assert.equal(says[1].project,undefined); assert.equal(says[1].text,"[notes.txt] stays in the text");
+ assert.equal(says[2].project,undefined); assert.equal(says[2].text,"[unknown] stays too");
+ const escalation=full.entries.find((e:any)=>e.bridge?.kind==="escalation");
+ assert.deepEqual(escalation.bridge,{kind:"escalation",job:"cp-1",id:"es-abcd",receipt:"turn_settled"});
+ assert.equal(escalation.text,"body line");
+ const bare=full.entries.find((e:any)=>String(e.text).includes("still the header"));
+ assert.equal(bare.bridge,undefined,"a header line that is not exactly the cp-bridge tag stays text");
+ assert.match(bare.text,/^\[cp-bridge wake extra\]/);
 });
 
 test("operator Full transcript: a missing or unrecorded file names itself, never an empty page", async t => {

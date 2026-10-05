@@ -73,7 +73,10 @@ test("QA: the operator tier has no Decisions | Full transcript toggle; system en
  const rendered=screen(full);
  assert.doesNotMatch(rendered,/>Full transcript<\/a>|>Decisions<\/a>/);
  assert.match(rendered,/aria-label="Operator session file"/,"more than one recorded file is selectable");
- assert.match(rendered,/<option value="older.jsonl">older\.jsonl/);
+ const optionLabel=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
+ assert.ok(rendered.includes(`title="newest.jsonl"`) && rendered.includes(optionLabel("2026-09-27T08:24:05Z",true)));
+ assert.ok(rendered.includes(`title="older.jsonl"`) && rendered.includes(optionLabel("2026-09-26T18:00:00Z",false)));
+ assert.doesNotMatch(rendered,/<option[^>]*>older\.jsonl/);
  assert.match(rendered,/class="session-message session-notice session-system"/);
  assert.match(rendered,/>cp-bridge<\/span><span>bridge<\/span>/);
  assert.match(rendered,/>compaction<\/span>/);

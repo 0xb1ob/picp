@@ -86,6 +86,29 @@ function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;o
  * A cp-bridge wake or escalation, or any other system entry (compaction, custom messages): one muted line, the rest and a
  * relay's `paths:` links behind one expander (mobile-chat-layout). An opened relay past RELAY_LINES shows its head and "Show more".
  */
+function bridgeWords(b: NonNullable<SessionEntry["bridge"]>): string {
+ const verb = b.kind === "wake" ? "woke" : b.kind.replaceAll("_", " ");
+ const receipt = b.receipt?.replaceAll("_", " ");
+ return ["bridge", verb, b.job].filter(Boolean).join(" ") + (receipt ? ` · ${receipt}` : "");
+}
+/** A parsed cp-bridge notice: one summary line, the body in a collapsed details when more than one line remains. */
+function BridgeNotice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
+ const [open,setOpen]=useState(false);
+ const lines=e.text.length ? e.text.split("\n") : [];
+ const links=e.paths ?? [];
+ const at=links.length ? lines.findIndex(line=>line.trim() === "paths:") : -1;
+ const prose=(at < 0 ? lines : lines.slice(0,at)).join("\n").replace(/\n+$/,"");
+ const multi=e.text.includes("\n");
+ return <article class="session-message session-notice session-system session-bridge">
+  {clock}
+  <div class="session-body">
+   <div class="session-who"><span>{e.who}</span>{e.tag && <span>{e.tag}</span>}</div>
+   <p class="session-bridge-line">{bridgeWords(e.bridge!)}</p>
+   {multi ? <details class="session-bridge-details" open={open}><summary class="session-notice-line" aria-expanded={open} onClick={ev=>{ev.preventDefault();setOpen(!open);}}><small>{open ? "Hide notice" : "Show notice"}</small></summary>{open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>{link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>}</details>
+    : prose ? <p><InlineText text={prose} links={e.links}/></p> : null}
+  </div>
+ </article>;
+}
 function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
  const [open,setOpen]=useState(false);
  const [full,setFull]=useState(false);
@@ -113,7 +136,7 @@ function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
 /** A message bubble: the prompting side on the right in the accent colour, the session on the left; a group's first bubble carries who and when. */
 function Bubble({entry:e,first}: {entry:SessionEntry;first:boolean}) {
  return <article class={`session-message session-say session-bubble ${isOwn(e) ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
-  {first && <div class="session-who"><span>{e.who}</span>{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
+  {first && <div class="session-who"><span>{e.who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
   <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
  </article>;
 }
@@ -123,7 +146,7 @@ function Entry({entry:e,first=true}: {entry:SessionEntry;first?:boolean}) {
  const head=e.kind === "tool" && e.text.length > TOOL_TEXT_MAX ? e.text.slice(0,TOOL_TEXT_MAX) : e.text;
  return <div class={e.failed ? "session-entry session-failed" : "session-entry"}>
   {e.kind === "tool" ? <details class="session-tool"><summary>{clock}<code>{e.name}</code><span>{e.summary}</span></summary><pre><Linked text={head} links={e.links}/></pre>{head !== e.text && <details class="session-tool-all"><summary>show all</summary><pre><Linked text={e.text.slice(TOOL_TEXT_MAX)} links={e.links}/></pre></details>}</details> :
-   e.kind === "system" || e.tag === "bridge" ? <Notice entry={e} clock={clock}/> :
+   e.kind === "system" || e.tag === "bridge" ? (e.bridge ? <BridgeNotice entry={e} clock={clock}/> : <Notice entry={e} clock={clock}/>) :
    isBubble(e) ? <Bubble entry={e} first={first}/> :
    // Ask and decision cards keep their card look.
    <article class="session-message session-notice">
@@ -139,6 +162,12 @@ const closeMenu = (e: {currentTarget: EventTarget | null}) => { const menu = (e.
  * a compact ctx chip, the composer's status chip, and one ⋯ menu for tool calls, the session file and search.
  * It replaces the shell header, the tab rows and the heading below 900 px; desktop keeps its sidebar and heading.
  */
+const sessionWhen = new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+function sessionOptionLabel(at: string, current: boolean): string {
+ const date = new Date(at), when = Number.isNaN(date.getTime()) ? at : sessionWhen.format(date);
+ return current ? `${when} · current` : when;
+}
+const fileOptions = (files: {id:string;at:string}[]) => files.map((s,i)=><option key={s.id} value={s.id} title={s.id}>{sessionOptionLabel(s.at,i === 0)}</option>);
 function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void}) {
  const shell = useContext(ShellContext);
  const composer = data.transcript === true && control;
@@ -162,7 +191,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
    <div class="session-bar-sheet">
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
-    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{files.map(s=><option key={s.id} value={s.id}>{s.id} · {time(s.at)}</option>)}</select>}
+    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select>}
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
     {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
    </div>
@@ -229,7 +258,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
    <header class="session-heading"><div><strong>{data.title}</strong><span>{data.subtitle}</span><ContextChip usage={context}/></div>
     {/* Audit P4 #27: no Decisions | Full transcript toggle; the decision log lives on the Decisions page (a refused transcript still falls back silently). */}
-    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{files.map(s=><option key={s.id} value={s.id}>{s.id} · {time(s.at)}</option>)}</select>}
+    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select>}
     {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     {data.selected === "you" && <p>{data.transcript === true ? "The operator session's own pi transcript, entry for entry, newest last." : "Trace a decision: parent’s question → operator’s answer → the message you saw."}</p>}</header>
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
