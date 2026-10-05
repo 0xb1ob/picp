@@ -35,6 +35,8 @@ import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync, c
 import { dirname, join, resolve } from "node:path";
 import { isIsoTimestamp, isoTimestamp, LAYOUT, SCHEMA_VERSION } from "./contracts.ts";
 import { isPidAlive as probePid } from "./fleet.ts";
+// Not loaded-commit.ts: importing it reads HEAD, and only the process that writes the lock should pay that.
+import { SHA } from "./viewer/git-read.ts";
 
 /** What the lock file holds. Small on purpose: a human reads this. */
 export interface ParentLockRecord {
@@ -45,6 +47,8 @@ export interface ParentLockRecord {
 	home: string;
 	/** pi's session id, when the caller knows it. Advisory. */
 	session_id?: string;
+	/** The commit the parent loaded (src/viewer/loaded-commit.ts); absent in a lock written before cp-kz20. Advisory. */
+	commit?: string;
 }
 
 export interface ParentLock {
@@ -75,6 +79,8 @@ export interface ParentLockOptions {
 	home: string;
 	pid?: number;
 	sessionId?: string;
+	/** The commit this parent loaded; recorded for the version badge, never compared here. */
+	commit?: string;
 	now?: () => Date;
 	/** Injected in tests; production probes the real process table. */
 	isPidAlive?: (pid: number) => boolean;
@@ -130,6 +136,7 @@ export function parseParentLock(text: string): ParentLockRecord | undefined {
 		started_at: candidate.started_at,
 		home: candidate.home,
 		...(typeof candidate.session_id === "string" ? { session_id: candidate.session_id } : {}),
+		...(typeof candidate.commit === "string" && SHA.test(candidate.commit) ? { commit: candidate.commit } : {}),
 	};
 }
 
@@ -151,6 +158,7 @@ export function acquireParentLock(options: ParentLockOptions): ParentLockResult 
 		started_at: isoTimestamp(options.now?.() ?? new Date()),
 		home,
 		...(options.sessionId ? { session_id: options.sessionId } : {}),
+		...(options.commit && SHA.test(options.commit) ? { commit: options.commit } : {}),
 	};
 
 	const write = (): { ok: true } | { ok: false; exists: boolean; reason: string } => {

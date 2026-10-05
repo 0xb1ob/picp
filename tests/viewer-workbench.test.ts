@@ -172,14 +172,14 @@ test("server: /api/dashboard and /api/awaiting are JSON under a deny-all CSP; ev
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	options.port = (server.address() as AddressInfo).port;
 	t.after(() => server.close());
-	for (const path of ["/api/dashboard", "/api/awaiting"]) {
+	for (const path of ["/api/dashboard", "/api/awaiting", "/api/version"]) {
 		const reply = await get(options.port, path);
 		assert.equal(reply.status, 200, path);
 		assert.match(String(reply.headers["content-type"]), /application\/json/);
 		assert.match(String(reply.headers["content-security-policy"]), /default-src 'none'/);
 		JSON.parse(reply.body);
 	}
-	for (const path of ["/api/dashboard", "/api/awaiting", "/api/job", "/api/diff", "/api/roots", "/api/files", "/api/git"]) {
+	for (const path of ["/api/dashboard", "/api/awaiting", "/api/job", "/api/diff", "/api/roots", "/api/files", "/api/git", "/api/version"]) {
 		for (const method of ["POST", "PUT", "PATCH", "DELETE"]) assert.equal((await get(options.port, path, method)).status, 405, `${method} ${path}`);
 		assert.equal((await get(options.port, path, "GET", "evil.example")).status, 421, path);
 	}

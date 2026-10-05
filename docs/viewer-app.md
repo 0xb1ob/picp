@@ -63,6 +63,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Reports / Schedules / Files | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` |
 | Search | Shell dialog (f7g.7), available from every screen |
+| Version | Shell badge (phone header, desktop corner, Sessions top bar); `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
@@ -130,6 +131,16 @@ Finished today tab's done rows; the heading carries the merged jobs' total cost 
 reviewer, as the Jobs list counts it — and each row its own, capped at five rows with "N more in
 Jobs →"). The shell shows the browser's local time and short zone
 name in the phone header and the desktop top-right corner, updated every 15 s.
+
+**Version badge** (cp-kz20, `viewer-app/components/VersionBadge.tsx`): a 44 px button with a dot and a short
+text — `✓` latest, `N↓` behind, `↻` a stale process, `!` alert, `?` unknown — beside the clock in the phone header,
+with its label in the desktop corner, and in the Sessions top bar on phone (where the shell header is hidden).
+Colour is never the only signal. Tapping it opens the three layers: the deployed commit and upstream (behind/ahead
+origin/main and when the updater last fetched, its result and detail), each running process — viewer, parent host,
+CP parent, operator session — with its state and the restart that fixes it, and this page: when its app script differs
+from the server's `bundle.script` the badge is at least amber and the panel offers **Reload page** (the browser's own
+reload; no write route). The shell reads `/api/version` once on mount, every 60 s and when the tab becomes visible,
+one read for every badge. Semantics: `docs/contracts.md`, *Version view*.
 
 Search filters enabled entries from the current route table plus in-flight job
 titles and IDs. The shell reads `/api/overview` once per opening, aborts on close

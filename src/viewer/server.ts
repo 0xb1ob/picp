@@ -40,6 +40,7 @@ import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, se
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
+import { readVersion } from "./version-view.ts";
 
 export interface ViewerOptions extends ViewerState {
 	app?: ViewerApp;
@@ -189,6 +190,13 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			return;
 		case "/api/identity":
 			sendJson(res, 200, { viewer: "command-post", home: resolve(options.home) });
+			return;
+		case "/api/version":
+			readVersion({ home: options.home, stateDir: options.stateDir, script: options.app?.script ?? null })
+				.then((view) => sendJson(res, 200, view))
+				.catch(() => {
+					if (!res.headersSent) sendJson(res, 500, { error: "internal" });
+				});
 			return;
 		case "/healthz":
 			send(res, 200, "text/plain; charset=utf-8", "ok\n");

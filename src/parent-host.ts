@@ -45,6 +45,7 @@ import { isPidAlive } from "./fleet.ts";
 import { deliverableRelay } from "./relay-scope.ts";
 import type { ParentSendDelegation } from "./parent-outbox.ts";
 import { readParentLock } from "./parent-lock.ts";
+import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
 
 export const PARENT_HOST_PROTOCOL = 1;
 const HOST_SCRIPT = fileURLToPath(import.meta.url);
@@ -66,6 +67,8 @@ export interface HostRecord {
 	socket: string;
 	token: string;
 	started_at: string;
+	/** The commit this host loaded (src/viewer/loaded-commit.ts); absent in a record written before cp-kz20. */
+	commit?: string;
 }
 
 export interface HostPaths {
@@ -204,7 +207,8 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	mkdirSync(paths.dir, { recursive: true });
 	const token = randomBytes(32).toString("hex");
 	const socketPath = paths.socket(gen);
-	const record: HostRecord = { version: PARENT_HOST_PROTOCOL, pid: process.pid, socket: socketPath, token, started_at: new Date().toISOString() };
+	const commit = (await LOADED_COMMIT)?.sha;
+	const record: HostRecord = { version: PARENT_HOST_PROTOCOL, pid: process.pid, socket: socketPath, token, started_at: new Date().toISOString(), ...(commit ? { commit } : {}) };
 	const tmp = `${paths.record(gen)}.${process.pid}.tmp`;
 	writeFileSync(tmp, `${JSON.stringify(record)}\n`, { mode: 0o600 });
 	let claimed = true;

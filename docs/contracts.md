@@ -1371,7 +1371,7 @@ the bridge above — parent `WorkerProcess`, outbox and relay stream — so the
 parent and its workers outlive the operator process. Clients speak framed,
 versioned (`PARENT_HOST_PROTOCOL`) JSON lines on the owner-only socket
 `state/parent-host.<gen>.sock`, each request carrying the per-host token from
-the 0600 record `state/parent-host.<gen>.json`; every RPC-reaching op runs on
+the 0600 record `state/parent-host.<gen>.json` (which also names, optionally, the `commit` the host loaded); every RPC-reaching op runs on
 one serialization queue. The current host is the highest generation, and its
 record is never deleted, only superseded: a host whose pid and lock pid are
 both dead is replaced by claiming `<gen + 1>` with an exclusive `link`, so
@@ -5593,9 +5593,24 @@ first failed (409).
 `session_start` the operator session binds `state/operator/dashboard.sock` (umask 077, then 0600; ≤ 107 bytes; a
 live socket another session serves is a named refusal, a stale one is unlinked only when nothing answers) and
 writes the 0600 record `state/operator/dashboard.json` (`pid`, `socket`, a fresh 32-byte socket `token` and CSRF
-`csrf` per session start). Frames are NDJSON `{v, token, id, op, args}`; a wrong socket token closes the
+`csrf` per session start, and an optional `commit` — the version view's, below). Frames are NDJSON `{v, token, id, op, args}`; a wrong socket token closes the
 connection. `session_shutdown` closes the socket and removes the record. No new network listener: with no
 operator session there is no socket, and the dashboard says **session not running**.
+
+**Version view** ([`src/viewer/version-view.ts`](../src/viewer/version-view.ts), cp-kz20). `GET /api/version` (GET
+only, Host-bound like every viewer route; no write route), the cp-bridge footer status `cp-version` and `/cp-version`'s
+third line read one function, `readVersion`. Three layers: the checkout's HEAD against the local
+`refs/remotes/origin/main` (behind/ahead, never a fetch; `checked_at` only when `state/update.json` records a
+fetch-proving result within 30 min), each long-lived process — viewer, parent host, CP parent, operator session — by
+the `commit` its record carries (`parent-host.<gen>.json`, `parent.lock`, `operator/dashboard.json`; the field is
+additive and optional, written from `LOADED_COMMIT` = HEAD when the process imported its code), and the page's bundle
+against `bundle.script`. A record without `commit` is `stale` only when it started before `update.json`'s
+`updated_at`, else `unknown`; a dead pid is `down`. `overall.level` is `alert` (operator session stale, an update
+`failed`/`rolled_back`/`rollback_failed`/`drain_timeout`/`migration_required`/`config_invalid`, ≥ 3 failed fetches) >
+`warn` (behind, another process stale) > `unknown` (HEAD unreadable, upstream not comparable or unchecked, an alive
+process unknown) > `ok`; ahead and diverged never warn. Records are read for `pid`, `started_at` and `commit` only —
+no token, CSRF or socket value reaches the response. Git runs through the bounded `runGit` and is cached 10 s per
+repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 
 **The viewer's routes** ([`src/viewer/control-api.ts`](../src/viewer/control-api.ts)). `GET
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the

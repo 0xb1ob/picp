@@ -277,3 +277,28 @@ export interface PushStatusResponse {
  generated_at: string; configured: boolean; origin: string | null; public_key: string | null;
  devices: number | null; last_sent_at: string | null; undelivered_24h: number | null; last_error: string | null;
 }
+/** The version badge (cp-kz20): ok green, warn amber, alert red, unknown grey. */
+export type VersionLevel = "ok" | "warn" | "alert" | "unknown";
+export type ProcessRole = "viewer" | "host" | "parent" | "operator";
+/** One running process against the checkout: `current`/`stale` by its recorded commit; `down` when no record or a dead pid. */
+export interface ProcessVersion {
+ role: ProcessRole; state: "current" | "stale" | "unknown" | "down"; commit: string | null; started_at: string | null;
+ pid_alive: boolean; why: string; fix: string | null;
+}
+/** The checkout against the local `origin/main` ref the updater fetches; `checked_at` only when that ref is known fresh. */
+export interface UpstreamVersion {
+ state: "current" | "behind" | "ahead" | "diverged" | "unknown"; behind: number | null; ahead: number | null; reason: string | null;
+ checked_at: string | null;
+ /** `state/update.json` + `data/update.json`; null when the updater never ran. */
+ updater: {enabled: boolean; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number} | null;
+}
+/** `GET /api/version`: picked fields only, never a token, csrf or socket. */
+export interface VersionResponse {
+ generated_at: string;
+ deployed: {sha: string; at: string} | null;
+ upstream: UpstreamVersion;
+ processes: ProcessVersion[];
+ /** The app script this server serves; a page whose own script differs is outdated. */
+ bundle: {script: string | null};
+ overall: {level: VersionLevel; label: string};
+}

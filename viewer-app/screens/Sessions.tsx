@@ -12,6 +12,7 @@ import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { ShellContext } from "../components/Shell.tsx";
+import { VersionBadge } from "../components/VersionBadge.tsx";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
@@ -145,6 +146,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   <span class={`shell-live shell-live-${shell.status}`} role="status" aria-label={`Data ${shell.status}`} title={shell.status}><span/></span>
   {context && <span class={`session-bar-ctx ctx-${context.level ?? "unknown"}`} title={contextText(context)}>{context.percent === null ? "ctx n/a" : `${Math.round(context.percent)}%`}</span>}
   {composer && <span class="session-bar-status" role="status" title={[controlLine(control.status),deliveryLine(control.delivery)].filter(Boolean).join(" · ")}>{controlChip(control.status,control.delivery)}</span>}
+  {shell.version && <VersionBadge state={shell.version}/>}
   <details class="session-bar-menu session-bar-more">
    <summary aria-label="More" title="More"><Icon name="more"/></summary>
    <div class="session-bar-sheet">

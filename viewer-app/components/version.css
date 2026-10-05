@@ -1,0 +1,30 @@
+/* The version badge (cp-kz20): `.shell-version*` only, so no shell or screen rule can clip it (cp-wuhl). */
+.shell-version { position: relative; flex-shrink: 0; }
+.shell-version > summary { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; gap: 4px; list-style: none; cursor: pointer; border-radius: 10px; font-size: 12px; color: var(--muted); }
+.shell-version > summary::-webkit-details-marker { display: none; }
+.shell-version[open] > summary { background: var(--surface); color: var(--text); }
+.shell-version-labelled > summary { width: auto; min-width: 44px; max-width: 320px; padding: 0 8px; }
+.shell-version-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-version-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+.shell-version-ok .shell-version-dot { background: var(--green); }
+.shell-version-warn .shell-version-dot { background: var(--amber); }
+.shell-version-alert .shell-version-dot { background: var(--coral); }
+.shell-version-ok .shell-version-short { color: var(--green); }
+.shell-version-warn .shell-version-short { color: var(--amber); }
+.shell-version-alert .shell-version-short { color: var(--coral); font-weight: 600; }
+/* Fixed, not anchored to the badge: on a phone the badge sits mid-header and an anchored panel would leave the screen. */
+.shell-version-panel { position: fixed; top: calc(60px + env(safe-area-inset-top)); right: 8px; z-index: 20; width: 340px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 80px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); font-size: 13px; color: var(--text); overflow-wrap: anywhere; text-align: left; }
+.shell-version-head { font-weight: 600; }
+.shell-version-layers { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; }
+.shell-version-layers dt { color: var(--muted); }
+.shell-version-layers dd { margin: 0; min-width: 0; }
+.shell-version-panel small { display: block; font-size: 12px; color: var(--muted); }
+.shell-version-procs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.shell-version-state { display: inline-block; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
+.shell-version-state-current { color: var(--green); }
+.shell-version-state-stale { color: var(--amber); }
+.shell-version-fix { color: var(--text) !important; }
+.shell-version-reload { min-height: 44px; margin-top: 6px; padding: 0 14px; display: block; background: var(--background); border: 1px solid var(--border); border-radius: 10px; }
+@media (min-width: 900px) {
+ .shell-version-panel { top: 60px; right: 24px; }
+}

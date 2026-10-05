@@ -6,6 +6,7 @@ import "./styles/shell.css";
 import "./components/search.css";
 import "./components/context.css";
 import "./components/control.css";
+import "./components/version.css";
 import "./screens/overview.css";
 import "./screens/overview-decisions.css";
 import "./screens/more.css";

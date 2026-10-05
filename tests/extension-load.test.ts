@@ -79,10 +79,12 @@ test("pi loads the command-post extension and /cp-version reports identity", { t
 			typeof r.message === "string" &&
 			(r.message as string).startsWith(`${identity.name} ${identity.version}`),
 	);
-	const [line, homeLine] = String(notify.message).split("\n");
+	const [line, homeLine, commitLine] = String(notify.message).split("\n");
 	assert.equal(line, `${identity.name} ${identity.version} (root: ${identity.root})`);
 	// T30 + spec 2026-09-04: /cp-version says which mode and home it resolved, and why.
 	assert.match(String(homeLine), new RegExp(`^multi-project mode, home ${home.path} \\(source: CP_HOME`));
+	// cp-kz20: the loaded commit against the checkout's HEAD, through the version view's bounded git read.
+	assert.match(String(commitLine), /^commit [0-9a-f]{7} · deployed [0-9a-f]{7} \(current\) · upstream /);
 
 	const promptResponse = await rpc.waitFor((r) => r.type === "response" && r.id === "run");
 	assert.equal(promptResponse.success, true);
