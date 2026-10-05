@@ -146,6 +146,8 @@ test("layout: the tool-calls toggle and a collapsed bridge notice hold at 390px,
 	assert.match(css, /\.session-system \.session-notice-line > span \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;[^}]*\}/, "a long first line ellipsizes instead of wrapping the row");
 	assert.match(css, /\.session-notice-paths a, \.session-notice-paths code \{ min-width: 0; overflow-wrap: anywhere; \}/, "long paths wrap inside the expanded body");
 	assert.doesNotMatch(desktop, /\.session-tools-toggle|\.session-bridge|\.session-notice-line|\.session-notice-paths/, "the desktop block leaves the phone rules in place at 1440px");
+	assert.doesNotMatch(css, /\.session-tools-toggle[^{]*\{[^}]*display:\s*none/, "the heading toggle is not hidden at 1440");
+	assert.match(css, /\.session-heading \{[^}]*overflow: visible/, "the heading row does not clip the toggle");
 });
 
 test("mobile top bar: the ⋯ sheet's tool toggle is the same remembered choice; pinned decisions collapse to one bar and close after a click", async (t) => {
@@ -188,7 +190,8 @@ const BRIDGE_TEXT = [
 	"- /home/ubuntu/workspace/pi-command-post/.pi-command-post/state/artifacts/cp-xrhq/report.md",
 ].join("\n");
 const bridgeEntry = (): SessionEntry => entry("s1", "system", {
-	who: "cp-bridge", tag: "bridge", text: BRIDGE_TEXT,
+	who: "cp-bridge", tag: "bridge", text: BRIDGE_TEXT.split("\n").slice(1).join("\n"),
+	bridge: { kind: "wake", job: "cp-xrhq", id: null, receipt: "owner_observed" },
 	paths: [
 		{ path: "/h/state/runs/cp-xrhq/artifact.md", href: "#job/cp-xrhq", read: null },
 		{ path: "/h/state/runs/cp-xrhq", href: "#job/cp-xrhq", read: null },
@@ -203,7 +206,8 @@ test("a cp-bridge notice starts collapsed to its first line and opens its paths 
 	const line = () => root.querySelector(".session-notice-line")!;
 
 	assert.equal(line().getAttribute("aria-expanded"), "false", "collapsed until tapped: nothing is remembered");
-	assert.equal(line().textContent, "[cp-bridge wake job=cp-xrhq receipt=owner_observed]7 more lines", "its first line, plus the count of what it hides");
+	assert.equal(root.querySelector(".session-bridge-line")!.textContent, "bridge woke cp-xrhq · owner observed", "one line: verb, job, receipt words");
+	assert.equal(line().textContent, "Show notice");
 	assert.doesNotMatch(root.innerHTML, /Mobile chat layout|pull\/357/, "the body and the repeated relay lines stay hidden");
 
 	await click(line());

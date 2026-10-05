@@ -28,14 +28,14 @@
 .session-system .session-body p { font-size: 13px; color: var(--muted); }
 .session-tool-all { margin: 0 0 12px; }
 .session-tool-all summary { min-height: 32px; cursor: pointer; font-size: 12px; color: var(--secondary); }
-.session-heading { display: none; padding: 0 16px 12px; border-bottom: 1px solid var(--divider); }
+.session-heading { display: none; padding: 0 16px 12px; border-bottom: 1px solid var(--divider); overflow: visible; }
 .session-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .session-heading strong { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-heading span { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-heading > div > * { max-width: 100%; }
 .session-heading > div { flex-wrap: wrap; }
 .session-heading > div > .ctx-chip { width: 100%; }
-.session-tools-toggle { display: flex; align-items: center; min-height: 44px; margin-top: 6px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; margin-top: 6px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
 .session-tools { display: flex; align-items: center; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--dim); cursor: pointer; }
 .session-tools:hover { color: var(--muted); }
@@ -52,6 +52,10 @@
 .session-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .session-who { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--muted); }
 .session-body p { font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
+.session-project { flex-shrink: 0; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--secondary); }
+.session-message.session-system .session-bridge-line { flex: 1 1 120px; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 44px; color: var(--muted); }
+.session-bridge-details { flex-basis: 100%; }
+.session-bridge-details > summary { list-style: none; }
 .session-body p a { overflow-wrap: anywhere; }
 .session-notice { margin: 8px 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; gap: 4px; }
 .session-notice:has(.session-awaiting) { border-color: var(--ask-border); }
@@ -143,8 +147,7 @@
  .session-choice > span:last-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
  .session-choice strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  .session-choice small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- /* The right padding keeps the heading's controls clear of the fixed shell corner clock (audit P2 #15). */
- .session-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 72px; padding: 12px 136px 12px 40px; }
+ .session-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 72px; padding: 12px 40px; overflow: visible; }
  .session-heading > div { min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; gap: 3px; }
  .session-heading strong { font-size: 17px; }
  /* A long session file name must not squeeze the title to nothing. */

@@ -18,7 +18,20 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  for (const selected of ["parent","workers"] as const) assert.doesNotMatch(screen({...sessions,selected}),/Trace a decision|entry for entry/,`no operator helper on the ${selected} view`);
  // Audit P2 #15: the corner-clock clearance is desktop only; the phone heading keeps its own 16px padding.
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/sessions.css"),"utf8"); const desktop=css.indexOf("@media (min-width: 900px)");
- assert.ok(desktop>0 && css.indexOf("136px")>desktop,"the clock padding sits in the desktop media block"); assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
+ assert.ok(desktop>0); assert.equal(css.includes("136px"),false,"the corner clock is gone, so the heading no longer dodges it");
+ assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
+ assert.match(css.slice(desktop),/\.session-heading \{[^}]*padding: 12px 40px;/);
+ assert.doesNotMatch(css,/\.session-tools-toggle[^{]*\{[^}]*display:\s*none/,"the tool-call toggle is never display:none, including at 1440");
+ const stamped="2026-09-27T08:24:05Z", olderAt="2026-09-26T18:00:00Z";
+ const when=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
+ const picked=screen({...sessions,transcript:true,operator_sessions:[{id:"newest.jsonl",at:stamped},{id:"older.jsonl",at:olderAt}],operator_session:"newest.jsonl",entries:[
+  {id:"p1",at:stamped,kind:"say",who:"Assistant",text:"landed",name:null,send_id:null,tag:null,failed:false,trace:[],project:"picp"},
+  {id:"b1",at:stamped,kind:"system",who:"cp-bridge",text:"Mobile chat landed.\nSecond line.",name:null,send_id:null,tag:"bridge",failed:false,trace:[],bridge:{kind:"wake",job:"cp-x",id:null,receipt:"owner_observed"}},
+ ]});
+ assert.ok(picked.includes(`title="newest.jsonl"`) && picked.includes(when(stamped,true)) && picked.includes(when(olderAt,false)));
+ assert.match(picked,/class="session-project">picp</);
+ assert.match(picked,/class="session-bridge-line">bridge woke cp-x · owner observed</);
+ assert.match(picked,/class="session-bridge-details"/); assert.doesNotMatch(picked,/session-bridge-details" open/);
  // Audit P2 #14: held-idle counts as live the way the Overview's health() does, and a running worker shows its run phase, never "waiting".
  const workers=[{id:"cp-run",kind:"worker",job_id:"cp-run",phase:"waiting",run_phase:"working",model:"m",live:true},{id:"cp-idle",kind:"worker",job_id:"cp-idle",phase:"held",run_phase:"idle",model:"m",live:false},{id:"cp-gone",kind:"worker",job_id:"cp-gone",phase:"done",run_phase:"exited",model:"m",live:false}];
  const listed=screen({...sessions,workers});

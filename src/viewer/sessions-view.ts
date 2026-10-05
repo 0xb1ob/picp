@@ -1,4 +1,5 @@
-import { statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
 import { isAskId, parseDashboardText } from "./control-files.ts";
@@ -50,7 +51,27 @@ const SIDES = {
  * entry named `thinking`. A missing file reads as nothing here; the caller
  * names why.
  */
-function parseTranscript(file: string, sides: {user:string;assistant:string}): {entries:SessionEntry[];truncated:boolean} {
+const BRIDGE_HEAD = /^\[cp-bridge (\S+)((?: \S+=\S+| stale)*)\]$/;
+function bridgeHead(text: string): {bridge: NonNullable<SessionEntry["bridge"]>; rest: string} | undefined {
+ const nl = text.indexOf("\n"), first = nl < 0 ? text : text.slice(0, nl), m = BRIDGE_HEAD.exec(first);
+ if (!m) return;
+ const attrs = m[2] ?? "", field = (key: string) => new RegExp(`(?:^| )${key}=(\\S+)`).exec(attrs)?.[1] ?? null;
+ return {bridge:{kind:m[1]!,job:field("job"),id:field("id"),receipt:field("receipt")},rest:nl < 0 ? "" : text.slice(nl + 1)};
+}
+/** `projects/*` directory names, once per read. A missing dir matches nothing. */
+function projectNames(state: ViewerState): Set<string> {
+ try { return new Set(readdirSync(join(dirname(state.stateDir),"projects"),{withFileTypes:true}).filter(d => d.isDirectory()).map(d => d.name)); }
+ catch { return new Set(); }
+}
+function stampProjects(entries: SessionEntry[], names: Set<string>): void {
+ for (const e of entries) {
+  if (e.kind !== "say") continue;
+  const m = /^\[([^\]]+)\] /.exec(e.text);
+  if (!m || !names.has(m[1]!)) continue;
+  e.project = m[1]!; e.text = e.text.slice(m[0].length);
+ }
+}
+function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}): {entries:SessionEntry[];truncated:boolean} {
  const start = startOffset(file,undefined,BACKLOG_BYTES);
  const lines = readLines(file,start.offset,BACKLOG_BYTES);
  const entries: SessionEntry[] = [];
@@ -74,6 +95,7 @@ function parseTranscript(file: string, sides: {user:string;assistant:string}): {
    if (!text.trim()) continue;
    const customEntry = entry(`${base}-custom`,at,"system",custom,text);
    customEntry.tag = custom === "cp-bridge" ? "bridge" : "system";
+   if (customEntry.tag === "bridge") { const parsed = bridgeHead(text); if (parsed) { customEntry.bridge = parsed.bridge; customEntry.text = parsed.rest; } }
    entries.push(customEntry);
    continue;
   }
@@ -121,6 +143,7 @@ function parseTranscript(file: string, sides: {user:string;assistant:string}): {
    e.send_id=ids.length === 1 ? ids[0]! : null; entries.push(e);
   }
  }
+ if (sides === SIDES.you) stampProjects(entries, projectNames(state));
  return {entries,truncated:start.offset>0};
 }
 
@@ -184,7 +207,7 @@ function withAskCards(entries: SessionEntry[], asks: ReturnType<typeof decisions
 function transcript(state: ViewerState, id: string) {
  const file = resolveSessionFile(state,id);
  if (!file) return {entries:[],truncated:false,warning:"Transcript unavailable"};
- const result = source(() => parseTranscript(file,id === "cp-parent" ? SIDES.parent : SIDES.workers),{entries:[] as SessionEntry[],truncated:false});
+ const result = source(() => parseTranscript(state, file, id === "cp-parent" ? SIDES.parent : SIDES.workers),{entries:[] as SessionEntry[],truncated:false});
  const window = windowed(result.value.entries);
  attachNoticePaths(state,window.entries);
  return {entries:window.entries,truncated:result.value.truncated || window.cut,warning:result.availability === "ok" ? null : "Transcript unavailable"};
@@ -216,7 +239,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  else {
   try {
    if (!statSync(selected.file).isFile()) throw new Error("not a file");
-   const parsed = parseTranscript(selected.file,SIDES.you);
+   const parsed = parseTranscript(state, selected.file, SIDES.you);
    entries = parsed.entries; truncated = parsed.truncated;
   } catch (error) {
    const code = (error as NodeJS.ErrnoException).code;
