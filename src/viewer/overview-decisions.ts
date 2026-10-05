@@ -77,7 +77,7 @@ export function decisions(state: ViewerState, now: number) {
   askSource, askHistory, escalations, decision_items,
   awaiting:{count:askSource.availability === "unavailable" ? null : askSource.value.length, items:askSource.value},
   parent_questions,
-  decided_today:{count:escalations.availability === "unavailable" ? null : delegated.length, items:delegated.slice(0,3), worth_count:null},
+  decided_today:{count:escalations.availability === "unavailable" ? null : delegated.length, items:delegated.slice(0,3), worth_count:null, by_you:askHistory.availability === "unavailable" ? null : askHistory.value.filter(r => r.state === "answered" && !!r.answered_at && today(r.answered_at, now)).length},
   all_questions_delegated:escalations.availability !== "unavailable" && opens.length === 0 && answered.length > 0 && delegated.length === answered.length,
  };
 }

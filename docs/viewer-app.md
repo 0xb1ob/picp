@@ -63,7 +63,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Reports / Schedules / Files | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` |
 | Search | Shell dialog (f7g.7), available from every screen |
-| Version | Shell badge (phone header, desktop corner, Sessions top bar); `GET /api/version` |
+| Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
@@ -115,7 +115,7 @@ evidence helper resolves it (`SessionEntry.links`).
 Overview is the executive landing page and answers four questions at a glance (dashboard audit P3):
 what runs now and on which project, what is blocked or needs you, what landed today and what it
 cost, and whether the system is healthy. Top to bottom: a health strip (parent alive when the pid
-`parent.lock` records is still running; operator running or offline, amber with "N unanswered,
+`parent.lock` records is still running; operator running or offline, with "N unanswered,
 oldest Xm" once any parent question has waited 10 minutes, linking to Decisions (`#decided`); main CI per project
 from `state/main-ci.json`, "red since <sha> <time>" while latched and otherwise "no red latch" —
 never "green", since a missing row is no proof of green, and the viewer re-reads the file rather
@@ -129,18 +129,19 @@ fact that matters: CI red, CI running, review N/5, or CI green) and Landed today
 without PR: the same total as the Board's Landed today column, which counts every lane, and the Jobs
 Finished today tab's done rows; the heading carries the merged jobs' total cost — worker plus
 reviewer, as the Jobs list counts it — and each row its own, capped at five rows with "N more in
-Jobs →"). The shell shows the browser's local time and short zone
-name in the phone header and the desktop top-right corner, updated every 15 s.
+Jobs →"). The shell shows one time, the data's `generated_at` in the browser's own zone: on a phone, `live · HH:MM <zone>` inside the header on main screens and `HH:MM <zone>` on a subpage or job page; on a desktop, an in-flow bar at the top of the page reads `updated HH:MM:SS <zone>` beside ⋮. There is no second clock and no fixed overlay.
 
 **Version badge** (cp-kz20, `viewer-app/components/VersionBadge.tsx`): a 44 px button with a dot and a short
-text — `✓` latest, `N↓` behind, `↻` a stale process, `!` alert, `?` unknown — beside the clock in the phone header,
-with its label in the desktop corner, and in the Sessions top bar on phone (where the shell header is hidden).
+text — `✓` latest, `N↓` behind, `↻` a stale process, `!` alert, `?` unknown — as the Viewer row of the ⋮ menu,
+labelled in that row, and in the Sessions top bar on phone (where the shell header is hidden).
 Colour is never the only signal. Tapping it opens the three layers: the deployed commit and upstream (behind/ahead
 origin/main and when the updater last fetched, its result and detail), each running process — viewer, parent host,
 CP parent, operator session — with its state and the restart that fixes it, and this page: when its app script differs
-from the server's `bundle.script` the badge is at least amber and the panel offers **Reload page** (the browser's own
+from the server's `bundle.script` the badge is at least a warning and the panel offers **Reload page** (the browser's own
 reload; no write route). The shell reads `/api/version` once on mount, every 60 s and when the tab becomes visible,
 one read for every badge. Semantics: `docs/contracts.md`, *Version view*.
+
+Amber and coral are only for an open human decision (an ask or escalation still needing the operator, including the documented amber past 10 minutes) or CI that is actually red. Alarms, failed jobs, context pressure, stranded dependencies, a stale live dot and version warnings stay neutral: the word carries the state. `.overview-alarm` is one of those neutral alarms.
 
 Search filters enabled entries from the current route table plus in-flight job
 titles and IDs. The shell reads `/api/overview` once per opening, aborts on close
@@ -318,11 +319,11 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 - Dashboard-sent messages show as `Operator (dashboard)`, tagged `dashboard`, with
   their `dc-…` id and the ask a click answered.
 - **Restart session** (cp-aqxl; `components/RestartSession.tsx`, `use-restart.ts`,
-  `restart-control.ts`; docs/contracts.md §Dashboard control): lives in the shell header's far-right
-  **⋮ More actions** menu (`components/MoreMenu.tsx`, after Search on phone; beside the clock on desktop; in
-  the ⋯ sheet on the mobile Sessions top bar, which replaces the shell header) — never inline in the composer or the Overview. The
-  button (44 px) shows only when the operator control view is available **and a session runs**, or while its own restart is under way
-  (a dot on the button, the status line inside the menu); Esc or a tap outside closes the menu, and a half-made confirm with it.
+  `restart-control.ts`; docs/contracts.md §Dashboard control): the last row of the shell's
+  **⋮ More actions** menu (`components/MoreMenu.tsx`). The menu is always there — after Search on the phone header, and in the desktop page bar — with Refresh now (reloads, and shows the last updated time), Copy link to this view, Notifications (the push phase, linking to `#more` where the toggle stays) and Viewer (the version badge). Restart session
+  is shown only when the operator control view is available **and a session runs**, or while its own restart is under way
+  (a dot on the button while a restart runs or the version level is alert; the status line stays inside the menu); Esc or a tap outside closes the menu, and a half-made confirm with it. The same Restart row is in
+  the ⋯ sheet on the mobile Sessions top bar, which replaces the shell header — never inline in the composer or the Overview.
   Offline, Start session / Resume last session own that space. Two taps: `Restart session` opens the
   confirm, `Tap again to restart · resumes <session file>` sends (`Cancel` backs out), so a stray tap
   never stops the session. The button is disabled, with the reason as its title and on the line

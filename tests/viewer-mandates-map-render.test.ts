@@ -9,7 +9,7 @@ import { LAYOUT } from "../src/contracts.ts";
 import { mapQaFixture, mapTitle, mapObjective } from "./fixtures/viewer-mandates-map.ts";
 
 async function renderer() {
- const result=await build({stdin:{contents:'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {DependencyMap} from "./viewer-app/screens/DependencyMap.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const mount=(root,data)=>domRender(h(DependencyMap,{data}),root); export const unmount=root=>domRender(null,root); export const screen=(data)=>render(h(DependencyMap,{data})); export const shell=(screen)=>render(h(Shell,{current:{screen,section:null,classic:null},awaiting:0,status:"live",updated:null}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const result=await build({stdin:{contents:'import {h,render as domRender} from "preact"; import {act} from "preact/test-utils"; import render from "preact-render-to-string"; import {DependencyMap} from "./viewer-app/screens/DependencyMap.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const mount=(root,data)=>domRender(h(DependencyMap,{data}),root); export const unmount=root=>domRender(null,root); export const screen=(data)=>render(h(DependencyMap,{data})); export const shell=(screen)=>render(h(Shell,{current:{screen,section:null,classic:null},awaiting:0,status:"live",updatedAt:"2026-09-26T05:41:07Z"}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 }
 test("map renders empty, failed, stranded and selected states without inline styles",async t=>{
@@ -79,7 +79,9 @@ test("More's views keep the phone sub-page header with search, the local clock a
   const header=/<header[^>]*>(.*?)<\/header>/.exec(shell(screen))?.[1] ?? "";
   assert.match(header,/href="#more".*aria-label="Back to More"/,screen);
   assert.match(header,/command-post/);assert.doesNotMatch(header,/read-only|shell-badge/,"the dashboard acts: no read-only badge");assert.doesNotMatch(header,/shell-live/);
-  assert.match(header,/<time class="shell-clock"[^>]*>\d\d:\d\d\b[^<]*<\/time>/,"the local clock sits in the phone header");
+  assert.match(header,/<time class="shell-clock"[^>]*>\d\d:\d\d\b[^<]*<\/time>/,"the data time sits in the phone header");
+  assert.equal(parseHTML(header).document.querySelectorAll("time.shell-clock").length,1,screen);
+  assert.doesNotMatch(shell(screen),/shell-corner/);
   const search=parseHTML(header).document.querySelector("button.shell-search");
   assert.ok(search);assert.equal(search.getAttribute("aria-haspopup"),"dialog");
   assert.match(search.getAttribute("aria-label") ?? "",/Search/);
@@ -88,8 +90,12 @@ test("More's views keep the phone sub-page header with search, the local clock a
  // Audit P4: Map and Board are Jobs views and Decisions a tab, so they take the plain header with the live status.
  for(const screen of ["map","board","decisions"]) {
   const header=/<header[^>]*>(.*?)<\/header>/.exec(shell(screen))?.[1] ?? "";
-  assert.doesNotMatch(header,/Back to More/,screen);assert.match(header,/shell-live/,screen);assert.ok(parseHTML(header).document.querySelector("button.shell-search"),screen);
+  assert.doesNotMatch(header,/Back to More/,screen);assert.match(header,/shell-live/,screen);assert.equal(parseHTML(header).document.querySelectorAll("time.shell-clock").length,1,screen);assert.ok(parseHTML(header).document.querySelector("button.shell-search"),screen);
+  assert.doesNotMatch(shell(screen),/shell-corner/);
  }
+ const job=/<header[^>]*>(.*?)<\/header>/.exec(shell("job"))?.[1] ?? "";
+ assert.doesNotMatch(job,/shell-live/);
+ assert.equal(parseHTML(job).document.querySelectorAll("time.shell-clock").length,1,"job");
 });
 test("audit P4 #23 #25 #26: Map carries the List | Board | Map toggle; the sidebar has six items, the tab bar five, with Jobs lit on Map",async()=>{
  const {screen,shell}=await renderer();

@@ -57,7 +57,7 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  const rows=screen("Jobs",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,jobs:[bare],projects:[],warnings:[]});
  assert.doesNotMatch(rows,/job-route|scope:M|md-8c47f5|Routing not recorded/); assert.doesNotMatch(rows,/CI -|review -|>anthropic\//);
  assert.match(rows,/<code title="anthropic\/claude-opus-5-5">claude-opus-5-5<\/code>/); assert.match(rows,/<span class="job-ci"><\/span><span>\$1\.50/,"an empty CI cell keeps the desktop columns aligned");
- assert.match(jobs,/review -/,"a row with a head keeps its review signal");
+ assert.match(jobs,/review not started/,"a row with a head and no review yet says so");
  const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,asks:[],questions:[],warnings:[]});
  assert.match(detail,/<div class="job-detail"><div class="job-detail-main"><header/);
  assert.match(detail,/<\/div><div class="job-detail-side"><dl class="job-facts">.*<dt>CI<\/dt>.*<dt>Review<\/dt>.*<\/dl><div class="job-links">.*<\/div><\/div><section class="job-timeline">/);

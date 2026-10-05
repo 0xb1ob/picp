@@ -17,7 +17,6 @@ import { Shell, ShellContext } from "./components/Shell.tsx";
 import { Overview } from "./screens/Overview.tsx";
 import { More } from "./screens/More.tsx";
 import { DependencyMap } from "./screens/DependencyMap.tsx";
-import { time } from "./format.ts";
 import { usePush } from "./use-push.ts";
 import { useAnswersControl } from "./use-answers-control.ts";
 export function DetailScreen({current:asked}: {current:Route}) {
@@ -55,7 +54,7 @@ function DecisionPage({current}: {current:Route}) {
  const control = useControl(true,resource.data?.generated_at ?? null,[]);
  const answers = useAnswersControl(true,resource.data?.generated_at ?? null);
  useSection(current,resource.data !== null);
- return <Shell current={current} awaiting={resource.data?.awaiting_count ?? null} status={resource.status} updated={resource.data ? time(resource.data.generated_at) : null}>
+ return <Shell current={current} awaiting={resource.data?.awaiting_count ?? null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{resource.data && " · showing last recorded data"}</p>}
   {resource.data ? <Decisions data={resource.data} control={control} answers={answers}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
  </Shell>;
@@ -66,7 +65,7 @@ function JobsRoute({current}:{current:Route}) {
  const data = resource.data;
  const summary = data && "awaiting_count" in data ? data : null;
  const scheduleControl = useScheduleControl(current.screen === "schedules", data?.generated_at ?? null);
- return <Shell current={current} awaiting={summary?.awaiting_count ?? null} status={resource.status} updated={data ? time(data.generated_at) : null}>
+ return <Shell current={current} awaiting={summary?.awaiting_count ?? null} status={resource.status} updatedAt={data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{data && " · showing last recorded data"}</p>}
   {summary?.warnings.map(w=><p role="alert" class="overview-error" key={w.section}>{w.section}: {w.message}</p>)}
   {data ? current.screen === "job" ? <JobDetail data={data as JobResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
@@ -80,7 +79,7 @@ function OverviewPage({current}: {current:Route}) {
  // Start session on the Overview's "operator session offline" line needs the control status (and its inbox token).
  const control = useControl(current.screen === "overview",resource.data?.generated_at ?? null,[]);
  useSection(current,loaded);
- return <Shell current={current} awaiting={resource.data && "awaiting" in resource.data ? resource.data.awaiting.count : null} status={resource.status} updated={resource.data ? time(resource.data.generated_at) : null}>
+ return <Shell current={current} awaiting={resource.data && "awaiting" in resource.data ? resource.data.awaiting.count : null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{loaded && " · showing last recorded data"}</p>}
   {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.query ?? ""}`} current={current}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
  </Shell>;

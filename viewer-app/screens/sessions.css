@@ -11,8 +11,8 @@
 .session-bar-views > summary strong { font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-bar-views > summary > span { font-size: 12px; color: var(--muted); }
 .session-bar-ctx, .session-bar-status { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.session-bar-ctx.ctx-warn { color: var(--amber); }
-.session-bar-ctx.ctx-high { color: var(--coral); }
+.session-bar-ctx.ctx-warn { color: var(--secondary); }
+.session-bar-ctx.ctx-high { color: var(--text); }
 .session-bar-status { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
 .session-bar-sheet { position: absolute; top: 100%; left: 8px; right: 8px; max-height: 70dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
 .session-bar-sheet > a, .session-bar-sheet > button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; background: none; border: 0; border-radius: 9px; text-align: left; text-decoration: none; font-size: 15px; color: var(--text); min-width: 0; }
@@ -87,7 +87,7 @@
 .session-own > .session-body { background: var(--bubble-own); border-color: var(--bubble-own); border-top-right-radius: 6px; }
 .session-grouped.session-other > .session-body { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
 .session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
-.session-failed .session-bubble > .session-body { border-color: var(--error-border); }
+.session-failed .session-bubble > .session-body { border-color: var(--border); }
 .session-bubble .session-send { margin-top: 4px; }
 /* Sent images (cp-br81 D9): 96 px tiles in the bubble, wrapping at 390 px; a tap opens one at the bubble's width; a file gone from the upload store reads "image expired". */
 .session-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; min-width: 0; }
@@ -125,7 +125,7 @@
 .session-new-wrap { position: sticky; bottom: 8px; height: 0; display: flex; justify-content: center; }
 .session-new { display: flex; align-items: center; gap: 6px; transform: translateY(-100%); min-height: 40px; padding: 0 14px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 4px 16px var(--page); }
 .session-empty, .session-warning { padding: 14px 0; font-size: 13px; color: var(--muted); }
-.session-warning, .session-failed .session-who, .session-failed summary { color: var(--coral); }
+.session-warning, .session-failed .session-who, .session-failed summary { color: var(--secondary); }
 .session-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
 .session-dot-working { background: var(--green); }
 .session-dot-starting, .session-dot-launching { background: transparent; border: 1.5px solid var(--green); }
