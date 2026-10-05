@@ -35,7 +35,9 @@ import { checkpointAwaitingId, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT
 import { raisePlanApproval } from "../src/escalation.ts";
 import { initialStatus } from "../src/run-artifacts.ts";
 import { assembleStatus } from "../src/status.ts";
-import { createScratchHome } from "./harness/index.ts";
+import type { Ledger } from "../src/ledger.ts";
+import { cpNext } from "../src/next.ts";
+import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -1671,6 +1673,50 @@ test("a mandate:* answer and another channel still queue and wake, and an answer
 		assert.deepEqual(flat(restarted.sent).map((decision) => decision.id), ["aw-checkpoint-cp-late"], "replayed by the next parent");
 		assert.deepEqual(restarted.post.answered.pending(), []);
 		assert.deepEqual(restarted.post.drainAnswered(() => assert.fail("delivered once")), []);
+	} finally {
+		home.cleanup();
+	}
+});
+
+test("cp_next closing its own clean mission end queues and wakes nothing; a messy end waits for an answer that wakes; other mandate auto-decisions still wake", async () => {
+	const home = createScratchHome();
+	try {
+		const parent = parentOn(home.path);
+		const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
+		const ports = { ledger, fleet: parent.post.fleet, mandates: parent.post.mandates, escalations: parent.post.escalations };
+		const grant = (jobId: string) =>
+			parent.post.mandates.issue({ projects: ["demo"], objective: jobId, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, job_ids: [jobId] });
+		const clean = await ledger.create({ title: "clean", project: "demo", delivery: "pr", kind: "ship" });
+		const messy = await ledger.create({ title: "messy", project: "demo", delivery: "pr", kind: "ship" });
+		const cleanGrant = grant(clean.id);
+		const messyGrant = grant(messy.id);
+		await ledger.close(clean.id, "https://example.com/pr/9");
+		await ledger.drop(messy.id, "not needed");
+
+		const next = await cpNext(ports, "demo");
+		const ends = [next, ...(next.others ?? [])];
+		const closed = ends.find((result) => result.mandate?.id === cleanGrant.id);
+		assert.match(closed?.action.reason ?? "", /landed clean/, "cp_next's own result reports the close");
+		const closedRecord = parent.post.escalations.get(closed?.escalation_id ?? "");
+		assert.deepEqual([closedRecord?.status, closedRecord?.answer, closedRecord?.answered_by], ["answered", "close", `mandate:${cleanGrant.id}`], "the auto decision is still journaled");
+		assert.equal(parent.post.mandates.get(cleanGrant.id)?.status, "revoked", "and the grant still revoked");
+		const open = ends.find((result) => result.mandate?.id === messyGrant.id);
+		assert.equal(parent.post.escalations.get(open?.escalation_id ?? "")?.status, "open", "a messy end is left for a human");
+		assert.deepEqual(parent.sent, [], "the clean close is not echoed back as a cp-answered turn");
+		assert.deepEqual(parent.post.answered.pending(), [], "and nothing is queued for it");
+		assert.equal(existsSync(join(home.path, LAYOUT.answeredFile)), false, "no outbox file at all");
+
+		await parent.post.escalations.answer(open!.escalation_id!, { answer: "close", by: "operator command" });
+		const checkpoints = parent.post.pipeline().checkpoints;
+		checkpoints.request({ jobId: "cp-gated", question: "ship?" });
+		checkpoints.decide("cp-gated", true, { by: `mandate:${messyGrant.id}` });
+		const mandateEnd = await parent.post.escalations.raise({ job_ids: ["cp-synth2"], kind: "mission_end", question: "close?", options: ESC_OPTIONS, recommended: "approve" });
+		await parent.post.escalations.answer(mandateEnd.id, { answer: "approve", by: `mandate:${messyGrant.id}` });
+		assert.deepEqual(
+			flat(parent.sent).map((decision) => decision.id),
+			[open!.escalation_id, "aw-checkpoint-cp-gated", mandateEnd.id],
+			"the messy end's answer and every unmarked mandate auto-decision wake, one each",
+		);
 	} finally {
 		home.cleanup();
 	}

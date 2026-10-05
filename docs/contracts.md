@@ -5329,12 +5329,19 @@ the parent's own turn. When `answered_by` is exactly `operator-quote` or exactly
 `operator-delegated` (`isSelfAnswered`, `src/answered.ts`), the writer records it
 as always but `CommandPost.#recordAnswered` neither enqueues it nor fires
 `onAnswered`: the parent that made the call needs no `cp-answered` turn to learn
-it. **`mandate:<id>` still wakes** (including mandate auto-close), as does every
+it. **`mandate:<id>` still wakes**, as does every
 other `answered_by`: a mandate auto-decision (`#tryMandate` → `autoDecideCheckpoint`)
 can run outside a parent turn when a gate or review lands, so suppressing it could
-strand a dispatch or merge. The escalation, awaiting and checkpoint records are
-untouched; a suppressed answer queues nothing, so a restart replays nothing, while
-a queued one is replayed as before (`tests/answered.test.ts`).
+strand a dispatch or merge. The one exception is marked explicitly at its call site,
+never inferred from `answered_by`: `cp_next` auto-closing its **own clean mission
+end** (`src/next.ts`) answers with `selfAnswered: true` on `EscalationStore.answer`,
+and `#recordAnswered` honours that sink option like a self-answer — that close runs
+only inside the parent's `cp_next` call, whose result already reports "answered close
+… grant revoked", so its echo was a duplicate parent turn. A messy mission end stays
+open for a human and wakes when answered. The escalation, awaiting and checkpoint
+records (answer, `answered_by`, basis, the revoke) are untouched; a suppressed answer
+queues nothing, so a restart replays nothing, while a queued one is replayed as
+before (`tests/answered.test.ts`).
 
 **Skip still writes nothing and wakes nobody.** It never reaches a writer, so
 there is nothing to queue — `state/answered.json` may not even exist afterwards.

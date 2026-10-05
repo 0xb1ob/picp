@@ -245,7 +245,10 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 				// A clean finish (all landed, none dropped or failed) closes itself: the grant's own answer, journaled on the
 				// escalation (answered_by, basis), then the same revoke `cp_decide close` runs. A messy one stays open for a human.
 				if (!answered && dropped === 0 && failed === 0) {
-					answered = await ports.escalations.answer(escalation.id, { answer: "close", by: `mandate:${mandate.id}`, basis: { mandate: mandate.id, clause: `${mandate.id}: every named job landed clean — mission closed automatically` } });
+					// `selfAnswered`: this runs only inside the parent's own `cp_next` call, whose result below reports the close,
+					// so its `cp-answered` echo would be a duplicate parent turn. Only this clean own close is marked; every
+					// other mandate auto-decision still wakes (`src/answered.ts`, "Self-answers do not echo").
+					answered = await ports.escalations.answer(escalation.id, { answer: "close", by: `mandate:${mandate.id}`, basis: { mandate: mandate.id, clause: `${mandate.id}: every named job landed clean — mission closed automatically` }, selfAnswered: true });
 					ports.mandates.revoke(mandate.id);
 					autoClosed = true;
 				}
