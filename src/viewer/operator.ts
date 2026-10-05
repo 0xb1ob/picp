@@ -1,6 +1,6 @@
 /**
- * `bin/cp-operator` — the operator session. Runs pi with only the bridge
- * extension plus the installed pi-web-access (`operatorWeb`; fleet tools stay on the RPC parent) and, for that session's
+ * `bin/cp-operator` — the operator session. Runs pi with the bridge extension, pi's built-in MCP,
+ * codemode and tool search, plus the installed pi-web-access (`operatorWeb`; fleet tools stay on the RPC parent) and, for that session's
  * lifetime, the read-only viewer as a child: `cp-view --require-tailnet --port
  * 8766` by default. `--host` and `--port` set both the viewer bind and the
  * address the parent uses for board links. The viewer this session started is stopped when the session exits,
@@ -25,6 +25,13 @@ import { viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/**
+ * pi's built-in MCP, codemode and tool search (cp-fl8b): `--no-extensions` turns built-ins off and
+ * `-e builtin:<name>` loads one (pi docs/settings.md "Resources"). Codemode and tool search are what
+ * reach MCP tools of the default `codemode` and the `deferred` exposure.
+ */
+export const OPERATOR_BUILTIN_EXTENSIONS: readonly string[] = ["builtin:mcp", "builtin:codemode", "builtin:tool-search"];
 
 export interface ViewerOptions {
 	home?: string;
@@ -139,7 +146,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
 	try {
 		return await superviseOperatorPi({
-			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args), web.extensions), {
+			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions]), {
 				stdio: "inherit",
 				env: { ...process.env, ...env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
 			}),

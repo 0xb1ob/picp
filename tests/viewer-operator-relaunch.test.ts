@@ -8,11 +8,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runOperator } from "../src/viewer/operator.ts";
+import { OPERATOR_BUILTIN_EXTENSIONS, runOperator } from "../src/viewer/operator.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 
 const FAKE_PI = join(REPO_ROOT, "tests/fixtures/fake-relaunch-pi.mjs");
 const VIEWER = { host: "127.0.0.1", port: 1 };
+/** cp-fl8b: pi's built-in MCP extensions follow the bridge on every run, the relaunch included. */
+const BUILTINS = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
 
 function scratch(t: import("node:test").TestContext, mode: string, sessionExists = true) {
 	const dir = mkdtempSync(join(tmpdir(), "cp-relaunch-"));
@@ -41,7 +43,7 @@ test("a marker naming the exited child: relaunched once with exactly --session <
 	const { session, relaunchFile, runs } = scratch(t, "once");
 	const lines = stderrLines(t);
 	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: VIEWER, relaunchFile }), 2);
-	assert.deepEqual(runs(), [["--model", "test-model"], ["--session", session]], "the wrapper's model on the first run only; the resumed session keeps its own");
+	assert.deepEqual(runs(), [[...BUILTINS, "--model", "test-model"], [...BUILTINS, "--session", session]], "the wrapper's model on the first run only; the resumed session keeps its own");
 	assert.equal(existsSync(relaunchFile), false, "the launcher removed the marker it took");
 	assert.ok(lines.some((line) => line === `cp-operator: restarting from the dashboard, resuming ${session}\n`), lines.join(""));
 });
@@ -56,14 +58,14 @@ test("a marker for another pid: no relaunch, pi's exit code, the marker left in 
 test("no marker: pi runs once and its exit code comes back, exactly as before", async (t) => {
 	const { relaunchFile, runs } = scratch(t, "never");
 	assert.equal(await runOperator(["--model", "x"], { piBin: FAKE_PI, viewer: VIEWER, relaunchFile }), 1);
-	assert.deepEqual(runs(), [["--model", "x"]]);
+	assert.deepEqual(runs(), [[...BUILTINS, "--model", "x"]]);
 });
 
 test("the session file is gone: the relaunch falls back to -c", async (t) => {
 	const { session, relaunchFile, runs } = scratch(t, "once", false);
 	const lines = stderrLines(t);
 	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: VIEWER, relaunchFile }), 2);
-	assert.deepEqual(runs()[1], ["-c"]);
+	assert.deepEqual(runs()[1], [...BUILTINS, "-c"]);
 	assert.ok(lines.some((line) => line.includes(`${session} is gone, continuing the most recent session (-c)`)), lines.join(""));
 });
 

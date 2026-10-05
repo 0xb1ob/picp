@@ -150,7 +150,7 @@ function climb(receipt: BridgeReceipt, level: BridgeReceiptLevel): BridgeReceipt
 	return { ...receipt, level, reached };
 }
 
-/** `webExtensions`: the resolved pi-web-access entry points, the only non-bridge extension the operator loads. */
+/** `webExtensions`: extra `-e` entries after the bridge (the operator's pi built-ins and pi-web-access). */
 export function operatorPiArgs(packageRoot: string, extra: readonly string[] = [], webExtensions: readonly string[] = []): string[] {
 	return ["--no-extensions", "-e", join(packageRoot, "extensions/cp-bridge/index.ts"), ...webExtensions.flatMap((path) => ["-e", path]), ...extra];
 }

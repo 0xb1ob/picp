@@ -38,6 +38,7 @@ import bridgeExtension, { BRIDGE_TOOL, operatorTargetFile, resolveOperatorTarget
 import { deliverStandingOrders, standingOrdersFile } from "../src/parent-context.ts";
 import { parentFile, parentRow } from "../src/viewer/sessions.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
+import { OPERATOR_BUILTIN_EXTENSIONS } from "../src/viewer/operator.ts";
 import { readOperatorSessions } from "../src/viewer/operator-sessions.ts";
 import { createScratchHome, startRpc } from "./harness/index.ts";
 
@@ -207,12 +208,13 @@ test("parent host restart retires dead target after crash and does not replay an
 	await replacement.request("stop", { discardPending: true });
 	await replacement.closed;
 });
-test("operator launcher loads only the bridge", () => {
+test("operator launcher loads the bridge, pi's built-in MCP extensions and the web extension", () => {
 	const script = readFileSync(join(PACKAGE_ROOT, "bin/cp-operator"), "utf8");
 	assert.match(script, /exec node "\$ROOT\/src\/viewer\/operator\.ts" "\$@"/);
 	const launcher = readFileSync(join(PACKAGE_ROOT, "src/viewer/operator.ts"), "utf8");
 	// The supervise loop (src/operator-relaunch.ts) hands each run its args: the CLI's first, `--session <file>` on a relaunch.
-	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args\), web\.extensions\)/);
+	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args\), \[\.\.\.OPERATOR_BUILTIN_EXTENSIONS, \.\.\.web\.extensions\]\)/);
+	assert.deepEqual(OPERATOR_BUILTIN_EXTENSIONS, ["builtin:mcp", "builtin:codemode", "builtin:tool-search"]);
 	assert.match(launcher, /firstArgs: piArgs/);
 	assert.equal(script.includes("extensions/command-post") || launcher.includes("extensions/command-post"), false);
 	const args = operatorPiArgs(PACKAGE_ROOT);
