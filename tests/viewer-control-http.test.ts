@@ -155,6 +155,35 @@ test("refusals, in order, each named and each journaled once by the viewer with 
 	rmSync(controlConfigFile(stateDir));
 });
 
+test("no HTTPS origin configured: a tailnet bind accepts only its own http:// origin for messages and clicks; a configured origin keeps its old rule; push still needs setup", async (t) => {
+	const { stateDir, port } = await setup(t, { host: "100.64.0.9" });
+	rmSync(pushConfigFile(pushDataDir(stateDir)));
+	const { injected, csrf } = await bridge(t, stateDir);
+	const self = `http://100.64.0.9:${port}`;
+	const at = (origin: string, body: unknown, extra: Record<string, string> = {}) => {
+		const req = json(csrf, body, { origin, ...extra });
+		return call(port, MESSAGE, { ...req, headers: { ...req.headers, host: `100.64.0.9:${port}` } });
+	};
+	assert.equal((await at(self, { kind: "message", text: "over http" })).status, 202);
+	assert.equal((await at(self, { kind: "answer", ask_id: "ask-abcd", label: "Keep" })).status, 202);
+	assert.equal(injected.length, 2);
+	for (const foreign of ["https://evil.example", `https://100.64.0.9:${port}`, `http://100.64.0.9:${port + 1}`, `http://127.0.0.1:${port}`, ""]) {
+		const out = await at(foreign, { kind: "message", text: "x" });
+		assert.equal(out.status, 403, foreign);
+		assert.match(String(out.body.error), new RegExp(`^Origin must be http://100\\.64\\.0\\.9:${port} \\(no HTTPS origin is configured`));
+	}
+	assert.equal((await at(self, { kind: "message", text: "x" }, { "sec-fetch-site": "cross-site" })).status, 403, "Sec-Fetch-Site still guards");
+	assert.equal(injected.length, 2);
+	const sub = await call(port, "/api/push/subscription", { method: "POST", body: "{}", headers: { host: `100.64.0.9:${port}`, origin: self, "content-type": "application/json" } });
+	assert.equal(sub.status, 409, "push still needs push:init (HTTPS)");
+
+	put(pushConfigFile(pushDataDir(stateDir)), JSON.stringify({ origin: ORIGIN, subject: "mailto:op@example.com", public_key: Buffer.alloc(65, 4).toString("base64url"), created_at: "2026-09-27T08:00:00Z" }));
+	const configured = await at(self, { kind: "message", text: "x" });
+	assert.equal(configured.status, 403, "configured: a non-loopback bind's own origin stays refused");
+	assert.match(String(configured.body.error), /^Origin must be https:\/\/cp\.example\.ts\.net$/);
+	assert.equal((await at(ORIGIN, { kind: "message", text: "via https" })).status, 202);
+});
+
 test("offline (no record, or its pid gone): the status carries the inbox token; a send is held with it as a 202; abort is 409; a stale token 403; at most 20 wait", async (t) => {
 	const { stateDir, port } = await setup(t);
 	const status = await call(port, "/api/operator/control");

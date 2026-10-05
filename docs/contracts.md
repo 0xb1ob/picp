@@ -5649,7 +5649,7 @@ session's CSRF token, which the page fetches itself; it never writes. `POST /api
 | viewer runs `--require-tailnet` | 403 |
 | 20 requests per 60 s and one in flight per client address (refusals count, so this also bounds the journal) | 429 with `retry-after` |
 | `data/dashboard-control.json` invalid / `enabled:false` | 503 / 403 `dashboard control is off (…)` |
-| `Origin` equals the public origin `/api/push` reports (or a loopback bind's own) | 403 `Origin must be …` |
+| `Origin` equals the public origin `/api/push` reports (or a loopback bind's own); with no public origin configured, the bind's own `http://` origin (same-origin with the Host the guard pinned; push still needs HTTPS) | 403 `Origin must be …` |
 | `Sec-Fetch-Site` same-origin when sent | 403 |
 | `application/json` | 415 |
 | body ≤ 20 KiB | 413 |
