@@ -11,6 +11,7 @@ import { LAYOUT } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { ScheduleControl } from "../src/schedule-control.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import type { IncomingMessage } from "node:http";
@@ -29,7 +30,10 @@ function bench(t: import("node:test").TestContext) {
 	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
 	const mandates = new MandateStore(home.path, { now: () => clock.now });
 	const fleet = new FleetStore({ home: home.path });
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path, now: () => clock.now, startedAt: T0 });
+	const scheduler = new Scheduler({
+		home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path, now: () => clock.now, startedAt: T0,
+		mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }),
+	});
 	const stateDir = join(home.path, LAYOUT.state);
 	const grant = () => mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true });
 	const logs: string[] = [];
@@ -69,7 +73,7 @@ test("enable, disable, remove and run now are claimed before they act and answer
 	assert.equal(state(run)?.job_id, fired?.job_id);
 	assert.match((await ledger.show(fired?.job_id as string)).title, /nightly run now 2026-07-01T07:03Z/);
 	assert.equal(fired?.manual_via, "dashboard");
-	assert.match((await ledger.show(fired?.job_id as string)).notes ?? "", new RegExp(`^run now from the dashboard \\(${run}\\) for ${schedule.id} \\(nightly\\) under mandate md-\\S+; peer 127\\.0\\.0\\.1$`));
+	assert.match((await ledger.show(fired?.job_id as string)).notes ?? "", new RegExp(`^run now from the dashboard \\(${run}\\) for ${schedule.id} \\(nightly\\) under fire grant ${fired?.mandate_id} \\(minted from the template approved by operator-delegated\\); peer 127\\.0\\.0\\.1$`));
 	assert.equal(scheduler.list()[0]?.last_fire, undefined, "a run now never writes last_fire");
 	const again = request("run_now", schedule.id);
 	assert.deepEqual(await parent.pass(), []);
@@ -83,7 +87,7 @@ test("enable, disable, remove and run now are claimed before they act and answer
 	const gone = request("remove", schedule.id);
 	await parent.pass();
 	assert.deepEqual(scheduler.list(), []);
-	assert.deepEqual([state(gone)?.state, state(gone)?.reason], ["done", `removed ${schedule.id}`]);
+	assert.deepEqual([state(gone)?.state, state(gone)?.reason], ["done", `removed ${schedule.id}; revoked its grant ${fired?.mandate_id} (in-flight workers were not killed)`]);
 	assert.ok(logs.some((line) => line.includes(`schedule control ${gone} remove ${schedule.id}: done`)));
 	const shown = handleScheduleControlStatus({} as IncomingMessage, { home: dirname(dirname(scheduler.file)), stateDir: dirname(scheduler.file), host: "127.0.0.1", port: 0, requireTailnet: true }, T0).body as ScheduleControlStatusResponse;
 	assert.deepEqual(shown.requests.map((entry) => [entry.op, entry.state]), [["disable", "done"], ["enable", "done"], ["run_now", "done"], ["run_now", "refused"], ["remove", "done"]]);

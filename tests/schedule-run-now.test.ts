@@ -106,22 +106,22 @@ test("run_now: an open previous fire refuses; a delegated quote is recorded as o
 	assert.equal((await jobs()).length, 1);
 });
 
-test("S3 refire: add needs the operator's verbatim approval_quote; run_now then fires under a freshly minted grant", async (t) => {
+test("fresh grant per fire: the removed refire/approval_quote params are refused as unknown; a plain add saves the template and run_now fires under a freshly minted grant", async (t) => {
 	const { mandates, said, call } = await bench(t);
 	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 500_000 }, job_cap: 2, schedule_grant: true });
 	const add = { action: "add", name: "triage", project: "demo", mandate_id: seed.id, manual: true, title: "Triage", kind: "research", delivery: "answer" };
-	await assert.rejects(call({ ...add, approval_quote: "anything" }), /approval_quote is for refire:true only/);
-	await assert.rejects(call({ ...add, refire: true, approval_quote: "Yes, refire triage." }), /quote not found/);
-	said.push("Yes, refire triage with a fresh grant each run.");
-	const added = await call({ ...add, refire: true, approval_quote: "Yes, refire triage with a fresh grant each run." });
-	assert.match(added, /refire: each Run now mints a fresh grant .*approved "Yes, refire triage with a fresh grant each run\." \(operator-quote\)/);
-	assert.match(added, /refire template: each fire grant lives 24 h from its fire/);
+	await assert.rejects(call({ ...add, refire: true }), /cp_schedule add refused: unknown parameter refire; every fire mints a fresh grant/);
+	await assert.rejects(call({ ...add, approval_quote: "Yes, refire triage." }), /cp_schedule add refused: unknown parameter approval_quote/);
+	await assert.rejects(call({ ...add, refire: true, approval_quote: "Yes." }), /unknown parameter refire, approval_quote/);
+	assert.equal(mandates.list().filter((m) => m.status === "active").length, 2, "a refused add touched no grant");
+	const added = await call(add);
+	assert.match(added, /fire grant template: each fire mints a fresh grant .*approved "triage" \(operator-delegated\)/);
 	const id = /added (sch-[0-9a-f]{6})/.exec(added)![1]!;
 	said.push("Run triage now.");
 	const fired = await call({ action: "run_now", id, operator_quote: "Run triage now." }, "call-r");
 	assert.match(fired, new RegExp(`minted fire grant md-[0-9a-f]{6} from the template of ${seed.id}`));
 	const fire = mandates.list().find((m) => m.schedule_fire?.schedule_id === id)!;
-	assert.equal(fire.schedule_fire?.approval.operator_quote, "Yes, refire triage with a fresh grant each run.");
+	assert.equal(fire.schedule_fire?.approval.operator_quote, "triage", "the seed's objective, quoted verbatim");
 	assert.equal(fire.schedule_fire?.trigger.via === "cp_schedule" && fire.schedule_fire.trigger.operator_quote, "Run triage now.");
 	assert.equal(mandates.get(seed.id)?.status, "revoked");
 });

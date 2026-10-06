@@ -61,6 +61,7 @@ test("the cp-self-review skill documents the recipe the plan fixes", () => {
 		"[REDACTED]", "schedule:<id>", "expanded:", "window_hours", "never bare `br`", "no builds",
 		"Context usage", "Context & compaction", "compactAtTokens", "self_compact", "cp-parent-control.json",
 		"L1-L6 are always delivery `local`", "S1 is\nalways delivery `board`", "board.json", "site/index.html", "/#job/<L-id>", "/boards/<S1-id>/",
+		"own fire grant", "job cap at least 8", "never ask\nthe operator about its budget",
 	]) assert.ok(text.includes(part), `SKILL.md mentions ${part}`);
 });
 
@@ -70,6 +71,7 @@ test("the cp-pr-review skill documents the recipe, and its reviewer brief is rea
 		"name: cp-pr-review", "R1…Rn", "S1", "external_ref", "schedule:<id>", "expanded:", "skipped:", "conflicting_acceptance", "dep_add",
 		"pr: https://github.com/<owner>/<repo>/pull/<n>", "routing default", "armed", "foreign-CI wait", "never re-dispatch it",
 		"board.json", "site/index.html", "/#job/<R-id>", "/boards/<S1-id>/", "report-only",
+		"own fire grant", "job cap at least N + 2", "never ask the operator about its budget",
 	]) assert.ok(text.includes(part), `SKILL.md mentions ${part}`);
 	// Binding decision es-314c8e d: the brief each reviewer is dispatched with (the expanded task) carries the read-only rules verbatim.
 	const brief = text.slice(text.indexOf("## Reviewer task template"), text.indexOf("## S1 task template"));

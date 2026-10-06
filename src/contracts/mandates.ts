@@ -124,9 +124,10 @@ export type RiskPreapprovedRow = Replace<Static<typeof RiskPreapprovedRowSchema>
 const SCHEDULE_ID_PATTERN = "^sch-[0-9a-f]{6}$";
 const QuoteDecidedBySchema = StringEnum(["operator-quote", "operator-delegated"]);
 /**
- * A refire schedule's fire grant (schedules S3): which schedule minted it in its fire lane, from which seed grant's
- * saved template, the template's operator approval verbatim, and the trigger of this fire (the dashboard click or the
- * run_now quote). Written only by `Scheduler` through `MandateStore.issue`; `cp_mandate` never accepts it.
+ * A schedule's fire grant (one per fire, every trigger): which schedule minted it in its fire lane, from which seed
+ * grant's saved template, the template's approval verbatim, and the trigger of this fire (a cron slot, a watch
+ * observation, the dashboard click or the run_now quote). Written only by `Scheduler` through `MandateStore.issue`;
+ * `cp_mandate` never accepts it.
  */
 export const ScheduleFireSchema = Type.Object(
 	{
@@ -139,6 +140,8 @@ export const ScheduleFireSchema = Type.Object(
 			{ additionalProperties: false },
 		),
 		trigger: Type.Union([
+			Type.Object({ via: Type.Literal("cron"), slot: IsoTimestampSchema, missed: Type.Boolean() }, { additionalProperties: false }),
+			Type.Object({ via: Type.Literal("watch"), at: IsoTimestampSchema, output_sha: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })) }, { additionalProperties: false }),
 			Type.Object({ via: Type.Literal("dashboard"), request_id: Type.String({ minLength: 1, maxLength: 200 }), peer: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]) }, { additionalProperties: false }),
 			Type.Object(
 				{ via: Type.Literal("cp_schedule"), operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, source_sha: Type.String({ pattern: "^[0-9a-f]{12}$" }), ...DelegationProvenanceFields },
@@ -156,6 +159,8 @@ export interface ScheduleFire {
 	fired_at: string;
 	approval: { operator_quote: string; decided_by: QuoteDecidedBy; approved_at: string; delegation_rule?: string; send_id?: string };
 	trigger:
+		| { via: "cron"; slot: string; missed: boolean }
+		| { via: "watch"; at: string; output_sha?: string }
 		| { via: "dashboard"; request_id: string; peer: string | null }
 		| { via: "cp_schedule"; operator_quote: string; decided_by: QuoteDecidedBy; source_sha: string; delegation_rule?: string; send_id?: string };
 }
@@ -223,7 +228,7 @@ export const MandateSchema = Type.Object(
 				{ additionalProperties: false },
 			),
 		),
-		/** A refire schedule's fire grant (schedules S3): its schedule, seed, approval and trigger. Absent on every other grant. */
+		/** A schedule's fire grant (one per fire): its schedule, seed, approval and trigger. Absent on every other grant. */
 		schedule_fire: Type.Optional(ScheduleFireSchema),
 	},
 	{ additionalProperties: false },

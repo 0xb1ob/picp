@@ -6,6 +6,18 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Fresh grant per fire, for every schedule (cp-fresh-grant-impl-c83k)
+
+Every fire of every schedule — cron, watch, the dashboard's Run now and `cp_schedule run_now` — now files its job under a grant minted for that fire alone from the schedule's saved `grant_template` (`mintFireGrant` in `Scheduler.#fireOnce`); a fire never reuses a grant. Hard-coded: no flag, parameter, config, environment variable, mandate default or standing order turns it off. This supersedes the S3 opt-in below.
+
+- **Changed:** every `cp_schedule add` saves a `grant_template` from its seed; its `approval` quotes the seed's objective verbatim (`decided_by: operator-delegated`). `refire` and `approval_quote` are removed: an add carrying either is refused `cp_schedule add refused: unknown parameter …`. A fire grant is never a template's seed.
+- **Changed:** only an operator revoke or (non-cap) pause of the schedule's current grant stops its fires; an expired, cap-paused or spent grant never does — the next fire mints fresh. The system never revokes a grant another schedule still names. A fire never writes a `budget_exhausted` escalation or asks the operator about its grant.
+- **Changed (no top-up):** a skill schedule's template job cap is raised to its fan-out plus anchor (`cp-self-review` 8, `cp-pr-review` N + 2) at add, move and migration, named in the result, never refused; both skills expand without asking about budget.
+- **Added:** `cp_schedule move id mandate_id` retargets a schedule to a fresh seed grant (same id, new template, old pointer revoked unless shared).
+- **Added:** `schedule_fire.trigger` gains `{via:"cron", slot, missed}` and `{via:"watch", at, output_sha?}`.
+
+Migration: one-shot `sweepScheduleGrantTemplates` at session start gives every schedule without a template one derived from its seed grant whatever its status; a missing or unparseable seed (or one no template derives from) leaves the schedule template-less with a `last_skip` naming `cp_schedule move`. Marker `state/.migrations/2026-11-schedule-grant-template.done`. **Downgrade:** an older binary rejects a fire grant with a `cron`/`watch` trigger and expects a template only on manual schedules: `cp_schedule remove` every schedule and strip `schedule_fire` from its fire grants before rolling back.
+
 ### Manual click-to-run schedules: run_now, per-fire grants, PR-review fan-out, foreign-PR CI (schedules S1–S5, cp-wlhu)
 
 An operator saves a **manual** schedule once and fires it as often as they like from the dashboard's **Run now** or `cp_schedule run_now`, under a fresh grant per fire for refire schedules; authorization is not weakened anywhere (no standing or blanket merge authority, caps and exclusions honoured, the operator's quote recorded verbatim).

@@ -1328,12 +1328,18 @@ test("S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe
 	const id = store.mintId();
 	const scheduleFire = {
 		schedule_id: "sch-abc123", seed_mandate_id: "md-seed01", previous_mandate_id: "md-seed01", fired_at: isoTimestamp(new Date()),
-		approval: { operator_quote: "yes, refire it", decided_by: "operator-quote" as const, approved_at: isoTimestamp(new Date()) },
+		approval: { operator_quote: "yes, mint it", decided_by: "operator-quote" as const, approved_at: isoTimestamp(new Date()) },
 		trigger: { via: "dashboard" as const, request_id: "sc-20261006000000-0a1b2c3d", peer: null },
 	};
 	const fire = issue(store, { id, schedule_grant: true, schedule_fire: scheduleFire });
 	assert.equal(fire.id, id);
 	assert.deepEqual(new MandateStore(home.path).get(id)?.schedule_fire, scheduleFire, "validated, written and re-read");
+	// Fresh grant per fire: cron and watch fires record their own trigger arms.
+	for (const trigger of [{ via: "cron" as const, slot: "2026-10-06T00:00:00Z", missed: true }, { via: "watch" as const, at: "2026-10-06T00:00:30Z", output_sha: "ab".repeat(32) }, { via: "watch" as const, at: "2026-10-06T00:00:30Z" }]) {
+		const minted = issue(store, { id: store.mintId(), schedule_grant: true, schedule_fire: { ...scheduleFire, trigger } });
+		assert.deepEqual(new MandateStore(home.path).get(minted.id)?.schedule_fire?.trigger, trigger);
+	}
+	assert.throws(() => issue(store, { id: store.mintId(), schedule_grant: true, schedule_fire: { ...scheduleFire, trigger: { via: "cron", slot: "x" } as never } }), /schedule_fire\/trigger/);
 	assert.throws(() => issue(store, { id }), /refusing to issue .*: not a fresh mandate id/);
 	assert.throws(() => issue(store, { id: "../escape" }), /not a fresh mandate id/);
 	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");

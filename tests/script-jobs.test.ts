@@ -12,6 +12,7 @@ import { ScriptDispatcher } from "../src/script-dispatch.ts";
 import type { IntakeResult } from "../src/intake.ts";
 import { ScheduleRunner } from "../src/schedule-runner.ts";
 import { type Schedule, Scheduler } from "../src/scheduler.ts";
+import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 
 test("script dispatch leases a branch, intakes once, and cannot replay", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 60_000 }, async (t) => {
  const home = createScratchHome();
@@ -104,13 +105,11 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  const real = Date.now();
  const clock = { now: new Date(real - 90_000) };
  const mandate = post.mandates.issue({ projects: ["demo"], objective: "nightly", expiry: isoTimestamp(new Date(real + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 1, schedule_grant: true });
- const scheduler = new Scheduler({ home: home.path, ledger: () => post.ledger(), mandates: post.mandates, usageJobs: () => post.fleet.read().jobs, cloneOf: (p) => post.registry.pathOf(p), now: () => clock.now, startedAt: clock.now });
+ const scheduler = new Scheduler({
+  home: home.path, ledger: () => post.ledger(), mandates: post.mandates, usageJobs: () => post.fleet.read().jobs, cloneOf: (p) => post.registry.pathOf(p), now: () => clock.now, startedAt: clock.now,
+  mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }),
+ });
  const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "* * * * *", tz: "UTC", title: "nightly", kind: "ship", delivery: "local", script_path: "scripts/run.sh" });
- // An earlier run of this schedule already holds the one slot (schedlater S3: only the schedule's own jobs count).
- await post.fleet.add({
-  job_id: "cp-other", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "held", reported_at: isoTimestamp(), worktree: "/wt", branch: "cp-other", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, schedule_id: schedule.id,
-  worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m/x", started_at: isoTimestamp() },
- } as FleetRecord);
  const wakes: IntakeResult[] = [];
  const runner = new ScheduleRunner({
   dispatch: (request) => post.dispatch(request), tearDown: (id) => post.tearDown(id), recorded: (id) => post.intake.intake(id), wake: (result) => wakes.push(result),
@@ -119,6 +118,11 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  clock.now = new Date(real);
  const [fired] = await scheduler.tick();
  assert.equal(fired?.outcome, "fired");
+ // Another run of this schedule takes the fire grant's one slot after it was minted (schedlater S3: only the schedule's own jobs count).
+ await post.fleet.add({
+  job_id: "cp-other", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "held", reported_at: isoTimestamp(), worktree: "/wt", branch: "cp-other", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, schedule_id: schedule.id,
+  worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m/x", started_at: isoTimestamp() },
+ } as FleetRecord);
  await runner.onFired(fired!);
  await runner.retryPending();
  const jobId = fired!.job_id!;

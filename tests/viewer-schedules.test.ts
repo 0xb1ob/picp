@@ -22,12 +22,18 @@ import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const NOW = Date.parse("2026-09-28T01:41:00Z");
 
+const template = {
+	seed_mandate_id: "md-seed1", channel: "operator_chat", objective: "triage", expiry_hours: 24, spend_usd: 10, spend_tokens: 500000, job_cap: 2,
+	allowed_actions: ["plan", "implement"], ask_on: ["merge", "risk:high"],
+	approval: { operator_quote: `Yes, triage. ${"long-unbroken-quote-".repeat(60)}`, decided_by: "operator-quote", approved_at: "2026-09-01T00:00:00Z" },
+};
 const cron = {
 	id: "sch-aaaaaa", name: "weekly digest", project: "demo", mandate_id: "md-live1",
 	trigger: { type: "cron", cron: "0 6 * * 1", tz: "Europe/Warsaw" },
 	job: { title: "Digest", kind: "research", delivery: "answer" },
 	enabled: true, created_at: "2026-09-01T00:00:00Z", last_checked_at: "2026-09-28T01:40:00Z",
 	last_fire: { at: "2026-09-21T04:00:10Z", slot: "2026-09-21T04:00:00.000Z", job_id: "cp-fire2", missed: true },
+	grant_template: template,
 };
 const watch = {
 	id: "sch-bbbbbb", name: "dep watch", project: "demo", mandate_id: "md-paus1",
@@ -35,6 +41,7 @@ const watch = {
 	job: { title: "Bump deps", kind: "ship", delivery: "pr" },
 	enabled: false, created_at: "2026-09-01T00:00:00Z", last_checked_at: "2026-09-28T01:00:00Z", last_output_sha: "abc",
 	last_skip: { at: "2026-09-28T01:00:00Z", reason: "fire at 2026-09-28T01:00Z not recorded: md-paus1 is paused" },
+	grant_template: template,
 };
 
 function fixture(t: { after(fn: () => void): void }, schedules?: string): ViewerOptions {
@@ -74,7 +81,7 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.equal(SCHEDULE_MANDATE_ID.source, MANDATE_ID_PATTERN);
 	assert.equal(SCHEDULE_SCHEMA_VERSION, SCHEMA_VERSION);
 	assert.deepEqual([...GRANT_TEMPLATE_ASK_ON], [...MANDATE_ASK_ON]);
-	assert.deepEqual([...GRANT_TEMPLATE_ACTIONS], MANDATE_ACTIONS.filter((action) => action !== "merge"), "a refire template never carries merge");
+	assert.deepEqual([...GRANT_TEMPLATE_ACTIONS], MANDATE_ACTIONS.filter((action) => action !== "merge"), "a fire grant template never carries merge");
 	assert.deepEqual([...MANDATE_CHANNEL_VALUES], [...MANDATE_CHANNELS]);
 	assert.deepEqual(scheduleFileErrors(JSON.parse(file(cron, watch))), []);
 	const bad = (patch: Record<string, unknown>) => scheduleFileErrors({ schema_version: SCHEMA_VERSION, schedules: [{ ...cron, ...patch }] });
@@ -155,16 +162,12 @@ test("a manual skill schedule: schema accepts it, the view has no next fire, the
 	assert.equal(triggerText(data.schedules[0]!), "manual (Run now only), expanded by skill cp-self-review");
 	const html = screen(data);
 	assert.match(html, /Manual: fires only on Run now/);
-	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under this grant\./);
+	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under that fire's own grant\./);
+	assert.match(html, /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: move the schedule to a fresh schedule grant<\/strong>/, "a schedule the migration skipped says so");
 	assert.doesNotMatch(html, /Next fire|Next check/);
 });
 
-test("S3 refire: the template validates (no merge, merge and risk:high always asked), the page shows the fire grant and the verbatim approval", async (t) => {
-	const template = {
-		seed_mandate_id: "md-seed1", channel: "operator_chat", objective: "triage", expiry_hours: 24, spend_usd: 10, spend_tokens: 500000, job_cap: 2,
-		allowed_actions: ["plan", "implement"], ask_on: ["merge", "risk:high"],
-		approval: { operator_quote: `Yes, refire triage. ${"long-unbroken-quote-".repeat(60)}`, decided_by: "operator-quote", approved_at: "2026-09-01T00:00:00Z" },
-	};
+test("fire grant template: validates (no merge, merge and risk:high always asked), the page shows the fire grant and the verbatim approval", async (t) => {
 	const refire = { id: "sch-dddddd", name: "triage", project: "demo", mandate_id: "md-paus1", trigger: { type: "manual" }, job: { title: "Triage", kind: "research", delivery: "answer" }, enabled: true, created_at: "2026-09-01T00:00:00Z", grant_template: template };
 	assert.deepEqual(scheduleFileErrors(JSON.parse(file(refire))), []);
 	const bad = (patch: Record<string, unknown>) => scheduleFileErrors(JSON.parse(file({ ...refire, grant_template: { ...template, ...patch } }))).join();
@@ -180,10 +183,10 @@ test("S3 refire: the template validates (no merge, merge and risk:high always as
 	});
 	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
 	const html = screen(data);
-	assert.match(html, /Fire grant <code>md-paus1<\/code> · paused \(operator\)<strong> · Run now is refused while this grant is paused/);
-	assert.match(html, /Fire grant <code>md-live1<\/code> · active · each Run now mints a fresh grant/);
-	assert.match(html, /class="job-meta schedule-approval">Template of <code>md-seed1<\/code>: 24 h, \$10, 500000 tokens, job cap 2; allowed plan, implement; asks on merge, risk:high\. Approved .*“Yes, refire triage\. long-unbroken/);
-	assert.doesNotMatch(html, /fires are skipped while this grant/);
+	assert.match(html, /Fire grant <code>md-paus1<\/code> · paused \(operator\)<strong> · fires are refused while this grant is paused: resume it, or move the schedule to a fresh schedule grant/);
+	assert.match(html, /Fire grant <code>md-live1<\/code> · active · each fire mints a fresh grant/);
+	assert.match(html, /class="job-meta schedule-approval">Template of <code>md-seed1<\/code>: 24 h, \$10, 500000 tokens, job cap 2; allowed plan, implement; asks on merge, risk:high\. Approved .*“Yes, triage\. long-unbroken/);
+	assert.doesNotMatch(html, /no grant template/);
 });
 
 test("schedules view: an answer is read only from the job's own artifact dir; a path outside it is refused", (t) => {
@@ -287,7 +290,7 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.match(html, /Next fire /);
 	assert.match(html, /watch scripts\/x\.sh every 300 s, fires on changed output/);
 	assert.match(html, />disabled</);
-	assert.match(html, /fires are skipped while this grant is paused/);
+	assert.match(html, /fires are refused while this grant is paused/);
 	assert.match(html, /this page's run history \(not the operator session\)/);
 	assert.doesNotMatch(html, /an answer card in the operator session/);
 	assert.match(html, /Warsaw: sunny, 29 C/);

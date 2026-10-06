@@ -31,7 +31,7 @@ export const SCHEDULE_SKILL_ANCHOR: Record<(typeof SCHEDULE_SKILLS)[number], { k
 	"cp-self-review": { kind: "research", delivery: "local" },
 	"cp-pr-review": { kind: "research", delivery: "local" },
 };
-/** A refire template's lifetime bound in hours (schedules S3): each fire grant lives this long from its fire. */
+/** A grant template's lifetime bound in hours: each fire grant lives this long from its fire. */
 export const GRANT_TEMPLATE_MAX_HOURS = 168;
 /** What a fire grant may auto-decide: never `merge` (mirrors MANDATE_ACTIONS minus merge). */
 export const GRANT_TEMPLATE_ACTIONS = ["plan", "implement", "review", "repair"] as const;
@@ -42,8 +42,8 @@ export const GRANT_TEMPLATE_FORCED_ASK_ON = ["merge", "risk:high"] as const;
 export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
 
 /**
- * A refire schedule's saved, operator-approved grant bounds (schedules S3), snapshotted from its seed grant at add.
- * Each Run now mints a fresh fire grant from it (src/schedule-grant.ts); it authorizes nothing on its own.
+ * A schedule's saved grant bounds, snapshotted from its seed grant at add, move or migration (its approval quotes the
+ * seed's own objective verbatim). Every fire mints a fresh fire grant from it (src/schedule-grant.ts).
  */
 export interface GrantTemplate {
 	seed_mandate_id: string;
@@ -65,12 +65,15 @@ export interface Schedule {
 	id: string;
 	name: string;
 	project: string;
-	/** The schedule's grant. A refire schedule's fire rewrites it, in the fire lane, to the grant it just minted. */
+	/** The schedule's current grant: its seed until the first fire, then the fire grant each fire mints, in the fire lane. */
 	mandate_id: string;
 	/** `manual`: no tick ever fires it; only Run now does. */
 	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" } | { type: "manual" };
 	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string; skill?: (typeof SCHEDULE_SKILLS)[number] };
-	/** manual only (`refire`): each fire mints a fresh grant from this template. */
+	/**
+	 * Every fire mints a fresh grant from this template; every add and move saves one. Optional only so a schedule the
+	 * one-shot migration could not derive one for (seed missing or unreadable) stays readable, with its fires refused.
+	 */
 	grant_template?: GrantTemplate;
 	enabled: boolean;
 	created_at: string;

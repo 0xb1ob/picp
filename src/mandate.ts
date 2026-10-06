@@ -188,7 +188,7 @@ export interface IssueMandateInput {
 	provenance?: MandateProvenance;
 	/** A verified operator risk:high pre-approval written with the grant (`withPreapproval`). */
 	risk_preapproval?: RiskPreapproval;
-	/** Code-only (a refire schedule's fire lane, src/schedule-grant.ts); `cp_mandate` exposes neither. */
+	/** Code-only (a schedule's fire lane, src/schedule-grant.ts); `cp_mandate` exposes neither. */
 	id?: string;
 	schedule_fire?: ScheduleFire;
 }
@@ -749,7 +749,7 @@ export class MandateStore {
 		return new EscalationStore({ home: this.home }).supersede((item) => supersedeReason(item, all, scoped, this.#stamp()));
 	}
 
-	/** A fresh `md-<6 hex>` no file holds yet; the refire fire lane names its grant with it before issuing (src/schedule-grant.ts). */
+	/** A fresh `md-<6 hex>` no file holds yet; a schedule's fire lane names its grant with it before issuing (src/schedule-grant.ts). */
 	mintId(): string {
 		for (let attempt = 0; attempt < 16; attempt += 1) {
 			const id = `md-${randomBytes(3).toString("hex")}`;
