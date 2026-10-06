@@ -112,3 +112,12 @@ test("the app page asks Android Chrome to resize its content for the keyboard, a
 	assert.ok(APP_VIEWPORT.includes("user-scalable=no"), "no zooming (operator 2026-09-27)");
 	assert.ok(APP_VIEWPORT.includes("viewport-fit=cover"), "non-zero safe-area insets");
 });
+
+test("the Sessions screen shares .shell-main with the page bar and banners: it fills the rest, never height: 100% on top of them", () => {
+	// Measured (Chromium, 1440x900 and 390x844): `.sessions { height: 100% }` under a 64 px page bar pushed the composer 64 px below the viewport.
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
+	assert.match(css, /\.shell-main:has\(> \.sessions\) \{ display: flex; flex-direction: column; \}/, "main stacks its children, so siblings above .sessions take their own height");
+	assert.match(css, /\.shell-main > \.sessions \{ flex: 1 1 0; \}/, "and .sessions takes only what is left");
+	assert.match(css, /\.session-transcript \{ flex: 1; min-height: 0; overflow-y: auto;/, "the transcript scrolls above the composer");
+	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*padding-bottom: calc\(8px \+ env\(safe-area-inset-bottom\)\);[^}]*flex-shrink: 0;/, "the composer never shrinks and clears the home indicator");
+});

@@ -136,6 +136,9 @@
 .session-dot-held { background: transparent; border: 1.5px solid var(--blue); }
 .session-dot-failed { border-radius: 2px; background: var(--muted); }
 .shell-main:has(> .sessions), .shell-main:has(> .session-loading) { padding: 0; overflow: hidden; }
+/* The page bar (desktop) and an error banner sit above .sessions in .shell-main: it takes what is left, never `height: 100%` on top of them, or the composer is pushed below the viewport. */
+.shell-main:has(> .sessions) { display: flex; flex-direction: column; }
+.shell-main > .sessions { flex: 1 1 0; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
  .session-sidebar { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; border-right: 1px solid var(--divider); overflow-y: auto; padding: 20px 12px; }
