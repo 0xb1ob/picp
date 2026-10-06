@@ -11,13 +11,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
 import { nextCronSlot, parseCron, scheduleFileErrors } from "../src/scheduler.ts";
-import { SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
+import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_ASK_ON, MANDATE_CHANNEL_VALUES, SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
 import { PARENT_SKILLS } from "../src/cp-bridge.ts";
 import { SCHEDULE_ANSWER_MAX_BYTES, scheduleAnswer, schedulesView } from "../src/viewer/schedules-view.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
 import type { ScheduleControlStatusResponse, SchedulesResponse } from "../src/viewer/api-types.ts";
 import type { ScheduleControlView } from "../viewer-app/schedule-control.ts";
-import { ANSWER_MAX_BYTES, DELIVERIES, JOB_KINDS, LAYOUT, MANDATE_ID_PATTERN, SCHEMA_VERSION } from "../src/contracts.ts";
+import { ANSWER_MAX_BYTES, DELIVERIES, JOB_KINDS, LAYOUT, MANDATE_ACTIONS, MANDATE_ASK_ON, MANDATE_CHANNELS, MANDATE_ID_PATTERN, SCHEMA_VERSION } from "../src/contracts.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const NOW = Date.parse("2026-09-28T01:41:00Z");
@@ -73,6 +73,9 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.deepEqual([...SCHEDULE_DELIVERIES], [...DELIVERIES]);
 	assert.equal(SCHEDULE_MANDATE_ID.source, MANDATE_ID_PATTERN);
 	assert.equal(SCHEDULE_SCHEMA_VERSION, SCHEMA_VERSION);
+	assert.deepEqual([...GRANT_TEMPLATE_ASK_ON], [...MANDATE_ASK_ON]);
+	assert.deepEqual([...GRANT_TEMPLATE_ACTIONS], MANDATE_ACTIONS.filter((action) => action !== "merge"), "a refire template never carries merge");
+	assert.deepEqual([...MANDATE_CHANNEL_VALUES], [...MANDATE_CHANNELS]);
 	assert.deepEqual(scheduleFileErrors(JSON.parse(file(cron, watch))), []);
 	const bad = (patch: Record<string, unknown>) => scheduleFileErrors({ schema_version: SCHEMA_VERSION, schedules: [{ ...cron, ...patch }] });
 	assert.match(bad({ extra: 1 }).join(), /\/schedules\/0\/extra: unexpected property/);
@@ -148,6 +151,33 @@ test("a manual skill schedule: schema accepts it, the view has no next fire, the
 	assert.match(html, /Manual: fires only on Run now/);
 	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under this grant\./);
 	assert.doesNotMatch(html, /Next fire|Next check/);
+});
+
+test("S3 refire: the template validates (no merge, merge and risk:high always asked), the page shows the fire grant and the verbatim approval", async (t) => {
+	const template = {
+		seed_mandate_id: "md-seed1", channel: "operator_chat", objective: "triage", expiry_hours: 24, spend_usd: 10, spend_tokens: 500000, job_cap: 2,
+		allowed_actions: ["plan", "implement"], ask_on: ["merge", "risk:high"],
+		approval: { operator_quote: `Yes, refire triage. ${"long-unbroken-quote-".repeat(60)}`, decided_by: "operator-quote", approved_at: "2026-09-01T00:00:00Z" },
+	};
+	const refire = { id: "sch-dddddd", name: "triage", project: "demo", mandate_id: "md-paus1", trigger: { type: "manual" }, job: { title: "Triage", kind: "research", delivery: "answer" }, enabled: true, created_at: "2026-09-01T00:00:00Z", grant_template: template };
+	assert.deepEqual(scheduleFileErrors(JSON.parse(file(refire))), []);
+	const bad = (patch: Record<string, unknown>) => scheduleFileErrors(JSON.parse(file({ ...refire, grant_template: { ...template, ...patch } }))).join();
+	assert.match(bad({ allowed_actions: ["merge"] }), /grant_template\/allowed_actions/);
+	assert.match(bad({ ask_on: ["merge"] }), /grant_template\/ask_on/);
+	assert.match(bad({ expiry_hours: 169 }), /grant_template\/expiry_hours/);
+	assert.match(bad({ approval: { ...template.approval, operator_quote: "" } }), /grant_template\/approval\/operator_quote/);
+	const data = schedulesView(fixture(t, file(refire, { ...refire, id: "sch-eeeeee", name: "live", mandate_id: "md-live1" })), () => {}, NOW);
+	assert.deepEqual(data.schedules.map((s) => [s.mandate_status, s.mandate_pause_reason]), [["paused", "operator"], ["active", null]]);
+	const built = await build({
+		stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules} from "./viewer-app/screens/Schedules.tsx"; export const screen=d=>render(h(Schedules,{data:d}));', loader: "tsx", resolveDir: REPO_ROOT },
+		bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" },
+	});
+	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
+	const html = screen(data);
+	assert.match(html, /Fire grant <code>md-paus1<\/code> · paused \(operator\)<strong> · Run now is refused while this grant is paused/);
+	assert.match(html, /Fire grant <code>md-live1<\/code> · active · each Run now mints a fresh grant/);
+	assert.match(html, /class="job-meta schedule-approval">Template of <code>md-seed1<\/code>: 24 h, \$10, 500000 tokens, job cap 2; allowed plan, implement; asks on merge, risk:high\. Approved .*“Yes, refire triage\. long-unbroken/);
+	assert.doesNotMatch(html, /fires are skipped while this grant/);
 });
 
 test("schedules view: an answer is read only from the job's own artifact dir; a path outside it is refused", (t) => {

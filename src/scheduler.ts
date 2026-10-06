@@ -22,7 +22,8 @@ import { isoTimestamp, isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, 
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
-import { assertTimeZone, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, type Refusal, refused, templateFromSeed } from "./schedule-grant.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 
@@ -55,6 +56,8 @@ export interface ScheduleInput {
 	manual?: true;
 	/** manual only: the fire records a deferred anchor and wakes the parent to expand it with this skill. */
 	skill?: string;
+	/** manual only (schedules S3): each fire mints a fresh grant from the seed's template; `approval` is the operator's verified quote. */
+	refire?: { approval: Omit<GrantTemplate["approval"], "approved_at"> };
 }
 
 export interface WatchRun { code: number | null; stdout: string }
@@ -73,6 +76,8 @@ export interface SchedulerPorts {
 	/** Registered but archived projects (the registry's `archivedNames`): refused at add and at every fire. */
 	archivedProjects?: () => readonly string[];
 	runWatch?: (cwd: string, scriptPath: string, timeoutMs: number) => Promise<WatchRun>;
+	/** A refire schedule's live inputs per fire (defaults, project override, token ceiling); absent or throwing refuses the fire. */
+	mintContext?: (project: string) => MintContext | Refusal;
 }
 
 export interface ScheduleEvent {
@@ -169,10 +174,12 @@ export class Scheduler {
 		});
 	}
 
-	async add(input: ScheduleInput): Promise<Schedule> {
+	/** `notes` (not saved) names every normalization a refire template made to its seed's bounds. */
+	async add(input: ScheduleInput): Promise<Schedule & { notes?: string[] }> {
 		const cron = input.cron !== undefined;
 		const manual = input.manual === true;
 		if ([cron, input.watch_script !== undefined, manual].filter(Boolean).length !== 1) throw new SchedulerError("a schedule is exactly one of cron (cron + tz), watch (watch_script + every_seconds + on) or manual (manual:true, Run now only)");
+		if (input.refire && !manual) throw new SchedulerError("refire needs a manual schedule: a cron or watch fire is unattended, so a grant minted per fire would be standing authority");
 		if (input.skill !== undefined) {
 			if (!(SCHEDULE_SKILLS as readonly string[]).includes(input.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(input.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
 			if (!manual || input.kind !== "research" || input.delivery !== "local" || input.script_path !== undefined) throw new SchedulerError("skill needs a manual schedule with kind research, delivery local and no script_path");
@@ -194,6 +201,8 @@ export class Scheduler {
 		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
 		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
 		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
+		const seeded = input.refire ? templateFromSeed(mandate as Mandate, input.refire.approval, stamp) : undefined;
+		if (seeded && refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
 		const schedule: Schedule = {
 			id: `sch-${randomBytes(3).toString("hex")}`,
 			name: input.name.trim(),
@@ -210,6 +219,7 @@ export class Scheduler {
 				...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
 				...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
 			},
+			...(seeded ? { grant_template: seeded.template } : {}),
 			enabled: true,
 			created_at: now.toISOString(),
 		};
@@ -218,16 +228,29 @@ export class Scheduler {
 			const shared = schedules.find((entry) => entry.mandate_id === schedule.mandate_id);
 			if (shared) throw new SchedulerError(`cp_schedule add refused: ${schedule.mandate_id} is already the grant of schedule ${shared.id} (${shared.name}); one grant per schedule`);
 			schedules.push(schedule);
-			return schedule;
+			return seeded ? { ...schedule, notes: seeded.notes } : schedule;
 		});
 	}
 
-	remove(id: string): Promise<Schedule> {
-		return this.#mutate((schedules) => {
+	/**
+	 * A refire schedule's current grant is revoked with it (in-flight workers are not killed); `note` says so. Other
+	 * grants are never touched. Serialized with fires, so a fire never mints for a schedule being removed.
+	 */
+	remove(id: string): Promise<{ schedule: Schedule; note: string }> {
+		return this.#serial(() => this.#removeOnce(id));
+	}
+
+	async #removeOnce(id: string): Promise<{ schedule: Schedule; note: string }> {
+		const schedule = await this.#mutate((schedules) => {
 			const index = schedules.findIndex((entry) => entry.id === id);
 			if (index < 0) throw new SchedulerError(`no schedule ${id}`);
 			return schedules.splice(index, 1)[0] as Schedule;
 		});
+		if (!schedule.grant_template) return { schedule, note: "" };
+		const grant = this.#ports.mandates.list().find((entry) => entry.id === schedule.mandate_id);
+		if (grant?.status !== "active" && grant?.status !== "paused") return { schedule, note: `; its grant ${schedule.mandate_id} is ${grant?.status ?? "missing"}, nothing to revoke` };
+		this.#ports.mandates.revoke(grant.id);
+		return { schedule, note: `; revoked its grant ${grant.id} (in-flight workers were not killed)` };
 	}
 
 	/**
@@ -242,7 +265,11 @@ export class Scheduler {
 		const now = this.#now();
 		const at = isoTimestamp(now);
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
-		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
+		// A refire schedule's pointer may have expired between clicks: what must hold is the next fire's re-evaluation.
+		const bounds = schedule.grant_template ? this.#fireBounds(schedule, now) : undefined;
+		const refusal = bounds
+			? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined)
+			: mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
 		if (refusal) throw new SchedulerError(`enable ${id} refused: ${refusal}`);
 		return this.#mutate((schedules) => {
 			const found = schedules.find((entry) => entry.id === id);
@@ -367,30 +394,46 @@ export class Scheduler {
 			: this.#skip(schedule, now, `fire at ${minuteIso(slot)} not recorded: ${why}`);
 		if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));
 		const stamp = isoTimestamp(now); // `at` keeps last_fire's millisecond format; grants are evaluated at second precision
-		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
-		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
-		if (refusal) return refuse(refusal);
 		const ledger = this.#ports.ledger();
 		const title = manual !== undefined ? `${schedule.job.title} (${schedule.name} run now ${minuteIso(now)})` : `${schedule.job.title} (${schedule.name} ${minuteIso(slot)})`;
 		const label = `schedule:${schedule.id}`;
 		const marker = manual?.via === "cp_schedule" ? runNowQuoteMarker(manual.source_sha) : undefined;
+		const ledgerRefusal = async (): Promise<string | undefined> => {
+			if (marker) {
+				// Single use, closed fires included: the sha is in the notes even when the quote comment was never written.
+				const used = (await ledger.list({ labels: [label], all: true })).find((entry) => entry.notes?.includes(marker) || entry.comments.some((comment) => comment.text.includes(marker)));
+				if (used) return `the operator message behind this quote already authorized run now ${used.id}; one operator sentence authorizes one run now per schedule`;
+			}
+			const open = (await ledger.list({ labels: [label] }))[0];
+			return open ? `the previous fire ${open.id} is still open` : undefined;
+		};
+		let mandateId = schedule.mandate_id;
+		let minted = "";
+		if (schedule.grant_template) {
+			// A refire fire mints nothing it would not use: single use and the open-fire guard come first (schedules S3).
+			const early = await ledgerRefusal();
+			if (early) return refuse(early);
+			const fire = await this.#mint(schedule, now, stamp, manual);
+			if (refused(fire)) return refuse(fire.refusal);
+			mandateId = base.mandate_id = fire.grant.id;
+			minted = `; minted fire grant ${fire.grant.id} from the template of ${schedule.grant_template.seed_mandate_id} (expires ${fire.grant.expiry})${fire.notes.map((note) => `; ${note}`).join("")}`;
+		} else {
+			const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
+			const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
+			if (refusal) return refuse(refusal);
+		}
 		let warning = "";
 		// Same slot twice (a crash between create and the state write) is the same job, never a second one.
 		let job = manual !== undefined ? undefined : ledger.findDuplicate({ title, project: schedule.project });
 		if (!job) {
-			if (marker) {
-				// Single use, closed fires included: the sha is in the notes even when the quote comment was never written.
-				const used = (await ledger.list({ labels: [label], all: true })).find((entry) => entry.notes?.includes(marker) || entry.comments.some((comment) => comment.text.includes(marker)));
-				if (used) return refuse(`the operator message behind this quote already authorized run now ${used.id}; one operator sentence authorizes one run now per schedule`);
-			}
-			const open = (await ledger.list({ labels: [label] }))[0];
-			if (open) return refuse(`the previous fire ${open.id} is still open`);
+			const late = schedule.grant_template ? undefined : await ledgerRefusal();
+			if (late) return refuse(late);
 			const created = await ledger.create({
 				title, project: schedule.project, kind: schedule.job.kind, delivery: schedule.job.delivery, labels: [label],
 				...(schedule.job.description ? { description: schedule.job.description } : {}),
 				...(schedule.job.script_path !== undefined ? { scriptPath: schedule.job.script_path } : {}),
 			});
-			const under = `for ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}`;
+			const under = `for ${schedule.id} (${schedule.name}) under ${schedule.grant_template ? "fire grant" : "mandate"} ${mandateId}${schedule.grant_template ? ` (minted from the template approved by ${schedule.grant_template.approval.decided_by})` : ""}`;
 			const notes = manual?.via === "dashboard"
 				? `run now from the dashboard (${manual.request_id}) ${under}${manual.peer ? `; peer ${manual.peer}` : ""}`
 				: manual?.via === "cp_schedule"
@@ -409,10 +452,51 @@ export class Scheduler {
 		return {
 			...base, outcome: "fired", job_id: job.id, delivery: schedule.job.delivery,
 			...(schedule.job.skill ? { skill: schedule.job.skill } : {}),
-			reason: `created ${job.id} under mandate ${schedule.mandate_id}${warning}`,
+			reason: `created ${job.id} under mandate ${mandateId}${minted}${warning}`,
 			...(missed ? { missed_at: minuteIso(missedAt) } : {}),
 			...manualFields,
 		};
+	}
+
+	/** A refire schedule's next fire bounds: its template re-evaluated against the live home (`mintContext`), fail closed. */
+	#fireBounds(schedule: Schedule, now: Date): ReturnType<typeof liveFireBounds> {
+		const template = schedule.grant_template as GrantTemplate;
+		let context: MintContext | Refusal;
+		try {
+			context = this.#ports.mintContext ? this.#ports.mintContext(schedule.project) : { refusal: "this host does not wire the refire mint context (data/mandate-defaults.json and the project override)" };
+		} catch (error) {
+			context = { refusal: `the live mandate defaults or project override are unreadable (${(error as Error).message})` };
+		}
+		return refused(context) ? context : liveFireBounds(template, context, schedule.project, schedule.job.kind, now);
+	}
+
+	/** Steps 3-10 of a refire fire (src/schedule-grant.ts): sweep, pointer check, live bounds, mint in this lane, sanity check. */
+	async #mint(queued: Schedule, now: Date, stamp: string, manual: FireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
+		if (manual === undefined) return { refusal: "a refire schedule fires only on Run now" };
+		// Re-read in the lane: a fire queued behind another sees the pointer that fire moved, and a removal in between refuses.
+		const schedule = this.list().find((entry) => entry.id === queued.id);
+		if (!schedule?.grant_template || !schedule.enabled) return { refusal: `schedule ${queued.id} was removed or disabled before this fire ran` };
+		const pointer = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
+		const stuck = pointerRefusal(pointer);
+		if (stuck) return { refusal: stuck };
+		const bounds = this.#fireBounds(schedule, now);
+		if (refused(bounds)) return bounds;
+		const trigger = manual.via === "dashboard"
+			? { via: manual.via, request_id: manual.request_id, peer: manual.peer }
+			: { via: manual.via, operator_quote: manual.operator_quote, decided_by: manual.decided_by as "operator-quote" | "operator-delegated", source_sha: manual.source_sha, ...(manual.send_id ? { send_id: manual.send_id } : {}), ...(manual.delegation_rule ? { delegation_rule: manual.delegation_rule } : {}) };
+		let fire: Awaited<ReturnType<typeof mintFireGrant>>;
+		try {
+			fire = await mintFireGrant({
+				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template: schedule.grant_template as GrantTemplate,
+				previousId: schedule.mandate_id, bounds: bounds.input, trigger, at: stamp,
+				movePointer: async (id) => void (await this.#patch(schedule.id, { mandate_id: id }, true)),
+			});
+		} catch (error) {
+			return { refusal: `no fire grant minted (${(error as Error).message}); the next fire re-mints` };
+		}
+		const refusal = mandateRefusal(fire.grant, fire.grant.id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
+		if (refusal) return { refusal: `the minted fire grant refuses the fire: ${refusal}` };
+		return { grant: fire.grant, notes: [...bounds.notes, ...(fire.revoked.length ? [`revoked ${fire.revoked.join(", ")}`] : [])] };
 	}
 
 	/** Recorded on the schedule every time; reported only when the reason changed, so a paused grant is news once. */
@@ -443,8 +527,16 @@ export function formatSchedules(schedules: readonly Schedule[]): string {
 			: `watch ${s.trigger.script_path} every ${s.trigger.every_seconds}s on ${s.trigger.on}`;
 		return [
 			`${s.id} ${s.name} [${s.project}] ${s.enabled ? "enabled" : "disabled"}: ${trigger} → ${s.job.kind}/${s.job.delivery} "${s.job.title}" under ${s.mandate_id}`,
+			...(s.grant_template ? [formatTemplate(s.grant_template, s.mandate_id)] : []),
 			...(s.last_fire ? [`  last fire: ${s.last_fire.at} → ${s.last_fire.job_id}${s.last_fire.missed ? " (missed slot)" : ""}`] : []),
 			...(s.last_skip ? [`  last skip: ${s.last_skip.at} — ${s.last_skip.reason}`] : []),
 		].join("\n");
 	}).join("\n");
+}
+
+function formatTemplate(t: GrantTemplate, current: string): string {
+	const exclusions = [...(t.exclusions?.paths ?? []), ...(t.exclusions?.subsystems ?? []), ...(t.exclusions?.job_kinds ?? [])];
+	return `  refire: each Run now mints a fresh grant from the template of ${t.seed_mandate_id} (${t.expiry_hours} h, $${t.spend_usd}, ${t.spend_tokens} tokens, job cap ${t.job_cap}` +
+		`${t.dispatch_parallelism ? `, parallelism ${t.dispatch_parallelism}` : ""}; allowed ${t.allowed_actions.join(", ")}; ask_on ${t.ask_on.join(", ")}${exclusions.length ? `; excludes ${exclusions.join(", ")}` : ""})` +
+		`, approved "${t.approval.operator_quote}" (${t.approval.decided_by}) at ${t.approval.approved_at}; current fire grant ${current}`;
 }

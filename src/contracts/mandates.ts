@@ -121,6 +121,45 @@ export const RiskPreapprovedRowSchema = Type.Object(
 );
 export type RiskPreapprovedRow = Replace<Static<typeof RiskPreapprovedRowSchema>, { use: RiskPreapprovedUse }>;
 
+const SCHEDULE_ID_PATTERN = "^sch-[0-9a-f]{6}$";
+const QuoteDecidedBySchema = StringEnum(["operator-quote", "operator-delegated"]);
+/**
+ * A refire schedule's fire grant (schedules S3): which schedule minted it in its fire lane, from which seed grant's
+ * saved template, the template's operator approval verbatim, and the trigger of this fire (the dashboard click or the
+ * run_now quote). Written only by `Scheduler` through `MandateStore.issue`; `cp_mandate` never accepts it.
+ */
+export const ScheduleFireSchema = Type.Object(
+	{
+		schedule_id: Type.String({ pattern: SCHEDULE_ID_PATTERN }),
+		seed_mandate_id: MandateIdSchema,
+		previous_mandate_id: Type.Optional(MandateIdSchema),
+		fired_at: IsoTimestampSchema,
+		approval: Type.Object(
+			{ operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, approved_at: IsoTimestampSchema, ...DelegationProvenanceFields },
+			{ additionalProperties: false },
+		),
+		trigger: Type.Union([
+			Type.Object({ via: Type.Literal("dashboard"), request_id: Type.String({ minLength: 1, maxLength: 200 }), peer: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]) }, { additionalProperties: false }),
+			Type.Object(
+				{ via: Type.Literal("cp_schedule"), operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, source_sha: Type.String({ pattern: "^[0-9a-f]{12}$" }), ...DelegationProvenanceFields },
+				{ additionalProperties: false },
+			),
+		]),
+	},
+	{ additionalProperties: false },
+);
+type QuoteDecidedBy = "operator-quote" | "operator-delegated";
+export interface ScheduleFire {
+	schedule_id: string;
+	seed_mandate_id: string;
+	previous_mandate_id?: string;
+	fired_at: string;
+	approval: { operator_quote: string; decided_by: QuoteDecidedBy; approved_at: string; delegation_rule?: string; send_id?: string };
+	trigger:
+		| { via: "dashboard"; request_id: string; peer: string | null }
+		| { via: "cp_schedule"; operator_quote: string; decided_by: QuoteDecidedBy; source_sha: string; delegation_rule?: string; send_id?: string };
+}
+
 export const MandateSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
@@ -184,6 +223,8 @@ export const MandateSchema = Type.Object(
 				{ additionalProperties: false },
 			),
 		),
+		/** A refire schedule's fire grant (schedules S3): its schedule, seed, approval and trigger. Absent on every other grant. */
+		schedule_fire: Type.Optional(ScheduleFireSchema),
 	},
 	{ additionalProperties: false },
 );
@@ -199,6 +240,7 @@ export type Mandate = Replace<
 		provenance?: MandateProvenance;
 		risk_preapproval?: RiskPreapproval;
 		risk_preapproved?: RiskPreapprovedRow[];
+		schedule_fire?: ScheduleFire;
 	}
 >;
 

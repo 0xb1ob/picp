@@ -24,7 +24,7 @@ async function bench(t: { after(fn: () => void): void }) {
 	const fleet = new FleetStore({ home: home.path });
 	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path });
 	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: grant.id, manual: true, title: "Nightly fix", kind: "ship", delivery: "pr" });
-	const post = { home: home.path, ledger: () => ledger, mandates, fleet, registry: { pathOf: () => home.path, archivedNames: () => [] }, dispatchQueue: { drain: async () => {} } };
+	const post = { home: home.path, ledger: () => ledger, mandates, fleet, registry: { pathOf: () => home.path, archivedNames: () => [], get: (name: string) => (name === "demo" ? {} : undefined) }, dispatchQueue: { drain: async () => {} } };
 	const lock = { held: true };
 	const sent: Array<{ customType: string; content: string }> = [];
 	let execute: Execute | undefined;
@@ -39,7 +39,11 @@ async function bench(t: { after(fn: () => void): void }) {
 		return (await execute!(call, { action: "run_now", id, operator_quote: quote }, undefined, undefined, ctx)).content[0]!.text;
 	};
 	const jobs = () => ledger.list({ labels: [`schedule:${schedule.id}`], all: true });
-	return { ledger, scheduler, schedule, lock, said, run, jobs, sent };
+	const call = async (params: Record<string, unknown>, id = "call-x") => {
+		const ctx = { sessionManager: { getEntries: () => said.map((content) => ({ type: "message", message: { role: "user", content } })) } };
+		return (await execute!(id, params, undefined, undefined, ctx)).content[0]!.text;
+	};
+	return { ledger, mandates, scheduler, schedule, lock, said, run, call, jobs, sent };
 }
 
 test("run_now fires on a verified quote naming the schedule, records it verbatim, and refuses a replay of the same message", async (t) => {
@@ -73,6 +77,9 @@ test("run_now refusals are each named and create no job", async (t) => {
 	await assert.rejects(run(`Run ${schedule.id} immediately.`), /quote not found/);
 	// (c) verbatim, but names neither the id nor the name
 	await assert.rejects(run("Go ahead with it."), new RegExp(`the quote names neither ${schedule.id} nor "nightly"`));
+	// S3 amendment: the name only inside a longer word names nothing (whole tokens only)
+	said.push("Run the nightlyish check now.");
+	await assert.rejects(run("Run the nightlyish check now."), new RegExp(`the quote names neither ${schedule.id} nor "nightly"`));
 	// (e) the session does not hold the parent lock
 	lock.held = false;
 	await assert.rejects(run(`Run ${schedule.id} now.`), /does not hold the parent lock/);
@@ -97,4 +104,24 @@ test("run_now: an open previous fire refuses; a delegated quote is recorded as o
 	said.push(`Run ${schedule.id} once more.`);
 	assert.match(await run(`Run ${schedule.id} once more.`, schedule.id, "call-2"), new RegExp(`run now not recorded: the previous fire ${job!.id} is still open`));
 	assert.equal((await jobs()).length, 1);
+});
+
+test("S3 refire: add needs the operator's verbatim approval_quote; run_now then fires under a freshly minted grant", async (t) => {
+	const { mandates, said, call } = await bench(t);
+	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 500_000 }, job_cap: 2, schedule_grant: true });
+	const add = { action: "add", name: "triage", project: "demo", mandate_id: seed.id, manual: true, title: "Triage", kind: "research", delivery: "answer" };
+	await assert.rejects(call({ ...add, approval_quote: "anything" }), /approval_quote is for refire:true only/);
+	await assert.rejects(call({ ...add, refire: true, approval_quote: "Yes, refire triage." }), /quote not found/);
+	said.push("Yes, refire triage with a fresh grant each run.");
+	const added = await call({ ...add, refire: true, approval_quote: "Yes, refire triage with a fresh grant each run." });
+	assert.match(added, /refire: each Run now mints a fresh grant .*approved "Yes, refire triage with a fresh grant each run\." \(operator-quote\)/);
+	assert.match(added, /refire template: each fire grant lives 24 h from its fire/);
+	const id = /added (sch-[0-9a-f]{6})/.exec(added)![1]!;
+	said.push("Run triage now.");
+	const fired = await call({ action: "run_now", id, operator_quote: "Run triage now." }, "call-r");
+	assert.match(fired, new RegExp(`minted fire grant md-[0-9a-f]{6} from the template of ${seed.id}`));
+	const fire = mandates.list().find((m) => m.schedule_fire?.schedule_id === id)!;
+	assert.equal(fire.schedule_fire?.approval.operator_quote, "Yes, refire triage with a fresh grant each run.");
+	assert.equal(fire.schedule_fire?.trigger.via === "cp_schedule" && fire.schedule_fire.trigger.operator_quote, "Run triage now.");
+	assert.equal(mandates.get(seed.id)?.status, "revoked");
 });

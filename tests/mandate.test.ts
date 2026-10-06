@@ -13,7 +13,6 @@ import {
 } from "../src/contracts.ts";
 import { escalationApproves, EscalationStore } from "../src/escalation.ts";
 import {
-	autoDecideCheckpoint,
 	capReached,
 	covers,
 	formatMandate,
@@ -30,6 +29,7 @@ import {
 	resolveMandateJobIds,
 	resolveMandateObjectiveRef,
 } from "../src/mandate.ts";
+import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
 import { join } from "node:path";
 import { paths } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS, setMandateDefault } from "../src/mandate-defaults.ts";
@@ -1319,4 +1319,29 @@ test("schedlater S3: covers matrix — a schedule grant covers only its own sche
 	const grants = [store.require(schedule.id)];
 	assert.equal(evaluateAuthority(subject({ jobId: "cp-s1", scheduleId: "sch-abc123", scheduleMandate: schedule.id }), grants).permitted, true);
 	assert.equal(evaluateAuthority(subject({ jobId: "cp-p1" }), grants).permitted, false);
+});
+
+test("S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const id = store.mintId();
+	const scheduleFire = {
+		schedule_id: "sch-abc123", seed_mandate_id: "md-seed01", previous_mandate_id: "md-seed01", fired_at: isoTimestamp(new Date()),
+		approval: { operator_quote: "yes, refire it", decided_by: "operator-quote" as const, approved_at: isoTimestamp(new Date()) },
+		trigger: { via: "dashboard" as const, request_id: "sc-20261006000000-0a1b2c3d", peer: null },
+	};
+	const fire = issue(store, { id, schedule_grant: true, schedule_fire: scheduleFire });
+	assert.equal(fire.id, id);
+	assert.deepEqual(new MandateStore(home.path).get(id)?.schedule_fire, scheduleFire, "validated, written and re-read");
+	assert.throws(() => issue(store, { id }), /refusing to issue .*: not a fresh mandate id/);
+	assert.throws(() => issue(store, { id: "../escape" }), /not a fresh mandate id/);
+	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");
+	const params = new Map<string, Record<string, unknown>>();
+	registerMandateTools({ on: () => {}, registerTool: (tool: { name: string; parameters: { properties: Record<string, unknown> } }) => params.set(tool.name, tool.parameters.properties) } as never, {
+		commandPost: () => ({}), setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined, createdThisTurn: [],
+	} as never);
+	const keys = Object.keys(params.get("cp_mandate") ?? {});
+	assert.ok(keys.includes("objective"), "the cp_mandate schema was read");
+	assert.ok(!keys.includes("id") && !keys.includes("schedule_fire"), `cp_mandate never takes id or schedule_fire (${keys.join(", ")})`);
 });

@@ -117,8 +117,8 @@ export class ScheduleControl {
 				await scheduler.setEnabled(id, request.op === "enable");
 				this.#outcome(request, "done", `${request.op}d ${id}`);
 			} else if (request.op === "remove") {
-				await scheduler.remove(id);
-				this.#outcome(request, "done", `removed ${id}`);
+				const { note } = await scheduler.remove(id);
+				this.#outcome(request, "done", `removed ${id}${note}`);
 			} else {
 				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer });
 				if (event.outcome !== "fired") {

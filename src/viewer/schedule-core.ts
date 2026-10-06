@@ -23,15 +23,47 @@ export const SCHEDULE_ID = /^sch-[0-9a-f]{6}$/;
 export const SCHEDULE_SCHEMA_VERSION = 1;
 /** Skills a manual schedule may name: its fire records a deferred anchor and wakes the parent to expand it. */
 export const SCHEDULE_SKILLS = ["cp-self-review"] as const;
+/** A refire template's lifetime bound in hours (schedules S3): each fire grant lives this long from its fire. */
+export const GRANT_TEMPLATE_MAX_HOURS = 168;
+/** What a fire grant may auto-decide: never `merge` (mirrors MANDATE_ACTIONS minus merge). */
+export const GRANT_TEMPLATE_ACTIONS = ["plan", "implement", "review", "repair"] as const;
+/** Mirrors MANDATE_ASK_ON; a template always holds `merge` and `risk:high`. */
+export const GRANT_TEMPLATE_ASK_ON = ["plan_approval", "merge", "risk:high"] as const;
+export const GRANT_TEMPLATE_FORCED_ASK_ON = ["merge", "risk:high"] as const;
+/** Mirrors MANDATE_CHANNELS; tests/viewer-schedules.test.ts pins the three mirrors. */
+export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
+
+/**
+ * A refire schedule's saved, operator-approved grant bounds (schedules S3), snapshotted from its seed grant at add.
+ * Each Run now mints a fresh fire grant from it (src/schedule-grant.ts); it authorizes nothing on its own.
+ */
+export interface GrantTemplate {
+	seed_mandate_id: string;
+	/** The seed's `issued_by.channel`, copied onto every fire grant (no new channel value). */
+	channel: (typeof MANDATE_CHANNEL_VALUES)[number];
+	objective: string;
+	expiry_hours: number;
+	spend_usd: number;
+	spend_tokens: number;
+	job_cap: number;
+	dispatch_parallelism?: number;
+	allowed_actions: Array<(typeof GRANT_TEMPLATE_ACTIONS)[number]>;
+	ask_on: Array<(typeof GRANT_TEMPLATE_ASK_ON)[number]>;
+	exclusions?: { paths?: string[]; subsystems?: string[]; job_kinds?: Array<(typeof SCHEDULE_JOB_KINDS)[number]> };
+	approval: { operator_quote: string; decided_by: "operator-quote" | "operator-delegated"; approved_at: string; delegation_rule?: string; send_id?: string };
+}
 
 export interface Schedule {
 	id: string;
 	name: string;
 	project: string;
+	/** The schedule's grant. A refire schedule's fire rewrites it, in the fire lane, to the grant it just minted. */
 	mandate_id: string;
 	/** `manual`: no tick ever fires it; only Run now does. */
 	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" } | { type: "manual" };
 	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string; skill?: (typeof SCHEDULE_SKILLS)[number] };
+	/** manual only (`refire`): each fire mints a fresh grant from this template. */
+	grant_template?: GrantTemplate;
 	enabled: boolean;
 	created_at: string;
 	/** Cron: the instant slots were last evaluated up to. Watch: when the script last ran. */
@@ -67,6 +99,35 @@ const watchTrigger = object({
 	type: oneOf(["watch"]), script_path: line(1000), on: oneOf(["exit0", "changed"]),
 	every_seconds: (v, path, errors) => { if (!Number.isInteger(v) || (v as number) < 30 || (v as number) > 86_400) errors.push(`${path}: must be an integer 30-86400`); },
 });
+const text = (max: number): Check => (v, path, errors) => { if (typeof v !== "string" || v.length < 1 || v.length > max) errors.push(`${path}: must be a string of 1-${max} characters`); };
+const number = (min: number, max: number, integer: boolean, exclusiveMin = false): Check => (v, path, errors) => {
+	if (typeof v !== "number" || !Number.isFinite(v) || (integer && !Number.isInteger(v)) || (exclusiveMin ? v <= min : v < min) || v > max) errors.push(`${path}: must be ${integer ? "an integer" : "a number"} ${exclusiveMin ? `over ${min}` : `${min}`}-${max}`);
+};
+/** A non-empty list of distinct `values`, at most `max` long; `required` must all be in it. */
+const subset = (values: readonly string[], max: number, required: readonly string[] = []): Check => (v, path, errors) => {
+	if (!Array.isArray(v) || v.length < 1 || v.length > max || new Set(v).size !== v.length || v.some((item) => !values.includes(item))) errors.push(`${path}: must be 1-${max} distinct of ${values.join(", ")}`);
+	else if (required.some((item) => !v.includes(item))) errors.push(`${path}: must include ${required.join(", ")}`);
+};
+const lines = (max: number, items: number): Check => (v, path, errors) => {
+	if (!Array.isArray(v) || v.length > items) errors.push(`${path}: must be an array of at most ${items}`);
+	else v.forEach((item, i) => line(max)(item, `${path}/${i}`, errors));
+};
+const ISO_SECOND = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+const grantTemplate = object({
+	seed_mandate_id: pattern(SCHEDULE_MANDATE_ID), channel: oneOf(MANDATE_CHANNEL_VALUES), objective: text(2000),
+	expiry_hours: number(1, GRANT_TEMPLATE_MAX_HOURS, true), spend_usd: number(0, Number.MAX_SAFE_INTEGER, false, true),
+	spend_tokens: number(1, Number.MAX_SAFE_INTEGER, true), job_cap: number(1, Number.MAX_SAFE_INTEGER, true), "dispatch_parallelism?": number(1, 32, true),
+	allowed_actions: subset(GRANT_TEMPLATE_ACTIONS, 8), ask_on: subset(GRANT_TEMPLATE_ASK_ON, 16, GRANT_TEMPLATE_FORCED_ASK_ON),
+	// The Mandate exclusions shape exactly (empty lists allowed), so every seed's exclusions snapshot unchanged.
+	"exclusions?": object({ "paths?": lines(200, 32), "subsystems?": lines(80, 32), "job_kinds?": (v, path, errors) => {
+		if (!Array.isArray(v) || v.length > 4) errors.push(`${path}: must be an array of at most 4`);
+		else v.forEach((item, i) => oneOf(SCHEDULE_JOB_KINDS)(item, `${path}/${i}`, errors));
+	} }),
+	approval: object({
+		operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), approved_at: pattern(ISO_SECOND),
+		"delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/),
+	}),
+});
 const schedule = object({
 	id: pattern(SCHEDULE_ID), name: line(80), project: line(64), mandate_id: pattern(SCHEDULE_MANDATE_ID),
 	trigger: (v, path, errors) => (isObject(v) && v.type === "watch" ? watchTrigger : isObject(v) && v.type === "manual" ? manualTrigger : cronTrigger)(v, path, errors),
@@ -75,6 +136,7 @@ const schedule = object({
 		"description?": (v, path, errors) => { if (typeof v !== "string" || v.length > 4000) errors.push(`${path}: must be a string of at most 4000 characters`); },
 		"script_path?": line(1000), "skill?": oneOf(SCHEDULE_SKILLS),
 	}),
+	"grant_template?": grantTemplate,
 	enabled: boolean, created_at: string, "last_checked_at?": string, "last_output_sha?": string,
 	"last_fire?": object({ at: string, slot: string, job_id: string, missed: boolean }),
 	"last_skip?": object({ at: string, reason: string }),

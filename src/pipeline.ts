@@ -37,7 +37,8 @@ import { recordAssessedRisk } from "./ledger-filter.ts";
 import type { ArtifactStore } from "./artifacts.ts";
 import type { AnsweredSink } from "./answered.ts";
 import { CheckpointStore } from "./checkpoint.ts";
-import { autoDecideCheckpoint, type MandateStore, type MandateUsageJob } from "./mandate.ts";
+import type { MandateStore, MandateUsageJob } from "./mandate.ts";
+import { autoDecideCheckpoint } from "./mandate-autodecide.ts";
 import { gateOverride, type EscalationStore, raiseForGate } from "./escalation.ts";
 import {
 	type Checkpoint,

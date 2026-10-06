@@ -10,10 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CheckpointStore } from "./checkpoint.ts";
 import {
-	checkpointAwaitingId,
-	type Checkpoint,
 	type CheckpointKind,
 	type Escalation,
 	type GateFlags,
@@ -31,6 +28,8 @@ import {
 	type Risk,
 	type RiskPreapproval,
 	type RoutingProvenance,
+	type ScheduleFire,
+	isSafeMandateId,
 	SCHEMA_VERSION,
 	isoTimestamp,
 	LAYOUT,
@@ -189,6 +188,9 @@ export interface IssueMandateInput {
 	provenance?: MandateProvenance;
 	/** A verified operator risk:high pre-approval written with the grant (`withPreapproval`). */
 	risk_preapproval?: RiskPreapproval;
+	/** Code-only (a refire schedule's fire lane, src/schedule-grant.ts); `cp_mandate` exposes neither. */
+	id?: string;
+	schedule_fire?: ScheduleFire;
 }
 
 // final_fix is never granted: evaluateAuthority refuses it before any action is read.
@@ -498,7 +500,8 @@ export class MandateStore {
 		}
 		const projects = input.projects.map((name) => name.trim()).filter((name) => name.length > 0);
 		if (projects.length === 0) throw new MandateError("cp_mandate issue needs at least one project");
-		const id = this.#mintId();
+		const id = input.id ?? this.mintId();
+		if (input.id !== undefined && (!isSafeMandateId(id) || existsSync(this.file(id)))) throw new MandateError(`refusing to issue ${id}: not a fresh mandate id`);
 		const mandate: Mandate = {
 			schema_version: SCHEMA_VERSION,
 			id,
@@ -519,6 +522,7 @@ export class MandateStore {
 			decisions: [],
 			escalations: [],
 			...(input.provenance ? { provenance: input.provenance } : {}),
+			...(input.schedule_fire ? { schedule_fire: input.schedule_fire } : {}),
 		};
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const baseline = usageBaseline(mandate, counted);
@@ -745,7 +749,8 @@ export class MandateStore {
 		return new EscalationStore({ home: this.home }).supersede((item) => supersedeReason(item, all, scoped, this.#stamp()));
 	}
 
-	#mintId(): string {
+	/** A fresh `md-<6 hex>` no file holds yet; the refire fire lane names its grant with it before issuing (src/schedule-grant.ts). */
+	mintId(): string {
 		for (let attempt = 0; attempt < 16; attempt += 1) {
 			const id = `md-${randomBytes(3).toString("hex")}`;
 			if (!existsSync(this.file(id))) return id;
@@ -766,34 +771,4 @@ export class MandateStore {
 function withEscalation(mandate: Mandate, escalation: MandateEscalation): MandateEscalation[] {
 	if (mandate.escalations.some((entry) => entry.kind === escalation.kind)) return mandate.escalations;
 	return [...mandate.escalations, escalation];
-}
-
-export function autoDecideCheckpoint(
-	store: CheckpointStore,
-	checkpoint: Checkpoint,
-	subject: MandateSubject,
-	mandates: MandateStore,
-): Checkpoint {
-	if (checkpoint.decision !== "pending") return checkpoint;
-	const now = subject.now ?? isoTimestamp();
-	const jobs = mandates.withReviewerSpend(subject.usageJobs ?? []);
-	mandates.sweep(now, jobs);
-	const scope = subject.scheduleId ? {} : mandates.scheduleOf(subject.jobId);
-	const verdict = evaluateAuthority({ ...subject, ...scope, createdAt: subject.createdAt ?? mandates.jobCreatedAt(subject.jobId), now, usageJobs: jobs }, mandates.list());
-	if (!verdict.permitted) return checkpoint;
-	const decided = store.decide(checkpoint.job_id, true, {
-		by: `mandate:${verdict.mandateId}`,
-		note: verdict.clause,
-		at: now,
-		basis: { mandate: verdict.mandateId, clause: verdict.clause },
-		...(checkpoint.scope ? { scope: checkpoint.scope } : {}),
-	});
-	mandates.journal(verdict.mandateId, {
-		at: decided.decided_at ?? now,
-		job_id: checkpoint.job_id,
-		kind: store.kind,
-		clause: verdict.clause,
-		checkpoint: checkpointAwaitingId(checkpoint.job_id, store.kind, checkpoint.scope),
-	});
-	return decided;
 }
