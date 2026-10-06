@@ -21,8 +21,16 @@ export const SCHEDULE_DELIVERIES = ["pr", "local", "pipeline", "answer", "board"
 export const SCHEDULE_MANDATE_ID = /^md-[a-z0-9]{4,16}$/;
 export const SCHEDULE_ID = /^sch-[0-9a-f]{6}$/;
 export const SCHEDULE_SCHEMA_VERSION = 1;
-/** Skills a manual schedule may name: its fire records a deferred anchor and wakes the parent to expand it. */
-export const SCHEDULE_SKILLS = ["cp-self-review"] as const;
+/**
+ * Skills a manual schedule may name (the expander registry): its fire records a deferred anchor and wakes the parent to
+ * expand it with `skills/<name>/SKILL.md`. Each is also a `PARENT_SKILLS` entry (src/cp-bridge.ts); tests pin the two.
+ */
+export const SCHEDULE_SKILLS = ["cp-self-review", "cp-pr-review"] as const;
+/** The anchor job each skill's schedule must record: its kind and delivery (no `script_path`). */
+export const SCHEDULE_SKILL_ANCHOR: Record<(typeof SCHEDULE_SKILLS)[number], { kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number] }> = {
+	"cp-self-review": { kind: "research", delivery: "local" },
+	"cp-pr-review": { kind: "research", delivery: "local" },
+};
 /** A refire template's lifetime bound in hours (schedules S3): each fire grant lives this long from its fire. */
 export const GRANT_TEMPLATE_MAX_HOURS = 168;
 /** What a fire grant may auto-decide: never `merge` (mirrors MANDATE_ACTIONS minus merge). */

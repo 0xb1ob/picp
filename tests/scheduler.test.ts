@@ -516,7 +516,7 @@ test("manual/skill add refusals each throw and write nothing", async (t) => {
 		[{ manual: true, ...skillJob, delivery: "answer" }, /skill needs a manual schedule/],
 		[{ manual: true, ...skillJob, kind: "ship" }, /skill needs a manual schedule/],
 		[{ manual: true, ...skillJob, script_path: "x.sh" }, /skill needs a manual schedule/],
-		[{ manual: true, ...skillJob, skill: "cp-other" }, /unknown skill "cp-other"; known: cp-self-review/],
+		[{ manual: true, ...skillJob, skill: "cp-other" }, /unknown skill "cp-other"; known: cp-self-review, cp-pr-review/],
 	];
 	for (const [input, message] of refusals) await assert.rejects(scheduler.add({ ...base, ...skillJob, ...input } as Parameters<Scheduler["add"]>[0]), message);
 	// skill on a cron schedule: the cron branch has manual unset.
@@ -547,6 +547,34 @@ test("run now on a manual skill schedule: grant-checked, one deferred anchor, si
 	assert.match(formatScheduleEvent(fired), /parent-expanded run.*skill cp-self-review/);
 	assert.match((await scheduler.fireNow(schedule.id, "sc-3")).reason, new RegExp(`the previous fire ${anchor.id} is still open`));
 	assert.equal((await ledger.list({ all: true })).length, 1);
+});
+
+test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a refire template that holds every reviewer plus the synthesis", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { ports, grant } = bench(home, { repoOf: (project) => (project === "demo" ? "Acme/Demo" : undefined) });
+	const scheduler = new Scheduler(ports);
+	const pr = (n: number) => `pr: https://github.com/acme/demo/pull/${n}`;
+	const review = { project: "demo", manual: true as const, title: "PR review", kind: "research" as const, delivery: "local" as const, skill: "cp-pr-review" };
+	const description = `Review the open queue.\n${pr(7)}\n  ${pr(9)}  \n`;
+	const added = await scheduler.add({ ...review, name: "prs", mandate_id: grant().id, description });
+	assert.deepEqual([added.job.skill, added.job.description], ["cp-pr-review", description]);
+	const refusals: [string, RegExp][] = [
+		[`${pr(7)}\npr: https://github.com/other/demo/pull/8`, /not in the project's repo Acme\/Demo/],
+		[Array.from({ length: 21 }, (_, i) => pr(i + 1)).join("\n"), /needs 1-20 description lines .*found 21/],
+		["no targets here", /needs 1-20 description lines .*found 0/],
+		["pr: https://github.com/acme/demo/issues/3", /is not a PR url/],
+		["pr: https://github.com/acme/demo/pull/3/files", /is not a PR url/],
+		[`${pr(3)}\n${pr(3)}`, /listed twice/],
+	];
+	for (const [text, message] of refusals) await assert.rejects(scheduler.add({ ...review, name: "bad", mandate_id: grant().id, description: text }), message);
+	await assert.rejects(new Scheduler({ ...ports, repoOf: undefined }).add({ ...review, name: "bad", mandate_id: grant().id, description: pr(1) }), /needs the project's GitHub repo/);
+	// refire: the template's job cap must hold N reviewers + 1 synthesis (job_cap 2 < 2 PRs + 1).
+	const approval = { operator_quote: "yes, refire prs", decided_by: "operator-quote" as const };
+	await assert.rejects(scheduler.add({ ...review, name: "tight", mandate_id: grant({ job_cap: 2 }).id, description: `${pr(1)}\n${pr(2)}`, refire: { approval } }), /job cap 2 is under 3 \(2 PR reviews \+ 1 synthesis per fire\)/);
+	const fits = await scheduler.add({ ...review, name: "fits", mandate_id: grant({ job_cap: 3 }).id, description: `${pr(1)}\n${pr(2)}`, refire: { approval } });
+	assert.equal(fits.grant_template?.job_cap, 3);
+	assert.deepEqual(scheduler.list().map((entry) => entry.name), ["prs", "fits"]);
 });
 
 test("cp_schedule is parent-only", () => {

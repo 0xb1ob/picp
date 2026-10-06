@@ -234,14 +234,14 @@ test("parent starts with --no-skills plus --skill <home>/skills/<name> for each 
 	assert.deepEqual([...PARENT_BRIDGE_FLAGS], ["--no-extensions", "--no-skills"]);
 	const pkg = (name: string) => join(PACKAGE_ROOT, "skills", name);
 	// A checkout home is the package root: the shipped skills resolve from it.
-	assert.deepEqual(parentSkillPaths(PACKAGE_ROOT), [pkg("cp-memory"), pkg("cp-self-review")]);
+	assert.deepEqual(parentSkillPaths(PACKAGE_ROOT), [pkg("cp-memory"), pkg("cp-self-review"), pkg("cp-pr-review")]);
 	for (const name of PARENT_SKILLS) assert.match(readFileSync(join(PACKAGE_ROOT, "skills", name, "SKILL.md"), "utf8"), new RegExp(`^name: ${name}$`, "m"));
 	// A home with its own copy wins per skill; a managed home without one falls back to the package.
 	const home = scratch();
-	assert.deepEqual(parentSkillPaths(home), [pkg("cp-memory"), pkg("cp-self-review")]);
+	assert.deepEqual(parentSkillPaths(home), [pkg("cp-memory"), pkg("cp-self-review"), pkg("cp-pr-review")]);
 	mkdirSync(join(home, "skills/cp-memory"), { recursive: true });
 	writeFileSync(join(home, "skills/cp-memory/SKILL.md"), "---\nname: cp-memory\n---\n", "utf8");
-	assert.deepEqual(parentSkillPaths(home), [join(home, "skills/cp-memory"), pkg("cp-self-review")]);
+	assert.deepEqual(parentSkillPaths(home), [join(home, "skills/cp-memory"), pkg("cp-self-review"), pkg("cp-pr-review")]);
 
 	const args = buildParentArgv({ sessionFile: "/s.jsonl", model: "m/x", extension: "/cp.ts", skills: parentSkillPaths(home) });
 	assert.ok(args.includes("--no-extensions") && args.includes("--no-skills"));

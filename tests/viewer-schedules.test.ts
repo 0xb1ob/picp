@@ -5,13 +5,13 @@
  * time zone, and the screen rendered from a fixture.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
 import { nextCronSlot, parseCron, scheduleFileErrors } from "../src/scheduler.ts";
-import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_ASK_ON, MANDATE_CHANNEL_VALUES, SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
+import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_ASK_ON, MANDATE_CHANNEL_VALUES, SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
 import { PARENT_SKILLS } from "../src/cp-bridge.ts";
 import { SCHEDULE_ANSWER_MAX_BYTES, scheduleAnswer, schedulesView } from "../src/viewer/schedules-view.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
@@ -129,9 +129,15 @@ test("a manual skill schedule: schema accepts it, the view has no next fire, the
 		enabled: true, created_at: "2026-09-01T00:00:00Z",
 	};
 	assert.deepEqual(scheduleFileErrors(JSON.parse(file(manual))), []);
-	assert.match(scheduleFileErrors(JSON.parse(file({ ...manual, job: { ...manual.job, skill: "cp-other" } }))).join(), /job\/skill: must be one of cp-self-review/);
+	assert.match(scheduleFileErrors(JSON.parse(file({ ...manual, job: { ...manual.job, skill: "cp-other" } }))).join(), /job\/skill: must be one of cp-self-review, cp-pr-review/);
+	assert.deepEqual(scheduleFileErrors(JSON.parse(file({ ...manual, job: { ...manual.job, skill: "cp-pr-review" } }))), []);
 	assert.match(scheduleFileErrors(JSON.parse(file({ ...manual, trigger: { type: "manual", cron: "* * * * *" } }))).join(), /trigger\/cron: unexpected property/);
-	for (const skill of SCHEDULE_SKILLS) assert.ok((PARENT_SKILLS as readonly string[]).includes(skill), `${skill} is a parent skill`);
+	// The expander registry: every schedule skill is a parent skill shipped as skills/<name>/SKILL.md, with a research/local anchor.
+	for (const skill of SCHEDULE_SKILLS) {
+		assert.ok((PARENT_SKILLS as readonly string[]).includes(skill), `${skill} is a parent skill`);
+		assert.match(readFileSync(join(REPO_ROOT, "skills", skill, "SKILL.md"), "utf8"), new RegExp(`^name: ${skill}$`, "m"));
+		assert.deepEqual(SCHEDULE_SKILL_ANCHOR[skill], { kind: "research", delivery: "local" });
+	}
 	const data = schedulesView(fixture(t, file(manual)), () => {}, NOW);
 	assert.deepEqual([data.error, data.schedules[0]?.next_at, data.schedules[0]?.next_note], [null, null, "manual: fires only on Run now"]);
 	const built = await build({

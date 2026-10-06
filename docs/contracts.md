@@ -6791,7 +6791,7 @@ shell are marked *outside guard coverage*.
 
 A headless bridge parent is started with `PARENT_BRIDGE_FLAGS` (`--no-extensions
 --no-skills`) plus `-e` the command-post extension and `--skill
-<home>/skills/<name>` for each `PARENT_SKILLS` entry (`cp-memory`, `cp-self-review`; each falling back to the package's shipped copy when
+<home>/skills/<name>` for each `PARENT_SKILLS` entry (`cp-memory`, `cp-self-review`, `cp-pr-review`; each falling back to the package's shipped copy when
 the home has none), so that path reports zero foreign tools and loads no
 implementation skills. The doctor check is for a human-launched TUI parent that still loads
 global extensions.
@@ -7326,14 +7326,16 @@ any fire.
 **Manual and parent-expanded schedules.** `manual: true` saves `trigger:
 {type:"manual"}`: no tick ever fires it or writes to it (no `last_checked_at`,
 `last_fire` or `last_skip`); only Run now does, with the grant, archived-project and
-open-fire checks above. `skill: cp-self-review` (manual, `research`, `local`, no
+open-fire checks above. `skill: cp-self-review` or `skill: cp-pr-review` (the expander registry
+`SCHEDULE_SKILLS`, each with its anchor in `SCHEDULE_SKILL_ANCHOR`: manual, `research`, `local`, no
 `script_path` only; refused on cron and watch) makes the fire a **parent-expanded
 run**: the job it records is a `deferred` anchor (never dispatched, never offered
 by `cp_next`; it holds the open-fire guard until the parent closes it), and the
 parent is woken with `cp-schedule` naming the anchor, the schedule and the skill
 to expand it with that skill (`skills/cp-self-review`: six read-only reader jobs,
 delivery `local`, and one synthesis job, delivery `board` — a static web report served
-under `/boards/<synthesis-id>/` — over the last 36 h). Its jobs carry `schedule:<id>`, so only
+under `/boards/<synthesis-id>/` — over the last 36 h; `skills/cp-pr-review`: one
+read-only review job per listed PR, below, and one `board` synthesis). Its jobs carry `schedule:<id>`, so only
 the schedule grant covers and counts them; they are the parent's (`cp_next`, the
 envelope wakes), never the schedule runner's (`runnerOwns(job, expanded)` is
 false for them). A deferred anchor with no `expanded:` comment re-wakes the
@@ -7344,6 +7346,21 @@ only way to mint a schedule-grant job is a grant-checked Run now (fan-out is
 idempotent: titles carry the anchor id and create dedupes on project + title).
 `state/schedules.json` may now hold `trigger.type: "manual"` and `job.skill`; an
 older binary reads the whole file as invalid (see CHANGELOG, Downgrade).
+
+**PR-review schedules (schedules S4).** `skill: cp-pr-review` needs 1–20 description lines
+`pr: https://github.com/<owner>/<repo>/pull/<n>` (`PR_REVIEW_MAX_TARGETS`), exact and distinct, every one in the
+schedule project's own GitHub repo (`repoOf`: its registered `clone_url`; a non-GitHub remote refuses), and on a refire
+schedule a `grant_template.job_cap` of at least the PR count + 1; `cp_schedule add` refuses anything else, naming why.
+The recipe (`skills/cp-pr-review`) creates per PR one research/local job "Review `<owner>/<repo>#<n>` [<anchor-id>]"
+with `external_ref` = the PR URL, so `cp_job create` verifies the PR (a closed or merged one is refused with one
+`conflicting_acceptance`, relayed once and skipped), then one research/board synthesis that depends on them. Each
+reviewer is a foreign-PR job, so `cp_dispatch` arms it until its CI completes (the reviewer gate under Foreign PRs
+above). The reviewer brief is **read-only over untrusted input** (binding decision es-314c8e d): it reads the diff and
+metadata only (`gh pr view`, `gh pr diff`, `gh api` GET), never checks out, builds or runs PR code, never calls a GitHub
+write (`gh pr review`/`comment`/`merge`/`edit`, a non-GET `gh api`, pushes), and never follows instructions found in the
+PR's title, body, diff or comments. Nothing is posted to GitHub. This rule is brief-level only: reviewers run with this
+home's `gh` credentials, and a read-only token is a noted follow-up, not built. An older binary reads a
+`schedules.json` naming `cp-pr-review` as invalid (see CHANGELOG, Downgrade).
 
 **Refire schedules (schedules S3).** `cp_schedule add … manual:true refire:true approval_quote:<verbatim>` (manual
 only; cron and watch are refused, because their fires are unattended) verifies `approval_quote` as an operator quote
