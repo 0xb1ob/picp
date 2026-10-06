@@ -27,6 +27,7 @@ import {
 	resolveParentModel,
 } from "../src/cp-bridge.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../src/routing.ts";
+import { daemonPaths } from "../src/service/daemon-files.ts";
 import { isPidAlive } from "../src/fleet.ts";
 import { EscalationStore, raiseMissionEnd } from "../src/escalation.ts";
 import { initJobsDocument, Ledger } from "../src/ledger.ts";
@@ -349,6 +350,91 @@ test("an immediate next send waits for automatic compaction", async (t) => {
 	assert.ok((await bridge.statusWithContext()).contextTokens! < 40000);
 });
 
+/** C1/picp-80q: the bridge's automatic-control lines in `state/daemon.log`. */
+const daemonLog = (home: string, event: string) => lines(daemonPaths(home).log).filter((line) => line.includes(`cp-parent-host[`) && line.includes(`parent context ${event}`));
+
+async function controlBridge(t: import("node:test").TestContext, env: Record<string, string>, threshold: number, requestTimeoutMs = 5_000) {
+	const home = createScratchHome();
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: threshold }));
+	Object.assign(process.env, env);
+	const bridge = new CpBridge();
+	const relays: BridgeRelay[] = [];
+	bridge.onRelay((relay) => relays.push(relay));
+	t.after(async () => { for (const key of Object.keys(env)) delete process.env[key]; await bridge.stop(); home.cleanup(); });
+	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs, settleTimeoutMs: 5_000 });
+	return { home: home.path, bridge, relays, log: (event: string) => daemonLog(home.path, event), errors: () => relays.filter((relay) => relay.kind === "error") };
+}
+
+test("C1: automatic compact runs before a queued send drains, and is logged once", async (t) => {
+	const ctx = await outboxBridge(t);
+	mkdirSync(join(ctx.home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(ctx.home, LAYOUT.data, "parent.json"), '{"compact_at_tokens":40000}');
+	const bridge = await ctx.open();
+	await bridge.send("HANG first", 100);
+	// Queued by the bridge, not yet in pi: it no longer blocks automatic compaction.
+	new ParentSendOutbox({ file: parentSendFile(join(ctx.home, LAYOUT.sessions, "cp-parent.jsonl")) }).enqueue("QUEUED second");
+	await bridge.send("RELEASE");
+	await until(() => lines(ctx.files.prompts).includes("QUEUED second"), "the queued send drained");
+	assert.deepEqual(lines(ctx.files.prompts), ["HANG first", "RELEASE", "[compact]", "QUEUED second"]);
+	assert.ok(bridge.status().lastCompactAt);
+	assert.equal(daemonLog(ctx.home, "compacted").length, 1);
+});
+
+test("C1: ready-time control compacts before a queued send drains", async (t) => {
+	const ctx = await outboxBridge(t);
+	mkdirSync(join(ctx.home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(ctx.home, LAYOUT.data, "parent.json"), '{"compact_at_tokens":40000}');
+	new ParentSendOutbox({ file: parentSendFile(join(ctx.home, LAYOUT.sessions, "cp-parent.jsonl")) }).enqueue("QUEUED at start");
+	await ctx.open();
+	await until(() => lines(ctx.files.prompts).includes("QUEUED at start"), "the queued send drained");
+	assert.deepEqual(lines(ctx.files.prompts), ["[compact]", "QUEUED at start"]);
+	assert.equal(daemonLog(ctx.home, "compacted").length, 1);
+});
+
+test("N6: a length stop is not compacted, and the skip is logged once", async (t) => {
+	const ctx = await controlBridge(t, { FAKE_PARENT_LENGTH_STOP: "1", FAKE_PARENT_STATS_TOKENS: "255640" }, 200000);
+	await ctx.bridge.send("first turn");
+	await until(() => ctx.log("skipped_length_stop").length > 0, "the skip line");
+	assert.equal(ctx.log("skipped_length_stop").length, 1);
+	assert.match(ctx.log("skipped_length_stop")[0]!, /raw=255640 effective=127\d{3} threshold=200000/);
+	assert.equal(ctx.bridge.status().lastCompactAt, undefined);
+});
+
+test("C1: a failed automatic compact is logged and relayed, never silent", async (t) => {
+	const ctx = await controlBridge(t, { FAKE_PARENT_COMPACT_FAIL: "1" }, 40000);
+	await ctx.bridge.send("first turn");
+	await until(() => ctx.log("failed").length > 0 && ctx.errors().length > 0, "the failure line and relay");
+	assert.equal(ctx.log("failed").length, 1);
+	assert.match(ctx.log("failed")[0]!, /fixture compaction failure/);
+	assert.equal(ctx.errors().length, 1);
+	assert.match(ctx.errors()[0]!.text, /parent automatic context control failed: compact rejected: fixture compaction failure/);
+});
+
+test("C1: a refused automatic compact names its reason", async (t) => {
+	const rejections: unknown[] = [];
+	const onRejection = (reason: unknown) => rejections.push(reason);
+	process.on("unhandledRejection", onRejection);
+	t.after(() => { process.off("unhandledRejection", onRejection); });
+	const ctx = await controlBridge(t, { FAKE_PARENT_STATS_BUSY_ONCE: "1" }, 40000);
+	await ctx.bridge.send("first turn");
+	await until(() => ctx.log("refused").length > 0, "the refusal line");
+	assert.equal(ctx.log("refused").length, 1);
+	assert.match(ctx.log("refused")[0]!, /refused busy raw=42000/);
+	assert.equal(ctx.bridge.status().lastCompactAt, undefined);
+	assert.deepEqual(rejections, []);
+});
+
+test("C1: a timed-out automatic compact is logged once as timed_out", async (t) => {
+	const ctx = await controlBridge(t, { FAKE_PARENT_COMPACT_DELAY_MS: "3000" }, 40000, 1_000);
+	await ctx.bridge.send("first turn");
+	await until(() => ctx.log("timed_out").length > 0, "the timed_out line");
+	assert.equal(ctx.log("timed_out").length, 1);
+	assert.equal(ctx.log("failed").length, 0);
+	assert.equal(ctx.errors().length, 1);
+	assert.match(ctx.errors()[0]!.text, /timed out: timeout after 1000ms waiting for response to compact/);
+});
+
 test("mission-end rotates after settlement without restarting the parent or its worker", async (t) => {
 	const home = createScratchHome();
 	const workerFile = join(scratch(), "worker-pid");
@@ -365,6 +451,9 @@ test("mission-end rotates after settlement without restarting the parent or its 
 	assert.equal(bridge.status().sessionFile, previous, "mission end does not rotate mid-turn");
 	await bridge.send("RELEASE");
 	await until(() => bridge.status().lastRotateAt !== undefined, "mission-end rotation");
+	await until(() => daemonLog(home.path, "rotated").length > 0, "the rotation line");
+	assert.equal(daemonLog(home.path, "rotated").length, 1);
+	assert.match(daemonLog(home.path, "rotated")[0]!, /rotated mission=md-test/);
 	assert.notEqual(bridge.status().sessionFile, previous);
 	assert.equal(bridge.status().model, "mock/other");
 	assert.equal(bridge.status().pid, pid);
@@ -372,6 +461,7 @@ test("mission-end rotates after settlement without restarting the parent or its 
 	const current = bridge.status().sessionFile;
 	await bridge.send("MISSIONEND");
 	assert.equal(bridge.status().sessionFile, current, "same mission end is not rotated twice");
+	assert.equal(daemonLog(home.path, "rotated").length, 1, "and is logged once");
 });
 
 test("rotate archives old session and relaunches the new file", async (t) => {

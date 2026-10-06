@@ -55,6 +55,7 @@ const SEGMENT_END = { type: "turn_end", message: { role: "assistant", stopReason
 const wakeEnd = () => (process.env.FAKE_PARENT_WAKE_SEGMENT === "1" ? SEGMENT_END : { type: "agent_settled" });
 let compacted = false;
 let compactedTurn = false;
+let statsBusy = false;
 const entriesFile = sessionFromArgv() ? `${sessionFromArgv()}.fake-entries.jsonl` : null;
 
 function readEntries() {
@@ -157,7 +158,14 @@ rl.on("line", (line) => {
 		return;
 	}
 	if (type === "get_session_stats") {
-		const reply = () => write({ type: "response", command: type, id, success: true, data: { sessionFile: activeSession, contextUsage: { tokens: compacted ? (compactedTurn ? 5000 : null) : 42000, contextWindow: 200000, percent: 21 } } });
+		// FAKE_PARENT_STATS_TOKENS: the pre-compaction reading (default 42000).
+		const before = Number(process.env.FAKE_PARENT_STATS_TOKENS ?? 42000);
+		const reply = () => write({ type: "response", command: type, id, success: true, data: { sessionFile: activeSession, contextUsage: { tokens: compacted ? (compactedTurn ? 5000 : null) : before, contextWindow: 200000, percent: 21 } } });
+		// FAKE_PARENT_STATS_BUSY_ONCE=1: a run starts (and never settles) before the first reading answers.
+		if (process.env.FAKE_PARENT_STATS_BUSY_ONCE === "1" && !statsBusy) {
+			statsBusy = true;
+			write({ type: "agent_start" });
+		}
 		const delay = Number(process.env.FAKE_PARENT_STATS_DELAY_MS ?? 0);
 		if (delay > 0) setTimeout(reply, delay);
 		else reply();
@@ -165,7 +173,15 @@ rl.on("line", (line) => {
 	}
 	if (type === "compact") {
 		compacted = true;
-		write({ type: "response", command: type, id, success: true, data: { tokensBefore: 42000, estimatedTokensAfter: 5000 } });
+		const promptLog = process.env.FAKE_PARENT_PROMPTS;
+		if (promptLog) appendFileSync(promptLog, "[compact]\n");
+		// FAKE_PARENT_COMPACT_FAIL=1 refuses; FAKE_PARENT_COMPACT_DELAY_MS delays only the response.
+		const reply = () => write(process.env.FAKE_PARENT_COMPACT_FAIL === "1"
+			? { type: "response", command: type, id, success: false, error: "fixture compaction failure" }
+			: { type: "response", command: type, id, success: true, data: { tokensBefore: 42000, estimatedTokensAfter: 5000 } });
+		const delay = Number(process.env.FAKE_PARENT_COMPACT_DELAY_MS ?? 0);
+		if (delay > 0) setTimeout(reply, delay);
+		else reply();
 		return;
 	}
 	if (type === "new_session") {
@@ -331,9 +347,13 @@ rl.on("line", (line) => {
 				result: { details },
 			});
 		}
+		// FAKE_PARENT_LENGTH_STOP=1: N6 — a length stop billed 128000 output tokens, ~400 chars stored.
+		const lengthStop = process.env.FAKE_PARENT_LENGTH_STOP === "1"
+			? { stopReason: "length", usage: { input: 2, output: 128000, cacheRead: 126795, cacheWrite: 801, totalTokens: 255598 } }
+			: {};
 		write({
 			type: "message_end",
-			message: { role: "assistant", content: [{ type: "text", text: `reply: ${text}` }] },
+			message: { role: "assistant", content: [{ type: "text", text: lengthStop.stopReason ? `reply: ${text} ${"x".repeat(390)}` : `reply: ${text}` }], ...lengthStop },
 		});
 		write({ type: "agent_settled" });
 		write({ type: "response", command: type, id, success: true });

@@ -1,6 +1,6 @@
 /** Operator-owned RPC parent: durable sends, observed-death recovery and read-only diagnostics. */
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
 	type BridgeReceiptLevel,
@@ -17,7 +17,8 @@ import {
 	type ThinkingLevel,
 	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
-import { autoParentContext, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus } from "./parent-context.ts";
+import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus } from "./parent-context.ts";
+import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
@@ -299,6 +300,8 @@ export class CpBridge {
 	#model: string | undefined;
 	#missionEnd: string | undefined;
 	#autoControl: Promise<void> | undefined;
+	/** The last valid assistant `message_end` (N6: a length stop's discarded output is not context). */
+	#lastAssistant: AssistantLike | undefined;
 
 	onRelay(listener: RelayListener): () => void {
 		this.#listeners.add(listener);
@@ -341,7 +344,7 @@ export class CpBridge {
 			liveProc: () => (this.#proc?.alive && this.#ready && !this.#stopping ? this.#proc : undefined),
 			emit: (relay) => this.#emit(relay),
 			sleep: options.outerRetrySleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
-			journal: (event, payload) => this.#journalOuterRetry(event, payload),
+			journal: (event, payload) => journalBridgeEvent(this.#home, event, payload),
 			countTurn: (failed, error) => this.#countTurn(failed, error),
 			...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
 		});
@@ -386,31 +389,6 @@ export class CpBridge {
 		}
 	}
 
-	/**
-	 * H1 review (finding 2): the bridge keeps no per-turn run log the way a job
-	 * does. This is the smallest durable record it does keep now \u2014 one
-	 * append-only JSONL file beside `parent.lock`, in the same `state/` this
-	 * home already owns \u2014 so an outer-ladder attempt, success or exhaustion for
-	 * the parent survives a restart instead of living only in the relay stream
-	 * (which nothing durable consumes today). Never throws: a journal that can't
-	 * write must not take the ladder down with it.
-	 */
-	#journalOuterRetry(
-		event: "outer_retry_attempt" | "outer_retry_succeeded" | "outer_retry_exhausted" | "outer_retry_reservation_failed" | "relay_failed",
-		payload: Record<string, unknown>,
-	): void {
-		const home = this.#home;
-		if (!home) return;
-		try {
-			const dir = join(home, LAYOUT.state);
-			mkdirSync(dir, { recursive: true });
-			const line = `${JSON.stringify({ ts: new Date().toISOString(), event, ...payload })}\n`;
-			appendFileSync(join(dir, "bridge-retry.jsonl"), line);
-		} catch {
-			// Best-effort durability: a journal write failing must never stall or crash the ladder.
-		}
-	}
-
 	sendReceipt(id: string): BridgeReceipt | undefined {
 		const entry = this.#delivery?.outbox.get(id);
 		return entry ? receiptOf(entry) : undefined;
@@ -437,12 +415,28 @@ export class CpBridge {
 	async statusWithContext(): Promise<ParentStatus> {
 		return liveParentStatus(this.#proc, this.#ready, this.#options?.requestTimeoutMs, () => this.status(), (update) => this.#recordControl(update));
 	}
-	#settledProc(): WorkerProcess {
+	/** One automatic-control pass at a time (`send` waits for it); never rejects, logs to daemon.log (parent-auto-control.ts). */
+	#runControl(): Promise<void> {
+		const home = this.#home;
+		if (!home || this.#unsettled(true) === "not_running") return Promise.resolve();
+		return this.#autoControl ??= runAutoControl(home, this.#missionEnd, this.#lastAssistant, {
+			unsettled: () => this.#unsettled(true), status: () => this.statusWithContext(),
+			rotate: async () => this.#rotate(this.#settledProc(true)), compact: async () => this.#compact(this.#settledProc(true)),
+		}, (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] })).finally(() => { this.#autoControl = undefined; });
+	}
+	#settledProc(allowQueued = false): WorkerProcess {
 		const proc = this.#proc;
 		if (!proc?.alive || !this.#ready || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");
-		if (this.#controlBusy || proc.busy || this.#runOpen || this.#delivery?.outbox.list().some((entry) =>
-			["queued", "injected", "landed"].includes(entry.state))) throw new CpBridgeError(PARENT_UNSETTLED);
+		if (this.#unsettled(allowQueued)) throw new CpBridgeError(PARENT_UNSETTLED);
 		return proc;
+	}
+	/** Why the parent is not settled. Automatic control (`allowQueued`) runs before the drain: a `queued` send is still the bridge's, not pi's. */
+	#unsettled(allowQueued: boolean): string | undefined {
+		if (!this.#proc?.alive || !this.#ready || this.#stopping) return "not_running";
+		if (this.#controlBusy) return "control_busy";
+		if (this.#proc.busy || this.#runOpen) return "busy";
+		const states = allowQueued ? ["injected", "landed"] : ["queued", "injected", "landed"];
+		return this.#delivery?.outbox.list().some((entry) => states.includes(entry.state)) ? "send_in_flight" : undefined;
 	}
 	async diagnostic(action: "doctor" | "version"): Promise<ParentDiagnostic> {
 		const proc = this.#settledProc();
@@ -462,7 +456,9 @@ export class CpBridge {
 		return this.drain("cancel");
 	}
 	async compact(instructions?: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
-		const proc = this.#settledProc();
+		return this.#compact(this.#settledProc(), instructions);
+	}
+	async #compact(proc: WorkerProcess, instructions?: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
 		this.#controlBusy = true;
 		try {
 			const customInstructions = [parentCompactInstructions(this.#home!), instructions?.trim()].filter(Boolean).join("\n\n");
@@ -473,7 +469,9 @@ export class CpBridge {
 		} finally { this.#controlBusy = false; }
 	}
 	async rotate(): Promise<{ sessionFile: string; archivedFile: string }> {
-		const proc = this.#settledProc();
+		return this.#rotate(this.#settledProc());
+	}
+	async #rotate(proc: WorkerProcess): Promise<{ sessionFile: string; archivedFile: string }> {
 		const old = this.#sessionFile;
 		if (!old || !this.#home) throw new CpBridgeError("parent session is missing");
 		this.#controlBusy = true;
@@ -570,7 +568,11 @@ export class CpBridge {
 			this.#ready = true;
 			this.#deathsBeforeReady = 0;
 			this.#booting = false;
-			void this.#delivery?.afterReady(proc);
+			// A queued send: control runs before the drain, so it never lands on an over-threshold context (A2).
+			let queued = false;
+			try { queued = this.#delivery?.outbox.list().some((entry) => entry.state === "queued") ?? false; } catch { /* unreadable outbox: status reports it */ }
+			if (queued) void this.#runControl().then(() => this.#delivery?.afterReady(proc));
+			else void this.#delivery?.afterReady(proc);
 		} catch (error) {
 			this.#stopping = true;
 			await proc.shutdown().catch(() => undefined);
@@ -585,6 +587,7 @@ export class CpBridge {
 		this.#ready = false;
 		this.#turn = freshTurn();
 		this.#runOpen = false;
+		this.#lastAssistant = undefined;
 		const generation = ++this.#generation;
 		proc.closed.then((exit) => {
 			if (generation !== this.#generation) return;
@@ -649,6 +652,7 @@ export class CpBridge {
 			if (message?.role === "user") this.#delivery?.landed(textOf(message), this.#turn);
 			if (!message || message.role !== "assistant") return;
 			this.#turn.assistantCount += 1;
+			this.#lastAssistant = lastValidAssistant([message]) ?? this.#lastAssistant;
 			const text = textOf(event.message);
 			if (text.length > 0) this.#turn.texts.push(text);
 			if (text.includes(STALE_WAKEUP_HEADLINE)) this.#turn.stale = true;
@@ -698,18 +702,8 @@ export class CpBridge {
 				this.#lastReplyAt = new Date().toISOString();
 			}
 			this.#relayWake(turn, open ? undefined : turn.error);
-			this.#delivery?.afterSettle();
-			if (this.#home && !this.#autoControl) {
-				try {
-					this.#settledProc();
-					this.#autoControl = autoParentContext(this.#home, this.#missionEnd, {
-						settled: () => { this.#settledProc(); }, status: () => this.statusWithContext(),
-						rotate: () => this.rotate(), compact: () => this.compact(),
-					}).catch((error: Error) => {
-						this.#emit({ kind: "error", stale: false, text: `parent automatic context control failed: ${error.message}`, receipt: emptyReceipt(), paths: [] });
-					}).finally(() => { this.#autoControl = undefined; });
-				} catch { /* a queued send or open turn owns the parent */ }
-			}
+			// Automatic control first, then the queued sends: a queued send never blocks compaction (A2).
+			void this.#runControl().then(() => this.#delivery?.afterSettle());
 		}
 	}
 

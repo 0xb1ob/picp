@@ -23,10 +23,12 @@ import { operatorNotify } from "../../src/parent-session.ts";
 import { durableWakeupProjects, homeMandateProjects, homeProjectResolver, type ProjectOf, projectsOf } from "../../src/project-report.ts";
 import { scheduledJobIds } from "../../src/relay-scope.ts";
 import { SendFirstGate } from "../../src/send-first-gate.ts";
+import { contextOver, type HoldContext, ParentCompactHold } from "../../src/parent-compact-hold.ts";
+import { parentContextLog } from "../../src/parent-context.ts";
 import { durableIdsFromMessage } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
 import { formatWedgedNotice } from "../../src/wedged.ts";
-import { currentRuntime, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
+import { currentRuntime, runtimeOrRefusal, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
 import type { SessionState } from "./shared.ts";
 
 export type WakeupSurfaces = ReturnType<typeof createWakeupSurfaces>;
@@ -202,6 +204,13 @@ export function createWakeupSurfaces(
 	const releaseHeld = (): void => {
 		for (const deliver of sendFirst.flush()) deliver();
 	};
+	// C1/picp-80q (src/parent-compact-hold.ts): behind the send-first gate, closest to pi.sendMessage.
+	const compactHold = new ParentCompactHold({ log: (line) => parentContextLog(currentRuntime().home, "cp-parent", line) });
+	// A refused runtime was reported once at session_start: no reading, no second report (single-mode-refused e2e).
+	const reading = (ctx: HoldContext | undefined) => {
+		const runtime = runtimeOrRefusal();
+		return contextOver("runtime" in runtime ? ctx : undefined, () => currentRuntime().home);
+	};
 	const wakeGate = {
 		agentStart: (): void => {
 			gate.busy = true;
@@ -217,7 +226,8 @@ export function createWakeupSurfaces(
 			sendFirst.userMessage((message as { role?: unknown } | null)?.role, messageText(message));
 		},
 		/** A clean turn_end answered the landed sends: their held wakes go now. */
-		turnEnd: (event: { type: string; [key: string]: unknown }): void => {
+		turnEnd: (event: { type: string; [key: string]: unknown }, ctx?: HoldContext): void => {
+			compactHold.turnEnded(reading(ctx));
 			sendFirst.turnEnd(event);
 			releaseHeld();
 		},
@@ -225,20 +235,22 @@ export function createWakeupSurfaces(
 			const last = [...messages].reverse().find((m) => (m as { role?: unknown } | null)?.role === "assistant");
 			if ((last as { stopReason?: unknown } | undefined)?.stopReason === "aborted") gate.aborted = true;
 		},
-		agentSettled: (): void => {
+		agentSettled: (ctx?: HoldContext): void => {
 			// Idle first (F6): anything sent from here on triggers its own turn.
 			gate.busy = false;
 			gate.triggered = false;
 			sendFirst.settled();
+			compactHold.settled(reading(ctx));
 			// After an abort held wakes wait for the next message or wake, like the nudge below.
 			if (!gate.aborted) releaseHeld();
 			const unseen = gate.nonTriggeringSent - gate.seenUpTo;
 			gate.seenUpTo = gate.nonTriggeringSent;
 			if (unseen <= 0 || gate.aborted) return;
-			pi.sendMessage(
+			const nudge = () => pi.sendMessage(
 				{ customType: WAKEUP_NUDGE_TYPE, content: `${unseen} fleet notice(s) arrived while you were busy; they are above.`, display: true },
 				{ deliverAs: "followUp", triggerTurn: true },
 			);
+			if (compactHold.offer(nudge) === "send") nudge();
 		},
 	};
 	const sendWakeup = (
@@ -266,7 +278,8 @@ export function createWakeupSurfaces(
 				};
 				// unload-parent PR3: an unanswered operator send goes first; held wakes count as sent (not acked).
 				releaseHeld();
-				if (sendFirst.offer(stamp.kind, deliver) === "send") deliver();
+				const gated = (): void => { if (compactHold.offer(deliver) === "send") deliver(); };
+				if (sendFirst.offer(stamp.kind, gated) === "send") gated();
 			},
 			onSuppressed: (suppressed, verdict) => recordStaleWakeup(suppressed, verdict, "send"),
 			projectOf: projectOf(),
@@ -766,6 +779,7 @@ export function createWakeupSurfaces(
 		projectOf,
 		sendWakeup,
 		wakeGate,
+		compactHold,
 		surfaceAnswerCards,
 		surfaceDurableWakeups,
 		confirmDurableArrival,
