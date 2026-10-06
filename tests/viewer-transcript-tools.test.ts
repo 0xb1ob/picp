@@ -140,7 +140,7 @@ test("a localStorage that refuses the write warns instead of swallowing it, and 
 
 test("layout: the tool-calls toggle and a collapsed bridge notice hold at 390px, and the desktop block does not override them", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
-	const desktop = css.split("@media (min-width: 900px) {")[1] ?? "";
+	const desktop = css.split("@media (min-width: 900px) {")[1]?.split("\n}")[0] ?? "";
 	assert.match(css, /\.session-tools-toggle \{ display: flex;[^}]*min-height: 44px;[^}]*white-space: nowrap;[^}]*\}/, "a 44px touch target that never wraps at 390px");
 	assert.match(css, /\.session-system \.session-notice-line \{[^}]*min-height: 44px;[^}]*\}/, "the collapsed notice (bridge or system) is a 44px touch target at 390px");
 	assert.match(css, /\.session-system \.session-notice-line > span \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;[^}]*\}/, "a long first line ellipsizes instead of wrapping the row");

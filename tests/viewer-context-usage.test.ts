@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, renameSyn
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
+import { parseHTML } from "linkedom";
 import { LAYOUT } from "../src/contracts.ts";
 import { recordModelWindows } from "../src/model-windows.ts";
 import { contextLevel, contextUsage, modelWindows, SCAN_BYTES, scanSession } from "../src/viewer/context-usage.ts";
@@ -110,7 +111,7 @@ test("views: Sessions carries operator, parent and worker context; Jobs and Map 
 	assert.match(html, /context n\/a/);
 	assert.doesNotMatch(html, /style=/);
 	const you = screens.sessions(sessionsView(state, "you", null)!);
-	assert.match(you, /context n\/a<small> · no assistant reply yet<\/small>/, "the heading names the reason");
+	assert.match(parseHTML(you).document.querySelector(".session-heading")!.innerHTML, /context n\/a<small> · no assistant reply yet<\/small>/, "the heading names the reason");
 	const jobsHtml = screens.jobs(jobsView(state));
 	assert.match(jobsHtml, /<span class="job-context"><span class="ctx-chip ctx-warn ctx-compact"/);
 	assert.match(jobsHtml, /ctx 204K \/ 272K · 75%/);
@@ -181,15 +182,15 @@ test("workers: model · thinking from the session, else routing (fleet record, s
 	const result = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; export const sessions=(data)=>render(h(Sessions,{data}));', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
 	const screens = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 	const html: string = screens.sessions(sessionsView(state, "workers", "cp-a")!);
-	for (const meta of ["gpt-x · medium", "gpt-x · high", "gpt-x · minimal", "gpt-x"]) assert.match(html, new RegExp(`<small>${meta}</small>`));
+	for (const meta of ["gpt-x · medium", "gpt-x · high", "gpt-x · minimal", "gpt-x"]) assert.match(html, new RegExp(`<small>no run status · ${meta}</small>`));
 
 	// A model switched inside the session after dispatch wins over the dispatch model; the row and the subtitle agree.
 	put(join(stateDir, "fleet.json"), { jobs: [job("cp-e", {}, file("e", line({ type: "model_change", provider: "anthropic", modelId: "claude-x" }) + line({ type: "thinking_level_change", thinkingLevel: "high" })))] });
 	const switched = sessionsView(state, "workers", "cp-e")!;
 	assert.equal(switched.subtitle, "claude-x · high");
 	const switchedHtml: string = screens.sessions(switched);
-	assert.match(switchedHtml, /<small>claude-x · high<\/small>/);
-	assert.doesNotMatch(switchedHtml, /<small>gpt-x/);
+	assert.match(switchedHtml, /<small>no run status · claude-x · high<\/small>/);
+	assert.doesNotMatch(switchedHtml, /<small>[^<]*gpt-x/);
 });
 
 test("long session (> SCAN_BYTES): the head's model/thinking fill what the tail lacks; the tail wins", (t) => {

@@ -251,20 +251,20 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
- const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice" title={context?.model ? modelText(context) : undefined}><span class={`session-dot session-dot-${phase}`}/><span><strong>{label}</strong><small>{meta}</small><ContextChip usage={context} compact/></span></a>;
+ const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null,showModel=false)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class={`session-dot session-dot-${phase}`}/><span><strong>{label}</strong><small>{meta}</small>{showModel && context && <small class="session-model">{modelText(context)}</small>}<ContextChip usage={context} compact/></span></a>;
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
  return <div class="sessions">
   <h1 class="session-title">Sessions</h1>
   <aside class="session-sidebar" aria-label="Session streams">
-   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context)}</section>
+   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
    {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
-   <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context)}</section>
+   <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context,true)}</section>
    <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${workerPhase(w)} · ${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
-   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}</div>
+   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<ContextChip usage={context}/></div>
     {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
     {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
