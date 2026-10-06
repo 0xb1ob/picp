@@ -52,6 +52,9 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	const item = () => root.querySelector<HTMLButtonElement>(".operator-restart-button")!;
 	const text = root.querySelector(".shell-more-panel")!.textContent ?? "";
 	assert.ok(text.indexOf("Refresh now") < text.indexOf("Copy link to this view") && text.indexOf("Copy link to this view") < text.indexOf("Notifications") && text.indexOf("Notifications") < text.indexOf("Viewer"), text);
+	assert.equal(root.querySelectorAll(".shell-more-row > svg").length, 3, "Refresh, Copy and Notifications each have an icon");
+	assert.ok(root.querySelector(".shell-more-footer .shell-more-version"), "Viewer sits in the divided footer");
+	assert.ok(root.querySelector(".shell-more-scrim[aria-hidden=true]"), "the phone background dims while the panel is open");
 	assert.equal(item().textContent, "Restart session");
 	await act(() => item().click());
 	assert.match(item().textContent!, /^Tap again to restart/);
@@ -62,11 +65,17 @@ test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc an
 	const key = (k: string) => { const e = new window.Event("keydown", { bubbles: true }); Object.defineProperty(e, "key", { value: k }); return e; };
 	await act(() => document.dispatchEvent(key("Enter")));
 	assert.equal(details.open, true, "other keys leave it open");
+	let focused = false;
+	root.querySelector("summary")!.focus = () => { focused = true; };
 	await act(() => document.dispatchEvent(key("Escape")));
 	assert.equal(details.open, false, "Esc closes");
+	assert.equal(focused, true, "Escape restores focus to the opener");
 	await toggle(true);
 	await act(() => document.getElementById("elsewhere")!.dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
 	assert.equal(details.open, false, "an outside tap closes");
+	await toggle(true);
+	await act(() => root.querySelector(".shell-more-scrim")!.dispatchEvent(new window.Event("pointerdown", {bubbles:true})));
+	assert.equal(details.open, false, "a tap on the scrim closes the menu");
 	await toggle(true);
 	await act(() => item().dispatchEvent(new window.Event("pointerdown", { bubbles: true })));
 	assert.equal(details.open, true, "a tap inside keeps it open");
@@ -96,4 +105,15 @@ test("⋮ menu: its classes are styled by shell.css alone, so no other screen's 
 		const css = readFileSync(join(REPO_ROOT, sheet), "utf8");
 		for (const cls of classes) assert.doesNotMatch(css, new RegExp(`\\.${cls}(?![\\w-])`), `${sheet} styles .${cls}`);
 	}
+});
+
+test("shell exposes the desktop live clock and shortcut without wrapping Sessions", async () => {
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; export const draw=()=>render(h(Shell,{current:{screen:"sessions",query:"view=you"},awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},h("div",{class:"sessions"})));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {draw} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const {document} = parseHTML(draw());
+ assert.ok(document.querySelector(".shell-main > .sessions"));
+ assert.ok(document.querySelector(".shell-page-bar .shell-live-live > span"));
+ assert.equal(document.querySelector(".shell-page-bar time")?.getAttribute("datetime"),"2026-10-06T08:30:00Z");
+ assert.match(document.querySelector(".shell-page-bar time")?.textContent ?? "",/^updated /);
+ assert.equal(document.querySelector(".shell-desktop-search kbd")?.textContent,"⌘K");
 });

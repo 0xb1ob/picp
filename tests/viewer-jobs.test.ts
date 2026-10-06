@@ -130,3 +130,17 @@ test("a merged job's Review fact reads its recorded review files; no review stay
  assert.deepEqual([job("cp-equiv").review,job("cp-equiv").review_attempts],["pass",0]);
  assert.deepEqual([job("cp-bare").review,job("cp-bare").review_attempts],[null,0]);
 });
+
+test("provider failures are neutral; only a recorded ci_failed observation is red", t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const state={home:home.path,stateDir:join(home.path,LAYOUT.state)}, at="2026-09-26T12:00:00Z";
+ mkdirSync(join(state.stateDir,"runs/cp-tone"),{recursive:true});
+ writeFileSync(join(home.path,".pi-command-post/jobs.json"),JSON.stringify({jobs:[{id:"cp-tone",title:"Tone",status:"in_progress",labels:["project:demo"]}]}));
+ const events = [
+  {type:"failure",payload:{reason:"Provider/model 503"}},
+  {type:"ci_observed",payload:{event:"ci_failed",reason:"Test failure"}},
+  {type:"ci_observed",payload:{event:"ci_green"}},
+ ].map(event=>JSON.stringify({source:"cp",job_id:"cp-tone",ts:at,...event})).join("\n")+"\n";
+ writeFileSync(join(state.stateDir,"runs/cp-tone/events.jsonl"),events);
+ assert.deepEqual(jobView(state,"cp-tone",Date.parse(at))?.timeline.map(e=>[e.label,e.tone]),[["Failed","neutral"],["CI red","red"],["CI green","green"]]);
+});

@@ -37,7 +37,12 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-more[open] > summary { background: var(--surface); color: var(--text); }
 .shell-more-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--text); }
 .shell-more-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; width: 280px; max-width: calc(100vw - 16px); padding: 6px; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
-.shell-more-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 14px; text-align: left; text-decoration: none; overflow-wrap: anywhere; }
+.shell-more-row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 14px; text-align: left; text-decoration: none; overflow-wrap: anywhere; }
+.shell-more-row > svg { color: var(--muted); }
+.shell-more-row > span { flex: 1; min-width: 0; }
+.shell-more-row > small { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--dim); }
+.shell-more-footer { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 6px; }
+.shell-more-scrim { display: none; }
 .shell-more-status { min-height: 0; margin: 0; padding: 0 10px; font-size: 12px; color: var(--muted); }
 .shell-more-status:empty { display: none; }
 .shell-more-version { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; }
@@ -59,6 +64,7 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 /* iOS zooms into any focused field under 16px; every field on mobile stays at 16px or more. */
 @media (max-width: 899px) {
  input, textarea, select { font-size: 16px !important; }
+ .shell-more-scrim { display: block; position: fixed; inset: 56px 0 0; z-index: 4; background: var(--page); opacity: 0.8; }
 }
 /* The session screen owns its own compact top bar and composer on mobile: no global header, no bottom nav. */
 .shell:has(> .shell-main > .sessions) > .shell-header, .shell:has(> .shell-main > .sessions) > .shell-tabs { display: none; }
@@ -87,15 +93,21 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  h1 { font-size: 32px; }
  .shell { flex-direction: row; }
  .shell-header, .shell-tabs { display: none; }
- .shell-sidebar { display: flex; flex-direction: column; gap: 24px; padding: 20px 12px; width: 232px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
- .shell-sidebar .shell-brand { padding: 0 8px; height: 32px; }
+ .shell-sidebar { display: flex; flex-direction: column; gap: 20px; padding: 20px 12px; width: 232px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
+ .shell-sidebar .shell-brand { padding: 0 8px; height: 23px; }
  .shell-desktop-search { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; }
+ .shell-desktop-search kbd { margin-left: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--dim); }
  .shell-sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
  .shell-sidebar-nav > a, .shell-sidebar-nav > span { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 10px; border-radius: 10px; text-decoration: none; font-size: 14px; color: var(--muted); }
  .shell-sidebar-nav [aria-current=page] { background: var(--nav-selected); color: var(--text); }
  .shell-sidebar-nav .shell-nav-icon { padding: 0; }
  .shell-sidebar-nav .shell-count { left: 130px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
- .shell-main { min-width: 0; padding: 32px 40px 48px; }
- .shell-page-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -8px 0 12px; font-size: 12px; color: var(--muted); }
+ .shell-main { min-width: 0; padding: 28px 40px 48px; }
+ .shell-page-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: max-content; align-self: flex-end; margin: -4px 0 12px auto; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+ .shell-page-bar .shell-live { flex-wrap: nowrap; }
+ /* Share the title band; keep Sessions and refresh errors in the remaining-height flow. */
+ .shell-main:not(:has(> .sessions, > .overview-error)) > .shell-page-bar { margin-bottom: -40px; position: relative; z-index: 4; }
+ .shell-page-bar + :not(.sessions):not(.job-detail) > :first-child { margin-right: 248px; }
+ .shell-page-bar + .job-detail > .job-detail-side { margin-top: 52px; }
 }
