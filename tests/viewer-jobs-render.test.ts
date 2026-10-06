@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
+import { parseHTML } from "linkedom";
 import { join } from "node:path";
 import { test } from "node:test";
 import { jobsView, boardView } from "../src/viewer/jobs-view.ts";
@@ -50,14 +51,44 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  const {screen}=await import(`data:text/javascript;base64,${Buffer.from(buildResult.outputFiles![0]!.contents).toString("base64")}`);
  const job:ViewerJob={id:"cp-wide",project:"demo",title:"A long title ".repeat(20),phase:"working",model:"wide-model",script_path:null,elapsed_seconds:600,limit_seconds:7200,head:"b".repeat(40),ci:"green",review:null,review_attempts:0,routing:"explicit",note:null,ledger_status:null,ledger_disagrees:false,mandate_id:null,cost_usd:1.5,pr_url:null,pr_status:null,finished_at:null,finished_today:false,merge_sha:null,failure:null,summary:null,blockers:[]};
  const jobs=screen("Jobs",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,jobs:[job],projects:[],warnings:[]});
- assert.match(jobs,/class="jobs-columns" aria-hidden="true"><span>job<\/span><span>title<\/span><span>phase<\/span><span>model<\/span><span>ctx<\/span><span>CI<\/span><span>cost<\/span><span>time<\/span>/);
- assert.match(jobs,/<span class="job-cols"><code title="wide-model">wide-model<\/code><span class="job-ctx">-<\/span><span class="job-ci job-ci-green">.*?<\/span><span>\$1\.50<\/span><span>ran 10m<\/span><\/span>/);
- // Audit P1 #4/#5: no routing line in list rows, the model without its provider prefix, no CI/review dashes before a PR or head.
+ const document = parseHTML(jobs).document;
+ assert.deepEqual([...document.querySelectorAll(".jobs-columns-flight > span")].map(e=>e.textContent),["job","title","elapsed / budget","context","review","CI","model","cost"]);
+ const signals = document.querySelector(".job-signals")!;
+ assert.deepEqual([...signals.children].map(e=>e.className),["job-clock","job-context","job-review","job-ci job-ci-green","job-model","job-cost"]);
+ assert.match(signals.textContent,/10m \/ 2h 0m.*context n\/a.*review not started.*CI green.*wide-model.*\$1\.50/);
+ assert.ok(document.querySelector(".jobs-toolbar .jobs-views")); assert.ok(document.querySelector(".jobs-toolbar .jobs-segments"));
+ assert.ok(document.querySelector(".jobs-group > header")!.compareDocumentPosition(document.querySelector(".jobs-columns-flight")!) & 4,"flight headers follow their section heading");
+ // D15: every flight row has truthful review and CI signals before a first head or PR.
  const bare:ViewerJob={...job,id:"cp-bare",model:"anthropic/claude-opus-5-5",head:null,ci:null,routing:"scope:M (inferred) · risk:high (explicit)",mandate_id:"md-8c47f5"};
  const rows=screen("Jobs",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,jobs:[bare],projects:[],warnings:[]});
- assert.doesNotMatch(rows,/job-route|scope:M|md-8c47f5|Routing not recorded/); assert.doesNotMatch(rows,/CI -|review -|>anthropic\//);
- assert.match(rows,/<code title="anthropic\/claude-opus-5-5">claude-opus-5-5<\/code>/); assert.match(rows,/<span class="job-ci"><\/span><span>\$1\.50/,"an empty CI cell keeps the desktop columns aligned");
- assert.match(jobs,/review not started/,"a row with a head and no review yet says so");
+ assert.doesNotMatch(rows,/job-route|scope:M|md-8c47f5|Routing not recorded|Phases:/); assert.doesNotMatch(rows,/CI -|review -|>anthropic\//);
+ assert.match(rows,/<code title="anthropic\/claude-opus-5-5">claude-opus-5-5<\/code>/);
+ const prehead = parseHTML(rows).document;
+ assert.equal(prehead.querySelector(".job-review")?.textContent,"review not started");
+ assert.equal(prehead.querySelector(".job-ci")?.textContent,"no CI yet");
+ assert.equal(prehead.querySelector(".job-cost")?.textContent,"$1.50");
+ assert.equal(prehead.querySelector(".job-context")?.textContent,"context n/a");
+ assert.equal(prehead.querySelector(".job-clock progress")?.getAttribute("value"),String(600/7200*100));
+ const finished = [
+  {...job,id:"cp-merged",phase:"done",finished_today:true,finished_at:"2026-09-27T09:45:00Z",pr_url:"https://github.com/acme/repo/pull/42",pr_status:"merged",merge_sha:"c".repeat(40)},
+  {...job,id:"cp-no-pr",phase:"done",finished_today:true,finished_at:"2026-09-27T09:40:00Z",head:null,model:null,cost_usd:null},
+  {...job,id:"cp-unmerged",phase:"done",finished_today:true,finished_at:"2026-09-27T09:35:00Z",pr_url:"https://github.com/acme/repo/pull/43",pr_status:"closed"},
+  {...job,id:"cp-failed",phase:"failed",finished_today:true,finished_at:"2026-09-27T09:30:00Z",failure:"provider unavailable"}
+ ];
+ const doneDoc=parseHTML(screen("Jobs",{generated_at:"2026-09-27T10:00:00Z",awaiting_count:0,jobs:finished,projects:[],warnings:[]})).document;
+ assert.deepEqual([...doneDoc.querySelectorAll(".jobs-columns-done > span")].map(e=>e.textContent),["job","title","outcome","commit","model","finished","cost"]);
+ const doneRows=[...doneDoc.querySelectorAll(".job-row-done")];
+ assert.deepEqual(doneRows.map(e=>e.querySelector(".job-outcome")!.textContent.trim()),["#42 ↗ merged","closed · no PR","#43 ↗ PR closed","failed"]);
+ assert.equal(doneRows[0]!.querySelector(".job-outcome a")?.getAttribute("href"),"https://github.com/acme/repo/pull/42");
+ assert.equal(doneRows[0]!.querySelector(".job-commit")?.textContent,"ccccccc");
+ assert.equal(doneRows[0]!.querySelector(".job-commit")?.getAttribute("title"),"c".repeat(40));
+ assert.deepEqual([...doneRows[0]!.querySelector(".job-finished")!.children].map(e=>e.className),["job-outcome","job-commit","job-model","job-finished-at","job-cost"]);
+ assert.ok(doneRows[0]!.querySelector(".job-finished-at")?.textContent); assert.equal(doneRows[0]!.querySelector(".job-cost")?.textContent,"$1.50");
+ assert.equal(doneRows[1]!.querySelector(".job-commit")?.textContent,"no commits"); assert.equal(doneRows[1]!.querySelector(".job-cost")?.textContent,"-");
+ assert.equal(doneRows[2]!.querySelector(".job-commit")?.textContent,"bbbbbbb");
+ assert.equal(doneRows[3]!.querySelector(".job-note")?.textContent,"provider unavailable");
+ assert.equal(doneDoc.querySelectorAll(".job-context, .ctx-chip, .job-ci, .job-review").length,0,"finished tables have no flight cells");
+ assert.equal(doneDoc.querySelectorAll("a a").length,0,"the PR link is separate from the job link");
  const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,asks:[],questions:[],warnings:[]});
  assert.match(detail,/<div class="job-detail"><div class="job-detail-main"><header/);
  assert.match(detail,/<\/div><div class="job-detail-side"><dl class="job-facts">.*<dt>CI<\/dt>.*<dt>Review<\/dt>.*<\/dl><div class="job-links">.*<\/div><\/div><section class="job-timeline">/);
