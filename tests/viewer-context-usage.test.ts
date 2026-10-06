@@ -111,7 +111,10 @@ test("views: Sessions carries operator, parent and worker context; Jobs and Map 
 	assert.doesNotMatch(html, /style=/);
 	const you = screens.sessions(sessionsView(state, "you", null)!);
 	assert.match(you, /context n\/a<small> · no assistant reply yet<\/small>/, "the heading names the reason");
-	assert.match(screens.jobs(jobsView(state)), /<span class="job-ctx"><span class="ctx-chip ctx-warn ctx-compact"/);
+	const jobsHtml = screens.jobs(jobsView(state));
+	assert.match(jobsHtml, /<span class="job-context"><span class="ctx-chip ctx-warn ctx-compact"/);
+	assert.match(jobsHtml, /ctx 204K \/ 272K · 75%/);
+	assert.match(jobsHtml, /aria-label="Context window used" max="100" value="75\./);
 });
 
 test("model and thinking: latest model_change and thinking_level_change; last assistant model fallback; unknown model explicit, unknown thinking omitted", async (t) => {
