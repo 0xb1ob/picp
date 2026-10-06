@@ -12,6 +12,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { type AnswerCardData, answerCardView } from "../../src/answer-card.ts";
 import { applyPromptWorking } from "../../src/awaiting-ui.ts";
 import { ciWatchIntervalMs } from "../../src/ci-watch.ts";
+import { keepUserTail } from "../../src/context-tail.ts";
 import { ANSWER_ENTRY_TYPE, ANSWER_MAX_BYTES, FLEET_MUTATING_TOOLS, type Runtime } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { summarizeReconcile } from "../../src/fleet.ts";
@@ -445,8 +446,9 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		if (!reviewed) return;
 		// Review preserves order and fresh object identities; only withheld entries are replaced.
 		const fresh = reviewed.filter((message, index) => message === messages[index]);
-		// SAFETY: every retained message is an unchanged member of event.messages.
-		return { messages: fresh as unknown as typeof event.messages };
+		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
+		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
+		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };
 	});
 
 	// The parent never leaves orphaned children behind.

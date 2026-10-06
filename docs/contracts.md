@@ -726,10 +726,14 @@ property of the notification path — not a prompt for more parent diligence.
   moment before the message reaches the model). The second check is the load
   bearing one: a send-time check alone would have delivered all three observed
   messages.
-- **A superseded wake-up's body does not travel.** The content the model sees is
-  replaced with a short notice naming the job, what the message claimed and what
-  is true now, pointing at `/status` and `/watch <job-id>`. A withheld summary
-  that is still readable is a summary somebody still acts on.
+- **A superseded wake-up's body does not travel.** The `context` hook drops a
+  withheld wake-up from what the model sees (qra); the run journal records why.
+  A withheld summary that is still readable is a summary somebody still acts on.
+  When that drop would leave the context ending on an assistant message (N9 —
+  a provider without assistant prefill answers it with a 400), the hook appends
+  one neutral `custom` stand-in (`cp-withheld-tail`, `src/context-tail.ts`): no
+  wake-up stamp, no stale body, only "nothing needs doing; end the turn".
+  Session history is never mutated.
 - **Silence is recorded.** Every withheld or rewritten wake-up appends a
   `cp:wakeup_suppressed` marker (kind, generation, `issued_at`, delay, reason,
   the stamp's `keys` (at most 8), and which stage caught it) to the job's run
