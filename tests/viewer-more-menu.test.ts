@@ -117,3 +117,23 @@ test("shell exposes the desktop live clock and shortcut without wrapping Session
  assert.match(document.querySelector(".shell-page-bar time")?.textContent ?? "",/^updated /);
  assert.equal(document.querySelector(".shell-desktop-search kbd")?.textContent,"⌘K");
 });
+
+test("desktop title clearance skips real recovery headings and still targets Overview", async () => {
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {NotFound,notFoundFor} from "./viewer-app/components/NotFound.tsx"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const draw=(current,data)=>render(h(Shell,{current,awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},data?h(Overview,{data}):h(NotFound,notFoundFor(current,404))));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const {draw} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const css = readFileSync(join(REPO_ROOT,"viewer-app/styles/shell.css"),"utf8");
+ const selector = /([^{}]+)\{ margin-right: 248px; \}/.exec(css)?.[1]?.trim();
+ assert.ok(selector,"the desktop title reservation exists");
+ for (const current of [{screen:"job",jobId:"cp-doesnotexist"},{screen:"sessions",query:"view=workers&id=cp-doesnotexist"}]) {
+  const doc = parseHTML(draw(current)).document;
+  assert.ok(doc.querySelector('.shell-main > .not-found > h1'));
+  assert.ok(doc.querySelector(selector) === null,"recovery content below the clock needs no top-band clearance");
+ }
+ const {overview} = await import("../src/viewer/overview-view.ts");
+ const {createScratchHome} = await import("./harness/index.ts");
+ const home = createScratchHome();
+ try {
+  const data = overview({home:home.path,stateDir:join(home.path,".pi-command-post/state")});
+  assert.equal(parseHTML(draw({screen:"overview"},data)).document.querySelector(selector)?.className,"overview-heading");
+ } finally { home.cleanup(); }
+});

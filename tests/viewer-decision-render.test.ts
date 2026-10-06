@@ -13,13 +13,17 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  const {screen,filterDecisions,act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
  const state = {home:home.path,stateDir:join(home.path, LAYOUT.state)};
  const awaiting = awaitingScreen(state); const decided = decidedScreen(state);
- assert.match(screen(awaiting),/Nothing needs you/); assert.match(screen(awaiting),/What comes here/);
- assert.equal((screen(awaiting).match(/decided today/gi) ?? []).length,1,"the decided-today count shows once: no Handled without you aside"); assert.match(screen(awaiting),/0 decided today · 0 for you, 0 by you/); assert.doesNotMatch(screen(awaiting),/worth a look/); assert.doesNotMatch(screen(awaiting),/Handled without you/);
- assert.match(screen(decided,true),/Nothing here for this filter/); assert.doesNotMatch(screen(decided,true),/What comes here|Always asks you about|decision-kinds/,"the kinds list lives on Awaiting only");
+ assert.match(screen(awaiting),/Nothing needs you/); assert.doesNotMatch(screen(awaiting),/What comes here|awaiting-aside|awaiting-empty-icon/);
+ assert.equal((screen(awaiting).match(/decided today/gi) ?? []).length,1); assert.match(screen(awaiting),/0 decided today · 0 for you, 0 by you/);
+ assert.doesNotMatch(screen(awaiting),/worth a look|Handled without you/);
+ assert.match(screen(decided,true),/Nothing here for this filter/); assert.doesNotMatch(screen(decided,true),/What comes here|Always asks you about|decision-kinds/,"the standalone log does not repeat question guidance");
  awaiting.availability.asks = "unavailable"; awaiting.awaiting_count = null;
  assert.match(screen(awaiting),/Questions unavailable/); assert.doesNotMatch(screen(awaiting),/Nothing needs you/);
+ const unknown = {...awaiting,availability:{...awaiting.availability,asks:"ok"},awaiting_count:null};
+ assert.match(screen(unknown),/Questions unavailable/); assert.doesNotMatch(screen(unknown),/Nothing needs you|awaiting-empty/);
  decided.availability.escalations = "unavailable";
  assert.match(screen(decided,true),/Decisions unavailable/); assert.doesNotMatch(screen(decided,true),/Nothing here for this filter/);
+ assert.match(screen(decided,true),/Today · counts unavailable/); assert.doesNotMatch(screen(decided,true),/Today · 0 decided for you/);
  awaiting.availability.asks = "ok"; awaiting.awaiting_count = 1;
  awaiting.items = [{id:"ask-aa",project:"demo",question:"<script>Raise cap?</script>",created_at:awaiting.generated_at,options:[{label:"Keep",consequence:"Paused",reply:"ask-aa: Keep"}],recommendation:"Keep",source_escalation:"es-open",job_ids:["cp-demo"],context:null,evidence_paths:[],reason:"Not delegated",source_created_at:awaiting.generated_at,mandate_id:null,mandate_status:null,spend:null,spend_cap:null,mandate_objective:null,jobs:[],escalation:null,evidence:[]}];
  const html = screen(awaiting); assert.match(html,/>Keep<\/strong>/); assert.doesNotMatch(html,/ask-aa: Keep|Copy a reply/); assert.match(html,/&lt;script>/); assert.match(html,/Where it came from/); assert.match(html,/Not delegated/);
@@ -45,6 +49,11 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  // Audit P2 #13: the header's "decided for you" is the Awaiting count; your own answers today are counted apart.
  const mine = {...decided,items:[decided.items[0]!,{...decided.items[1]!,today:true}]};
  assert.match(screen(mine,true),/Decided for you 1/); assert.match(screen(mine,true),/Answered by you 1/);
+ const toolbar = parseHTML(screen(mine,true)).document;
+ assert.ok(toolbar.querySelector('.decided-toolbar [role="tablist"]'));
+ assert.ok(toolbar.querySelector('.decided-toolbar [aria-label="Range"]'));
+ assert.ok(toolbar.querySelector('.decided-toolbar .decided-worth'));
+ assert.equal(toolbar.querySelector('.decided-summary')?.textContent,"Today · 1 decided for you · 1 answered by you · 1 worth a look");
  assert.match(screen(mine,true),/role="tablist"/); assert.match(screen(mine,true),/aria-selected="true"/); assert.match(screen(mine,true),/aria-controls="decided-panel-for"/); assert.match(screen(mine,true),/role="tabpanel"/); assert.match(screen(mine,true),/tabindex="0"/); assert.match(screen(mine,true),/tabindex="-1"/); assert.match(screen(mine,true),/your words/);
  assert.doesNotMatch(screen(decided,true),/\/classic/);
  const {window,document} = parseHTML("<html><body><main></main></body></html>");
@@ -59,6 +68,7 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  const tab = (name:string) => [...root.querySelectorAll("[role=tab]")].find(b => b.textContent?.startsWith(name))!;
  await act(() => button("All").dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.equal(button("All").getAttribute("aria-pressed"),"true");
+ assert.equal(root.querySelector('.decided-summary')?.textContent,"All time · 1 decided for you · 1 answered by you · 1 worth a look");
  assert.doesNotMatch(root.textContent!,/Older human answer/,"All stays on the for-you tab");
  assert.equal(tab("Decided for you").getAttribute("aria-selected"),"true");
  assert.equal(tab("Decided for you").getAttribute("tabIndex"),"0");
@@ -107,6 +117,17 @@ test("audit P4 #24 #26: one Decisions page stacks Awaiting, a collapsed Being ha
  const at = (html:string,needle:string) => { const i = html.indexOf(needle); assert.ok(i >= 0,needle); return i; };
  assert.ok(at(empty,'id="awaiting"') < at(empty,'id="decided"'),"Awaiting sits above the Decided log");
  assert.doesNotMatch(empty,/id="answers"/,"no answers journal: no Answers section");
+ assert.ok(parseHTML(empty).document.querySelector('.decisions-log #decided'));
+ assert.match(parseHTML(empty).document.querySelector('.decisions-log-aside')?.textContent ?? "",/own judgement/);
+ data.answers = {availability:"ok",open:[],open_count:0,history:[],history_total:0,warning:null};
+ const quiet = parseHTML(page(data)).document;
+ assert.ok(quiet.querySelector('#answers .answers-header') === null);
+ assert.ok(quiet.querySelector('#answers .answers-control') === null);
+ assert.equal(quiet.querySelector('#answers details')?.hasAttribute('open'),false);
+ assert.match(quiet.querySelector('#answers summary')?.textContent ?? "",/No answers waiting · 0 acknowledged/);
+ data.answers = {...data.answers,availability:"unavailable",open_count:null,history_total:null,warning:"Answers unavailable"};
+ const unavailable = page(data);
+ assert.match(unavailable,/Answers unavailable/); assert.doesNotMatch(unavailable,/No answers waiting/);
  data.answers = {availability:"ok",open:[{id:"ans-aaaaaaaaaaaa",project:"demo",question:"What?",answer:"Because.",short:"Because.",posted_at:data.generated_at,acked_at:null,job:null,evidence:[],links:{}}],open_count:1,history:[],history_total:0,warning:null};
  const withAnswers = page(data);
  assert.ok(at(withAnswers,'id="awaiting"') < at(withAnswers,'id="answers"') && at(withAnswers,'id="answers"') < at(withAnswers,'id="decided"'),"Answers sit between Awaiting and the Decided log");

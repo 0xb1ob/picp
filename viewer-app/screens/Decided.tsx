@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import type { DecidedResponse, DecisionDetail } from "../../src/viewer/api-types.ts";
 import { observedTime, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
+import { WorthExplanation } from "./DecisionContext.tsx";
 export function filterDecisions(items:DecisionDetail[], range:"today" | "all", worth:boolean): DecisionDetail[] {
  return items.filter(item => (range === "all" || item.today) && (!worth || item.worth.length > 0));
 }
@@ -54,8 +55,11 @@ export function DecidedScreen({data}: {data:DecidedResponse}) {
   const id = next === "for" ? "decided-tab-for" : "decided-tab-you";
   queueMicrotask(() => { const node = document.getElementById(id); if (typeof node?.focus === "function") node.focus(); });
  };
- return <div class="decided-screen"><header class="decision-heading"><div class="decided-tabs" role="tablist" aria-label="Who answered"><button type="button" role="tab" id="decided-tab-for" aria-selected={who === "for"} aria-controls="decided-panel-for" tabIndex={who === "for" ? 0 : -1} onKeyDown={move} onClick={() => setWho("for")}>Decided for you {n(forRows.length)}</button><button type="button" role="tab" id="decided-tab-you" aria-selected={who === "you"} aria-controls="decided-panel-you" tabIndex={who === "you" ? 0 : -1} onKeyDown={move} onClick={() => setWho("you")}>Answered by you {n(youRows.length)}</button></div></header>
-  <div class="decided-main"><div class="decided-filter-bar"><div class="decided-range" role="group" aria-label="Range"><button type="button" aria-pressed={range === "today"} onClick={() => setRange("today")}>Today</button><button type="button" aria-pressed={range === "all"} onClick={() => setRange("all")}>All</button></div><button type="button" class="decided-worth" aria-pressed={worth} onClick={() => setWorth(!worth)}><span class="decision-diamond"/>Worth a look<span class="decision-desktop"> only</span></button></div>
+ return <div class="decided-screen"><header class="decided-toolbar"><div class="decided-tabs" role="tablist" aria-label="Who answered"><button type="button" role="tab" id="decided-tab-for" aria-selected={who === "for"} aria-controls="decided-panel-for" tabIndex={who === "for" ? 0 : -1} onKeyDown={move} onClick={() => setWho("for")}>Decided for you {n(forRows.length)}</button><button type="button" role="tab" id="decided-tab-you" aria-selected={who === "you"} aria-controls="decided-panel-you" tabIndex={who === "you" ? 0 : -1} onKeyDown={move} onClick={() => setWho("you")}>Answered by you {n(youRows.length)}</button></div>
+  <div class="decided-filter-bar"><div class="decided-range" role="group" aria-label="Range"><button type="button" aria-pressed={range === "today"} onClick={() => setRange("today")}>Today</button><button type="button" aria-pressed={range === "all"} onClick={() => setRange("all")}>All</button></div><button type="button" class="decided-worth" aria-pressed={worth} title="Filters Decided for you by the operator's own judgement" onClick={() => setWorth(!worth)}><span class="decision-diamond"/>Worth a look<span class="decision-desktop"> only</span></button></div></header>
+  <p class="decided-summary" role="status">{range === "today" ? "Today" : "All time"} · {complete ? `${forRows.length} decided for you · ${youRows.length} answered by you · ${forRows.filter(d => d.worth.length > 0).length} worth a look` : "counts unavailable"}</p>
+  <div class="decided-phone-note"><WorthExplanation/></div>
+  <div class="decided-main">
    {!complete && <p role="alert" class="overview-error">Decisions unavailable for {Object.entries(data.availability).filter(([,v]) => v === "unavailable").map(([key]) => key).join(" and ")}. Showing available records.</p>}
    <div class="decided-columns decision-desktop" aria-hidden="true"><span>time</span><span>job</span><span>question</span><span>answer</span><span>basis</span><span>evidence</span></div>
    <section class="decided-rows" role="tabpanel" id={panel} aria-labelledby={tab}>{rows.map(row => {

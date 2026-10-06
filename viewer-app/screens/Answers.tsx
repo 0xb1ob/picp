@@ -30,23 +30,23 @@ export function AnswersSection({data, control}: {data: AnswersView; control?: An
  if (data.availability === "missing") return null; // no journal yet: the section is absent, not empty
  const ready = answersControlReady(control?.status);
  const open = data.open.filter(item => !control?.acked.includes(item.id));
+ const pending = data.open_count === null ? null : Math.max(0, data.open_count - (data.open.length - open.length));
+ const quiet = data.availability === "ok" && pending === 0 && !data.warning;
+ const history = data.history.map(item => <article key={item.id} class="answers-row answers-done" aria-label={`Acknowledged answer ${item.id}`}>
+  <AnswerMeta item={item} at={item.posted_at}/><AnswerBody item={item}/>
+  {item.acked_at && <p class="answers-acked">Acknowledged <time dateTime={item.acked_at}>{observedTime(item.acked_at)}</time></p>}
+ </article>);
+ if (quiet) return <details class="answers-quiet"><summary>No answers waiting &middot; {data.history_total ?? "-"} acknowledged</summary>{history.length ? history : <p class="answers-empty">No acknowledged answers yet</p>}</details>;
  return <div class="answers">
-  <div class="answers-header"><h2>Answers to acknowledge</h2><span class="answers-count">{data.open_count ?? "-"}</span></div>
+  <div class="answers-header"><h2>Answers to acknowledge</h2><span class="answers-count">{pending ?? "-"}</span></div>
   <p class="answers-control" role="status">{answersControlLine(control?.status)}</p>
   {data.warning && <p role="alert" class="answers-warning">{data.warning}</p>}
-  {data.availability === "ok" && open.length === 0 && <p class="answers-empty">No answers waiting</p>}
   {open.map(item => <article key={item.id} class="answers-row" aria-label={`Answer ${item.id}`}>
    <AnswerMeta item={item} at={item.posted_at}/>
    <AnswerBody item={item}/>
    <button type="button" class="answers-ack" aria-label={`Acknowledge ${item.id}`} disabled={!ready || control?.sending === item.id} onClick={() => control?.ack(item.id)}><Icon name="check" size={16}/> Acknowledge</button>
    {control?.failed?.id === item.id && <p role="alert" class="answers-failed">Failed: {control.failed.reason}</p>}
   </article>)}
-  {data.history.length > 0 && <details class="answers-history"><summary>Acknowledged &middot; {data.history_total}</summary>
-   {data.history.map(item => <article key={item.id} class="answers-row answers-done" aria-label={`Acknowledged answer ${item.id}`}>
-    <AnswerMeta item={item} at={item.posted_at}/>
-    <AnswerBody item={item}/>
-    {item.acked_at && <p class="answers-acked">Acknowledged <time dateTime={item.acked_at}>{observedTime(item.acked_at)}</time></p>}
-   </article>)}
-  </details>}
+  {history.length > 0 && <details class="answers-history"><summary>Acknowledged &middot; {data.history_total}</summary>{history}</details>}
  </div>;
 }

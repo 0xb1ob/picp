@@ -5,7 +5,7 @@ import { AnswersSection } from "./Answers.tsx";
 import { elapsed } from "../format.ts";
 import { AwaitingScreen } from "./Awaiting.tsx";
 import { DecidedScreen } from "./Decided.tsx";
-import { ParentQuestions } from "./DecisionContext.tsx";
+import { DecisionKinds, ParentQuestions, WorthExplanation } from "./DecisionContext.tsx";
 
 /**
  * Audit P4 #24: Awaiting and Decided as one page. Awaiting's one-click cards on top (`#awaiting`), then the parent's
@@ -22,6 +22,6 @@ export function Decisions({data,control,answers}: {data:DecisionsResponse;contro
    <summary>Being handled &middot; {unavailable ? "-" : questions.length}{questions.length > 0 && <span> (oldest {elapsed(oldest)})</span>}</summary>
    <ParentQuestions items={questions} availability={data.availability.escalations}/>
   </details>}
-  <section id="decided" tabIndex={-1} aria-label="Decided for you"><DecidedScreen data={{...data,items:data.decided}}/></section>
+  <div class="decisions-log"><section id="decided" tabIndex={-1} aria-label="Decision log"><DecidedScreen data={{...data,items:data.decided}}/></section><aside class="decisions-log-aside"><WorthExplanation/>{data.availability.asks !== "unavailable" && data.awaiting_count === 0 && <DecisionKinds/>}</aside></div>
  </div>;
 }
