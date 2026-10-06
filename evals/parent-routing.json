@@ -38,7 +38,7 @@
         "risk": "high",
         "provenance": { "scope": "defaulted", "risk": "inferred" }
       },
-      "divergence": "The word `auth` raises the inferred risk even though the deliverable is an answer: keyword assessment cannot see that nothing will be changed. Harmless in practice — cp_ask passes scope S and risk low explicitly — and it is the reason risk inference is advisory rather than a verdict."
+      "divergence": "The word `token` raises the inferred risk even though the deliverable is an answer: keyword assessment cannot see that nothing will be changed. Harmless in practice — cp_ask passes scope S and risk low explicitly — and it is the reason risk inference is advisory rather than a verdict."
     },
     {
       "id": "parent-typo-in-auth-comment",
@@ -56,7 +56,7 @@
         "risk": "high",
         "provenance": { "scope": "defaulted", "risk": "inferred" }
       },
-      "divergence": "`auth` in the task text infers risk high for a comment typo. The parent may pass risk low here — an explicit axis wins, and is recorded as `explicit` so the override is legible afterwards."
+      "divergence": "`token` in the task text infers risk high for a comment typo. The parent may pass risk low here — an explicit axis wins, and is recorded as `explicit` so the override is legible afterwards."
     },
     {
       "id": "parent-scope-only-production-credentials",

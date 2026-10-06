@@ -1179,7 +1179,8 @@ at `agent_settled`: pi emits `agent_start` for each forced continuation, so it i
 a run boundary. *Heuristic, not guaranteed:* `detectHumanQuestion` reads the last 600
 chars minus code fences and `>` quotes, and fires on a sentence ending in `?` or one
 matching `should I | do you want | would you like | which option/one | please
-confirm/choose/decide | your call | let me know | still waiting | your (two) choice(s)`. It misses a question with neither
+confirm/choose/decide | your call | let me know | your (two) choice(s)` (`still waiting` counts only with a `?`; a cue
+sentence with no `?` while an ask is already open is not nudged). It misses a question with neither
 (an imperative "tell me which") and fires on a rhetorical or quoted one (the model
 answers `NO-ASK`). No pi hook can stop the model writing prose, so the guarantee is
 only that a detected question gets a nudge and then a card, whatever the model does;
@@ -5525,7 +5526,7 @@ failure/recovery)`). cp-health ([`src/service/health.ts`](../src/service/health.
 min) pushes `{project: "command-post", kind: "health: <parent down | viewer down | crash-looping |
 disk low | git credential | gh credential | update failed | relay unseen>", headline}` once when a check starts failing (parent and
 viewer only after 2 runs in a row, never while `state/update.json` `phase` is not idle unless it is a `held` rollback with no run in flight), nothing while it stays
-failed, once more for each distinct updater failure (keyed `result:to`: `failed`, `drain_timeout`, `rolled_back`,
+failed, once more for each distinct updater failure (keyed `result:to`, one `drain_timeout` episode keyed `result:since`: `failed`, `drain_timeout`, `rolled_back`,
 `rollback_failed`, `config_invalid`, `fetch_failed` three times), and `health: <name> recovered` once. It sends
 directly to the subscribed devices with the same RFC code; its only record is `state/health.json`. A failed push
 is retried on the next ≤ 3 runs, then logged and given up. It never writes `state/push-deliveries.json` and never

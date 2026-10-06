@@ -9,8 +9,8 @@
  *   disk        free < 5 GiB or < 10 % of the home's filesystem                → `health: disk low`
  *   git         `git ls-remote --exit-code origin HEAD` in the app fails (hourly) → `health: git credential`
  *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
- *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to`, so a new failure pushes
- *               again                                                          → `health: update failed`
+ *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to` (`drain_timeout:since`, one
+ *               push per episode), so a new failure pushes again              → `health: update failed`
  *   relay       a parent→operator relay unacked 10 min (`state/operator/relay-outbox.json` vs `relay-acks.jsonl`), or an open
  *               escalation 20 min old no ack, discard or open ask accounts for; keyed `relay:<id>` / `escalation:<id>`
  *                                                                               → `health: relay unseen`
@@ -257,7 +257,9 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 			const result = typeof update?.last_result === "string" ? update.last_result : undefined;
 			if (!result) return { skip: "no update result recorded" };
 			const to = typeof update?.to === "string" ? update.to : "";
-			if (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && Number(update?.fetch_failures) >= 3)) return { ok: false, key: `${result}:${to}`, detail: `auto-update ${result}${to ? ` (${to.slice(0, 12)})` : ""}; see state/update.json and cp-daemon log` };
+			// One drain_timeout episode is one push: the updater keeps `since` while the result repeats, but `to` moves with origin/main (N7).
+			const episode = result === "drain_timeout" && typeof update?.since === "string" ? update.since : to;
+			if (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && Number(update?.fetch_failures) >= 3)) return { ok: false, key: `${result}:${episode}`, detail: `auto-update ${result}${to ? ` (${to.slice(0, 12)})` : ""}; see state/update.json and cp-daemon log` };
 			return result === "updated" || result === "up_to_date" ? { ok: true } : { skip: `update ${result}` };
 		},
 		relay: () => relayObservation(home, stateDir, now()),

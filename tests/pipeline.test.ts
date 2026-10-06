@@ -369,6 +369,17 @@ test("risk inference skips locally negated verbs and ordinary authority prose (b
 	}
 });
 
+test("risk inference: the self-review redaction sentence alone is not access work; bare `auth` is not a signal (cp-sr-s1-lkgo N4)", () => {
+	const redaction = "Redact: never quote tokens, keys, cookies, auth headers or the contents of auth/models-store/daemon.json/dashboard.json/vapid.key — write [REDACTED].";
+	assert.equal(inferScopeAndRisk(redaction).risk, undefined);
+	assert.deepEqual(riskKeywords(redaction), []);
+	// The tokens negation is unchanged, and real access work still routes high.
+	assert.deepEqual(riskKeywords("Redact the logs, then quote tokens in the report"), ["tokens"]);
+	for (const text of ["Rotate the auth tokens", "Fix the authn check", "Add authz to the viewer", "Authorize the deploy key", "Fix the authentication redirect"]) {
+		assert.equal(inferScopeAndRisk(text).risk, "high", text);
+	}
+});
+
 test("risk inference: affirmative credential, deletion, production billing and shared-history work stays high", () => {
 	for (const [text, why] of [
 		["Rotate the deploy credentials", /credentials or access/],

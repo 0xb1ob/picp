@@ -116,14 +116,15 @@ test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-
 	assert.deepEqual(none, { risk: "low" });
 });
 
-test("riskkw-qno: audit tags, an unapproved named item and `gh auth status` do not warn; the gate and inference are unchanged", () => {
+test("riskkw-qno: audit tags and an unapproved named item do not warn; the gate and inference are unchanged", () => {
 	const asks = { wouldAskRiskHigh: () => true } as unknown as MandateStore;
 	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
+	// cp-sr-s1-lkgo N4: bare `auth` is no risk signal, so the `gh auth status` probe is not even inferred any more.
+	assert.deepEqual(riskKeywords("After it's installed, check `gh auth status`."), []);
 	for (const text of [
 		"P4 of the plan below. **P5 (migrating a home) is not approved:** don't build any of it.",
 		"P5 (migration) is not approved.",
 		"The scope is over-engineering only: `delete:` / `stdlib:` / `shrink:`.",
-		"After it's installed, check `gh auth status`.",
 	]) {
 		assert.ok(riskKeywords(text).length > 0, `inference still counts it: ${text}`);
 		assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", recorded: "low", recordedFrom: "task_header", text }), { risk: "low" }, text);

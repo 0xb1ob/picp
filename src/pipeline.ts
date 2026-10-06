@@ -241,8 +241,9 @@ const PIPELINE_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.free
 export const RISK_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.freeze([
 	{ re: /\b(migrat\w*|backfill|drop (the )?(table|column|index)|delet(e[sd]?|ing)|destroy(s|ed|ing)?|truncat(e[sd]?|ing)|purg(e[sd]?|ing))\b/i, why: "the task is destructive or irreversible" },
 	{ re: /\b(force[- ]?push(es|ed|ing)?|rewrit(e|es|ing) ((the|shared|git|branch|public) )*history|rebase (the )?(main|master|trunk))\b/i, why: "the task rewrites shared history" },
-	// Access work only: `authority`/`author` are ordinary prose, never credentials (bead b-qbi.2).
-	{ re: /\b(secrets?|credentials?|tokens?|password|auth([nz]|entication|enticat(e[sd]?|ing)|ori[sz]ation|ori[sz](e[sd]?|ing))?|permissions?|access control)\b/i, why: "the task touches credentials or access" },
+	// Access work only: `authority`/`author` are ordinary prose, never credentials (bead b-qbi.2); bare `auth` is a prefix
+	// (`auth headers`, `auth/models-store` in a redaction rule), not access work — only authn/authz/authentication/authorization count.
+	{ re: /\b(secrets?|credentials?|tokens?|password|auth([nz]|entication|enticat(e[sd]?|ing)|ori[sz]ation|ori[sz](e[sd]?|ing))|permissions?|access control)\b/i, why: "the task touches credentials or access" },
 	{ re: /\b(payment|billing|invoice|charge|refund)\b/i, why: "the task touches money" },
 	{ re: /\b(prod|production|live (system|site|traffic))\b/i, why: "the task names production" },
 ]);

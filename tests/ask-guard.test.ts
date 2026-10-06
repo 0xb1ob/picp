@@ -33,12 +33,31 @@ test("the detector ignores a ? inside a code fence or a > quote, and a URL query
 	assert.equal(detectHumanQuestion("```\nunclosed fence: really?"), undefined);
 });
 
-test("N10: a choice with no ? — 'still waiting' or 'your (two) choices' — is the question; fenced it still is not", () => {
+test("N10: a choice with no ? — 'your (two) choices' — is the question; fenced it still is not", () => {
 	const tail = "Still waiting on your two choices: hand-off merges, and the beads backlog.";
 	assert.equal(detectHumanQuestion(`PR #12 merged.\n${tail}`), tail);
 	assert.equal(detectHumanQuestion("Both landed. Over to your choice."), "Over to your choice.");
 	assert.equal(detectHumanQuestion(`Done.\n\`\`\`\n${tail}\n\`\`\`\nAll merged.`), undefined);
 	assert.equal(detectHumanQuestion(`> ${tail}\nAll merged.`), undefined);
+});
+
+test("N8: 'still waiting' with no ? is a status line, not a question; with a ? it still is", () => {
+	assert.equal(detectHumanQuestion("Dispatched the readers. Still waiting on readers."), undefined);
+	assert.equal(detectHumanQuestion("Still waiting on readers"), undefined);
+	assert.equal(detectHumanQuestion("Done. Are you still waiting on the readers?"), "Are you still waiting on the readers?");
+});
+
+test("N8: a cue with no ? while an ask is open is not nudged; a real ? question still is", (t) => {
+	const { guard, asks, store } = fixture(t);
+	store.open({ project: "demo-app", question: "A or B?", options: [{ label: "A", consequence: "a" }], recommendation: "A" });
+	guard.runEnded();
+	assert.equal(guard.beforeSettle("Still waiting on your two choices: hand-off merges, and the beads backlog.", asks), undefined);
+	assert.equal(guard.beforeSettle("Let me know which option you prefer.", asks), undefined);
+	assert.equal(store.open().length, 1, "no card either");
+	assert.equal(guard.beforeSettle("Should I proceed with A or B?", asks)?.continue, true, "a ? question nudges even with an ask open");
+	const { guard: fresh, asks: none } = fixture(t);
+	fresh.runEnded();
+	assert.equal(fresh.beforeSettle("Let me know which option you prefer.", none)?.continue, true, "no ask open: the cue still nudges");
 });
 
 test("the detector reads only the last 600 characters", () => {
