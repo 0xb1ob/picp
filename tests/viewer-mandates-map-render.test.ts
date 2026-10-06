@@ -23,7 +23,7 @@ test("map renders empty, failed, stranded and selected states without inline sty
  assert.match(screen(data,true),/Dependency status unavailable/);assert.doesNotMatch(screen(data,true),/No stranded dependencies/);
  data.nodes.push({...data.nodes[0]!,id:"cp-right"});
  data.edges=[{from:"cp-right",to:"cp-failed",kind:"open"}];
- assert.match(screen(data,true),/d="M380 80L351 80"/,"a right-to-left dependency connects the facing node edges, not through the nodes");
+ assert.match(screen(data,true),/d="M344 100L373 100"/,"dependency depth puts the blocker first and connects the facing boundaries");
 });
 
 test("Map shows today's revoked mission closures and toggles older history in the browser's local day",async t=>{
@@ -74,8 +74,8 @@ test("map prioritizes active projects, selects nothing until a pick, and keeps e
  assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
  assert.match(html,/Select a job or mandate/);assert.match(html,/Nothing is dimmed until you pick one/);
  assert.doesNotMatch(html,/map-node-dim/);assert.doesNotMatch(html,/job · cp-job-/);
- assert.match(html,/<svg width="1144"/);assert.match(html,/foreignObject x="1020"[^>]*width="124"/);
- assert.match(html,/d="M282 108L282 123L602 123L602 115"/,"the skipped middle node cannot obscure the dependency endpoints");
+ assert.match(html,/<svg width="840"/);assert.match(html,/foreignObject x="700" y="178"[^>]*height="96"/);
+ assert.match(html,/d="M344 100L373 100"/,"dependency depth connects facing node edges");
  for(let i=0;i<6;i++) assert.ok(html.includes(`title="cp-job-${i}:`));
  assert.doesNotMatch(html,/>https:\/\/github/);
  for(const label of ["working","not dispatched","held","failed","launching","done","blocked by · open","blocked by · satisfied","pipeline"]) assert.ok(html.includes(`>${label}<`),label);
@@ -84,6 +84,44 @@ test("map prioritizes active projects, selects nothing until a pick, and keeps e
  assert.match(waiting,/no run status/);assert.doesNotMatch(waiting,/>waiting</);
 });
 
+test("hundreds of independent jobs wrap without losing nodes, full titles or initial reachability",async()=>{
+ const {screen}=await renderer();const data=mapQaFixture();
+ data.nodes=Array.from({length:227},(_,i)=>({...data.nodes[0]!,id:`cp-independent-${i}-with-a-long-id`,title:`${mapTitle} ${i}`}));data.edges=[];
+ const doc=parseHTML(screen(data)).document;const graph=doc.querySelector('.map-graph > svg')!;
+ assert.ok(Number(graph.getAttribute("width"))<=840,"independent jobs must not grow the horizontal canvas");
+ const boxes=[...graph.querySelectorAll("foreignObject")].filter(box=>box.querySelector('button[title^="cp-independent-"]'));
+ assert.equal(boxes.length,227);assert.ok(new Set(boxes.map(box=>box.getAttribute("y"))).size>1);
+ for(const [i,box] of boxes.entries()) {
+  assert.equal(box.querySelector("button")!.getAttribute("title"),`${data.nodes[i]!.id}: ${data.nodes[i]!.title}`);
+  assert.ok(Number(box.getAttribute("x"))+Number(box.getAttribute("width"))<=Number(graph.getAttribute("width")));
+  assert.ok(Number(box.getAttribute("y"))+Number(box.getAttribute("height"))<=Number(graph.getAttribute("height")));
+  assert.equal(box.querySelector("button")!.getAttribute("aria-pressed"),"false");
+ }
+ assert.equal(doc.querySelectorAll(".map-node-dim").length,0);
+ assert.equal(doc.querySelectorAll('.map-mobile-lanes a[href^="#job/"]').length,227,"phone keeps every job link");
+});
+
+test("the mounted graph follows its pane width and releases its resize observer",async t=>{
+ const {mount,unmount,act}=await renderer();const data=mapQaFixture();data.edges=[];
+ const {window,document}=parseHTML("<html><body><main></main></body></html>");
+ const originals=["window","document","ResizeObserver"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ let measure=()=>{},disconnected=false;
+ class Observer {constructor(callback:()=>void){measure=callback;} observe(){} disconnect(){disconnected=true;}}
+ for(const [key,value] of Object.entries({window,document,ResizeObserver:Observer})) Object.defineProperty(globalThis,key,{configurable:true,value});
+ t.after(()=>{for(const [key,descriptor] of originals) {if(descriptor) Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
+ const root=document.querySelector("main")!;
+ try {
+  await act(()=>mount(root,data));const graph=root.querySelector('.map-graph')!;
+  for(const width of [680,520,840]) {
+   Object.defineProperty(graph,"clientWidth",{configurable:true,value:width});await act(()=>measure());
+   const svg=graph.querySelector("svg")!;assert.equal(Number(svg.getAttribute("width")),width);
+   const boxes=[...svg.querySelectorAll('foreignObject')].filter(box=>box.querySelector('button[title^="cp-job-"]'));
+   assert.equal(boxes.length,data.nodes.length);
+   for(const box of boxes) assert.ok(Number(box.getAttribute("x"))+Number(box.getAttribute("width"))<=width);
+  }
+ } finally {await act(()=>unmount(root));}
+ assert.equal(disconnected,true);
+});
 test("More's views keep the phone sub-page header with search, the local clock and no live status",async()=>{
  const {shell}=await renderer();
  for(const screen of ["files","schedules","reports"]) {

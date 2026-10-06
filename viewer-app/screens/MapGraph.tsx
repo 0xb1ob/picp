@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { MandateItem, MandatesResponse, MapNode, MapResponse } from "../../src/viewer/api-types.ts";
 import { edgePoints, type GraphBox } from "./map-edges.ts";
 import { count, elapsed, money, percent, phaseText, time } from "../format.ts";
@@ -36,25 +37,65 @@ export function mapLanes(data:MapResponse,history:boolean):MapLane[] {
  });
 }
 export const phaseClass=(phase:string)=>`map-dot map-dot-${phase.replaceAll(" ","-")}`;
-export function MapGraph({data,lanes,selection,onSelect}:{data:MapResponse;lanes:MapLane[];selection:string|null;onSelect:(id:string)=>void}) {
+export function mapLayout(lanes:MapLane[],edges:MapResponse["edges"],paneWidth=840) {
  const positions=new Map<string,GraphBox>();
- const rows:{lane:MapLane;y:number;heading:boolean}[]=[];
- let y=0;let project="";let width=840;
- for(const lane of lanes){
+ const rows:{lane:MapLane;y:number;heading:boolean;height:number}[]=[];
+ let y=0,project="",width=Math.max(360,Math.floor(paneWidth));
+ const columns=Math.max(1,Math.floor((width-220-16+36)/160));
+ for(const lane of lanes) {
   const heading=project!==lane.project;if(heading){y+=44;project=lane.project;}
-  rows.push({lane,y,heading});
-  lane.jobs.forEach((job,i)=>positions.set(job.id,{x:220+i*160,y:y+8,w:124,h:56}));
-  width=Math.max(width,220+(lane.jobs.length-1)*160+124);y+=86;
+  const ids=new Set(lane.jobs.map(job=>job.id));
+  const incoming=new Map(lane.jobs.map(job=>[job.id,0]));
+  const outgoing=new Map(lane.jobs.map(job=>[job.id,[] as string[]]));
+  const connected=new Set<string>();
+  for(const edge of edges) if(ids.has(edge.from) && ids.has(edge.to)) {
+   incoming.set(edge.to,incoming.get(edge.to)!+1);outgoing.get(edge.from)!.push(edge.to);
+   connected.add(edge.from);connected.add(edge.to);
+  }
+  const queue=lane.jobs.filter(job=>incoming.get(job.id)===0).map(job=>job.id);
+  const depth=new Map(queue.map(id=>[id,0]));
+  // ponytail: depth is lane-local; global layering if cross-lane graphs need aligned columns.
+  for(let i=0;i<queue.length;i++) for(const to of outgoing.get(queue[i]!)!) {
+   depth.set(to,Math.max(depth.get(to)??0,depth.get(queue[i]!)!+1));
+   incoming.set(to,incoming.get(to)!-1);if(incoming.get(to)===0) queue.push(to);
+  }
+  const columnRows=new Map<number,number>();
+  let connectedRows=0;
+  const place=(id:string,column:number,row:number)=>{
+   const box={x:220+column*160,y:y+8+row*126,w:124,h:96};
+   positions.set(id,box);width=Math.max(width,box.x+box.w+16);
+  };
+  for(const job of lane.jobs) if(connected.has(job.id) && incoming.get(job.id)===0) {
+   const column=depth.get(job.id)!;const row=columnRows.get(column)??0;
+   place(job.id,column,row);columnRows.set(column,row+1);connectedRows=Math.max(connectedRows,row+1);
+  }
+  // Independent jobs and the cyclic remainder wrap in stable input order, without recursion.
+  const wrapped=lane.jobs.filter(job=>!positions.has(job.id));
+  wrapped.forEach((job,i)=>place(job.id,i%columns,connectedRows+Math.floor(i/columns)));
+  const height=Math.max(1,connectedRows+Math.ceil(wrapped.length/columns))*126;
+  rows.push({lane,y,heading,height});y+=height;
  }
+ return {positions,rows,width,height:y+8};
+}
+export function MapGraph({data,lanes,selection,onSelect}:{data:MapResponse;lanes:MapLane[];selection:string|null;onSelect:(id:string)=>void}) {
+ const graph=useRef<HTMLDivElement>(null),[paneWidth,setPaneWidth]=useState(840);
+ useEffect(()=>{
+  const element=graph.current;if(!element) return;
+  const measure=()=>{if(element.clientWidth>0) setPaneWidth(element.clientWidth);};
+  measure();if(typeof ResizeObserver==="undefined") return;
+  const observer=new ResizeObserver(measure);observer.observe(element);
+  return ()=>observer.disconnect();
+ },[]);
+ const {positions,rows,width,height}=mapLayout(lanes,data.edges,paneWidth);
  const lit=selection ? new Set([selection]) : null;
  if(lit){
   for(const e of data.edges){if(e.from===selection)lit.add(e.to);if(e.to===selection)lit.add(e.from);}
   for(const lane of lanes)for(const n of lane.jobs){if(n.id===selection && lane.mandate)lit.add(lane.mandate.id);if(lane.mandate?.id===selection)lit.add(n.id);}
  }
- return <div class="map-graph" role="region" aria-label="Mandate and job graph" tabIndex={0}><svg width={width} height={y+8} aria-label="Dependency graph">
-  {rows.map(({lane,y,heading})=><g key={`${lane.project}:${lane.mandate?.id ?? "none"}`}>
+ return <div ref={graph} class="map-graph" role="region" aria-label="Mandate and job graph" tabIndex={0}><svg width={width} height={height} aria-label="Dependency graph">
+  {rows.map(({lane,y,heading,height})=><g key={`${lane.project}:${lane.mandate?.id ?? "none"}`}>
    {heading && <text x={0} y={y-20} class="map-project-heading">{lane.project}</text>}
-   <rect x={0} y={y-6} width={width} height={84} rx={14} class="map-band"/>
+   <rect x={0} y={y-6} width={width} height={height-4} rx={14} class="map-band"/>
   </g>)}
   {data.edges.map(e=>{
    const a=positions.get(e.from),b=positions.get(e.to);if(!a || !b)return null;
@@ -64,7 +105,7 @@ export function MapGraph({data,lanes,selection,onSelect}:{data:MapResponse;lanes
    return <g key={`${e.from}:${e.to}`} class={`map-edge map-edge-${e.kind}${selection && e.from!==selection && e.to!==selection ? " map-edge-dim" : ""}`}><title>{e.to} blocked by {e.from}: {e.kind}</title><path d={path}/><polygon points={`${x2},${y2} ${bx-3.5*uy},${by+3.5*ux} ${bx+3.5*uy},${by-3.5*ux}`}/></g>;
   })}
   {rows.map(({lane,y})=><g key={`nodes:${lane.project}:${lane.mandate?.id ?? "none"}`}>
-   <foreignObject x={0} y={y} width={180} height={72}>{lane.mandate ? <button class={`map-node map-mandate-node ${lane.mandate.status!=="active" ? "map-inactive" : ""}${lit && !lit.has(lane.mandate.id) ? " map-node-dim" : ""}`} title={lane.mandate.objective} aria-pressed={selection===lane.mandate.id} onClick={()=>onSelect(lane.mandate!.id)}><span><code>{lane.mandate.id}</code><small>{lane.mandate.status}</small></span><svg width="100%" height={3} aria-hidden="true"><rect width="100%" height={3} class="map-bar-track"/>{lane.mandate.spend && lane.mandate.spend_cap.usd!==null && <rect width={`${percent(lane.mandate.spend.usd,lane.mandate.spend_cap.usd)}%`} height={3} class="map-bar"/>}</svg><span><small>{money(lane.mandate.spend?.usd ?? null)} / {money(lane.mandate.spend_cap.usd)}</small><small>{expiry(lane.mandate,data.generated_at)}</small></span></button> : <div class="map-uncovered">No mandate</div>}</foreignObject>
+   <foreignObject x={0} y={y} width={180} height={96}>{lane.mandate ? <button class={`map-node map-mandate-node ${lane.mandate.status!=="active" ? "map-inactive" : ""}${lit && !lit.has(lane.mandate.id) ? " map-node-dim" : ""}`} title={lane.mandate.objective} aria-pressed={selection===lane.mandate.id} onClick={()=>onSelect(lane.mandate!.id)}><span><code>{lane.mandate.id}</code><small>{lane.mandate.status}</small></span><svg width="100%" height={3} aria-hidden="true"><rect width="100%" height={3} class="map-bar-track"/>{lane.mandate.spend && lane.mandate.spend_cap.usd!==null && <rect width={`${percent(lane.mandate.spend.usd,lane.mandate.spend_cap.usd)}%`} height={3} class="map-bar"/>}</svg><span><small>{money(lane.mandate.spend?.usd ?? null)} / {money(lane.mandate.spend_cap.usd)}</small><small>{expiry(lane.mandate,data.generated_at)}</small></span></button> : <div class="map-uncovered">No mandate</div>}</foreignObject>
    {lane.jobs.map(job=>{
     const p=positions.get(job.id)!;const stranded=data.edges.some(e=>e.to===job.id && e.kind==="stranded" && job.ledger_status!=="closed");
     return <foreignObject key={job.id} x={p.x} y={p.y} width={p.w} height={p.h}><button class={`map-node${stranded ? " map-node-stranded" : ""}${lit && !lit.has(job.id) ? " map-node-dim" : ""}`} title={`${job.id}: ${job.title}`} aria-pressed={selection===job.id} onClick={()=>onSelect(job.id)}><span><i class={phaseClass(job.phase)}/><code>{job.id}</code></span><small>{stranded ? "stranded" : phaseText(job.phase)}{job.phase==="failed" && job.ledger_status ? ` · ledger ${job.ledger_status}` : ""}</small><ContextChip usage={job.context} compact/></button></foreignObject>;
