@@ -4,6 +4,9 @@ import { jobHref } from "../routes.ts";
 export function DecisionKinds() {
  return <section class="decision-kinds"><h2>What comes here</h2><ul>{["Irreversible actions","Raising a USD spending cap","Real scope changes","Work on paused projects","Unclear product questions"].map(kind => <li key={kind}>{kind}</li>)}</ul><p>Everything else falls under your standing delegation and shows up in <a href="#decided">Decided</a>.</p></section>;
 }
+export function WorthExplanation() {
+ return <section class="decision-worth-note" aria-label="About Worth a look"><h2><span class="decision-diamond"/>Worth a look</h2><p>Answers given on the operator&rsquo;s own judgement, rather than your words or a standing order. It is a reading filter, not a request for approval.</p><p>The basis beside each answer shows what it rests on.</p></section>;
+}
 export function ParentQuestions({items,availability}: {items:Question[];availability:SourceAvailability}) {
  // Rendered only inside the Decisions page's collapsed "Being handled" line (audit P4 #24), which carries the count.
  return <section class="decision-parent" aria-label="Parent's open questions"><p class="decision-parent-intro">Being handled by the operator session. Amber only after 10 minutes unanswered.</p>

@@ -26,6 +26,12 @@
 .decisions { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
 .decisions > section { min-width: 0; outline: none; }
 .decision-heading h2 { font-size: 20px; color: var(--text); }
+.decisions-log { min-width: 0; }
+.decisions-log-aside { display: none; }
+.decisions-log > section { min-width: 0; outline: none; }
+.decision-worth-note { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.decision-worth-note h2 { display: flex; align-items: center; gap: 8px; color: var(--subtle); }
+.decided-phone-note .decision-worth-note > p:last-child { display: none; }
 .decisions-handled { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .decisions-handled > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 44px; padding: 0 14px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .decisions-handled-overdue { border-color: var(--ask-border); }
@@ -38,4 +44,10 @@
  .decision-kinds li { min-height: 0; }
  .decision-parent { gap: 12px; }
  .decision-parent-item { padding: 14px; background: var(--background); }
+}
+@media (min-width: 1200px) {
+ .decisions-log { display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 32px; align-items: start; }
+ .decided-phone-note { display: none; }
+ .decisions-log-aside { display: flex; flex-direction: column; gap: 24px; }
+ .decision-worth-note { padding: 14px 16px; }
 }

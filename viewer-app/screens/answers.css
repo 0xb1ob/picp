@@ -16,6 +16,9 @@
 .answers-evidence li { display: flex; flex-wrap: wrap; gap: 4px 10px; overflow-wrap: anywhere; }
 .answers-ack { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid var(--check-border); border-radius: 999px; background: var(--check-background); color: var(--text); font-size: 14px; cursor: pointer; }
 .answers-ack:disabled { opacity: 0.55; cursor: not-allowed; }
+.answers-quiet { border: 1px solid var(--border); border-radius: 12px; padding: 0 14px; color: var(--muted); }
+.answers-quiet > summary { min-height: 44px; padding: 12px 0; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.answers-quiet[open] { padding-bottom: 14px; }
 .answers-history { display: flex; flex-direction: column; gap: 10px; }
 .answers-history[open] > summary { margin-bottom: 4px; }
 @media (min-width: 900px) {
