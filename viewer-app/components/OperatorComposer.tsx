@@ -3,7 +3,7 @@ import { attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlImages, contr
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
-import type { ThreadsView } from "../threads.ts";
+import { threadsReady, type ThreadsView } from "../threads.ts";
 import { ThreadPicker } from "./ThreadNav.tsx";
 
 /** The composer's placeholder: short enough for the one-row box at 390px, even with the busy ⋯ button. */
@@ -76,8 +76,18 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
  const line = deliveryLine(control.delivery);
  const flagged = control.delivery?.state === "failed" || !!control.delivery?.reason;
  const sendLabel = busy ? "Send after this turn" : "Send";
+ const optionsLabel = thread?.selected ? `Thread · ${thread.selected}` : "Message options";
  return <section class="operator-composer" aria-label="Message the operator session">
-  <p class={ready && status.running ? "operator-composer-state operator-composer-state-ready" : "operator-composer-state"}>{controlLine(status)}{ready && status.running && status.session_file && <span> · delivers to the running session <code>{status.session_file}</code></span>}</p>
+  <div class="operator-composer-meta">
+   <p class={ready && status.running ? "operator-composer-state operator-composer-state-ready" : "operator-composer-state"}>{controlLine(status)}</p>
+   {ready && ((status.running && status.session_file) || threadsReady(thread?.status)) && <details class="operator-composer-options">
+    <summary aria-label={optionsLabel} title={optionsLabel}><span>{optionsLabel}</span><span aria-hidden="true"> ▾</span><Icon name="sessions"/></summary>
+    <div class="operator-composer-options-panel">
+     {thread && <ThreadPicker threads={thread}/>}
+     {status.running && status.session_file && <p>Delivers to the running session <code>{status.session_file}</code></p>}
+    </div>
+   </details>}
+  </div>
   <StartSession control={control}/>
   {ready && attachments.length > 0 && <ul class="operator-composer-attachments" aria-label="Attached images">
    {attachments.map(a => <li key={a.key} class={a.state === "failed" ? "operator-composer-attachment-failed" : undefined}>
@@ -85,7 +95,6 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
     <button type="button" class="operator-composer-thumb-remove" aria-label={`Remove ${a.name || "image"}`} title="Remove" onClick={() => setAttachments(list => list.filter(b => b.key !== a.key))}><Icon name="close" size={14}/></button>
    </li>)}
   </ul>}
-  {ready && thread && <ThreadPicker threads={thread}/>}
   {ready && <div class="operator-composer-row">
    {upload && <button type="button" class="operator-composer-attach" aria-label="Attach images" title="Attach images (or paste)" disabled={sending} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept="image/*" multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}

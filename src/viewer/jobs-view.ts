@@ -6,7 +6,7 @@ import { jobRoot, listOrRead } from "./explorer.ts";
 import { overview } from "./overview-view.ts";
 import { decisions } from "./overview-decisions.ts";
 import { SHA } from "./git-read.ts";
-import { recordedEvents, routingText } from "./overview-health.ts";
+import { recordedEvents, routingFacts, routingText } from "./overview-health.ts";
 import { mandateDisplay, mandateEscalations } from "./mandates-map-view.ts";
 import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded } from "./overview-read.ts";
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
@@ -69,6 +69,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
    ci:head && ci?.head_sha===head ? str(ci.last_ci) ?? null : null,review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,
+   routing_facts:entry ? routingFacts(state,entry) : null,
    cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : null,pr_url:merged ? String(receipt.pr_url) : detail?.pr_url ?? null,pr_status:merged ? "merged" : detail?.pr_status ?? null,
    finished_at:finished,finished_today:today(finished,now),merge_sha:merged ? String(receipt.merge_commit_sha) : null,
    // A failure is shown only while the job is failed: a revived, held or landed job's old failure is history, not state (audit P2 #10).

@@ -7,13 +7,17 @@ export function mapJobs(jobs:MapNode[]) {
  const ids=new Set(hidden.map(n=>n.id));
  return {shown:jobs.filter(n=>!ids.has(n.id)),hidden};
 }
+function closedToday(m:MandateItem,data:MandatesResponse):boolean {
+ const day=new Intl.DateTimeFormat("en",{year:"numeric",month:"numeric",day:"numeric"});
+ return m.status==="closed" || m.status==="revoked" && !!m.closed_at && Number.isFinite(Date.parse(m.closed_at)) && day.format(new Date(m.closed_at))===day.format(new Date(data.generated_at));
+}
 export function visibleMandates(data:MandatesResponse,history=false):MandateItem[] {
  const order=["active","paused","closed","expired","revoked"];
- return data.items.filter(m=>history || m.status==="active").sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status));
+ return data.items.filter(m=>history || ["active","paused"].includes(m.status) || closedToday(m,data)).sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status));
 }
 export function MandateHistoryToggle({data,checked,onChange}:{data:MandatesResponse;checked:boolean;onChange:(value:boolean)=>void}) {
  const hidden=data.availability.mandates==="unavailable" ? null : data.items.length-visibleMandates(data).length;
- return <label class="mandate-history-toggle">Show {count(hidden)} inactive mandates<input type="checkbox" checked={checked} onChange={e=>onChange(e.currentTarget.checked)}/></label>;
+ return <label class="mandate-history-toggle">Show {count(hidden)} expired or revoked mandates<input type="checkbox" checked={checked} onChange={e=>onChange(e.currentTarget.checked)}/></label>;
 }
 export function expiry(m:MandateItem,now:string):string {
  if(m.status==="closed") return m.closed_at ? `closed ${time(m.closed_at)}` : "closed";

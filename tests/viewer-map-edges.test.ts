@@ -53,7 +53,7 @@ test("cycles and self-links retain deterministic reachable positions at every pa
  data.edges.push({from:"cp-self",to:"cp-self",kind:"open"},{from:"cp-cycle-0",to:"cp-descendant",kind:"open"});
  for(const pane of [360,520,680,840]) {
   const lanes=mapLanes(data,false),layout=mapLayout(lanes,pane) as {positions:Map<string,GraphBox>;width:number;height:number};
-  assert.equal(layout.width,pane);assert.equal(layout.positions.size,data.nodes.length);
+  assert.equal(layout.width,Math.max(pane,516),"the default closed mandate keeps its column");assert.equal(layout.positions.size,data.nodes.length);
   assert.deepEqual(layout,mapLayout(lanes,pane));
   const boxes=[...layout.positions.values()];assert.equal(new Set(boxes.map(box=>box.x)).size,1);
   for(const box of boxes) assert.ok(box.x+box.w<=layout.width && box.y+box.h<=layout.height);

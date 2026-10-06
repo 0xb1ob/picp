@@ -1,6 +1,6 @@
 import { fileCache } from "./file-cache.ts";
 import { join } from "node:path";
-import type { OverviewResponse, QuotaObservation } from "./api-types.ts";
+import type { OverviewResponse, QuotaObservation, ViewerRoutingFacts } from "./api-types.ts";
 import { isSafeId, obj, parentRow, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
 import { nonnegative, parseObject, strings, timestamp } from "./overview-read.ts";
 import { readLines } from "./tail.ts";
@@ -38,13 +38,21 @@ export function recordedEvents(state: ViewerState, id: string): Json[] {
 export function routingEvents(state: ViewerState, id: string): Json[] {
  return recordedEvents(state,id).filter(e => e.type === "routing_resolved");
 }
-export function routingText(state: ViewerState, job: Json): string | null {
+export function routingFacts(state: ViewerState, job: Json): ViewerRoutingFacts | null {
  const event = [...routingEvents(state, String(job.job_id))].sort((a,b) => String(a.ts).localeCompare(String(b.ts))).at(-1);
  const routing = obj(event?.payload) ?? obj(job.routing);
  if (!routing) return null;
  const provenance = obj(routing.provenance);
- const axis = (key: "scope" | "risk") => str(routing[key]) ? `${key}:${routing[key]}${str(provenance?.[key]) ? ` (${provenance![key]})` : ""}` : null;
- return [axis("scope"), axis("risk"), str(routing.rule), ...strings(routing.reasons)].filter(Boolean).join(" · ") || null;
+ const facts = {scope:str(routing.scope) ?? null, risk:str(routing.risk) ?? null,
+  provenance:{scope:str(provenance?.scope) ?? null, risk:str(provenance?.risk) ?? null},
+  rule:str(routing.rule) ?? null, reasons:strings(routing.reasons)};
+ return facts.scope || facts.risk || facts.rule || facts.reasons.some(Boolean) ? facts : null;
+}
+export function routingText(state: ViewerState, job: Json): string | null {
+ const facts = routingFacts(state,job);
+ if (!facts) return null;
+ const axis = (key: "scope" | "risk") => facts[key] ? `${key}:${facts[key]}${facts.provenance[key] ? ` (${facts.provenance[key]})` : ""}` : null;
+ return [axis("scope"), axis("risk"), facts.rule, ...facts.reasons].filter(Boolean).join(" · ") || null;
 }
 export function quota(state: ViewerState, jobs: Json[]): QuotaObservation | null {
  const candidates = [...jobs].filter(j => isSafeId(String(j.job_id))).sort((a,b) => (str(b.dispatched_at) ?? "").localeCompare(str(a.dispatched_at) ?? "")).slice(0,20);
