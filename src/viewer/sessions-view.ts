@@ -2,7 +2,8 @@ import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
-import { isAskId, parseDashboardText } from "./control-files.ts";
+import { isAskId, parseDashboardText, readThreads } from "./control-files.ts";
+import { assignThreads } from "./thread-turns.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
@@ -77,6 +78,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  const entries: SessionEntry[] = [];
  const calls = new Map<string,SessionEntry>();
  const askCalls = new Set<string>(); // cp_parent ask calls: their result names the ask id
+ const answerCalls = new Set<string>(); // cp_parent answer calls: their result names the ans- id (posted, or the first on a duplicate)
  for (const line of lines.lines) {
   const record = parseObject(line.text);
   const at = stamp(record?.timestamp);
@@ -110,7 +112,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
      const e = entry(`${base}-${i}`,at,"tool",role,b.type === "thinking" ? String(b.thinking ?? "") : `Arguments\n${JSON.stringify(b.arguments ?? {},null,2)}`);
      e.name = b.type === "thinking" ? "thinking" : str(b.name) ?? "tool";
      e.summary = b.type === "thinking" ? resultSummary(e.text,false) : "Result not recorded";
-     if (b.type === "toolCall" && str(b.id)) { calls.set(String(b.id),e); if (sides === SIDES.you && e.name === "cp_parent" && obj(b.arguments)?.action === "ask") askCalls.add(String(b.id)); }
+     if (b.type === "toolCall" && str(b.id)) { calls.set(String(b.id),e); const action=sides === SIDES.you && e.name === "cp_parent" ? obj(b.arguments)?.action : undefined; if (action === "ask") askCalls.add(String(b.id)); if (action === "answer") answerCalls.add(String(b.id)); }
      entries.push(e);
     }
    }
@@ -121,6 +123,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    e.name=str(message.toolName) ?? e.name ?? "tool";
    e.text+=`${call ? "\n\n" : ""}Result\n${text}`; e.failed=message.isError === true; e.summary=resultSummary(text,e.failed);
    if (callId && askCalls.has(callId)) { const id=parseObject(text)?.id; if (isAskId(id)) e.ask_id=id; }
+   if (callId && answerCalls.has(callId)) { const id=/\bans-[a-f0-9]{12}\b/.exec(text)?.[0]; if (id) e.answer_id=id; }
    if (!call) entries.push(e);
    if (callId) calls.delete(callId);
   } else {
@@ -248,7 +251,11 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  }
  const d = decisions(state,now), asks = d.askHistory;
  if (asks.availability === "unavailable") warnings.push("asks unavailable");
- const window = windowed(withAskCards(entries,asks.value),(e)=>e.ask?.state === "open");
+ const cards = withAskCards(entries,asks.value);
+ const threads = readThreads(state.stateDir);
+ if (threads.error) warnings.push(`threads unavailable: ${threads.error}`);
+ assignThreads(cards,threads.error ? new Map() : threads.refs);
+ const window = windowed(cards,(e)=>e.ask?.state === "open");
  entries = window.entries; truncated ||= window.cut;
  attachNoticePaths(state,entries);
  return {

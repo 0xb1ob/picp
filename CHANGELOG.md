@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Full transcript entries carry their thread (cp-xmw2 S3)
+
+The operator Full transcript (`GET /api/sessions?view=you&transcript=1`) files each entry under a thread by the turn rule in `src/viewer/thread-turns.ts` (`assignThreads`, run after the decision cards are placed and before the 300-entry window): system entries (bridge relays, compaction, other custom messages) and the `[cp-dashboard inbox — ` replay are `shared: true` and end the current turn; an Operator say/via opens one; an entry takes the thread of its own `dashboard_id`, `ask_id` or `answer_id` from `state/operator/threads.jsonl` (newest bind wins), else its turn's thread (the opener's own, else the first own one in the turn), else none. `cp_parent answer` tool entries now carry `answer_id` (the first `ans-` id in the result text, the posted id or the duplicate's first). `SessionEntry` gains the optional `thread`, `shared` and `answer_id`; the UI ignores them until S5. A missing journal adds nothing; an unreadable one adds the warning `threads unavailable: …` and no thread. Migration: none.
+
 ### Operator thread journal (cp-xmw2 S1)
 
 `src/viewer/control-files.ts` gains the operator thread journal `state/operator/threads.jsonl` (0600, append-only, 16 MiB read cap): `open` lines name a tag (`^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag`: trim, ASCII-lowercase, whitespace runs to `-`) under a `th-<12 hex>` id, `bind` lines file a `dc-`/`ask-`/`ans-` id under a thread, `done` lines mark one done; never any message text. `readThreads` folds it like `readAnswers` (torn last line ignored, bad lines counted in `skipped`, a second `open` of one tag aliased to the first id, the newest bind of a ref wins, `error` names an unreadable or oversized file). `src/viewer/control-audit.ts` gains `appendThreadLine` and `bindThread` (opens a tag once, binds idempotently, never throws). Nothing calls them yet and nothing creates the file: the bridge, viewer routes and UI arrive in later slices. Migration: none.
