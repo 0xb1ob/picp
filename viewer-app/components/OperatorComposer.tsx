@@ -76,11 +76,12 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
  const line = deliveryLine(control.delivery);
  const flagged = control.delivery?.state === "failed" || !!control.delivery?.reason;
  const sendLabel = busy ? "Send after this turn" : "Send";
+ const optionsLabel = thread?.selected ? `Thread · ${thread.selected}` : "Message options";
  return <section class="operator-composer" aria-label="Message the operator session">
   <div class="operator-composer-meta">
    <p class={ready && status.running ? "operator-composer-state operator-composer-state-ready" : "operator-composer-state"}>{controlLine(status)}</p>
    {ready && ((status.running && status.session_file) || threadsReady(thread?.status)) && <details class="operator-composer-options">
-    <summary>{thread?.selected ? `Thread · ${thread.selected}` : "Message options"}<span aria-hidden="true"> ▾</span></summary>
+    <summary aria-label={optionsLabel} title={optionsLabel}><span>{optionsLabel}</span><span aria-hidden="true"> ▾</span><Icon name="sessions"/></summary>
     <div class="operator-composer-options-panel">
      {thread && <ThreadPicker threads={thread}/>}
      {status.running && status.session_file && <p>Delivers to the running session <code>{status.session_file}</code></p>}

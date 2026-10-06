@@ -49,6 +49,7 @@
 .operator-composer-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
 .operator-composer-options { margin-left: auto; min-width: 0; max-width: 100%; }
 .operator-composer-options > summary { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 8px; font-size: 12px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
+.operator-composer-options > summary > svg { display: none; }
 .operator-composer-options-panel { position: absolute; bottom: calc(100% + 8px); right: 12px; z-index: 3; width: 320px; max-width: calc(100% - 24px); max-height: 45dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
 .operator-composer-options-panel > p { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .operator-composer-state, .operator-composer-delivery { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -103,6 +104,16 @@
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {
+ .operator-composer { display: grid; grid-template-columns: 44px minmax(0,1fr); }
+ .operator-composer-meta { display: contents; }
+ .operator-composer-state, .operator-composer-attachments, .start-session { grid-column: 1 / -1; }
+ .operator-composer-options { order: 1; grid-column: 1; align-self: end; margin-left: 0; }
+ .operator-composer-options > summary { justify-content: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--surface); }
+ .operator-composer-options > summary > span { display: none; }
+ .operator-composer-options > summary > svg { display: block; }
+ .operator-composer-row { order: 1; grid-column: 2; }
+ .operator-composer:not(:has(.operator-composer-options)) .operator-composer-row { grid-column: 1 / -1; }
+ .operator-composer-delivery { order: 2; grid-column: 1 / -1; }
  /* The status and file name live in the top bar (chip and ⋯ sheet); only a failure or an unready session speaks here. */
  .operator-composer-state-ready, .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
  .operator-composer-thread select, .operator-composer-thread input { font-size: 16px; }

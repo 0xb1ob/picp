@@ -122,6 +122,7 @@ test("composer: the filename and thread picker live in compact, closed message o
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}}));
  const options = root.querySelector("details.operator-composer-options");
  assert.ok(options); assert.equal(options.hasAttribute("open"),false);
+ assert.equal(options.querySelector("summary")?.getAttribute("aria-label"),"Message options","the icon-only mobile trigger keeps its name");
  assert.match(options.textContent ?? "",/op\.jsonl/);
  assert.equal(root.querySelector(".operator-composer-state")?.textContent,"Ready");
  assert.equal(root.querySelector(".operator-composer-state code"),null);
@@ -132,6 +133,7 @@ test("composer: the filename and thread picker live in compact, closed message o
  assert.match(picker?.textContent ?? "",/No thread.*New thread…/);
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,{...threads,selected:"new-fixture-thread"}));
  assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · new-fixture-thread/);
+ assert.equal(root.querySelector(".operator-composer-options > summary")?.getAttribute("aria-label"),"Thread · new-fixture-thread","the selected thread stays accessible on mobile");
  await act(() => unmount(root));
  await act(() => mount(root,{status:{...ready,enabled:false,reason:"Dashboard control is off"},delivery:null,send:()=>{}}));
  assert.equal(root.querySelector(".operator-composer-options"),null);
