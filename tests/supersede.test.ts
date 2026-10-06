@@ -31,6 +31,7 @@ import {
 	decideReopen,
 	landedReceipt,
 	lastFiledEnvelopeFile,
+	readLiveReport,
 	reopenEnvelopeSlot,
 	SupersedeError,
 } from "../src/supersede.ts";
@@ -239,6 +240,27 @@ test("reopening a job with nothing filed changes nothing", async (t) => {
 	assert.equal(result, undefined);
 	assert.equal(readFileSync(join(b.home.path, LAYOUT.fleetFile), "utf8"), before);
 	assert.equal(existsSync(join(b.home.path, paths.eventsFile("cp-open"))), false, "no run log was opened either");
+});
+
+test("readLiveReport: absent, done, blocked (strings and planner objects), unreadable", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const file = join(home.path, paths.envelopeFile("cp-live"));
+	mkdirSync(join(file, ".."), { recursive: true });
+	const write = (envelope: unknown) => writeFileSync(file, JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: "cp-live", envelope }));
+	const read = () => readLiveReport(home.path, "cp-live");
+
+	assert.deepEqual(readLiveReport(home.path, "cp-none"), { state: "absent" });
+	write({ status: "done" });
+	assert.deepEqual(read(), { state: "done" });
+	write({ status: "blocked", blockers: ["  no screenshots  ", "x".repeat(300)], head_sha: "abc" });
+	assert.deepEqual(read(), { state: "blocked", blockers: ["no screenshots", "x".repeat(200)], head_sha: "abc" });
+	write({ status: "blocked", blockers: [{ question: "which base?" }, { why: "no question" }, 7] });
+	assert.deepEqual(read(), { state: "blocked", blockers: ["which base?"] });
+	writeFileSync(file, "{");
+	assert.equal(read().state, "unreadable");
+	write({ status: "maybe" });
+	assert.deepEqual(read(), { state: "unreadable", detail: "status maybe is neither done nor blocked" });
 });
 
 test("reopening a landed delivery throws instead of reviving it", async (t) => {

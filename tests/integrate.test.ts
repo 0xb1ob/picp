@@ -21,7 +21,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromCheckpoints, isDerivedAwaitingId, obsoleteDeclaredReason } from "../src/awaiting.ts";
@@ -73,6 +73,7 @@ import { RunRegistry } from "../src/runs.ts";
 import type { TeardownResult } from "../src/teardown.ts";
 import { createScratchHome, fakeWorkerManager, readRunEvents } from "./harness/index.ts";
 import { HeldRelease } from "../src/held-release.ts";
+import { HeldContinuation } from "../src/held-continuation.ts";
 
 const BR = "cp-int1";
 const PR_URL = "https://github.com/o/r/pull/61";
@@ -2806,4 +2807,106 @@ test("human_handoff: the human's merge lands through the ordinary MERGED path an
 	const row = handoffRows(b)[0];
 	assert.ok(row);
 	assert.ok(obsoleteDeclaredReason(row, b.fleet.list() as unknown as Parameters<typeof obsoleteDeclaredReason>[1]));
+});
+
+// ---------------------------------------------------------------------------
+// N3: a blocked report is never merged
+// ---------------------------------------------------------------------------
+
+function writeBlockedEnvelope(home: string, head?: string, blockers: string[] = ["screenshots are not in the PR"]): void {
+	mkdirSync(join(home, paths.runDir(BR)), { recursive: true });
+	const envelope = { job_id: BR, kind: "ship", status: "blocked", summary: "not finished", blockers, branch: BR, ...(head ? { head_sha: head } : {}) };
+	writeFileSync(join(home, paths.envelopeFile(BR)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: BR, received_at: isoTimestamp(), attempt: 1, envelope }));
+}
+
+const touched = (b: Bench) => b.calls.filter((call) => /^gh (pr merge|pr update-branch|pr ready|run)/.test(call));
+
+test("N3: a blocked live report stops a green, reviewed PR before anything is touched", async (t) => {
+	const b = await benchOf(t);
+	writeBlockedEnvelope(b.home, HEAD_A);
+	const result = await b.integrator().advance({ jobId: BR });
+	assert.deepEqual([result.step, result.next], ["start", "surface"]);
+	assert.match(result.reason, /blocked/);
+	assert.match(result.reason, /cp_send/);
+	assert.ok(result.record.facts.includes("blocker: screenshots are not in the PR"));
+	assert.deepEqual(touched(b), []);
+	assert.equal(b.sent.length, 0);
+	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.ok(readRunEvents(b.home, BR).some((event) => event.type === "integration_surfaced"));
+
+	writeShipEnvelope(b.home, HEAD_A);
+	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
+});
+
+test("N3: a blocked job whose PR a human merged on GitHub still finishes", async (t) => {
+	const b = await benchOf(t);
+	writeBlockedEnvelope(b.home, HEAD_A);
+	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	assert.deepEqual([done.next, done.merge?.recorded, b.teardowns.length], ["done", true, 1]);
+	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
+});
+
+for (const permission of ["CLEAN", undefined]) {
+	test(`N3: a blocked report filed during the CI read stops the ${permission === "CLEAN" ? "repo-derived" : "human-checkpoint"} merge`, async (t) => {
+		const b = await benchOf(t);
+		b.approve(HEAD_A);
+		const world = defaultWorld({ pr: { ...openPr(), mergeStateStatus: permission } });
+		const run = runnerFor(world, b.calls, b.worktree);
+		const integration = b.integrator({}, {
+			run: async (cwd, bin, args, options) => {
+				const result = await run(cwd, bin, args, options);
+				if (bin === "gh" && args[0] === "run") writeBlockedEnvelope(b.home, HEAD_A);
+				return result;
+			},
+		});
+		const result = await integration.advance({ jobId: BR });
+		assert.equal(result.next, "surface");
+		assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
+	});
+}
+
+test("N3: an unreadable envelope.json fails closed; a missing one is unchanged", async (t) => {
+	const b = await benchOf(t);
+	mkdirSync(join(b.home, paths.runDir(BR)), { recursive: true });
+	writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
+	const result = await b.integrator().advance({ jobId: BR });
+	assert.equal(result.next, "surface");
+	assert.match(result.reason, /unreadable/);
+	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
+	rmSync(join(b.home, paths.envelopeFile(BR)));
+	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
+});
+
+test("N3/PR90: a ci_green continuation on a blocked report stops once, visibly, without a review", async (t) => {
+	const b = await benchOf(t);
+	writeBlockedEnvelope(b.home, HEAD_A);
+	const notices: Array<{ id: string; content: string }> = [];
+	const continuation = new HeldContinuation({
+		enabled: () => true,
+		fleet: b.fleet,
+		advance: (id) => b.integrator().advance({ jobId: id }),
+		review: async () => assert.fail("a blocked delivery starts no review"),
+		reviews: { pending: () => undefined, handBack: () => {} },
+		head: () => HEAD_A,
+		notify: (notice) => void notices.push(notice),
+	});
+	const outcome = await continuation.trigger({ jobId: BR, event: "ci_green", head: HEAD_A });
+	assert.deepEqual([outcome.action, outcome.next], ["stopped", "surface"]);
+	assert.equal(notices.length, 1);
+	assert.match(notices[0]?.content ?? "", /HELD PR STOPPED — cp-int1/);
+	assert.match(notices[0]?.content ?? "", /screenshots are not in the PR/);
+	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
+	await continuation.trigger({ jobId: BR, event: "envelope", generation: 1 });
+	assert.equal(notices.length, 2);
+	assert.equal(notices[1]?.id, notices[0]?.id);
+});
+
+test("N3: a blocked report surfaces before a conflict promote", async (t) => {
+	const b = await benchOf(t);
+	writeBlockedEnvelope(b.home, HEAD_A);
+	const result = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	assert.equal(result.next, "surface");
+	assert.equal(b.sent.length, 0);
 });
