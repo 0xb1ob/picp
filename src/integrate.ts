@@ -58,6 +58,7 @@ import {
 	validate,
 } from "./contracts.ts";
 import { awaitingId } from "./awaiting.ts";
+import { readLiveReport } from "./supersede.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { type CiConfiguredVerdict, ghWorkflowsArgs, readCiConfigured } from "./ci-configured.ts";
 import type { InfraRerunInput, InfraRerunOutcome } from "./ci-infra-rerun.ts";
@@ -358,6 +359,9 @@ export class Integrator {
 					"reopen it, or decide with the operator whether this job is dropped.",
 			});
 		}
+
+		const reportBlocked = this.#reportBlocked({ jobId, branch, facts, prUrl, ...(head ? { head } : {}) });
+		if (reportBlocked) return reportBlocked;
 
 		// --- open: hazards, freshness, conflict, CI, authorization, merge ------
 		const hazard = await this.#worktreeHazard(record.worktree);
@@ -697,6 +701,8 @@ export class Integrator {
 		const strategy: MergeStrategy = request.strategy ?? "squash";
 		const heldBeforeMerge = this.#held(jobId, branch);
 		if (heldBeforeMerge) return heldBeforeMerge;
+		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
+		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
 			"pr",
 			"merge",
@@ -895,6 +901,8 @@ export class Integrator {
 		const strategy: MergeStrategy = request.strategy ?? "squash";
 		const heldBeforeMerge = this.#held(jobId, branch);
 		if (heldBeforeMerge) return heldBeforeMerge;
+		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
+		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
 			"pr",
 			"merge",
@@ -1750,6 +1758,23 @@ export class Integrator {
 			reason = `${jobId}: ${(error as Error).message}. Integration waits until the hold can be read or explicitly released.`;
 		}
 		return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [reason], reason });
+	}
+
+	/** N3: a live `blocked` (or unreadable) report is never merged; absent and done pass. */
+	#reportBlocked(input: { jobId: string; branch: string; facts: string[]; prUrl: string; head?: string }): IntegrateResult | undefined {
+		const { jobId, branch, prUrl, head } = input;
+		const report = readLiveReport(this.#options.home, jobId);
+		if (report.state === "absent" || report.state === "done") return undefined;
+		const generation = (this.#options.fleet.get(jobId)?.supersessions ?? 0) + 1;
+		const blockers = report.state === "blocked" ? report.blockers : [];
+		const facts = [...input.facts, `envelope generation ${generation}: ${report.state === "blocked" ? "blocked" : `unreadable: ${report.detail}`}`];
+		for (const blocker of blockers) facts.push(`blocker: ${blocker}`);
+		if (report.state === "blocked" && report.head_sha) facts.push(`blocked report head ${report.head_sha.slice(0, 12)}`);
+		const why = report.state === "blocked" ? `reported blocked: ${blockers[0] ?? "no blocker named"}` : `has an unreadable envelope.json (${report.detail})`;
+		const reason =
+			`${jobId}: generation ${generation} ${why.slice(0, 220)}. A blocked delivery is never merged; nothing was touched. ` +
+			`Clear the blocker and cp_send ${jobId} so it reports done, or merge ${prUrl} on GitHub yourself; the next cp_integrate finishes either way.`;
+		return this.#write({ jobId, branch, step: "start", next: "surface", facts, prUrl, ...(head ? { headSha: head } : {}), reason: reason.slice(0, 600) });
 	}
 
 	#now(): Date {

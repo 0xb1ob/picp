@@ -219,6 +219,39 @@ function readEnvelopeStatus(file: string): EnvelopeStatus | undefined {
 	}
 }
 
+export type LiveReport =
+	| { state: "absent" }
+	| { state: "done" }
+	| { state: "blocked"; blockers: string[]; head_sha?: string }
+	| { state: "unreadable"; detail: string };
+
+/**
+ * N3: the live report as integration reads it. Absent and done are today's
+ * behaviour; blocked and unreadable stop a merge. A raw control-field read,
+ * like `readEnvelopeStatus`, so schema drift is never mistaken for absent.
+ */
+export function readLiveReport(home: string, jobId: string): LiveReport {
+	const file = join(home, paths.envelopeFile(jobId));
+	if (!existsSync(file)) return { state: "absent" };
+	let envelope: { status?: unknown; blockers?: unknown; head_sha?: unknown } | undefined;
+	try {
+		envelope = (JSON.parse(readFileSync(file, "utf8")) as { envelope?: typeof envelope })?.envelope;
+	} catch (error) {
+		return { state: "unreadable", detail: String(error instanceof Error ? error.message : error).split("\n")[0] ?? "" };
+	}
+	const status = envelope?.status;
+	if (status === "done") return { state: "done" };
+	if (status !== "blocked") return { state: "unreadable", detail: `status ${String(status)} is neither done nor blocked` };
+	const raw = Array.isArray(envelope?.blockers) ? (envelope.blockers as unknown[]) : [];
+	const blockers = raw
+		.map((item) => (typeof item === "string" ? item : (item as { question?: unknown } | null)?.question))
+		.filter((text): text is string => typeof text === "string")
+		.slice(0, 5)
+		.map((text) => text.trim().slice(0, 200));
+	const head = envelope?.head_sha;
+	return { state: "blocked", blockers, ...(typeof head === "string" ? { head_sha: head } : {}) };
+}
+
 // ---------------------------------------------------------------------------
 // Frozen-task replacement (cp-promote-task-record): the same archive-then-
 // write shape as envelope supersession, applied to `paths.originalTaskFile`

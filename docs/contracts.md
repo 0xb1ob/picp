@@ -283,6 +283,8 @@ Cross-field policy (all fail-closed, all in code):
   worker still sends strings. After `PLANNER_BLOCKED_ROUND_CAP` (2) blocked
   rounds on one job, the next blocked planner envelope is escalated
   (`loop_exhausted`) instead of being left for the parent to answer.
+  A blocked ship `delivery:pr` envelope is accepted and held like any other,
+  but `cp_integrate` never merges while it is the live report (N3).
 
 ### One terminating tool per role
 
@@ -2918,6 +2920,7 @@ record. The record (`state/runs/<job-id>/integration.json`,
 |---|---|---|---|
 | — | PR state `CLOSED` unmerged | none | `surface` |
 | — | PR state `MERGED` | jump to `record` | not an error: the receipt is the observer either way |
+| — | live `envelope.json` is status `blocked`, or present but unreadable (open PR) | none — checked again just before each merge command | `surface`: blockers in facts; exits are a `done` re-report (`cp_send`) or a human merge on GitHub |
 | `conflict` | `mergeable == CONFLICTING` | promote the implementer | never resolved by this tool |
 | `ci` | a *completed* run whose `headSha` is the pushed head | none | green, or `wait` / `resolve`; zero runs with an **unreadable** workflow list falls back to `authorize`, and with an authoritative empty one falls through to `permit` |
 | `permit` | CI green on the pushed head | re-read `gh pr view`, evaluate `evaluateMergePermission` | `permitted` (merge), `pending` (merge-pending reminder, no merge), `retry` (head still resolving, or moved), or `unreadable` (fallback to `authorize`) |
@@ -2984,6 +2987,8 @@ wake-up whose id is job, generation, head, step and `next`, so the same outcome
 is delivered once and a new head or generation is new news). An operational
 fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.
+A blocked live report (N3) surfaces at the first step, so no `cp_review`
+starts and one `HELD PR STOPPED` notice names its blockers.
 
 **A drain stops the cadence (unload-parent PR2).** While `state/drain.json`
 exists — or cannot be read, which fails closed — a trigger acts on nothing and
