@@ -6,17 +6,22 @@
  * in code with no parent turn; a pr/pipeline fire wakes the parent to call cp_next.
  * Every 2 s it also consumes the Schedules page's journaled requests (src/schedule-control.ts, cp-hhuf P6).
  */
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Delivery, JobKind } from "../../src/contracts.ts";
+import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts";
 import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
 import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-control.ts";
 import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, SCHEDULER_TICK_MS } from "../../src/scheduler.ts";
 import type { ExtensionDeps } from "./shared.ts";
+
+/** The quote is written verbatim as one ledger comment (≤4000 chars) after its `run-now quote sha <12 hex>: ` prefix. */
+const RUN_NOW_QUOTE_MAX = 3900;
 
 export function registerScheduleTools(
 	pi: ExtensionAPI, deps: ExtensionDeps, holdsLock: () => boolean,
@@ -120,7 +125,8 @@ export function registerScheduleTools(
 		label: "Schedule",
 		description:
 			"Saved schedules: `add` a cron line (5 fields + IANA tz), a watch (a tracked script run every N seconds in the project's " +
-			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`. A fire records an ordinary " +
+			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`; " +
+			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use). A fire records an ordinary " +
 			"ledger job under the schedule's own grant (schedule_grant). answer/board/local fires are dispatched and torn down by the schedule runner " +
 			"in code (an LLM schedule as one short-lived worker with its description as the task, a script_path schedule directly, no model); " +
 			"pr/pipeline fires wake you (cp-schedule) for cp_next/cp_dispatch. Job caps, parallelism, risk gates and review apply either way. " +
@@ -130,10 +136,12 @@ export function registerScheduleTools(
 			"A cp-schedule wake-up (pr/pipeline schedules only) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's, never dispatch them yourself.",
 			"A cp-schedule wake naming a parent-expanded run is yours: follow its skill (cp-self-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
 			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule): it covers only that schedule's jobs, and a project-wide grant never covers a scheduled job. A paused or expired grant skips the fire, never bypasses it.",
+			"run_now needs the operator's verbatim sentence naming the schedule (its id or name) as operator_quote; never on your own initiative, and never by replaying an earlier sentence: one operator message authorizes one run now per schedule.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["add", "list", "enable", "disable", "remove"]),
-			id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove)" })),
+			action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now"]),
+			id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now)" })),
+			operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now only: the operator's verbatim sentence naming the schedule (id or name)" })),
 			name: Type.Optional(Type.String()),
 			project: Type.Optional(Type.String()),
 			mandate_id: Type.Optional(Type.String({ description: "The schedule grant (schedule_grant:true) every fire is filed under; one grant per schedule" })),
@@ -150,7 +158,7 @@ export function registerScheduleTools(
 			manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
 			skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill" })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			deps.setLive(ctx);
 			const s = (scheduler ??= build());
 			const need = (key: keyof typeof params): string => {
@@ -172,6 +180,26 @@ export function registerScheduleTools(
 				});
 				text = `added ${formatSchedules([added])}${holdsLock() ? "" : "\n(this session does not hold the parent lock: it will not fire here)"}`;
 			} else if (params.action === "remove") text = `removed ${(await s.remove(need("id"))).id}`;
+			else if (params.action === "run_now") {
+				// The fleet owner only, on one verbatim operator sentence that names the schedule; the fire itself enforces single use.
+				if (!holdsLock()) throw new Error("cp_schedule run_now refused: this session does not hold the parent lock; only the parent that owns the fleet fires a schedule");
+				const id = need("id");
+				const schedule = s.list().find((entry) => entry.id === id);
+				if (!schedule) throw new Error(`cp_schedule run_now refused: no schedule ${id}`);
+				const quote = need("operator_quote");
+				if (quote.length > RUN_NOW_QUOTE_MAX) throw new Error(`cp_schedule run_now refused: operator_quote is over ${RUN_NOW_QUOTE_MAX} characters`);
+				const verified = requireOperatorQuote(quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) });
+				const said = verified.stored.operator_quote.toLowerCase();
+				if (!said.includes(schedule.id.toLowerCase()) && !said.includes(schedule.name.toLowerCase())) {
+					throw new Error(`cp_schedule run_now refused: the quote names neither ${schedule.id} nor "${schedule.name}"; a run now needs the operator's sentence naming the schedule`);
+				}
+				const event = await s.fireNow(id, {
+					via: "cp_schedule", tool_call_id: toolCallId, operator_quote: verified.stored.operator_quote, decided_by: verified.decidedBy,
+					source_sha: createHash("sha256").update(verified.source).digest("hex").slice(0, 12), ...(verified.provenance ?? {}),
+				});
+				handle(event, (runner ??= buildRunner()));
+				text = formatScheduleEvent(event);
+			}
 			else text = formatSchedules([await s.setEnabled(need("id"), params.action === "enable")]);
 			return { content: [{ type: "text", text }], details: {} };
 		},

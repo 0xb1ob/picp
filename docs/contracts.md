@@ -5881,8 +5881,10 @@ than 120 s → `expired` (never applied late); `data/dashboard-control.json` not
 `Scheduler` `cp_schedule` uses, then appends the `outcome`. A claim another pid left without an outcome is
 `interrupted`, never re-applied. Effects: `enable` is refused unless the schedule's grant passes the fire check, and
 restarts cron slot evaluation at the enable time; `disable` and `remove` are never grant-gated; `run_now` is a manual
-fire (see Schedules), whose job goes to the schedule runner (answer/board/local) or the `cp-schedule` wake
+fire (see Schedules; the job's notes name the request id and its `peer`), whose job goes to the schedule runner (answer/board/local) or the `cp-schedule` wake
 (pr/pipeline) exactly like a slot fire — or, for a parent-expanded schedule, the deferred anchor and the expansion wake.
+The parent's own route to the same fire is `cp_schedule run_now`, which needs a verbatim, single-use operator quote
+naming the schedule (see Schedules).
 
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the route and refuses queued requests at
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
@@ -7209,7 +7211,24 @@ evaluation at the enable time, so a slot that passed while it was disabled never
 fires. The page's Run now is a manual fire (title `<title> (<name> run now
 <minute>Z)`) under the same grant and open-fire checks; it never writes
 `last_fire`/`last_skip`, is refused on a disabled schedule, and is serialized
-with slot fires, so the two never both create.
+with slot fires, so the two never both create. **`cp_schedule run_now id
+operator_quote`** (S2) is the same fire from the parent, and only on the
+operator's words: it is refused, naming the cause and creating no job, unless the
+session holds the parent lock, the schedule exists and is enabled, the quote is
+found verbatim in an operator message (`requireOperatorQuote`; a main-session
+delegated send is accepted and recorded `operator-delegated` with its send id and
+rule), the quote names the schedule's id or name (case-insensitive), and that
+quote's source message has not already authorized a run now of this schedule.
+Single use is recorded on the fired job: its notes say `run now via cp_schedule
+(<tool call id>) … authorized by <decided_by>; run-now quote sha <12 hex>` (sha256
+of the source message), and one comment carries `run-now quote sha <12 hex>:
+<verbatim quote>`; any job labelled `schedule:<id>`, closed ones included, whose
+notes or comments hold that marker refuses a replay (`… already authorized run now
+<job id>`). A comment that cannot be written leaves the fire recorded with a
+warning in its reason; the notes still carry the sha. A dashboard Run now's notes
+name its request id and the request's `peer`. The parent never fires a schedule
+on its own initiative; grant, cap, parallelism, risk and review gates are those of
+any fire.
 
 **Manual and parent-expanded schedules.** `manual: true` saves `trigger:
 {type:"manual"}`: no tick ever fires it or writes to it (no `last_checked_at`,

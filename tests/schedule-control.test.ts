@@ -68,6 +68,8 @@ test("enable, disable, remove and run now are claimed before they act and answer
 	assert.equal(state(run)?.state, "done");
 	assert.equal(state(run)?.job_id, fired?.job_id);
 	assert.match((await ledger.show(fired?.job_id as string)).title, /nightly run now 2026-07-01T07:03Z/);
+	assert.equal(fired?.manual_via, "dashboard");
+	assert.match((await ledger.show(fired?.job_id as string)).notes ?? "", new RegExp(`^run now from the dashboard \\(${run}\\) for ${schedule.id} \\(nightly\\) under mandate md-\\S+; peer 127\\.0\\.0\\.1$`));
 	assert.equal(scheduler.list()[0]?.last_fire, undefined, "a run now never writes last_fire");
 	const again = request("run_now", schedule.id);
 	assert.deepEqual(await parent.pass(), []);

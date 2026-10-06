@@ -86,11 +86,25 @@ export interface ScheduleEvent {
 	/** The fired job's delivery: answer/board/local fires are the schedule runner's to dispatch. */
 	delivery?: Delivery;
 	missed_at?: string;
-	/** Run now from the dashboard: its request id (cp-hhuf P6). */
+	/** Run now: the dashboard request id (cp-hhuf P6) or the cp_schedule tool call id. */
 	manual?: string;
+	/** Which run now: the dashboard's authenticated click or cp_schedule run_now with a verified operator quote. */
+	manual_via?: FireTrigger["via"];
 	/** A parent-expanded run (manual + skill): `job_id` is a deferred anchor the parent expands with this skill. */
 	skill?: string;
 }
+
+/**
+ * Who asked for a run now. The dashboard's authenticated click (tailnet, schedule token, Origin, 120 s age), or
+ * `cp_schedule run_now` with one verbatim operator sentence naming the schedule (`requireOperatorQuote`); `source_sha`
+ * is 12 hex of sha256 of that quote's source message, which authorizes at most one run now per schedule.
+ */
+export type FireTrigger =
+	| { via: "dashboard"; request_id: string; peer: string | null }
+	| { via: "cp_schedule"; tool_call_id: string; operator_quote: string; decided_by: string; source_sha: string; send_id?: string; delegation_rule?: string };
+
+/** Written on a cp_schedule run now's job (notes and quote comment); finding it on any job of the schedule refuses a replay. */
+export const runNowQuoteMarker = (sourceSha: string): string => `run-now quote sha ${sourceSha}`;
 
 /** Tracked file only (the X1 script rules), in the canonical clone, with the script runner's bare environment. */
 export async function runWatchScript(cwd: string, scriptPath: string, timeoutMs: number): Promise<WatchRun> {
@@ -243,13 +257,17 @@ export class Scheduler {
 		});
 	}
 
-	/** Run now (cp-hhuf P6): one manual fire under the same grant checks as a slot; never writes last_fire/last_skip. */
-	async fireNow(id: string, request: string): Promise<ScheduleEvent> {
+	/**
+	 * Run now (cp-hhuf P6): one manual fire under the same grant checks as a slot; never writes last_fire/last_skip.
+	 * A string trigger is a dashboard request id with no peer (the pre-S2 signature).
+	 */
+	async fireNow(id: string, trigger: string | FireTrigger): Promise<ScheduleEvent> {
 		const schedule = this.list().find((entry) => entry.id === id);
 		if (!schedule) throw new SchedulerError(`no schedule ${id}`);
 		if (!schedule.enabled) throw new SchedulerError(`schedule ${id} is disabled; enable it first`);
 		const now = this.#now();
-		return (await this.#fire(schedule, now, false, now, now, request)) as ScheduleEvent;
+		const manual: FireTrigger = typeof trigger === "string" ? { via: "dashboard", request_id: trigger, peer: null } : trigger;
+		return (await this.#fire(schedule, now, false, now, now, manual)) as ScheduleEvent;
 	}
 
 	#patch(id: string, patch: Partial<Schedule>, required = false): Promise<Schedule | undefined> {
@@ -335,16 +353,17 @@ export class Scheduler {
 		return run;
 	}
 
-	#fire(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date = slot, manual?: string): Promise<ScheduleEvent | undefined> {
+	#fire(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date = slot, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
 		return this.#serial(() => this.#fireOnce(schedule, slot, missed, now, missedAt, manual));
 	}
 
-	/** `manual`: a run now's request id — its refusals are always reported and never recorded, and it writes no last_fire. */
-	async #fireOnce(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: string): Promise<ScheduleEvent | undefined> {
+	/** `manual`: a run now's trigger — its refusals are always reported and never recorded, and it writes no last_fire. */
+	async #fireOnce(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
+		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };
 		const refuse = (why: string) => manual !== undefined
-			? Promise.resolve<ScheduleEvent>({ ...base, outcome: "skipped", reason: `run now not recorded: ${why}`, manual })
+			? Promise.resolve<ScheduleEvent>({ ...base, outcome: "skipped", reason: `run now not recorded: ${why}`, ...manualFields })
 			: this.#skip(schedule, now, `fire at ${minuteIso(slot)} not recorded: ${why}`);
 		if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));
 		const stamp = isoTimestamp(now); // `at` keeps last_fire's millisecond format; grants are evaluated at second precision
@@ -354,9 +373,16 @@ export class Scheduler {
 		const ledger = this.#ports.ledger();
 		const title = manual !== undefined ? `${schedule.job.title} (${schedule.name} run now ${minuteIso(now)})` : `${schedule.job.title} (${schedule.name} ${minuteIso(slot)})`;
 		const label = `schedule:${schedule.id}`;
+		const marker = manual?.via === "cp_schedule" ? runNowQuoteMarker(manual.source_sha) : undefined;
+		let warning = "";
 		// Same slot twice (a crash between create and the state write) is the same job, never a second one.
 		let job = manual !== undefined ? undefined : ledger.findDuplicate({ title, project: schedule.project });
 		if (!job) {
+			if (marker) {
+				// Single use, closed fires included: the sha is in the notes even when the quote comment was never written.
+				const used = (await ledger.list({ labels: [label], all: true })).find((entry) => entry.notes?.includes(marker) || entry.comments.some((comment) => comment.text.includes(marker)));
+				if (used) return refuse(`the operator message behind this quote already authorized run now ${used.id}; one operator sentence authorizes one run now per schedule`);
+			}
 			const open = (await ledger.list({ labels: [label] }))[0];
 			if (open) return refuse(`the previous fire ${open.id} is still open`);
 			const created = await ledger.create({
@@ -364,18 +390,28 @@ export class Scheduler {
 				...(schedule.job.description ? { description: schedule.job.description } : {}),
 				...(schedule.job.script_path !== undefined ? { scriptPath: schedule.job.script_path } : {}),
 			});
-			const notes = manual !== undefined
-				? `run now from the dashboard (${manual}) for ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}`
-				: `scheduled by ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}${missed ? `; missed ${minuteIso(missedAt)}` : ""}`;
+			const under = `for ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}`;
+			const notes = manual?.via === "dashboard"
+				? `run now from the dashboard (${manual.request_id}) ${under}${manual.peer ? `; peer ${manual.peer}` : ""}`
+				: manual?.via === "cp_schedule"
+					? `run now via cp_schedule (${manual.tool_call_id}) ${under}; authorized by ${manual.decided_by}${manual.send_id ? ` (send ${manual.send_id}${manual.delegation_rule ? `, rule: ${manual.delegation_rule}` : ""})` : ""}; ${marker}`
+					: `scheduled by ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}${missed ? `; missed ${minuteIso(missedAt)}` : ""}`;
 			job = await ledger.update(created.id, { notes, ...(schedule.job.skill ? { status: "deferred" as const } : {}) });
+			if (manual?.via === "cp_schedule") {
+				try {
+					await ledger.comment(job.id, `${marker}: ${manual.operator_quote}`);
+				} catch (error) {
+					warning = `; warning: the verbatim quote comment was not written (${(error as Error).message}); the job notes carry ${marker}, so the quote stays single-use`;
+				}
+			}
 		}
 		if (manual === undefined) await this.#patch(schedule.id, { last_fire: { at, slot: slot.toISOString(), job_id: job.id, missed } });
 		return {
 			...base, outcome: "fired", job_id: job.id, delivery: schedule.job.delivery,
 			...(schedule.job.skill ? { skill: schedule.job.skill } : {}),
-			reason: `created ${job.id} under mandate ${schedule.mandate_id}`,
+			reason: `created ${job.id} under mandate ${schedule.mandate_id}${warning}`,
 			...(missed ? { missed_at: minuteIso(missedAt) } : {}),
-			...(manual !== undefined ? { manual } : {}),
+			...manualFields,
 		};
 	}
 
@@ -390,7 +426,8 @@ export class Scheduler {
 export function formatScheduleEvent(event: ScheduleEvent): string {
 	const head = `[${event.project}] schedule ${event.name} (${event.schedule_id})`;
 	if (event.outcome === "skipped") return `${head} skipped: ${event.reason}`;
-	const fired = `${head} fired: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${event.manual ? `; run now from the dashboard (${event.manual})` : ""}. `;
+	const via = event.manual ? (event.manual_via === "cp_schedule" ? `; run now via cp_schedule on a verified operator quote (${event.manual})` : `; run now from the dashboard (${event.manual})`) : "";
+	const fired = `${head} fired: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${via}. `;
 	if (event.skill) return `${fired}${event.job_id} is a parent-expanded run (deferred anchor): use skill ${event.skill} to expand it — its jobs carry label schedule:${event.schedule_id}; never dispatch the anchor.`;
 	return fired +
 		(event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)
