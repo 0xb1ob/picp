@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import type { ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
 import { observedTime } from "../format.ts";
-import { composerHref, jobHref } from "../routes.ts";
+import { composerHref, jobHref, navigation } from "../routes.ts";
 import { ADD_SCHEDULE_DRAFT, latestRequest, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
 import "./jobs.css";
 import "./schedules.css";
@@ -18,20 +18,25 @@ export function triggerText(s: ScheduleItem): string {
 
 function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) {
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
- return <article class="job-row schedule-card">
-  <div class="job-row-heading"><strong class="job-title">{s.name}</strong><span class="job-ledger">{s.enabled ? "enabled" : "disabled"}</span><span class="job-meta">{s.project}</span></div>
-  <p class="job-meta"><code>{triggerText(s)}</code></p>
-  <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>
-  {control && <ScheduleControls s={s} control={control}/>}
-  {s.grant_template ? <>
-   <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
-   <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
-  </> : <p class="job-meta">Grant <code>{s.mandate_id}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason.includes("has no grant template") ? s.last_skip.reason : "move it to a schedule grant to resume"}</strong></p>}
-  <p class="job-meta">Each fire records a <code>{s.job.kind}</code>/<code>{s.job.delivery}</code> job “{s.job.title}”; its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>
-  {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under that fire's own grant.</p>}
-  <p class="job-meta">Last fire: {s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)} for slot {observedTime(s.last_fire.slot)}{s.last_fire.missed && " (missed)"}</> : "never"}</p>
+ return <article class="schedule-card">
+  <div class="schedule-card-heading"><h2>{s.name}</h2><span class="job-ledger">{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
+  <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>
+  <dl class="schedule-facts">
+   <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
+   <dt>Recipe</dt><dd>{s.job.skill ? <><code>{s.job.skill}</code> skill</> : "Saved job"}</dd>
+   <dt>Mandate</dt><dd><code>{s.mandate_id}</code> · {s.mandate_status}{s.grant_stopped ? " · stopped" : !s.grant_template ? " · no grant template" : ""}</dd>
+   <dt>Last fire</dt><dd>{s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {s.history.length} recent runs</dd>
+  </dl>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
-  <details><summary class="job-meta">Runs · {s.history.length}</summary>
+  <details class="schedule-details"><summary>Grant, template &amp; run history · {s.history.length}</summary>
+   {s.grant_template ? <>
+    <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
+    <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
+   </> : <p class="job-meta">Grant <code>{s.mandate_id}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason.includes("has no grant template") ? s.last_skip.reason : "move it to a schedule grant to resume"}</strong></p>}
+   {s.trigger.type === "manual" && <p class="job-meta">{next}</p>}
+   <p class="job-meta"><code>{triggerText(s)}</code> · <code>{s.job.kind}</code>/<code>{s.job.delivery}</code></p>
+   {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under that fire's own grant.</p>}
+   {s.last_fire && <p class="job-meta">Last fire slot: {observedTime(s.last_fire.slot)}</p>}
    {s.history.length ? <ul class="schedule-history">{s.history.map(j => <li key={j.id} class="job-meta">
     <a href={jobHref(j.id)}><code>{j.id}</code></a> {j.status}{j.close_reason && ` · ${j.close_reason}`}
     {j.reported_at && <> · reported {observedTime(j.reported_at)}</>}
@@ -41,6 +46,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
     {j.answer && <pre class="schedule-answer">{j.answer.text}{j.answer.truncated && `\n… truncated at 8 KiB of ${j.answer.bytes} bytes`}</pre>}
    </li>)}</ul> : <p class="jobs-empty">No job fired yet</p>}
   </details>
+  {control && <ScheduleControls s={s} control={control}/>}
  </article>;
 }
 
@@ -63,15 +69,20 @@ export function ScheduleControls({s, control}: {s:ScheduleItem; control:Schedule
 }
 
 export function Schedules({data, control}: {data:SchedulesResponse; control?:ScheduleControlView}) {
- return <div class="jobs-screen"><header class="jobs-heading">
-  <div class="schedule-heading"><div><h1>Schedules</h1><p>Saved triggers and the jobs they fired.</p></div><a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}>+ Add</a></div>
-  <details class="schedule-how"><summary>How schedules run</summary><p>Every request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></details>
-  {control && <p role="status" class="job-meta">{scheduleControlLine(control.status)}</p>}</header>
+ return <div class="jobs-screen schedule-screen">
+  <header class="schedule-heading"><h1>Schedules</h1><p>Saved triggers and the jobs they fired.</p></header>
+  <div class="schedule-toolbar">
+   <nav class="board-view" aria-label="Schedules and files">{navigation.filter(n => n.id === "schedules" || n.id === "files").map(n => <a key={n.id} href={n.href} aria-current={n.id === "schedules" ? "page" : undefined}>{n.label}</a>)}</nav>
+   {control && <p role="status" class="job-meta">{scheduleControlLine(control.status)}</p>}
+   <a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}>+ Add schedule</a>
+  </div>
   {data.error && <p role="alert" class="overview-error">Schedules unavailable: {data.error}</p>}
-  <section class="jobs-group" aria-label="Schedules">
-   <header><h2>Schedules · {data.schedules.length}</h2></header>
-   <div class="reports-grid">{data.schedules.map(s => <Schedule key={s.id} s={s} control={control}/>)}</div>
-   {!data.schedules.length && !data.error && <p class="jobs-empty">No schedules. Ask the operator session to add one (cp_schedule).</p>}
-  </section>
+  <div class="schedule-layout">
+   <section class="schedule-list" aria-label={`Schedules · ${data.schedules.length}`}>
+    {data.schedules.map(s => <Schedule key={s.id} s={s} control={control}/>)}
+    {!data.schedules.length && !data.error && <p class="jobs-empty">No schedules. Ask the operator session to add one (cp_schedule).</p>}
+   </section>
+   <aside class="schedule-how"><h2>How schedules run</h2><p>Every request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></aside>
+  </div>
  </div>;
 }
