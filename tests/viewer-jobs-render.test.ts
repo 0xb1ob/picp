@@ -113,7 +113,8 @@ test("Done today groups newest first, shows five rows, and finished rows have no
  const waiting=job({id:"cp-wait",phase:"waiting",finished_today:false,finished_at:null,context:null});
  const html=screen({generated_at:"2026-09-27T04:00:00Z",awaiting_count:0,jobs:[beta,...demo,live,waiting],projects:[{name:"alpha",paused:true},{name:"beta",paused:false},{name:"delta",paused:false},{name:"demo",paused:false},{name:"gamma",paused:false}],warnings:[]});
  const done=html.split(">Done today ·")[1]!;
- assert.match(done,/demo · 1 merged · 5 closed without PR · \$7\.00[\s\S]*beta · 0 merged · 1 closed without PR · \$1\.00/,"groups follow the newest job, rows inside a group stay newest first");
+ assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project h3")].map(e=>e.textContent),["demo · 1 merged · 5 closed without PR · $7.00","beta · 0 merged · 1 closed without PR · $1.00"],"groups follow the newest job, with counts then cost");
+ assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project h3 strong")].map(e=>e.textContent),["demo","beta"]);
  assert.match(done,/cp-d0[\s\S]*cp-d4/); assert.doesNotMatch(done.split("Show 1 more from demo")[0]!,/cp-d5/);
  assert.match(done,/Show 1 more from demo/);
  assert.match(done,/Nothing done today in alpha \(paused\), delta or gamma\./);
@@ -168,4 +169,13 @@ test("Board shares status columns and mandate filters, complete flight facts, an
  assert.match(done().textContent ?? "",/merged aaaaaaa/);
  await act(()=>root.querySelector('button[aria-pressed="false"]')!.dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.equal(done().querySelectorAll(".board-card").length,4,"All mandates restores the preview");
+});
+
+
+test("desktop Jobs detail link owns a 44px box across only the job and title columns", () => {
+ const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8");
+ assert.match(css,/\.job-row-link \{[^}]*min-height: 44px/);
+ const desktop=css.split("@media (min-width: 900px) {")[1]!.split("/* Narrow desktop")[0]!;
+ assert.match(desktop,/\.job-row-link \{[^}]*grid-area: 1 \/ 1 \/ 3 \/ 3;[^}]*display: grid;/);
+ assert.doesNotMatch(desktop,/\.job-row-link\s*(?:,|\{)[^}]*display: contents/);
 });

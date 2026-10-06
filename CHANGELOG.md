@@ -6,6 +6,24 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Dashboard v4 design fixes (S1–S12)
+
+The dashboard follows the v4 artboard hierarchy on phone and desktop, with fixture-based before/design/after evidence in [`docs/tui-verification/v4-s1.md`](docs/tui-verification/v4-s1.md) through [`v4-s12.md`](docs/tui-verification/v4-s12.md).
+
+- **Shared shell (S1):** desktop titles and the single update clock share the top band; search shows its shortcut, and the phone More menu has icons, a scrim and a divided Viewer footer. Empty human queues and provider failures stay neutral; only actual red CI gets coral.
+- **Decisions (S2):** compact empty Awaiting and acknowledgement sections keep the log in view; one desktop toolbar carries answer tabs, range and Worth filters, with a ranged summary and judgement explanation. Open and unavailable states retain their full controls and evidence.
+- **Jobs (S3):** distinct flight and finished tables show pre-head review/CI, elapsed/context/model/cost, truthful merged or closed outcomes, PR links and SHA7. Newest-first project groups keep their five-row expansion. S12 adds compact filters, bold project headers, bordered expansion buttons and boxed 44 px detail links separate from PR links.
+- **Board (S4):** status columns are the default at both sizes, with shared mandate filters, complete flight facts, reverse blocker tags, four newest landed cards and an accurate overflow link. Empty strips retain Waiting and phone columns remain swipeable.
+- **Map (S5–S6):** bounded geometry gives way to artboard mandate columns with visible objectives, vertically stacked labelled jobs and dependency edges, done-job expansion and an in-flow selection pane. All node links and the existing local-day/history membership remain reachable.
+- **Overview (S7):** a calm empty strip, paused pills and compact service line lead aligned flight rows with elapsed bars and five latest landed rows with PR/SHA7/cost. Counts come from recorded data.
+- **Sessions (S8):** desktop title/frame, consistent Operator ↔ you and observed worker phases, compact transcript controls and dated picker. Delivery filenames move into disclosure; thread/image controls, viewport handling and the #110 composer height remain intact.
+- **Job detail (S9):** 23/32 px titles, a full-width desktop hero, phase/PR/CI/review badges, ordered 13 px facts and structured recorded routing pills. Timeline SHA7 keeps full-value copy; S12 renders copy icons with invisible 44 px padding. #101/#102 matching-head CI/review fallbacks are preserved.
+- **Search (S10):** phone shortcuts use two columns, job hits use phase dots, and the rounded field truthfully searches job IDs, titles and pages; grouped results and keyboard/focus behavior remain.
+- **Schedules (S11):** wide labelled cards, explanation aside, concise phone facts and advanced grant/template/history disclosure; clear action hierarchy, Files navigation and Add schedule. The #114 stopped/move wording and migration skip reason remain.
+- **404 recovery (S12):** circular search/message icons, desktop Sessions title/breadcrumb and wider recovery with horizontal actions. Worker alternatives use only observed working/launching model workers from available Overview evidence; phone Back/Search targets stay at least 44 px, and other HTTP errors retain their unavailable state.
+
+Migration: none. The optional structured job routing facts are additive; no authority, schedule execution, ledger/history retention or CI/review evidence policy changes.
+
 ### Fresh grant per fire, for every schedule (cp-fresh-grant-impl-c83k)
 
 Every fire of every schedule — cron, watch, the dashboard's Run now and `cp_schedule run_now` — now files its job under a grant minted for that fire alone from the schedule's saved `grant_template` (`mintFireGrant` in `Scheduler.#fireOnce`); a fire never reuses a grant. Hard-coded: no flag, parameter, config, environment variable, mandate default or standing order turns it off. This supersedes the S3 opt-in below.
