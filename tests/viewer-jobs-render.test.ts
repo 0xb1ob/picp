@@ -88,14 +88,18 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  assert.equal(doneRows[3]!.querySelector(".job-note")?.textContent,"provider unavailable");
  assert.equal(doneDoc.querySelectorAll(".job-context, .ctx-chip, .job-ci, .job-review").length,0,"finished tables have no flight cells");
  assert.equal(doneDoc.querySelectorAll("a a").length,0,"the PR link is separate from the job link");
- const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,asks:[],questions:[],warnings:[]});
- assert.match(detail,/<div class="job-detail"><div class="job-detail-main"><header/);
+ const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job:{...job,summary:"Recorded summary"},timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,asks:[],questions:[],warnings:[]});
+ assert.match(detail,/<div class="job-detail"><header class="job-detail-heading">/);
+ const detailDoc=parseHTML(detail).document;
+ assert.equal(detailDoc.querySelector(".job-detail-body > .job-detail-main > .job-summary")?.textContent,"Recorded summary");
+ assert.ok(detailDoc.querySelector(".job-detail-body > .job-detail-side > .job-facts"));
+ assert.equal(detailDoc.querySelector(".job-detail-side .job-summary"),null,"summary stays separate from facts");
  assert.match(detail,/<\/div><div class="job-detail-side"><dl class="job-facts">.*<dt>CI<\/dt>.*<dt>Review<\/dt>.*<\/dl><div class="job-links">.*<\/div><\/div><section class="job-timeline">/);
  const desktop=(file:string)=>readFileSync(join(REPO_ROOT,"viewer-app/screens",file),"utf8").split("@media (min-width: 900px) {")[1] ?? "";
  assert.match(readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8"),/^\.jobs-screen, \.job-detail \{ max-width: 358px;/, "the phone layout keeps its 358px column");
  assert.match(desktop("jobs.css"),/\.jobs-screen, \.job-detail \{ max-width: none;/);
  assert.match(desktop("jobs.css"),/\.reports-grid \{ display: grid;/);
- assert.match(desktop("job-detail.css"),/\.job-detail \{ display: grid;/);
+ assert.match(desktop("job-detail.css"),/\.job-detail-body \{ display: grid;/);
 });
 
 test("Done today groups newest first, shows five rows, and finished rows have no context chip", async () => {

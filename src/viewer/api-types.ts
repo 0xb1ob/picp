@@ -98,6 +98,11 @@ export interface FilesResponse {
 }
 
 export type JobPhase = "queued" | "launching" | "working" | "held" | "done" | "failed" | "waiting" | "idle";
+export interface ViewerRoutingFacts {
+ scope: string | null; risk: string | null;
+ provenance: {scope: string | null; risk: string | null};
+ rule: string | null; reasons: string[];
+}
 export interface ViewerJob extends FlightJob {
  board_lane_id?: string;
  phase: JobPhase; ledger_status: string | null; ledger_disagrees: boolean; mandate_id: string | null;
@@ -107,6 +112,8 @@ export interface ViewerJob extends FlightJob {
  summary: string | null;
  /** The live or last worker's context; null when the job never had a worker session. */
  context?: ContextUsage | null;
+ /** Selected recorded routing fields; absent on older payloads, null when nothing was recorded. */
+ routing_facts?: ViewerRoutingFacts | null;
 }
 export interface JobsResponse {
  generated_at: string; awaiting_count: number | null;
