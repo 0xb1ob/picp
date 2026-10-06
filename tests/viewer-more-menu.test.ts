@@ -126,7 +126,8 @@ test("desktop title clearance skips real recovery headings and still targets Ove
  assert.ok(selector,"the desktop title reservation exists");
  for (const current of [{screen:"job",jobId:"cp-doesnotexist"},{screen:"sessions",query:"view=workers&id=cp-doesnotexist"}]) {
   const doc = parseHTML(draw(current)).document;
-  assert.ok(doc.querySelector('.shell-main > .not-found > h1'));
+  const heading = doc.querySelector('.shell-main > .not-found > .not-found-recovery > :is(h1,h2)');
+  assert.equal(heading?.textContent, current.screen === "job" ? "No job cp-doesnotexist" : "No worker session cp-doesnotexist");
   assert.ok(doc.querySelector(selector) === null,"recovery content below the clock needs no top-band clearance");
  }
  const {overview} = await import("../src/viewer/overview-view.ts");
