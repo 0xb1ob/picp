@@ -26,6 +26,7 @@ import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedg
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
 import { OperatorAnswers } from "../../src/operator-answers.ts";
+import { fileUnderThread, threadTag } from "../../src/operator-threads.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
@@ -213,10 +214,8 @@ export default function (pi: ExtensionAPI): void {
 	let client: ParentHostClient | undefined;
 	let connectedTarget: OperatorTarget | undefined;
 	const compaction = registerOperatorCompact(pi, () => connectedTarget ?? resolveOperatorTarget());
-	const operatorAsks = () => {
-		const target = connectedTarget ?? resolveOperatorTarget();
-		return new OperatorAsks(resolve(target.home, layoutForHome(target.mode, target.home).state, "operator/asks.jsonl"));
-	};
+	const operatorStateDir = () => { const target = connectedTarget ?? resolveOperatorTarget(); return resolve(target.home, layoutForHome(target.mode, target.home).state); };
+	const operatorAsks = () => new OperatorAsks(resolve(operatorStateDir(), "operator/asks.jsonl"));
 	// Read before a stop or rotate kills the parent's workers: drained, or how many die.
 	const killNotice = (): string => {
 		try {
@@ -567,6 +566,7 @@ export default function (pi: ExtensionAPI): void {
 			"Raise every human question with ask before relaying it; close it with ask_answer using the human's verbatim reply, or ask_withdraw with a reason. Bookkeeping is never authorization; parent decisions still use their existing channel.",
 			"Keep an ask's question short; put the background in its context (plain text, up to 2000 chars): what happened, what each option really does, and the risk. The dashboard shows it on the decision card.",
 			"Post every answer the human asked for with answer (project, their question verbatim, the full answer, evidence_paths; job_id when it is the landing of a kind:research job they requested, any delivery (research report, cp_ask answer or board)): it lands on the dashboard without a parent turn and never pushes. Once per job_id; never for status, relays, decisions (ask/ask_answer) or chat.",
+			"Pass thread (a short tag) on answer or ask only when the human named the thread the question belongs to; never invent one and never for relays; it only files the item on the dashboard.",
 			"A user message `<ask-id>: <label>` whose last line is `[cp-dashboard dc-… — from the dashboard; ask=<ask-id>]` is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
 			"Send delegated:true with a short delegation_rule when deciding on the human's behalf; omit it for the human's own answer.",
 			"Use integration_hold with job_id and reason before sending a request to pause merging; it writes immediately even while the parent is busy. Release only when that pause is explicitly lifted, then send cp_integrate advance to resume.",
@@ -590,6 +590,7 @@ export default function (pi: ExtensionAPI): void {
 			question: Type.Optional(Type.String({ description: "answer: the human's question, verbatim" })),
 			evidence_paths: Type.Optional(Type.Array(Type.String(), { description: "answer: report, board or file paths behind the answer" })),
 			job_id: Type.Optional(Type.String({ description: "integration_hold or integration_release: delivery:pr ship job; answer: the kind:research job, any delivery (local, answer, board), whose landing this answers" })),
+			thread: Type.Optional(Type.String({ maxLength: 64, description: "answer or ask: optional thread tag the human named (a-z 0-9 -, ≤32); files the ans-/ask- id under that dashboard thread; bookkeeping only" })),
 			reason: Type.Optional(Type.String({ description: "ask_withdraw or integration_hold: reason" })),
 			...ParentSendDelegationSchema.properties,
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
@@ -607,6 +608,7 @@ export default function (pi: ExtensionAPI): void {
 				if (params.action === "answer") {
 					if (params.id) throw new CpBridgeError("cp_parent answer posts a new answer; close an ask with ask_answer");
 					if (!params.project || !params.question || !params.answer) throw new CpBridgeError("cp_parent answer needs project, question and answer");
+					const tag = params.thread === undefined ? null : threadTag(params.thread);
 					const target = connectedTarget ?? resolveOperatorTarget();
 					configureLayout(target.mode, target.home);
 					const stateDir = resolve(target.home, layoutForHome(target.mode, target.home).state);
@@ -615,13 +617,17 @@ export default function (pi: ExtensionAPI): void {
 						...(params.evidence_paths ? { evidence_paths: params.evidence_paths } : {}),
 						...(params.job_id ? { job_id: params.job_id } : {}),
 					});
-					return textResult(state === "duplicate" ? `answer: ${answer.job_id} already posted as ${answer.id}; nothing written` : `answer: ${answer.id} posted to the dashboard (bookkeeping only; no push)`, { state, id: answer.id, job_id: answer.job_id, project: answer.project });
+					const filed = tag && state === "posted" ? fileUnderThread(stateDir, tag, { kind: "answer", id: answer.id }) : null;
+					const note = filed ? filed.note : tag ? `; thread ${tag}: ${answer.id} was not re-filed` : "";
+					return textResult((state === "duplicate" ? `answer: ${answer.job_id} already posted as ${answer.id}; nothing written` : `answer: ${answer.id} posted to the dashboard (bookkeeping only; no push)`) + note, { state, id: answer.id, job_id: answer.job_id, project: answer.project, ...(filed ? { thread: filed.details } : {}) });
 				}
 				if (["ask", "ask_answer", "ask_withdraw"].includes(params.action)) {
 					const asks = operatorAsks();
 					if (params.action === "ask") {
 						if (!params.ask) throw new CpBridgeError("cp_parent ask needs ask details");
-						const ask = asks.open(params.ask);
+						const tag = params.thread === undefined ? null : threadTag(params.thread);
+						const opened = asks.open(params.ask);
+						const ask = tag ? { ...opened, thread: fileUnderThread(operatorStateDir(), tag, { kind: "ask", id: opened.id }).details } : opened;
 						return textResult(JSON.stringify(ask), { ...ask });
 					}
 					if (!params.id) throw new CpBridgeError(`${params.action} needs id`);
