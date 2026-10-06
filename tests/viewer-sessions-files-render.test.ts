@@ -7,6 +7,7 @@ import { sessionsView } from "../src/viewer/sessions-view.ts";
 import { filesView } from "../src/viewer/files-view.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
+import { parseHTML } from "linkedom";
 
 test("Sessions and Files render empty, awaiting, failed, and confined file states", async t=>{
  const home=createScratchHome(); t.after(()=>home.cleanup()); const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
@@ -20,7 +21,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/sessions.css"),"utf8"); const desktop=css.indexOf("@media (min-width: 900px)");
  assert.ok(desktop>0); assert.equal(css.includes("136px"),false,"the corner clock is gone, so the heading no longer dodges it");
  assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
- assert.match(css.slice(desktop),/\.session-heading \{[^}]*padding: 12px 40px;/);
+ assert.match(css.slice(desktop),/\.session-heading \{[^}]*padding: 10px 16px;/);
  assert.doesNotMatch(css,/\.session-tools-toggle[^{]*\{[^}]*display:\s*none/,"the tool-call toggle is never display:none, including at 1440");
  const stamped="2026-09-27T08:24:05Z", olderAt="2026-09-26T18:00:00Z";
  const when=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
@@ -32,11 +33,21 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  assert.match(picked,/class="session-project">picp</);
  assert.match(picked,/class="session-bridge-line">bridge woke cp-x · owner observed</);
  assert.match(picked,/class="session-bridge-details"/); assert.doesNotMatch(picked,/session-bridge-details" open/);
+ const doc=parseHTML(`<body>${picked}</body>`).document;
+ assert.equal(doc.querySelector('.sessions > h1')?.textContent,"Sessions","the desktop title stays inside the direct-child screen");
+ assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator ↔ you");
+ assert.equal(doc.querySelector('.session-heading label')?.firstChild?.textContent,"Transcript");
+ assert.equal(doc.querySelector('.session-heading label select')?.getAttribute("aria-label"),"Operator session file");
+ assert.doesNotMatch(doc.querySelector('.session-heading')?.textContent ?? "",/entry for entry|Full transcript/);
  // Audit P2 #14: held-idle counts as live the way the Overview's health() does, and a running worker shows its run phase, never "waiting".
  const workers=[{id:"cp-run",kind:"worker",job_id:"cp-run",phase:"waiting",run_phase:"working",model:"m",live:true},{id:"cp-idle",kind:"worker",job_id:"cp-idle",phase:"held",run_phase:"idle",model:"m",live:false},{id:"cp-gone",kind:"worker",job_id:"cp-gone",phase:"done",run_phase:"exited",model:"m",live:false}];
  const listed=screen({...sessions,workers});
- // The row text is now `model · thinking` (cp-s9rc addendum 1); the run phase stays on the status dot, never "waiting".
- assert.match(listed,/Workers · 2 live/); assert.match(listed,/session-dot-working/); assert.match(listed,/session-dot-held/); assert.doesNotMatch(listed,/waiting · m|session-dot-waiting/); assert.match(listed,/<small>m<\/small>/);
+ // S8 keeps the short model while making the observed run phase readable in both switcher and sidebar.
+ assert.match(listed,/Workers · 2 live/); assert.match(listed,/session-dot-working/); assert.match(listed,/session-dot-held/); assert.doesNotMatch(listed,/waiting · m|session-dot-waiting/); assert.match(listed,/<small>working · m<\/small>/);
+ const switcher=parseHTML(`<body>${listed}</body>`).document.querySelector('.session-bar-views nav')!;
+ assert.deepEqual([...switcher.querySelectorAll('.session-bar-worker small')].map(e=>e.textContent),["working","idle","exited"]);
+ const unknown=screen({...sessions,workers:[{...workers[0],run_phase:null}]});
+ assert.match(unknown,/>no run status</); assert.doesNotMatch(unknown,/>waiting</);
  sessions.entries=[{id:"ask-ab",at:"2026-09-26T10:00:00Z",kind:"ask",who:"Operator → you",text:"<script>question</script>",name:null,send_id:null,tag:"awaiting you",failed:false,trace:[{id:"es-abcd",label:"parent asked",at:"2026-09-26T09:59:00Z",detail:"Recorded question"}]}];
  const html=screen(sessions); assert.match(html,/awaiting you/); assert.match(html,/&lt;script>/); assert.match(html,/Recorded question/); assert.doesNotMatch(html,/<script>|style=|onclick=/i);
  sessions.entries[0]!.trace[0]!.at=null; assert.doesNotMatch(screen(sessions),/parent asked/,"untimestamped trace chips stay hidden");

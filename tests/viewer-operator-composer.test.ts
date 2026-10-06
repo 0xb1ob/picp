@@ -6,10 +6,11 @@ import { parseHTML } from "linkedom";
 import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
 import type { ControlBody, ControlView } from "../viewer-app/control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
+import type { ThreadsView } from "../viewer-app/threads.ts";
 
-const result = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {OperatorComposer,COMPOSER_PLACEHOLDER} from "./viewer-app/components/OperatorComposer.tsx"; export {act,COMPOSER_PLACEHOLDER}; export const mount=(root,control,draft)=>render(h(OperatorComposer,{control,draft}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+const result = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {OperatorComposer,COMPOSER_PLACEHOLDER} from "./viewer-app/components/OperatorComposer.tsx"; export {act,COMPOSER_PLACEHOLDER}; export const mount=(root,control,draft,thread)=>render(h(OperatorComposer,{control,draft,thread}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {act,mount,unmount,COMPOSER_PLACEHOLDER} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`) as {
-	act: (fn: () => unknown) => Promise<void>; mount: (root: unknown, control: ControlView, draft?: string) => void; unmount: (root: unknown) => void; COMPOSER_PLACEHOLDER: string;
+ act: (fn: () => unknown) => Promise<void>; mount: (root: unknown, control: ControlView, draft?: string, thread?: ThreadsView) => void; unmount: (root: unknown) => void; COMPOSER_PLACEHOLDER: string;
 };
 
 const ready: ControlStatusResponse = { generated_at: "2026-09-27T08:30:00Z", enabled: true, running: true, reason: null, token: "t".repeat(64), busy: false, pending: false, session_file: "op.jsonl", recent: [], offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: true, herdr: false }, resume: { tmux: false, herdr: false } };
@@ -110,4 +111,35 @@ test("composer: a draft (the Schedules page's Add schedule…) fills the textare
 	await act(() => mount(root, control, "x".repeat(16_500)));
 	assert.equal(root.querySelector("textarea")!.value.length, 16_000);
 	await act(() => unmount(root));
+});
+
+test("composer: the filename and thread picker live in compact, closed message options", async t => {
+ const {document} = parseHTML("<html><body><div id='root'></div></body></html>");
+ const original = Object.getOwnPropertyDescriptor(globalThis,"document");
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ t.after(() => { if (original) Object.defineProperty(globalThis,"document",original); else Reflect.deleteProperty(globalThis,"document"); });
+ const root = document.getElementById("root")!;
+ await act(() => mount(root,{status:ready,delivery:null,send:()=>{}}));
+ const options = root.querySelector("details.operator-composer-options");
+ assert.ok(options); assert.equal(options.hasAttribute("open"),false);
+ assert.equal(options.querySelector("summary")?.getAttribute("aria-label"),"Message options","the icon-only mobile trigger keeps its name");
+ assert.match(options.textContent ?? "",/op\.jsonl/);
+ assert.equal(root.querySelector(".operator-composer-state")?.textContent,"Ready");
+ assert.equal(root.querySelector(".operator-composer-state code"),null);
+ const threads: ThreadsView = {status:{generated_at:ready.generated_at,availability:"missing",enabled:true,reason:null,token:"fixture-only",threads:[],total:0,warning:null},selected:null,select:()=>{},done:()=>{},sending:null,failed:null};
+ await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,threads));
+ const picker = root.querySelector('select[aria-label="Thread"]');
+ assert.ok(picker?.closest("details.operator-composer-options"),"the empty picker stays reachable inside message options");
+ assert.match(picker?.textContent ?? "",/No thread.*New thread…/);
+ await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,{...threads,selected:"new-fixture-thread"}));
+ assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · new-fixture-thread/);
+ assert.equal(root.querySelector(".operator-composer-options > summary")?.getAttribute("aria-label"),"Thread · new-fixture-thread","the selected thread stays accessible on mobile");
+ await act(() => unmount(root));
+ await act(() => mount(root,{status:{...ready,enabled:false,reason:"Dashboard control is off"},delivery:null,send:()=>{}}));
+ assert.equal(root.querySelector(".operator-composer-options"),null);
+ assert.match(root.textContent ?? "",/Dashboard control is off/);
+ await act(() => unmount(root));
+ await act(() => mount(root,{status:{...ready,session_file:null},delivery:null,send:()=>{}},undefined,{...threads,status:{error:"HTTP 403"}}));
+ assert.equal(root.querySelector(".operator-composer-options"),null,"no empty options when neither a destination nor threads are available");
+ await act(() => unmount(root));
 });

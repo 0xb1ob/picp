@@ -121,3 +121,13 @@ test("the Sessions screen shares .shell-main with the page bar and banners: it f
 	assert.match(css, /\.session-transcript \{ flex: 1; min-height: 0; overflow-y: auto;/, "the transcript scrolls above the composer");
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*padding-bottom: calc\(8px \+ env\(safe-area-inset-bottom\)\);[^}]*flex-shrink: 0;/, "the composer never shrinks and clears the home indicator");
 });
+
+test("the collapsed phone composer shares one row with a 44px Message options target", () => {
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8");
+	const phone = css.slice(css.lastIndexOf("@media (max-width: 899px) {"));
+	assert.match(phone, /\.operator-composer \{ display: grid; grid-template-columns: 44px minmax\(0,1fr\); \}/, "options share the input row instead of consuming another 44px row");
+	assert.match(phone, /\.operator-composer-meta \{ display: contents; \}/, "the hidden ready status leaves no empty row or gap");
+	assert.match(phone, /\.operator-composer-row \{[^}]*order: 1;[^}]*grid-column: 2;/);
+	assert.match(phone, /\.operator-composer-options \{[^}]*order: 1;[^}]*grid-column: 1;/);
+	assert.match(phone, /\.operator-composer-options > summary \{[^}]*width: 44px;[^}]*height: 44px;/, "the disclosure keeps its touch target");
+});

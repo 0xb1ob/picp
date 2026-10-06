@@ -62,7 +62,10 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.doesNotMatch(ready, /operator-composer-hint/);
 	assert.match(ready, /<button type="button" class="operator-composer-send" aria-label="Send" title="Send" disabled(?:="")?>/, "one round send button, idle: a plain send");
 	assert.doesNotMatch(ready, /operator-composer-more/, "no steer/abort menu while idle");
-	assert.match(ready, /delivers to the running session <code>op\.jsonl<\/code>/);
+	const options = parseHTML(ready).document.querySelector(".operator-composer-options")!;
+	assert.equal(options.getAttribute("open"), null, "delivery details start collapsed");
+	assert.equal(options.querySelector("p")?.textContent, "Delivers to the running session op.jsonl");
+	assert.equal(options.querySelector("code")?.textContent, "op.jsonl", "the filename stays reachable in Message options");
 	assert.match(ready, /class="operator-composer-state operator-composer-state-ready"/, "the ready status line is the one mobile hides");
 	// The mobile top bar: back, the view's name, the compact ctx, the status chip and the ⋯ sheet; no tab rows.
 	const bar = /<header class="session-bar">[\s\S]*?<\/header>/.exec(ready)?.[0] ?? "";
