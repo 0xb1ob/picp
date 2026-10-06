@@ -148,6 +148,23 @@ test("S6 revision stacks compact jobs inside mandate columns and preserves defau
  assert.ok(doc.querySelector(".map-selection-empty svg"));
 });
 
+test("nonadjacent dependency labels clear the done control in a collapsed column",async()=>{
+ const {screen}=await renderer();const data=mapQaFixture();
+ data.nodes=[...Array.from({length:2},(_,i)=>({...data.nodes[1]!,id:`cp-label-working-${i}`,phase:"working"})),...Array.from({length:3},(_,i)=>({...data.nodes[0]!,id:`cp-label-done-${i}`}))];
+ data.edges=[{from:"cp-label-working-0",to:"cp-label-done-0",kind:"open"}];
+ const doc=parseHTML(screen(data)).document,graph=doc.querySelector(".map-graph")!;
+ const job=graph.querySelector('button[title^="cp-label-done-0:"]')!.closest("foreignObject")!;
+ const label=graph.querySelector(".map-edge-label")!.closest("foreignObject")!;
+ const control=graph.querySelector(".map-more-done")!,footer=control.closest("foreignObject")!;
+ const top=(box:Element)=>Number(box.getAttribute("y")),bottom=(box:Element)=>top(box)+Number(box.getAttribute("height"));
+ assert.match(label.textContent!,/cp-label-done-0 blocked by cp-label-working-0 · open/);
+ assert.ok(top(label)>=bottom(job),"the skipped dependency label sits below the last shown job");
+ assert.ok(top(footer)>=bottom(label)+8,"the label needs its own space and an 8px gap before the collapse control");
+ assert.equal(footer.getAttribute("height"),"44");assert.equal(control.textContent,"+2 more done");
+ assert.equal(graph.querySelectorAll('button[title^="cp-label-"]').length,3);
+ assert.equal(doc.querySelectorAll('.map-mobile-lanes a[href^="#job/cp-label-"]').length,5,"collapsed jobs keep every phone link");
+});
+
 test("map prioritizes active projects, selects nothing until a pick, and keeps every job title",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
  assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked mandates/);assert.ok(html.includes(`title="${mapObjective}"`));

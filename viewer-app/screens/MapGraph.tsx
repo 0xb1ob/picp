@@ -49,7 +49,8 @@ export function mapLayout(lanes:MapLane[],paneWidth=840) {
   const heading=project!==lane.project;
   if(heading){if(project) y=bottom+44;project=lane.project;x=0;}
   lane.jobs.forEach((job,i)=>positions.set(job.id,{x:x+12,y:y+128+i*94,w:228,h:58}));
-  const height=128+lane.jobs.length*94+32;
+  // Below the last card: 8px + 22px label + 8px gap + 44px control + 12px inset.
+  const height=128+lane.jobs.length*94+58;
   columns.push({lane,x,y,heading,height});bottom=Math.max(bottom,y+height);
   width=Math.max(width,x+252);x+=264;
  }
