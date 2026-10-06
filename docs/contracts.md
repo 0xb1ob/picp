@@ -7378,10 +7378,17 @@ named in the add result, never refused; the skills expand under their fire grant
 budget. Every normalization is named in the add result; the template authorizes nothing on its own. **Each fire**,
 inside the serialized fire lane: throws if the schedule has no template or its template is seeded by a fire grant
 (nothing is ever reused); refuses on a replayed quote or an open previous fire **before** minting anything; sweeps
-the grants; refuses only if the schedule's current grant (its pointer) was **revoked**, or **paused** for anything
-but a cap, by the operator — an expired, missing, cap-paused (`spend_cap`, `token_cap`, `job_cap`) or spent pointer
-never stops a fire, and the system never revokes a grant a schedule still names, so a revoked pointer is the
-operator's; an operator stop sticks until the grant is resumed or the schedule is moved; re-evaluates the template
+the grants; refuses only on an **operator stop** of the schedule's current grant (its pointer) — `operatorStop`
+(`src/viewer/schedule-core.ts`), the one predicate the fire path (`pointerRefusal`) and the Schedules page share.
+Every revoke records who asked in the grant's **`revoked_by`**: `{by: "operator", operator_quote, decided_by}`
+(`cp_mandate revoke mandate_id operator_quote`, the quote verified; or an operator-quoted mission-end close via
+`cp_decide`), `{by: "parent"}` (`cp_mandate revoke` without a quote) or `{by: "system"}` (a mission closed
+automatically, the scheduler retiring a pointer or seed no schedule names). **Stopped:** a revoke recorded
+`by: "operator"`, a **legacy revoke with no `revoked_by`** (a grant revoked before provenance was recorded; no
+provenance, so the safe default), or a **pause** for anything but a cap. **Not stopped:** a revoke recorded
+`by: "parent"` or `by: "system"`, an expired or missing pointer, or a cap-exhausted one (paused `spend_cap`,
+`token_cap` or `job_cap`, or spent). An operator stop sticks until the pause is resumed or the schedule is moved (a
+revoke is never resumed); re-evaluates the template
 against the live home — exclusion paths = template ∪ `data/mandate-defaults.json` `exclude_paths` ∪ the project
 override's (over 32 refuses, none dropped), tokens = min(template, live `token_ceiling`) with the clamp named, a
 template-excluded job kind refuses, an unreadable defaults file or unregistered project refuses; mints a fresh id,
@@ -7390,12 +7397,15 @@ and caps apply per fire), issues a schedule grant expiring `expiry_hours` after 
 grants* above; `trigger` names the cron slot, the watch run, the dashboard request or the run_now quote), revokes the
 previous grant, the seed and any orphan fire grant of this schedule that no other schedule names, and checks only the
 new grant with the fire check. A failed issue leaves the pointer on an id with no file, which the next fire re-mints. A
-fire never writes a `budget_exhausted` escalation and never asks the operator anything about its grant. The job's
+fire never writes a `budget_exhausted` escalation and never asks the operator anything about its grant: a fire grant
+paused on a cap records no cap entry in its own `escalations` either. The job's
 notes say `under fire grant <id> (minted from the template approved by <decided_by>)`; the event names the minted
 grant, its expiry, every note and every revoked grant. `cp_schedule enable` re-evaluates the template the same way;
 `remove` revokes the schedule's current grant unless another schedule names it (in-flight workers are not killed).
-The Schedules page shows the fire grant (warning only when fires would be refused) and the template with its
-verbatim approval, or that the schedule has no template.
+The Schedules page shows the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the fire path
+would refuse: "move the schedule to a new grant" for a revoke, "resume it, or move the schedule to a new grant" for a
+pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
+template with its verbatim approval, or that the schedule has no template with the migration's reason.
 
 **`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
 `schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
@@ -7407,14 +7417,18 @@ schedule names it. It is the way back from an operator revoke or pause, and from
 `mandate_id` — **whatever that grant's status** (active, expired, revoked or cap-paused): the template is bounds,
 not authority, and the next fire still honours the pointer rules above. A seed with a risk:high pre-approval has it
 dropped and named. Only a seed file that is missing or cannot be parsed, or one no template can be derived from (not a
-schedule grant, `job_ids`, a zero cap, merge-only), leaves the schedule without one, with `last_skip` `migration: <why>;
-no fire grant template, so every fire is refused: cp_schedule move it to a fresh schedule grant`. A skill schedule's
-template job cap is raised as at add. The marker `state/.migrations/2026-11-schedule-grant-template.done` makes every
-later start a no-op; the parent notifies one line per migrated or skipped schedule. **Downgrade:** an older binary
+schedule grant, `job_ids`, a zero cap, merge-only — accepted narrowing of A2), leaves the schedule without one, with
+`last_skip` `schedule <id> has no grant template (migration: <why>), so no fire can mint a fresh grant: cp_schedule
+move it to a schedule grant to resume`; every later refusal repeats that reason, and the Schedules page shows it. A
+skill schedule's template job cap is raised as at add. The marker
+`state/.migrations/2026-11-schedule-grant-template.done` makes every later start a no-op; the parent notifies one line
+per migrated or skipped schedule. A pointer revoked before this release has no `revoked_by`, so it is a legacy revoke
+and stays stopped until `cp_schedule move`. **Downgrade:** an older binary
 reads a fire grant whose `schedule_fire.trigger` is `cron` or `watch` as invalid (a pre-S3 one also any
-`grant_template` or `schedule_fire`), and expects a template only on a manual schedule, so before a downgrade
-`cp_schedule remove` every schedule and strip `schedule_fire` from its (revoked) fire grants, then re-add them under
-the older binary.
+`grant_template` or `schedule_fire`), and any mandate carrying the new `revoked_by` field as invalid
+(`MandateSchema` admits no unknown field), and expects a template only on a manual schedule, so before a downgrade
+`cp_schedule remove` every schedule, strip `schedule_fire` from its (revoked) fire grants and `revoked_by` from every
+`state/mandates/md-*.json`, then re-add the schedules under the older binary.
 
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,

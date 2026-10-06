@@ -323,8 +323,8 @@ MandateFieldSource	type	f3ed4ab652ec1e92	-
 MandateFieldSourceSchema	value	a2d3848e5d1c474b	424bfc3b8f6273c5
 MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandateProvenance	type	483039dec428e70a	-
-MandateRevokedBy	type	11e029c0cead47c0	-
-MandateSchema	value	98730f49e60b288c	d5d29fb7fa5ebc8a
+MandateRevokedBy	type	72adc3133e08ada6	-
+MandateSchema	value	75e6368355dd0baf	9d240517d6648a31
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-

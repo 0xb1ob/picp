@@ -462,7 +462,9 @@ export class MandateStore {
 						? `${next.id} spend cap reached (usd ${next.spend_cap.usd})`
 						: `${next.id} token cap reached (${next.spend_cap.tokens} non-cached; token_ceiling ${this.tokenCeiling()})`;
 				const kind = `${cap}_cap`;
-				next = this.#write({ ...next, status: "paused", paused_at: now, pause_reason: kind, escalations: withEscalation(next, { at: now, kind, reason }) });
+				// A schedule's fire grant pauses on its cap but records no cap entry: a fire never asks anyone about its budget (A3).
+				const escalations = next.schedule_fire ? next.escalations : withEscalation(next, { at: now, kind, reason });
+				next = this.#write({ ...next, status: "paused", paused_at: now, pause_reason: kind, escalations });
 				const jobId = next.job_ids?.[0];
 				if (jobId && !parentRaisable) {
 					void raiseBudgetExhausted(new EscalationStore({ home: this.home }), {
@@ -571,7 +573,10 @@ export class MandateStore {
 		return this.#write({ ...rest, status: "active" });
 	}
 
-	/** `by`: the operator's verified quote (`cp_mandate revoke operator_quote`); without it the revoke is the system's or the parent's. */
+	/**
+	 * `by` records who revoked (`revoked_by`): the operator's verified quote (`cp_mandate revoke operator_quote`), the
+	 * parent (`cp_mandate revoke` without one) or the system. A revoke recorded without it reads as a legacy revoke.
+	 */
 	revoke(id: string, by?: MandateRevokedBy): Mandate {
 		const existing = this.require(id);
 		if (existing.status === "revoked") return existing;

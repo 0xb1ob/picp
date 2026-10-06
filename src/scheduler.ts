@@ -24,7 +24,7 @@ import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
 import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { parsePrUrl } from "./ci-watch.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
@@ -164,7 +164,11 @@ const minuteIso = (at: Date): string => `${at.toISOString().slice(0, 16)}Z`;
 
 const archivedRefusal = (project: string, prefix?: string): string => `${prefix ? `${prefix}: ` : ""}archived project ${project} — unarchive with cp_project unarchive first`;
 
-const noTemplate = (id: string): string => `schedule ${id} has no grant template (its seed was missing or unreadable at migration), so no fire can mint a fresh grant: cp_schedule move it to a fresh schedule grant`;
+/** A template-less schedule's refusal: the migration's saved reason when it has one (never overwritten, never hidden). */
+const noTemplate = (schedule: Schedule): string => {
+	const saved = schedule.last_skip?.reason;
+	return saved?.startsWith(`schedule ${schedule.id} has no grant template (migration: `) ? saved : noTemplateReason(schedule.id);
+};
 
 export class Scheduler {
 	readonly file: string;
@@ -293,7 +297,7 @@ export class Scheduler {
 		if (named.includes(id)) return `; its grant ${id} is still named by another schedule, not revoked`;
 		const grant = this.#ports.mandates.list().find((entry) => entry.id === id);
 		if (grant?.status !== "active" && grant?.status !== "paused") return `; its grant ${id} is ${grant?.status ?? "missing"}, nothing to revoke`;
-		this.#ports.mandates.revoke(grant.id);
+		this.#ports.mandates.revoke(grant.id, { by: "system" });
 		return `; revoked its grant ${grant.id} (in-flight workers were not killed)`;
 	}
 
@@ -343,7 +347,7 @@ export class Scheduler {
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
 		// The pointer may have expired between clicks: what must hold is the next fire's re-evaluation.
 		const bounds = schedule.grant_template ? this.#fireBounds(schedule, now) : undefined;
-		const refusal = bounds ? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined) : noTemplate(schedule.id);
+		const refusal = bounds ? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined) : noTemplate(schedule);
 		if (refusal) throw new SchedulerError(`enable ${id} refused: ${refusal}`);
 		return this.#mutate((schedules) => {
 			const found = schedules.find((entry) => entry.id === id);
@@ -534,7 +538,7 @@ export class Scheduler {
 	 */
 	#template(schedule: Schedule): GrantTemplate {
 		const template = schedule.grant_template;
-		if (!template) throw new SchedulerError(noTemplate(schedule.id));
+		if (!template) throw new SchedulerError(noTemplate(schedule));
 		const seed = this.#ports.mandates.get(template.seed_mandate_id);
 		if (seed?.schedule_fire) throw new SchedulerError(`schedule ${schedule.id}'s template is seeded by fire grant ${seed.id}; a fire grant is never reused: cp_schedule move it to a fresh schedule grant`);
 		return template;

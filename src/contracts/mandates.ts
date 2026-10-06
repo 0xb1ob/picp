@@ -152,7 +152,9 @@ export const ScheduleFireSchema = Type.Object(
 	{ additionalProperties: false },
 );
 type QuoteDecidedBy = "operator-quote" | "operator-delegated";
-export interface MandateRevokedBy { operator_quote: string; decided_by: QuoteDecidedBy; delegation_rule?: string; send_id?: string }
+export type MandateRevokedBy =
+	| { by: "operator"; operator_quote: string; decided_by: QuoteDecidedBy; delegation_rule?: string; send_id?: string }
+	| { by: "parent" | "system" };
 export interface ScheduleFire {
 	schedule_id: string;
 	seed_mandate_id: string;
@@ -197,12 +199,19 @@ export const MandateSchema = Type.Object(
 		status: MandateStatusSchema,
 		paused_at: Type.Optional(IsoTimestampSchema),
 		revoked_at: Type.Optional(IsoTimestampSchema),
-		/** An operator revoke (`cp_mandate revoke` with a verified operator_quote). Absent on a system or parent revoke: a schedule re-mints past those. */
+		/**
+		 * Who revoked: `operator` (`cp_mandate revoke` with a verified operator_quote), `parent` (`cp_mandate revoke`
+		 * without one) or `system` (mission end, a decision, the scheduler retiring a pointer no schedule names). Absent on
+		 * a legacy revoke (before it was recorded). A schedule re-mints past only a `parent` or `system` revoke (`operatorStop`).
+		 */
 		revoked_by: Type.Optional(
-			Type.Object(
-				{ operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, ...DelegationProvenanceFields },
-				{ additionalProperties: false },
-			),
+			Type.Union([
+				Type.Object(
+					{ by: Type.Literal("operator"), operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, ...DelegationProvenanceFields },
+					{ additionalProperties: false },
+				),
+				Type.Object({ by: StringEnum(["parent", "system"]) }, { additionalProperties: false }),
+			]),
 		),
 		pause_reason: Type.Optional(Type.String({ maxLength: 400 })),
 		decisions: Type.Array(MandateDecisionRecordSchema, { maxItems: 500 }),

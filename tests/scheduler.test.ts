@@ -307,7 +307,7 @@ test("a schedule saved with no grant template (pre-migration, or skipped by it) 
 	clock.now = new Date("2026-07-01T07:00:05Z");
 	const [skipped] = await scheduler.tick();
 	assert.equal(skipped?.outcome, "skipped");
-	assert.match(skipped?.reason ?? "", /schedule sch-abc123 has no grant template .*cp_schedule move it to a fresh schedule grant/);
+	assert.match(skipped?.reason ?? "", /schedule sch-abc123 has no grant template .*cp_schedule move it to a schedule grant to resume/);
 	clock.now = new Date("2026-07-01T08:00:05Z");
 	assert.deepEqual(await scheduler.tick(), [], "the same skip is news once");
 	assert.match(scheduler.list()[0]?.last_skip?.reason ?? "", /has no grant template/, "recorded on the schedule every time");
@@ -364,7 +364,7 @@ test("cp-hhuf P6: enable is refused unless the schedule's grant passes the fire 
 	mandates.resume(mandate.id);
 	assert.equal((await scheduler.setEnabled(schedule.id, true)).enabled, true);
 	await scheduler.setEnabled(schedule.id, false);
-	mandates.revoke(mandate.id, { operator_quote: "revoke the nightly grant", decided_by: "operator-quote" });
+	mandates.revoke(mandate.id, { by: "operator", operator_quote: "revoke the nightly grant", decided_by: "operator-quote" });
 	await assert.rejects(scheduler.setEnabled(schedule.id, true), /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
 	assert.equal(scheduler.list()[0]?.enabled, false);
 	await assert.rejects(scheduler.setEnabled("sch-ffffff", true), /no schedule sch-ffffff/);

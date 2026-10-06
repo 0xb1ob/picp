@@ -14,7 +14,7 @@ import { isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION } from "./contracts.
 import { atomicWriteJson } from "./json-store.ts";
 import type { MandateStore } from "./mandate.ts";
 import { refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
-import { type GrantTemplate, readScheduleFile, scheduleFileErrors } from "./viewer/schedule-core.ts";
+import { type GrantTemplate, noTemplateReason, readScheduleFile, scheduleFileErrors } from "./viewer/schedule-core.ts";
 
 export const SCHEDULE_TEMPLATE_MIGRATION_MARKER = "2026-11-schedule-grant-template.done";
 
@@ -59,7 +59,7 @@ export function sweepScheduleGrantTemplates(options: { home: string; mandates: M
 		}
 		const derived = unreadable ? { refusal: unreadable } : derive(schedule.mandate_id, seed, at);
 		if ("refusal" in derived) {
-			const reason = `migration: ${derived.refusal}; no fire grant template, so every fire is refused: cp_schedule move it to a fresh schedule grant`;
+			const reason = noTemplateReason(schedule.id, `migration: ${derived.refusal}`);
 			schedule.last_skip = { at: now.toISOString(), reason };
 			report.skipped.push({ id: schedule.id, reason });
 			continue;

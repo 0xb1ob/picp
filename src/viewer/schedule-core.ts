@@ -45,14 +45,24 @@ export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
 const GRANT_CAP_PAUSES: readonly unknown[] = ["spend_cap", "token_cap", "job_cap"];
 /**
  * The one rule for an operator stop on a schedule's pointer grant, shared by the fire path (`pointerRefusal`,
- * src/schedule-grant.ts) and the Schedules page: a revoke carrying the operator's verified quote (`revoked_by`), or a
- * pause by anything but a cap. A revoke without one (the system's or the parent's), expired, cap-paused, active or
- * missing is no stop: the next fire mints a fresh grant.
+ * src/schedule-grant.ts) and the Schedules page. Stopped: a revoke recorded as the operator's (`revoked_by.by:
+ * "operator"`), a legacy revoke with no `revoked_by` (no provenance, so the safe default), or a pause by anything but a
+ * cap. Not stopped: a revoke recorded as the parent's or the system's, expiry, a cap pause, active or missing — the
+ * next fire mints a fresh grant.
  */
 export function operatorStop(grant: { status?: unknown; pause_reason?: unknown; revoked_by?: unknown } | undefined): "revoked" | "paused" | undefined {
-	if (grant?.status === "revoked" && grant.revoked_by) return "revoked";
+	const by = (grant?.revoked_by as { by?: unknown } | undefined)?.by;
+	if (grant?.status === "revoked" && by !== "parent" && by !== "system") return "revoked";
 	if (grant?.status === "paused" && !GRANT_CAP_PAUSES.includes(grant.pause_reason ?? "")) return "paused";
 	return undefined;
+}
+
+/**
+ * Why a schedule without a `grant_template` never fires. The migration's `why` (`migration: …`: a seed that is missing,
+ * unparseable or yields no template) is saved in `last_skip` and repeated by every later refusal, never hidden.
+ */
+export function noTemplateReason(id: string, why = "saved before every fire minted its own grant"): string {
+	return `schedule ${id} has no grant template (${why}), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume`;
 }
 
 /**

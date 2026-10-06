@@ -128,16 +128,20 @@ export function liveFireBounds(template: GrantTemplate, context: MintContext, pr
 
 /**
  * Whether the schedule's current grant stops the next fire: only an operator stop (`operatorStop`, the one predicate
- * the Schedules page shares) — a revoke carrying the operator's verified quote (`revoked_by`, `cp_mandate revoke
- * operator_quote`), or a pause by anything but a cap — sticks until the schedule is moved to (or re-added under) a
- * fresh schedule grant. A revoke without an operator quote (the system's or the parent's), expired, cap-paused, active
- * or missing (a crash between pointer move and issue) is minted past.
+ * the Schedules page shares) — a revoke recorded as the operator's (`cp_mandate revoke operator_quote`), a legacy revoke
+ * with no recorded provenance, or a pause by anything but a cap — sticks until the schedule is moved to (or re-added
+ * under) a fresh schedule grant, or a pause is resumed. A revoke recorded as the parent's or the system's, expired,
+ * cap-paused, active or missing (a crash between pointer move and issue) is minted past.
  */
 export function pointerRefusal(grant: Mandate | undefined): string | undefined {
 	const stop = operatorStop(grant);
 	if (!grant || !stop) return undefined;
 	const resume = "cp_schedule move it to a fresh schedule grant (or remove and re-add it) to resume";
-	if (stop === "revoked") return `${grant.id} was revoked by the operator (${grant.revoked_by?.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`;
+	if (stop === "revoked") {
+		return grant.revoked_by?.by === "operator"
+			? `${grant.id} was revoked by the operator (${grant.revoked_by.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`
+			: `${grant.id} was revoked with no recorded provenance (a legacy revoke), treated as the operator's; a schedule never re-mints past it: ${resume}`;
+	}
 	return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
 }
 
@@ -184,7 +188,7 @@ export async function mintFireGrant(ports: MintPorts): Promise<{ grant: Mandate;
 	for (const mandate of ports.mandates.list()) {
 		if (mandate.id === grant.id || (mandate.status !== "active" && mandate.status !== "paused") || ports.named(mandate.id)) continue;
 		if (mandate.id === ports.previousId || mandate.id === ports.template.seed_mandate_id || mandate.schedule_fire?.schedule_id === ports.scheduleId) {
-			ports.mandates.revoke(mandate.id);
+			ports.mandates.revoke(mandate.id, { by: "system" });
 			revoked.push(mandate.id);
 		}
 	}
