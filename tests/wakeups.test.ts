@@ -559,10 +559,20 @@ test("a CI wake-up is fresh on the head it describes, and superseded once that h
 	assert.equal(moved.state, "superseded");
 	assert.match(moved.reason ?? "", /the branch moved/);
 
-	// A promote reopened the slot: same rule as every other kind.
+	// P1/picp-wzq: a promote reopened the slot, but the head did not move — a CI
+	// fact names one commit, so a new generation alone never makes it history.
 	observedHead = HEAD;
 	await b.fleet.patch("cp-ci1", { supersessions: 1 });
-	assert.match(checkWakeup(stamp, ciFacts(), new Date("2026-08-31T12:47:30Z")).reason ?? "", /slot was reopened/);
+	assert.equal(b.fleet.get("cp-ci1")?.phase, "held");
+	const reopened = checkWakeup(stamp, ciFacts(), new Date("2026-08-31T12:47:30Z"));
+	assert.equal(reopened.state, "fresh");
+	assert.equal(reopened.note, undefined, "a held job's CI fact carries no note");
+	// The promoted worker is still working: fresh, with a note before anyone merges on it.
+	await b.fleet.patch("cp-ci1", { phase: "waiting" });
+	const working = checkWakeup(stamp, ciFacts(), new Date("2026-08-31T12:47:30Z"));
+	assert.equal(working.state, "fresh");
+	assert.match(working.note ?? "", /promoted after this CI fact \(now generation 2, phase waiting\)/);
+	assert.match(working.note ?? "", /wait for its report before cp_integrate cp-ci1/);
 
 	// Torn down: the story is over whatever GitHub says.
 	await b.fleet.patch("cp-ci1", { supersessions: undefined, phase: "done", closed_at: "2026-08-31T12:48:00Z" });
@@ -816,7 +826,7 @@ test("pi-command-post-jua: a terminal job's repeated cp-ci fact never reaches th
 	assert.match(review.superseded[0]?.verdict.reason ?? "", /already done/, "the first copy is stale for the terminal reason");
 });
 
-test("pi-command-post-jua: a cp-ci stamp naming a superseded generation never reaches the parent twice either", async (t) => {
+test("P1/picp-wzq: a cp-ci fact sent before a promote is still delivered once, with its note, and its duplicate is a replay", async (t) => {
 	const b = benchOf(t);
 	await b.fleet.add(jobRecord(b.home.path, "cp-ci-gen"));
 	const HEAD = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
@@ -828,22 +838,60 @@ test("pi-command-post-jua: a cp-ci stamp naming a superseded generation never re
 	b.setNow("2026-08-31T12:45:43Z");
 	assert.equal(b.notify({ kind: "ci", job_id: "cp-ci-gen", generation: 1, keys: [HEAD] }, content, details), true);
 
-	// A promote reopens the envelope slot: the job is now on generation 2, and
-	// the stamp naming generation 1 describes a slot that no longer exists.
+	// A promote reopens the envelope slot (generation 2, phase waiting). The head did
+	// not move, so the fact is still true of d48a81d — it is annotated, never withheld.
 	await b.fleet.patch("cp-ci-gen", { supersessions: 1 });
 	const first = asCarrier(b.sent[0] as WakeupMessage);
 	const duplicate = { ...first };
 
 	const review = reviewWakeups([first, duplicate], facts(b), new Date("2026-08-31T12:47:00Z"));
 	assert.equal(review.changed, true);
-	assert.equal(review.superseded.length, 2, "neither copy describes the live generation");
-	for (const message of review.messages) {
-		assert.ok(
-			!(message.content as string).includes("CI green on d48a81d"),
-			"a superseded-generation CI fact must never reach the parent as live content, first copy or duplicate",
-		);
-	}
-	assert.match(review.superseded[0]?.verdict.reason ?? "", /slot was reopened/, "the first copy is stale for the generation reason");
+	assert.equal(review.superseded.length, 1, "only the duplicate is withheld, as a replay");
+	const delivered = review.messages[0]?.content as string;
+	assert.ok(delivered.includes("CI green on d48a81d"), "a true CI fact is never retracted by a promote alone");
+	assert.match(delivered, /\(cp-ci-gen was promoted after this CI fact \(now generation 2, phase waiting\)/);
+	assert.match(review.messages[1]?.content as string, new RegExp(REPLAYED_WAKEUP_HEADLINE));
+	assert.doesNotMatch(review.messages[1]?.content as string, /CI green on d48a81d/);
+});
+
+test("P1/picp-wzq: a ci_failed at generation 1 survives the promote, and only the watcher seeing the branch move withholds it", async (t) => {
+	const b = benchOf(t);
+	await b.fleet.add(jobRecord(b.home.path, "cp-s9"));
+	writeEnvelopeFile(b.home.path, "cp-s9", SHIPPED("cp-s9", "https://github.com/o/r/pull/122"));
+	await b.intake.intake("cp-s9");
+	const HEAD = "cedaecdfde9e".padEnd(40, "0");
+	const MOVED = "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00";
+	const failedKey = ciEventKey("cp-s9", HEAD, "ci_failed");
+	const content = "CI/PR OBSERVED — 1 new fact about a held PR\n  cp-s9: CI RED on cedaecdfde9e — CI failure on cedaecd (ci) (run 9 https://github.com/o/r/actions/runs/9)";
+	b.setNow("2026-08-31T11:56:26Z");
+	assert.equal(b.notify({ kind: "ci", job_id: "cp-s9", generation: 1, keys: [HEAD] }, content, { ci: [{ key: failedKey, event: "ci_failed", job_id: "cp-s9", head_sha: HEAD }] }), true);
+	const carrier = asCarrier(b.sent[0] as WakeupMessage);
+
+	// The promote lands before delivery: the row is pruned, so the watcher has no head for it.
+	await b.fleet.patch("cp-s9", { supersessions: 1, phase: "waiting", reported_at: undefined });
+	const delivered = reviewWakeups([carrier], wakeupFacts({ record: (jobId) => b.fleet.get(jobId), ciHead: () => undefined }), new Date("2026-08-31T11:56:48Z"));
+	assert.equal(delivered.superseded.length, 0);
+	assert.ok((delivered.messages[0]?.content as string).includes("(run 9 https://github.com/o/r/actions/runs/9)"));
+
+	// The reopened worker pushes; the watcher observes the new head later.
+	const moved = wakeupFacts({ record: (jobId) => b.fleet.get(jobId), ciHead: () => MOVED, ciHeadObservedAt: () => "2026-08-31T12:27:00Z" });
+	const later = reviewWakeups([carrier], moved, new Date("2026-08-31T12:28:00Z"));
+	assert.equal(later.superseded.length, 1);
+	assert.match(later.superseded[0]?.verdict.reason ?? "", /the branch moved/);
+});
+
+test("P1/picp-wzq: a cp-ci note added at send time is never added again at delivery", async (t) => {
+	const b = benchOf(t);
+	await b.fleet.add(jobRecord(b.home.path, "cp-ci-note"));
+	await b.fleet.patch("cp-ci-note", { supersessions: 1 });
+	const HEAD = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
+	const details = { ci: [{ key: ciEventKey("cp-ci-note", HEAD, "ci_green"), event: "ci_green", job_id: "cp-ci-note", head_sha: HEAD }] };
+	assert.equal(b.notify({ kind: "ci", job_id: "cp-ci-note", generation: 2, keys: [HEAD] }, "CI green on d48a81d", details), true);
+	const sent = b.sent[0]?.content as string;
+	assert.equal(sent.split("was promoted after this CI fact").length - 1, 1, sent);
+	const review = reviewWakeups([asCarrier(b.sent[0] as WakeupMessage)], facts(b), new Date("2026-08-31T12:47:00Z"));
+	assert.equal(review.changed, false);
+	assert.equal(review.messages[0]?.content, sent);
 });
 
 test("cp-ze1t: a re-sent durable wake-up with the same durable_id is a replay; the first copy is untouched", async (t) => {

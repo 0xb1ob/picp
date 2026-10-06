@@ -654,6 +654,8 @@ export class CommandPost {
 						reason: observation.reason,
 						...(observation.pr_url ? { pr_url: observation.pr_url } : {}),
 						...(observation.merge_commit_sha ? { merge_commit_sha: observation.merge_commit_sha } : {}),
+						...(observation.run_id !== undefined ? { run_id: observation.run_id } : {}),
+						...(observation.run_url ? { run_url: observation.run_url } : {}),
 					});
 				} catch {
 					// A run log that cannot be written must never swallow a wake-up.

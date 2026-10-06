@@ -47,6 +47,7 @@ import {
 	validate,
 	WORKER_FORBIDDEN_TOOLS,
 } from "../src/contracts.ts";
+import { drainFile } from "../src/drain.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { readFinalFixRecord, requestFinalFix, resolveFinalFix } from "../src/final-fix.ts";
 import { readReviewPassHeads } from "../src/merge-ask.ts";
@@ -141,7 +142,7 @@ interface GhFail {
 	status?: number;
 }
 
-type CiRunJson = { status: string; conclusion: string | null; headSha: string; workflowName?: string };
+type CiRunJson = { status: string; conclusion: string | null; headSha: string; workflowName?: string; databaseId?: number; attempt?: number };
 
 interface World {
 	/** What `gh pr view` answers, or a failure. */
@@ -655,15 +656,27 @@ function mergedPr(head = HEAD_A): PrJson {
 // 1. the happy path, one call at a time
 // ---------------------------------------------------------------------------
 
-test("a durable operator hold prevents a green, reviewed PR from merging", async (t) => {
+/** picp-wzq: a held step may read the PR and its CI, and do nothing else. */
+function onlyHeldReads(calls: Calls): void {
+	for (const call of calls) assert.match(call, /^gh (pr view|run list) /, `a held step ran ${call}`);
+}
+
+test("a durable operator hold prevents a green, reviewed PR from merging, and still names its CI", async (t) => {
 	const b = await benchOf(t);
 	const file = join(b.home, paths.runDir(BR), "integration-hold.json");
 	mkdirSync(join(file, ".."), { recursive: true });
 	writeFileSync(file, JSON.stringify({ job_id: BR, reason: "browser QA", held_at: isoTimestamp() }));
 	const result = await b.integrator().advance({ jobId: BR });
 	assert.equal(result.next, "wait");
-	assert.match(result.reason, /browser QA/);
-	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
+	assert.equal(result.step, "merge");
+	assert.match(result.reason, new RegExp(`^${BR}: CI green on aaaaaaaaaaaa; integration held: browser QA`));
+	assert.ok(result.facts.includes(`gh: ${PR_URL} is OPEN at aaaaaaaaaaaa`), result.facts.join("\n"));
+	assert.ok(result.facts.some((fact) => /^ci: green — /.test(fact)), result.facts.join("\n"));
+	assert.equal(result.head_sha, HEAD_A);
+	assert.equal(result.pr_url, PR_URL);
+	assert.equal(result.record.head_sha, HEAD_A);
+	assert.equal(b.calls.length, 2);
+	onlyHeldReads(b.calls);
 });
 
 test("integration hold persists across instances; explicit release resumes with fresh gates", async (t) => {
@@ -673,7 +686,8 @@ test("integration hold persists across instances; explicit release resumes with 
 	assert.equal(new IntegrationHolds(b.home).get(BR)?.reason, "browser QA");
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
-	assert.equal(b.calls.length, 0);
+	assert.equal(b.calls.length, 4);
+	onlyHeldReads(b.calls);
 	new IntegrationHolds(b.home).release(BR);
 	holds.release(BR); // Releasing twice is harmless.
 	assert.equal(holds.get(BR), undefined);
@@ -682,6 +696,35 @@ test("integration hold persists across instances; explicit release resumes with 
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
+});
+
+test("picp-wzq: a held red head is sourced (run id and URL) and nobody is promoted, rerun or asked", async (t) => {
+	const b = await benchOf(t);
+	new IntegrationHolds(b.home).hold(BR, "browser QA");
+	const runs = [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 37458827243, attempt: 1 }];
+	const result = await b.integrator({ runs }, { infraRerun: async () => assert.fail("no infra rerun while held") }).advance({ jobId: BR });
+	assert.equal(result.next, "wait");
+	assert.equal(result.step, "merge");
+	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
+	assert.match(result.reason, new RegExp(`^${BR}: CI failed on aaaaaaaaaaaa \\(run 37458827243\\); integration held: browser QA`));
+	assert.equal(b.sent.length, 0);
+	onlyHeldReads(b.calls);
+	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.awaiting().list().length, 0);
+});
+
+test("picp-wzq: a drain (or an unreadable drain file) under a hold starts no process and says CI was not read", async (t) => {
+	for (const body of [JSON.stringify({ started_at: isoTimestamp(), jobs: [] }), "{"]) {
+		const b = await benchOf(t);
+		new IntegrationHolds(b.home).hold(BR, "browser QA");
+		mkdirSync(join(drainFile(b.home), ".."), { recursive: true });
+		writeFileSync(drainFile(b.home), body);
+		const result = await b.integrator().advance({ jobId: BR });
+		assert.equal(result.next, "wait");
+		assert.deepEqual(b.calls, []);
+		assert.equal(result.facts.filter((fact) => fact.startsWith("ci: not read — ")).length, 1, result.facts.join("\n"));
+		if (body !== "{") assert.ok(result.facts.some((fact) => /^ci: not read — .*draining/.test(fact)), result.facts.join("\n"));
+	}
 });
 
 for (const permission of ["CLEAN", undefined]) {
@@ -701,6 +744,10 @@ for (const permission of ["CLEAN", undefined]) {
 		const result = await integration.advance({ jobId: BR });
 		assert.equal(result.next, "wait");
 		assert.match(result.reason, /QA requested during CI read/);
+		// picp-wzq: the pre-merge hold keeps what this step already read.
+		assert.ok(result.facts.some((fact) => /^ci: green — /.test(fact)), result.facts.join("\n"));
+		assert.equal(result.head_sha, HEAD_A);
+		assert.equal(result.pr_url, PR_URL);
 		assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
 		holds.release(BR);
 		const resumed = await b.integrator({ pr: world.pr }).advance({ jobId: BR });
@@ -719,6 +766,7 @@ test("invalid or unreadable integration holds fail closed and can be explicitly 
 		assert.equal(result.next, "wait");
 		assert.match(result.reason, /invalid integration hold|integration hold unreadable/);
 		assert.deepEqual(b.calls, []);
+		assert.ok(result.facts.includes("ci: not read — the hold could not be read"), result.facts.join("\n"));
 		holds.release(BR);
 	}
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
@@ -841,6 +889,10 @@ test("operator bridge writes a hold without a running parent; parent status sees
 	const invoke = (params: Record<string, unknown>) => parent.execute("parent", { job_id: BR, ...params }, undefined, undefined, {});
 	const status = await invoke({ action: "status" });
 	assert.equal((status.details.hold as { reason: string }).reason, "operator browser QA");
+	// picp-wzq: status prints the record's facts (CI read while held) and the watcher's line; this fake post has no ciWatch.
+	assert.match(status.content[0]!.text, /\n {2}- ci: green — /);
+	assert.match(status.content[0]!.text, /\n {2}ci-watch: unavailable \(/);
+	assert.equal(status.details.ci_watch, null);
 	await invoke({ action: "release" });
 	await invoke({ action: "hold", reason: "parent QA" });
 	assert.equal(new IntegrationHolds(b.home).get(BR)?.reason, "parent QA");
@@ -1471,13 +1523,16 @@ test("an armed auto-merge is refused, not re-issued: cp_integrate never relies o
 test("CI red on the pushed head promotes the implementer and never asks for a merge", async (t) => {
 	const b = await benchOf(t);
 	const result = await b
-		.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }] })
+		.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 37458827243 }] })
 		.advance({ jobId: BR });
 
 	assert.equal(result.step, "ci");
 	assert.equal(result.next, "resolve");
 	assert.equal(b.sent.length, 1);
 	assert.match(b.sent[0]!.message, /CI is red/);
+	// picp-wzq: the red fact and the hand-back both name the failing run.
+	assert.match(b.sent[0]!.message, /\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)/);
+	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
 	assert.match(b.sent[0]!.message, /--force-with-lease/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	assert.equal(

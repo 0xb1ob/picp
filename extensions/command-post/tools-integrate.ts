@@ -123,7 +123,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		promptGuidelines: [
 			"Call cp_integrate advance for the next PR to merge; it does one step and returns `next`. Call it again while next is `advance`.",
 			"next: `surface` means a human decision, or a merge the repository refuses (merge pending) — relay it, do not retry it.",
-			"next: `wait` means CI is unfinished or an integration hold is active. Nothing was merged; release a hold explicitly, then advance again.",
+			"next: `wait` means CI is unfinished or an integration hold is active — the result still names CI for the pushed head. Nothing was merged; release a hold explicitly, then advance again.",
 			"next: `review` means no passing cp_review on this head. Run cp_review on the named head; do not re-review an unchanged one.",
 			"next: `resolve` means the job's own implementer was promoted to fix a conflict or a red suite. Wait for its envelope.",
 			"A stale base alone is never rebased: only BEHIND, or a readable up-to-date rule, updates the branch, and the moved head needs CI and cp_review again.",
@@ -160,12 +160,23 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				const record = post.integrator.get(params.job_id);
 				const endState = post.integrator.endState(params.job_id);
 				const hold = holds.get(params.job_id) ?? null;
-				const details = { job_id: params.job_id, record: record ?? null, end_state: endState, hold };
+				// picp-wzq: the record's facts (CI included, even while held) and the watcher's last CI read; never a gh call.
+				let ciWatch: ReturnType<typeof post.ciWatch.store.job> | null = null;
+				let watchLine: string;
+				try {
+					ciWatch = post.ciWatch.store.job(params.job_id) ?? null;
+					watchLine = ciWatch
+						? `last_ci=${ciWatch.last_ci ?? "unknown"} on ${ciWatch.head_sha?.slice(0, 12) ?? "no head"} observed ${ciWatch.head_observed_at ?? "never"}`
+						: "not watched (only held PRs with a live report are)";
+				} catch (error) {
+					watchLine = `unavailable (${(error as Error).message})`;
+				}
+				const details = { job_id: params.job_id, record: record ?? null, end_state: endState, hold, ci_watch: ciWatch };
 				const text = record
-					? `${record.job_id} integrate: ${record.step} -> ${record.next}\n  ${record.reason}`
+					? [`${record.job_id} integrate: ${record.step} -> ${record.next}`, `  ${record.reason}`, ...record.facts.map((fact) => `  - ${fact}`)].join("\n")
 					: `${params.job_id}: no integration has been attempted yet`;
 				return {
-					content: [{ type: "text", text: `${text}\n  hold: ${hold?.reason ?? "none"}\n  end state: ${JSON.stringify(endState)}` }],
+					content: [{ type: "text", text: `${text}\n  ci-watch: ${watchLine}\n  hold: ${hold?.reason ?? "none"}\n  end state: ${JSON.stringify(endState)}` }],
 					details,
 				};
 			}

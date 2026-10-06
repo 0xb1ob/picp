@@ -16,7 +16,9 @@
  * and one head (`state/checkpoints/<job-id>.merge-<head>.json`). No standing or blanket merge
  * authority; a moved head needs fresh CI, review and permission. IntegrationHolds stores an
  * operator pause, read at entry and immediately before either merge command; a hold (or an
- * unreadable one) returns next: wait, and removes no CI, review or permission gate. With zero CI
+ * unreadable one) returns next: wait, and removes no CI, review or permission gate. It pauses
+ * merging only: the entry check still reads the PR and its CI for the pushed head (read-only,
+ * picp-wzq) and records them; a drain or an unreadable hold starts no process at all. With zero CI
  * runs, an authoritative empty workflow list (ci-configured.ts) means no CI configured and still
  * requires repository permission. See docs/contracts.md, Integration.
  *
@@ -68,6 +70,8 @@ import { atomicWriteJson } from "./json-store.ts";
 import { IntegrationHolds } from "./integration-hold.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
 import { ghRunListArgs, parseCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
+import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
+import { readDrain } from "./drain.ts";
 import { type MainCiScope, mainRedHold } from "./main-ci.ts";
 import {
 	type BranchRule,
@@ -283,8 +287,9 @@ export class Integrator {
 		const branch = record.branch;
 		const cwd = this.#options.projectDir(record.project, record.worktree);
 		const facts: string[] = [];
-		const held = this.#held(jobId, branch);
-		if (held) return held;
+		// picp-wzq: a hold pauses merging only — the PR and its CI for the pushed head are still read (read-only) and recorded.
+		const hold = this.#readHold(jobId);
+		if (hold) return this.#heldResult(jobId, branch, hold, hold.probe ? await this.#probeHeld({ jobId, record, branch, cwd, request }) : { facts: [`ci: not read — ${hold.why}`] });
 
 		// --- the fast path: already recorded merged, so only the tail is left ---
 		const receipt = this.#options.merges.get(jobId);
@@ -434,7 +439,8 @@ export class Integrator {
 		}
 		const runsParsed = safeParseRuns(runs.stdout);
 		const ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
-		facts.push(`ci: ${ci.ci} — ${ci.reason}`);
+		const runRef = ci.ci === "failed" ? formatRunRef(ciRunRef(runsParsed, head, prUrl)) : "";
+		facts.push(`ci: ${ci.ci} — ${ci.reason}${runRef}`);
 		/** Set only when the repository itself answered "no workflows" (`src/ci-configured.ts`). */
 		let noCi: CiConfiguredVerdict | undefined;
 		if (ci.ci === "failed") {
@@ -448,7 +454,7 @@ export class Integrator {
 				facts,
 				prUrl,
 				headSha: head,
-				message: ciFailedMessage({ jobId, branch, prUrl, reason: ci.reason }),
+				message: ciFailedMessage({ jobId, branch, prUrl, reason: ci.reason + runRef }),
 				// cp-gmy's rule, restated as code: a red head is never a merge ask.
 				reason: `${jobId}: ${ci.reason}. No merge, and no merge authorization was requested.`,
 			});
@@ -699,8 +705,8 @@ export class Integrator {
 			decided_at: isoTimestamp(this.#now()),
 		};
 		const strategy: MergeStrategy = request.strategy ?? "squash";
-		const heldBeforeMerge = this.#held(jobId, branch);
-		if (heldBeforeMerge) return heldBeforeMerge;
+		const heldBeforeMerge = this.#readHold(jobId);
+		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
 		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
 		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
@@ -899,8 +905,8 @@ export class Integrator {
 			decided_at: existing.decided_at ?? isoTimestamp(this.#now()),
 		};
 		const strategy: MergeStrategy = request.strategy ?? "squash";
-		const heldBeforeMerge = this.#held(jobId, branch);
-		if (heldBeforeMerge) return heldBeforeMerge;
+		const heldBeforeMerge = this.#readHold(jobId);
+		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
 		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
 		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
@@ -1748,16 +1754,65 @@ export class Integrator {
 		}
 	}
 
-	#held(jobId: string, branch: string): IntegrateResult | undefined {
-		let reason: string;
+	/** The hold, if any. `probe` is false while draining (or on an unreadable hold): then no process may start. */
+	#readHold(jobId: string): { text: string; readable: boolean; probe: boolean; why: string } | undefined {
+		let draining: boolean;
+		try {
+			draining = readDrain(this.#options.home) !== undefined;
+		} catch {
+			draining = true;
+		}
 		try {
 			const hold = new IntegrationHolds(this.#options.home).get(jobId);
 			if (!hold) return undefined;
-			reason = `${jobId}: integration held: ${hold.reason}. Release the hold before continuing.`;
+			return { text: hold.reason, readable: true, probe: !draining, why: "the parent is draining; no process is started" };
 		} catch (error) {
-			reason = `${jobId}: ${(error as Error).message}. Integration waits until the hold can be read or explicitly released.`;
+			return { text: (error as Error).message, readable: false, probe: false, why: "the hold could not be read" };
 		}
-		return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [reason], reason });
+	}
+
+	/** A held step: `wait`, with whatever was seen so far. The CI clause leads so the 600-char reason bound never cuts it. */
+	#heldResult(jobId: string, branch: string, hold: { text: string; readable: boolean }, seen: { facts: string[]; prUrl?: string; headSha?: string; lead?: string }): IntegrateResult {
+		const lead = seen.lead ? `${seen.lead}; ` : "";
+		const reason = hold.readable
+			? `${jobId}: ${lead}integration held: ${hold.text}. Release the hold before continuing.`
+			: `${jobId}: ${lead}${hold.text}. Integration waits until the hold can be read or explicitly released.`;
+		return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...seen.facts, reason], ...(seen.prUrl ? { prUrl: seen.prUrl } : {}), ...(seen.headSha ? { headSha: seen.headSha } : {}), reason });
+	}
+
+	/**
+	 * picp-wzq: the held entry step's read-only look at the PR and its CI — one `gh pr view`, one `gh run list`,
+	 * nothing else (no promote, rerun, update, ready or merge). Never throws: a failure is a `ci: not read` fact.
+	 */
+	async #probeHeld(input: { jobId: string; record: FleetRecord; branch: string; cwd: string; request: IntegrateRequest }): Promise<{ facts: string[]; prUrl?: string; headSha?: string; lead?: string }> {
+		const { jobId, record, branch, cwd, request } = input;
+		try {
+			const receipt = this.#options.merges.get(jobId);
+			if (receipt) return { facts: [`merge receipt: ${receipt.pr_url} merged as ${receipt.merge_commit_sha.slice(0, 12)} (CI not read: already merged)`], prUrl: receipt.pr_url, headSha: receipt.head_sha };
+			const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || branch;
+			const view = await this.#viewPr(cwd, pr);
+			if (!view.ok) return { facts: [`gh: ${view.detail} — CI not read`] };
+			const state = (view.value.state ?? "").toUpperCase();
+			const prUrl = view.value.url ?? pr;
+			const head = hexSha(view.value.headRefOid);
+			const facts = [`gh: ${prUrl} is ${state || "in an unknown state"}${head ? ` at ${head.slice(0, 12)}` : ""}`];
+			if (state !== "OPEN" || !head) {
+				facts.push(`ci: not read — ${state !== "OPEN" ? `PR is ${state || "in an unknown state"}` : "no head"}`);
+				return { facts, prUrl, ...(head ? { headSha: head } : {}) };
+			}
+			const runs = await this.#run(cwd, "gh", ghRunListArgs(branch));
+			if (runs.status !== 0) {
+				facts.push(`ci: unreadable — ${firstLine(runs)}`);
+				return { facts, prUrl, headSha: head };
+			}
+			const parsed = safeParseRuns(runs.stdout);
+			const ci = readCiForHead({ branch, headSha: head, runs: parsed });
+			const ref = ci.ci === "failed" ? ciRunRef(parsed, head, prUrl) : {};
+			facts.push(`ci: ${ci.ci} — ${ci.reason}${formatRunRef(ref)}`);
+			return { facts, prUrl, headSha: head, lead: `CI ${ci.ci} on ${head.slice(0, 12)}${ref.run_id === undefined ? "" : ` (run ${ref.run_id})`}` };
+		} catch (error) {
+			return { facts: [`ci: not read — ${(error as Error).message}`] };
+		}
 	}
 
 	/** N3: a live `blocked` (or unreadable) report is never merged; absent and done pass. */

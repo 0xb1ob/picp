@@ -751,7 +751,7 @@ property of the notification path — not a prompt for more parent diligence.
 | `cp-envelope` | the job is on a later generation, nothing is filed for the stamped one, a different `reported_at` is live, or the job is already `done`/`failed` |
 | `cp-unreported` | the job has since reported, the slot was reopened, or the job is `done`/`failed` — **unless the stamp's `keys` name the very failure class the record now carries** (cp-0wq7): a stamp that names the class is explaining the current failure, not an old state. A `to: failed` transition itself is journaled as `cp-death` or `cp-bound`, not this kind |
 | `cp-wedged` | that tool call ended, the worker is gone, or the job is `done`/`failed` |
-| `cp-ci` | the branch's head moved off the sha the message describes, the slot was reopened, or the job is `done`/`failed` |
+| `cp-ci` | the branch's head moved off the sha the message describes, or the job is `done`/`failed`/gone — **not** a reopened generation (a CI fact names one commit, P1/picp-wzq); while a promoted worker has not reported again the message carries a note instead |
 | `cp-answered` | **never** for the answer — stamped and annotated, never withheld. A second copy carrying only already-delivered ids is rewritten as a replay (cp-5mgg) |
 | `cp-bound` | the job is `done`/`failed` with a different class, or has since reported — **unless** the stamp names the bound class the record now carries |
 | `cp-death` | no fleet record (torn down), or the job is `done`/`failed` with a different class |
@@ -840,7 +840,7 @@ owning reading decides, and where the owning reading is itself absent or
 degraded, nothing supersedes at all — the direction that delivers the card.
 
 Genuine suppression is untouched — a head the owning reading has moved off is
-still superseded — and the generation checks are unchanged. Both readings stay
+still superseded — and the generation checks are unchanged for every kind but `cp-ci`. Both readings stay
 files-only.
 
 **A timestamp is the age of the head, never the age of the last attempt.**
@@ -916,7 +916,10 @@ Worker liveness is deliberately **not** in the predicate: a `held`
 **What it emits**, one `cp-ci` per tick coalescing every due fact for every job:
 `ci_green`, `ci_failed`, `pr_merged`, `pr_closed`. Nothing at all for CI still
 running, for a head no run has started on yet, or for an unknown state — those
-are the states the watcher exists to sit through quietly.
+are the states the watcher exists to sit through quietly. A `ci_failed` fact
+names the failing run — the first completed, not-green run on that head, never a
+`skipped` one (`src/ci-run-ref.ts`): `run <databaseId>` and its Actions URL,
+derived from the PR URL, with no extra query and its key unchanged.
 
 - **CI is evaluated by cp-gmy's evaluator, unforked.** `evaluateMergeAskCi`
   already encodes the only correct rule ("a completed run counts only when its
@@ -2963,6 +2966,17 @@ read it at entry and again immediately before both the repository-permitted
 and human-checkpoint merge commands. An active or unreadable hold returns
 `next: wait` with the reason; neither green CI nor an approved checkpoint
 clears it. Unknown jobs, non-PR jobs, unsafe ids and empty reasons are refused.
+
+**A hold pauses merging only (picp-wzq).** The held entry step still reads the
+PR and its CI for the pushed head, read-only: one `gh pr view` and one
+`gh run list`, recorded as `gh:`/`ci:` facts with the head sha and PR url (a red
+`ci:` fact names its run, as in §The CI/PR watch), and the reason leads with `CI <state> on
+<head12>`. It never promotes, reruns, updates the branch, readies, or merges, and
+it still returns `next: wait`. A hold caught right before a merge command keeps
+the facts that step already read. During a drain, or on an unreadable hold or
+drain file, it starts no process at all and records `ci: not read — <why>`.
+`cp_integrate status` prints the record's facts and the watcher's last CI read
+(`ci-watch:`, from `state/ci-watch.json`), never calling `gh`.
 
 Release is idempotent and only removes the pause. Call `cp_integrate advance`
 after release (from the bridge, send that instruction to the parent); the next
