@@ -3,6 +3,8 @@ import { attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlImages, contr
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
+import type { ThreadsView } from "../threads.ts";
+import { ThreadPicker } from "./ThreadNav.tsx";
 
 /** The composer's placeholder: short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message (Enter to send)";
@@ -15,7 +17,7 @@ type Picked = {name: string; type: string; size: number};
  * and, only while busy, a ⋯ menu with "Steer now" and a confirm-tap "Abort turn". While the session takes
  * images, a paperclip (or a paste) attaches up to 8: each uploads at once and shows as a removable thumbnail.
  */
-export function OperatorComposer({control, draft}: {control:ControlView; draft?:string}) {
+export function OperatorComposer({control, draft, thread}: {control:ControlView; draft?:string; thread?:ThreadsView}) {
  const [text,setText] = useState((draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [confirmAbort,setConfirmAbort] = useState(false);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
@@ -61,7 +63,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  const send = (deliver?: "followUp" | "steer") => {
   const body = text.trim();
   if (!canSend) return;
-  const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {})};
+  const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(thread?.selected ? {thread: thread.selected} : {})};
   control.send({kind:"message",text:body,...extra});
   setText("");
   setAttachments([]);
@@ -72,6 +74,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
   closeMenu();
  };
  const line = deliveryLine(control.delivery);
+ const flagged = control.delivery?.state === "failed" || !!control.delivery?.reason;
  const sendLabel = busy ? "Send after this turn" : "Send";
  return <section class="operator-composer" aria-label="Message the operator session">
   <p class={ready && status.running ? "operator-composer-state operator-composer-state-ready" : "operator-composer-state"}>{controlLine(status)}{ready && status.running && status.session_file && <span> · delivers to the running session <code>{status.session_file}</code></span>}</p>
@@ -82,6 +85,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
     <button type="button" class="operator-composer-thumb-remove" aria-label={`Remove ${a.name || "image"}`} title="Remove" onClick={() => setAttachments(list => list.filter(b => b.key !== a.key))}><Icon name="close" size={14}/></button>
    </li>)}
   </ul>}
+  {ready && thread && <ThreadPicker threads={thread}/>}
   {ready && <div class="operator-composer-row">
    {upload && <button type="button" class="operator-composer-attach" aria-label="Attach images" title="Attach images (or paste)" disabled={sending} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept="image/*" multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
@@ -104,6 +108,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
    </details>}
    <button type="button" class="operator-composer-send" aria-label={sendLabel} title={sendLabel} disabled={!canSend} onClick={() => send(busy ? "followUp" : undefined)}><Icon name="send"/></button>
   </div>}
-  {line && <p role={control.delivery?.state === "failed" ? "alert" : "status"} class={control.delivery?.state === "failed" ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}
+  {/* A failure, or a delivered send with a reason (its thread not recorded), is an alert the phone shows too. */}
+  {line && <p role={flagged ? "alert" : "status"} class={flagged ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}
  </section>;
 }

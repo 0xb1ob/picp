@@ -139,6 +139,12 @@
 /* The page bar (desktop) and an error banner sit above .sessions in .shell-main: it takes what is left, never `height: 100%` on top of them, or the composer is pushed below the viewport. */
 .shell-main:has(> .sessions) { display: flex; flex-direction: column; }
 .shell-main > .sessions { flex: 1 1 0; }
+/* Operator threads (cp-xmw2): below 900 px one chip row right above the composer, scrolling sideways; at 900 px and up the sidebar lists them. */
+.session-threads { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-width: 0; padding: 6px 12px; overflow-x: auto; border-top: 1px solid var(--divider); }
+.session-thread-chip { flex-shrink: 0; min-height: 44px; max-width: 70vw; padding: 0 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.session-thread-chip[aria-pressed=true] { background: var(--toggle); }
+.session-thread-done:disabled { opacity: 0.5; cursor: default; }
+.session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
  .session-sidebar { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; border-right: 1px solid var(--divider); overflow-y: auto; padding: 20px 12px; }
@@ -150,6 +156,15 @@
  .session-choice > span:last-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
  .session-choice strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  .session-choice small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .session-threads { display: none; }
+ .session-thread-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+ .session-thread-choice { flex: 1; width: 100%; min-width: 0; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px; background: none; color: var(--text); border: 0; border-radius: 10px; font: inherit; text-align: left; cursor: pointer; }
+ .session-thread-choice[aria-pressed=true] { background: var(--nav-selected); }
+ .session-thread-choice strong { max-width: 100%; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .session-thread-choice small { font-size: 12px; color: var(--muted); }
+ .session-thread-row > .session-thread-done { flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+ .session-sidebar details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
+ .session-sidebar .session-thread-failed { display: block; padding: 0 10px; white-space: normal; overflow-wrap: anywhere; }
  .session-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 72px; padding: 12px 40px; overflow: visible; }
  .session-heading > div { min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; gap: 3px; }
  .session-heading strong { font-size: 17px; }

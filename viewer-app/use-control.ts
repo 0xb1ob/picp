@@ -48,7 +48,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   const askId = body.kind === "answer" ? body.ask_id : card ?? null;
   setDelivery({id: null, state: "sending", reason: null, ask_id: askId});
   void sendControl(fetcher, controlToken(status), body).then(result => {
-   setDelivery("error" in result ? {id: null, state: "failed", reason: result.error, ask_id: askId} : {id: result.id, state: result.state, reason: null, ask_id: askId});
+   setDelivery("error" in result ? {id: null, state: "failed", reason: result.error, ask_id: askId} : {id: result.id, state: result.state, reason: result.thread?.error ? `thread not recorded: ${result.thread.error}` : null, ask_id: askId});
    setGeneration(value => value + 1);
   });
  };
