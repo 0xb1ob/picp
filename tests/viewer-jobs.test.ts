@@ -144,3 +144,30 @@ test("provider failures are neutral; only a recorded ci_failed observation is re
  writeFileSync(join(state.stateDir,"runs/cp-tone/events.jsonl"),events);
  assert.deepEqual(jobView(state,"cp-tone",Date.parse(at))?.timeline.map(e=>[e.label,e.tone]),[["Failed","neutral"],["CI red","red"],["CI green","green"]]);
 });
+
+
+test("structured routing and legacy text share the latest recorded selection, with a fleet fallback", t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const state={home:home.path,stateDir:join(home.path,LAYOUT.state)}, at="2026-09-26T12:00:00Z";
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,typeof value==="string"?value:JSON.stringify(value));};
+ const fallback={scope:"S",risk:"low",provenance:{scope:"explicit",risk:"defaulted"},rule:"fleet rule",reasons:["fleet reason"]};
+ const ids=["cp-events","cp-fleet","cp-partial","cp-empty"];
+ put(".pi-command-post/jobs.json",{jobs:ids.map(id=>({id,title:id,status:"closed",labels:["project:demo"]}))});
+ put(LAYOUT.fleetFile,{jobs:ids.map(job_id=>({job_id,project:"demo",phase:"done",routing:job_id==="cp-empty"?{}:job_id==="cp-partial"?{risk:"high",provenance:{risk:"inferred"}}:fallback}))});
+ const event=(ts:string,payload:unknown)=>JSON.stringify({source:"cp",job_id:"cp-events",ts,type:"routing_resolved",payload});
+ const selected={scope:"L",risk:"low",provenance:{scope:"inferred",risk:"explicit",secret:"private"},rule:"latest rule",reasons:["latest reason",123],secret:"not-for-the-api"};
+ put(join(LAYOUT.runs,"cp-events/events.jsonl"),event(at,selected)+"\n"+event("2026-09-26T11:00:00Z",fallback)+"\n");
+ const rows=jobsView(state,Date.parse(at)).jobs;
+ assert.deepEqual(rows.find(j=>j.id==="cp-events")?.routing_facts,{scope:"L",risk:"low",provenance:{scope:"inferred",risk:"explicit"},rule:"latest rule",reasons:["latest reason"]});
+ assert.equal(rows.find(j=>j.id==="cp-events")?.routing,"scope:L (inferred) · risk:low (explicit) · latest rule · latest reason");
+ assert.deepEqual(rows.find(j=>j.id==="cp-fleet")?.routing_facts,fallback);
+ assert.deepEqual(rows.find(j=>j.id==="cp-partial")?.routing_facts,{scope:null,risk:"high",provenance:{scope:null,risk:"inferred"},rule:null,reasons:[]});
+ assert.equal(rows.find(j=>j.id==="cp-empty")?.routing_facts,null);
+ assert.equal(rows.find(j=>j.id==="cp-empty")?.routing,null);
+ assert.doesNotMatch(JSON.stringify(rows), /not-for-the-api|private/);
+ const live={job_id:"cp-live",project:"demo",phase:"held",routing:fallback};
+ put(LAYOUT.fleetFile,{jobs:[live]});
+ const row=jobsView(state,Date.parse(at)).jobs.find(j=>j.id==="cp-live")!;
+ assert.equal(row.routing,"scope:S (explicit) · risk:low (defaulted) · fleet rule · fleet reason");
+ assert.deepEqual(row.routing_facts,fallback,"live and finished jobs expose the same structured fields");
+});
