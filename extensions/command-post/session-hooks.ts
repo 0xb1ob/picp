@@ -74,8 +74,9 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	// C1/picp-80q: the bridge's compact RPC starts the hold's cap; N6 cancels a length-stop-inflated threshold compaction.
 	pi.on("session_before_compact", (event) => {
 		if (event.reason === "manual") compactHold.compactionStarted();
-		if (event.reason !== "threshold") return undefined;
-		const home = currentRuntime().home;
+		const resolved = runtimeOrRefusal();
+		if (event.reason !== "threshold" || !("runtime" in resolved)) return undefined;
+		const home = resolved.runtime.home;
 		return thresholdCancel(event, home, (line) => parentContextLog(home, "cp-parent", line));
 	});
 	// Only a manual failure releases: the threshold cancel above comes back as a `threshold` failure.

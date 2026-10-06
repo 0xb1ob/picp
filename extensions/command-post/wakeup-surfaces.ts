@@ -28,7 +28,7 @@ import { parentContextLog } from "../../src/parent-context.ts";
 import { durableIdsFromMessage } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
 import { formatWedgedNotice } from "../../src/wedged.ts";
-import { currentRuntime, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
+import { currentRuntime, runtimeOrRefusal, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
 import type { SessionState } from "./shared.ts";
 
 export type WakeupSurfaces = ReturnType<typeof createWakeupSurfaces>;
@@ -206,7 +206,11 @@ export function createWakeupSurfaces(
 	};
 	// C1/picp-80q (src/parent-compact-hold.ts): behind the send-first gate, closest to pi.sendMessage.
 	const compactHold = new ParentCompactHold({ log: (line) => parentContextLog(currentRuntime().home, "cp-parent", line) });
-	const reading = (ctx: HoldContext | undefined) => contextOver(ctx, () => currentRuntime().home);
+	// A refused runtime was reported once at session_start: no reading, no second report (single-mode-refused e2e).
+	const reading = (ctx: HoldContext | undefined) => {
+		const runtime = runtimeOrRefusal();
+		return contextOver("runtime" in runtime ? ctx : undefined, () => currentRuntime().home);
+	};
 	const wakeGate = {
 		agentStart: (): void => {
 			gate.busy = true;
