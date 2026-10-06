@@ -100,6 +100,42 @@ test("qra: stale and replayed notices stay journaled, not in the parent's model 
 	assert.doesNotMatch(JSON.stringify(suppressed), /Obsolete .* instructions|A new operator decision|HELD PR LANDED/, "journal records reasons, not message bodies");
 });
 
+test("N9: a withheld tail wake never leaves the context ending on assistant", async (t) => {
+	const post = scratchPost(t);
+	post.runs.open("cp-gone");
+	let context: ContextHook | undefined;
+	const pi = {
+		on(name: string, handler: ContextHook) { if (name === "context") context = handler; },
+		registerEntryRenderer() {},
+	} as unknown as ExtensionAPI;
+	const state = createSessionState();
+	state.post = post;
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
+	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
+	assert.ok(context);
+	const user: WakeupCarrier = { role: "user", content: "Continue the current work" };
+	const assistant: WakeupCarrier = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done." }] };
+	const staleVerdict: WakeupCarrier = {
+		role: "custom", customType: "cp-verdict", content: "Obsolete verdict instructions", timestamp: 7_000,
+		details: { cp_wakeup: { kind: "verdict", job_id: "cp-gone", issued_at: "2026-09-26T08:00:00Z" } },
+	};
+	const input = [user, assistant, staleVerdict];
+	const result = await context({ messages: input });
+	assert.ok(result);
+	assert.equal(result.messages.length, 3);
+	assert.equal(result.messages[0], user);
+	assert.equal(result.messages[1], assistant);
+	const tail = result.messages[2]!;
+	assert.equal(tail.role, "custom");
+	assert.equal(tail.customType, "cp-withheld-tail");
+	assert.equal(tail.timestamp, 7_000, "the stand-in takes the dropped message's place in time");
+	assert.equal((tail.details as { cp_wakeup?: unknown } | undefined)?.cp_wakeup, undefined, "the stand-in carries no wake-up stamp");
+	assert.doesNotMatch(JSON.stringify(tail.content), /Obsolete|STALE WAKE-UP/, "no stale body, no stale headline");
+	assert.equal(input.length, 3, "session history is not mutated");
+	assert.equal(input[2], staleVerdict);
+	assert.deepEqual(await context({ messages: [user, staleVerdict] }), { messages: [user] }, "a user tail needs no stand-in");
+});
+
 // cp-vy73 (PR-3, cp-cc45 F3/F6): the busy-wake gate through the real hook wiring.
 test("cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges once for a stranded one", async (t) => {
 	const post = scratchPost(t);
