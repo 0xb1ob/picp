@@ -92,7 +92,7 @@ test("a grant closed by its mission end (answered close, revoked today) is a clo
  assert.equal(board.jobs.find(j=>j.id==="cp-auto")?.board_lane_id,"md-auto");
 });
 
-test("QA rendering: recorded grant, nonempty active lanes by default, escalation note and CI glyphs",async t=>{
+test("QA rendering: recorded grant, shared mandate filters, escalation note and CI glyphs",async t=>{
  const {state,put}=fixture(t);
  const head="a".repeat(40);
  for(const id of ["cp-recorded","cp-run","cp-legacy"]) put(`${LAYOUT.runs}/${id}/envelope.json`,{envelope:{head_sha:head}});
@@ -112,10 +112,12 @@ test("QA rendering: recorded grant, nonempty active lanes by default, escalation
  const board=boardView(state,now);board.lanes[0]!.objective="Land the remaining dashboard vertical slices with exact typography, readable provenance, durable test evidence, and one reviewed pull request per bead.";
  const rendered=screen("Board",board);const dom=parseHTML(rendered).document;
  assert.equal(dom.querySelector(".board-note")?.getAttribute("title"),board.jobs.find(j=>j.id==="cp-recorded")!.note);
- assert.equal(dom.querySelector(".board-lane > header > p")?.getAttribute("title"),board.lanes[0]!.objective);
- assert.equal(dom.querySelector('input[type="checkbox"]')?.hasAttribute("checked"),false);
- assert.equal(dom.querySelectorAll(".board-lane").length,2);assert.doesNotMatch(dom.querySelector(".board-lanes")!.textContent!,/md-empty|md-expired|md-paused/);
- assert.deepEqual(visibleBoard(board,true,"all").lanes.map((l:{id:string})=>l.id),["md-original","unassigned","md-paused"]);
+ assert.equal(dom.querySelector(".board-filters button[title]")?.getAttribute("title"),board.lanes[0]!.objective);
+ assert.equal(dom.querySelectorAll(".board-filters button").length,4,"All mandates and the three nonempty recorded lanes stay available");
+ assert.doesNotMatch(dom.querySelector(".board-filters")!.textContent!,/md-empty|md-expired/);
+ assert.match(dom.querySelector(".board-filters")!.textContent!,/md-paused.*paused/);
+ assert.ok(dom.querySelector('a[href="#job/cp-paused"]'),"All mandates retains live paused-grant work");
+ assert.deepEqual(visibleBoard(board,"all").lanes.map((l:{id:string})=>l.id),["md-original","unassigned","md-paused"]);
  assert.match(rendered,/job-ci-red/);
 });
 test("empty Board columns fold to strips on phone and desktop", async t => {
@@ -130,16 +132,14 @@ test("empty Board columns fold to strips on phone and desktop", async t => {
  board.lanes=[lane("md-1","Ship the board fold"),lane("unassigned","No covering live grant")];
  board.jobs=[job({id:"cp-idle",phase:"idle"}),job({id:"cp-work",blockers:["cp-idle"]})];
  const waiting=parseHTML(screen(board)).document;
- assert.equal(waiting.querySelector(".board-column h2") && [...waiting.querySelectorAll(".board-phone.board-columns .board-column h2")].some(h=>/Waiting/.test(h.textContent!)),true,"a waiting or idle job keeps the Waiting column");
- assert.equal(labels(waiting.querySelector(".board-phone.board-columns")!,".board-strip").includes("Waiting · 0"),false);
- assert.match(waiting.querySelector(".board-desktop.board-grid-head")!.textContent!,/Waiting/);
- assert.equal(labels(waiting,".board-strips .board-strip").includes("Waiting · 0"),false);
- const phoneKinds=kinds(waiting.querySelector(".board-phone.board-columns")!);
- const cut=phoneKinds.indexOf("strip");
- assert.ok(cut>0 && phoneKinds.slice(cut).every(k=>k==="strip") && phoneKinds.slice(0,cut).every(k=>k==="col"),"phone strips follow the columns that have cards");
- assert.deepEqual(labels(waiting,".board-strips .board-strip"),["Queued · 0","Launching · 0","Held · 0","Landed today · 0","Failed · 0"]);
- assert.equal(waiting.querySelector('.board-chip-name[title="Ship the board fold"]')?.textContent,"Ship the board fold");
- assert.equal(waiting.querySelector('.board-chip-name[title="No covering live grant"]')?.textContent,"No covering live grant");
+ assert.equal([...waiting.querySelectorAll(".board-column h2")].some(h=>/Waiting/.test(h.textContent!)),true,"a waiting or idle job keeps the Waiting column on both widths");
+ assert.equal(labels(waiting,".board-strip").includes("Waiting · 0"),false);
+ const columnKinds=kinds(waiting.querySelector(".board-columns")!);
+ const cut=columnKinds.indexOf("strip");
+ assert.ok(cut>0 && columnKinds.slice(cut).every(k=>k==="strip") && columnKinds.slice(0,cut).every(k=>k==="col"),"strips follow the columns that have cards");
+ assert.deepEqual(labels(waiting,".board-strip"),["Held · 0","Launching · 0","Queued · 0","Failed · 0","Landed today · 0"]);
+ assert.equal(waiting.querySelector('button[title="Ship the board fold"] .board-chip-name')?.textContent,"Ship the board fold");
+ assert.equal(waiting.querySelector('button[title="No covering live grant"] .board-chip-name')?.textContent,"No covering live grant");
  assert.match(waiting.querySelector(".board-filters")!.textContent!,/All mandates/);
  assert.match(waiting.querySelector(".board-filters")!.textContent!,/Unassigned/);
  const blocker=waiting.querySelector('a[href="#job/cp-idle"]')!;
@@ -147,11 +147,10 @@ test("empty Board columns fold to strips on phone and desktop", async t => {
  assert.doesNotMatch(waiting.querySelector('a[href="#job/cp-work"]')!.textContent!,/blocks cp-idle/);
  board.jobs=[job({id:"cp-work"})];
  const folded=parseHTML(screen(board)).document;
- assert.equal(labels(folded.querySelector(".board-phone.board-columns")!,".board-strip").includes("Waiting · 0"),true,"phone folds an empty Waiting column");
- assert.equal(labels(folded,".board-strips .board-strip").includes("Waiting · 0"),true,"desktop folds an empty Waiting column");
- assert.equal([...folded.querySelectorAll(".board-phone.board-columns .board-column h2")].some(h=>/Waiting/.test(h.textContent!)),false);
- assert.doesNotMatch(screen(board),/Empty now:/);
- const again=kinds(folded.querySelector(".board-phone.board-columns")!);
+ assert.equal(labels(folded,".board-strip").includes("Waiting · 0"),true,"the shared renderer folds an empty Waiting column on both widths");
+ assert.equal([...folded.querySelectorAll(".board-column h2")].some(h=>/Waiting/.test(h.textContent!)),false);
+ assert.match(folded.querySelector(".board-phone.board-fold")!.textContent!,/Empty now:.*Waiting/);
+ const again=kinds(folded.querySelector(".board-columns")!);
  const at=again.indexOf("strip");
  assert.ok(at>0 && again.slice(at).every(k=>k==="strip"));
 });

@@ -8,7 +8,7 @@ import type { JobResponse, ViewerJob } from "../src/viewer/api-types.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
-test("Jobs, detail and Board render empty, failed and awaiting states; board filters exclude inactive lanes",async t=>{
+test("Jobs, detail and Board render empty, failed and awaiting states; board filters preserve inactive work",async t=>{
  const home=createScratchHome(); t.after(()=>home.cleanup());
  const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
  const buildResult=await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Jobs} from "./viewer-app/screens/Jobs.tsx"; import {JobDetail} from "./viewer-app/screens/JobDetail.tsx"; import {Board,visibleBoard} from "./viewer-app/screens/Board.tsx"; export {visibleBoard}; export const screen=(name,data)=>render(h({Jobs,JobDetail,Board}[name],{data}));',loader:"tsx",resolveDir:REPO_ROOT},bundle:true,write:false,platform:"node",format:"esm",jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
@@ -22,18 +22,17 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  const html=screen("JobDetail",detail); assert.match(html,/Awaiting you/);assert.match(html,/ask-a: Keep/);assert.match(html,/No recorded events/);assert.match(html,/CI red/);assert.match(html,/&lt;script>/);assert.doesNotMatch(html,/<script>|style=|onclick=/i);
  board.jobs=[job,{...job,id:"cp-inactive",mandate_id:"md-paused"}];
  board.lanes=[{id:"md-active",status:"active",active:true,objective:"Active",expiry:null,ask_on:[],spend:null,cap:null,note:null},{id:"md-paused",status:"paused",active:false,objective:"Paused",expiry:null,ask_on:[],spend:null,cap:null,note:null}];
- assert.deepEqual(visibleBoard(board,false,"all").jobs.map((j:ViewerJob)=>j.id),["cp-render"]);
- assert.deepEqual(visibleBoard(board,true,"md-paused").jobs.map((j:ViewerJob)=>j.id),["cp-inactive"]);
- const rendered=screen("Board",board);assert.match(rendered,/By mandate/);assert.match(rendered,/Paused &amp; closed/);assert.match(rendered,/href="#job\/cp-render"/);assert.doesNotMatch(rendered,/<script>|style=|onclick=/i);
- // The Mandates page is gone; its name must not survive as the phone heading either (cp-hvbj).
- assert.match(rendered,/board-desktop">Board<\/span><span class="board-phone">Board</);assert.doesNotMatch(rendered,/>Mandates</);
- // Audit P2 #12: the desktop Landed today count covers every lane, a hidden paused one included; Jobs says "Done today".
+ assert.deepEqual(visibleBoard(board,"all").jobs.map((j:ViewerJob)=>j.id),["cp-render","cp-inactive"]);
+ assert.deepEqual(visibleBoard(board,"md-paused").jobs.map((j:ViewerJob)=>j.id),["cp-inactive"]);
+ const rendered=screen("Board",board);assert.match(rendered,/All mandates/);assert.match(rendered,/board-chip-status">paused/);assert.match(rendered,/href="#job\/cp-render"/);assert.doesNotMatch(rendered,/<script>|style=|onclick=/i);
+ assert.match(rendered,/<h1>Jobs<\/h1>/);assert.doesNotMatch(rendered,/>Mandates</);
+ // All mandates includes inactive landed jobs, so the default count matches Overview and Jobs.
  board.jobs=[...board.jobs,{...job,id:"cp-landed",phase:"done",mandate_id:"md-paused"}];
- const grid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
- assert.match(grid,/Landed today<span>1<\/span>/); assert.match(grid,/Failed<span>1<\/span>/,"other columns still count the shown lanes");
+ const grid=screen("Board",board);
+ assert.match(grid,/Landed today<span>1<\/span>/); assert.match(grid,/Failed<span>2<\/span>/,"All mandates retains inactive jobs");
  // A waiting or idle job is not a Working job: it counts under Waiting only.
  board.jobs=[{...job,id:"cp-wait",phase:"waiting"},{...job,id:"cp-idle",phase:"idle"},{...job,id:"cp-run",phase:"working"}];
- const waitGrid=screen("Board",board).split('board-desktop board-grid-head')[1]!.split('board-desktop board-lanes')[0]!;
+ const waitGrid=screen("Board",board);
  assert.match(waitGrid,/Working<span>1<\/span>/); assert.match(waitGrid,/Waiting<span>2<\/span>/); assert.match(waitGrid,/needs a person, or the worker is idle/);
  assert.match(screen("Jobs",list),/Done today<span>1<\/span>/);
  // Audit P4 #23: one Jobs item with a List | Board | Map toggle on each view, the current one marked, on every width.
@@ -87,4 +86,51 @@ test("Done today groups newest first, shows five rows, and finished rows have no
  assert.match(html.split(">Done today ·")[0]!,/ctx-chip/);
  assert.match(html,/job-phase">no run status</); assert.doesNotMatch(html,/job-phase">waiting</);
  assert.match(readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8"),/\.jobs-segments \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto/);
+});
+
+test("Board shares status columns and mandate filters, complete flight facts, and four newest landed cards", async t => {
+ const buildResult=await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {Board} from "./viewer-app/screens/Board.tsx"; export {act}; export const mount=(root,data)=>render(h(Board,{data}),root); export const unmount=root=>render(null,root);',loader:"tsx",resolveDir:REPO_ROOT},bundle:true,write:false,platform:"node",format:"esm",jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const {mount,unmount,act}=await import(`data:text/javascript;base64,${Buffer.from(buildResult.outputFiles![0]!.contents).toString("base64")}`);
+ const {parseHTML}=await import("linkedom");
+ const {window,document}=parseHTML("<html><body><div id='root'></div></body></html>");
+ const original=Object.getOwnPropertyDescriptor(globalThis,"document");
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ const root=document.getElementById("root")!;
+ const data=boardView({home:"/nonexistent",stateDir:"/nonexistent"});
+ const job:ViewerJob={id:"cp-prehead",project:"picp",title:"A long title ".repeat(20),phase:"working",model:"anthropic/claude-opus-5-5",script_path:null,elapsed_seconds:600,limit_seconds:7200,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null,ledger_status:"in_progress",ledger_disagrees:false,mandate_id:"md-active",cost_usd:1.5,pr_url:null,pr_status:null,finished_at:null,finished_today:false,merge_sha:null,failure:null,summary:null,blockers:[],context:{tokens:10,window:100,percent:10,level:"ok",reason:null,model:"m",thinking:null,last_compact_at:null}};
+ data.lanes=[{id:"md-active",status:"active",active:true,objective:"Long objective ".repeat(20),expiry:null,ask_on:[],spend:null,cap:null,note:null},{id:"md-paused",status:"paused",active:false,objective:"Paused work",expiry:null,ask_on:[],spend:null,cap:null,note:"Budget paused"}];
+ const landed=Array.from({length:6},(_,i)=>({...job,id:`cp-landed-${i}`,phase:"done" as const,finished_today:true,finished_at:`2026-10-06T0${i}:00:00Z`,pr_url:i===5 ? "https://github.com/0xb1ob/picp/pull/1" : null,pr_status:i===5 ? "merged" : null,merge_sha:i===5 ? "a".repeat(40) : null,mandate_id:i===5 ? "md-paused" : "md-active"}));
+ data.jobs=[job,{...job,id:"cp-paused",mandate_id:"md-history",board_lane_id:"md-paused",context:null,blockers:[job.id]},...landed];
+ t.after(()=>{unmount(root);if(original) Object.defineProperty(globalThis,"document",original); else Reflect.deleteProperty(globalThis,"document");});
+ await act(()=>mount(root,data));
+ assert.equal(root.querySelector("h1")?.textContent,"Jobs");
+ assert.equal(root.querySelectorAll('[aria-label="Board columns"]').length,1,"one renderer for both widths");
+ assert.equal(root.querySelectorAll('[aria-label="Filter by mandate"]').length,1,"one shared filter");
+ assert.ok(root.querySelector('a[href="#job/cp-paused"]'),"All mandates retains flight jobs on inactive grants");
+ const flight=root.querySelector('a[href="#job/cp-prehead"]')!;
+ assert.match(flight.textContent ?? "",/review not started.*no CI yet.*claude-opus-5-5.*\$1\.50/);
+ assert.ok(flight.querySelector('progress[aria-label="Wall clock"]'));
+ assert.ok(flight.querySelector(".ctx-chip"));
+ assert.match(flight.textContent ?? "",/blocks cp-paused/);
+ assert.equal(flight.querySelector('code[title="anthropic/claude-opus-5-5"]')?.textContent,"claude-opus-5-5");
+ const done=()=>root.querySelector('[aria-label="Landed today"]')!;
+ assert.deepEqual([...done().querySelectorAll(".board-card-heading code")].map(e=>e.textContent),["cp-landed-5","cp-landed-4","cp-landed-3","cp-landed-2"]);
+ assert.match(done().textContent ?? "",/Landed today6.*#1 · merged aaaaaaa.*Show 2 more in the list/);
+ assert.equal(done().querySelector(".board-more")?.getAttribute("href"),"#jobs");
+ assert.equal(done().querySelectorAll(".ctx-chip").length,0,"finished cards have no live context");
+ assert.ok(root.querySelector('[aria-label="Waiting · 0"]'),"Waiting folds rather than vanishing");
+ assert.match(root.textContent ?? "",/Empty now.*Waiting/);
+ const paused=root.querySelector('button[title="Paused work"]')!;
+ assert.match(paused.textContent ?? "",/paused/);
+ await act(()=>paused.dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(paused.getAttribute("aria-pressed"),"true");
+ assert.equal(root.querySelector('a[href="#job/cp-prehead"]'),null);
+ assert.ok(root.querySelector('a[href="#job/cp-paused"]'));
+ assert.equal(done().querySelectorAll(".board-card").length,1);
+ assert.equal(done().querySelector(".board-more"),null,"no overflow link for a small filtered set");
+ assert.match(root.textContent ?? "",/Budget paused/);
+ assert.match(root.querySelector('a[href="#job/cp-paused"]')?.textContent ?? "",/context n\/a/);
+ assert.match(done().textContent ?? "",/merged aaaaaaa/);
+ await act(()=>root.querySelector('button[aria-pressed="false"]')!.dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(done().querySelectorAll(".board-card").length,4,"All mandates restores the preview");
 });
