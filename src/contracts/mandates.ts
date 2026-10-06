@@ -152,6 +152,7 @@ export const ScheduleFireSchema = Type.Object(
 	{ additionalProperties: false },
 );
 type QuoteDecidedBy = "operator-quote" | "operator-delegated";
+export interface MandateRevokedBy { operator_quote: string; decided_by: QuoteDecidedBy; delegation_rule?: string; send_id?: string }
 export interface ScheduleFire {
 	schedule_id: string;
 	seed_mandate_id: string;
@@ -196,6 +197,13 @@ export const MandateSchema = Type.Object(
 		status: MandateStatusSchema,
 		paused_at: Type.Optional(IsoTimestampSchema),
 		revoked_at: Type.Optional(IsoTimestampSchema),
+		/** An operator revoke (`cp_mandate revoke` with a verified operator_quote). Absent on a system or parent revoke: a schedule re-mints past those. */
+		revoked_by: Type.Optional(
+			Type.Object(
+				{ operator_quote: Type.String({ minLength: 1, maxLength: 4000 }), decided_by: QuoteDecidedBySchema, ...DelegationProvenanceFields },
+				{ additionalProperties: false },
+			),
+		),
 		pause_reason: Type.Optional(Type.String({ maxLength: 400 })),
 		decisions: Type.Array(MandateDecisionRecordSchema, { maxItems: 500 }),
 		escalations: Type.Array(MandateEscalationSchema, { maxItems: 32 }),
@@ -246,6 +254,7 @@ export type Mandate = Replace<
 		risk_preapproval?: RiskPreapproval;
 		risk_preapproved?: RiskPreapprovedRow[];
 		schedule_fire?: ScheduleFire;
+		revoked_by?: MandateRevokedBy;
 	}
 >;
 

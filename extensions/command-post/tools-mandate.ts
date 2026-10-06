@@ -63,7 +63,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json",
 			}),
 			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk: the mandate id (md-…)" })),
-			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session" })),
+			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session. revoke: the operator's verbatim words revoking the grant — only a revoke with it stops a schedule's fires" })),
 			risk_preapproval: Type.Optional(
 				Type.Object(
 					{ operator_quote: Type.String(), job_ids: Type.Optional(Type.Array(Type.String())) },
@@ -155,7 +155,13 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					const action = params.action as "pause" | "resume" | "revoke" | "raise_tokens";
 					if (action === "raise_tokens" && (tokens === undefined || !reason)) throw new MandateError("cp_mandate raise_tokens needs spend_tokens (the new cap) and reason");
 					// The USD cap is passed through only so raiseTokenCap refuses it in code: the parent never raises money.
-					const mandate = action === "raise_tokens" ? raiseTokenCap(post.mandates, params.mandate_id, { tokens: tokens as number, reason: reason as string, ...(usd !== undefined ? { usd } : {}) }, jobs) : post.mandates[action](params.mandate_id);
+					// A revoke records the operator's verified quote when given: only such a revoke stops a schedule's fires (pointerRefusal).
+					const revokedBy = action === "revoke" && params.operator_quote ? requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTexts() }) : undefined;
+					const mandate = action === "raise_tokens"
+						? raiseTokenCap(post.mandates, params.mandate_id, { tokens: tokens as number, reason: reason as string, ...(usd !== undefined ? { usd } : {}) }, jobs)
+						: action === "revoke"
+							? post.mandates.revoke(params.mandate_id, revokedBy ? { ...revokedBy.stored, decided_by: revokedBy.decidedBy, ...(revokedBy.provenance ?? {}) } : undefined)
+							: post.mandates[action](params.mandate_id);
 					const killed = "; in-flight workers were not killed";
 					const said = { pause: `paused${killed}`, resume: "resumed", revoke: `revoked${killed}`, raise_tokens: `token cap raised to ${mandate.spend_cap.tokens} (${mandate.status}); in-flight work continues` };
 					// SAFETY: Extension tool details are JSON records consumed by the bridge.

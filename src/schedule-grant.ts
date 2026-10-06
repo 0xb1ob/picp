@@ -129,15 +129,15 @@ export function liveFireBounds(template: GrantTemplate, context: MintContext, pr
 }
 
 /**
- * Whether the schedule's current grant stops the next fire: only an operator act — a revoke, or a pause by anything but
- * a cap — sticks until the schedule is moved to (or re-added under) a fresh schedule grant. Expired, cap-paused,
- * active or missing (a crash between pointer move and issue) is minted past. The scheduler never revokes a grant a
- * schedule still names (`MintPorts.named`), so a revoked pointer is the operator's.
+ * Whether the schedule's current grant stops the next fire: only an operator act — a revoke carrying the operator's
+ * verified quote (`revoked_by`, `cp_mandate revoke operator_quote`), or a pause by anything but a cap — sticks until the
+ * schedule is moved to (or re-added under) a fresh schedule grant. A revoke without an operator quote (the system's or
+ * the parent's), expired, cap-paused, active or missing (a crash between pointer move and issue) is minted past.
  */
 export function pointerRefusal(grant: Mandate | undefined): string | undefined {
 	if (!grant) return undefined;
 	const resume = "cp_schedule move it to a fresh schedule grant (or remove and re-add it) to resume";
-	if (grant.status === "revoked") return `${grant.id} was revoked; a schedule never re-mints past an operator revoke: ${resume}`;
+	if (grant.status === "revoked" && grant.revoked_by) return `${grant.id} was revoked by the operator (${grant.revoked_by.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`;
 	if (grant.status === "paused" && !CAP_PAUSES.includes(grant.pause_reason ?? "")) {
 		return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
 	}

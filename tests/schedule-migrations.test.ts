@@ -27,7 +27,7 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 		at: "2026-07-01T00:00:00Z", schedule_grant: true, allowed_actions: ["plan", "implement", "merge"], ...extra,
 	});
 	const revoked = issue();
-	mandates.revoke(revoked.id);
+	mandates.revoke(revoked.id, { operator_quote: "revoke the triage seed", decided_by: "operator-quote" });
 	const expired = issue(); // its expiry is long past at T0
 	const preapproved = issue({ risk_preapproval: { operator_quote: "ok", decided_by: "operator-quote", scope: "mandate_jobs", granted_at: "2026-07-01T00:00:00Z" } });
 	const skill = issue({ job_cap: 2 });
@@ -64,11 +64,11 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 	assert.match(formatScheduleMigration(report), /4 migrated, 2 skipped/);
 
 	// The template is derived either way; firing still honours the pointer: an expired seed re-mints, an operator-revoked
-	// one stops until the schedule is moved to a fresh schedule grant.
+	// one (revoked with the operator's quote) stops until the schedule is moved to a fresh schedule grant.
 	const fired = await scheduler.fireNow("sch-aaaaa2", "req-1");
 	assert.equal(fired.outcome, "fired", fired.reason);
 	assert.notEqual(fired.mandate_id, expired.id);
-	assert.match((await scheduler.fireNow("sch-aaaaa1", "req-3")).reason, /was revoked; a schedule never re-mints past an operator revoke/);
+	assert.match((await scheduler.fireNow("sch-aaaaa1", "req-3")).reason, /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
 	await assert.rejects(scheduler.fireNow("sch-aaaaa5", "req-2"), /has no grant template/);
 
 	const before = readFileSync(scheduler.file, "utf8");
@@ -96,6 +96,21 @@ test("two pre-rule schedules sharing one seed: each fire mints its own grant and
 	assert.notEqual(first.mandate_id, second.mandate_id);
 	assert.equal(mandates.get(first.mandate_id)?.status, "active", "one schedule's fire never revokes another's fire grant");
 	assert.equal(mandates.get(seed.id)?.status, "revoked", "retired once no schedule names it");
+});
+
+test("a seed the parent revoked without an operator quote (md-4c68e9) migrates and its schedule still fires under a fresh grant", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const mandates = new MandateStore(home.path, { now: () => T0 });
+	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: "2026-12-01T00:00:00Z", spend_cap: { usd: 20, tokens: 2_000_000 }, job_cap: 3, at: "2026-11-01T00:00:00Z", schedule_grant: true });
+	mandates.revoke(seed.id); // cp_mandate revoke with no operator_quote: the parent's own revoke
+	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
+	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => [], cloneOf: () => home.path, now: () => T0, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
+	writeFileSync(scheduler.file, JSON.stringify({ schema_version: SCHEMA_VERSION, schedules: [{ id: "sch-ccccc1", name: "triage", project: "demo", mandate_id: seed.id, trigger: { type: "manual" }, job, enabled: true, created_at: "2026-11-01T00:00:00Z" }] }));
+	assert.equal(sweepScheduleGrantTemplates({ home: home.path, mandates, now: T0 }).migrated.length, 1);
+	const fired = await scheduler.fireNow("sch-ccccc1", "req-1");
+	assert.equal(fired.outcome, "fired", fired.reason);
+	assert.notEqual(fired.mandate_id, seed.id);
 });
 
 test("migration with no schedules file writes only the marker", (t) => {

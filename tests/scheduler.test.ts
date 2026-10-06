@@ -364,8 +364,8 @@ test("cp-hhuf P6: enable is refused unless the schedule's grant passes the fire 
 	mandates.resume(mandate.id);
 	assert.equal((await scheduler.setEnabled(schedule.id, true)).enabled, true);
 	await scheduler.setEnabled(schedule.id, false);
-	mandates.revoke(mandate.id);
-	await assert.rejects(scheduler.setEnabled(schedule.id, true), /was revoked; a schedule never re-mints past an operator revoke/);
+	mandates.revoke(mandate.id, { operator_quote: "revoke the nightly grant", decided_by: "operator-quote" });
+	await assert.rejects(scheduler.setEnabled(schedule.id, true), /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
 	assert.equal(scheduler.list()[0]?.enabled, false);
 	await assert.rejects(scheduler.setEnabled("sch-ffffff", true), /no schedule sch-ffffff/);
 });

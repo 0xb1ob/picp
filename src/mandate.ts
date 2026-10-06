@@ -16,6 +16,7 @@ import {
 	type GateFlags,
 	type JobKind,
 	type Mandate,
+	type MandateRevokedBy,
 	type MandateAction,
 	type MandateAskOn,
 	type MandateChannel,
@@ -570,7 +571,8 @@ export class MandateStore {
 		return this.#write({ ...rest, status: "active" });
 	}
 
-	revoke(id: string): Mandate {
+	/** `by`: the operator's verified quote (`cp_mandate revoke operator_quote`); without it the revoke is the system's or the parent's. */
+	revoke(id: string, by?: MandateRevokedBy): Mandate {
 		const existing = this.require(id);
 		if (existing.status === "revoked") return existing;
 		const at = this.#stamp();
@@ -578,6 +580,7 @@ export class MandateStore {
 			...existing,
 			status: "revoked",
 			revoked_at: at,
+			...(by ? { revoked_by: by } : {}),
 			escalations: withEscalation(existing, {
 				at,
 				kind: "revoked",
