@@ -62,7 +62,7 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  assert.match(html,/parent<\/span><strong title="alive">alive/); assert.match(html,/1 live \/ 3 slots/); assert.match(html,/tight: anthropic</);
  assert.match(html,/Blocked &amp; failed · 1/); assert.match(html,/href="#job\/cp-wait"/); assert.match(html,/Blocked title/); assert.match(html,/blocked by .*cp-render.*paused/);
  assert.match(html,/href="#job\/cp-render"/); assert.match(html,/href="https:\/\/github.com\/acme\/repo\/pull\/7"[^>]*>#7</); assert.ok(html.includes(`title="${data.in_flight[0]!.title}"`));
- assert.match(html,/Landed today · 1 merged · 4 closed without PR · \$1\.50/); assert.match(html,/#1 ↗<\/a><span class="overview-meta">merged <code>bbbbbbb<\/code>/);
+ assert.match(html,/Landed today · 1 merged · 4 closed without PR · \$1\.50/); assert.match(html,/#1 ↗<\/a><span class="overview-meta overview-merge" title="b{40}">merged <code>bbbbbbb<\/code>/);
  assert.match(html,/CI red</,"audit P3 #21: a held row says why it is held"); assert.doesNotMatch(html,/overview-project/,"one project: no tag");
  assert.match(html,/other paused/);
  data.availability.fleet = "unavailable"; assert.match(screen(data),/Jobs unavailable/); assert.match(screen(data,true),/- live worktrees/);
@@ -117,7 +117,8 @@ test("audit P3 #20 #21 end to end: recorded ci-watch values reach the held fact,
  const data = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
  assert.deepEqual(data.in_flight.map(j => j.ci), cases.map(([ci]) => ci), "flights() passes the recorded value through");
  const html = screen(data);
- for (const [ci, fact] of cases) assert.match(html, new RegExp(`<code>cp-${ci.replace("_","-")}</code></a><span class="overview-line-text"[^>]*>[^<]*</span><span class="overview-meta">${fact}</span>`), ci);
+ const {parseHTML} = await import("linkedom"); const document = parseHTML(html).document;
+ for (const [ci, fact] of cases) assert.equal(document.querySelector(`[aria-label="cp-${ci.replace("_","-")}"] .overview-flight-extra .overview-meta`)?.textContent,fact,ci);
  assert.deepEqual(data.shipped_today.map(j => j.cost_usd), merged.map(() => 0.5), "all 12 merged rows keep their cost past FINISHED_SHOWN (10)");
  assert.match(html, /Landed today · 12 merged · \$6\.00/);
  assert.match(html, /#\d+ ↗.*merged <code>[0-9a-f]{7}/);
@@ -136,4 +137,46 @@ test("stamp, shortSha, prNumber and phaseText", async t => {
  assert.equal(prNumber("https://github.com/acme/repo/pull/265"), "#265");
  assert.equal(phaseText("waiting"), "no run status");
  assert.equal(phaseText("working"), "working");
+});
+
+
+test("S7 Overview has a calm empty strip, complete flight cells and five projected landed rows", async t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const screen=data=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {screen} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const {parseHTML} = await import("linkedom");
+ const data = overview({home:home.path,stateDir:join(home.path,LAYOUT.state)});
+ data.decided_today = {...data.decided_today,count:3,by_you:2};
+ data.mandates.paused_projects = ["fixture-paused"];
+ const flight = {id:"cp-prehead",project:"picp",title:"Long job ".repeat(50),phase:"working",model:"provider/recorded-model",script_path:null,elapsed_seconds:120,limit_seconds:600,head:null,ci:null,review:null,review_attempts:0,routing:null,note:null,pr_url:null,cost_usd:0.25};
+ data.in_flight = [flight,{...flight,id:"cp-held",project:"fixture-lab",phase:"held",head:"a".repeat(40),ci:"green",review:"pass",review_attempts:1,elapsed_seconds:900,context:{tokens:25,window:100,percent:25,level:"ok",model:"recorded-model",reason:null,last_compact_at:null,thinking:null},pr_url:"https://github.com/acme/repo/pull/8"},{...flight,id:"cp-unknown",elapsed_seconds:null,limit_seconds:null,cost_usd:null}];
+ data.shipped_today = Array.from({length:7},(_,i)=>({id:`cp-landed-${i}`,title:`Landed ${i}`,merged_at:data.generated_at,merge_sha:"b".repeat(40),pr_url:`https://github.com/acme/repo/pull/${i+1}`,cost_usd:0.5}));
+ const doc = () => parseHTML(screen(data)).document;
+ let document = doc();
+ const clear = document.querySelector("#awaiting.overview-clear")!;
+ assert.ok(clear,"available empty questions use a single calm strip");
+ assert.match(clear.textContent!,/Nothing needs you.*5 decided today · 3 for you, 2 by you/);
+ assert.equal(clear.querySelector("a")?.getAttribute("href"),"#decided"); assert.equal(clear.querySelector("h2"),null);
+ assert.equal(document.querySelector(".overview-paused-pill")?.textContent,"fixture-paused paused");
+ assert.equal(document.querySelector(".overview-health")?.parentElement,document.querySelector(".overview-services")?.parentElement,"health and service line share compact spacing");
+ assert.deepEqual([...document.querySelectorAll(".overview-flight-columns > span")].map(e=>e.textContent),["job","title","wall clock / context","review","CI","model","cost"]);
+ const rows = [...document.querySelectorAll(".overview-flight")]; assert.equal(rows.length,3);
+ for (const row of rows) for (const cell of [".overview-job-id",".overview-flight-title",".overview-clock",".overview-review",".overview-ci",".overview-model",".overview-cost"]) assert.ok(row.querySelector(cell),cell);
+ assert.equal(rows[0]!.querySelector("progress")?.getAttribute("value"),"20");
+ assert.match(rows[0]!.querySelector(".overview-clock")!.textContent!,/2m \/ 10m.*context n\/a/);
+ assert.equal(rows[0]!.querySelector(".overview-line-text")?.getAttribute("title"),flight.title);
+ assert.match(rows[0]!.querySelector(".overview-review")!.textContent!,/review not started/); assert.match(rows[0]!.querySelector(".overview-ci")!.textContent!,/no CI yet/);
+ assert.equal(rows[0]!.querySelector(".overview-model code")?.textContent,"recorded-model"); assert.equal(rows[0]!.querySelector(".overview-cost")?.textContent,"$0.25");
+ assert.equal(rows[1]!.querySelector('progress[aria-label="Wall clock"]')?.getAttribute("value"),"100","overdue wall clock is bounded");
+ assert.equal(rows[1]!.querySelector('progress[aria-label="Context window used"]')?.getAttribute("value"),"25");
+ assert.match(rows[1]!.textContent!,/review 1\/5 pass/); assert.match(rows[1]!.querySelector(".overview-ci")!.textContent!,/CI green aaaaaaa/);
+ assert.equal(rows[2]!.querySelector("progress"),null,"unknown elapsed/limit never fabricates a bar"); assert.equal(rows[2]!.querySelector(".overview-cost")?.textContent,"-");
+ const landed = [...document.querySelectorAll(".overview-landed")];
+ assert.deepEqual(landed.map(row=>row.querySelector(".overview-job-id code")?.textContent),data.shipped_today.slice(0,5).map(j=>j.id));
+ for (const row of landed) { assert.ok(row.querySelector(".overview-dot-done")); assert.equal(row.querySelector(".overview-merge code")?.textContent,"bbbbbbb"); assert.equal(row.querySelector(".overview-merge")?.getAttribute("title"),"b".repeat(40)); assert.equal(row.querySelector(".overview-cost")?.textContent,"$0.50"); }
+ assert.equal(landed[0]!.querySelector(".overview-landed-pr")?.getAttribute("href"),data.shipped_today[0]!.pr_url);
+ assert.match(document.querySelector(".overview")!.textContent!,/Landed today · 7 merged · \$3\.50/); assert.match(document.querySelector(".overview")!.textContent!,/2 more in Jobs/);
+ data.availability.asks="unavailable";data.awaiting.count=null;document=doc();assert.equal(document.querySelector(".overview-clear"),null);assert.match(document.querySelector(".overview")!.textContent!,/Questions unavailable/);
+ data.availability.asks="ok";data.awaiting.count=1;data.awaiting.items=[{id:"ask-ab",project:"picp",question:"Continue?",created_at:data.generated_at,options:[],recommendation:"Continue",source_escalation:null,job_ids:[],context:null,evidence_paths:[]}];
+ document=doc();assert.equal(document.querySelector(".overview-clear"),null);assert.match(document.querySelector("#awaiting")!.textContent!,/Needs you · 1.*Continue\?/);assert.ok(document.querySelector(".overview-square-attention"));
 });
