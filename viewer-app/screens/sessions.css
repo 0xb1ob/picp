@@ -1,4 +1,5 @@
 .sessions { display: flex; height: 100%; min-height: 0; }
+.session-title { display: none; }
 .session-sidebar { display: none; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The mobile top bar (mobile-chat-layout): one row, at most 48 px; desktop keeps the sidebar and heading. */
@@ -24,18 +25,16 @@
 .session-bar-file { padding: 8px 12px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .session-bar-restart { padding: 4px 12px; }
 .session-bar-restart .operator-restart { flex-direction: column; align-items: stretch; }
-.session-heading > select { max-width: 100%; min-height: 44px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; }
+.session-file-picker { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted); }
+.session-file-picker select { min-width: 0; max-width: 100%; min-height: 44px; padding: 0 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; text-overflow: ellipsis; }
 .session-system .session-body p { font-size: 13px; color: var(--muted); }
 .session-tool-all { margin: 0 0 12px; }
 .session-tool-all summary { min-height: 32px; cursor: pointer; font-size: 12px; color: var(--secondary); }
 .session-heading { display: none; padding: 0 16px 12px; border-bottom: 1px solid var(--divider); overflow: visible; }
-.session-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.session-heading > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .session-heading strong { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-heading span { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-heading > div > * { max-width: 100%; }
-.session-heading > div { flex-wrap: wrap; }
-.session-heading > div > .ctx-chip { width: 100%; }
-.session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; margin-top: 6px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
 .session-tools { display: flex; align-items: center; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--dim); cursor: pointer; }
 .session-tools:hover { color: var(--muted); }
@@ -147,7 +146,12 @@
 .session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
- .session-sidebar { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; border-right: 1px solid var(--divider); overflow-y: auto; padding: 20px 12px; }
+ .sessions { display: grid; grid-template-columns: 250px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); gap: 20px; padding: 28px 40px 40px; }
+ .session-title { display: block; grid-column: 1 / -1; margin-right: 248px; }
+ /* Share S1's title band without adding a flow row above the remaining-height screen (PR 110). */
+ .shell-main:has(> .sessions):not(:has(> .overview-error)) > .shell-page-bar { margin: 24px 40px -68px auto; position: relative; z-index: 4; }
+ .session-panel { min-height: 0; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+ .session-sidebar { min-height: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
  .session-sidebar h2 { margin: 0 0 6px; padding: 0 10px; font-size: 12px; color: var(--dim); }
  .session-sidebar p { font-size: 12px; color: var(--muted); padding: 10px; }
  .session-choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 10px; text-decoration: none; min-height: 44px; }
@@ -165,16 +169,13 @@
  .session-thread-row > .session-thread-done { flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
  .session-sidebar details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
  .session-sidebar .session-thread-failed { display: block; padding: 0 10px; white-space: normal; overflow-wrap: anywhere; }
- .session-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 72px; padding: 12px 40px; overflow: visible; }
- .session-heading > div { min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; gap: 3px; }
- .session-heading strong { font-size: 17px; }
- /* A long session file name must not squeeze the title to nothing. */
- .session-heading { flex-wrap: wrap; row-gap: 8px; }
- .session-heading > div { min-width: 200px; }
- .session-heading > select { min-width: 0; max-width: 280px; text-overflow: ellipsis; }
- .session-heading > p { flex: 0 1 360px; min-width: 0; }
- .session-heading > p { display: block; font-size: 12px; color: var(--dim); max-width: 360px; text-align: right; }
- .session-transcript { padding: 16px 40px 96px; }
+ .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 64px; padding: 10px 16px; flex-shrink: 0; }
+ .session-heading > div { flex: 1 1 140px; }
+ .session-heading strong { font-size: 15px; }
+ .session-heading .session-file-picker { flex: 0 1 auto; max-width: 100%; }
+ .session-heading select { max-width: 220px; }
+ .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
+ .session-transcript { padding: 16px 24px 24px; }
  /* Chat in the 780px column: bubbles at most 75% wide; system rows share the tool calls' 56px time column. */
  .session-bubble > .session-who, .session-bubble > .session-body { max-width: 75%; }
  .session-message.session-system { gap: 12px; }
@@ -190,6 +191,12 @@
  .session-notice > .session-time { padding-top: 18px; }
  .session-trace { margin-left: 68px; }
  .session-new-wrap { bottom: 24px; }
+}
+@media (min-width: 900px) and (max-width: 1199px) {
+ .session-heading > div { flex: 1; }
+ .session-heading .session-tools-toggle { order: 1; }
+ .session-heading .session-file-picker { order: 2; flex-basis: 100%; }
+ .session-heading select { flex: 1; max-width: none; }
 }
 /*
  * Light Sessions (cp-wfw3): a light-scheme browser gets the Sessions screen — sidebar, top bar, transcript, cards and

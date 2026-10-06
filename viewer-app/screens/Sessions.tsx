@@ -24,6 +24,7 @@ const TOOL_TEXT_MAX = 1200;
 type Worker = SessionsResponse["workers"][number];
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
+const workerPhase = (w: Worker): string => w.run_phase ?? "no run status";
 function readStored(key: string): string | null {
  if (typeof window === "undefined") return null;
  try { return window.localStorage?.getItem(key) ?? null; } catch { return null; }
@@ -181,7 +182,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
    <summary aria-label="Switch session"><strong>{data.title}</strong><span aria-hidden="true">▾</span></summary>
    <nav class="session-bar-sheet" aria-label="Session streams">
     {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
-    {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown"}`}/><span>{w.id}</span><small>{w.phase}</small></a>)}
+    {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown"}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
    </nav>
   </details>
   <span class={`shell-live shell-live-${shell.status}`} role="status" aria-label={`Data ${shell.status}`} title={shell.status}><span/></span>
@@ -193,7 +194,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
    <div class="session-bar-sheet">
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
-    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select>}
+    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
     {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
    </div>
@@ -238,9 +239,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  },[]);
  // A tap outside an open top-bar or composer menu closes it.
  useEffect(()=>{
-  const outside=(e:Event)=>{for(const menu of document.querySelectorAll<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-more[open]")) if(!menu.contains(e.target as Node)) menu.open=false;};
-  document.addEventListener("pointerdown",outside);
-  return ()=>document.removeEventListener("pointerdown",outside);
+  const outside=(e:Event)=>{for(const menu of document.querySelectorAll<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-more[open], .operator-composer-options[open]")) if(!menu.contains(e.target as Node)) menu.open=false;};
+  const escape=(e:KeyboardEvent)=>{if(e.key !== "Escape") return; const menu=document.querySelector<HTMLDetailsElement>(".operator-composer-options[open]"); if(menu){menu.open=false; menu.querySelector<HTMLElement>("summary")?.focus();}};
+  document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
+  return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
  // Operator threads (cp-xmw2): the selected thread's entries plus every shared one; the pinned decisions are never filtered.
  const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, shown=visibleEntries(data.entries,filter);
@@ -249,23 +251,24 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
- const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null,showModel=false)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class={`session-dot session-dot-${phase}`}/><span><strong>{label}</strong><small>{meta}</small>{showModel && context && <small class="session-model">{modelText(context)}</small>}<ContextChip usage={context} compact/></span></a>;
+ const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice" title={context?.model ? modelText(context) : undefined}><span class={`session-dot session-dot-${phase}`}/><span><strong>{label}</strong><small>{meta}</small><ContextChip usage={context} compact/></span></a>;
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
  return <div class="sessions">
+  <h1 class="session-title">Sessions</h1>
   <aside class="session-sidebar" aria-label="Session streams">
-   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator session",data.selected === "you" && data.transcript ? "Full transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
+   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context)}</section>
    {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
-   <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context,true)}</section>
-   <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,modelText({model:w.context?.model ?? w.model,thinking:w.thinking}),data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context)}</section>
+   <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${workerPhase(w)} · ${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
-   <header class="session-heading"><div><strong>{data.title}</strong><span>{data.subtitle}</span><ContextChip usage={context}/></div>
-    {/* Audit P4 #27: no Decisions | Full transcript toggle; the decision log lives on the Decisions page (a refused transcript still falls back silently). */}
-    {data.transcript === true && files.length > 1 && <select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select>}
+   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}</div>
+    {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
+    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
     {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
-    {data.selected === "you" && <p>{data.transcript === true ? "The operator session's own pi transcript, entry for entry, newest last." : "Trace a decision: parent’s question → operator’s answer → the message you saw."}</p>}</header>
+    {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
     <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
