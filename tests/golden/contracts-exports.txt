@@ -169,6 +169,7 @@ EMPTY_CI_WATCH_FILE	value	d43c8cb410c846e3	9a926df320a4d507
 EMPTY_DURABLE_WAKEUP_OUTBOX	value	ba7f33d3c48548da	a1bf5af9b7511099
 EMPTY_ESCALATION_FILE	value	180c8f3dfea5acf1	739dc623cdb37434
 EMPTY_FLEET	value	41f1bb93852bb5c0	9a926df320a4d507
+EMPTY_FOREIGN_CI_WATCH_FILE	value	60f250dc884e96df	9a926df320a4d507
 EMPTY_SHIPPED_SEEN_FILE	value	a0ca7bdef5371556	0fa3a550708fbb31
 EMPTY_USAGE	value	dac87001ac4dffe6	bace70ef99feddfa
 ENVELOPE_CORRECTION_REASON_MAX_CHARS	value	48ad41518da2b1ec	81a83544cf93c245
@@ -210,6 +211,10 @@ EscalationStatusSchema	value	bd1293e1b774ad5b	e3317a5f179af8d4
 FAILURE_CLASSES	value	8ef3b7a86454b6df	a793e5c61b256770
 FAILURE_RECOVERABLE	value	dd1aad215d6416ba	3f6fa772b49c5629
 FLEET_MUTATING_TOOLS	value	c5788a3b2d6cb437	2a9b04e913a39dd3
+FOREIGN_CI_EVENTS	value	c7769d8dc4748ec9	f267efcad78d058e
+FOREIGN_CI_GATE_TIMEOUT_MS	value	50ba15296b763f05	c48664a448d8a63d
+FOREIGN_CI_KEEP_ANNOUNCED	value	4d33238c0594d553	a68b412c4282555f
+FOREIGN_CI_MAX_PER_TICK	value	7fbffd9e1686f34e	f5ca38f748a1d6ea
 Failure	type	ad6f52ac28ea11d7	-
 FailureClass	type	56ae13662dfb3b19	-
 FailureClassSchema	value	1b2489a58baf391f	13b4201f71b01c43
@@ -218,6 +223,11 @@ FleetFile	type	296e2f8058552d67	-
 FleetFileSchema	value	392f27c9bf875f52	ba5df3b531e2fa16
 FleetRecord	type	bba4eea4f16bb7f2	-
 FleetRecordSchema	value	a79c25b91e19b789	a6db3f2360aed817
+ForeignCiEvent	type	8d1b00c8be47fc57	-
+ForeignCiWatchFile	type	565f7401ba125830	-
+ForeignCiWatchFileSchema	value	826ca6f687cfcec6	618ebc9ab0a49b46
+ForeignCiWatchJob	type	5d4201125f515d54	-
+ForeignCiWatchJobSchema	value	22f02d84da074600	44efca99d1cacb3c
 GATE_CAUSES	value	b6db1ba987d2429f	946bd0a2631ce1d5
 GATE_MAX_ATTEMPTS_SCANNED	value	952ef8b257f4adc8	2c624232cdd22177
 GATE_MAX_REVISE	value	b43c1baad39bbebb	6b86b273ff34fce1
@@ -276,12 +286,12 @@ JobStatus	type	221dc0ca1696f40f	-
 JobStatusSchema	value	50748456edcad95b	bd62caaeedebc279
 JobsDocument	type	34b6a954ff5d593a	-
 JobsDocumentSchema	value	d617b60b841d313e	0054b5f6f375b7a6
-LAYOUT	value	12b83b5c283bd385	a884171b550feb66
+LAYOUT	value	12b83b5c283bd385	5b48a6e849284bca
 LEDGER_PREFIX_PATTERN	value	be414b07abc002a0	8b9f60e471e86a5c
 LEGACY_JOB_FIELDS	value	6e6683803c4a2a3a	4f36ea757ebce99a
 LEGACY_ROLE_ALIASES	value	aae3045414f95ecc	6a94f43a3c23d1f9
 LONG_TOOL_CALL_SECONDS	value	6b1b29c2819b6840	983bd614bb5afece
-Layout	type	f8fc40250907fd0f	-
+Layout	type	28f842276bec93a5	-
 LegacyJobFields	type	223afe8be7d06be3	-
 MANDATE_ACTIONS	value	078aa2328cae0a51	6497bc371d290108
 MANDATE_ASK_ON	value	7a99914de3a7a78f	fd9d6449689ca449
@@ -588,7 +598,7 @@ isSafeScriptPath	value	2d1bb4f70dcc5fcf	844cbc3057d8f467
 isScriptFleetRecord	value	95cbe4d9d4856a64	523b3872abd75820
 isoTimestamp	value	d5fa064e9682f2b7	8fffe8a7895366ce
 jobsInvariantErrors	value	8c5ea1fd870d5e20	76c67dd2470a9390
-layoutFor	value	8dc91de49d094be9	ba0ec8ea54419432
+layoutFor	value	e949e4298c89d102	ba0ec8ea54419432
 layoutForHome	value	3f3cc27b052470ae	1f4c4199de549bc9
 looksLikeAuthorization	value	0bbe1d31228aefc6	2ded89cfee1063a6
 missingArtifactSections	value	6dd5ba3ca05052c8	a83d546e09108cec
@@ -618,6 +628,7 @@ validateEnvelope	value	349db48e29e78780	fe3d1a5b11addfe1
 validateEscalation	value	65cbd3b07dabf2a5	4f4e6b23fb2be5a2
 validateEscalationFile	value	48e885737e1ec9ed	5be73cb12d5fd7d3
 validateFleetFile	value	49ed90df79e86dd4	4e53812f66038254
+validateForeignCiWatchFile	value	e801715c2abe090c	9bbe9a2472aa57cd
 validateJobsDocument	value	64f090890b1852cd	c93595774409dc08
 validateModeSettings	value	5b546bd44c3d30ab	54bc82f8f0ea6131
 validatePendingReview	value	abb72efb1e248a53	bb7e6da3ca004b8c

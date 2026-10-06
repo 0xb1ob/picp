@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { isPidAlive } from "../src/fleet.ts";
 import { currentHost, type HostRecord, ParentHostClient, parentHostPaths, readStopMarker } from "../src/parent-host.ts";
 import { EXIT_NO_MODEL, type HostClient, hostPorts, supervise, type SupervisePorts } from "../src/service/supervise.ts";
-import { createScratchHome } from "./harness/index.ts";
+import { createScratchHome, waitFor } from "./harness/index.ts";
 import "./harness/fake-parent-tracker.ts";
 
 const FAKE_PARENT = resolve(import.meta.dirname, "fixtures/fake-parent.mjs");
@@ -88,7 +88,8 @@ test("host lost: a drain file or a stop marker for the watched generation waits 
 		const run = supervise({ home: "/h" }, p);
 		await new Promise((done) => setImmediate(done));
 		first.close();
-		await new Promise((done) => setTimeout(done, 10));
+		// Wait for the reattach itself, not a fixed 10 ms: a loaded CI runner can take longer for loss → 3 sleeps → connect.
+		await waitFor(() => p.lines, (lines) => lines.some((line) => line.includes("attached to newer host generation 2")), { intervalMs: 5, what: `${hold}: reattach to generation 2` });
 		assert.deepEqual(p.sleeps, [10_000, 10_000, 10_000], hold);
 		assert.equal(attaches, 1, "waiting never attaches (so never spawns)");
 		assert.ok(p.lines.some((line) => line.includes("attached to newer host generation 2")), p.lines.join("\n"));

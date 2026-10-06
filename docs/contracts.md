@@ -99,6 +99,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
   state/                  runtime truth
     fleet.json            the fleet: one record per in-flight job
     ci-watch.json         what the CI/PR watch has observed and announced (cp-e2d)
+    foreign-ci-watch.json what the foreign-PR CI watch has observed and announced (cp-wlhu S5)
     ci-reruns.json        one infra-only CI rerun claimed per job + head (unload-parent PR2)
     armed-dispatches.json  cp_dispatch requests waiting for their blockers to land (unload-parent PR2)
     main-ci.json          per-project red-main latch; pauses cp_integrate (k52)
@@ -987,6 +988,16 @@ the last observed `head_sha`, `announced`, `last_checked_at`, `next_due_at`,
 are pruned every tick to the current watch set, so the file is bounded by the
 fleet and not by history; an unreadable one degrades to "no memory" (one
 duplicate notice) rather than throwing out of a tick.
+
+#### Foreign PRs: notify-only, and the reviewer gate (cp-wlhu S5)
+
+A ledger job whose `external_ref` is a PR in its project's registered GitHub repo, with no fleet PR receipt for that url, is a **foreign PR** — typically a cp-pr-review fan-out reviewer's target. [`src/foreign-ci-watch.ts`](../src/foreign-ci-watch.ts) watches it on the same tick, cadence and backoff, after the own-PR and main halves, at most `FOREIGN_CI_MAX_PER_TICK` (20) jobs per tick.
+
+- **Two read-only GETs**: `gh api repos/{o}/{r}/pulls/{n}` and `gh api repos/{o}/{r}/actions/runs?head_sha=<head>` against the URL's base repo, where a fork PR's runs are listed. Evaluated by `deriveCiEvents`, unforked; one more fact, `head_moved`, once per new head.
+- **Notify-only.** One operator notice per tick (`FOREIGN PR CI — …`). Never a wake-up, an Awaiting-you row, a deferred-row recheck, `cp_integrate`, a merge, a comment or a re-run. A query failure is one warning (and a `ci_watch_failed` run-log line when the job has a run) per new cause; a 404 stops the watch for that job, reported once. Merged, closed, or a closed job also ends it.
+- **The reviewer gate** (binding decision es-314c8e c). `CommandPost.dispatch` asks `gate(job)` for a research job with a `schedule:` label and a foreign PR. Until CI has completed on the PR's **current** head it throws `ForeignCiWaitError`, a `BlockedDispatchError` with no blockers, so `cp_dispatch` arms the request and the armed release re-runs the gate every scheduler tick. A completed result releases only after one fresh read-only `pulls/{n}` GET shows the head it was recorded for is still the PR's head; a moved or unreadable head keeps it waiting until the watch observes CI for the new head. Once that holds — or `FOREIGN_CI_GATE_TIMEOUT_MS` (1h) after the job was created, or with the watch off — it dispatches, and the brief's referenced material carries a `### Foreign CI` line with the state, `unknown` included. The reviewer reads the diff and metadata only; this gate gives it evidence, never authorization.
+
+`state/foreign-ci-watch.json` (`ForeignCiWatchFileSchema`) is pruned to the selection on every write, keeps the last `FOREIGN_CI_KEEP_ANNOUNCED` (64) announced keys per job, and an unreadable one is no memory.
 
 #### Main CI: a red `origin/main` pauses integration (k52)
 

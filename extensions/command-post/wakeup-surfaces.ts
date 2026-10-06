@@ -10,6 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { answeredIdsFromMessage, formatAnsweredNotice } from "../../src/answered.ts";
 import { type AnswerCardData, formatAnswerNotice } from "../../src/answer-card.ts";
 import { ciKeysFromMessage, type CiObservation, formatCiNotice } from "../../src/ci-watch.ts";
+import { formatForeignCiNotice } from "../../src/foreign-ci-watch.ts";
 import { runMainCiTick } from "../../src/main-ci.ts";
 import type { CommandRunner } from "../../src/merge-ask.ts";
 import type { CommandPost } from "../../src/command-post.ts";
@@ -528,6 +529,27 @@ export function createWakeupSurfaces(
 	};
 
 	/**
+	 * cp-wlhu S5: the foreign-PR half — facts about PRs this home did not ship.
+	 * Notify-only by contract: no wake-up, no deferred-row recheck, no
+	 * cp_integrate, no rerun, no comment. A query failure is journaled once per
+	 * cause (run log when the job has one, plus one warning line); a fault here
+	 * never stops the held-PR half.
+	 */
+	const surfaceForeignCi = async (post: CommandPost): Promise<void> => {
+		try {
+			const tick = await post.foreignCiTick();
+			for (const error of tick.errors) {
+				if (isSafeJobId(error.job_id) && existsSync(join(currentRuntime().home, paths.runDir(error.job_id)))) post.runs.open(error.job_id).cp("ci_watch_failed", { message: `foreign PR ${error.pr_url}: ${error.message}`.slice(0, 300) });
+				operatorNotify(s.live, `pi-command-post: foreign PR CI query failed for ${error.job_id} (${error.pr_url}): ${error.message} — backing off`, "warning");
+			}
+			const text = formatForeignCiNotice(tick);
+			if (text) operatorNotify(s.live, text, tick.observations.some((fact) => fact.event === "ci_failed") ? "warning" : "info");
+		} catch (error) {
+			operatorNotify(s.live, `pi-command-post: foreign PR CI watch tick failed: ${(error as Error).message.split("\n")[0]}`, "warning");
+		}
+	};
+
+	/**
 	 * cp-e2d: the fifth unasked wake-up — a fact GitHub owns.
 	 *
 	 * A worker never waits for CI (cp-kzc) and nothing local changes when a run
@@ -563,6 +585,7 @@ export function createWakeupSurfaces(
 				}
 				// k52: with gh gone (watch disabled) the main half would only fail each tick.
 				if (!tick.disabled) await surfaceMainCi(post);
+				if (!tick.disabled) await surfaceForeignCi(post);
 				const observations: CiObservation[] = tick.observations;
 				if (observations.length === 0) return;
 				// Before the wake-up, not because of it: CI finishing on the held head is
