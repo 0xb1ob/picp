@@ -531,16 +531,12 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date = 
 
 	// cp-e2d: a CI fact is a claim about one commit. Once the branch's head has
 	// moved, "CI is green" was true about a sha that is now history, and a message
-	// that still reads as live news is one somebody will merge on.
+	// that still reads as live news is one somebody will merge on. P1/picp-wzq: only
+	// a moved head, a terminal job or no record makes it history — never a reopened
+	// generation; a promoted worker that has not reported again gets a note instead.
 	if (stamp.kind === "ci") {
 		if (TERMINAL.includes(job.phase)) {
 			return stale(`${stamp.job_id} is already ${job.phase}: the delivery landed and the job was torn down`);
-		}
-		if (stamp.generation !== undefined && job.generation !== stamp.generation) {
-			return stale(
-				`the envelope slot was reopened: this describes generation ${stamp.generation}, ` +
-					`and ${stamp.job_id} is on generation ${job.generation} (phase ${job.phase})`,
-			);
 		}
 		const head = stamp.keys?.[0];
 		const movedTo = head !== undefined ? headMoved(job, head, "observed") : undefined;
@@ -548,6 +544,14 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date = 
 			return stale(
 				`the branch moved: this describes CI on ${head?.slice(0, 12)}, and ${stamp.job_id} is now pushed at ${movedTo.slice(0, 12)}`,
 			);
+		}
+		if ((job.phase === "waiting" || job.phase === "launching") && job.generation > 1) {
+			return {
+				...fresh,
+				note:
+					`${stamp.job_id} was promoted after this CI fact (now generation ${job.generation}, phase ${job.phase}): it is still true of ` +
+					`${head?.slice(0, 12) ?? "that head"}, but the reopened worker may move the branch — wait for its report before cp_integrate ${stamp.job_id}`,
+			};
 		}
 		return fresh;
 	}
@@ -1153,7 +1157,14 @@ export function reviewWakeups<T extends WakeupCarrier>(
 			verdict.reason = withheldBefore ? `this notice was already withheld in an earlier context: ${withheldBefore}` : "this notice was already withheld in an earlier context (original reason not recorded)";
 		}
 		if (verdict.state !== "superseded") {
-			reviewed.push(message);
+			// P1/picp-wzq: a CI fact delivered after a promote carries its note once (send time may already have added it).
+			const note = stamp.kind === "ci" && verdict.note ? formatAnsweredJobDone(verdict) : undefined;
+			if (note && !message.content.includes(note)) {
+				changed = true;
+				reviewed.push({ ...message, content: `${message.content}\n${note}` });
+			} else {
+				reviewed.push(message);
+			}
 			continue;
 		}
 		if (withheldBefore === undefined) {

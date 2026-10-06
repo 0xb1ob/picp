@@ -750,6 +750,21 @@ test("a red notice asks no merge question at all", () => {
 	const text = formatCiNotice([red as CiObservation]);
 	assert.match(text, /Merging red is forbidden/);
 	assert.doesNotMatch(text, /evidence, not authorization/i);
+	assert.doesNotMatch(text, /\(run /, "no databaseId, no run reference");
+});
+
+test("picp-wzq: a red notice names the failing run, and only that run, without moving its key", () => {
+	const facts = { jobId: "cp-4wz", branch: "cp-4wz", pr: pr(), head: { sha: HEAD } };
+	const [red] = deriveCiEvents({ ...facts, runs: [run({ workflowName: "lint", conclusion: "skipped", databaseId: 11, attempt: 1 }), run({ workflowName: "ci", conclusion: "failure", databaseId: 37458827243, attempt: 1 })] });
+	assert.equal(red?.workflow, "ci", "a skipped run is never blamed for the red");
+	assert.equal(red?.run_id, 37458827243);
+	assert.equal(red?.run_url, "https://github.com/0xb1ob/pi-command-post/actions/runs/37458827243");
+	assert.match(formatCiNotice([red as CiObservation]), /\(run 37458827243 https:\/\/github\.com\/0xb1ob\/pi-command-post\/actions\/runs\/37458827243\) https:\/\/github\.com\/0xb1ob\/pi-command-post\/pull\/58/);
+	assert.equal(red?.key, ciEventKey("cp-4wz", HEAD, "ci_failed", red?.run_identity), "the run reference is never part of the key");
+	const [legacy] = deriveCiEvents({ ...facts, runs: [run({ conclusion: "failure" })] });
+	assert.equal(legacy?.run_id, undefined);
+	assert.equal(legacy?.run_url, undefined);
+	assert.equal(legacy?.key, ciEventKey("cp-4wz", HEAD, "ci_failed"));
 });
 
 test("REST parsing: the PR url, the fields, and nothing GraphQL", () => {

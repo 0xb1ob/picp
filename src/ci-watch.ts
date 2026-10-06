@@ -99,6 +99,7 @@ import {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ciRunRef, failedRunOn, formatRunRef } from "./ci-run-ref.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import {
 	type CiRun,
@@ -198,6 +199,9 @@ export interface CiObservation {
 	closed_at?: string;
 	/** The head's completed-run identity behind a CI event, when there is one (`ciRunIdentity`). */
 	run_identity?: string;
+	/** ci_failed only: the failing run (src/ci-run-ref.ts); never part of the key. */
+	run_id?: number;
+	run_url?: string;
 }
 
 /**
@@ -283,14 +287,13 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
 	}
 	if (verdict.ci === "failed") {
-		const failing = facts.runs.find(
-			(run) => run.status === "completed" && (run.conclusion ?? "").toLowerCase() !== "success" && sameHead(run.headSha, head),
-		);
+		const failing = failedRunOn(facts.runs, head);
 		return [
 			at("ci_failed", {
 				reason: verdict.reason,
 				...(verdict.conclusion ? { conclusion: verdict.conclusion } : {}),
 				...(failing?.workflowName ? { workflow: failing.workflowName } : {}),
+				...ciRunRef(facts.runs, head, facts.pr?.url),
 			}, identity),
 		];
 	}
@@ -874,7 +877,7 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 			: `CI/PR OBSERVED — ${observations.length} new facts about ${jobs.size} held PR(s)`,
 	];
 	const fact = (observation: CiObservation) =>
-		`  ${observation.job_id}: ${HEADLINES[observation.event]} on ${observation.head_sha.slice(0, 12)} — ${observation.reason}${observation.pr_url ? ` ${observation.pr_url}` : ""}`;
+		`  ${observation.job_id}: ${HEADLINES[observation.event]} on ${observation.head_sha.slice(0, 12)} — ${observation.reason}${formatRunRef(observation)}${observation.pr_url ? ` ${observation.pr_url}` : ""}`;
 	lines.push(...projectGroupedLines(observations, projectOf && ((observation) => projectOf(observation.job_id)), fact));
 	if (observations.some((observation) => observation.event === "ci_green")) {
 		lines.push(
@@ -885,8 +888,8 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 	}
 	if (observations.some((observation) => observation.event === "ci_failed")) {
 		lines.push(
-			"Merging red is forbidden, so there is no merge question here: relay the failure, name the job and the",
-			"workflow, and exercise ordinary judgment (promote the held worker, or re-dispatch).",
+			"Merging red is forbidden, so there is no merge question here: relay the failure, name the job, the",
+			"workflow and the run, and exercise ordinary judgment (promote the held worker, or re-dispatch).",
 		);
 	}
 	if (observations.some((observation) => observation.event === "pr_merged")) {
