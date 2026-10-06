@@ -12,7 +12,10 @@
  * An id is due while neither acked nor discarded, unless this process emitted
  * it into the current session (its reservation): a new owner or session
  * re-emits, and so does an idle settle with nothing pending in pi (proof pi no
- * longer holds it). Nothing is retired silently: every discard is a line with
+ * longer holds it) — at most once per id per consumer and session file, never a
+ * third hand-off before the ack (picp-75g). While the operator compacts
+ * (`busy`) a pass does nothing at all; the pass after it delivers. Nothing is
+ * retired silently: every discard is a line with
  * a reason and a `retired:` note on the next message and the status line.
  * A wake is also retired when every escalation it names was decided after it
  * was queued and every job it names moved on (`handledWake`, cp-nbxo).
@@ -51,9 +54,11 @@ export interface RelayConsumerPorts {
 	status(line: string): void;
 	now?(): Date;
 	owner?: string;
+	/** True while the operator session compacts: nothing is rechecked, journaled or handed off; the port's owner pokes once it ends. */
+	busy?(): boolean;
 }
 
-interface Due { id: string; relay: BridgeRelay; queuedAt: string; overdue: boolean; direct: boolean }
+interface Due { id: string; relay: BridgeRelay; queuedAt: string; overdue: boolean; direct: boolean; reclaim: boolean }
 
 /**
  * cp-nbxo: a wake held past the operator's turn may report a decision and jobs that already moved on.
@@ -134,6 +139,8 @@ export class OperatorRelayConsumer {
 	readonly #direct = new Map<string, { relay: BridgeRelay; overdue: boolean; at: string }>();
 	readonly #directSeen = new Set<string>();
 	readonly #ackedHere = new Set<string>();
+	/** picp-75g: ids this instance already re-emitted on an idle settle in this session: never a second reclaim before the ack. */
+	readonly #reclaimed = new Set<string>();
 	#retired: string[] = [];
 
 	constructor(ports: RelayConsumerPorts) {
@@ -161,6 +168,7 @@ export class OperatorRelayConsumer {
 
 	/** A new process or session: record the consumer, compact an oversized journal, deliver. */
 	sessionStarted(): void {
+		this.#reclaimed.clear(); // a new session file re-arms one reclaim
 		try {
 			const acks = this.#ports.acks();
 			acks.append([{ type: "consumer", owner: this.#owner, pid: process.pid, ...this.#session(), at: this.#now().toISOString(), protocol: OPERATOR_RELAY_PROTOCOL }]);
@@ -182,6 +190,7 @@ export class OperatorRelayConsumer {
 			this.#ports.acks().append(ids.map((id) => ({ type: "ack" as const, id, at })));
 			for (const id of ids) {
 				this.#ackedHere.add(id);
+				this.#reclaimed.delete(id);
 				this.#direct.delete(id);
 			}
 		} catch (error) {
@@ -209,12 +218,14 @@ export class OperatorRelayConsumer {
 
 	deliverDue(reclaim = false): void {
 		if (this.#running) return;
+		if (this.#ports.busy?.()) return;
 		let fold;
 		try {
 			fold = this.#ports.acks().fold();
 		} catch (error) {
 			return this.#ports.status(`cp-relays: acks unreadable (${(error as Error).message}); nothing delivered`);
 		}
+		for (const id of this.#reclaimed) if (fold.acked.has(id) || fold.discarded.has(id)) this.#reclaimed.delete(id);
 		const { session } = this.#session();
 		const due = new Map<string, Due>();
 		let entries: OperatorRelayEntry[] = [];
@@ -225,12 +236,13 @@ export class OperatorRelayConsumer {
 		}
 		for (const entry of entries) {
 			const emit = fold.emits.get(entry.id);
-			if (!reclaim && emit && emit.owner === this.#owner && emit.session === session) continue;
-			due.set(entry.id, { id: entry.id, relay: entry.relay, queuedAt: entry.queued_at, overdue: false, direct: false });
+			const ours = emit !== undefined && emit.owner === this.#owner && emit.session === session;
+			if (ours && (!reclaim || this.#reclaimed.has(entry.id))) continue;
+			due.set(entry.id, { id: entry.id, relay: entry.relay, queuedAt: entry.queued_at, overdue: false, direct: false, reclaim: ours });
 		}
 		for (const [id, item] of this.#direct) {
 			if (fold.acked.has(id) || fold.discarded.has(id)) this.#direct.delete(id);
-			else due.set(id, { id, relay: item.relay, queuedAt: item.at, overdue: item.overdue, direct: true });
+			else due.set(id, { id, relay: item.relay, queuedAt: item.at, overdue: item.overdue, direct: true, reclaim: false });
 		}
 		if (due.size === 0) return;
 		// A send reply settles after the escalations raised in its turn: read it first.
@@ -262,7 +274,10 @@ export class OperatorRelayConsumer {
 		for (const message of messages) {
 			try {
 				this.#ports.send(message);
-				for (const id of message.details.relay_ids) this.#direct.delete(id);
+				for (const id of message.details.relay_ids) {
+					this.#direct.delete(id);
+					if (due.get(id)?.reclaim) this.#reclaimed.add(id);
+				}
 			} catch (error) {
 				try {
 					this.#ports.acks().append(message.details.relay_ids.map((id) => ({ type: "emit_failed" as const, id, owner: this.#owner, at: at.toISOString() })));

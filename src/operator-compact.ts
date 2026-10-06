@@ -4,16 +4,30 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { layoutForHome, type Mode } from "./contracts.ts";
 import { atomicWriteText } from "./json-store.ts";
+import { relayIdsOfMessage } from "./operator-outbox.ts";
 
 const DEFAULT_THRESHOLD = 200000;
 const WORK_FOCUS = "operator delegation and standing mandate, in-flight jobs and PRs with heads, open decisions, what's on hold, next steps, and the latest handoff paths";
 
 const AUTO = "operator-auto-compact";
 const MAX_AUTO_FAILURES = 3;
+/** N5: provider-rejection compactions per process; after that a notice only (`/compact` or a restart). */
+const MAX_STREAK_COMPACTIONS = 3;
+const NUDGE_RELAYS_MAX = 20;
+
+/** N5: an assistant turn the provider rejected with a 400 naming `tool_addition` (pi's inline-tools beta). Anything else, false. */
+export function isToolAdditionRejection(message: unknown): boolean {
+	if (!message || typeof message !== "object") return false;
+	const { role, stopReason, errorMessage } = message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
+	return role === "assistant" && stopReason === "error" && typeof errorMessage === "string"
+		&& /\btool_addition\b/.test(errorMessage) && /\b400\b|invalid_request_error/.test(errorMessage);
+}
 
 export type OperatorCompactControl = {
 	/** Run now, or after the running compaction ends: a turn started mid-compaction loses it. */
 	whenIdle(fn: () => void): void;
+	/** True from the `ctx.compact` call of a compaction this module started until it ends; synchronous, unlike pi's `isIdle()`. */
+	compacting(): boolean;
 };
 
 export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: string; mode: Mode }): OperatorCompactControl {
@@ -22,6 +36,10 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 	let lastCompactAt: string | undefined;
 	let requested = false;
 	let failures = 0;
+	// N5: a streak of `tool_addition` 400s since the last good assistant reply, and the relays those turns never answered.
+	let streak: { rejections: number; compacted: boolean; noticed: boolean } | undefined;
+	let unanswered: string[] = [];
+	let streakCompactions = 0;
 	const deferred: Array<() => void> = [];
 	const finish = () => {
 		running = undefined;
@@ -82,12 +100,28 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 	});
 
 	pi.on("session_start", (_event, ctx) => status(ctx));
-	const run = (ctx: ExtensionContext, customInstructions: string | undefined, label: string) => {
+	pi.on("message_end", (event) => {
+		const message = (event as { message?: unknown }).message;
+		if (isToolAdditionRejection(message)) {
+			streak ??= { rejections: 0, compacted: false, noticed: false };
+			streak.rejections++;
+			return;
+		}
+		const ids = relayIdsOfMessage(message);
+		if (ids.length > 0) unanswered = [...unanswered.filter((id) => !ids.includes(id)), ...ids].slice(-NUDGE_RELAYS_MAX);
+		const { role, stopReason } = (message ?? {}) as { role?: unknown; stopReason?: unknown };
+		if (role === "assistant" && stopReason !== "error" && stopReason !== "aborted") {
+			streak = undefined;
+			unanswered = [];
+		}
+	});
+	const run = (ctx: ExtensionContext, customInstructions: string | undefined, label: string, after?: { failed?: string; completed?: () => void }) => {
 		running = customInstructions ?? AUTO;
+		if (streak) streak.compacted = true; // any compaction during a streak is the streak's one
 		const onError = (error: Error) => {
 			finish();
 			failures++;
-			const text = `${label} failed: ${error.message}; ${failures < MAX_AUTO_FAILURES ? "the next settle over the threshold compacts automatically" : `automatic compaction stopped after ${failures} failures, run /compact`}`;
+			const text = `${label} failed: ${error.message}; ${after?.failed ?? (failures < MAX_AUTO_FAILURES ? "the next settle over the threshold compacts automatically" : `automatic compaction stopped after ${failures} failures, run /compact`)}`;
 			notify(ctx, text, "error");
 			// A UI toast is gone after the next repaint; the session must record that context was not reduced.
 			if (ctx.hasUI) pi.sendMessage({ customType: "operator-compact", content: text, display: true }, { deliverAs: "nextTurn" });
@@ -102,11 +136,16 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 					lastCompactAt = new Date().toISOString();
 					status(ctx);
 					notify(ctx, `${label} completed`, "info");
+					after?.completed?.();
 				},
 				onError,
 			});
 		} catch (error) { onError(error instanceof Error ? error : new Error(String(error))); }
 	};
+	const nudge = (rejections: number, relays: string[]) => pi.sendMessage({
+		customType: "operator-compact", display: true,
+		content: `Context was compacted after the provider rejected ${rejections} turn(s) with a \`tool_addition\` 400. ${relays.length > 0 ? `These bridge relays reached context during the failures and were never answered: ${relays.join(", ")}. Answer them now.` : "Continue the current work."}`,
+	}, { deliverAs: "followUp", triggerTurn: true });
 
 	pi.on("agent_settled", (_event, ctx) => {
 		status(ctx);
@@ -117,6 +156,19 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 			return;
 		}
 		if (running) return;
+		// N5: the threshold request would 400 too; compact once per streak, ahead of it.
+		if (streak) {
+			if (!streak.compacted && streakCompactions < MAX_STREAK_COMPACTIONS) {
+				streakCompactions++;
+				const rejections = streak.rejections;
+				const relays = unanswered.slice();
+				run(ctx, undefined, `provider-rejection compaction (${rejections} tool_addition 400s)`, { failed: "not retried in this failure streak; run /compact", completed: () => nudge(rejections, relays) });
+			} else if (!streak.noticed) {
+				streak.noticed = true;
+				notify(ctx, `provider still rejects turns with a tool_addition 400; not compacting again (${streak.compacted ? "this failure streak already compacted" : `${MAX_STREAK_COMPACTIONS} provider-rejection compactions already ran in this process`}): run /compact or restart the operator session`, "error");
+			}
+			return;
+		}
 		const tokens = ctx.getContextUsage()?.tokens;
 		if (tokens === null || tokens === undefined) return;
 		const limit = threshold();
@@ -156,5 +208,5 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 		event.preparation.messagesToSummarize.push({ role: "user", content: instructions, timestamp: Date.now() });
 	});
 
-	return { whenIdle: (fn) => { if (running) deferred.push(fn); else fn(); } };
+	return { whenIdle: (fn) => { if (running) deferred.push(fn); else fn(); }, compacting: () => running !== undefined };
 }

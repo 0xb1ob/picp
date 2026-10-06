@@ -1208,7 +1208,7 @@ An existing `parent.json` with an invalid `compact_at_tokens` disables automatic
 
 Home-local `data/standing-orders.md` is ignored by git. The first `session_start` seeds generic operational orders when the file is absent; home-specific model allowlists, wall-clock values and paused projects belong only in the operator/parent-edited file. Later starts, including rotation, and successful in-place compactions load that file without replacing it. Its full contents are injected beside the memory digest from `data/learnings.md` as hidden `nextTurn` messages; a read or write failure is surfaced rather than silently shortening the orders. Keep authorization in the mandate store. `AGENTS.md` and this contract always win on conflict.
 
-**Operator compaction.** `self_compact` queues the operator's handoff instructions until `agent_settled`, after all model/tool rounds and automatic continuations finish. Threshold requests use the same settled boundary; the threshold is `data/operator.json` `compact_at_tokens`, default 200000 when absent or invalid. A second request is refused while compaction is pending or running; `turn_end` must not start compaction because it would abort the remaining run.
+**Operator compaction.** `self_compact` queues the operator's handoff instructions until `agent_settled`, after all model/tool rounds and automatic continuations finish. Threshold requests use the same settled boundary; the threshold is `data/operator.json` `compact_at_tokens`, default 200000 when absent or invalid. A second request is refused while compaction is pending or running; `turn_end` must not start compaction because it would abort the remaining run. A provider `400` naming `tool_addition` (N5) compacts once per failure streak at `agent_settled`, ahead of the threshold request; a non-error assistant reply ends the streak; a failed streak compaction is not retried in the streak; at most 3 per process, then a notice only; after a streak compaction completes, one follow-up names the bridge relays the failed turns never answered.
 
 **Durable sends** (`src/parent-outbox.ts`, driven by `src/parent-delivery.ts`). Every send is written to
 `parentSendFile(<session file>)` — `state/sessions/cp-parent.sends.json`,
@@ -1319,7 +1319,9 @@ an id-less frame goes through the consumer in memory and is not replayed after a
 `details.relay_ids` — a hand-off is an `emit`; (I4) an acked id never enters
 context again, across restarts; (I5) an unacked id is due unless this process
 emitted it into the current session file — a new process or session, or an idle
-settle with no pending messages, re-emits it; (I6) nothing is retired silently:
+settle with no pending messages, re-emits it; the idle settle re-emits it once
+per id per process and session (picp-75g), and no relay is rechecked, journaled
+or handed off while the operator compacts — the pass after it ends delivers; (I6) nothing is retired silently:
 an escalation no longer open (`superseded: <status>`), one named in a send reply
 (`named in send reply`; a backstop relay keeps today's rule), a send outcome
 already `owner_observed` (`returned in tool result`), and a wake every
