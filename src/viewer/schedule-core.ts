@@ -41,6 +41,20 @@ export const GRANT_TEMPLATE_FORCED_ASK_ON = ["merge", "risk:high"] as const;
 /** Mirrors MANDATE_CHANNELS; tests/viewer-schedules.test.ts pins the three mirrors. */
 export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
 
+/** A pause the scheduler re-mints past; any other pause is the operator's. */
+const GRANT_CAP_PAUSES: readonly unknown[] = ["spend_cap", "token_cap", "job_cap"];
+/**
+ * The one rule for an operator stop on a schedule's pointer grant, shared by the fire path (`pointerRefusal`,
+ * src/schedule-grant.ts) and the Schedules page: a revoke carrying the operator's verified quote (`revoked_by`), or a
+ * pause by anything but a cap. A revoke without one (the system's or the parent's), expired, cap-paused, active or
+ * missing is no stop: the next fire mints a fresh grant.
+ */
+export function operatorStop(grant: { status?: unknown; pause_reason?: unknown; revoked_by?: unknown } | undefined): "revoked" | "paused" | undefined {
+	if (grant?.status === "revoked" && grant.revoked_by) return "revoked";
+	if (grant?.status === "paused" && !GRANT_CAP_PAUSES.includes(grant.pause_reason ?? "")) return "paused";
+	return undefined;
+}
+
 /**
  * A schedule's saved grant bounds, snapshotted from its seed grant at add, move or migration (its approval quotes the
  * seed's own objective verbatim). Every fire mints a fresh fire grant from it (src/schedule-grant.ts).

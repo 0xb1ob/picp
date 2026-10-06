@@ -7,7 +7,7 @@
  */
 import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
-import { nextCronSlot, parseCron, readScheduleFile, type Schedule } from "./schedule-core.ts";
+import { nextCronSlot, operatorStop, parseCron, readScheduleFile, type Schedule } from "./schedule-core.ts";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "./api-types.ts";
 import { listBoards, type BoardWarn } from "./boards.ts";
 import { PR_URL, readMandates } from "./fleet-view.ts";
@@ -31,10 +31,11 @@ function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "
 	}
 }
 
+/** A revoke without the operator's quote (the system's or the parent's) is no stop (`operatorStop`): shown as active. */
 function mandateStatus(grants: Json[], id: string, now: number): ScheduleItem["mandate_status"] {
 	const m = grants.find((g) => g.id === id);
 	if (!m) return "missing";
-	if (m.status === "active") return Date.parse(String(m.expiry)) <= now ? "expired" : "active";
+	if (m.status === "active" || (m.status === "revoked" && !operatorStop(m))) return Date.parse(String(m.expiry)) <= now ? "expired" : "active";
 	return m.status === "paused" || m.status === "revoked" || m.status === "expired" ? m.status : "missing";
 }
 
@@ -104,6 +105,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			...next(schedule, now),
 			mandate_status: mandateStatus(grants, schedule.mandate_id, now),
 			mandate_pause_reason: pauseReason(grants, schedule.mandate_id),
+			grant_stopped: operatorStop(grants.find((g) => g.id === schedule.mandate_id)) !== undefined,
 			history: ledger
 				.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`))
 				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))

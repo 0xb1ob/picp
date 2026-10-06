@@ -8,7 +8,7 @@
  */
 import { isoTimestamp, type JobKind, type Mandate, type MandateDefaults, type ProjectMandateOverride, type ScheduleFire } from "./contracts.ts";
 import type { IssueMandateInput, MandateStore, MandateUsageJob } from "./mandate.ts";
-import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate, type Schedule } from "./viewer/schedule-core.ts";
+import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate, operatorStop, type Schedule } from "./viewer/schedule-core.ts";
 
 export interface Refusal { refusal: string }
 export const refused = <T extends object>(value: T | Refusal): value is Refusal => "refusal" in value;
@@ -18,8 +18,6 @@ export interface MintContext { defaults: MandateDefaults; projectOverride?: Proj
 
 /** Exclusion paths a grant can hold (MandateSchema `exclusions.paths` maxItems). */
 const MAX_EXCLUDED_PATHS = 32;
-/** A pause the scheduler re-mints past; any other pause (the operator's) sticks until the grant is resumed or the schedule moved. */
-const CAP_PAUSES = ["spend_cap", "token_cap", "job_cap"];
 
 /**
  * The seed's bounds as a template, with every normalization named in `notes` (never applied silently): `merge` leaves
@@ -129,19 +127,18 @@ export function liveFireBounds(template: GrantTemplate, context: MintContext, pr
 }
 
 /**
- * Whether the schedule's current grant stops the next fire: only an operator act — a revoke carrying the operator's
- * verified quote (`revoked_by`, `cp_mandate revoke operator_quote`), or a pause by anything but a cap — sticks until the
- * schedule is moved to (or re-added under) a fresh schedule grant. A revoke without an operator quote (the system's or
- * the parent's), expired, cap-paused, active or missing (a crash between pointer move and issue) is minted past.
+ * Whether the schedule's current grant stops the next fire: only an operator stop (`operatorStop`, the one predicate
+ * the Schedules page shares) — a revoke carrying the operator's verified quote (`revoked_by`, `cp_mandate revoke
+ * operator_quote`), or a pause by anything but a cap — sticks until the schedule is moved to (or re-added under) a
+ * fresh schedule grant. A revoke without an operator quote (the system's or the parent's), expired, cap-paused, active
+ * or missing (a crash between pointer move and issue) is minted past.
  */
 export function pointerRefusal(grant: Mandate | undefined): string | undefined {
-	if (!grant) return undefined;
+	const stop = operatorStop(grant);
+	if (!grant || !stop) return undefined;
 	const resume = "cp_schedule move it to a fresh schedule grant (or remove and re-add it) to resume";
-	if (grant.status === "revoked" && grant.revoked_by) return `${grant.id} was revoked by the operator (${grant.revoked_by.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`;
-	if (grant.status === "paused" && !CAP_PAUSES.includes(grant.pause_reason ?? "")) {
-		return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
-	}
-	return undefined;
+	if (stop === "revoked") return `${grant.id} was revoked by the operator (${grant.revoked_by?.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`;
+	return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
 }
 
 export interface MintPorts {

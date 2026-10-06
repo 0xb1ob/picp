@@ -15,10 +15,6 @@ export function triggerText(s: ScheduleItem): string {
  return t.type === "cron" ? `cron ${t.cron} (${t.tz})` : `watch ${t.script_path} every ${t.every_seconds} s, fires on ${t.on === "changed" ? "changed output" : "exit 0"}`;
 }
 
-/** Every fire mints past an expired, missing or cap-paused grant; only an operator revoke or pause stops it (src/schedule-grant.ts). */
-export function grantStopped(s: ScheduleItem): boolean {
- return s.mandate_status === "revoked" || (s.mandate_status === "paused" && !["spend_cap","token_cap","job_cap"].includes(s.mandate_pause_reason ?? ""));
-}
 
 function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) {
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
@@ -28,7 +24,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
   <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>
   {control && <ScheduleControls s={s} control={control}/>}
   {s.grant_template ? <>
-   <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{grantStopped(s) ? <strong> · fires are refused while this grant is {s.mandate_status}: resume it, or move the schedule to a fresh schedule grant</strong> : " · each fire mints a fresh grant"}</p>
+   <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: resume it, or move the schedule to a fresh schedule grant</strong> : " · next fire mints a fresh grant"}</p>
    <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
   </> : <p class="job-meta">Grant <code>{s.mandate_id}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: move the schedule to a fresh schedule grant</strong></p>}
   <p class="job-meta">Each fire records a <code>{s.job.kind}</code>/<code>{s.job.delivery}</code> job “{s.job.title}”; its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>

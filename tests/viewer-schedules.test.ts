@@ -50,9 +50,11 @@ function fixture(t: { after(fn: () => void): void }, schedules?: string): Viewer
 	const stateDir = join(home.path, LAYOUT.state);
 	mkdirSync(join(stateDir, "mandates"), { recursive: true });
 	if (schedules !== undefined) writeFileSync(join(stateDir, "schedules.json"), schedules);
-	const mandate = (id: string, status: string) => writeFileSync(join(stateDir, "mandates", `${id}.json`), JSON.stringify({ id, status, expiry: "2026-12-01T00:00:00Z", issued_at: "2026-09-01T00:00:00Z", projects: ["demo"], spend_cap: { usd: 10 } }));
+	const mandate = (id: string, status: string, extra: Record<string, unknown> = {}) => writeFileSync(join(stateDir, "mandates", `${id}.json`), JSON.stringify({ id, status, expiry: "2026-12-01T00:00:00Z", issued_at: "2026-09-01T00:00:00Z", projects: ["demo"], spend_cap: { usd: 10 }, ...extra }));
 	mandate("md-live1", "active");
 	mandate("md-paus1", "paused");
+	mandate("md-prev1", "revoked", { revoked_at: "2026-09-27T00:00:00Z" }); // the parent's revoke: no operator quote
+	mandate("md-oprv1", "revoked", { revoked_at: "2026-09-27T00:00:00Z", revoked_by: { operator_quote: "revoke the triage grant", decided_by: "operator-quote" } });
 	writeFileSync(join(home.path, ".pi-command-post", "jobs.json"), JSON.stringify({ jobs: [
 		{ id: "cp-fire1", title: "Digest (weekly digest 2026-09-14T04:00Z)", status: "closed", close_reason: "answered", labels: ["schedule:sch-aaaaaa", "delivery:answer"], created_at: "2026-09-14T04:00:10Z" },
 		{ id: "cp-fire2", title: "Digest (weekly digest 2026-09-21T04:00Z)", status: "open", labels: ["schedule:sch-aaaaaa"], created_at: "2026-09-21T04:00:10Z" },
@@ -184,9 +186,35 @@ test("fire grant template: validates (no merge, merge and risk:high always asked
 	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
 	const html = screen(data);
 	assert.match(html, /Fire grant <code>md-paus1<\/code> · paused \(operator\)<strong> · fires are refused while this grant is paused: resume it, or move the schedule to a fresh schedule grant/);
-	assert.match(html, /Fire grant <code>md-live1<\/code> · active · each fire mints a fresh grant/);
+	assert.match(html, /Fire grant <code>md-live1<\/code> · active · next fire mints a fresh grant/);
 	assert.match(html, /class="job-meta schedule-approval">Template of <code>md-seed1<\/code>: 24 h, \$10, 500000 tokens, job cap 2; allowed plan, implement; asks on merge, risk:high\. Approved .*“Yes, triage\. long-unbroken/);
 	assert.doesNotMatch(html, /no grant template/);
+});
+
+/** The Schedules page for one manual schedule whose fire grant pointer is `mandate_id`, server-rendered. */
+async function renderPointer(t: { after(fn: () => void): void }, mandate_id: string): Promise<{ item: SchedulesResponse["schedules"][number]; html: string }> {
+	const schedule = { id: "sch-ffffff", name: "triage", project: "demo", mandate_id, trigger: { type: "manual" }, job: { title: "Triage", kind: "research", delivery: "answer" }, enabled: true, created_at: "2026-09-01T00:00:00Z", grant_template: template };
+	const data = schedulesView(fixture(t, file(schedule)), () => {}, NOW);
+	const built = await build({
+		stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules} from "./viewer-app/screens/Schedules.tsx"; export const screen=d=>render(h(Schedules,{data:d}));', loader: "tsx", resolveDir: REPO_ROOT },
+		bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" },
+	});
+	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
+	return { item: data.schedules[0]!, html: screen(data) };
+}
+
+test("Schedules page: a pointer the parent or system revoked (no operator quote) shows active, next fire mints a fresh grant", async (t) => {
+	const { item, html } = await renderPointer(t, "md-prev1");
+	assert.deepEqual([item.mandate_status, item.grant_stopped], ["active", false], "operatorStop: no stop, the fire path mints past it");
+	assert.match(html, /Fire grant <code>md-prev1<\/code> · active · next fire mints a fresh grant/);
+	assert.doesNotMatch(html, /fires are refused/);
+});
+
+test("Schedules page: a pointer the operator revoked (revoked_by, their quote) shows stopped, as the fire path refuses it", async (t) => {
+	const { item, html } = await renderPointer(t, "md-oprv1");
+	assert.deepEqual([item.mandate_status, item.grant_stopped], ["revoked", true]);
+	assert.match(html, /Fire grant <code>md-oprv1<\/code> · revoked<strong> · fires are refused while this grant is revoked: resume it, or move the schedule to a fresh schedule grant<\/strong>/);
+	assert.doesNotMatch(html, /next fire mints a fresh grant/);
 });
 
 test("schedules view: an answer is read only from the job's own artifact dir; a path outside it is refused", (t) => {
