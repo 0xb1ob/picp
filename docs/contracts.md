@@ -3725,7 +3725,9 @@ them.
 
 Persisted at `state/mandates/<id>.json`. Written only by `cp_mandate`
 (`issue|pause|resume|revoke|show|raise_tokens|preapprove_risk|supersede_stale|defaults_show|defaults_set`), plus the
-risk:high gate's pre-approval audit rows (`risk_preapproved`, see *Operator risk pre-approval* below). `evaluateAuthority`
+risk:high gate's pre-approval audit rows (`risk_preapproved`, see *Operator risk pre-approval* below), plus the
+scheduler's per-fire grants of a `refire` schedule (*Refire schedules*, schedules S3: `schedule_fire` set, minted from
+an operator-approved template inside the fire lane). `evaluateAuthority`
 is pure: given a pending checkpoint (kind, job, project, routing `risk`/`scope`,
 artifact hash) and the mandates on disk it returns `permitted (mandate id,
 clause)` or `not permitted (reason)`.
@@ -3753,6 +3755,13 @@ scheduled job. So a schedule grant never covers, counts or recommends unrelated 
 schedule's ready jobs), and a project-wide grant's caps and parallelism never count a scheduled run. Both dispatch
 paths write the fleet record's `schedule_id` (`^sch-[0-9a-f]{6}$`) from the ledger job's `schedule:` label; an
 unscheduled record carries none.
+
+**Refire fire grants (schedules S3).** A grant the scheduler minted for one Run now of a `refire` schedule (see
+*Refire schedules* under *Schedules*) is an ordinary schedule grant plus `schedule_fire`: `schedule_id`,
+`seed_mandate_id`, `previous_mandate_id`, `fired_at`, the template's `approval` (the operator's verbatim quote,
+`decided_by`, `approved_at`, delegation provenance) and the fire's `trigger` (`dashboard` with `request_id`/`peer`, or
+`cp_schedule` with the verbatim run_now `operator_quote`, `decided_by`, `source_sha`, provenance). It is evaluated
+exactly like any grant — nothing here adds a permission; its bounds were re-evaluated at mint.
 
 **Caps count what covered jobs spend after the grant is issued.** `MandateStore.issue(input, jobs)` records
 `usage_baseline` on the new grant: one entry per fleet job it covers (whatever its phase, zero-usage ones included),
@@ -5908,7 +5917,8 @@ restarts cron slot evaluation at the enable time; `disable` and `remove` are nev
 fire (see Schedules; the job's notes name the request id and its `peer`), whose job goes to the schedule runner (answer/board/local) or the `cp-schedule` wake
 (pr/pipeline) exactly like a slot fire — or, for a parent-expanded schedule, the deferred anchor and the expansion wake.
 The parent's own route to the same fire is `cp_schedule run_now`, which needs a verbatim, single-use operator quote
-naming the schedule (see Schedules).
+naming the schedule (see Schedules). On a `refire` schedule both routes mint the fire's grant first (*Refire
+schedules*); `remove` also revokes that schedule's current grant, and its outcome reason says so.
 
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the route and refuses queued requests at
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
@@ -7275,7 +7285,7 @@ not recorded: <id> is not a schedule grant …` (the schedule's `last_skip`, log
 by the parent; no job is created). To resume it the
 operator issues a fresh grant with `cp_mandate issue … schedule_grant:true`, then
 `cp_schedule remove` and `add` the schedule under it — a saved schedule's
-`mandate_id` is never rewritten in place. The scheduler evaluates grants at second precision; `MandateStore`
+`mandate_id` is never rewritten in place, except by a `refire` schedule's own fire (*Refire schedules* below). The scheduler evaluates grants at second precision; `MandateStore`
 normalizes any instant it is handed. A fire only records an ordinary ledger job — title plus the slot,
 label `schedule:<id>`, notes naming the schedule and mandate — and wakes the
 parent with `cp-schedule`; dispatch stays `cp_next`/`cp_dispatch`, so job caps,
@@ -7299,7 +7309,8 @@ operator's words: it is refused, naming the cause and creating no job, unless th
 session holds the parent lock, the schedule exists and is enabled, the quote is
 found verbatim in an operator message (`requireOperatorQuote`; a main-session
 delegated send is accepted and recorded `operator-delegated` with its send id and
-rule), the quote names the schedule's id or name (case-insensitive), and that
+rule), the quote names the schedule's id (case-sensitive) or name (case-insensitive) as a whole token — no letter,
+digit or `_` directly before or after it, so `nightly` inside `nightlyish` names nothing (S3) — and that
 quote's source message has not already authorized a run now of this schedule.
 Single use is recorded on the fired job: its notes say `run now via cp_schedule
 (<tool call id>) … authorized by <decided_by>; run-now quote sha <12 hex>` (sha256
@@ -7333,6 +7344,33 @@ only way to mint a schedule-grant job is a grant-checked Run now (fan-out is
 idempotent: titles carry the anchor id and create dedupes on project + title).
 `state/schedules.json` may now hold `trigger.type: "manual"` and `job.skill`; an
 older binary reads the whole file as invalid (see CHANGELOG, Downgrade).
+
+**Refire schedules (schedules S3).** `cp_schedule add … manual:true refire:true approval_quote:<verbatim>` (manual
+only; cron and watch are refused, because their fires are unattended) verifies `approval_quote` as an operator quote
+(`requireOperatorQuote`, ≤ 4000 chars; a delegated send is recorded `operator-delegated`) and snapshots the seed grant
+(`mandate_id`, an active schedule grant passing the add checks above) into the schedule's `grant_template`:
+`seed_mandate_id`, `channel`, `objective`, `expiry_hours` (ceil((expiry − issued_at) / 1 h), bounded to 1–168),
+`spend_usd`, `spend_tokens`, `job_cap`, `dispatch_parallelism`, `allowed_actions` (`merge` removed), `ask_on` (`merge`
+and `risk:high` always added), `exclusions`, and `approval` (`operator_quote`, `decided_by`, `approved_at`, provenance).
+Every normalization is named in the add result. A seed with a risk:high pre-approval, `job_ids`, a zero USD or token cap,
+or only `merge` allowed is refused. The template authorizes nothing on its own. **Each Run now** (page or `cp_schedule
+run_now`, with every check above) then, inside the serialized fire lane: refuses on a replayed quote or an open previous
+fire **before** minting anything; sweeps the grants; refuses if the schedule's current grant was revoked, or paused for
+anything but a cap (`spend_cap`, `token_cap`, `job_cap`) — an operator stop sticks until the schedule is removed and
+re-added under a fresh grant; re-evaluates the template against the live home — exclusion paths = template ∪
+`data/mandate-defaults.json` `exclude_paths` ∪ the project override's (over 32 refuses, none dropped), tokens =
+min(template, live `token_ceiling`) with the clamp named, a template-excluded job kind refuses, an unreadable defaults
+file or unregistered project refuses; mints a fresh id, moves the schedule's `mandate_id` to it **before** issuing (so
+`usage_baseline` absorbs every earlier fire's spend and caps apply per fire), issues a schedule grant expiring
+`expiry_hours` after the fire with `schedule_fire` (*Refire fire grants* above), revokes the previous grant, the seed
+and any orphan fire grant of this schedule, and re-checks the new grant with the fire check. A failed issue leaves the
+pointer on an id with no file, which the next fire re-mints. The job's notes say `under fire grant <id> (minted from the
+template approved by <decided_by>)`; the event names the minted grant, its expiry, every note and every revoked grant.
+`cp_schedule enable` re-evaluates the template the same way; `remove` revokes the schedule's current grant (in-flight
+workers are not killed). The Schedules page shows the fire grant (warning only when Run now would be refused) and the
+template with its verbatim approval. `state/schedules.json` may now hold `grant_template` and a grant file
+`schedule_fire`; an older binary reads either file as invalid, so before a downgrade `cp_schedule remove` every refire
+schedule and strip `schedule_fire` from its (revoked) fire grants.
 
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,

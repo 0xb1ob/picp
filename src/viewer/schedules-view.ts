@@ -38,6 +38,11 @@ function mandateStatus(grants: Json[], id: string, now: number): ScheduleItem["m
 	return m.status === "paused" || m.status === "revoked" || m.status === "expired" ? m.status : "missing";
 }
 
+function pauseReason(grants: Json[], id: string): string | null {
+	const m = grants.find((g) => g.id === id);
+	return m?.status === "paused" ? str(m.pause_reason) ?? "operator" : null;
+}
+
 function prUrl(state: ViewerState, id: string, envelope: Json | undefined): string | null {
 	if (!isSafeId(id)) return null;
 	const receipt = str(readObject(join(state.stateDir, "runs", id, "merge.json"))?.pr_url);
@@ -98,6 +103,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			...schedule,
 			...next(schedule, now),
 			mandate_status: mandateStatus(grants, schedule.mandate_id, now),
+			mandate_pause_reason: pauseReason(grants, schedule.mandate_id),
 			history: ledger
 				.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`))
 				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))
