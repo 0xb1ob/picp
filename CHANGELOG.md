@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Foreign-PR CI watch, and cp-pr-review reviewers wait for CI (cp-sch-s5)
+
+A ledger job whose `external_ref` is a PR in its project's registered GitHub repo, and not a PR this home shipped, is now watched by `src/foreign-ci-watch.ts` on the CI watch's tick: `gh api …/pulls/{n}` plus `gh api …/actions/runs?head_sha=` on the base repo (fork PRs included), at most 20 jobs per tick, the CI watch's cadence and backoff. Facts (`ci_green`, `ci_failed`, `pr_merged`, `pr_closed`, `head_moved`) are one operator notice per tick, never a wake-up, row, merge, comment or re-run; a query failure warns once per cause; a 404 stops that job's watch. A research job with a `schedule:` label and a foreign PR is armed by `cp_dispatch` until CI on the head completes (`ForeignCiWaitError`, no blockers), at most 1h after the job was created; its brief then carries a `### Foreign CI` line with the state, `unknown` past the timeout or with the watch off. New state file `state/foreign-ci-watch.json` (`ForeignCiWatchFileSchema`, `LAYOUT.foreignCiWatchFile`). Migration: none.
+
 ### cp_parent ask/answer take an optional thread (cp-xmw2 S2)
 
 `cp_parent answer` and `cp_parent ask` take an optional top-level `thread` (a tag, normalized like `normalizeThreadTag`). An invalid tag is refused before `answers.jsonl` or `asks.jsonl` is written. After a `posted` answer or an opened ask, the bridge files the `ans-`/`ask-` id under that tag in `state/operator/threads.jsonl` (`open` on first use, then `bind`, `by:"bridge"`) through the new `src/operator-threads.ts`; a duplicate `job_id` answer is not filed. A failed bind never undoes the post: the answer text adds `; thread <tag> NOT filed: <error>`, the ask's JSON result carries `thread:{tag,id:null,error}`, and the tool is not an error. Bookkeeping only; the ask journal line and the marker are unchanged. Migration: none.

@@ -169,7 +169,7 @@ export class ArmedDispatches {
 		this.disarm(entry.job_id);
 		const content =
 			outcome === "started"
-				? `ARMED DISPATCH STARTED — ${entry.job_id} (${detail}): its blockers landed (armed at ${entry.armed_at}). Its envelope is the next wake-up.`
+				? `ARMED DISPATCH STARTED — ${entry.job_id} (${detail}): ${entry.blockers.length > 0 ? "its blockers landed" : "its foreign-CI wait ended"} (armed at ${entry.armed_at}). Its envelope is the next wake-up.`
 				: outcome === "queued"
 					? `ARMED DISPATCH QUEUED — ${entry.job_id} (${detail}): its blockers landed but the spawn cap is full; it starts when a worker slot frees. Do not re-dispatch.`
 					: `ARMED DISPATCH DROPPED: ${detail} — ${entry.job_id}, armed at ${entry.armed_at}. Nothing was dispatched; cp_next decides what runs next.`;

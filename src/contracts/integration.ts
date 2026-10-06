@@ -351,3 +351,64 @@ export const EMPTY_CI_WATCH_FILE: CiWatchFile = {
 export function validateCiWatchFile(value: unknown): ValidationResult<CiWatchFile> {
 	return validate<CiWatchFile>(CiWatchFileSchema, value);
 }
+
+// ---------------------------------------------------------------------------
+// Foreign-PR CI watch (cp-wlhu S5) — state/foreign-ci-watch.json
+// ---------------------------------------------------------------------------
+
+/** The facts the foreign watch reports: the four own-PR facts plus a head that moved. Notify-only, never a wake-up. */
+export const FOREIGN_CI_EVENTS = [...CI_WATCH_EVENTS, "head_moved"] as const;
+export type ForeignCiEvent = (typeof FOREIGN_CI_EVENTS)[number];
+/** At most this many foreign PR jobs are queried per tick: two REST GETs each, against a rate-limited API. */
+export const FOREIGN_CI_MAX_PER_TICK = 20;
+/** Announced keys kept per job. */
+export const FOREIGN_CI_KEEP_ANNOUNCED = 64;
+/**
+ * How long a cp-pr-review reviewer dispatch waits for the PR's CI to complete,
+ * from the job's `created_at` (binding decision es-314c8e c). After it the
+ * dispatch goes ahead and the brief records the CI as "unknown".
+ */
+export const FOREIGN_CI_GATE_TIMEOUT_MS = 3_600_000;
+
+/** One foreign PR job's memory. `announced` is persisted: a fact reported once is history. */
+export const ForeignCiWatchJobSchema = Type.Object(
+	{
+		job_id: JobIdSchema,
+		pr_url: Type.String({ minLength: 1, maxLength: 1000 }),
+		head_sha: Type.Optional(Type.String({ minLength: 7, maxLength: 64 })),
+		/** When `head_sha` was first observed; a moved head resets it. */
+		head_observed_at: Type.Optional(IsoTimestampSchema),
+		/** The CI classification for `head_sha` (`green`/`failed`/`in_progress`/…). */
+		last_ci: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })),
+		failures: Type.Integer({ minimum: 0 }),
+		next_due_at: Type.Optional(IsoTimestampSchema),
+		/** The last query error, bounded; a new cause is reported once. */
+		last_error: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+		/** Why this job is no longer queried (merged, closed, unreadable). */
+		ended: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+		announced: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: FOREIGN_CI_KEEP_ANNOUNCED }),
+	},
+	{ additionalProperties: false },
+);
+export type ForeignCiWatchJob = Static<typeof ForeignCiWatchJobSchema>;
+
+/** `state/foreign-ci-watch.json` — the foreign watch's whole durable state. */
+export const ForeignCiWatchFileSchema = Type.Object(
+	{
+		schema_version: Type.Integer({ minimum: 1 }),
+		updated_at: IsoTimestampSchema,
+		jobs: Type.Array(ForeignCiWatchJobSchema),
+	},
+	{ additionalProperties: false },
+);
+export type ForeignCiWatchFile = Narrow<Static<typeof ForeignCiWatchFileSchema>, "jobs", ForeignCiWatchJob[]>;
+
+export const EMPTY_FOREIGN_CI_WATCH_FILE: ForeignCiWatchFile = {
+	schema_version: SCHEMA_VERSION,
+	updated_at: "1970-01-01T00:00:00Z",
+	jobs: [],
+};
+
+export function validateForeignCiWatchFile(value: unknown): ValidationResult<ForeignCiWatchFile> {
+	return validate<ForeignCiWatchFile>(ForeignCiWatchFileSchema, value);
+}

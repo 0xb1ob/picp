@@ -35,6 +35,8 @@ export interface Layout {
 	answerCardsFile: string;
 	/** What the CI/PR watcher has already observed and announced (cp-e2d). */
 	ciWatchFile: string;
+	/** What the foreign-PR CI watch has observed about PRs this home did not ship (cp-wlhu S5). */
+	foreignCiWatchFile: string;
 	/** `cp_dispatch` requests refused only by the spawn cap, drained FIFO by the lock owner (cp-itl4 4b-2). */
 	dispatchQueueFile: string;
 	/** The one infra-only CI rerun claimed per job + head (unload-parent PR2, src/ci-infra-rerun.ts). */
@@ -133,6 +135,7 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		wakeupsFile: `${state}/wakeups.json`,
 		answerCardsFile: `${state}/answer-cards.json`,
 		ciWatchFile: `${state}/ci-watch.json`,
+		foreignCiWatchFile: `${state}/foreign-ci-watch.json`,
 		dispatchQueueFile: `${state}/dispatch-queue.json`,
 		ciRerunsFile: `${state}/ci-reruns.json`,
 		armedDispatchFile: `${state}/armed-dispatches.json`,

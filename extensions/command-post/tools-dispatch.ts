@@ -212,7 +212,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					}
 					refreshWidget(ctx);
 					return {
-						content: [{ type: "text", text: `${armed.rearmed ? "re-armed" : "armed"}: ${params.job_id} starts when ${error.blockers.join(", ")} land(s); every gate re-runs then, and the outcome arrives as a wake-up — do not re-dispatch` }],
+						content: [{ type: "text", text: `${armed.rearmed ? "re-armed" : "armed"}: ${error.blockers.length > 0 ? `${params.job_id} starts when ${error.blockers.join(", ")} land(s)` : error.message}; every gate re-runs then, and the outcome arrives as a wake-up — do not re-dispatch` }],
 						details: { state: "armed", job_id: params.job_id, blockers: error.blockers, rearmed: armed.rearmed },
 					};
 				}

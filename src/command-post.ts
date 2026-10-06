@@ -14,6 +14,7 @@ import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { ghCiConfigured } from "./ci-configured.ts";
 import { CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
+import { ForeignCiWatch, type ForeignCiTick, ghForeignRuns } from "./foreign-ci-watch.ts";
 import {
 	buildDecisionContext,
 	type BuildDecisionContextOptions,
@@ -67,7 +68,7 @@ import { assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDur
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
-import { MandateStore } from "./mandate.ts";
+import { githubRepoFromCloneUrl, MandateStore } from "./mandate.ts";
 import { memoLogin, resolveMainCiScope } from "./main-ci.ts";
 import { EscalationStore } from "./escalation.ts";
 import { Gate, type GateRequest, type GateStart } from "./gate.ts";
@@ -300,6 +301,8 @@ export class CommandPost {
 	 * every mode (TUI and `pi --mode rpc`), including when `hasUI` is false.
 	 */
 	readonly ciWatch: CiWatch;
+	/** cp-wlhu S5: CI facts about PRs this home did not ship (notify-only), and the cp-pr-review reviewer dispatch gate. */
+	readonly foreignCi: ForeignCiWatch;
 	/**
 	 * cp-b5eg: what the status block has already reported under Shipped, per
 	 * session. Persisted rather than held in the extension's activation closure,
@@ -658,6 +661,16 @@ export class CommandPost {
 				this.continuation.onCi(jobId, observation);
 			},
 		});
+		// cp-wlhu S5: read-only GETs against registered project repos; evidence, never authorization.
+		this.foreignCi = new ForeignCiWatch({
+			home: options.home,
+			jobs: () => this.ledger().read().jobs,
+			ownPrUrls: () => this.fleet.list().flatMap((record) => (record.receipts ?? []).flatMap((receipt) => (receipt.kind === "pr" && receipt.url ? [receipt.url] : []))),
+			repoOf: (project) => githubRepoFromCloneUrl(this.registry.get(project)?.clone_url ?? ""),
+			pr: async (target) => ghPrRest({ cwd: this.registry.pathOf(target.project) })(target.url),
+			runs: async (owner, repo, sha) => ghForeignRuns({ cwd: options.home })(owner, repo, sha),
+			disabled: () => this.ciWatch.disabled,
+		});
 	}
 
 	/**
@@ -715,6 +728,11 @@ export class CommandPost {
 	 */
 	async ciTick(): Promise<CiWatchTick> {
 		return this.ciWatch.tick();
+	}
+
+	/** cp-wlhu S5: one pass of the foreign-PR CI watch. Its facts are notified, never sent as a wake-up. */
+	async foreignCiTick(): Promise<ForeignCiTick> {
+		return this.foreignCi.tick();
 	}
 
 	/** jje.2: a CI/PR watch tick that threw is journaled durably (state/wakeups.json), once per cause. */
@@ -1134,7 +1152,11 @@ export class CommandPost {
 	async dispatch(request: DispatchRequest): Promise<DispatchResult | ScriptDispatchResult> {
 		assertNotDraining(this.home, "dispatch");
 		const dispatcher = this.dispatcher();
-		return (await this.ledger().show(request.jobId)).script ? dispatcher.dispatchScript(request) : dispatcher.dispatch(request);
+		const job = await this.ledger().show(request.jobId);
+		if (job.script) return dispatcher.dispatchScript(request);
+		// cp-wlhu S5: a cp-pr-review reviewer waits (armed) for its PR's CI, bounded; open blockers are reported first.
+		const gate = (await this.ledger().blockersOf(job.id)).length > 0 ? undefined : this.foreignCi.gate(job);
+		return dispatcher.dispatch(gate ? { ...request, foreignCi: gate.line } : request);
 	}
 
 	/**

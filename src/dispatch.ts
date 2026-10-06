@@ -301,6 +301,7 @@ export interface DispatchRequest {
 	wallClockSeconds?: number;
 	/** Per-dispatch tool-start cap; home/env default otherwise. */
 	toolCallCap?: number;
+	/** cp-wlhu S5: the foreign-CI line `CommandPost.dispatch`'s reviewer gate computed; snapshotted into the brief, never stored. */ foreignCi?: string;
 }
 export interface DispatchResult {
 	job_id: string;
@@ -615,7 +616,7 @@ export class Dispatcher {
 			// --- 5. brief and shared reference snapshot ----------------------
 			const beadsDb = options.ledger.beadsDb(labels.project);
 			const references = await referencedMaterial({ task: task.forInference, externalRef: issue.external_ref, prefix: options.ledger.read().prefix,
-				clone, worktree: lease.path, home: options.home, exec: options.referenceExec, ...(beadsDb ? { beadsDb } : {}) });
+				clone, worktree: lease.path, home: options.home, exec: options.referenceExec, ...(beadsDb ? { beadsDb } : {}), ...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
 			const originalTask = task.forInference + references;
 			const runDir = join(options.home, paths.runDir(issue.id));
 			mkdirSync(runDir, { recursive: true });
