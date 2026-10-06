@@ -241,6 +241,27 @@ test("hitting the spend cap pauses, refuses a new dispatch, and escalates once",
 	assert.match(store.show(grant.id, jobs), /spend_cap/);
 });
 
+test("MandateStore writes every instant it is handed at second precision (2026-10-06T00:05Z)", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path, { now: () => new Date("2026-07-01T07:00:20.789Z") });
+	const issued = issue(store, { at: "2026-07-01T00:00:20.999Z", expiry: "2026-07-01T07:00:00Z" });
+	assert.equal(issued.issued_at, "2026-07-01T00:00:20Z");
+	const expired = store.sweep("2026-07-01T07:00:20.123Z").find((mandate) => mandate.id === issued.id);
+	assert.deepEqual([expired?.status, expired?.escalations[0]?.at], ["expired", "2026-07-01T07:00:20Z"]);
+	// The cap pause (paused_at and its escalation) from a sweep handed a millisecond instant.
+	const held = [{ job_id: "cp-held", project: "demo", phase: "held", usage: { total_tokens: 100, cost_usd: 0.1 } }];
+	const capped = issue(store, { at: "2026-07-01T00:00:00Z", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 20, tokens: 1_000 } }, held);
+	const grown = [{ ...held[0]!, usage: { total_tokens: 5_000, cost_usd: 0.1 } }];
+	const paused = store.sweep("2026-07-01T07:00:20.456Z", grown).find((mandate) => mandate.id === capped.id);
+	assert.deepEqual([paused?.status, paused?.paused_at, paused?.escalations[0]?.at], ["paused", "2026-07-01T07:00:20Z", "2026-07-01T07:00:20Z"]);
+	// pause(id, reason) takes no instant (it stamps from the store clock, truncated before this fix too): the
+	// millisecond-instant pause path is the sweep cap pause asserted above. This pins the clock path only.
+	const operator = issue(store, { at: "2026-07-01T00:00:00Z", expiry: "2026-12-31T00:00:00Z" });
+	assert.equal(store.pause(operator.id).paused_at, "2026-07-01T07:00:20Z");
+	assert.throws(() => store.sweep("garbage"), (error: Error) => error instanceof MandateError && /invalid timestamp/.test(error.message));
+});
+
 test("a new grant counts only usage accrued after issue; only a zero cap is refused, and nothing is written", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

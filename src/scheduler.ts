@@ -18,7 +18,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-import { isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
+import { isoTimestamp, isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
@@ -176,8 +176,9 @@ export class Scheduler {
 		if (known && !known.includes(input.project)) throw new SchedulerError(`unknown project ${JSON.stringify(input.project)}; known: ${known.join(", ") || "(none)"}`);
 		if (this.#ports.archivedProjects?.().includes(input.project)) throw new SchedulerError(archivedRefusal(input.project, "cp_schedule add refused"));
 		const now = this.#now();
-		const mandate = this.#ports.mandates.sweep(now.toISOString(), this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
-		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, now.toISOString(), undefined, this.list());
+		const stamp = isoTimestamp(now); // MandateStore and the grant checks compare at second precision
+		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
+		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
 		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
 		const schedule: Schedule = {
 			id: `sch-${randomBytes(3).toString("hex")}`,
@@ -225,7 +226,7 @@ export class Scheduler {
 		const schedule = this.list().find((entry) => entry.id === id);
 		if (!schedule) throw new SchedulerError(`no schedule ${id}`);
 		const now = this.#now();
-		const at = now.toISOString();
+		const at = isoTimestamp(now);
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
 		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
 		if (refusal) throw new SchedulerError(`enable ${id} refused: ${refusal}`);
@@ -346,8 +347,9 @@ export class Scheduler {
 			? Promise.resolve<ScheduleEvent>({ ...base, outcome: "skipped", reason: `run now not recorded: ${why}`, manual })
 			: this.#skip(schedule, now, `fire at ${minuteIso(slot)} not recorded: ${why}`);
 		if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));
-		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
-		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
+		const stamp = isoTimestamp(now); // `at` keeps last_fire's millisecond format; grants are evaluated at second precision
+		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
+		const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
 		if (refusal) return refuse(refusal);
 		const ledger = this.#ports.ledger();
 		const title = manual !== undefined ? `${schedule.job.title} (${schedule.name} run now ${minuteIso(now)})` : `${schedule.job.title} (${schedule.name} ${minuteIso(slot)})`;

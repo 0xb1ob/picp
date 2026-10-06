@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Fixed: a schedule fire at a millisecond instant is no longer skipped by another grant's expiry (cp-sch-s1-ez12)
+
+The scheduler handed `MandateStore.sweep` and `mandateRefusal` millisecond instants (`now.toISOString()`); when another grant expired in that sweep, its `expired` escalation was written with a millisecond `at`, the mandate schema refused the write (`/escalations/0/at must match pattern`) and the tick recorded that as the schedule's skip (2026-10-06T00:05Z). The scheduler now evaluates grants at second precision (`isoTimestamp`), and `MandateStore` normalizes every instant it is handed (`sweep`, `issue` `at`, cap and operator pauses) to second precision; an unparsable instant is `MandateError("invalid timestamp …")`. `schedules.json` keeps its millisecond `last_checked_at`/`last_fire`/`created_at`. Migration: none.
+
 ### Full transcript entries carry their thread (cp-xmw2 S3)
 
 The operator Full transcript (`GET /api/sessions?view=you&transcript=1`) files each entry under a thread by the turn rule in `src/viewer/thread-turns.ts` (`assignThreads`, run after the decision cards are placed and before the 300-entry window): system entries (bridge relays, compaction, other custom messages) and the `[cp-dashboard inbox — ` replay are `shared: true` and end the current turn; an Operator say/via opens one; an entry takes the thread of its own `dashboard_id`, `ask_id` or `answer_id` from `state/operator/threads.jsonl` (newest bind wins), else its turn's thread (the opener's own, else the first own one in the turn), else none. `cp_parent answer` tool entries now carry `answer_id` (the first `ans-` id in the result text, the posted id or the duplicate's first). `SessionEntry` gains the optional `thread`, `shared` and `answer_id`; the UI ignores them until S5. A missing journal adds nothing; an unreadable one adds the warning `threads unavailable: …` and no thread. Migration: none.

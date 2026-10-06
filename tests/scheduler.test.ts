@@ -90,6 +90,35 @@ test("schedlater S1: a pr schedule's fire still wakes the parent and is cp_next'
 	assert.deepEqual([next.action.kind, next.action.job_id], ["dispatch", event?.job_id]);
 });
 
+test("a fire at a millisecond instant survives another grant expiring in the same sweep (2026-10-06T00:05Z)", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { clock, mandates, ports, grant } = bench(home);
+	const mandate = grant();
+	const other = mandates.issue({ projects: ["demo"], objective: "other", expiry: "2026-07-01T06:30:00Z", spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1, at: "2026-06-01T00:00:00Z" });
+	const scheduler = new Scheduler(ports);
+	await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 7 * * *", tz: "UTC", ...job });
+	clock.now = new Date("2026-07-01T07:00:20.123Z");
+	const [event] = await scheduler.tick();
+	assert.equal(event?.outcome, "fired", event?.reason);
+	const expired = mandates.get(other.id);
+	assert.equal(expired?.status, "expired");
+	assert.equal(expired?.escalations[0]?.at, "2026-07-01T07:00:20Z");
+});
+
+test("run now at a millisecond instant fires while an unrelated grant is expired", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { clock, mandates, ports, grant } = bench(home);
+	const mandate = grant();
+	mandates.issue({ projects: ["demo"], objective: "other", expiry: "2026-07-01T06:30:00Z", spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1, at: "2026-06-01T00:00:00Z" });
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "on demand", project: "demo", mandate_id: mandate.id, manual: true, ...job });
+	clock.now = new Date("2026-07-01T07:00:20.456Z");
+	const event = await scheduler.fireNow(schedule.id, "sc-1");
+	assert.equal(event.outcome, "fired", event.reason);
+});
+
 test("parent start catches up a missed cron slot once, stamped missed <time>", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
