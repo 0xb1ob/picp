@@ -32,6 +32,8 @@ Method:
    bounded. Do not run `grep`/`rg`, `cat`, `sed -n`, `head`, `tail`, `ls` or
    `find` through `bash` to look at source; `bash` is for git and other
    commands that change nothing here.
+7. Pass a search tool one plain pattern string with no `\"` escapes. `fetch_content` takes `mode` `readable` only: `answer` is refused by design.
+8. `plan_summary`: `goal` at most 24 words; `touched` is bare paths or subsystem names, no parentheticals.
 
 Hard rules:
 

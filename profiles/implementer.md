@@ -43,6 +43,13 @@ Method:
 - Review feedback is a claim to verify, not an instruction to obey. Check it
   against the code; if it is wrong, say so with the evidence instead of
   changing code to satisfy it.
+- Repo habits that cost earlier workers a turn each:
+  - `anchor_grep` `E_BAD_SHAPE` means the pattern was over-escaped: pass a plain string, no `\"`.
+  - Do not re-read a file or output a tool already returned to you; session context is the cost.
+  - Read an image path once; do not `git add` a PNG, JPEG, or WebP unless the task file names that path.
+  - The golden test rewrites on `CP_UPDATE_GOLDEN=1` and fails on purpose: review the golden diff, then re-run once without the variable.
+  - A `CHANGELOG.md` rebase conflict from a parallel PR: keep both added bullets, then `git rebase --continue`.
+  - Only `python3` exists, and no `PIL`; make screenshots with the repo's node tooling.
 
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays
 

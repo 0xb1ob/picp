@@ -32,7 +32,7 @@ you started.
 
 Don't chain checks with `&&`/`;` into silence: run them separately, or `|| echo "FAILED: <step>"`.
 
-**Agent isolation.** Any pi/agent run your task needs gets a throwaway agent directory, never `~/.pi` or the installed home (both stay unchanged). Copy only `models.json` into it; add authentication only if the run truly needs it. Create it outside the worktree (`mktemp -d`, mode `0700`) and remove it in a `trap ... EXIT` or `finally`. Name that path and its cleanup in the PR body. Before pushing, audit `git log -p origin/${base}..HEAD` for credential material with `grep -c`, never printing a matched line.
+**Agent isolation.** Any pi/agent run your task needs gets a throwaway agent directory, never `~/.pi` or the installed home. Copy only `models.json` into it; add authentication only if the run truly needs it. Create it outside the worktree (`mktemp -d`, mode `0700`) and remove it in a `trap ... EXIT` or `finally`. Name that path and its cleanup in the PR body. Before pushing, audit `git log -p origin/${base}..HEAD` for credential material with `grep -cEi … || true` (a printed 0 is clean), never printing a matched line.
 
 **Test cadence:** Before and after rebase, run only touched test files with `npm run test:one -- tests/<x>.test.ts` and `npm run typecheck`; never run full `npm test` locally. Nomad CI runs the full suite on the pushed head. A timeout-only failure under load is not evidence; rerun that focused file serially.
 
