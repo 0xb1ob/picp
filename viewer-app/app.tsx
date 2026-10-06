@@ -21,7 +21,7 @@ import { DependencyMap } from "./screens/DependencyMap.tsx";
 import { usePush } from "./use-push.ts";
 import { useAnswersControl } from "./use-answers-control.ts";
 import { useThreads } from "./use-threads.ts";
-export function DetailScreen({current:asked}: {current:Route}) {
+export function DetailScreen({current:asked, workers}: {current:Route; workers?: OverviewResponse["in_flight"] | undefined}) {
  // A defaulted Full transcript the server refuses (403) falls back to Decisions, silently (routes.ts).
  // `refused` never outlives its route: DetailScreen is keyed on `${screen}?${query}`, so a route change remounts it.
  const [refused,setRefused]=useState(false);
@@ -39,7 +39,7 @@ export function DetailScreen({current:asked}: {current:Route}) {
  const control=own && restarting ? {...own,restarting} : own;
  const threads=useThreads(transcript,data?.generated_at ?? null);
  if (current.defaulted && resource.code === 403) return <p role="status">Loading</p>;
- const missing = resource.data ? null : notFoundFor(current, resource.code);
+ const missing = resource.data ? null : notFoundFor(current, resource.code, workers);
  if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
  return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} threads={threads}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
@@ -88,8 +88,9 @@ function OverviewPage({current}: {current:Route}) {
  // Start session on the Overview's "operator session offline" line needs the control status (and its inbox token).
  const control = useControl(current.screen === "overview",resource.data?.generated_at ?? null,[]);
  useSection(current,loaded);
+ const workers = !resource.error && resource.data && "in_flight" in resource.data && resource.data.availability.fleet === "ok" && resource.data.availability.ledger !== "unavailable" ? resource.data.in_flight : undefined;
  return <Shell current={current} awaiting={resource.data && "awaiting" in resource.data ? resource.data.awaiting.count : null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{loaded && " · showing last recorded data"}</p>}
-  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.query ?? ""}`} current={current}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
+  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.query ?? ""}`} current={current} workers={workers}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
  </Shell>;
 }

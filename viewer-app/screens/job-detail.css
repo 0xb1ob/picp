@@ -28,7 +28,7 @@
 .job-sha > code { font-size: 12px; }
 .job-sha .overview-reply { position: relative; flex: 0 0 auto; padding: 0; background: transparent; }
 .job-sha .overview-reply code { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.job-sha .overview-reply button { min-width: 44px; min-height: 44px; height: 44px; padding: 0; font-size: 0; }
+.job-sha .overview-reply button { min-width: 44px; min-height: 44px; height: 44px; padding: 15px; gap: 0; border: 0; background: transparent; font-size: 0; }
 .job-sha .overview-copy-status:empty { display: none; }
 .job-facts a { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; text-decoration: none; }
 .job-fact-wide { grid-column: span 2; }

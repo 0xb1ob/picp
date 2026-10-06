@@ -4,6 +4,8 @@ import { test } from "node:test";
 import type { JobResponse, ViewerJob } from "../src/viewer/api-types.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import { parseHTML } from "linkedom";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const buildResult = await build({
  stdin: {
@@ -118,4 +120,10 @@ test("finished research has no speculative pending stages; an equivalent pass is
  const {document} = parseHTML(detail({phase:"done",review:"pass",review_attempts:0}));
  assert.match(document.querySelector(".job-badge-review")!.textContent!, /pass.*equivalent/);
  assert.doesNotMatch(document.querySelector(".job-badge-review")!.textContent!, /not started/);
+});
+
+
+test("SHA copy target stays 44px with invisible padding around the 14px icon", () => {
+ const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/job-detail.css"),"utf8");
+ assert.match(css,/\.job-sha \.overview-reply button \{[^}]*min-width: 44px;[^}]*min-height: 44px;[^}]*padding: 15px;[^}]*border: 0;[^}]*background: transparent/);
 });
