@@ -108,17 +108,17 @@ export function riskKeywords(text: string, alsoBenign?: (text: string, index: nu
 }
 
 // riskkw-qno: senses only the warning drops (inference and the gate still count them): an audit tag
-// (`delete:`), a named item that is not approved (`P5 (migration) is not approved`), the `gh auth status` probe,
-// and deleting a named source/doc file or explicitly dead code (`Delete src/x.ts`, `delete dead code`; the ponytail batches).
+// (`delete:`), a named item that is not approved (`P5 (migration) is not approved`), and deleting a named source/doc
+// file or explicitly dead code (`Delete src/x.ts`, `delete dead code`; the ponytail batches). The `gh auth status` probe
+// needs no case here: bare `auth` is no risk signal at all (cp-sr-s1-lkgo N4).
 // A bare `delete the files`/`delete code`/`delete docs` still warns: only a path or a dead/stale/unused/obsolete noun is benign.
-// ponytail: four bounded patterns from observed false warnings, not a parser.
+// ponytail: three bounded patterns from observed false warnings, not a parser.
 const DELETE_CODE_OBJECT_RE = /^\s+(?:the\s+)?(?:[\w@./-]+\.(?:tsx?|mjs|js|css|md|sh)\b|(?:dead|stale|unused|obsolete)\s+(?:files?|code|symbols?|docs?|exports?)\b)/i;
 function warningOnlyBenign(text: string, index: number, word: string): boolean {
 	const after = text.slice(index + word.length);
 	if (after.startsWith(":")) return true;
 	if (/^delete$/i.test(word) && DELETE_CODE_OBJECT_RE.test(after)) return true;
-	if (/^[\w\s-]*\)?[*_\s]*(?:is|are)\s+not\s+approved\b/i.test(after)) return true;
-	return /^auth$/i.test(word) && /\bgh\s+$/i.test(text.slice(0, index)) && /^\s+status\b/i.test(after);
+	return /^[\w\s-]*\)?[*_\s]*(?:is|are)\s+not\s+approved\b/i.test(after);
 }
 
 /** A risk somebody set on purpose, never one keyword inference or a default produced. */

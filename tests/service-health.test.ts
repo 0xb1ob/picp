@@ -131,6 +131,24 @@ test("hostProbes on a scratch home: no host is parent down; mid-update suppresse
 	assert.equal(b.pushed.length, 5);
 });
 
+test("N7: one drain_timeout episode pushes fail once even when origin/main moves; a new episode pushes again", async (t) => {
+	const b = bench(t);
+	const probes = hostProbes({ home: b.home, run: () => ({ status: 0, stdout: "" }) });
+	const update = async (value: Record<string, unknown>) => {
+		writeFileSync(join(b.stateDir, "update.json"), JSON.stringify({ phase: "idle", ...value }));
+		await b.run({ update: await probes.update(undefined) });
+	};
+	await update({ last_result: "drain_timeout", to: "aaaa", since: "2026-10-06T12:26:40Z" });
+	await update({ last_result: "drain_timeout", to: "bbbb", since: "2026-10-06T12:26:40Z" });
+	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: update failed"], "same since, new to: one episode, one push");
+	await update({ last_result: "up_to_date", since: "2026-10-06T14:16:43Z" });
+	await update({ last_result: "drain_timeout", to: "bbbb", since: "2026-10-06T15:00:00Z" });
+	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: update failed", "health: update recovered", "health: update failed"]);
+	await update({ last_result: "failed", to: "cccc", since: "2026-10-06T16:00:00Z" });
+	await update({ last_result: "failed", to: "dddd", since: "2026-10-06T16:00:00Z" });
+	assert.equal(b.pushed.length, 5, "other failures stay keyed by to: a new sha pushes again");
+});
+
 test("a push that fails is retried on the next 3 runs, then logged and given up", async (t) => {
 	const b = bench(t);
 	b.failPushes(true);

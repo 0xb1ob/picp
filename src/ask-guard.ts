@@ -14,8 +14,10 @@ export const DETECTED_ASK_PREFIX = "Detected in the main session's reply";
 export const NO_ASK = "NO-ASK";
 const DETECTED_LABEL = "Answer in the operator chat";
 const WINDOW_CHARS = 600;
-// `still waiting` / `your (two) choices` (N10): a choice put to the human with no `?` and no other cue.
-const CUE = /\b(should I|do you want|would you like|which (option|one)|please (confirm|choose|decide)|your call|let me know|still waiting|your (?:\w+ )?choices?)\b/i;
+// `your (two) choices` (N10): a choice put to the human with no `?` and no other cue. `still waiting` is a status line, not a
+// cue: it counts only as a sentence ending in `?` (cp-sr-s1-lkgo N8).
+const CUE = /\b(should I|do you want|would you like|which (option|one)|please (confirm|choose|decide)|your call|let me know|your (?:\w+ )?choices?)\b/i;
+const QUESTION_END = /\?["')\]*_`]*$/;
 const DASHBOARD_ASK_CLICK = /\[cp-dashboard [^\]]*\bask=/;
 
 /** The sentence that asks the human something, from the tail of the final text; fences and `>` quotes never count. */
@@ -25,7 +27,7 @@ export function detectHumanQuestion(text: string): string | undefined {
 	for (const line of prose.slice(-WINDOW_CHARS).split("\n")) {
 		for (const part of line.split(/(?<=[.!?])\s+/)) {
 			const sentence = part.trim();
-			if (sentence && (/\?["')\]*_`]*$/.test(sentence) || CUE.test(sentence))) found = sentence;
+			if (sentence && (QUESTION_END.test(sentence) || CUE.test(sentence))) found = sentence;
 		}
 	}
 	return found;
@@ -62,11 +64,16 @@ export class AskGuard {
 		if (event?.toolName === "cp_parent" && !event.isError && details?.state === "open" && /^ask-/.test(String(details.id))) this.#asked = true;
 	}
 
-	/** First call with a detected question and no ask: one forced continuation. Second: the card, unless the reply is `NO-ASK`. */
+	/**
+	 * First call with a detected question and no ask: one forced continuation. Second: the card, unless the reply is `NO-ASK`.
+	 * A cue sentence with no `?` while an ask is already open is a reminder of that ask, not a new question (N8).
+	 */
 	beforeSettle(text: string, asks: () => OperatorAsks, now = new Date()): { entries?: GuardEntry[]; continue?: boolean; card?: OperatorAsk } | undefined {
 		if (this.#asked || this.#carded) return undefined;
 		if (!this.#nudged) {
-			if (!detectHumanQuestion(text)) return undefined;
+			const question = detectHumanQuestion(text);
+			if (!question) return undefined;
+			if (!QUESTION_END.test(question) && asks().open().length > 0) return undefined;
 			this.#nudged = text;
 			return {
 				entries: [{ type: "custom_message", customType: ASK_GUARD_TYPE, display: false, content: `Your reply asks the human a question but opened no cp_parent ask. Open it now (short question, options, recommendation, context) or reply ${NO_ASK} if it was not a question.` }],

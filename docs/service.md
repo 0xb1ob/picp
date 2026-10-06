@@ -474,7 +474,7 @@ one result in `state/update.json` (its only writer):
 
 Every failure (`failed`, `drain_timeout`, `rolled_back`, `rollback_failed`, `config_invalid`, and
 `fetch_failed` from its third run in a row on) asks cp-daemon for a health run, which pushes exactly once per
-distinct failure (result + target sha) and once on recovery at the next `updated`/`up_to_date`; the
+distinct failure (result + target sha; a `drain_timeout` is one push per episode, result + `since`) and once on recovery at the next `updated`/`up_to_date`; the
 updater itself never pushes. A `rollback_failed` whose reset, npm ci, restart or verify failed (phase `idle`) is sticky: nothing runs until you check the
 checkout and remove `state/update.json`. `/doctor` `service.update` shows on/off and the last result,
 and warns on a failure or on a skip that has lasted over 24 h with `origin/main` ahead.
