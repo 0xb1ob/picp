@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -208,7 +208,7 @@ const STALE = (file: string) =>
 	`[E_STALE_ANCHOR] 1 stale anchor in ${file}: "ReUA". The file changed since read. Call read() on ${file} for fresh anchors.`;
 const INVALID = 'Validation failed for tool "replace":\n  - replacement_lines: must have required properties replacement_lines';
 
-function stubbedToolResultHandler() {
+function stubbedHandlers(): Record<string, (event: unknown) => unknown> {
 	const keys = ["CP_JOB_ID", "CP_KIND", "CP_DELIVERY", "CP_RUN_DIR", "CP_ROLE"];
 	const saved = keys.map((key) => process.env[key]);
 	Object.assign(process.env, {
@@ -229,6 +229,11 @@ function stubbedToolResultHandler() {
 	} finally {
 		keys.forEach((key, i) => (saved[i] === undefined ? delete process.env[key] : (process.env[key] = saved[i])));
 	}
+	return handlers;
+}
+
+function stubbedToolResultHandler() {
+	const handlers = stubbedHandlers();
 	return (toolName: string, input: Record<string, unknown>, text: string, isError = true): string | undefined => {
 		const out = handlers.tool_result?.({ toolName, input, isError, content: [{ type: "text", text }] }) as
 			| { content: Array<{ text: string }> }
@@ -236,6 +241,35 @@ function stubbedToolResultHandler() {
 		return out?.content[0]?.text;
 	};
 }
+
+test("credential guards are blocked at tool_call (N1, N2)", () => {
+	const handlers = stubbedHandlers();
+	const call = (command: string) =>
+		handlers.tool_call?.({ toolName: "bash", input: { command } }) as { block: true; reason: string } | undefined;
+	const copy = call('cp -a ~/.pi-command-post/state ~/.pi-command-post/data "$T/.pi-command-post/"');
+	assert.equal(copy?.block, true);
+	assert.match(copy?.reason ?? "", /never bulk-copies/);
+	const auth = call("gh auth status 2>&1");
+	assert.equal(auth?.block, true);
+	assert.match(auth?.reason ?? "", /gh api user --jq \.login/);
+	assert.equal(call("cp ~/.pi/agent/models.json /tmp/a/models.json"), undefined);
+	assert.equal(call("cp -a ~/.pi-command-post/state/runs/cp-xlax /tmp/a/"), undefined);
+});
+
+test("tool_result handler: bash token shapes are redacted, success or error", () => {
+	// Built at runtime: no literal token shape lives in source.
+	const fake = ["github", "pat", "A".repeat(22), "b".repeat(59)].join("_");
+	const result = stubbedToolResultHandler();
+	assert.equal(result("bash", { command: "gh-ish" }, `Token: ${fake}`, false), "Token: [REDACTED]");
+	const failed = result("bash", { command: "x" }, `oops ${fake}\n\nCommand exited with code 1`) ?? "";
+	assert.match(failed, /Command exited with code 1/);
+	assert.match(failed, /\[REDACTED\]/);
+	assert.ok(!failed.includes(fake));
+	const silent = result("bash", { command: `curl -H "x: ${fake}" host` }, "(no output)\n\nCommand exited with code 1") ?? "";
+	assert.match(silent, /Command: curl -H "x: \[REDACTED\]" host/);
+	assert.ok(!silent.includes(fake));
+	assert.equal(result("bash", { command: "echo hi" }, "hi", false), undefined);
+});
 
 test("tool_result handler: replace/insert are enriched, and the 3rd identical miss on a file appends the re-read line", () => {
 	assert.ok(!("path" in REPLACE_INPUT) && !("path" in INSERT_INPUT));
@@ -1011,6 +1045,76 @@ test("CI-wait guard: a sleep-then-poll bash call is refused, a real command is n
 	assert.match(results[0] ?? "", /head_sha/);
 	assert.ok(!/"conclusion"/.test(results[0] ?? ""), "the poll must never reach GitHub");
 	assert.match(results[1] ?? "", /LEGIT-RAN/, "an ordinary bash call still runs");
+});
+
+test("N2: bash token output is redacted before the session JSONL and the model see it", { timeout: 90_000 }, async (t) => {
+	// Synthetic values only, built at runtime and passed through env: the bash call echoes them.
+	const fakePat = ["github", "pat", "Q".repeat(22), "r".repeat(59)].join("_");
+	const fakeClassic = `${"gh"}${"p_"}${"Z".repeat(36)}`;
+	const provider = await MockProvider.start();
+	const repo = createScratchRepo({ name: "redact", withRemote: false });
+	const home = createScratchHome();
+	const runDir = join(home.path, paths.runDir("cp-redact"));
+	mkdirSync(runDir, { recursive: true });
+	const sessionDir = join(home.path, "sessions");
+	const model = provider.addScript("redact", [
+		{
+			kind: "tool_calls",
+			calls: [{ name: "bash", args: { command: 'echo "Token: $CP_TEST_FAKE_PAT"; echo "classic=$CP_TEST_FAKE_CLASSIC"' } }],
+		},
+		{ kind: "text", text: "done" },
+	]);
+	const agentDir = createAgentDir({ provider });
+	const worker = WorkerProcess.spawn({
+		cwd: repo.path,
+		model,
+		tools: ["report_result", "bash"],
+		extensions: [WORKER_REPORTER_EXTENSION],
+		sessionDir,
+		env: {
+			...agentDir.env,
+			CP_JOB_ID: "cp-redact",
+			CP_KIND: "ship",
+			CP_DELIVERY: "pr",
+			CP_RUN_DIR: runDir,
+			CP_WORKTREE: repo.path,
+			CP_ROLE: "implementer",
+			CP_TEST_FAKE_PAT: fakePat,
+			CP_TEST_FAKE_CLASSIC: fakeClassic,
+		},
+		extraArgs: ["--no-context-files"],
+	});
+	t.after(async () => {
+		await worker.shutdown();
+		agentDir.cleanup();
+		repo.cleanup();
+		home.cleanup();
+		await provider.stop();
+	});
+
+	// tool_execution_update is deliberately not asserted: its streamed partialResult is
+	// pre-hook bash output, the documented gap (docs/storage.md Known gaps).
+	const ends: string[] = [];
+	worker.onEvent((event) => {
+		if (event.type === "tool_execution_end" && event.toolName === "bash") ends.push(JSON.stringify(event.result));
+	});
+
+	await worker.getState(30_000);
+	await worker.prompt("print the token");
+	await worker.waitForSettled(60_000);
+
+	const clean = (text: string, what: string) => {
+		assert.ok(text.includes("[REDACTED]"), `${what} carries [REDACTED]`);
+		assert.ok(!text.includes(fakePat) && !text.includes(fakeClassic), `${what} carries no fake token`);
+	};
+	assert.equal(ends.length, 1);
+	clean(ends[0] ?? "", "tool_execution_end");
+	const sessions = (readdirSync(sessionDir, { recursive: true }) as string[]).filter((f) => f.endsWith(".jsonl"));
+	assert.ok(sessions.length > 0, "a session transcript was written");
+	for (const file of sessions) clean(readFileSync(join(sessionDir, file), "utf8"), file);
+	assert.equal(provider.requests("redact").length, 2);
+	clean(JSON.stringify(provider.requests("redact")[1]?.body.messages ?? null), "the next model request");
+	assert.equal(provider.remaining("redact"), 0);
 });
 
 // ---------------------------------------------------------------------------

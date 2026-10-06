@@ -261,3 +261,9 @@ parent and viewer stopped. `storage.home` flags a home that has not moved.
 4. ~~**Managed-home path doubling.**~~ Closed (cp-daemon v1 P1): an installed
    package now uses the flat standard home `~/.pi-command-post`, and the
    managed `~/.pi/command-post` holds only `operator-targets/`.
+5. **Raw bash output in the run log.** `RunRecorder.pi` (`src/run-artifacts.ts`)
+   logs pi's `tool_execution_update` events verbatim, and their `partialResult`
+   is bash output from *before* the worker-reporter `tool_result` hook redacts
+   token shapes; pi's own `$TMPDIR/pi-bash-*.log` (output over 50 KB/2000
+   lines) is raw too. The model context and the pi session transcript get the
+   redacted text. Whether to stop logging `partialResult` is an open decision.

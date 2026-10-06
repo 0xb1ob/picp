@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Worker credential guards (self-review N1, N2)
+
+- **Bulk home copy, `gh auth`, token redaction:** a worker `cp`/`rsync` whose source is a command-post home in bulk (its root, `state/`, `data/`, `state/sessions` or all of `state/runs`, `--exclude` and glob forms included) is refused at the worker-reporter `tool_call` hook; `models.json`, one named `state/runs/<id>/`, single files and a home that is only the destination stay allowed. `gh auth status` (any flag) and `gh auth token` are refused, pointing at `gh api user --jq .login`. GitHub token shapes in bash results become `[REDACTED]` in the `tool_result` hook, before the model and the pi session transcript see them; the run log's streamed `tool_execution_update` stays raw ([`docs/storage.md`](docs/storage.md) Known gaps).
+
 ### Dashboard v4 design fixes (S1–S12)
 
 The dashboard follows the v4 artboard hierarchy on phone and desktop, with fixture-based before/design/after evidence in [`docs/tui-verification/v4-s1.md`](docs/tui-verification/v4-s1.md) through [`v4-s12.md`](docs/tui-verification/v4-s12.md).
