@@ -35,7 +35,7 @@ const KEEP = [
  /^\.session-pinned-open(?![\w-])/,
  /^\.decision-card-option\.decision-card-recommended(?![\w-])/,
  /^\.shell-count(?![\w-])/,
- /^\.overview-square(?![\w-])/,
+ /^\.overview-square-attention(?![\w-])/,
  /^\.job-question-awaiting(?![\w-])/,
  /^\.session-notice:has\(\.session-awaiting\)/,
  /^\.session-awaiting(?![\w-])/,
@@ -77,4 +77,24 @@ test("amber and coral only on open human decisions and CI that is red", () => {
  assert.equal(allowed(".job-failure"), false);
  assert.equal(allowed(".job-ci-red > span"), true);
  assert.equal(allowed(".overview-dot-ci-red"), true);
+});
+
+test("Needs-you attention comes only from an available open ask", async t => {
+ const {build} = await import("esbuild");
+ const {overview} = await import("../src/viewer/overview-view.ts");
+ const {createScratchHome} = await import("./harness/index.ts");
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const draw=data=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {draw} = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
+ const data = overview({home:home.path,stateDir:join(home.path,".pi-command-post/state")});
+ assert.doesNotMatch(draw(data), /overview-square-attention/);
+ data.availability.asks = "ok"; data.awaiting.count = 1;
+ data.awaiting.items = [{id:"ask-ab",project:"demo",question:"Continue?",created_at:data.generated_at,options:[],recommendation:"Keep",source_escalation:null,job_ids:[],context:null,evidence_paths:[]}];
+ assert.match(draw(data), /class="overview-square overview-square-attention"/);
+ data.availability.asks = "unavailable"; data.awaiting.count = null;
+ assert.doesNotMatch(draw(data), /overview-square-attention/);
+ assert.match(draw(data), /Questions unavailable/);
+ const css = readFileSync(join(REPO_ROOT,"viewer-app/screens/overview-decisions.css"),"utf8");
+ assert.match(css, /\.overview-square \{[^}]*background: var\(--dim\)/);
+ assert.match(css, /\.overview-square-attention \{ background: var\(--amber\); \}/);
 });

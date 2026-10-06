@@ -132,7 +132,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   if(event.type==="review_decided") label=`Review ${nonnegative(payload?.attempt) ?? "-"} · ${verdict==="revise" ? "changes requested" : verdict ?? "unknown"}`;
   if(event.type==="ci_observed") label=({ci_green:"CI green",ci_failed:"CI red",pr_merged:"PR merged",pr_closed:"PR closed unmerged"} as Record<string,string>)[observation ?? ""] ?? "CI observed";
   const meta=[str(payload?.model),str(payload?.reason),str(payload?.head_sha)].filter(Boolean).join(" · ");
-  timeline.push({at:event.ts,label,meta,tone:event.type==="failure" || observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral"});
+  timeline.push({at:event.ts,label,meta,tone:observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral"});
   if(observation==="ci_green" || observation==="ci_failed") seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};
  }
  // ci-watch.json drops a row once the job leaves the watch (merged, closed), so the CI fact falls back to the last recorded CI event for this head, the same source as the timeline.

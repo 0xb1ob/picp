@@ -99,7 +99,7 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
   {data.warnings.length > 0 && <div role="status" class="overview-error">{data.warnings.map(w => <p key={w.section}>{w.section}: {w.message}</p>)}</div>}
   <Health data={data}/>
   <Services data={data} control={control}/>
-  <Block id="awaiting" title={<><span class="overview-square"/>Needs you &middot; {count(data.awaiting.count)}</>}>
+  <Block id="awaiting" title={<><span class={`overview-square${data.availability.asks !== "unavailable" && data.awaiting.items.length ? " overview-square-attention" : ""}`}/>Needs you &middot; {count(data.awaiting.count)}</>}>
    {data.availability.asks === "unavailable" ? <p class="overview-error">Questions unavailable</p> : data.awaiting.items.length ? data.awaiting.items.slice(0,3).map(ask => <a key={ask.id} href="#awaiting" class="overview-line"><code>{ask.id}</code><span class="overview-line-text" title={ask.question}>{ask.question}</span><span class="overview-meta">{ask.project}</span></a>) : <><p class="overview-dependencies-ok"><Icon name="check" size={16}/>Nothing needs you</p><a href="#decided" class="overview-more">{decidedLine(data)} →</a></>}
   </Block>
   {stuck > 0 && <Block title={<>Blocked &amp; failed &middot; {stuck}</>}>

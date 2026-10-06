@@ -35,15 +35,15 @@ export function MoreMenu({control, version = {view:null, error:null}, updatedAt 
   const href = globalThis.location?.href ?? "";
   void navigator.clipboard?.writeText(href).then(() => setCopied("Link copied"), () => setCopied("Couldn't copy the link"));
  };
- return <details class="shell-more" ref={menu} onToggle={e => setOpen(e.currentTarget.open)}>
+ return <>{open && <div class="shell-more-scrim" aria-hidden="true"/>}<details class="shell-more" ref={menu} onToggle={e => setOpen(e.currentTarget.open)}>
   <summary aria-label="More actions" title="More actions"><Icon name="vmore"/>{dot && <span class="shell-more-dot" role="status" aria-label={busy ? "Restart in progress" : "Version alert"}/>}</summary>
   {open && <div class="shell-more-panel">
-   <button type="button" class="shell-more-row" onClick={() => globalThis.location?.reload()}>Refresh now{updatedAt && <small>{stamp(updatedAt)}</small>}</button>
-   <button type="button" class="shell-more-row" onClick={copy}>Copy link to this view</button>
+   <button type="button" class="shell-more-row" onClick={() => globalThis.location?.reload()}><Icon name="refresh" size={18}/><span>Refresh now</span>{updatedAt && <small>{stamp(updatedAt)}</small>}</button>
+   <button type="button" class="shell-more-row" onClick={copy}><Icon name="copy" size={18}/><span>Copy link to this view</span></button>
    <p class="shell-more-status" role="status">{copied ?? ""}</p>
-   <a class="shell-more-row" href="#more">Notifications · {push ? pushShort(push.phase) : "Checking"}</a>
-   <div class="shell-more-version"><span>Viewer</span><VersionBadge state={version} labelled/></div>
-   {control && restartShown(control) && <RestartSession control={control}/>}
+   <a class="shell-more-row" href="#more"><Icon name="notifications" size={18}/><span>Notifications</span><small>{push ? pushShort(push.phase) : "Checking"}</small></a>
+   <div class="shell-more-footer"><div class="shell-more-version"><span>Viewer</span><VersionBadge state={version} labelled/></div>
+   {control && restartShown(control) && <RestartSession control={control}/>}</div>
   </div>}
- </details>;
+ </details></>;
 }
