@@ -6,6 +6,13 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Operator relays and compaction (picp-75g, N5)
+
+- **Relays (picp-75g):** an idle-settle reclaim re-emits an unacked relay at most once per id per consumer and session file, so an id is handed off at most twice before its ack; a new process or session file still re-emits. No relay pass (recheck, journal, hand-off) runs while the operator's own compaction runs; one pass runs when it ends, so a relay that reached context during compaction is never re-injected after it.
+- **Provider rejection (N5):** an assistant turn rejected with a `400` naming `tool_addition` opens a failure streak; the next `agent_settled` compacts once for the streak, ahead of the threshold request, then a follow-up names the bridge relays the failed turns never answered. A good reply ends the streak; a failed streak compaction is not retried; at most 3 per process, then a notice.
+
+Migration: none. No journal line type, schema or `compact_at_tokens` change.
+
 ### Worker credential guards (self-review N1, N2)
 
 - **Bulk home copy, `gh auth`, token redaction:** a worker `cp`/`rsync` whose source is a command-post home in bulk (its root, `state/`, `data/`, `state/sessions` or all of `state/runs`, `--exclude` and glob forms included) is refused at the worker-reporter `tool_call` hook; `models.json`, one named `state/runs/<id>/`, single files and a home that is only the destination stay allowed. `gh auth status` (any flag) and `gh auth token` are refused, pointing at `gh api user --jq .login`. GitHub token shapes in bash results become `[REDACTED]` in the `tool_result` hook, before the model and the pi session transcript see them; the run log's streamed `tool_execution_update` stays raw ([`docs/storage.md`](docs/storage.md) Known gaps).

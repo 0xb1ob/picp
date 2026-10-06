@@ -267,8 +267,10 @@ export default function (pi: ExtensionAPI): void {
 	};
 	// cp-6fyl A: relays come from the host's on-disk outbox (a frame is only a poke), are acked at context entry,
 	// and wait out the operator's own turn and any compaction (a turn started mid-compaction races the summarizer).
-	// A hand-off still waiting on compaction counts as pending: an idle settle must not re-emit it.
+	// picp-75g: a whole relay pass is held while the operator compacts (no recheck, journal or hand-off), and one
+	// poke runs when it ends. A hand-off still waiting on compaction counts as pending: an idle settle must not re-emit it.
 	let deferredRelays = 0;
+	let relayPokeQueued = false;
 	const relayFiles = () => {
 		const target = backstopTarget();
 		const layout = layoutForHome(target.mode, target.home);
@@ -293,6 +295,15 @@ export default function (pi: ExtensionAPI): void {
 			});
 		},
 		status: (line) => setStatusLine(sessionCtx, "cp-relays", line),
+		busy: () => {
+			if (!compaction.compacting()) return false;
+			if (!relayPokeQueued) {
+				relayPokeQueued = true;
+				setStatusLine(sessionCtx, "cp-relays", "cp-relays: held while the operator compacts");
+				compaction.whenIdle(() => { relayPokeQueued = false; consumer.poke(); });
+			}
+			return true;
+		},
 	});
 	// A frame without an id is from a host older than the outbox: delivered through the same consumer, in memory.
 	const onRelay = (relay: BridgeRelay, relayId?: string) => (relayId ? consumer.poke() : consumer.direct(relay, relayIdOf(relay)));

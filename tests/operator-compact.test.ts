@@ -7,7 +7,10 @@ import { compact, type CompactOptions, type ExtensionAPI, type ExtensionContext,
 import { createAssistantMessageEventStream, type Context } from "@earendil-works/pi-ai";
 import bridge, { saveOperatorTarget } from "../extensions/cp-bridge/index.ts";
 import { CP_BRIDGE_EXTENSION, MockProvider, createAgentDir, startRpc } from "./harness/index.ts";
-import { LAYOUT } from "../src/contracts.ts";
+import { LAYOUT, layoutForHome } from "../src/contracts.ts";
+import { isToolAdditionRejection } from "../src/operator-compact.ts";
+import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
+import { RELAY_UNSEEN_SECONDS, hostProbes } from "../src/service/health.ts";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
 type Tool = { execute: (id: string, params: { instructions: string }, signal: undefined, update: undefined, ctx: ExtensionContext) => Promise<unknown> };
@@ -187,6 +190,135 @@ test("bridge wakes that arrive during a compaction wait for it to end", async (t
 	assert.deepEqual(woke, ["idle"]);
 	compacts[0]?.onError?.(new Error("cancelled"));
 	assert.deepEqual(woke, ["idle", "a", "b"]);
+});
+
+test("picp-75g: a relay handed off before a compaction is not handed off again after it (s12 L2748/L2755)", async (t) => {
+	const f = setup(t);
+	Object.assign(f.ctx, { isIdle: () => true, hasPendingMessages: () => false });
+	const bridged = () => f.messages.filter(({ message }) => (message as { customType?: string }).customType === "cp-bridge");
+	new OperatorRelayOutbox(operatorRelayOutboxFile(join(f.home, layoutForHome("multi", f.home).state)))
+		.enqueue({ kind: "wake", stale: false, text: "[picp] cp-demo: wake", receipt: { level: null, reached: [] }, paths: [] }, "h");
+	await f.emit("agent_settled");
+	assert.equal(bridged().length, 1, "hand-off #1");
+	f.tokens(270000);
+	await f.call(instructions);
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1, "the queued self_compact starts");
+	assert.equal(bridged().length, 1, "nothing handed off while it runs");
+	await f.emit("message_start", { message: { role: "custom", customType: "cp-bridge", details: (bridged()[0]!.message as { details?: unknown }).details } });
+	f.compacts[0]?.onComplete?.({ summary: "done", firstKeptEntryId: "kept", tokensBefore: 270000 });
+	assert.equal(bridged().length, 1, "hand-off #1 reached context during compaction: never re-injected after it");
+});
+
+test("a compaction that never ends holds relays unjournaled, so the cp-health relay check still sees them unacked", async (t) => {
+	const f = setup(t);
+	Object.assign(f.ctx, { isIdle: () => true, hasPendingMessages: () => false });
+	const state = join(f.home, layoutForHome("multi", f.home).state);
+	f.tokens(270000);
+	await f.call(instructions);
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1);
+	const id = new OperatorRelayOutbox(operatorRelayOutboxFile(state))
+		.enqueue({ kind: "wake", stale: false, text: "[picp] cp-demo: wake", receipt: { level: null, reached: [] }, paths: [] }, "h");
+	await f.emit("agent_settled");
+	assert.equal(f.messages.filter(({ message }) => (message as { customType?: string }).customType === "cp-bridge").length, 0, "held while compacting");
+	assert.match(f.statuses.join("\n"), /cp-relays: held while the operator compacts/);
+	const probe = await hostProbes({ home: f.home, now: () => new Date(Date.now() + RELAY_UNSEEN_SECONDS * 1_000) }).relay(undefined) as { ok: boolean; key?: string };
+	assert.equal(probe.ok, false, "unacked and unjournaled: the relay health check alarms at its 600 s window");
+	assert.equal(probe.key, `relay:${id}`);
+});
+
+// N5 (s17 L775): the provider's own rejection text.
+const REJECTED = { role: "assistant", stopReason: "error", errorMessage: "400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.684.content.0: `tool_addition` blocks require anthropic-beta: inline-tools-2026-09-15\"}}" };
+const GOOD = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }] };
+const ofType = (f: ReturnType<typeof setup>, type: string) => f.messages.filter(({ message }) => (message as { customType?: string }).customType === type);
+
+test("N5: isToolAdditionRejection matches only an assistant error naming tool_addition with a 400", () => {
+	assert.equal(isToolAdditionRejection(REJECTED), true);
+	assert.equal(isToolAdditionRejection({ ...REJECTED, errorMessage: "messages.4: `tool_addition` blocks require anthropic-beta (invalid_request_error)" }), true);
+	assert.equal(isToolAdditionRejection({ ...REJECTED, role: "user" }), false);
+	assert.equal(isToolAdditionRejection({ ...REJECTED, stopReason: "stop" }), false);
+	assert.equal(isToolAdditionRejection({ ...REJECTED, errorMessage: "529 overloaded" }), false);
+	assert.equal(isToolAdditionRejection({ ...REJECTED, errorMessage: "tool_addition blocks are not supported" }), false);
+	assert.equal(isToolAdditionRejection(undefined), false);
+});
+
+test("N5: a tool_addition 400 compacts once per failure streak, ahead of the threshold request", async (t) => {
+	const f = setup(t);
+	f.tokens(250000);
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1);
+	assert.equal(f.compacts[0]?.customInstructions, undefined, "the handoff-enriched default summarizer");
+	assert.equal(ofType(f, "operator-compact-request").length, 0, "the threshold request would 400 too");
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1, "never a second while it runs");
+	f.compacts[0]?.onComplete?.({ summary: "done", firstKeptEntryId: "kept", tokensBefore: 250000 });
+	const nudges = ofType(f, "operator-compact");
+	assert.equal(nudges.length, 1);
+	assert.deepEqual(nudges[0]?.options, { deliverAs: "followUp", triggerTurn: true });
+	assert.match(nudges[0]!.message.content, /rejected 1 turn\(s\) with a `tool_addition` 400/);
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1, "the streak already compacted");
+	assert.equal(f.notices.filter((text) => /not compacting again/.test(text)).length, 1, "one notice per streak");
+	assert.equal(ofType(f, "operator-compact-request").length, 0);
+	await f.emit("message_end", { message: GOOD });
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 2, "a good reply ended the streak; a new one compacts once");
+});
+
+test("N5: other errors, aborts, user and custom messages neither open nor end a streak", async (t) => {
+	const f = setup(t);
+	await f.emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "529 overloaded" } });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 0);
+	await f.emit("message_end", { message: REJECTED });
+	for (const message of [{ role: "assistant", stopReason: "aborted" }, { role: "user", content: "hi" }, { role: "custom", customType: "cp-bridge", details: { relay_ids: ["wake:x"] } }]) {
+		await f.emit("message_end", { message });
+	}
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1, "the streak survived");
+});
+
+test("N5: a failed streak compaction is not retried in the streak", async (t) => {
+	const f = setup(t);
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	f.compacts[0]?.onError?.(new Error("offline"));
+	assert.match(f.notices.join("\n"), /provider-rejection compaction \(1 tool_addition 400s\) failed: offline; not retried in this failure streak/);
+	assert.equal(ofType(f, "operator-compact").filter(({ message }) => /tool_addition` 400\./.test(message.content)).length, 0, "no nudge after a failure");
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1);
+	assert.match(f.notices.join("\n"), /not compacting again \(this failure streak already compacted\)/);
+});
+
+test("N5: streak compactions stop at 3 per process", async (t) => {
+	const f = setup(t);
+	for (let i = 0; i < 3; i++) {
+		await f.emit("message_end", { message: REJECTED });
+		await f.emit("agent_settled");
+		f.compacts[i]?.onComplete?.({ summary: "done", firstKeptEntryId: "kept", tokensBefore: 1000 });
+		await f.emit("message_end", { message: GOOD });
+	}
+	assert.equal(f.compacts.length, 3);
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 3);
+	assert.match(f.notices.join("\n"), /not compacting again \(3 provider-rejection compactions already ran in this process\)/);
+});
+
+test("N5: the nudge names the relays the failed turns never answered", async (t) => {
+	const f = setup(t);
+	await f.emit("message_end", { message: { role: "custom", customType: "cp-bridge", details: { relay_ids: ["esc:es-53859f"] } } });
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	f.compacts[0]?.onComplete?.({ summary: "done", firstKeptEntryId: "kept", tokensBefore: 1000 });
+	assert.match(ofType(f, "operator-compact").at(-1)!.message.content, /never answered: esc:es-53859f\. Answer them now\./);
 });
 
 test("operator settings override the trigger; invalid settings use 200000", async (t) => {
