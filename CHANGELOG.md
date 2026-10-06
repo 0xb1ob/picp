@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### cp_parent ask/answer take an optional thread (cp-xmw2 S2)
+
+`cp_parent answer` and `cp_parent ask` take an optional top-level `thread` (a tag, normalized like `normalizeThreadTag`). An invalid tag is refused before `answers.jsonl` or `asks.jsonl` is written. After a `posted` answer or an opened ask, the bridge files the `ans-`/`ask-` id under that tag in `state/operator/threads.jsonl` (`open` on first use, then `bind`, `by:"bridge"`) through the new `src/operator-threads.ts`; a duplicate `job_id` answer is not filed. A failed bind never undoes the post: the answer text adds `; thread <tag> NOT filed: <error>`, the ask's JSON result carries `thread:{tag,id:null,error}`, and the tool is not an error. Bookkeeping only; the ask journal line and the marker are unchanged. Migration: none.
+
 ### Fixed: a schedule fire at a millisecond instant is no longer skipped by another grant's expiry (cp-sch-s1-ez12)
 
 The scheduler handed `MandateStore.sweep` and `mandateRefusal` millisecond instants (`now.toISOString()`); when another grant expired in that sweep, its `expired` escalation was written with a millisecond `at`, the mandate schema refused the write (`/escalations/0/at must match pattern`) and the tick recorded that as the schedule's skip (2026-10-06T00:05Z). The scheduler now evaluates grants at second precision (`isoTimestamp`), and `MandateStore` normalizes every instant it is handed (`sweep`, `issue` `at`, cap and operator pauses) to second precision; an unparsable instant is `MandateError("invalid timestamp …")`. `schedules.json` keeps its millisecond `last_checked_at`/`last_fire`/`created_at`. Migration: none.

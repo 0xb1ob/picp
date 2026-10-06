@@ -1129,6 +1129,18 @@ and the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-fil
 ignored, bad lines count as skipped, the first `job_id` wins, a repeat ack is ignored). The dashboard list and the
 acknowledge route are §Answers to acknowledge.
 
+**Operator threads.** `cp_parent answer` and `cp_parent ask` take an optional top-level `thread` (cp-xmw2 S2): a
+short tag the human named for the topic, never invented and never for relays. It is normalized like the viewer's
+`normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`) and must then be 1-32 of `a-z 0-9 -`, first a
+letter or digit; anything else is refused before `answers.jsonl` or `asks.jsonl` is written. After a `posted` answer
+or an opened ask, the bridge (`src/operator-threads.ts`) files the `ans-`/`ask-` id under that tag in
+`state/operator/threads.jsonl` through `bindThread`: an `open` line on the tag's first use, then a `bind`
+(`by:"bridge"`, `peer:null`). A `duplicate` answer is not filed; its text says the first id was not re-filed. A
+failed bind never undoes the post and the tool is not an error: the answer text adds `; thread <tag> NOT filed:
+<error>`, and the ask's JSON result (and details) carry `thread:{tag, id:null, error}`; on success `thread` holds
+the `th-` id. The ask journal line keeps its keys (no `thread`), so the Decisions fold is unchanged. Bookkeeping
+only: a thread grants nothing and the session never sees composer threads.
+
 **Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
 without a `cp_parent ask` is forced back once, then carded by the bridge itself.
 *Enforced:* whether a `cp_parent ask` succeeded in the run (`tool_execution_end`,
