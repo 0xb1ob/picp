@@ -70,6 +70,15 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  // Audit P4 #28: the route table is 10 entries after the nav consolidation, plus the one in-flight job.
  assert.equal(results().length,13);
  assert.deepEqual([...root.querySelectorAll("dialog h2")].map(node => node.textContent), ["Go to", "In flight", "Recently landed"]);
+ assert.deepEqual([...root.querySelectorAll('.search-shortcuts .search-items a')].map(node => node.getAttribute('href')), ["#overview","#decisions","#jobs","#board","#map","#sessions","#reports","#schedules","#files","#more"], "design shortcut order retains every destination, including More");
+ assert.equal(root.querySelector('dialog input')!.getAttribute('placeholder'), "Job ID, title or page");
+ assert.equal(root.querySelector('dialog input')!.getAttribute('aria-label'), "Search job IDs, titles and pages");
+ for (const [id,phase] of [["cp-search","held"],["cp-wait","waiting"],["cp-landed","done"]]) {
+  const result = results().find(node => node.getAttribute('href') === `#job/${id}`)!;
+  assert.ok(result.querySelector(`.job-dot-${phase}[aria-hidden="true"]`), `${id} uses its phase dot`);
+  assert.equal(result.querySelector('svg'), null, "job hits do not reuse navigation icons");
+ }
+ assert.ok(root.querySelector('.search-shortcuts a svg'), "page shortcuts retain their navigation icons");
  assert.match(results().find(node => node.getAttribute("href") === "#job/cp-search")!.textContent!, /cp-search · held/);
  assert.match(results().find(node => node.getAttribute("href") === "#job/cp-wait")!.textContent!, /cp-wait · no run status/);
  assert.match(results().find(node => node.getAttribute("href") === "#job/cp-landed")!.textContent!, /cp-landed · #80 merged/);
@@ -79,6 +88,8 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  await query("  QUEUE  ");
  assert.deepEqual(results().map(node => node.getAttribute("href")),["#job/cp-search"]);
  await query("CP-SEARCH"); assert.equal(results().length,1);
+ await query("CP-LANDED"); assert.deepEqual(results().map(node => node.getAttribute("href")),["#job/cp-landed"]);
+ for (const unsupported of ["md-live", "#80"]) { await query(unsupported); assert.equal(results().length,0,"search does not promise mandate or PR matching"); }
  await query("files"); assert.deepEqual(results().map(node => node.getAttribute("href")),["#files"]);
  await query("decisions"); assert.deepEqual(results().map(node => node.getAttribute("href")),["#decisions"]);
  for (const gone of ["awaiting","decided"]) { await query(gone); assert.equal(results().length,0,`no separate ${gone} entry`); }
