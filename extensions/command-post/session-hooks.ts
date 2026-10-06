@@ -26,7 +26,8 @@ import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
 import { recordModelWindows } from "../../src/model-windows.ts";
 import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
-import { digestsInContext, standingOrdersDigest } from "../../src/parent-context.ts";
+import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../src/parent-context.ts";
+import { thresholdCancel } from "../../src/parent-compact-hold.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { formatScheduleMigration, sweepScheduleGrantTemplates } from "../../src/schedule-migrations.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
@@ -51,20 +52,35 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		confirmDurableArrival,
 		reviewWakeupsInContext,
 		wakeGate,
+		compactHold,
 	} = wakeups;
 
 	// cp-vy73: the busy-wake gate's run boundaries (wakeup-surfaces.ts). Synchronous, and
 	// registered before awaiting-command's `agent_settled`, so busy clears before anything
 	// that handler sends.
-	pi.on("agent_start", () => wakeGate.agentStart());
+	pi.on("agent_start", () => {
+		wakeGate.agentStart();
+		compactHold.runStarted();
+	});
 	pi.on("before_provider_request", () => {
 		wakeGate.providerRequest();
 	});
 	pi.on("agent_end", (event) => wakeGate.agentEnd(event.messages));
-	pi.on("agent_settled", () => wakeGate.agentSettled());
+	pi.on("agent_settled", (_event, ctx) => wakeGate.agentSettled(ctx));
 	// unload-parent PR3: a clean turn_end answered the landed operator sends; held wakes go out.
-	pi.on("turn_end", (event) => {
-		wakeGate.turnEnd(event as unknown as { type: string; [key: string]: unknown });
+	pi.on("turn_end", (event, ctx) => {
+		wakeGate.turnEnd(event as unknown as { type: string; [key: string]: unknown }, ctx);
+	});
+	// C1/picp-80q: the bridge's compact RPC starts the hold's cap; N6 cancels a length-stop-inflated threshold compaction.
+	pi.on("session_before_compact", (event) => {
+		if (event.reason === "manual") compactHold.compactionStarted();
+		if (event.reason !== "threshold") return undefined;
+		const home = currentRuntime().home;
+		return thresholdCancel(event, home, (line) => parentContextLog(home, "cp-parent", line));
+	});
+	// Only a manual failure releases: the threshold cancel above comes back as a `threshold` failure.
+	pi.on("session_compact_failed", (event) => {
+		if (event.reason === "manual") compactHold.failed();
 	});
 
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
@@ -88,6 +104,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 
 	// Only successful compactions emit this event; the next turn gets fresh disk context.
 	pi.on("session_compact", (_event, ctx) => {
+		// After pi's compact() has returned (its isCompacting cleared), held wakes go out.
+		setTimeout(() => compactHold.compacted(), 0);
 		if (s.parentLock) deliverDigests(currentRuntime().home, ctx);
 	});
 

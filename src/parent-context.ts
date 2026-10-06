@@ -1,11 +1,12 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { LAYOUT } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
 import { EscalationStore } from "./escalation.ts";
 import { FleetStore } from "./fleet.ts";
 import { isActive, MandateStore } from "./mandate.ts";
 import { parentSendFile, ParentSendOutbox } from "./parent-outbox.ts";
+import { daemonPaths } from "./service/daemon-files.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 
 export const parentContextFile = (home: string) => join(home, LAYOUT.sessions, "cp-parent-context.json");
@@ -89,23 +90,109 @@ export async function liveParentStatus(
 	return { ...status(), contextTokens: usage?.contextUsage?.tokens ?? null };
 }
 
-export async function autoParentContext(home: string, missionEnd: string | undefined, control: {
-	settled: () => void;
+/** The fields of an assistant message the effective-context rule reads (pi `AssistantMessage`, structurally). */
+export interface AssistantLike {
+	role?: string;
+	stopReason?: string;
+	usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
+	content?: unknown;
+}
+
+const usageTokens = (usage: AssistantLike["usage"]): number =>
+	usage ? usage.totalTokens || (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0) : 0;
+
+/** pi's `getLastAssistantUsage`: the newest assistant with usable usage (no error/aborted/zero usage), entries or messages; none past a compaction. */
+export function lastValidAssistant(items: readonly unknown[] | undefined): AssistantLike | undefined {
+	for (let index = (items?.length ?? 0) - 1; index >= 0; index--) {
+		const item = items![index] as (AssistantLike & { type?: string; message?: AssistantLike }) | null;
+		if (item?.type === "compaction") return undefined;
+		const message = item?.type === "message" ? item.message : item;
+		if (message?.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && usageTokens(message.usage) > 0) return message;
+	}
+	return undefined;
+}
+
+function storedChars(content: unknown): number {
+	if (typeof content === "string") return content.length;
+	if (!Array.isArray(content)) return 0;
+	let chars = 0;
+	for (const block of content as Array<{ text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>) {
+		for (const value of [block?.text, block?.thinking, block?.name]) if (typeof value === "string") chars += value.length;
+		if (block?.arguments !== undefined) chars += JSON.stringify(block.arguments).length;
+	}
+	return chars;
+}
+
+/**
+ * N6: a `length` stop's billed `output` was discarded (only ~its stored content is kept),
+ * so it is not context. One rule for the bridge, the parent's hold and the threshold cancel.
+ */
+export function effectiveContextTokens(tokens: number | null | undefined, last?: AssistantLike): number | null {
+	if (tokens === null || tokens === undefined) return null;
+	const output = last?.stopReason === "length" ? last.usage?.output ?? 0 : 0;
+	return output > 0 ? Math.max(0, tokens - output) + Math.ceil(storedChars(last!.content) / 4) : tokens;
+}
+
+/** One `state/daemon.log` line (`cp-daemon log` shows it). Never throws: a failed write goes to stderr. */
+export function parentContextLog(home: string, source: string, line: string): void {
+	const text = `${new Date().toISOString()} ${source}[${process.pid}]: parent context ${line}\n`;
+	try {
+		const file = daemonPaths(home).log;
+		mkdirSync(dirname(file), { recursive: true });
+		appendFileSync(file, text, { mode: 0o600 });
+	} catch (error) {
+		process.stderr.write(`daemon.log unwritable (${(error as Error).message}): ${text}`);
+	}
+}
+
+/** One automatic-control pass. `event` absent: below the threshold or unknown, nothing done. */
+export interface ParentContextOutcome {
+	rotated?: string;
+	rotateFailed?: string;
+	event?: "compacted" | "refused" | "failed" | "timed_out" | "skipped_length_stop";
+	raw?: number;
+	effective?: number;
+	threshold?: number;
+	error?: string;
+	ms?: number;
+	before?: number;
+	after?: number;
+}
+
+const COMPACT_TIMEOUT = /^timeout after \d+ms waiting for response to compact/;
+
+/** Never rejects: every failure is an outcome the caller logs. A failed mission-end rotate falls through to the threshold check. */
+export async function autoParentContext(home: string, missionEnd: string | undefined, lastAssistant: AssistantLike | undefined, control: {
+	/** Why the parent cannot compact now, or undefined when it can. */
+	unsettled: () => string | undefined;
 	status: () => Promise<ParentStatus>;
 	rotate: () => Promise<unknown>;
-	compact: () => Promise<unknown>;
-}): Promise<void> {
+	compact: () => Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }>;
+}): Promise<ParentContextOutcome> {
+	const outcome: ParentContextOutcome = {};
 	const active = new MandateStore(home).list().filter((m) => m.status === "active");
 	if (missionEnd && parentContextStatus(home).lastMissionEnd !== missionEnd && active.every((m) => m.id === missionEnd)) {
-		control.settled();
-		await control.rotate();
-		return;
+		try {
+			await control.rotate();
+			return { rotated: missionEnd };
+		} catch (error) { outcome.rotateFailed = (error as Error).message; }
 	}
-	const stats = await control.status();
+	let raw: number | null | undefined;
+	try { raw = (await control.status()).contextTokens; } catch (error) { return { ...outcome, event: "failed", error: (error as Error).message }; }
 	const threshold = parentSettings(home).compact_at_tokens;
-	if (threshold && stats.contextTokens !== null && stats.contextTokens !== undefined && stats.contextTokens >= threshold) {
-		control.settled();
-		await control.compact();
+	if (!threshold || raw === null || raw === undefined || raw < threshold) return outcome;
+	const effective = effectiveContextTokens(raw, lastAssistant)!;
+	Object.assign(outcome, { raw, effective, threshold });
+	if (effective < threshold) return { ...outcome, event: "skipped_length_stop" };
+	const refused = control.unsettled();
+	if (refused) return { ...outcome, event: "refused", error: refused };
+	const started = Date.now();
+	try {
+		const result = await control.compact();
+		return { ...outcome, event: "compacted", ms: Date.now() - started, ...(result.tokensBefore !== undefined ? { before: result.tokensBefore } : {}), ...(result.estimatedTokensAfter !== undefined ? { after: result.estimatedTokensAfter } : {}) };
+	} catch (error) {
+		const message = (error as Error).message;
+		return { ...outcome, event: COMPACT_TIMEOUT.test(message) ? "timed_out" : "failed", error: message, ms: Date.now() - started };
 	}
 }
 

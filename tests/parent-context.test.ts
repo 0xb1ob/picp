@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import "./harness/fake-parent-tracker.ts";
@@ -8,7 +8,8 @@ import { CpBridge } from "../src/cp-bridge.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { digestsInContext, parentCompactInstructions, parentSettings } from "../src/parent-context.ts";
+import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings } from "../src/parent-context.ts";
+import type { ParentStatus } from "../src/cp-bridge.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
 import { WorkerProcess } from "../src/worker-process.ts";
 import { COMMAND_POST_EXTENSION, MockProvider, createAgentDir, createScratchHome, startRpc } from "./harness/index.ts";
@@ -24,6 +25,60 @@ test("parentSettings defaults an absent parent.json to 200000 and keeps explicit
 		writeFileSync(file, "{}");
 		assert.deepEqual(parentSettings(home.path), {}, "an explicit file without a valid value stays disabled");
 	} finally { home.cleanup(); }
+});
+
+// N6 (E7): a length stop that billed 128000 output tokens and stored ~400 chars.
+const LENGTH_STOP = {
+	role: "assistant", stopReason: "length", usage: { input: 2, output: 128000, cacheRead: 126795, cacheWrite: 801, totalTokens: 255598 },
+	content: [{ type: "thinking", thinking: "t".repeat(339) }, { type: "toolCall", name: "cp_schedule", arguments: { a: "x".repeat(40) } }],
+};
+
+test("N6: a length stop's discarded output is not context; a normal stop and an unknown reading are unchanged", () => {
+	const effective = effectiveContextTokens(255640, LENGTH_STOP)!;
+	assert.ok(effective > 127_700 && effective < 127_800 && effective < 200000, String(effective));
+	assert.equal(effectiveContextTokens(205000, { role: "assistant", stopReason: "stop", usage: { output: 900, totalTokens: 205000 } }), 205000);
+	assert.equal(effectiveContextTokens(null, LENGTH_STOP), null);
+	const usage = { input: 1, output: 1, totalTokens: 2 };
+	const entry = (message: unknown) => ({ type: "message", message });
+	const valid = { role: "assistant", stopReason: "stop", usage };
+	assert.equal(lastValidAssistant([entry(valid), entry({ role: "assistant", stopReason: "error", usage }), entry({ role: "assistant", stopReason: "aborted", usage }), entry({ role: "assistant", stopReason: "stop", usage: { totalTokens: 0 } }), entry({ role: "user" })]), valid);
+	assert.equal(lastValidAssistant([LENGTH_STOP, { role: "custom" }]), LENGTH_STOP, "plain messages too");
+	assert.equal(lastValidAssistant([entry(valid), { type: "compaction" }]), undefined, "nothing before a compaction counts");
+});
+
+test("autoParentContext: a failed mission-end rotate falls through to compaction; below the threshold it does nothing", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const calls: string[] = [];
+	const status = (contextTokens: number) => async () => ({ contextTokens }) as ParentStatus;
+	const control = (contextTokens: number) => ({
+		unsettled: () => undefined, status: status(contextTokens),
+		rotate: async () => { calls.push("rotate"); throw new Error("new_session rejected: cancelled"); },
+		compact: async () => { calls.push("compact"); return { tokensBefore: contextTokens, estimatedTokensAfter: 5000 }; },
+	});
+	const over = await autoParentContext(home.path, "md-x", undefined, control(205000));
+	assert.deepEqual(calls, ["rotate", "compact"]);
+	assert.equal(over.rotateFailed, "new_session rejected: cancelled");
+	assert.equal(over.event, "compacted");
+	assert.equal(over.before, 205000);
+	calls.length = 0;
+	assert.deepEqual(await autoParentContext(home.path, undefined, undefined, control(150000)), {}, "below the threshold: no outcome");
+	assert.deepEqual(calls, []);
+	assert.equal((await autoParentContext(home.path, undefined, LENGTH_STOP, control(255640))).event, "skipped_length_stop");
+	assert.deepEqual(calls, [], "a length stop is not compacted");
+	assert.equal((await autoParentContext(home.path, undefined, undefined, { ...control(205000), unsettled: () => "busy" })).error, "busy");
+	const timedOut = await autoParentContext(home.path, undefined, undefined, { ...control(205000), compact: async () => { throw new Error("timeout after 1000ms waiting for response to compact"); } });
+	assert.equal(timedOut.event, "timed_out");
+	assert.equal((await autoParentContext(home.path, undefined, undefined, { ...control(205000), compact: async () => { throw new Error("compact rejected: x"); } })).event, "failed");
+});
+
+test("parentContextLog appends exactly one line to state/daemon.log", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	parentContextLog(home.path, "cp-parent-host", "compacted before=1 after=2 ms=3");
+	const text = readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8");
+	assert.equal(text.split("\n").filter(Boolean).length, 1);
+	assert.match(text, /^\S+ cp-parent-host\[\d+\]: parent context compacted before=1 after=2 ms=3\n$/);
 });
 
 test("picp-99l: an identical latest digest pair is not re-sent; a compaction or a changed digest still is", () => {
