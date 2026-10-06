@@ -326,7 +326,11 @@ export class ForeignCiWatch {
 		if (!target) return undefined;
 		const entry = this.store.read().jobs.find((candidate) => candidate.job_id === job.id && candidate.pr_url === target.url);
 		const on = entry?.head_sha ? ` on ${entry.head_sha.slice(0, 12)}` : "";
-		if (entry?.last_ci && COMPLETED.has(entry.last_ci)) return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch, before dispatch).` };
+		// The watch's last read, not a fresh one: the line names that head, so a reviewer seeing another head treats CI as unknown.
+		if (entry?.last_ci && COMPLETED.has(entry.last_ci)) {
+			const head = entry.head_sha?.slice(0, 12) ?? "?";
+			return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch, head observed ${entry.head_observed_at ?? "?"}; if the PR head is no longer ${head}, CI for it is unknown).` };
+		}
 		if (entry?.ended) return { line: `${target.url}: CI unknown — ${entry.ended}.` };
 		const disabled = this.#deps.disabled?.();
 		if (disabled) return { line: `${target.url}: CI unknown — the CI watch is off (${disabled}).` };

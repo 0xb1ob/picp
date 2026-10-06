@@ -11,7 +11,8 @@ import { detectCiWait } from "../src/ci-wait.ts";
 import type { PrObservation } from "../src/ci-watch.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { LAYOUT, validateForeignCiWatchFile } from "../src/contracts.ts";
-import { BlockedDispatchError } from "../src/dispatch.ts";
+import { BlockedDispatchError, type DispatchRequest } from "../src/dispatch.ts";
+import { acquireParentLock, releaseParentLock } from "../src/parent-lock.ts";
 import {
 	ForeignCiWaitError,
 	ForeignCiWatch,
@@ -178,7 +179,7 @@ test("the reviewer gate waits for CI, then carries its state into the brief; pas
 	b.state.runs = [{ status: "completed", conclusion: "success", headSha: HEAD, databaseId: 11 }];
 	b.later(10 * 60_000);
 	await b.watch.tick();
-	assert.equal(b.watch.gate(reviewer)!.line, `${PR}: CI green on d48a81d1f4d3 (foreign CI watch, before dispatch).`);
+	assert.equal(b.watch.gate(reviewer)!.line, `${PR}: CI green on d48a81d1f4d3 (foreign CI watch, head observed 2026-10-06T10:05:00Z; if the PR head is no longer d48a81d1f4d3, CI for it is unknown).`);
 
 	assert.equal(b.watch.gate(job({ labels: ["project:widgets", "delivery:local", "kind:research"] })), undefined, "no schedule label: not a fan-out reviewer");
 	assert.equal(b.watch.gate(job({ labels: ["project:widgets", "delivery:pr", "kind:ship", "schedule:sch-abc123"] })), undefined, "not research");
@@ -192,15 +193,34 @@ test("the reviewer gate waits for CI, then carries its state into the brief; pas
 	assert.match(snapshot, /### Foreign CI\nhttps:\/\/github\.com\/acme\/widgets\/pull\/7: CI unknown — PR merged\./);
 });
 
-test("CommandPost.dispatch refuses a waiting reviewer with the armable wait error, before any lease", async (t) => {
+test("CommandPost.dispatch arms a waiting reviewer; the armed release (no blockers) re-runs the gate every pass and starts it only once CI completed", async (t) => {
 	const home = createScratchHome();
+	const lock = acquireParentLock({ home: home.path });
+	assert.equal(lock.ok, true);
 	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
 	t.after(() => {
 		post.runs.closeAll();
+		releaseParentLock({ home: home.path });
 		home.cleanup();
 	});
 	const created = await createScratchLedger({ home: home.path }).ledger.create({ title: "Review acme/widgets#7", project: "widgets", delivery: "local", kind: "research", labels: ["schedule:sch-abc123"], externalRef: PR });
 	(post.registry as { get: (name: string) => unknown }).get = (name) => (name === "widgets" ? { name, clone_url: "https://github.com/acme/widgets.git" } : undefined);
-	await assert.rejects(post.dispatch({ jobId: created.id, task: "review it" }), (error: unknown) => error instanceof ForeignCiWaitError && /waits for CI/.test((error as Error).message));
+	// Only the spawn is stubbed: CommandPost.dispatch, its gate and the armed release are the real ones.
+	const spawned: DispatchRequest[] = [];
+	Object.assign(post, { dispatcher: () => ({ dispatch: async (request: DispatchRequest) => (spawned.push(request), { state: "dispatched", job_id: request.jobId }) }) });
+
+	let refusal: unknown;
+	await post.dispatch({ jobId: created.id, task: "review it" }).catch((error: unknown) => (refusal = error));
+	assert.ok(refusal instanceof ForeignCiWaitError && /waits for CI/.test(refusal.message), String(refusal));
 	assert.deepEqual(post.fleet.list(), [], "nothing was taken");
+	post.armedDispatches.arm(created.id, { task: "review it" }, refusal.blockers); // what cp_dispatch does with it
+	await post.armedDispatches.release();
+	await post.armedDispatches.release();
+	assert.deepEqual([spawned, post.armedDispatches.ids()], [[], [created.id]], "zero blockers never release vacuously: still armed while CI runs");
+
+	post.foreignCi.store.write([{ job_id: created.id, pr_url: PR, head_sha: HEAD, head_observed_at: "2026-10-06T10:05:00Z", last_ci: "green", failures: 0, announced: [] }]);
+	await post.armedDispatches.release();
+	assert.deepEqual(post.armedDispatches.ids(), [], "started, so disarmed");
+	assert.equal(spawned.length, 1);
+	assert.match(spawned[0]!.foreignCi ?? "", /^https:\/\/github\.com\/acme\/widgets\/pull\/7: CI green on d48a81d1f4d3 /);
 });
