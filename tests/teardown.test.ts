@@ -24,6 +24,7 @@ import {
 	type PipelineRecord,
 	SCHEMA_VERSION,
 } from "../src/contracts.ts";
+import { AwaitingStore } from "../src/awaiting.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { atomicWriteJson } from "../src/json-store.ts";
 import type { JobClaims } from "../src/job-claims.ts";
@@ -1078,6 +1079,21 @@ test("a normal (gated) teardown is marked closed_reason:gated, never left ambigu
 	const result = await b.teardown.teardown("cp-gated");
 	assert.equal(result.torn_down, true);
 	assert.equal(b.fleet.require("cp-gated").closed_reason, "gated");
+});
+
+test("picp-pvo: closing a job withdraws its open human-review row and nothing else", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const worktree = b.worktree("cp-handoff");
+	await b.addJob("cp-handoff", worktree);
+	git(worktree, "push", "--quiet", "-u", "origin", "cp-handoff");
+	const awaiting = new AwaitingStore({ home: b.home });
+	const row = (job_id: string, subject: string) => awaiting.declareGated({ type: "approval", subject, decision: `${subject} at abc`, why: "w", blocks: "b", job_id });
+	const handoff = (await row("cp-handoff", "human-review pr https://github.com/o/r/pull/1")).item;
+	const reminder = (await row("cp-handoff", "merge-pending pr https://github.com/o/r/pull/1")).item;
+	const other = (await row("cp-other", "human-review pr https://github.com/o/r/pull/2")).item;
+
+	assert.equal((await b.teardown.teardown("cp-handoff")).torn_down, true);
+	assert.deepEqual([awaiting.get(handoff.id)?.state, awaiting.get(reminder.id)?.state, awaiting.get(other.id)?.state], ["withdrawn", "open", "open"]);
 });
 
 test("t3code adoption 7: teardown deletes the job's checkpoint ref; a missing one is not a failure", { timeout: 60_000 }, async (t) => {

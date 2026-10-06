@@ -26,7 +26,7 @@ import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
 import { recordModelWindows } from "../../src/model-windows.ts";
 import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
-import { deliverStandingOrders } from "../../src/parent-context.ts";
+import { digestsInContext, standingOrdersDigest } from "../../src/parent-context.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { formatScheduleMigration, sweepScheduleGrantTemplates } from "../../src/schedule-migrations.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
@@ -68,22 +68,22 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	});
 
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
+		const messages: Array<{ customType: string; content: string; display: false }> = [];
 		try {
 			const post = commandPost();
 			post.scaffoldMemory();
 			const digest = [post.memoryDigest(), pendingNotice(home)].filter(Boolean).join("\n");
-			if (digest) {
-				pi.sendMessage(
-					{ customType: "cp-memory", content: digest, display: false },
-					{ triggerTurn: false },
-				);
-			}
+			if (digest) messages.push({ customType: "cp-memory", content: digest, display: false });
 		} catch (error) {
 			const message = `pi-command-post: memory unavailable: ${(error as Error).message}`;
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
 			else process.stderr.write(`${message}\n`);
 		}
-		deliverStandingOrders((message, options) => pi.sendMessage(message, options), home);
+		const orders = standingOrdersDigest(home);
+		if (orders) messages.push({ customType: "cp-standing-orders", content: orders, display: false });
+		// picp-99l: a resumed session already holding this exact pair gets no second copy.
+		if (digestsInContext(ctx.sessionManager.getBranch(), messages)) return;
+		for (const message of messages) pi.sendMessage(message, { triggerTurn: false });
 	};
 
 	// Only successful compactions emit this event; the next turn gets fresh disk context.

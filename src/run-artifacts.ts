@@ -506,6 +506,11 @@ export class RunRecorder {
 			this.#scheduleFlush();
 			return undefined;
 		}
+		// N2: a streamed partialResult repeats tool output (a token, a 50KB log) into the run log; the final result is on tool_execution_end.
+		if (event.type === "tool_execution_update" && this.#options.recordStreamingDeltas !== true && "partialResult" in event) {
+			const { partialResult: _partial, ...rest } = event as Record<string, unknown>;
+			return this.record("pi", event.type, rest);
+		}
 		return this.record("pi", event.type, event as Record<string, unknown>);
 	}
 

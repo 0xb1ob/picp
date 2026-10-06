@@ -152,6 +152,25 @@ export function deliverStandingOrders(
 	return true;
 }
 
+const DIGEST_TYPES = ["cp-memory", "cp-standing-orders"] as const;
+
+/**
+ * picp-99l: a resumed parent session re-ran `session_start` and appended the same
+ * cp-memory + cp-standing-orders pair again. True when the latest pair since the last
+ * compaction already equals `messages`; a compaction (or a changed digest) means send.
+ */
+export function digestsInContext(
+	branch: readonly { type: string; customType?: string; content?: unknown }[],
+	messages: readonly { customType: string; content: string }[],
+): boolean {
+	const latest = new Map<string, unknown>();
+	for (let index = branch.length - 1; index >= 0 && branch[index]!.type !== "compaction"; index--) {
+		const entry = branch[index]!;
+		if (entry.type === "custom_message" && entry.customType && !latest.has(entry.customType)) latest.set(entry.customType, entry.content);
+	}
+	return messages.length > 0 && DIGEST_TYPES.every((type) => latest.get(type) === messages.find((message) => message.customType === type)?.content);
+}
+
 export function standingOrdersDigest(home: string): string | undefined {
 	const file = standingOrdersFile(home);
 	mkdirSync(join(home, LAYOUT.data), { recursive: true });

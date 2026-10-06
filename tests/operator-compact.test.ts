@@ -74,8 +74,21 @@ test("self_compact refuses empty, short and pathless instructions before writing
 	assert.equal(readdirSync(f.home).includes("state"), false);
 });
 
+test("N13: self_compact under the threshold returns without queueing or writing a handoff", async (t) => {
+	const f = setup(t);
+	f.tokens(54896);
+	const result = await f.call(instructions);
+	assert.match(JSON.stringify(result), /not queued.*54896.*200000/);
+	assert.equal(readdirSync(f.home).includes("state"), false, "no handoff file");
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 0);
+	f.tokens(270000);
+	assert.match(JSON.stringify(await f.call(instructions)), /queued for agent settlement/, "nothing was left pending");
+});
+
 test("self_compact writes instructions and only compacts once after settlement, with visible outcomes", async (t) => {
 	const f = setup(t);
+	f.tokens(270000);
 	const result = await f.call(instructions);
 	assert.match(JSON.stringify(result), /queued/i);
 	assert.equal(f.compacts.length, 0);
@@ -255,6 +268,7 @@ test("handoff enrichment reaches pi's actual default summarizer for normal and s
 
 test("handoff read failures notify but never cancel the backstop; write failures never queue", async (t) => {
 	const f = setup(t);
+	f.tokens(270000);
 	const dir = join(f.home, LAYOUT.state, "operator");
 	mkdirSync(dir, { recursive: true });
 	mkdirSync(join(dir, "compact-broken.md"));
@@ -271,6 +285,9 @@ test("handoff read failures notify but never cancel the backstop; write failures
 
 test("queued self_compact lets the tool-result reply finish before compacting a real Pi run", { timeout: 90_000 }, async (t) => {
 	const f = setup(t);
+	// N13: a short mock run is far under 200000; a 1-token trigger keeps self_compact queueing.
+	mkdirSync(join(f.home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(f.home, LAYOUT.data, "operator.json"), JSON.stringify({ compact_at_tokens: 1 }));
 	const provider = await MockProvider.start();
 	const model = provider.addScript("operator-compact", [
 		{ kind: "tool_calls", calls: [{ name: "self_compact", args: { instructions } }] },
@@ -297,6 +314,7 @@ test("queued self_compact lets the tool-result reply finish before compacting a 
 
 test("fresh-home compaction uses the state operator directory and honors handoffs_dir", async (t) => {
 	const f = setup(t);
+	f.tokens(270000);
 	const event = beforeCompact();
 	await f.emit("session_before_compact", event);
 	assert.match(JSON.stringify(event.preparation), /Latest operator handoff directory: .*state[\\/]+operator/);
