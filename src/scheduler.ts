@@ -1,7 +1,8 @@
 /**
  * Saved schedules (Lane X, Pier 1.5): a cron line with a time zone, a watch
  * script run every N seconds, or a manual trigger no tick fires (Run now only). A fire does exactly one thing — it records a
- * normal ledger job under its own schedule grant (`schedule_grant`). Dispatch is never
+ * normal ledger job under a schedule grant minted fresh for that one fire from the schedule's `grant_template`
+ * (docs/contracts.md, *Fresh grant per fire*; hard-coded, no opt-out, no grant reuse). Dispatch is never
  * here: answer/board/local fires are dispatched and torn down by the schedule
  * runner (src/schedule-runner.ts) through the ordinary `CommandPost.dispatch`,
  * pr/pipeline fires stay `cp_next`/`cp_dispatch`'s — so job caps, dispatch
@@ -22,8 +23,8 @@ import { isoTimestamp, isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, 
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
-import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, type Refusal, refused, templateFromSeed } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { parsePrUrl } from "./ci-watch.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
@@ -57,8 +58,6 @@ export interface ScheduleInput {
 	manual?: true;
 	/** manual only: the fire records a deferred anchor and wakes the parent to expand it with this skill. */
 	skill?: string;
-	/** manual only (schedules S3): each fire mints a fresh grant from the seed's template; `approval` is the operator's verified quote. */
-	refire?: { approval: Omit<GrantTemplate["approval"], "approved_at"> };
 }
 
 export interface WatchRun { code: number | null; stdout: string }
@@ -77,7 +76,7 @@ export interface SchedulerPorts {
 	/** Registered but archived projects (the registry's `archivedNames`): refused at add and at every fire. */
 	archivedProjects?: () => readonly string[];
 	runWatch?: (cwd: string, scriptPath: string, timeoutMs: number) => Promise<WatchRun>;
-	/** A refire schedule's live inputs per fire (defaults, project override, token ceiling); absent or throwing refuses the fire. */
+	/** Every fire's live inputs (defaults, project override, token ceiling); absent or throwing refuses the fire. */
 	mintContext?: (project: string) => MintContext | Refusal;
 	/** The project's GitHub `owner/repo` (its registered clone_url): where a cp-pr-review schedule's PRs must live. Absent or undefined refuses it. */
 	repoOf?: (project: string) => string | undefined;
@@ -92,7 +91,7 @@ export const PR_REVIEW_MAX_TARGETS = 20;
  */
 export function prReviewTargets(description: string, repo: string | undefined): string[] {
 	if (!repo) throw new SchedulerError("cp-pr-review needs the project's GitHub repo: its registered clone_url is not a github.com remote (or this host does not wire it)");
-	const urls = description.split("\n").map((entry) => entry.trim()).filter((entry) => /^pr:/i.test(entry)).map((entry) => entry.slice(3).trim());
+	const urls = prReviewLines(description);
 	if (urls.length < 1 || urls.length > PR_REVIEW_MAX_TARGETS) throw new SchedulerError(`cp-pr-review needs 1-${PR_REVIEW_MAX_TARGETS} description lines "pr: https://github.com/${repo}/pull/<n>"; found ${urls.length}`);
 	for (const url of urls) {
 		const pr = parsePrUrl(url);
@@ -165,6 +164,12 @@ const minuteIso = (at: Date): string => `${at.toISOString().slice(0, 16)}Z`;
 
 const archivedRefusal = (project: string, prefix?: string): string => `${prefix ? `${prefix}: ` : ""}archived project ${project} — unarchive with cp_project unarchive first`;
 
+/** A template-less schedule's refusal: the migration's saved reason when it has one (never overwritten, never hidden). */
+const noTemplate = (schedule: Schedule): string => {
+	const saved = schedule.last_skip?.reason;
+	return saved?.startsWith(`schedule ${schedule.id} has no grant template (migration: `) ? saved : noTemplateReason(schedule.id);
+};
+
 export class Scheduler {
 	readonly file: string;
 	readonly #ports: SchedulerPorts;
@@ -198,18 +203,19 @@ export class Scheduler {
 		});
 	}
 
-	/** `notes` (not saved) names every normalization a refire template made to its seed's bounds. */
+	/**
+	 * Every add snapshots the seed grant's bounds into `grant_template` (every fire mints a fresh grant from it);
+	 * `notes` (not saved) names every normalization the template made to its seed's bounds.
+	 */
 	async add(input: ScheduleInput): Promise<Schedule & { notes?: string[] }> {
 		const cron = input.cron !== undefined;
 		const manual = input.manual === true;
 		if ([cron, input.watch_script !== undefined, manual].filter(Boolean).length !== 1) throw new SchedulerError("a schedule is exactly one of cron (cron + tz), watch (watch_script + every_seconds + on) or manual (manual:true, Run now only)");
-		if (input.refire && !manual) throw new SchedulerError("refire needs a manual schedule: a cron or watch fire is unattended, so a grant minted per fire would be standing authority");
-		let prTargets: string[] | undefined;
 		if (input.skill !== undefined) {
 			if (!(SCHEDULE_SKILLS as readonly string[]).includes(input.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(input.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
 			const anchor = SCHEDULE_SKILL_ANCHOR[input.skill as (typeof SCHEDULE_SKILLS)[number]];
 			if (!manual || input.kind !== anchor.kind || input.delivery !== anchor.delivery || input.script_path !== undefined) throw new SchedulerError(`skill needs a manual schedule with kind ${anchor.kind}, delivery ${anchor.delivery} and no script_path`);
-			if (input.skill === "cp-pr-review") prTargets = prReviewTargets(input.description ?? "", this.#ports.repoOf?.(input.project));
+			if (input.skill === "cp-pr-review") prReviewTargets(input.description ?? "", this.#ports.repoOf?.(input.project));
 		}
 		if (cron) {
 			parseCron(input.cron as string);
@@ -228,12 +234,17 @@ export class Scheduler {
 		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
 		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
 		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
-		const seeded = input.refire ? templateFromSeed(mandate as Mandate, input.refire.approval, stamp) : undefined;
-		if (seeded && refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
-		// One reviewer per PR plus the synthesis, all under one fire grant: a template that cannot hold them is refused now, not mid-fan-out.
-		if (seeded && prTargets && seeded.template.job_cap < prTargets.length + 1) {
-			throw new SchedulerError(`cp_schedule add refused: the seed's job cap ${seeded.template.job_cap} is under ${prTargets.length + 1} (${prTargets.length} PR reviews + 1 synthesis per fire)`);
-		}
+		const seed = mandate as Mandate;
+		const seeded = templateFromSeed(seed, synthesizedApproval(seed, "cp_schedule add"), stamp);
+		if (refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
+		const job: Schedule["job"] = {
+			title: input.title.trim(), kind: input.kind, delivery: input.delivery,
+			...(input.description ? { description: input.description } : {}),
+			...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
+			...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
+		};
+		// One fire's whole fan-out plus its anchor runs under its own fire grant: a lower job cap is raised, never refused.
+		const floored = withSkillJobFloor(seeded.template, job);
 		const schedule: Schedule = {
 			id: `sch-${randomBytes(3).toString("hex")}`,
 			name: input.name.trim(),
@@ -244,50 +255,88 @@ export class Scheduler {
 				: cron
 					? { type: "cron", cron: (input.cron as string).trim(), tz: input.tz as string }
 					: { type: "watch", script_path: input.watch_script as string, every_seconds: input.every_seconds as number, on: input.on as "exit0" | "changed" },
-			job: {
-				title: input.title.trim(), kind: input.kind, delivery: input.delivery,
-				...(input.description ? { description: input.description } : {}),
-				...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
-				...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
-			},
-			...(seeded ? { grant_template: seeded.template } : {}),
+			job,
+			grant_template: floored.template,
 			enabled: true,
 			created_at: now.toISOString(),
 		};
+		const notes = [...seeded.notes, ...(floored.note ? [floored.note] : [])];
 		return this.#mutate((schedules) => {
 			if (schedules.some((entry) => entry.name === schedule.name && entry.project === schedule.project)) throw new SchedulerError(`project ${schedule.project} already has a schedule named ${JSON.stringify(schedule.name)}`);
 			const shared = schedules.find((entry) => entry.mandate_id === schedule.mandate_id);
 			if (shared) throw new SchedulerError(`cp_schedule add refused: ${schedule.mandate_id} is already the grant of schedule ${shared.id} (${shared.name}); one grant per schedule`);
 			schedules.push(schedule);
-			return seeded ? { ...schedule, notes: seeded.notes } : schedule;
+			return notes.length ? { ...schedule, notes } : schedule;
 		});
 	}
 
 	/**
-	 * A refire schedule's current grant is revoked with it (in-flight workers are not killed); `note` says so. Other
-	 * grants are never touched. Serialized with fires, so a fire never mints for a schedule being removed.
+	 * A schedule's current grant is revoked with it (in-flight workers are not killed) unless another schedule still
+	 * names it; `note` says so. Other grants are never touched. Serialized with fires, so a fire never mints for a
+	 * schedule being removed.
 	 */
 	remove(id: string): Promise<{ schedule: Schedule; note: string }> {
 		return this.#serial(() => this.#removeOnce(id));
 	}
 
 	async #removeOnce(id: string): Promise<{ schedule: Schedule; note: string }> {
+		let named: string[] = [];
 		const schedule = await this.#mutate((schedules) => {
 			const index = schedules.findIndex((entry) => entry.id === id);
 			if (index < 0) throw new SchedulerError(`no schedule ${id}`);
-			return schedules.splice(index, 1)[0] as Schedule;
+			const removed = schedules.splice(index, 1)[0] as Schedule;
+			named = schedules.map((entry) => entry.mandate_id);
+			return removed;
 		});
 		if (!schedule.grant_template) return { schedule, note: "" };
-		const grant = this.#ports.mandates.list().find((entry) => entry.id === schedule.mandate_id);
-		if (grant?.status !== "active" && grant?.status !== "paused") return { schedule, note: `; its grant ${schedule.mandate_id} is ${grant?.status ?? "missing"}, nothing to revoke` };
-		this.#ports.mandates.revoke(grant.id);
-		return { schedule, note: `; revoked its grant ${grant.id} (in-flight workers were not killed)` };
+		return { schedule, note: this.#retire(schedule.mandate_id, named) };
+	}
+
+	/** Revokes a schedule's former pointer when it is active or paused and no schedule (`named`) still names it. */
+	#retire(id: string, named: readonly string[]): string {
+		if (named.includes(id)) return `; its grant ${id} is still named by another schedule, not revoked`;
+		const grant = this.#ports.mandates.list().find((entry) => entry.id === id);
+		if (grant?.status !== "active" && grant?.status !== "paused") return `; its grant ${id} is ${grant?.status ?? "missing"}, nothing to revoke`;
+		this.#ports.mandates.revoke(grant.id, { by: "system" });
+		return `; revoked its grant ${grant.id} (in-flight workers were not killed)`;
 	}
 
 	/**
-	 * Enable is refused unless the schedule's grant passes the fire check (cp-hhuf P6: one rule for `cp_schedule enable`
-	 * and the Schedules page). Enabling a disabled cron schedule restarts slot evaluation at the enable time, so a slot
-	 * that passed while it was disabled never fires. Disable is never grant-gated.
+	 * Retargets a schedule to a fresh seed grant (`cp_schedule move`): the template is re-derived from the new seed and
+	 * written with the pointer in one write, in the fire lane, so the id, its `schedule:<id>` label and any open run are
+	 * kept. The old pointer is revoked unless another schedule names it.
+	 */
+	move(id: string, mandateId: string): Promise<{ schedule: Schedule; note: string; notes: string[] }> {
+		return this.#serial(async () => {
+			const found = this.list().find((entry) => entry.id === id);
+			if (!found) throw new SchedulerError(`no schedule ${id}`);
+			const stamp = isoTimestamp(this.#now());
+			const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === mandateId);
+			const refusal = mandateRefusal(mandate, mandateId, found.project, found.job.kind, stamp, found.id, this.list());
+			if (refusal) throw new SchedulerError(`cp_schedule move refused: ${refusal}`);
+			const seeded = templateFromSeed(mandate as Mandate, synthesizedApproval(mandate as Mandate, "cp_schedule move"), stamp);
+			if (refused(seeded)) throw new SchedulerError(`cp_schedule move refused: ${seeded.refusal}`);
+			const floored = withSkillJobFloor(seeded.template, found.job);
+			let named: string[] = [];
+			const schedule = await this.#mutate((schedules) => {
+				const entry = schedules.find((candidate) => candidate.id === id);
+				if (!entry) throw new SchedulerError(`no schedule ${id}`);
+				entry.mandate_id = mandateId;
+				entry.grant_template = floored.template;
+				delete entry.last_skip;
+				named = schedules.map((candidate) => candidate.mandate_id);
+				return entry;
+			});
+			const note = found.mandate_id === mandateId ? "" : this.#retire(found.mandate_id, named);
+			return { schedule, note, notes: [...seeded.notes, ...(floored.note ? [floored.note] : [])] };
+		});
+	}
+
+	/**
+	 * Enable is refused unless the schedule's next fire could mint (cp-hhuf P6: one rule for `cp_schedule enable` and
+	 * the Schedules page): a saved template, no operator revoke or pause on its pointer, and live bounds. Enabling a
+	 * disabled cron schedule restarts slot evaluation at the enable time, so a slot that passed while it was disabled
+	 * never fires. Disable is never grant-gated.
 	 */
 	async setEnabled(id: string, enabled: boolean): Promise<Schedule> {
 		if (!enabled) return this.#patch(id, { enabled }, true) as Promise<Schedule>;
@@ -296,11 +345,9 @@ export class Scheduler {
 		const now = this.#now();
 		const at = isoTimestamp(now);
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
-		// A refire schedule's pointer may have expired between clicks: what must hold is the next fire's re-evaluation.
+		// The pointer may have expired between clicks: what must hold is the next fire's re-evaluation.
 		const bounds = schedule.grant_template ? this.#fireBounds(schedule, now) : undefined;
-		const refusal = bounds
-			? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined)
-			: mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, at, schedule.id, this.list());
+		const refusal = bounds ? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined) : noTemplate(schedule);
 		if (refusal) throw new SchedulerError(`enable ${id} refused: ${refusal}`);
 		return this.#mutate((schedules) => {
 			const found = schedules.find((entry) => entry.id === id);
@@ -415,8 +462,13 @@ export class Scheduler {
 		return this.#serial(() => this.#fireOnce(schedule, slot, missed, now, missedAt, manual));
 	}
 
-	/** `manual`: a run now's trigger — its refusals are always reported and never recorded, and it writes no last_fire. */
+	/**
+	 * The one fire path, every trigger: always mints a fresh grant from the schedule's template (`#mint`) and files the
+	 * job under it; there is no other branch. A schedule with no template throws. `manual`: a run now's trigger — its
+	 * refusals are always reported and never recorded, and it writes no last_fire.
+	 */
 	async #fireOnce(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
+		const template = this.#template(schedule);
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
 		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };
@@ -438,38 +490,28 @@ export class Scheduler {
 			const open = (await ledger.list({ labels: [label] }))[0];
 			return open ? `the previous fire ${open.id} is still open` : undefined;
 		};
-		let mandateId = schedule.mandate_id;
-		let minted = "";
-		if (schedule.grant_template) {
-			// A refire fire mints nothing it would not use: single use and the open-fire guard come first (schedules S3).
-			const early = await ledgerRefusal();
-			if (early) return refuse(early);
-			const fire = await this.#mint(schedule, now, stamp, manual);
-			if (refused(fire)) return refuse(fire.refusal);
-			mandateId = base.mandate_id = fire.grant.id;
-			minted = `; minted fire grant ${fire.grant.id} from the template of ${schedule.grant_template.seed_mandate_id} (expires ${fire.grant.expiry})${fire.notes.map((note) => `; ${note}`).join("")}`;
-		} else {
-			const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
-			const refusal = mandateRefusal(mandate, schedule.mandate_id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
-			if (refusal) return refuse(refusal);
-		}
+		// A fire mints nothing it would not use: single use and the open-fire guard come first.
+		const early = await ledgerRefusal();
+		if (early) return refuse(early);
+		const fire = await this.#mint(schedule, now, stamp, slot, missed, manual);
+		if (refused(fire)) return refuse(fire.refusal);
+		const mandateId = base.mandate_id = fire.grant.id;
+		const minted = `; minted fire grant ${mandateId} from the template of ${template.seed_mandate_id} (expires ${fire.grant.expiry})${fire.notes.map((note) => `; ${note}`).join("")}`;
 		let warning = "";
 		// Same slot twice (a crash between create and the state write) is the same job, never a second one.
 		let job = manual !== undefined ? undefined : ledger.findDuplicate({ title, project: schedule.project });
 		if (!job) {
-			const late = schedule.grant_template ? undefined : await ledgerRefusal();
-			if (late) return refuse(late);
 			const created = await ledger.create({
 				title, project: schedule.project, kind: schedule.job.kind, delivery: schedule.job.delivery, labels: [label],
 				...(schedule.job.description ? { description: schedule.job.description } : {}),
 				...(schedule.job.script_path !== undefined ? { scriptPath: schedule.job.script_path } : {}),
 			});
-			const under = `for ${schedule.id} (${schedule.name}) under ${schedule.grant_template ? "fire grant" : "mandate"} ${mandateId}${schedule.grant_template ? ` (minted from the template approved by ${schedule.grant_template.approval.decided_by})` : ""}`;
+			const under = `for ${schedule.id} (${schedule.name}) under fire grant ${mandateId} (minted from the template approved by ${template.approval.decided_by})`;
 			const notes = manual?.via === "dashboard"
 				? `run now from the dashboard (${manual.request_id}) ${under}${manual.peer ? `; peer ${manual.peer}` : ""}`
 				: manual?.via === "cp_schedule"
 					? `run now via cp_schedule (${manual.tool_call_id}) ${under}; authorized by ${manual.decided_by}${manual.send_id ? ` (send ${manual.send_id}${manual.delegation_rule ? `, rule: ${manual.delegation_rule}` : ""})` : ""}; ${marker}`
-					: `scheduled by ${schedule.id} (${schedule.name}) under mandate ${schedule.mandate_id}${missed ? `; missed ${minuteIso(missedAt)}` : ""}`;
+					: `scheduled ${under}${missed ? `; missed ${minuteIso(missedAt)}` : ""}`;
 			job = await ledger.update(created.id, { notes, ...(schedule.job.skill ? { status: "deferred" as const } : {}) });
 			if (manual?.via === "cp_schedule") {
 				try {
@@ -483,48 +525,71 @@ export class Scheduler {
 		return {
 			...base, outcome: "fired", job_id: job.id, delivery: schedule.job.delivery,
 			...(schedule.job.skill ? { skill: schedule.job.skill } : {}),
-			reason: `created ${job.id} under mandate ${mandateId}${minted}${warning}`,
+			reason: `created ${job.id} under fire grant ${mandateId}${minted}${warning}`,
 			...(missed ? { missed_at: minuteIso(missedAt) } : {}),
 			...manualFields,
 		};
 	}
 
-	/** A refire schedule's next fire bounds: its template re-evaluated against the live home (`mintContext`), fail closed. */
+	/**
+	 * The schedule's template, or a throw: a schedule without one never fires, and a template seeded by a fire grant
+	 * (a previous fire's grant reused as a seed) is refused — every fire's grant is minted fresh from an operator-issued
+	 * seed's bounds, never carried over.
+	 */
+	#template(schedule: Schedule): GrantTemplate {
+		const template = schedule.grant_template;
+		if (!template) throw new SchedulerError(noTemplate(schedule));
+		const seed = this.#ports.mandates.get(template.seed_mandate_id);
+		if (seed?.schedule_fire) throw new SchedulerError(`schedule ${schedule.id}'s template is seeded by fire grant ${seed.id}; a fire grant is never reused: cp_schedule move it to a fresh schedule grant`);
+		return template;
+	}
+
+	/** A schedule's next fire bounds: its template re-evaluated against the live home (`mintContext`), fail closed. */
 	#fireBounds(schedule: Schedule, now: Date): ReturnType<typeof liveFireBounds> {
 		const template = schedule.grant_template as GrantTemplate;
 		let context: MintContext | Refusal;
 		try {
-			context = this.#ports.mintContext ? this.#ports.mintContext(schedule.project) : { refusal: "this host does not wire the refire mint context (data/mandate-defaults.json and the project override)" };
+			context = this.#ports.mintContext ? this.#ports.mintContext(schedule.project) : { refusal: "this host does not wire the fire grant mint context (data/mandate-defaults.json and the project override)" };
 		} catch (error) {
 			context = { refusal: `the live mandate defaults or project override are unreadable (${(error as Error).message})` };
 		}
 		return refused(context) ? context : liveFireBounds(template, context, schedule.project, schedule.job.kind, now);
 	}
 
-	/** Steps 3-10 of a refire fire (src/schedule-grant.ts): sweep, pointer check, live bounds, mint in this lane, sanity check. */
-	async #mint(queued: Schedule, now: Date, stamp: string, manual: FireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
-		if (manual === undefined) return { refusal: "a refire schedule fires only on Run now" };
+	/**
+	 * Steps 3-10 of every fire (src/schedule-grant.ts): re-read, sweep, pointer check (an operator revoke or pause
+	 * only), live bounds, mint in this lane, sanity check. Whatever the pointer's state — expired, cap-paused, spent —
+	 * the fire's caps come from the template, never from it.
+	 */
+	async #mint(queued: Schedule, now: Date, stamp: string, slot: Date, missed: boolean, manual: FireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
 		// Re-read in the lane: a fire queued behind another sees the pointer that fire moved, and a removal in between refuses.
 		const schedule = this.list().find((entry) => entry.id === queued.id);
-		if (!schedule?.grant_template || !schedule.enabled) return { refusal: `schedule ${queued.id} was removed or disabled before this fire ran` };
+		if (!schedule?.enabled) return { refusal: `schedule ${queued.id} was removed or disabled before this fire ran` };
+		const template = this.#template(schedule);
 		const pointer = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
 		const stuck = pointerRefusal(pointer);
 		if (stuck) return { refusal: stuck };
 		const bounds = this.#fireBounds(schedule, now);
 		if (refused(bounds)) return bounds;
-		const trigger = manual.via === "dashboard"
+		const trigger = manual?.via === "dashboard"
 			? { via: manual.via, request_id: manual.request_id, peer: manual.peer }
-			: { via: manual.via, operator_quote: manual.operator_quote, decided_by: manual.decided_by as "operator-quote" | "operator-delegated", source_sha: manual.source_sha, ...(manual.send_id ? { send_id: manual.send_id } : {}), ...(manual.delegation_rule ? { delegation_rule: manual.delegation_rule } : {}) };
+			: manual?.via === "cp_schedule"
+				? { via: manual.via, operator_quote: manual.operator_quote, decided_by: manual.decided_by as "operator-quote" | "operator-delegated", source_sha: manual.source_sha, ...(manual.send_id ? { send_id: manual.send_id } : {}), ...(manual.delegation_rule ? { delegation_rule: manual.delegation_rule } : {}) }
+				: schedule.trigger.type === "watch"
+					? { via: "watch" as const, at: stamp, ...(schedule.last_output_sha ? { output_sha: schedule.last_output_sha } : {}) }
+					: { via: "cron" as const, slot: isoTimestamp(slot), missed };
 		let fire: Awaited<ReturnType<typeof mintFireGrant>>;
 		try {
 			fire = await mintFireGrant({
-				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template: schedule.grant_template as GrantTemplate,
+				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template,
 				previousId: schedule.mandate_id, bounds: bounds.input, trigger, at: stamp,
 				movePointer: async (id) => void (await this.#patch(schedule.id, { mandate_id: id }, true)),
+				named: (id) => this.list().some((entry) => entry.id !== schedule.id && entry.mandate_id === id),
 			});
 		} catch (error) {
 			return { refusal: `no fire grant minted (${(error as Error).message}); the next fire re-mints` };
 		}
+		if (fire.grant.id === schedule.mandate_id) throw new SchedulerError(`schedule ${schedule.id} would reuse ${fire.grant.id}; every fire files under a fresh grant`);
 		const refusal = mandateRefusal(fire.grant, fire.grant.id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
 		if (refusal) return { refusal: `the minted fire grant refuses the fire: ${refusal}` };
 		return { grant: fire.grant, notes: [...bounds.notes, ...(fire.revoked.length ? [`revoked ${fire.revoked.join(", ")}`] : [])] };
@@ -567,7 +632,7 @@ export function formatSchedules(schedules: readonly Schedule[]): string {
 
 function formatTemplate(t: GrantTemplate, current: string): string {
 	const exclusions = [...(t.exclusions?.paths ?? []), ...(t.exclusions?.subsystems ?? []), ...(t.exclusions?.job_kinds ?? [])];
-	return `  refire: each Run now mints a fresh grant from the template of ${t.seed_mandate_id} (${t.expiry_hours} h, $${t.spend_usd}, ${t.spend_tokens} tokens, job cap ${t.job_cap}` +
+	return `  fire grant template: each fire mints a fresh grant from the template of ${t.seed_mandate_id} (${t.expiry_hours} h, $${t.spend_usd}, ${t.spend_tokens} tokens, job cap ${t.job_cap}` +
 		`${t.dispatch_parallelism ? `, parallelism ${t.dispatch_parallelism}` : ""}; allowed ${t.allowed_actions.join(", ")}; ask_on ${t.ask_on.join(", ")}${exclusions.length ? `; excludes ${exclusions.join(", ")}` : ""})` +
 		`, approved "${t.approval.operator_quote}" (${t.approval.decided_by}) at ${t.approval.approved_at}; current fire grant ${current}`;
 }

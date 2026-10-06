@@ -259,7 +259,8 @@ async function decideEscalation(id: string, input: DecideInput, deps: DecideDeps
 	if (record?.status === "answered" && missionEndCloses(record, record.answer ?? "")) {
 		const grant = deps.mandates.list().find((mandate) => mandate.id === record.mandate_id);
 		if (grant) {
-			deps.mandates.revoke(grant.id);
+			// The operator's verified close: recorded as their revoke.
+			deps.mandates.revoke(grant.id, { by: "operator", ...verified.stored, decided_by: verified.decidedBy, ...(verified.provenance ?? {}) });
 			revoked = `; ${grant.id} revoked`;
 		}
 	}

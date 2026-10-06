@@ -25,7 +25,7 @@ function process_(home: string, ledger: Ledger, mandates: MandateStore, t: { aft
 	const sent: Sent[] = [];
 	const post = {
 		home, ledger: () => ledger, mandates, fleet: new FleetStore({ home }),
-		registry: { pathOf: () => home, archivedNames: () => [] }, dispatchQueue: { drain: async () => {} },
+		registry: { pathOf: () => home, archivedNames: () => [], get: (name: string) => (name === "demo" ? {} : undefined) }, dispatchQueue: { drain: async () => {} },
 	};
 	registerScheduleTools(
 		{ on: (event: string, fn: () => Promise<void>) => hooks.set(event, fn), registerTool: () => {}, sendMessage: (message: Sent) => sent.push(message) } as never,

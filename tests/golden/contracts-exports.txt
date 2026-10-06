@@ -305,7 +305,7 @@ MERGE_STRATEGIES	value	f3a53b9439e69194	1c655a696307b8f0
 MINIMAL_PLAN_SUMMARY	value	d97f95db71e5477e	195b8f7ce377f26c
 MODES	value	3283b80f6b595713	0f8df5baff38eebb
 MODE_SETTINGS	value	a09441fb2fcfe5f9	c9b1a20166e4ce59
-Mandate	type	9cdb539fe5b1b171	-
+Mandate	type	36f40420851d2648	-
 MandateAction	type	a5670930f3415fa2	-
 MandateActionSchema	value	da9c9c8a5d81337f	1756035535c14214
 MandateAskOn	type	b3ce7197b7ec18cf	-
@@ -323,7 +323,8 @@ MandateFieldSource	type	f3ed4ab652ec1e92	-
 MandateFieldSourceSchema	value	a2d3848e5d1c474b	424bfc3b8f6273c5
 MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandateProvenance	type	483039dec428e70a	-
-MandateSchema	value	8b5b203e0b5657c4	73e4d388955c4189
+MandateRevokedBy	type	72adc3133e08ada6	-
+MandateSchema	value	75e6368355dd0baf	9d240517d6648a31
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -493,8 +494,8 @@ SUGGEST_MAX_OUTPUT_TOKENS	value	eb6c3fdb81fad6ce	51e8ea280b44e169
 SUGGEST_PROMPT_MAX_CHARS	value	a9389e6a963d0b01	15197cf7214b58e6
 SUMMARY_MAX_CHARS	value	72183bdaed455972	284b7e6d788f363f
 SUMMARY_MAX_LINES	value	44c99cee12d3fb05	4e07408562bedb8b
-ScheduleFire	type	18bb648780e106c4	-
-ScheduleFireSchema	value	d8779497e7ffa600	b55c15a907f31331
+ScheduleFire	type	a41d836c324e5654	-
+ScheduleFireSchema	value	aedddeaa9f1a0f56	54ace5123a16ad9b
 Scope	type	9fbf012ba5215f97	-
 ScopeSchema	value	346b3456ff2f3702	192d46137c8e7dc2
 ScriptDeclaration	type	9f8176c128520553	-

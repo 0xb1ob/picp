@@ -14,8 +14,10 @@ description: >-
 
 Only on a `cp-schedule` wake that names a parent-expanded run (an anchor job, a schedule id and this skill), or on the
 restart re-wake of the same anchor. Never on your own initiative, never for unlabelled review jobs, never a second
-expansion of a closed anchor. This skill grants nothing: the schedule's grant is the only authority, and every dispatch
-below is still gated by `cp_dispatch` (mandate, job cap, parallelism, risk).
+expansion of a closed anchor. This skill grants nothing: the schedule's own fire grant (freshly minted from its template on
+every fire, job cap at least 8: these seven jobs plus the anchor) is the only authority, and every dispatch below is
+still gated by `cp_dispatch` (mandate, job cap, parallelism, risk). Expand under that fire grant as it stands: never ask
+the operator about its budget or cap, never raise one, and never issue another grant for the run.
 
 ## Window
 

@@ -16,6 +16,7 @@ import {
 	type GateFlags,
 	type JobKind,
 	type Mandate,
+	type MandateRevokedBy,
 	type MandateAction,
 	type MandateAskOn,
 	type MandateChannel,
@@ -188,7 +189,7 @@ export interface IssueMandateInput {
 	provenance?: MandateProvenance;
 	/** A verified operator risk:high pre-approval written with the grant (`withPreapproval`). */
 	risk_preapproval?: RiskPreapproval;
-	/** Code-only (a refire schedule's fire lane, src/schedule-grant.ts); `cp_mandate` exposes neither. */
+	/** Code-only (a schedule's fire lane, src/schedule-grant.ts); `cp_mandate` exposes neither. */
 	id?: string;
 	schedule_fire?: ScheduleFire;
 }
@@ -461,7 +462,9 @@ export class MandateStore {
 						? `${next.id} spend cap reached (usd ${next.spend_cap.usd})`
 						: `${next.id} token cap reached (${next.spend_cap.tokens} non-cached; token_ceiling ${this.tokenCeiling()})`;
 				const kind = `${cap}_cap`;
-				next = this.#write({ ...next, status: "paused", paused_at: now, pause_reason: kind, escalations: withEscalation(next, { at: now, kind, reason }) });
+				// A schedule's fire grant pauses on its cap but records no cap entry: a fire never asks anyone about its budget (A3).
+				const escalations = next.schedule_fire ? next.escalations : withEscalation(next, { at: now, kind, reason });
+				next = this.#write({ ...next, status: "paused", paused_at: now, pause_reason: kind, escalations });
 				const jobId = next.job_ids?.[0];
 				if (jobId && !parentRaisable) {
 					void raiseBudgetExhausted(new EscalationStore({ home: this.home }), {
@@ -570,7 +573,11 @@ export class MandateStore {
 		return this.#write({ ...rest, status: "active" });
 	}
 
-	revoke(id: string): Mandate {
+	/**
+	 * `by` records who revoked (`revoked_by`): the operator's verified quote (`cp_mandate revoke operator_quote`), the
+	 * parent (`cp_mandate revoke` without one) or the system. A revoke recorded without it reads as a legacy revoke.
+	 */
+	revoke(id: string, by?: MandateRevokedBy): Mandate {
 		const existing = this.require(id);
 		if (existing.status === "revoked") return existing;
 		const at = this.#stamp();
@@ -578,6 +585,7 @@ export class MandateStore {
 			...existing,
 			status: "revoked",
 			revoked_at: at,
+			...(by ? { revoked_by: by } : {}),
 			escalations: withEscalation(existing, {
 				at,
 				kind: "revoked",
@@ -749,7 +757,7 @@ export class MandateStore {
 		return new EscalationStore({ home: this.home }).supersede((item) => supersedeReason(item, all, scoped, this.#stamp()));
 	}
 
-	/** A fresh `md-<6 hex>` no file holds yet; the refire fire lane names its grant with it before issuing (src/schedule-grant.ts). */
+	/** A fresh `md-<6 hex>` no file holds yet; a schedule's fire lane names its grant with it before issuing (src/schedule-grant.ts). */
 	mintId(): string {
 		for (let attempt = 0; attempt < 16; attempt += 1) {
 			const id = `md-${randomBytes(3).toString("hex")}`;

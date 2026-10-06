@@ -1,13 +1,14 @@
 /**
- * Per-fire grants for manual `refire` schedules (schedules S3). At `cp_schedule add` the seed schedule grant's bounds
- * are snapshotted into the schedule's `grant_template` beside the operator's verbatim approval; every Run now (a click
- * or a verified run_now quote) then mints a fresh `schedule_grant` from that template, re-evaluated against the live
- * home defaults, inside the scheduler's serialized fire lane. A template authorizes nothing on its own: every fire is
- * a human act, merge and risk:high are always asked, exclusions only grow and the token cap only shrinks.
+ * Per-fire grants: every schedule mints a fresh grant on every fire (docs/contracts.md, *Fresh grant per fire*). At
+ * `cp_schedule add` (or `move`, or the one-shot migration) the seed schedule grant's bounds are snapshotted into the
+ * schedule's `grant_template`, its approval quoting the seed's own objective verbatim; every fire — cron, watch, the
+ * dashboard's Run now or `cp_schedule run_now` — then mints a fresh `schedule_grant` from that template, re-evaluated
+ * against the live home defaults, inside the scheduler's serialized fire lane. There is no opt-out and no reuse of a
+ * grant: merge and risk:high are always asked, exclusions only grow and the token cap only shrinks.
  */
 import { isoTimestamp, type JobKind, type Mandate, type MandateDefaults, type ProjectMandateOverride, type ScheduleFire } from "./contracts.ts";
 import type { IssueMandateInput, MandateStore, MandateUsageJob } from "./mandate.ts";
-import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate } from "./viewer/schedule-core.ts";
+import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate, operatorStop, type Schedule } from "./viewer/schedule-core.ts";
 
 export interface Refusal { refusal: string }
 export const refused = <T extends object>(value: T | Refusal): value is Refusal => "refusal" in value;
@@ -17,17 +18,17 @@ export interface MintContext { defaults: MandateDefaults; projectOverride?: Proj
 
 /** Exclusion paths a grant can hold (MandateSchema `exclusions.paths` maxItems). */
 const MAX_EXCLUDED_PATHS = 32;
-/** A pause the scheduler re-mints past; any other pause (the operator's) sticks until the schedule is re-added. */
-const CAP_PAUSES = ["spend_cap", "token_cap", "job_cap"];
 
 /**
  * The seed's bounds as a template, with every normalization named in `notes` (never applied silently): `merge` leaves
  * allowed_actions, `merge` and `risk:high` join ask_on, and the lifetime is ceil((expiry − issued_at) / 1 h) bounded to
- * 1-168 h. A seed with a risk:high pre-approval or job_ids, or that is no schedule grant, is refused.
+ * 1-168 h. Its status is not read (a migration derives from an expired, revoked or cap-paused seed alike). A seed that
+ * is no schedule grant, is itself a fire grant, or carries a risk:high pre-approval or job_ids, is refused.
  */
 export function templateFromSeed(seed: Mandate, approval: Omit<GrantTemplate["approval"], "approved_at">, at: string): { template: GrantTemplate; notes: string[] } | Refusal {
 	if (!seed.schedule_grant) return { refusal: `${seed.id} is not a schedule grant` };
-	if (seed.risk_preapproval) return { refusal: `${seed.id} carries a risk:high pre-approval; a refire template never inherits one, so issue the seed without it` };
+	if (seed.schedule_fire) return { refusal: `${seed.id} is a fire grant minted for ${seed.schedule_fire.schedule_id}; a fire grant is never reused as a seed, so issue a fresh schedule grant` };
+	if (seed.risk_preapproval) return { refusal: `${seed.id} carries a risk:high pre-approval; a fire grant template never inherits one, so issue the seed without it` };
 	if (seed.job_ids?.length) return { refusal: `${seed.id} names job_ids; a schedule grant never does` };
 	if (seed.spend_cap.usd <= 0 || seed.spend_cap.tokens < 1) return { refusal: `${seed.id} has a zero USD or token cap; a fire grant needs both above zero` };
 	const notes: string[] = [];
@@ -54,6 +55,37 @@ export function templateFromSeed(seed: Mandate, approval: Omit<GrantTemplate["ap
 		approval: { ...approval, approved_at: at },
 	};
 	return { template, notes };
+}
+
+/**
+ * A template's approval, never invented wording: the seed grant's own objective, verbatim — the operator's text when
+ * they issued the seed (`cp_mandate issue` is operator-only). `rule` names which path derived the template.
+ */
+export function synthesizedApproval(seed: Mandate, rule: "cp_schedule add" | "cp_schedule move" | "schedule migration"): Omit<GrantTemplate["approval"], "approved_at"> {
+	return { operator_quote: seed.objective, decided_by: "operator-delegated", delegation_rule: `${rule}: the objective of seed grant ${seed.id}, quoted verbatim` };
+}
+
+/** A cp-pr-review description's `pr:` lines (trimmed, the prefix dropped); `prReviewTargets` validates them. */
+export function prReviewLines(description: string): string[] {
+	return description.split("\n").map((entry) => entry.trim()).filter((entry) => /^pr:/i.test(entry)).map((entry) => entry.slice(3).trim());
+}
+
+/**
+ * The fewest jobs one fire of a skill schedule records under its fire grant: the skill's fan-out plus its deferred
+ * anchor — cp-self-review six readers + one synthesis + the anchor = 8, cp-pr-review one reviewer per `pr:` line + one
+ * synthesis + the anchor = N + 2 (skills/<name>/SKILL.md). Undefined for a schedule with no skill.
+ */
+export function skillJobFloor(job: Schedule["job"]): number | undefined {
+	if (job.skill === "cp-self-review") return 6 + 1 + 1;
+	if (job.skill === "cp-pr-review") return prReviewLines(job.description ?? "").length + 1 + 1;
+	return undefined;
+}
+
+/** A skill schedule's template with its job cap raised to `skillJobFloor`, the raise named; never a refusal. */
+export function withSkillJobFloor(template: GrantTemplate, job: Schedule["job"]): { template: GrantTemplate; note?: string } {
+	const floor = skillJobFloor(job);
+	if (floor === undefined || template.job_cap >= floor) return { template };
+	return { template: { ...template, job_cap: floor }, note: `job cap raised from ${template.job_cap} to ${floor}: one ${job.skill} fire records ${floor - 1} jobs plus its deferred anchor under its own fire grant` };
 }
 
 /** The `issue()` input for one fire: the template's bounds re-evaluated against the live home (fail closed). */
@@ -95,17 +127,22 @@ export function liveFireBounds(template: GrantTemplate, context: MintContext, pr
 }
 
 /**
- * Whether the schedule's current grant stops the next fire: revoked, or paused by anything but a cap (the operator),
- * sticks until the schedule is re-added. Expired, cap-paused, active or missing (a crash between pointer move and
- * issue) is minted past.
+ * Whether the schedule's current grant stops the next fire: only an operator stop (`operatorStop`, the one predicate
+ * the Schedules page shares) — a revoke recorded as the operator's (`cp_mandate revoke operator_quote`), a legacy revoke
+ * with no recorded provenance, or a pause by anything but a cap — sticks until the schedule is moved to (or re-added
+ * under) a fresh schedule grant, or a pause is resumed. A revoke recorded as the parent's or the system's, expired,
+ * cap-paused, active or missing (a crash between pointer move and issue) is minted past.
  */
 export function pointerRefusal(grant: Mandate | undefined): string | undefined {
-	if (!grant) return undefined;
-	if (grant.status === "revoked") return `${grant.id} was revoked; a refire schedule never re-mints past an operator revoke: remove it and re-add it under a fresh schedule grant to resume`;
-	if (grant.status === "paused" && !CAP_PAUSES.includes(grant.pause_reason ?? "")) {
-		return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a refire schedule never re-mints past an operator pause: resume the grant, or remove the schedule and re-add it under a fresh schedule grant`;
+	const stop = operatorStop(grant);
+	if (!grant || !stop) return undefined;
+	const resume = "cp_schedule move it to a fresh schedule grant (or remove and re-add it) to resume";
+	if (stop === "revoked") {
+		return grant.revoked_by?.by === "operator"
+			? `${grant.id} was revoked by the operator (${grant.revoked_by.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`
+			: `${grant.id} was revoked with no recorded provenance (a legacy revoke), treated as the operator's; a schedule never re-mints past it: ${resume}`;
 	}
-	return undefined;
+	return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
 }
 
 export interface MintPorts {
@@ -120,13 +157,16 @@ export interface MintPorts {
 	bounds: FireBounds;
 	trigger: ScheduleFire["trigger"];
 	at: string;
+	/** Whether another schedule still names `id` (a pre-rule shared seed): such a grant is never revoked here. */
+	named: (id: string) => boolean;
 }
 
 /**
- * Steps 6-9 of a refire fire: mint the id, move the schedule's pointer to it, then issue — so `usage_baseline` already
+ * Steps 6-9 of a fire: mint the id, move the schedule's pointer to it, then issue — so `usage_baseline` already
  * captures every earlier fire's fleet records (the pointer names the new grant) and spend from earlier fires is never
  * charged to it — then revoke the previous pointer, the seed and any orphan fire grant of this schedule (a crash after
- * an earlier issue). A refused issue leaves the pointer on an id with no file, which the next fire re-mints.
+ * an earlier issue), except a grant another schedule still names. A refused issue leaves the pointer on an id with no
+ * file, which the next fire re-mints.
  */
 export async function mintFireGrant(ports: MintPorts): Promise<{ grant: Mandate; revoked: string[] }> {
 	const id = ports.mandates.mintId();
@@ -146,9 +186,9 @@ export async function mintFireGrant(ports: MintPorts): Promise<{ grant: Mandate;
 	}, ports.usageJobs());
 	const revoked: string[] = [];
 	for (const mandate of ports.mandates.list()) {
-		if (mandate.id === grant.id || (mandate.status !== "active" && mandate.status !== "paused")) continue;
+		if (mandate.id === grant.id || (mandate.status !== "active" && mandate.status !== "paused") || ports.named(mandate.id)) continue;
 		if (mandate.id === ports.previousId || mandate.id === ports.template.seed_mandate_id || mandate.schedule_fire?.schedule_id === ports.scheduleId) {
-			ports.mandates.revoke(mandate.id);
+			ports.mandates.revoke(mandate.id, { by: "system" });
 			revoked.push(mandate.id);
 		}
 	}

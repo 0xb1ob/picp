@@ -28,6 +28,7 @@ import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
 import { deliverStandingOrders } from "../../src/parent-context.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
+import { formatScheduleMigration, sweepScheduleGrantTemplates } from "../../src/schedule-migrations.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
 import { formatSweep, sweepJobIdRename } from "../../src/state-migrations.ts";
 import { type WakeupCarrier } from "../../src/wakeups.ts";
@@ -197,6 +198,18 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			}
 		} catch (error) {
 			const message = `pi-command-post: state migration failed for ${home}: ${(error as Error).message}`;
+			if (ctx.hasUI) ctx.ui.notify(message, "error");
+			else process.stderr.write(`${message}\n`);
+		}
+		// Fresh grant per fire: give every schedule saved before it a grant template, once, before the scheduler ticks.
+		try {
+			const text = formatScheduleMigration(sweepScheduleGrantTemplates({ home, mandates: commandPost().mandates }));
+			if (text.length > 0) {
+				if (ctx.hasUI) ctx.ui.notify(text, "info");
+				else process.stderr.write(`${text}\n`);
+			}
+		} catch (error) {
+			const message = `pi-command-post: schedule migration failed for ${home}: ${(error as Error).message}`;
 			if (ctx.hasUI) ctx.ui.notify(message, "error");
 			else process.stderr.write(`${message}\n`);
 		}

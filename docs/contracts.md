@@ -3726,8 +3726,8 @@ them.
 Persisted at `state/mandates/<id>.json`. Written only by `cp_mandate`
 (`issue|pause|resume|revoke|show|raise_tokens|preapprove_risk|supersede_stale|defaults_show|defaults_set`), plus the
 risk:high gate's pre-approval audit rows (`risk_preapproved`, see *Operator risk pre-approval* below), plus the
-scheduler's per-fire grants of a `refire` schedule (*Refire schedules*, schedules S3: `schedule_fire` set, minted from
-an operator-approved template inside the fire lane). `evaluateAuthority`
+scheduler's fire grants (*Fresh grant per fire*: one per fire of every schedule, `schedule_fire` set, minted from the
+schedule's saved template inside the fire lane). `evaluateAuthority`
 is pure: given a pending checkpoint (kind, job, project, routing `risk`/`scope`,
 artifact hash) and the mandates on disk it returns `permitted (mandate id,
 clause)` or `not permitted (reason)`.
@@ -3756,12 +3756,13 @@ schedule's ready jobs), and a project-wide grant's caps and parallelism never co
 paths write the fleet record's `schedule_id` (`^sch-[0-9a-f]{6}$`) from the ledger job's `schedule:` label; an
 unscheduled record carries none.
 
-**Refire fire grants (schedules S3).** A grant the scheduler minted for one Run now of a `refire` schedule (see
-*Refire schedules* under *Schedules*) is an ordinary schedule grant plus `schedule_fire`: `schedule_id`,
-`seed_mandate_id`, `previous_mandate_id`, `fired_at`, the template's `approval` (the operator's verbatim quote,
-`decided_by`, `approved_at`, delegation provenance) and the fire's `trigger` (`dashboard` with `request_id`/`peer`, or
-`cp_schedule` with the verbatim run_now `operator_quote`, `decided_by`, `source_sha`, provenance). It is evaluated
-exactly like any grant — nothing here adds a permission; its bounds were re-evaluated at mint.
+**Fire grants (fresh grant per fire).** A grant the scheduler minted for one fire of a schedule (see *Fresh grant per
+fire* under *Schedules*) is an ordinary schedule grant plus `schedule_fire`: `schedule_id`, `seed_mandate_id`,
+`previous_mandate_id`, `fired_at`, the template's `approval` (the quoted seed objective or operator quote, `decided_by`,
+`approved_at`, delegation provenance) and the fire's `trigger` (`cron` with `slot`/`missed`, `watch` with `at` and the
+output's `output_sha`, `dashboard` with `request_id`/`peer`, or `cp_schedule` with the verbatim run_now
+`operator_quote`, `decided_by`, `source_sha`, provenance). It is evaluated exactly like any grant — nothing here adds a
+permission; its bounds were re-evaluated at mint. A fire grant is never a template's seed.
 
 **Caps count what covered jobs spend after the grant is issued.** `MandateStore.issue(input, jobs)` records
 `usage_baseline` on the new grant: one entry per fleet job it covers (whatever its phase, zero-usage ones included),
@@ -5917,8 +5918,8 @@ restarts cron slot evaluation at the enable time; `disable` and `remove` are nev
 fire (see Schedules; the job's notes name the request id and its `peer`), whose job goes to the schedule runner (answer/board/local) or the `cp-schedule` wake
 (pr/pipeline) exactly like a slot fire — or, for a parent-expanded schedule, the deferred anchor and the expansion wake.
 The parent's own route to the same fire is `cp_schedule run_now`, which needs a verbatim, single-use operator quote
-naming the schedule (see Schedules). On a `refire` schedule both routes mint the fire's grant first (*Refire
-schedules*); `remove` also revokes that schedule's current grant, and its outcome reason says so.
+naming the schedule (see Schedules). Both routes mint the fire's own grant first, like every fire (*Fresh grant per
+fire*); `remove` also revokes that schedule's current grant, and its outcome reason says so.
 
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the route and refuses queued requests at
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
@@ -7274,31 +7275,28 @@ restricted together match either — plus an IANA `tz`) or a watch (a tracked
 repository-relative script run every 30–86400 s in the project's canonical
 clone with the script runner's bare environment and resolution rules, firing on
 `exit0` or on `changed` stdout; the first output is the baseline) in
-`state/schedules.json` (`src/scheduler.ts`). Each names a mandate that must be
+`state/schedules.json` (`src/scheduler.ts`). Each is added under a seed mandate that must be
 an active schedule grant (`schedule_grant: true`, *Schedule grants* above;
 `cp_schedule add` with any other grant is refused naming `schedule_grant`), cover
 the project and job kind, name no `job_ids` (every fire is a new id), and be
-named by no other schedule (one grant per schedule, checked at add and at every
-fire). **Upgrade note (S3, no migration):** a schedule saved before S3 under a
-project-wide grant stays on disk, but every fire is skipped with `fire at <slot>
-not recorded: <id> is not a schedule grant …` (the schedule's `last_skip`, logged
-by the parent; no job is created). To resume it the
-operator issues a fresh grant with `cp_mandate issue … schedule_grant:true`, then
-`cp_schedule remove` and `add` the schedule under it — a saved schedule's
-`mandate_id` is never rewritten in place, except by a `refire` schedule's own fire (*Refire schedules* below). The scheduler evaluates grants at second precision; `MandateStore`
+named by no other schedule (one grant per schedule). Every add saves the seed's
+`grant_template`, and **every fire mints its own grant from it** (*Fresh grant per fire* below); the schedule's
+`mandate_id` then points at its latest fire grant. A saved schedule's `mandate_id` changes only by its own fire or
+`cp_schedule move`. The scheduler evaluates grants at second precision; `MandateStore`
 normalizes any instant it is handed. A fire only records an ordinary ledger job — title plus the slot,
-label `schedule:<id>`, notes naming the schedule and mandate — and wakes the
+label `schedule:<id>`, notes naming the schedule and its fire grant — and wakes the
 parent with `cp-schedule`; dispatch stays `cp_next`/`cp_dispatch`, so job caps,
 dispatch parallelism, risk gates and review apply unchanged. A fire is skipped,
-with the reason recorded on the schedule and reported once, when the mandate is
-not active or the schedule's previous fire is still open; the same slot twice
+with the reason recorded on the schedule and reported once, when the schedule has no template, its pointer was
+revoked or paused by the operator, the fresh grant cannot be minted or refuses the fire, or the schedule's previous
+fire is still open; the same slot twice
 is the same job. Schedules tick every 30 s only while a session holds the
 parent lock; the first tick after start fires each schedule's latest missed
 slot (cron, 366-day lookback) or due run (watch) once and notes
 `missed <time>`. An always-on host is a non-goal: `Scheduler.tick()` takes its
 clock and ports as arguments so one can drive it later. `cp_schedule enable`
-(and the page's Enable, cp-hhuf P6) is refused unless the schedule's grant
-passes the fire check, and enabling a disabled cron schedule restarts slot
+(and the page's Enable, cp-hhuf P6) is refused unless the schedule's next fire
+could mint (a saved template, no operator stop on its pointer, live bounds), and enabling a disabled cron schedule restarts slot
 evaluation at the enable time, so a slot that passed while it was disabled never
 fires. The page's Run now is a manual fire (title `<title> (<name> run now
 <minute>Z)`) under the same grant and open-fire checks; it never writes
@@ -7349,8 +7347,8 @@ older binary reads the whole file as invalid (see CHANGELOG, Downgrade).
 
 **PR-review schedules (schedules S4).** `skill: cp-pr-review` needs 1–20 description lines
 `pr: https://github.com/<owner>/<repo>/pull/<n>` (`PR_REVIEW_MAX_TARGETS`), exact and distinct, every one in the
-schedule project's own GitHub repo (`repoOf`: its registered `clone_url`; a non-GitHub remote refuses), and on a refire
-schedule a `grant_template.job_cap` of at least the PR count + 1; `cp_schedule add` refuses anything else, naming why.
+schedule project's own GitHub repo (`repoOf`: its registered `clone_url`; a non-GitHub remote refuses); `cp_schedule add`
+refuses anything else, naming why. Its template's `job_cap` is raised to at least the PR count + 2 (*Fresh grant per fire*).
 The recipe (`skills/cp-pr-review`) creates per PR one research/local job "Review `<owner>/<repo>#<n>` [<anchor-id>]"
 with `external_ref` = the PR URL, so `cp_job create` verifies the PR (a closed or merged one is refused with one
 `conflicting_acceptance`, relayed once and skipped), then one research/board synthesis that depends on them. Each
@@ -7362,32 +7360,75 @@ PR's title, body, diff or comments. Nothing is posted to GitHub. This rule is br
 home's `gh` credentials, and a read-only token is a noted follow-up, not built. An older binary reads a
 `schedules.json` naming `cp-pr-review` as invalid (see CHANGELOG, Downgrade).
 
-**Refire schedules (schedules S3).** `cp_schedule add … manual:true refire:true approval_quote:<verbatim>` (manual
-only; cron and watch are refused, because their fires are unattended) verifies `approval_quote` as an operator quote
-(`requireOperatorQuote`, ≤ 4000 chars; a delegated send is recorded `operator-delegated`) and snapshots the seed grant
-(`mandate_id`, an active schedule grant passing the add checks above) into the schedule's `grant_template`:
-`seed_mandate_id`, `channel`, `objective`, `expiry_hours` (ceil((expiry − issued_at) / 1 h), bounded to 1–168),
-`spend_usd`, `spend_tokens`, `job_cap`, `dispatch_parallelism`, `allowed_actions` (`merge` removed), `ask_on` (`merge`
-and `risk:high` always added), `exclusions`, and `approval` (`operator_quote`, `decided_by`, `approved_at`, provenance).
-Every normalization is named in the add result. A seed with a risk:high pre-approval, `job_ids`, a zero USD or token cap,
-or only `merge` allowed is refused. The template authorizes nothing on its own. **Each Run now** (page or `cp_schedule
-run_now`, with every check above) then, inside the serialized fire lane: refuses on a replayed quote or an open previous
-fire **before** minting anything; sweeps the grants; refuses if the schedule's current grant was revoked, or paused for
-anything but a cap (`spend_cap`, `token_cap`, `job_cap`) — an operator stop sticks until the schedule is removed and
-re-added under a fresh grant; re-evaluates the template against the live home — exclusion paths = template ∪
-`data/mandate-defaults.json` `exclude_paths` ∪ the project override's (over 32 refuses, none dropped), tokens =
-min(template, live `token_ceiling`) with the clamp named, a template-excluded job kind refuses, an unreadable defaults
-file or unregistered project refuses; mints a fresh id, moves the schedule's `mandate_id` to it **before** issuing (so
-`usage_baseline` absorbs every earlier fire's spend and caps apply per fire), issues a schedule grant expiring
-`expiry_hours` after the fire with `schedule_fire` (*Refire fire grants* above), revokes the previous grant, the seed
-and any orphan fire grant of this schedule, and re-checks the new grant with the fire check. A failed issue leaves the
-pointer on an id with no file, which the next fire re-mints. The job's notes say `under fire grant <id> (minted from the
-template approved by <decided_by>)`; the event names the minted grant, its expiry, every note and every revoked grant.
-`cp_schedule enable` re-evaluates the template the same way; `remove` revokes the schedule's current grant (in-flight
-workers are not killed). The Schedules page shows the fire grant (warning only when Run now would be refused) and the
-template with its verbatim approval. `state/schedules.json` may now hold `grant_template` and a grant file
-`schedule_fire`; an older binary reads either file as invalid, so before a downgrade `cp_schedule remove` every refire
-schedule and strip `schedule_fire` from its (revoked) fire grants.
+**Fresh grant per fire.** Every fire of every schedule — a cron slot, a watch fire, the page's Run now and
+`cp_schedule run_now` — files its job under a grant minted for that fire alone, from the schedule's saved
+`grant_template`. This is hard-coded: there is no flag, parameter, config, environment variable, mandate default or
+standing order that turns it off, and the S3 opt-in is gone — `cp_schedule add` with `refire` or `approval_quote` is
+refused `cp_schedule add refused: unknown parameter …`. **The template.** Every `cp_schedule add` (and `cp_schedule
+move`) snapshots its seed grant (`mandate_id`, an active schedule grant passing the add checks above; a fire grant is
+never a seed) into `grant_template`: `seed_mandate_id`, `channel`, `objective`, `expiry_hours` (ceil((expiry −
+issued_at) / 1 h), bounded to 1–168), `spend_usd`, `spend_tokens`, `job_cap`, `dispatch_parallelism`, `allowed_actions`
+(`merge` removed), `ask_on` (`merge` and `risk:high` always added), `exclusions`, and `approval`: the seed's own
+objective quoted verbatim, `decided_by: operator-delegated`, `delegation_rule` `<cp_schedule add | cp_schedule move |
+schedule migration>: the objective of seed grant <id>, quoted verbatim` (`synthesizedApproval`) — never invented
+words. A seed with a risk:high pre-approval, `job_ids`, a zero USD or token cap, or only `merge` allowed is refused.
+**No top-up:** a skill schedule's template `job_cap` is raised to its fan-out plus its anchor (`cp-self-review`: 6
+readers + 1 synthesis + the anchor = 8; `cp-pr-review`: N reviewers + 1 synthesis + the anchor = N + 2) and the raise is
+named in the add result, never refused; the skills expand under their fire grant without asking the operator about
+budget. Every normalization is named in the add result; the template authorizes nothing on its own. **Each fire**,
+inside the serialized fire lane: throws if the schedule has no template or its template is seeded by a fire grant
+(nothing is ever reused); refuses on a replayed quote or an open previous fire **before** minting anything; sweeps
+the grants; refuses only on an **operator stop** of the schedule's current grant (its pointer) — `operatorStop`
+(`src/viewer/schedule-core.ts`), the one predicate the fire path (`pointerRefusal`) and the Schedules page share.
+Every revoke records who asked in the grant's **`revoked_by`**: `{by: "operator", operator_quote, decided_by}`
+(`cp_mandate revoke mandate_id operator_quote`, the quote verified; or an operator-quoted mission-end close via
+`cp_decide`), `{by: "parent"}` (`cp_mandate revoke` without a quote) or `{by: "system"}` (a mission closed
+automatically, the scheduler retiring a pointer or seed no schedule names). **Stopped:** a revoke recorded
+`by: "operator"`, a **legacy revoke with no `revoked_by`** (a grant revoked before provenance was recorded; no
+provenance, so the safe default), or a **pause** for anything but a cap. **Not stopped:** a revoke recorded
+`by: "parent"` or `by: "system"`, an expired or missing pointer, or a cap-exhausted one (paused `spend_cap`,
+`token_cap` or `job_cap`, or spent). An operator stop sticks until the pause is resumed or the schedule is moved (a
+revoke is never resumed); re-evaluates the template
+against the live home — exclusion paths = template ∪ `data/mandate-defaults.json` `exclude_paths` ∪ the project
+override's (over 32 refuses, none dropped), tokens = min(template, live `token_ceiling`) with the clamp named, a
+template-excluded job kind refuses, an unreadable defaults file or unregistered project refuses; mints a fresh id,
+moves the schedule's `mandate_id` to it **before** issuing (so `usage_baseline` absorbs every earlier fire's spend
+and caps apply per fire), issues a schedule grant expiring `expiry_hours` after the fire with `schedule_fire` (*Fire
+grants* above; `trigger` names the cron slot, the watch run, the dashboard request or the run_now quote), revokes the
+previous grant, the seed and any orphan fire grant of this schedule that no other schedule names, and checks only the
+new grant with the fire check. A failed issue leaves the pointer on an id with no file, which the next fire re-mints. A
+fire never writes a `budget_exhausted` escalation and never asks the operator anything about its grant: a fire grant
+paused on a cap records no cap entry in its own `escalations` either. The job's
+notes say `under fire grant <id> (minted from the template approved by <decided_by>)`; the event names the minted
+grant, its expiry, every note and every revoked grant. `cp_schedule enable` re-evaluates the template the same way;
+`remove` revokes the schedule's current grant unless another schedule names it (in-flight workers are not killed).
+The Schedules page shows the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the fire path
+would refuse: "move the schedule to a new grant" for a revoke, "resume it, or move the schedule to a new grant" for a
+pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
+template with its verbatim approval, or that the schedule has no template with the migration's reason.
+
+**`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
+`schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
+skill floor apply), `mandate_id` set to the seed, `last_skip` cleared; the old pointer is revoked unless another
+schedule names it. It is the way back from an operator revoke or pause, and from a schedule the migration skipped.
+
+**Upgrade (one-shot migration).** At `session_start`, before the scheduler ticks, `sweepScheduleGrantTemplates`
+(`src/schedule-migrations.ts`) gives every schedule without a `grant_template` one derived from its seed grant — its
+`mandate_id` — **whatever that grant's status** (active, expired, revoked or cap-paused): the template is bounds,
+not authority, and the next fire still honours the pointer rules above. A seed with a risk:high pre-approval has it
+dropped and named. Only a seed file that is missing or cannot be parsed, or one no template can be derived from (not a
+schedule grant, `job_ids`, a zero cap, merge-only — accepted narrowing of A2), leaves the schedule without one, with
+`last_skip` `schedule <id> has no grant template (migration: <why>), so no fire can mint a fresh grant: cp_schedule
+move it to a schedule grant to resume`; every later refusal repeats that reason, and the Schedules page shows it. A
+skill schedule's template job cap is raised as at add. The marker
+`state/.migrations/2026-11-schedule-grant-template.done` makes every later start a no-op; the parent notifies one line
+per migrated or skipped schedule. A pointer revoked before this release has no `revoked_by`, so it is a legacy revoke
+and stays stopped until `cp_schedule move`. **Downgrade:** an older binary
+reads a fire grant whose `schedule_fire.trigger` is `cron` or `watch` as invalid (a pre-S3 one also any
+`grant_template` or `schedule_fire`), and any mandate carrying the new `revoked_by` field as invalid
+(`MandateSchema` admits no unknown field), and expects a template only on a manual schedule, so before a downgrade
+`cp_schedule remove` every schedule, strip `schedule_fire` from its (revoked) fire grants and `revoked_by` from every
+`state/mandates/md-*.json`, then re-add the schedules under the older binary.
 
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,

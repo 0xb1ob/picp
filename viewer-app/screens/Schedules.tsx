@@ -15,10 +15,6 @@ export function triggerText(s: ScheduleItem): string {
  return t.type === "cron" ? `cron ${t.cron} (${t.tz})` : `watch ${t.script_path} every ${t.every_seconds} s, fires on ${t.on === "changed" ? "changed output" : "exit 0"}`;
 }
 
-/** A refire schedule re-mints past an expired, missing or cap-paused grant; an operator revoke or pause stops it (src/schedule-grant.ts). */
-export function refireStuck(s: ScheduleItem): boolean {
- return s.mandate_status === "revoked" || (s.mandate_status === "paused" && !["spend_cap","token_cap","job_cap"].includes(s.mandate_pause_reason ?? ""));
-}
 
 function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) {
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
@@ -28,11 +24,11 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
   <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>
   {control && <ScheduleControls s={s} control={control}/>}
   {s.grant_template ? <>
-   <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{refireStuck(s) ? <strong> · Run now is refused while this grant is {s.mandate_status}: remove the schedule and re-add it under a fresh grant</strong> : " · each Run now mints a fresh grant"}</p>
+   <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
    <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
-  </> : <p class="job-meta">Mandate <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_status !== "active" && <strong> · fires are skipped while this grant is {s.mandate_status}</strong>}</p>}
+  </> : <p class="job-meta">Grant <code>{s.mandate_id}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason.includes("has no grant template") ? s.last_skip.reason : "move it to a schedule grant to resume"}</strong></p>}
   <p class="job-meta">Each fire records a <code>{s.job.kind}</code>/<code>{s.job.delivery}</code> job “{s.job.title}”; its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>
-  {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under this grant.</p>}
+  {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under that fire's own grant.</p>}
   <p class="job-meta">Last fire: {s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)} for slot {observedTime(s.last_fire.slot)}{s.last_fire.missed && " (missed)"}</> : "never"}</p>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
   <details><summary class="job-meta">Runs · {s.history.length}</summary>

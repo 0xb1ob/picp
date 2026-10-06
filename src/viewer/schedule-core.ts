@@ -31,7 +31,7 @@ export const SCHEDULE_SKILL_ANCHOR: Record<(typeof SCHEDULE_SKILLS)[number], { k
 	"cp-self-review": { kind: "research", delivery: "local" },
 	"cp-pr-review": { kind: "research", delivery: "local" },
 };
-/** A refire template's lifetime bound in hours (schedules S3): each fire grant lives this long from its fire. */
+/** A grant template's lifetime bound in hours: each fire grant lives this long from its fire. */
 export const GRANT_TEMPLATE_MAX_HOURS = 168;
 /** What a fire grant may auto-decide: never `merge` (mirrors MANDATE_ACTIONS minus merge). */
 export const GRANT_TEMPLATE_ACTIONS = ["plan", "implement", "review", "repair"] as const;
@@ -41,9 +41,33 @@ export const GRANT_TEMPLATE_FORCED_ASK_ON = ["merge", "risk:high"] as const;
 /** Mirrors MANDATE_CHANNELS; tests/viewer-schedules.test.ts pins the three mirrors. */
 export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
 
+/** A pause the scheduler re-mints past; any other pause is the operator's. */
+const GRANT_CAP_PAUSES: readonly unknown[] = ["spend_cap", "token_cap", "job_cap"];
 /**
- * A refire schedule's saved, operator-approved grant bounds (schedules S3), snapshotted from its seed grant at add.
- * Each Run now mints a fresh fire grant from it (src/schedule-grant.ts); it authorizes nothing on its own.
+ * The one rule for an operator stop on a schedule's pointer grant, shared by the fire path (`pointerRefusal`,
+ * src/schedule-grant.ts) and the Schedules page. Stopped: a revoke recorded as the operator's (`revoked_by.by:
+ * "operator"`), a legacy revoke with no `revoked_by` (no provenance, so the safe default), or a pause by anything but a
+ * cap. Not stopped: a revoke recorded as the parent's or the system's, expiry, a cap pause, active or missing — the
+ * next fire mints a fresh grant.
+ */
+export function operatorStop(grant: { status?: unknown; pause_reason?: unknown; revoked_by?: unknown } | undefined): "revoked" | "paused" | undefined {
+	const by = (grant?.revoked_by as { by?: unknown } | undefined)?.by;
+	if (grant?.status === "revoked" && by !== "parent" && by !== "system") return "revoked";
+	if (grant?.status === "paused" && !GRANT_CAP_PAUSES.includes(grant.pause_reason ?? "")) return "paused";
+	return undefined;
+}
+
+/**
+ * Why a schedule without a `grant_template` never fires. The migration's `why` (`migration: …`: a seed that is missing,
+ * unparseable or yields no template) is saved in `last_skip` and repeated by every later refusal, never hidden.
+ */
+export function noTemplateReason(id: string, why = "saved before every fire minted its own grant"): string {
+	return `schedule ${id} has no grant template (${why}), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume`;
+}
+
+/**
+ * A schedule's saved grant bounds, snapshotted from its seed grant at add, move or migration (its approval quotes the
+ * seed's own objective verbatim). Every fire mints a fresh fire grant from it (src/schedule-grant.ts).
  */
 export interface GrantTemplate {
 	seed_mandate_id: string;
@@ -65,12 +89,15 @@ export interface Schedule {
 	id: string;
 	name: string;
 	project: string;
-	/** The schedule's grant. A refire schedule's fire rewrites it, in the fire lane, to the grant it just minted. */
+	/** The schedule's current grant: its seed until the first fire, then the fire grant each fire mints, in the fire lane. */
 	mandate_id: string;
 	/** `manual`: no tick ever fires it; only Run now does. */
 	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" } | { type: "manual" };
 	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string; skill?: (typeof SCHEDULE_SKILLS)[number] };
-	/** manual only (`refire`): each fire mints a fresh grant from this template. */
+	/**
+	 * Every fire mints a fresh grant from this template; every add and move saves one. Optional only so a schedule the
+	 * one-shot migration could not derive one for (seed missing or unreadable) stays readable, with its fires refused.
+	 */
 	grant_template?: GrantTemplate;
 	enabled: boolean;
 	created_at: string;

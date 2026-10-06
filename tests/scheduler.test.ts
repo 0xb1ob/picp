@@ -14,6 +14,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { cpNext } from "../src/next.ts";
 import { formatScheduleEvent, formatSchedules, latestCronSlot, parseCron, runWatchScript, Scheduler, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
 import { createScratchHome, createScratchLedger, type ScratchHome } from "./harness/index.ts";
@@ -27,7 +28,7 @@ function bench(home: ScratchHome, overrides: Partial<SchedulerPorts> = {}) {
 	const fleet = new FleetStore({ home: home.path });
 	const ports: SchedulerPorts = {
 		home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path,
-		now: () => clock.now, startedAt: T0, ...overrides,
+		now: () => clock.now, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }), ...overrides,
 	};
 	const grant = (extra: Partial<Parameters<MandateStore["issue"]>[0]> = {}) =>
 		mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true, ...extra });
@@ -65,7 +66,8 @@ test("a cron fire is an ordinary job under the named mandate, the runner's (not 
 	const created = await ledger.show(event?.job_id as string);
 	assert.equal(created.title, "nightly report (nightly 2026-07-01T07:00Z)");
 	assert.ok(created.labels.includes(`schedule:${schedule.id}`) && created.labels.includes("delivery:answer"));
-	assert.match(created.notes ?? "", new RegExp(`under mandate ${mandate.id}`));
+	assert.match(created.notes ?? "", new RegExp(`under fire grant ${event?.mandate_id}`));
+	assert.notEqual(event?.mandate_id, mandate.id, "the fire files under a fresh grant, never its seed");
 	clock.now = new Date("2026-07-01T07:00:50Z");
 	assert.deepEqual(await scheduler.tick(), []);
 	assert.equal((await ledger.list()).length, 1);
@@ -279,7 +281,7 @@ test("a fire is never a bypass: no active grant, a job-scoped grant, an open pre
 	// schedlater S3: an unrelated ready job is never recommended under the schedule's grant.
 	const unrelated = await ledger.create({ title: "unrelated", project: "demo", kind: "ship", delivery: "pr" });
 	const scopedNext = await cpNext({ ledger, fleet, mandates, escalations: new EscalationStore({ home: home.path }), now: () => clock.now }, "demo");
-	assert.equal(scopedNext.mandate?.id, mandate.id);
+	assert.equal(scopedNext.mandate?.id, fired?.mandate_id, "the fire's own fresh grant");
 	assert.deepEqual(scopedNext.ready.map((entry) => entry.id), [fired?.job_id], `${unrelated.id} is not the schedule's`);
 	assert.equal(scopedNext.action.job_id, fired?.job_id);
 
@@ -294,10 +296,10 @@ test("a fire is never a bypass: no active grant, a job-scoped grant, an open pre
 	assert.match(next.action.reason, /job cap 1 reached/);
 });
 
-test("schedlater S3 upgrade: a schedule saved under a project-wide grant before S3 skips every fire as not a schedule grant", async (t) => {
+test("a schedule saved with no grant template (pre-migration, or skipped by it) skips every fire and is never fired under its pointer", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
+	const { clock, ledger, mandates, ports, grant } = bench(home);
 	const wide = grant({ schedule_grant: undefined });
 	const scheduler = new Scheduler(ports);
 	const saved = { id: "sch-abc123", name: "legacy", project: "demo", mandate_id: wide.id, trigger: { type: "cron", cron: "0 * * * *", tz: "UTC" }, job, enabled: true, created_at: T0.toISOString() };
@@ -305,12 +307,13 @@ test("schedlater S3 upgrade: a schedule saved under a project-wide grant before 
 	clock.now = new Date("2026-07-01T07:00:05Z");
 	const [skipped] = await scheduler.tick();
 	assert.equal(skipped?.outcome, "skipped");
-	assert.match(skipped?.reason ?? "", new RegExp(`${wide.id} is not a schedule grant.*schedule_grant:true`));
+	assert.match(skipped?.reason ?? "", /schedule sch-abc123 has no grant template .*cp_schedule move it to a schedule grant to resume/);
 	clock.now = new Date("2026-07-01T08:00:05Z");
-	const [again] = await scheduler.tick();
-	assert.match(again?.reason ?? "", /fire at 2026-07-01T08:00Z not recorded: .* is not a schedule grant/, "every slot is skipped, never fired");
-	assert.match(scheduler.list()[0]?.last_skip?.reason ?? "", /is not a schedule grant/, "recorded on the schedule");
+	assert.deepEqual(await scheduler.tick(), [], "the same skip is news once");
+	assert.match(scheduler.list()[0]?.last_skip?.reason ?? "", /has no grant template/, "recorded on the schedule every time");
+	assert.equal(scheduler.list()[0]?.last_skip?.at, "2026-07-01T08:00:05.000Z");
 	assert.equal((await ledger.list({ all: true })).length, 0, "no job is ever recorded under it");
+	assert.equal(mandates.list().length, 1, "and no grant minted");
 });
 
 test("watch: exit 0 fires, changed output fires only on a change, and a missed interval is caught up once", async (t) => {
@@ -361,8 +364,8 @@ test("cp-hhuf P6: enable is refused unless the schedule's grant passes the fire 
 	mandates.resume(mandate.id);
 	assert.equal((await scheduler.setEnabled(schedule.id, true)).enabled, true);
 	await scheduler.setEnabled(schedule.id, false);
-	mandates.revoke(mandate.id);
-	await assert.rejects(scheduler.setEnabled(schedule.id, true), /is revoked/);
+	mandates.revoke(mandate.id, { by: "operator", operator_quote: "revoke the nightly grant", decided_by: "operator-quote" });
+	await assert.rejects(scheduler.setEnabled(schedule.id, true), /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
 	assert.equal(scheduler.list()[0]?.enabled, false);
 	await assert.rejects(scheduler.setEnabled("sch-ffffff", true), /no schedule sch-ffffff/);
 });
@@ -549,7 +552,7 @@ test("run now on a manual skill schedule: grant-checked, one deferred anchor, si
 	assert.equal((await ledger.list({ all: true })).length, 1);
 });
 
-test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a refire template that holds every reviewer plus the synthesis", async (t) => {
+test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a fire grant template that holds every reviewer plus the synthesis and the anchor", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const { ports, grant } = bench(home, { repoOf: (project) => (project === "demo" ? "Acme/Demo" : undefined) });
@@ -569,12 +572,13 @@ test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a ref
 	];
 	for (const [text, message] of refusals) await assert.rejects(scheduler.add({ ...review, name: "bad", mandate_id: grant().id, description: text }), message);
 	await assert.rejects(new Scheduler({ ...ports, repoOf: undefined }).add({ ...review, name: "bad", mandate_id: grant().id, description: pr(1) }), /needs the project's GitHub repo/);
-	// refire: the template's job cap must hold N reviewers + 1 synthesis (job_cap 2 < 2 PRs + 1).
-	const approval = { operator_quote: "yes, refire prs", decided_by: "operator-quote" as const };
-	await assert.rejects(scheduler.add({ ...review, name: "tight", mandate_id: grant({ job_cap: 2 }).id, description: `${pr(1)}\n${pr(2)}`, refire: { approval } }), /job cap 2 is under 3 \(2 PR reviews \+ 1 synthesis per fire\)/);
-	const fits = await scheduler.add({ ...review, name: "fits", mandate_id: grant({ job_cap: 3 }).id, description: `${pr(1)}\n${pr(2)}`, refire: { approval } });
-	assert.equal(fits.grant_template?.job_cap, 3);
-	assert.deepEqual(scheduler.list().map((entry) => entry.name), ["prs", "fits"]);
+	// A3: the template's job cap is raised to N reviewers + 1 synthesis + the anchor (job_cap 2 → 4 for 2 PRs), never refused.
+	const tight = await scheduler.add({ ...review, name: "tight", mandate_id: grant({ job_cap: 2 }).id, description: `${pr(1)}\n${pr(2)}` });
+	assert.equal(tight.grant_template?.job_cap, 4);
+	assert.match(tight.notes!.join("; "), /job cap raised from 2 to 4: one cp-pr-review fire records 3 jobs plus its deferred anchor/);
+	const fits = await scheduler.add({ ...review, name: "fits", mandate_id: grant({ job_cap: 9 }).id, description: `${pr(1)}\n${pr(2)}` });
+	assert.equal(fits.grant_template?.job_cap, 9);
+	assert.deepEqual(scheduler.list().map((entry) => entry.name), ["prs", "tight", "fits"]);
 });
 
 test("cp_schedule is parent-only", () => {

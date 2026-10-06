@@ -148,8 +148,10 @@ export interface ScheduleHistoryJob {
 export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	next_at: string | null; next_note: string | null;
 	mandate_status: "active" | "paused" | "expired" | "revoked" | "missing";
-	/** The grant's `pause_reason` while paused, else null: a refire schedule re-mints past a cap pause, never an operator one. */
+	/** The grant's `pause_reason` while paused, else null: a schedule's pointer re-mints past a cap pause, never an operator one. */
 	mandate_pause_reason: string | null;
+	/** Whether the fire path refuses the next fire on this pointer (`operatorStop`, the predicate `pointerRefusal` uses). */
+	grant_stopped: boolean;
 	history: ScheduleHistoryJob[];
 };
 /** `/api/schedules`: `error` names an unreadable or invalid `state/schedules.json`; it is never silently empty. */

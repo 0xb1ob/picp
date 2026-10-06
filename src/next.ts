@@ -249,7 +249,7 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 					// so its `cp-answered` echo would be a duplicate parent turn. Only this clean own close is marked; every
 					// other mandate auto-decision still wakes (`src/answered.ts`, "Self-answers do not echo").
 					answered = await ports.escalations.answer(escalation.id, { answer: "close", by: `mandate:${mandate.id}`, basis: { mandate: mandate.id, clause: `${mandate.id}: every named job landed clean — mission closed automatically` }, selfAnswered: true });
-					ports.mandates.revoke(mandate.id);
+					ports.mandates.revoke(mandate.id, { by: "system" });
 					autoClosed = true;
 				}
 			} catch {

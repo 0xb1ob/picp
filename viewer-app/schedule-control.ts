@@ -14,7 +14,7 @@ export interface ScheduleControlView {
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** Add schedule… prefills the composer with this: a schedule needs its own grant, issued only on the operator's words. */
-export const ADD_SCHEDULE_DRAFT = "Add a schedule (cp_schedule add): name \"…\", project \"…\", cron \"0 9 * * *\" tz \"UTC\" (or a watch script), kind research, delivery answer, title \"…\", description \"…\". Issue its own schedule grant first (cp_mandate issue with schedule_grant:true). For a fresh grant on every Run now, make it manual:true refire:true approval_quote \"<my words approving it>\" instead of cron.";
+export const ADD_SCHEDULE_DRAFT = "Add a schedule (cp_schedule add): name \"…\", project \"…\", cron \"0 9 * * *\" tz \"UTC\" (or a watch script), kind research, delivery answer, title \"…\", description \"…\". Issue its own schedule grant first (cp_mandate issue with schedule_grant:true).";
 
 async function failure(response: Response): Promise<string> {
  try { const body = await response.json() as {error?: unknown}; if (typeof body.error === "string") return body.error; } catch { /* no JSON body: the status says enough */ }

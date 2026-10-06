@@ -47,7 +47,7 @@ export function registerScheduleTools(
 			home: post.home, ledger: () => post.ledger(), mandates: post.mandates,
 			usageJobs: () => post.fleet.read().jobs, cloneOf: (project) => post.registry.pathOf(project), startedAt,
 			archivedProjects: () => post.registry.archivedNames(),
-			// A refire schedule re-reads these on every fire: an unregistered project or an unreadable defaults file refuses it.
+			// Every fire re-reads these: an unregistered project or an unreadable defaults file refuses it.
 			mintContext: (project) => {
 				const entry = post.registry.get(project);
 				if (!entry) return { refusal: `project ${project} is not registered` };
@@ -137,15 +137,36 @@ export function registerScheduleTools(
 		controlTimer = undefined;
 	});
 
+	const parameters = Type.Object({
+		action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now", "move"]),
+		id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now/move)" })),
+		operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now only: the operator's verbatim sentence naming the schedule (id or name)" })),
+		name: Type.Optional(Type.String()),
+		project: Type.Optional(Type.String()),
+		mandate_id: Type.Optional(Type.String({ description: "add/move: the seed schedule grant (schedule_grant:true) whose bounds every fire's fresh grant is minted from; one grant per schedule" })),
+		cron: Type.Optional(Type.String({ description: "minute hour day-of-month month day-of-week" })),
+		tz: Type.Optional(Type.String({ description: "IANA time zone for cron, e.g. Europe/Warsaw or UTC" })),
+		watch_script: Type.Optional(Type.String({ description: "Tracked repository-relative script for a watch" })),
+		every_seconds: Type.Optional(Type.Integer({ minimum: 30, maximum: 86400 })),
+		on: Type.Optional(StringEnum(["exit0", "changed"])),
+		title: Type.Optional(Type.String({ description: "Title of each fired job (the slot is appended)" })),
+		kind: Type.Optional(StringEnum(["ship", "research"])),
+		delivery: Type.Optional(StringEnum(["pr", "local", "pipeline", "answer", "board"])),
+		description: Type.Optional(Type.String()),
+		script_path: Type.Optional(Type.String({ description: "Make each fired job a script job (ship/local)" })),
+		manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
+		skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill; cp-pr-review needs 1-20 description lines `pr: https://github.com/<owner>/<repo>/pull/<n>` in the project's own repo" })),
+	});
+
 	pi.registerTool({
 		name: "cp_schedule",
 		label: "Schedule",
 		description:
 			"Saved schedules: `add` a cron line (5 fields + IANA tz), a watch (a tracked script run every N seconds in the project's " +
 			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`; " +
-			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use). A manual schedule added with `refire:true` and " +
-			"approval_quote (the operator's verbatim approval) snapshots its seed grant's bounds and mints a fresh grant from them on every Run now (merge and risk:high always asked). A fire records an ordinary " +
-			"ledger job under the schedule's own grant (schedule_grant). answer/board/local fires are dispatched and torn down by the schedule runner " +
+			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use); `move` retargets a schedule to a fresh seed grant. " +
+			"Every fire mints a fresh grant from the schedule's saved template (its seed grant's bounds; merge and risk:high always asked) and records an ordinary " +
+			"ledger job under it. answer/board/local fires are dispatched and torn down by the schedule runner " +
 			"in code (an LLM schedule as one short-lived worker with its description as the task, a script_path schedule directly, no model); " +
 			"pr/pipeline fires wake you (cp-schedule) for cp_next/cp_dispatch. Job caps, parallelism, risk gates and review apply either way. " +
 			"Fires in the always-on parent; a slot missed while it was down is caught up once at start, noted \"missed <time>\".",
@@ -153,32 +174,11 @@ export function registerScheduleTools(
 		promptGuidelines: [
 			"A cp-schedule wake-up (pr/pipeline schedules only) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's, never dispatch them yourself.",
 			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
-			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule): it covers only that schedule's jobs, and a project-wide grant never covers a scheduled job. A paused or expired grant skips the fire, never bypasses it.",
+			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule) as its seed: add saves its bounds as the schedule's template, and every fire mints a fresh grant from that template, so an expired or spent fire grant never stops the next fire and its budget is never yours to raise or ask about.",
 			"run_now needs the operator's verbatim sentence naming the schedule (its id or name) as operator_quote; never on your own initiative, and never by replaying an earlier sentence: one operator message authorizes one run now per schedule.",
-			"refire:true (manual only) needs approval_quote, the operator's verbatim sentence approving per-fire grants; never propose it yourself. An operator revoke or pause of the fire grant stops the schedule until it is removed and re-added.",
+			"An operator revoke or pause of a schedule's current fire grant stops the schedule until it is moved (`move` with id and mandate_id: a fresh schedule grant) or the grant is resumed.",
 		],
-		parameters: Type.Object({
-			action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now"]),
-			id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now)" })),
-			operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now only: the operator's verbatim sentence naming the schedule (id or name)" })),
-			name: Type.Optional(Type.String()),
-			project: Type.Optional(Type.String()),
-			mandate_id: Type.Optional(Type.String({ description: "The schedule grant (schedule_grant:true) every fire is filed under; one grant per schedule" })),
-			cron: Type.Optional(Type.String({ description: "minute hour day-of-month month day-of-week" })),
-			tz: Type.Optional(Type.String({ description: "IANA time zone for cron, e.g. Europe/Warsaw or UTC" })),
-			watch_script: Type.Optional(Type.String({ description: "Tracked repository-relative script for a watch" })),
-			every_seconds: Type.Optional(Type.Integer({ minimum: 30, maximum: 86400 })),
-			on: Type.Optional(StringEnum(["exit0", "changed"])),
-			title: Type.Optional(Type.String({ description: "Title of each fired job (the slot is appended)" })),
-			kind: Type.Optional(StringEnum(["ship", "research"])),
-			delivery: Type.Optional(StringEnum(["pr", "local", "pipeline", "answer", "board"])),
-			description: Type.Optional(Type.String()),
-			script_path: Type.Optional(Type.String({ description: "Make each fired job a script job (ship/local)" })),
-			manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
-			skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill; cp-pr-review needs 1-20 description lines `pr: https://github.com/<owner>/<repo>/pull/<n>` in the project's own repo" })),
-			refire: Type.Optional(Type.Boolean({ description: "manual only: each Run now mints a fresh grant from mandate_id's (the seed's) saved bounds; needs approval_quote" })),
-			approval_quote: Type.Optional(Type.String({ maxLength: 4000, description: "refire only: the operator's verbatim sentence approving per-fire grants for this schedule" })),
-		}),
+		parameters,
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			deps.setLive(ctx);
 			const s = (scheduler ??= build());
@@ -190,9 +190,9 @@ export function registerScheduleTools(
 			let text: string;
 			if (params.action === "list") text = formatSchedules(s.list());
 			else if (params.action === "add") {
-				if (params.approval_quote !== undefined && !params.refire) throw new Error("cp_schedule add refused: approval_quote is for refire:true only");
-				// The template authorizes nothing by itself, but its bounds are saved only on the operator's verbatim words.
-				const verified = params.refire ? requireOperatorQuote(need("approval_quote"), { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) }) : undefined;
+				// No hidden inputs: every fire mints a fresh grant, so a parameter outside the schema (a removed opt-in) is refused, never ignored.
+				const unknown = Object.keys(params).filter((key) => !Object.hasOwn(parameters.properties, key));
+				if (unknown.length) throw new Error(`cp_schedule add refused: unknown parameter ${unknown.join(", ")}; every fire mints a fresh grant from the schedule's template, with nothing to opt into`);
 				const added = await s.add({
 					name: need("name"), project: need("project"), mandate_id: need("mandate_id"), title: need("title"),
 					kind: need("kind") as JobKind, delivery: need("delivery") as Delivery,
@@ -201,10 +201,12 @@ export function registerScheduleTools(
 					...(params.every_seconds ? { every_seconds: params.every_seconds } : {}), ...(params.on ? { on: params.on as "exit0" | "changed" } : {}),
 					...(params.description ? { description: params.description } : {}), ...(params.script_path !== undefined ? { script_path: params.script_path } : {}),
 					...(params.manual ? { manual: true as const } : {}), ...(params.skill ? { skill: params.skill } : {}),
-					...(verified ? { refire: { approval: { operator_quote: verified.stored.operator_quote, decided_by: verified.decidedBy, ...(verified.provenance ?? {}) } } } : {}),
 				});
-				const notes = added.notes?.length ? `\nrefire template: ${added.notes.join("; ")}` : "";
+				const notes = added.notes?.length ? `\nfire grant template: ${added.notes.join("; ")}` : "";
 				text = `added ${formatSchedules([added])}${notes}${holdsLock() ? "" : "\n(this session does not hold the parent lock: it will not fire here)"}`;
+			} else if (params.action === "move") {
+				const moved = await s.move(need("id"), need("mandate_id"));
+				text = `moved ${formatSchedules([moved.schedule])}${moved.note}${moved.notes.length ? `\nfire grant template: ${moved.notes.join("; ")}` : ""}`;
 			} else if (params.action === "remove") {
 				const removed = await s.remove(need("id"));
 				text = `removed ${removed.schedule.id}${removed.note}`;
