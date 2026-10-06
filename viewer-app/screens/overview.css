@@ -2,7 +2,15 @@
 .overview section { min-width: 0; }
 .overview-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .overview-heading > div { min-width: 0; }
-.overview-subtitle { font-size: 13px; margin-top: 4px; line-height: 1.5; }
+.overview-subtitle { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; margin-top: 8px; line-height: 1.5; }
+.overview-paused-pill { padding: 1px 9px; border: 1px solid var(--paused-border); border-radius: 999px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.overview-status { display: flex; flex-direction: column; gap: 8px; }
+.overview-status .overview-services { margin: 0; }
+.overview-clear { border: 1px solid var(--empty-border); border-radius: 14px; background: var(--empty-background); }
+.overview-clear > a { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 16px; font-size: 12px; color: var(--muted); text-decoration: none; }
+.overview-clear svg { flex-shrink: 0; color: var(--green); }
+.overview-clear a > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.overview-clear strong { font-size: 15px; color: var(--text); }
 .overview-meta { font-size: 12px; line-height: 1.5; color: var(--dim); }
 .overview-error { color: var(--secondary); font-size: 13px; }
 .overview-amber { color: var(--secondary); }
@@ -27,18 +35,50 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-dot-working { background: var(--green); border-color: var(--green); }
 .overview-failed { color: var(--secondary); }
 .overview-project { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.overview-more { padding: 10px 0; font-size: 13px; color: var(--muted); text-decoration: none; }
+.overview-more { display: flex; align-items: center; min-height: 44px; padding: 10px 0; font-size: 13px; color: var(--muted); text-decoration: none; }
 .overview-dot-launching { border-color: var(--green); }
 .overview-dot-held { border-color: var(--blue); }
 .overview-dot-down { background: transparent; border-color: var(--secondary); }
 .overview-dot-tight { background: var(--text); border-color: var(--text); }
 .overview-dot-ci-red { background: var(--coral); border-color: var(--coral); }
-.overview-dependencies-ok { display: flex; gap: 8px; align-items: center; padding: 10px 0; font-size: 14px; color: var(--subtle); }
-.overview-dependencies-ok svg { color: var(--green); }
+.overview-dot-done { background: var(--faint); border: 0; }
+.overview-flight-columns { display: none; }
+.overview-flight, .overview-landed { display: grid; align-items: center; gap: 2px 14px; padding: 4px 0; color: var(--muted); }
+.overview-flight { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-areas: "job cost" "title title" "clock model" "review ci"; }
+.overview-flight > *, .overview-landed > * { min-width: 0; }
+.overview-flight .overview-job-id, .overview-landed .overview-job-id { grid-area: job; min-height: 44px; }
+.overview-flight-title { grid-area: title; }
+.overview-flight .overview-line-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.overview-flight-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
+.overview-flight-extra .overview-project { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.overview-flight-extra a { display: flex; align-items: center; min-height: 44px; color: var(--muted); text-decoration: none; }
+.overview-flight-extra:empty { display: none; }
+.overview-clock { grid-area: clock; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.overview-clock > progress::-webkit-progress-value { background: var(--dim); }
+.overview-clock > progress::-moz-progress-bar { background: var(--dim); }
+.overview-review { grid-area: review; font-size: 12px; overflow-wrap: anywhere; }
+.overview-ci { grid-area: ci; font-size: 12px; }
+.overview-model { grid-area: model; align-self: start; overflow-wrap: anywhere; }
+.overview-model code { font-size: 11px; }
+.overview-cost { grid-area: cost; justify-self: end; font-size: 12px; white-space: nowrap; }
+.overview-landed { grid-template-columns: auto minmax(0,1fr) auto; grid-template-areas: "job job cost" "title title title" "pr merge merge"; }
+.overview-landed > .overview-line-text { grid-area: title; }
+.overview-landed-pr { grid-area: pr; display: flex; align-items: center; min-height: 44px; }
+.overview-merge { grid-area: merge; }
 @media (min-width: 900px) {
- .overview-subtitle { font-size: 14px; }
  .overview-health { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); }
  .overview-chip { padding: 14px 16px; }
  .overview-chip strong { font-size: 14px; }
+ .overview-clear > a { min-height: 48px; padding: 0 16px; }
+ .overview-clear a > div { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
  .overview-line { flex-wrap: nowrap; }
+ .overview-flight { grid-template-columns: 9rem minmax(0,1fr) 9rem; grid-template-areas: "job title cost" ". clock model" ". review ci"; }
+ .overview-flight .overview-line-text { display: block; white-space: nowrap; }
+ .overview-landed { grid-template-columns: 9rem minmax(0,1fr) 5rem 9rem 4rem; grid-template-areas: "job title pr merge cost"; padding: 0; }
+}
+@media (min-width: 1200px) {
+ .overview-flight, .overview-flight-columns { grid-template-columns: 9rem minmax(0,2.8fr) minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1.2fr) 4rem; column-gap: 16px; }
+ .overview-flight { grid-template-areas: "job title clock review ci model cost"; }
+ .overview-flight-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
+ .overview-flight-columns > :last-child { text-align: right; }
 }
