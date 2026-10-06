@@ -16,6 +16,8 @@ import { VersionBadge } from "../components/VersionBadge.tsx";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
+import { ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
+import { threadFilter, type ThreadsView, visibleEntries } from "../threads.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -198,14 +200,14 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   </details>
  </header>;
 }
-export function Sessions({data,control,draft}: {data:SessionsResponse;control?:ControlView;draft?:string}) {
+export function Sessions({data,control,draft,threads}: {data:SessionsResponse;control?:ControlView;draft?:string;threads?:ThreadsView}) {
  const scroller=useRef<HTMLDivElement>(null);
  const [atBottom,setAtBottom]=useState(true);
  const [showTools,setShowTools]=useState(readToolCalls);
  const [openRuns,setOpenRuns]=useState<string[]>([]);
  const lastEntry=data.entries.at(-1)?.id;
  const scrollToEnd=()=>{const el=scroller.current; if(el) el.scrollTop=el.scrollHeight;};
- useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,showTools,openRuns]);
+ useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,showTools,openRuns,threads?.selected]);
  const follow=useRef(true);
  // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
  // itself only when an ask id it has not shown before appears — never because the count alone changed.
@@ -240,8 +242,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   document.addEventListener("pointerdown",outside);
   return ()=>document.removeEventListener("pointerdown",outside);
  },[]);
- const rowList=rows(data.entries), starts=groupStarts(rowList);
- const toolCalls=data.entries.filter(e=>e.kind === "tool").length;
+ // Operator threads (cp-xmw2): the selected thread's entries plus every shared one; the pinned decisions are never filtered.
+ const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, shown=visibleEntries(data.entries,filter);
+ const rowList=rows(shown), starts=groupStarts(rowList);
+ const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
@@ -251,6 +255,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  return <div class="sessions">
   <aside class="session-sidebar" aria-label="Session streams">
    <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator session",data.selected === "you" && data.transcript ? "Full transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
+   {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
    <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context,true)}</section>
    <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,modelText({model:w.context?.model ?? w.model,thinking:w.thinking}),data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
@@ -262,14 +267,15 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     {data.selected === "you" && <p>{data.transcript === true ? "The operator session's own pi transcript, entry for entry, newest last." : "Trace a decision: parent’s question → operator’s answer → the message you saw."}</p>}</header>
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && <p class="session-empty">No recorded entries</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">
     <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
-   {data.transcript === true && control && <OperatorComposer control={control} draft={draft}/>}
+   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
+   {data.transcript === true && control && <OperatorComposer control={control} draft={draft} thread={threads}/>}
   </div>
  </div>;
 }

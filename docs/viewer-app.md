@@ -385,6 +385,32 @@ sends nothing to the operator session or the parent and never pushes. `screens/a
 (light and dark), no inline styles; rows wrap and long text breaks (`overflow-wrap: anywhere`) at 390 px and sit in the
 page column at 1440 px.
 
+**Threads** (cp-xmw2, docs/contracts.md §Operator threads). In Sessions → Operator ↔ you → **Full transcript** the operator
+sorts the one chat into threads: views of one session, never separate contexts, and no model call. `use-threads.ts` reads
+`GET /api/threads` (`threads.ts`) on mount, on every refresh and after each Mark done. One selection, a thread **tag**,
+is kept in `localStorage` `cp-thread` (absent is **All**; a storage that refuses the write warns and the choice holds for
+the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread
+plus every `shared` one — bridge relays, system entries, the inbox replay; **All** shows everything), the chips, the
+sidebar and the composer picker. A tag with no thread yet shows only shared entries and `No messages in <tag> yet`; its
+first send creates it. The pinned "N decisions waiting" section is never filtered. Below 900 px a `<nav
+class="session-threads" aria-label="Threads">` chip row sits right above the composer: **All**, then each thread not
+done, its label the tag plus a waiting badge (`· 2`, open asks plus unacknowledged answers, spelled out in its
+`aria-label`), `aria-pressed` on the selected one, then **Mark done** for it; 44 px chips, the row scrolls sideways and
+is `display: none` at 900 px and up. There the sidebar gets a **Threads** section under Operator ↔ you (only in the Full
+transcript): **All** first, a row per open or waiting thread, done threads in a collapsed `Done (n)`. **Mark done** (`POST
+/api/threads/done {id}` with the thread token, `x-cp-control-token`) is disabled, with the reason as its title, while the
+thread waits, while control is off and while asks or answers are unreadable; a refusal is an alert (`Not done: …`), a
+success goes back to **All** (a later send or bind reopens the thread). The composer's **Thread** select (`ThreadPicker`
+in `components/ThreadNav.tsx`, above the text row) offers No thread, each open or waiting tag, a `Done` group and `New
+thread…`, which opens a 32-character tag field with **Use**: the tag is normalized the server's way (trim, lowercase,
+spaces to `-`) and a bad one disables **Use** and shows the rule. A send with a tag carries `thread` in the
+`POST /api/operator/message` body; the injected marker and the socket frame are unchanged, so the session never sees it.
+A bind the server could not write still delivers, and the delivery line adds `· thread not recorded: <error>` as an
+alert (shown on the phone too). The picker and chips are hidden while `/api/threads` is forbidden or unreadable, and the
+sidebar section says `Threads unavailable: <reason>`. Styles: `.session-thread*` in `screens/sessions.css`, `.operator-composer-thread` in `components/control.css`
+(44 px controls, 16 px fields below 900 px, palette tokens only, no inline styles); tags render as text, long ones
+ellipsize in their chip at 390 px and in the 300 px sidebar at 1440 px.
+
 ## Live Data
 
 `/api/stream?view=overview` is an explicit read-only refresh clock: immediate

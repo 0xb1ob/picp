@@ -18,7 +18,7 @@ export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const UPLOAD_MAX_PER_MESSAGE = 8;
 
-export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]} | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
+export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
@@ -27,7 +27,7 @@ export interface Starting { state: "starting" | "running" | "failed"; reason: st
 export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-async function failure(response: Response): Promise<string> {
+export async function failure(response: Response): Promise<string> {
  try { const body = await response.json() as {error?: unknown}; if (typeof body.error === "string") return body.error; } catch { /* no JSON body: the status says enough */ }
  return `HTTP ${response.status}`;
 }
@@ -133,10 +133,10 @@ export function startLine(status: ControlStatus | null | undefined, starting: St
  return "Starting a session spends model tokens";
 }
 
-/** The delivery line: Sending, Queued, Delivered, or Failed with the reason. */
+/** The delivery line: Sending, Queued, Delivered, or Failed with the reason; a delivered send's own reason (an unfiled thread) follows it. */
 export function deliveryLine(delivery: Delivery | null): string {
  if (!delivery) return "";
  if (delivery.state === "failed") return `Failed: ${delivery.reason ?? "unknown"}`;
  const label = {sending: "Sending", queued: "Queued", delivered: "Delivered to the session", held: "Held until an operator session attaches"}[delivery.state];
- return delivery.id ? `${label} · ${delivery.id}` : label;
+ return [label, delivery.id, delivery.reason].filter(Boolean).join(" · ");
 }
