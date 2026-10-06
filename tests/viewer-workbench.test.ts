@@ -188,7 +188,7 @@ test("server: /api/dashboard and /api/awaiting are JSON under a deny-all CSP; ev
 const VIEWER = join(REPO_ROOT, "src", "viewer");
 const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts");
 
-test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images", () => {
+test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines", () => {
 	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts"]);
 	for (const name of standalone()) {
 		const text = readFileSync(join(VIEWER, name), "utf8");
@@ -203,8 +203,8 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 			assert.match(match[1] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$/, `${name} dynamically imports ${match[1]}`);
 		}
 		if (!writers.has(name)) assert.doesNotMatch(text, /writeFileSync|appendFileSync|mkdirSync|rmSync|renameSync|unlinkSync|createWriteStream|\bwriteSync\(|\b(?:writeFile|appendFile|mkdir|rename|unlink)\s*\(/, name);
-		// The dashboard-control writer is imported by the two write routes (control, image upload) and nothing else in the viewer.
-		if (name !== "control-api.ts" && name !== "operator-upload-api.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
+		// The dashboard-control writer is imported by the three write routes (control, image upload, thread done) and nothing else in the viewer.
+		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
 		// The image store is written only through uploads.ts, and only the upload route stores (the message route and the GET only read).
 		if (name !== "operator-upload-api.ts" && name !== "uploads.ts") assert.doesNotMatch(text, /\bwriteUpload\b/, `${name} stores an upload`);
 		if (name === "control-api.ts" || name === "control-files.ts") assert.doesNotMatch(text, /parent-host|OperatorAsks|operator-asks/, `${name} reaches the parent or the ask journal`);

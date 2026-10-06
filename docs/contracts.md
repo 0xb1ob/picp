@@ -5648,7 +5648,8 @@ repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 **The viewer's routes** ([`src/viewer/control-api.ts`](../src/viewer/control-api.ts)). `GET
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the
 session's CSRF token, which the page fetches itself; it never writes. `POST /api/operator/message` takes
-`{kind:"message", text, deliver?}`, `{kind:"answer", ask_id, label}` or `{kind:"abort"}` and refuses, in order:
+`{kind:"message", text, deliver?, thread?}`, `{kind:"answer", ask_id, label}` or `{kind:"abort"}` and refuses, in order
+(`thread` — a tag, only on `message`, never forwarded to the session — is covered under Operator threads):
 
 | Check | Refusal |
 |---|---|
@@ -5923,6 +5924,64 @@ first ack.
 **Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the ack route; the list still renders
 read-only. Deleting `state/operator/answers.jsonl` clears the list and loses nothing else. An unreadable or over-16-MiB
 journal shows "Answers unavailable".
+
+### Operator threads (cp-xmw2)
+
+Threads let the human sort the one operator chat; they are **views of one chat, never separate model contexts**, and
+bookkeeping only (no model call, no push, no authority). The dashboard marker, the control-socket ops and their args and
+the inbox line shape are unchanged.
+
+**Journal** `state/operator/threads.jsonl` (0600, dir 0700, append-only, one `O_APPEND` write + `fsync` per line through
+[`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts); created on first use; 16 MiB read cap; no rotation). Two
+writers: the operator session's bridge (`by:"bridge"`, `peer:null`) and the viewer (`by:"viewer"`, `peer` = client
+address); `at` is ISO seconds. Lines: `{"type":"open","by","id":"th-<12 hex>","at","tag","peer"}`,
+`{"type":"bind","by","at","thread":"th-…","ref":{"kind":"dashboard"|"ask"|"answer","id":"dc-…"|"ask-…"|"ans-…"},"peer"}`,
+`{"type":"done","by":"viewer","id","at","peer"}` — tags, ids, timestamps and addresses, never message, ask or answer text.
+A tag is `^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`).
+`readThreads` folds it in line order: the torn last line is ignored; bad lines, unknown types, repeated open ids and
+binds/dones for unknown threads count in `skipped`; a second `open` of a tag aliases its id to the first (two writers
+racing); the newest bind of a ref wins.
+
+**Derived state** (`src/viewer/threads-view.ts`; nothing stored): `waiting` while a ref the thread holds is an open ask
+(`asks.jsonl`) or an unacknowledged answer (`answers.jsonl`) — `waiting: {asks, answers}`; else `done` while its newest
+done line comes after its newest bind (line order, never clocks — a later bind reopens it); else `open`. With asks or
+answers unreadable `waiting` is null and a warning names the source.
+
+**Routes** ([`src/viewer/threads-api.ts`](../src/viewer/threads-api.ts)). `GET /api/threads` (403 `threads are served
+only under --require-tailnet` otherwise — tags can name private topics; never writes) returns `{generated_at,
+availability, enabled, reason, token, threads, total, warning}`: `threads` are `{id, tag, state, waiting, counts:
+{messages, asks, answers}, opened_at, last_at, done_at}`, waiting first, then open (newest `last_at`), then done (newest
+`done_at`), at most 100 with `total`; `token` is this viewer process's random thread token, only while control is on.
+`POST /api/threads/done` takes exactly `{"id": "th-<12 hex>"}` and refuses, in order:
+
+| Check | Refusal |
+|---|---|
+| method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `thread_done`) |
+| body shape | 400 `body must be {"id": "th-<12 hex>"}` |
+| `x-cp-control-token` equals the thread token | 403 `control token missing or stale; reload the page` |
+| the journal is readable | 500 `threads unreadable: …` |
+| the thread is known | 404 `no thread <id>` |
+| asks and answers readable | 503 `cannot tell whether <id> is waiting: <source> unreadable` |
+| nothing waiting | 409 `answer or acknowledge first: <n> open ask(s), <m> unacknowledged answer(s) in <tag>` |
+| not already done | 409 `<id> is already done since <done_at>` |
+| the `done` line is appended | 500 `threads journal unwritable (…)` |
+| — | 202 `{id, state: "done", done_at}` |
+
+Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "thread_done"`, `thread_id` once parsed)
+in `state/operator/dashboard.jsonl`; no refusal writes a done line. Mark done authorizes and acknowledges nothing.
+
+**Composer `thread`.** `POST /api/operator/message` accepts `thread` on `kind:"message"` only (on `answer`/`abort` it is
+400 `unknown field thread`); a value that does not normalize is 400 `thread must be a tag: 1-32 of a-z 0-9 -, starting
+with a letter or digit`, before any frame. The socket frame is built without it, so the session never sees composer
+threads. After the session's 202 (or the inbox `held` line) the viewer files the `dc-` id: `open` on the tag's first use,
+then `bind`. The 202 body gains `thread: {tag, id, error}`; a bind that cannot be written never changes the 202 —
+`thread.error` names why and the viewer logs one line (`viewer: thread bind unwritten for <dc-id>: …`). A send later
+dropped leaves an orphan bind that matches no entry; harmless.
+
+**Failure and recovery.** A missing journal is `availability: "missing"` (empty list). An unreadable or over-16-MiB one
+is `unavailable` with a warning, done answers 500 and composer binds fail with `thread.error` while the message still
+delivers; nothing is truncated — move the file aside (deleting it clears all grouping and loses nothing else). The
+trust boundary is the dashboard control one: a same-user local process can already write `state/`.
 
 ## Reading the plan
 

@@ -70,7 +70,11 @@ export interface RestartStatus { supported: boolean; blockers: string[]; reason:
 /** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
 export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
-export interface ControlSendResponse { id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort" }
+export interface ControlSendResponse {
+	id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort";
+	/** cp-xmw2: present when the send named a `thread`; `error` says why the dc- id was not filed (the send still stands). */
+	thread?: { tag: string; id: string | null; error: string | null };
+}
 /**
  * `POST /api/operator/start` `{"via": "herdr" | "tmux", "resume"?: true}`: a herdr workspace, or `<tmux> new-session -d -s
  * cp-operator <wrapper>` (resume: `<wrapper> -c`); fixed argv. Resume runs `cp-operator -c`: pi continues
@@ -214,6 +218,17 @@ export interface AnswersView {
 export interface AnswersControlStatusResponse { generated_at: string; enabled: boolean; reason: string | null; token: string | null }
 /** `POST /api/answers/ack` accepted: 202 once its `acked` line is on disk. */
 export interface AnswerAckResponse { id: string; state: "acked"; acked_at: string }
+/** cp-xmw2: one operator thread with its derived state (`waiting` null while asks or answers are unreadable). */
+export interface ThreadView {
+ id: string; tag: string; state: "open" | "waiting" | "done";
+ waiting: { asks: number; answers: number } | null;
+ counts: { messages: number; asks: number; answers: number };
+ opened_at: string; last_at: string; done_at: string | null;
+}
+/** `GET /api/threads` (--require-tailnet only): the list, and the done CSRF token only while control is on. */
+export interface ThreadsResponse { generated_at: string; availability: SourceAvailability; enabled: boolean; reason: string | null; token: string | null; threads: ThreadView[]; total: number; warning: string | null }
+/** `POST /api/threads/done` accepted: 202 once its `done` line is on disk. */
+export interface ThreadDoneResponse { id: string; state: "done"; done_at: string }
 export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[]; answers: AnswersView }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
