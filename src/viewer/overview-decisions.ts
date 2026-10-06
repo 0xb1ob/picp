@@ -4,7 +4,7 @@ import { isSafeId, obj, type ViewerState } from "./sessions.ts";
 import { objectList, parseObject, readBounded, source, strings, text, timestamp, today } from "./overview-read.ts";
 
 interface RecordedAsk { ask: Ask; state: "open" | "answered" | "withdrawn"; answered_at: string | null; answer: string | null; reason: string | null }
-function asks(state: ViewerState) {
+export function asks(state: ViewerState) {
  return source<RecordedAsk[]>(() => {
   const data = readBounded(join(state.stateDir, "operator", "asks.jsonl"));
   const records = new Map<string, RecordedAsk>();

@@ -32,7 +32,7 @@ Only this trusted startup/build command writes generated output. Requests never
 write operational state (the request-time writes are a device's Web Push
 subscription under `data/push/subscriptions/`, the dashboard-control audit line in
 `state/operator/dashboard.jsonl`, a Schedules page `request` line in `state/schedule-control.jsonl`, which the
-parent reads, and an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard), contact a gateway, invoke policy stores, probe process
+parent reads, an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard, and a thread `open`/`bind`/`done` line in `state/operator/threads.jsonl`, likewise), contact a gateway, invoke policy stores, probe process
 liveness or communicate with a parent or worker (dashboard control talks only to the
 operator's own session, over its owner-only socket). Build failure is logged to
 stderr and `/` returns a generic 503 without paths, stack traces or a classic
@@ -50,7 +50,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
 loosened. The separate published-board policy still forbids scripts. Host binding,
-GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request` and `POST /api/answers/ack`) and explorer
+GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack` and `POST /api/threads/done`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
 ## Routes
@@ -68,6 +68,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 | Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
+| Threads | `GET /api/threads` (list + this viewer's thread token), `POST /api/threads/done` (only under `--require-tailnet`; appends one `done` line, no session or parent) |
 
 Native `hashchange` drives routing, including Back/Forward. Empty, malformed and
 unknown fragments show Overview. Legacy root session, files and dashboard hashes
@@ -357,7 +358,7 @@ opt-out (`data/dashboard-control.json` `{"enabled": false}`), `Origin` (the orig
 record, its CSRF token, and the socket. Every refusal after the
 `--require-tailnet` guard appends one `refused` line to
 `state/operator/dashboard.jsonl` (`src/viewer/control-audit.ts`, append-only,
-imported only by `control-api.ts` and the image upload route `operator-upload-api.ts`); the operator session journals what it
+imported only by `control-api.ts`, the image upload route `operator-upload-api.ts` and the thread done route `threads-api.ts`); the operator session journals what it
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
