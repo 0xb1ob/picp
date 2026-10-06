@@ -51,6 +51,12 @@ test("Map shows today's revoked mission closures and toggles older history in th
   assert.match(root.textContent!,/md-history/);assert.match(root.textContent!,/md-old/);
   await act(()=>{toggle.checked=false;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
   assert.match(root.textContent!,/md-revoked/);assert.doesNotMatch(root.textContent!,/md-history|md-old/);
+  const legend=root.querySelector<HTMLButtonElement>('[aria-label="Show full legend"]')!;
+  await act(()=>{legend.dispatchEvent(new window.Event("click",{bubbles:true}));});
+  assert.equal(legend.getAttribute("aria-pressed"),"true");
+  for(const label of ["working","not dispatched","held","failed","launching","done","blocked by · open","stranded","blocked by · satisfied","dependency removed","pipeline","waits on PR · CI red","superseded by","repairs"]) assert.ok(root.querySelector(".map-full-legend")!.textContent!.includes(label),label);
+  await act(()=>{legend.dispatchEvent(new window.Event("click",{bubbles:true}));});
+  assert.equal(legend.getAttribute("aria-pressed"),"false");assert.equal(root.querySelector(".map-full-legend"),null);
   assert.match(root.textContent!,/Select a job or mandate/);
   assert.equal(root.querySelectorAll(".map-node-dim").length,0);
   const pick=(id:string)=>[...root.querySelectorAll("button")].find(b=>(b.getAttribute("title")??"").startsWith(`${id}:`))!;
@@ -67,10 +73,37 @@ test("Map shows today's revoked mission closures and toggles older history in th
  }
 });
 
+test("S6 map exposes clamped objectives and job titles with full accessible names and compact controls",async()=>{
+ const {screen}=await renderer();const data=mapQaFixture();
+ data.nodes[0]!.id="cp-a-very-long-job-identifier-that-must-stay-accessible";
+ data.nodes[0]!.title='Long job title <with markup> & details that must remain accessible beyond the two visible lines';
+ const doc=parseHTML(screen(data)).document;
+ assert.equal(doc.querySelector("h1")!.textContent,"Jobs");
+ const header=doc.querySelector(".map-heading")!;
+ assert.ok(header.querySelector('nav[aria-label="Jobs view"]'));
+ assert.ok(header.querySelector(".map-legend-summary"));
+ assert.ok(header.querySelector(".mandate-history-toggle"));
+ assert.equal(header.querySelectorAll(".map-legend-summary .map-legend-chip").length,2);
+ const mandate=doc.querySelector('.map-mandate-node[title]')!;
+ assert.equal(mandate.querySelector(".map-label")!.textContent,mapObjective);
+ assert.equal(mandate.getAttribute("aria-label"),`md-live: ${mapObjective}`);
+ for(const job of data.nodes) {
+  const node=[...doc.querySelectorAll('.map-graph button')].find(n=>n.getAttribute("title")===`${job.id}: ${job.title}`)!;
+  assert.equal(node.querySelector(".map-label")!.textContent,job.title);
+  assert.equal(node.getAttribute("aria-label"),`${job.id}: ${job.title}`);
+  assert.equal(node.closest("foreignObject")!.getAttribute("height"),"96","S5 reserves label height in edge geometry");
+  const link=doc.querySelector(`.map-mobile-lanes a[href="#job/${job.id}"]`)!;
+  assert.equal(link.querySelector(".map-label")!.textContent,job.title);
+  assert.equal(link.getAttribute("aria-label"),`${job.id}: ${job.title}`);
+ }
+ assert.equal(doc.querySelector(".map-status")!.textContent,"✓No stranded dependencies");
+ assert.equal(doc.querySelectorAll(".map-node-dim").length,0);
+});
+
 test("map prioritizes active projects, selects nothing until a pick, and keeps every job title",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
  assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked/);assert.ok(html.includes(`title="${mapObjective}"`));
- assert.match(html,/<h1>Map<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
+ assert.match(html,/<h1>Jobs<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
  assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
  assert.match(html,/Select a job or mandate/);assert.match(html,/Nothing is dimmed until you pick one/);
  assert.doesNotMatch(html,/map-node-dim/);assert.doesNotMatch(html,/job · cp-job-/);
@@ -78,7 +111,9 @@ test("map prioritizes active projects, selects nothing until a pick, and keeps e
  assert.match(html,/d="M344 100L373 100"/,"dependency depth connects facing node edges");
  for(let i=0;i<6;i++) assert.ok(html.includes(`title="cp-job-${i}:`));
  assert.doesNotMatch(html,/>https:\/\/github/);
- for(const label of ["working","not dispatched","held","failed","launching","done","blocked by · open","blocked by · satisfied","pipeline"]) assert.ok(html.includes(`>${label}<`),label);
+ for(const label of ["working","not dispatched","held","done"]) assert.ok(html.includes(`>${label}<`),label);
+ assert.match(html,/← blocked by · open/);assert.match(html,/← satisfied/);
+ assert.doesNotMatch(html,/map-full-legend/);
  data.nodes[3]!.phase="waiting";
  const waiting=screen(data,true);
  assert.match(waiting,/no run status/);assert.doesNotMatch(waiting,/>waiting</);
