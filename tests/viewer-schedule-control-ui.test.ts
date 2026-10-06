@@ -39,6 +39,22 @@ test("Run now sends run_now; Remove needs two taps", async t => {
 	assert.equal(button(/remove/i).textContent, "Remove…", "and disarms again");
 	await click(/^Disable$/);
 	assert.deepEqual(sent.at(-1), ["disable", "sch-aaaaaa"]);
+	await act(() => mount(root, { ...schedule, enabled: false }, control));
+	assert.deepEqual(labels(), ["Enable", "Remove…"], "disabled schedules cannot Run now");
+	await click(/^Enable$/);
+	assert.deepEqual(sent.at(-1), ["enable", "sch-aaaaaa"]);
+	for (const held of [
+		{ ...control, status: { error: "Controls unavailable" } },
+		{ ...control, status: { ...ready, parent: { running: false, pid: null, reason: "offline" } } },
+		{ ...control, sending: { schedule_id: schedule.id, op: "run_now" as const } },
+		{ ...control, status: { ...ready, requests: [{ id: "sc-20260701070000-00000001", at: ready.generated_at, op: "run_now" as const, schedule_id: schedule.id, state: "queued" as const, reason: null, job_id: null }] } },
+	]) {
+		await act(() => mount(root, schedule, held));
+		assert.ok([...root.querySelectorAll("button")].every(b => b.hasAttribute("disabled")), "unavailable/pending requests disable every action");
+	}
+	await act(() => mount(root, schedule, { ...control, failed: { schedule_id: schedule.id, reason: "grant is stopped: move the schedule to a new grant" } }));
+	assert.equal(root.querySelector('[role="alert"]')?.textContent, "Refused: grant is stopped: move the schedule to a new grant");
+	assert.equal(root.querySelector(".schedule-remove")?.textContent, "Remove…");
 	await act(() => unmount(root));
 });
 

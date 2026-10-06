@@ -19,21 +19,24 @@ test("map renders empty, failed, stranded and selected states without inline sty
  data.nodes=[{id:"cp-failed",title:"<script>bad</script>",project:"demo",mandate_id:null,phase:"failed",ledger_status:"in_progress",model:"model",cost_usd:2,pr_url:null,ci:null}];
  data.edges=[{from:"cp-failed",to:"cp-failed",kind:"stranded"}];data.stranded_count=1;
  const html=screen(data,true);assert.match(html,/1 stranded dependency/);assert.match(html,/failed/);assert.match(html,/aria-label="Selection"/);assert.match(html,/&lt;script>/);assert.match(html,/Mandate and job graph/);assert.doesNotMatch(html,/<script>|style=|onclick=/i);
+ assert.equal(parseHTML(html).document.querySelector('.map-graph .map-node > span > small')!.textContent,"failed","stranded jobs retain their recorded phase");
+ data.nodes[0]!.ledger_status="closed";
+ assert.ok(parseHTML(screen(data)).document.querySelector(".map-health-status"),"closed stranded targets do not count as open dependencies");
+ data.nodes[0]!.ledger_status="in_progress";
  data.availability.mandates="unavailable";data.stranded_count=null;
  assert.match(screen(data,true),/Dependency status unavailable/);assert.doesNotMatch(screen(data,true),/No stranded dependencies/);
  data.nodes.push({...data.nodes[0]!,id:"cp-right"});
  data.edges=[{from:"cp-right",to:"cp-failed",kind:"open"}];
- assert.match(screen(data,true),/d="M344 100L373 100"/,"dependency depth puts the blocker first and connects the facing boundaries");
+ assert.match(screen(data,true),/cp-failed blocked by cp-right · open/,"vertical dependencies retain their recorded endpoints and kind");
 });
 
-test("Map shows today's revoked mission closures and toggles older history in the browser's local day",async t=>{
+test("Map gates every inactive mandate and preserves historical jobs, controls and selection",async t=>{
  const {mount,unmount,act}=await renderer();const data=mapQaFixture();
- // The day boundary is the browser's own zone: 23:00Z on the 25th and 02:00Z on the 26th are both Sep 25 in Los Angeles.
- const zone=process.env.TZ;process.env.TZ="America/Los_Angeles";t.after(()=>{if(zone===undefined) delete process.env.TZ;else process.env.TZ=zone;});
  data.generated_at="2026-09-26T02:00:00Z";
  const recent=data.items.find(m=>m.id==="md-revoked")!;recent.closed_at="2026-09-25T23:00:00Z";
  data.items.push({...recent,id:"md-history",closed_at:"2026-09-25T01:00:00Z"});
  data.nodes.push({...data.nodes[0]!,id:"cp-recent",project:recent.projects[0]!,mandate_id:recent.id});
+ delete data.items.find(m=>m.id==="md-closed")!.closed_at;
  const {window,document}=parseHTML("<html><body><main></main></body></html>");
  const originals=["window","document"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  Object.defineProperty(globalThis,"window",{configurable:true,value:window});
@@ -42,15 +45,17 @@ test("Map shows today's revoked mission closures and toggles older history in th
  const root=document.querySelector("main")!;
  {
   await act(()=>mount(root,data));
-  assert.match(root.textContent!,/md-revoked/);
-  assert.match(root.textContent!,/cp-recent/);
-  assert.doesNotMatch(root.textContent!,/md-history|md-old/);
-  assert.match(root.textContent!,/Show 2 expired or revoked/);
+  assert.doesNotMatch(root.textContent!,/md-revoked|cp-recent|md-history|md-old|md-paused|md-closed/);
+  assert.match(root.textContent!,/Show 5 inactive mandates/);
   const toggle=root.querySelector<HTMLInputElement>('.mandate-history-toggle input')!;
   await act(()=>{toggle.checked=true;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
-  assert.match(root.textContent!,/md-history/);assert.match(root.textContent!,/md-old/);
+  for(const id of ["md-history","md-old","md-revoked","md-paused","md-closed","cp-recent"]) assert.ok(root.textContent!.includes(id));
+  assert.equal(root.querySelector('.map-mandate-node[aria-label^="md-closed:"] small')!.textContent,"closed","unknown closure dates do not invent a day");
+  const recentNode=root.querySelector<HTMLButtonElement>('.map-graph button[title^="cp-recent:"]')!;
+  await act(()=>recentNode.dispatchEvent(new window.Event("click",{bubbles:true})));
+  assert.match(root.textContent!,/job · cp-recent/);
   await act(()=>{toggle.checked=false;toggle.dispatchEvent(new window.Event("change",{bubbles:true}));});
-  assert.match(root.textContent!,/md-revoked/);assert.doesNotMatch(root.textContent!,/md-history|md-old/);
+  assert.doesNotMatch(root.textContent!,/md-revoked|cp-recent|md-history|md-old|md-paused|md-closed/);
   const legend=root.querySelector<HTMLButtonElement>('[aria-label="Show full legend"]')!;
   await act(()=>{legend.dispatchEvent(new window.Event("click",{bubbles:true}));});
   assert.equal(legend.getAttribute("aria-pressed"),"true");
@@ -69,6 +74,20 @@ test("Map shows today's revoked mission closures and toggles older history in th
   await act(()=>mount(root,data));
   assert.match(root.innerHTML,/#265 · merged/);
   assert.doesNotMatch(root.innerHTML,/>https:\/\/github/);
+  for(let i=0;i<4;i++) data.nodes.push({...data.nodes[0]!,id:`cp-more-done-${i}`});
+  await act(()=>mount(root,data));
+  const more=root.querySelector<HTMLButtonElement>(".map-more-done")!;
+  assert.equal(more.textContent,"+4 more done");
+  assert.equal(root.querySelectorAll('.map-graph button[title^="cp-more-done-"]').length,0);
+  assert.equal(root.querySelectorAll('.map-done-details a[href^="#job/cp-more-done-"]').length,4,"phone disclosure retains all finished links");
+  await act(()=>more.dispatchEvent(new window.Event("click",{bubbles:true})));
+  assert.equal(more.getAttribute("aria-expanded"),"true");
+  assert.equal(root.querySelectorAll('.map-graph button[title^="cp-more-done-"]').length,4);
+  await act(()=>pick("cp-more-done-3").dispatchEvent(new window.Event("click",{bubbles:true})));
+  assert.match(root.textContent!,/job · cp-more-done-3/);
+  await act(()=>more.dispatchEvent(new window.Event("click",{bubbles:true})));
+  assert.equal(more.getAttribute("aria-expanded"),"false");
+  assert.match(root.textContent!,/Select a job or mandate/);assert.equal(root.querySelectorAll(".map-node-dim").length,0);
   await act(()=>unmount(root));
  }
 });
@@ -91,7 +110,7 @@ test("S6 map exposes clamped objectives and job titles with full accessible name
   const node=[...doc.querySelectorAll('.map-graph button')].find(n=>n.getAttribute("title")===`${job.id}: ${job.title}`)!;
   assert.equal(node.querySelector(".map-label")!.textContent,job.title);
   assert.equal(node.getAttribute("aria-label"),`${job.id}: ${job.title}`);
-  assert.equal(node.closest("foreignObject")!.getAttribute("height"),"96","S5 reserves label height in edge geometry");
+  assert.equal(node.closest("foreignObject")!.getAttribute("height"),"58","compact cards reserve a title line and inline phase");
   const link=doc.querySelector(`.map-mobile-lanes a[href="#job/${job.id}"]`)!;
   assert.equal(link.querySelector(".map-label")!.textContent,job.title);
   assert.equal(link.getAttribute("aria-label"),`${job.id}: ${job.title}`);
@@ -100,15 +119,36 @@ test("S6 map exposes clamped objectives and job titles with full accessible name
  assert.equal(doc.querySelectorAll(".map-node-dim").length,0);
 });
 
+test("S6 revision stacks compact jobs inside mandate columns and gates inactive grants",async()=>{
+ const {screen}=await renderer();const data=mapQaFixture();
+ data.nodes[1]!.context={tokens:84000,window:272000,percent:31,level:"ok",reason:null,model:"fixture",last_compact_at:null,thinking:null};
+ data.items.push({...data.items.find(m=>m.id==="md-live")!,id:"md-second"});
+ data.nodes.push({...data.nodes[1]!,id:"cp-second",mandate_id:"md-second"});
+ data.edges.push({from:"cp-job-1",to:"cp-job-2",kind:"open"});
+ const doc=parseHTML(screen(data)).document;const graph=doc.querySelector(".map-graph")!;
+ const jobs=[...graph.querySelectorAll("foreignObject")].filter(box=>box.querySelector('button[title^="cp-job-"]'));
+ assert.equal(new Set(jobs.map(box=>box.getAttribute("x"))).size,1,"each mandate owns one vertical job stack");
+ assert.equal(new Set(jobs.map(box=>box.getAttribute("y"))).size,data.nodes.length-1);
+ assert.equal(graph.querySelectorAll(".map-column").length,2,"active mandates sit side by side");
+ assert.equal(graph.querySelectorAll(".ctx-chip").length,0,"tiles omit context bars");
+ assert.equal(doc.querySelectorAll(".map-mobile-job .ctx-chip").length,0);
+ assert.doesNotMatch(doc.querySelector(".map-screen")!.textContent!,/md-paused|md-closed|md-old|md-revoked/);
+ assert.match(doc.querySelector(".map-screen")!.textContent!,/Show 4 inactive mandates/);
+ assert.ok(graph.textContent!.includes("cp-job-2 blocked by cp-job-0 · satisfied"));
+ assert.equal(graph.querySelectorAll(".map-edge-label").length,1,"multiple blockers share a label without overlapping text");
+ assert.ok(graph.querySelector(".map-edge-label")!.getAttribute("title")!.includes("cp-job-2 blocked by cp-job-1 · open"));
+ assert.ok(doc.querySelector(".map-selection-empty svg"));
+});
+
 test("map prioritizes active projects, selects nothing until a pick, and keeps every job title",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
- assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked/);assert.ok(html.includes(`title="${mapObjective}"`));
+ assert.doesNotMatch(html,/md-old|md-revoked|md-paused|md-closed/);assert.match(html,/Show 4 inactive mandates/);assert.ok(html.includes(`title="${mapObjective}"`));
  assert.match(html,/<h1>Jobs<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
- assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
+ assert.match(html,/<h2>pi-command-post-system/);assert.doesNotMatch(html,/<h2>aaa-paused/);
  assert.match(html,/Select a job or mandate/);assert.match(html,/Nothing is dimmed until you pick one/);
  assert.doesNotMatch(html,/map-node-dim/);assert.doesNotMatch(html,/job · cp-job-/);
- assert.match(html,/<svg width="840"/);assert.match(html,/foreignObject x="700" y="178"[^>]*height="96"/);
- assert.match(html,/d="M344 100L373 100"/,"dependency depth connects facing node edges");
+ assert.match(html,/<svg width="840"/);assert.match(html,/foreignObject x="12" y="630"[^>]*height="58"/);
+ assert.match(html,/cp-job-2 blocked by cp-job-0 · satisfied/);
  for(let i=0;i<6;i++) assert.ok(html.includes(`title="cp-job-${i}:`));
  assert.doesNotMatch(html,/>https:\/\/github/);
  for(const label of ["working","not dispatched","held","done"]) assert.ok(html.includes(`>${label}<`),label);
@@ -119,9 +159,9 @@ test("map prioritizes active projects, selects nothing until a pick, and keeps e
  assert.match(waiting,/no run status/);assert.doesNotMatch(waiting,/>waiting</);
 });
 
-test("hundreds of independent jobs wrap without losing nodes, full titles or initial reachability",async()=>{
+test("hundreds of independent jobs stack without losing nodes, full titles or initial reachability",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();
- data.nodes=Array.from({length:227},(_,i)=>({...data.nodes[0]!,id:`cp-independent-${i}-with-a-long-id`,title:`${mapTitle} ${i}`}));data.edges=[];
+ data.nodes=Array.from({length:227},(_,i)=>({...data.nodes[0]!,phase:"working",ledger_status:"in_progress",id:`cp-independent-${i}-with-a-long-id`,title:`${mapTitle} ${i}`}));data.edges=[];
  const doc=parseHTML(screen(data)).document;const graph=doc.querySelector('.map-graph > svg')!;
  assert.ok(Number(graph.getAttribute("width"))<=840,"independent jobs must not grow the horizontal canvas");
  const boxes=[...graph.querySelectorAll("foreignObject")].filter(box=>box.querySelector('button[title^="cp-independent-"]'));

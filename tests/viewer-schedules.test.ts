@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
+import { parseHTML } from "linkedom";
 import { nextCronSlot, parseCron, scheduleFileErrors } from "../src/scheduler.ts";
 import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_ASK_ON, MANDATE_CHANNEL_VALUES, SCHEDULE_DELIVERIES, SCHEDULE_JOB_KINDS, SCHEDULE_MANDATE_ID, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS } from "../src/viewer/schedule-core.ts";
 import { PARENT_SKILLS } from "../src/cp-bridge.ts";
@@ -336,6 +337,22 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.match(screen({ generated_at: new Date(NOW).toISOString(), error: "state/schedules.json violates the schedule contract", schedules: [] }), /role="alert"[^>]*>Schedules unavailable: state\/schedules\.json violates/);
 
 	const html = screen(schedulesView(fixture(t, file(cron, watch)), () => {}, NOW));
+	const { document } = parseHTML(html);
+	const nav = document.querySelector('nav[aria-label="Schedules and files"]')!;
+	assert.ok(nav, "Schedules/Files navigation is reachable on this page");
+	assert.equal(nav.querySelector('[aria-current="page"]')?.getAttribute("href"), "#schedules");
+	assert.equal(nav.querySelector('a[href="#files"]')?.textContent, "Files");
+	assert.equal(document.querySelector(".schedule-add")?.textContent, "+ Add schedule");
+	assert.ok(document.querySelector(".schedule-layout > aside"), "explanation beside the schedule list");
+	for (const card of document.querySelectorAll(".schedule-card")) {
+		assert.deepEqual([...card.querySelectorAll(".schedule-facts > dt")].map(e => e.textContent), ["Trigger", "Recipe", "Mandate", "Last fire"]);
+		const details = card.querySelector(".schedule-details")!;
+		assert.ok(details && !details.hasAttribute("open"), "advanced grant/template/history details start collapsed");
+		assert.ok(details.querySelector(".schedule-approval"), "verbatim template approval remains reachable");
+		assert.ok(details.querySelector(".schedule-history") || details.textContent?.includes("No job fired yet"));
+		assert.equal(card.querySelector(".schedule-result")?.closest("details"), null, "result destination is a primary fact");
+	}
+	assert.match(document.querySelector(".schedule-card .schedule-result")?.textContent ?? "", /this page's run history/);
 	assert.match(html, /weekly digest/);
 	assert.match(html, /cron 0 6 \* \* 1 \(Europe\/Warsaw\)/);
 	assert.match(html, /Next fire /);
@@ -364,7 +381,7 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	};
 	const noop = { sending: null, failed: null, request: () => {} };
 	const live = controlled(data, { status: ready, ...noop });
-	const [cronCard = "", watchCard = ""] = live.split('<article class="job-row schedule-card">').slice(1);
+	const [cronCard = "", watchCard = ""] = live.split('<article class="schedule-card">').slice(1);
 	assert.match(cronCard, /<button type="button" class="schedule-primary">Run now<\/button><button type="button">Disable<\/button><button type="button" class="schedule-remove">Remove…<\/button>/);
 	assert.match(watchCard, /<button type="button">Enable<\/button><button type="button" class="schedule-remove">Remove…<\/button>/);
 	assert.doesNotMatch(watchCard, /Run now/, "no run now on a disabled schedule");
