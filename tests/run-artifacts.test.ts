@@ -222,6 +222,22 @@ test("every persisted projection satisfies the contract validator", () => {
 	}
 });
 
+test("N2: a logged tool_execution_update keeps its call id but never its streamed partialResult", () => {
+	const home = createScratchHome();
+	try {
+		const recorder = RunRecorder.open({ home: home.path, jobId: BR });
+		recorder.pi({ type: "tool_execution_start", toolCallId: "c1", toolName: "bash" });
+		recorder.pi({ type: "tool_execution_update", toolCallId: "c1", toolName: "bash", partialResult: { content: [{ type: "text", text: "STREAMED-SECRET" }] } });
+		recorder.close();
+		const raw = readFileSync(join(home.path, paths.eventsFile(BR)), "utf8");
+		assert.doesNotMatch(raw, /STREAMED-SECRET|partialResult/);
+		const update = readEventLog(home.path, BR).find((event) => event.type === "tool_execution_update");
+		assert.equal((update?.payload as { toolCallId?: string }).toolCallId, "c1");
+	} finally {
+		home.cleanup();
+	}
+});
+
 // ---------------------------------------------------------------------------
 // cp-0wq7: events that arrive after the observed close
 // ---------------------------------------------------------------------------

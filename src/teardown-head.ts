@@ -14,7 +14,9 @@ import {
 	validate,
 	validateEnvelope,
 } from "./contracts.ts";
+import { AwaitingStore } from "./awaiting.ts";
 import { isPidAlive, readRunObservation } from "./fleet.ts";
+import { HUMAN_REVIEW_SUBJECT } from "./human-handoff.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
 import type { JobOwner } from "./job-claims.ts";
@@ -156,6 +158,28 @@ function ledgerCloseFailedWakeup(records: readonly FleetRecord[], failed: Ledger
 		...(failed.length === 1 ? { job_id: failed[0]?.job_id } : {}),
 		content: lines.join("\n"),
 	};
+}
+
+/**
+ * picp-pvo: the job is closed, so its `human-review pr <url>` Awaiting row stops asking.
+ * Only this job's open or deferred rows with that subject; an answer is never withdrawn.
+ * A store that cannot be written never undoes a teardown: it is one `recovery` wake-up.
+ */
+export async function withdrawHumanReview(home: string, record: FleetRecord, journal?: (input: DurableWakeupInput) => void): Promise<void> {
+	try {
+		const store = new AwaitingStore({ home });
+		for (const item of store.list()) {
+			if (item.job_id !== record.job_id || !item.subject?.startsWith(HUMAN_REVIEW_SUBJECT)) continue;
+			if (item.state === "open" || item.state === "deferred") await store.withdraw(item.id);
+		}
+	} catch (error) {
+		journal?.({
+			id: boundedWakeupId(`human-review-withdraw-failed:${record.job_id}`),
+			kind: "recovery",
+			job_id: record.job_id,
+			content: `[${record.project}] ${record.job_id}: torn down, but its human-review Awaiting row could not be withdrawn — ${firstLine(error)}\n  next: nothing to answer; the row reads as obsolete once the job is done (state/awaiting.json keeps it open).`,
+		});
+	}
 }
 
 /**

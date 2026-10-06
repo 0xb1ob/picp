@@ -58,7 +58,7 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 		label: "Self compact",
 		description: "Queue operator-session compaction after the agent run settles. Write instructions from the current work, at least 200 characters, naming a handoff file path. Include " + WORK_FOCUS + ".",
 		parameters: Type.Object({ instructions: Type.String() }, { additionalProperties: false }),
-		async execute(_id, params) {
+		async execute(_id, params, _signal, _update, ctx) {
 			const instructions = params.instructions.trim();
 			if (!instructions) throw new Error("self_compact refused: empty instructions");
 			if (instructions.length < 200) throw new Error("self_compact refused: instructions must be at least 200 characters");
@@ -66,6 +66,12 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 				throw new Error("self_compact refused: instructions must mention a handoff file path");
 			}
 			if (pending || running) throw new Error("self_compact refused: compaction already queued or running");
+			// N13: a compact that already ran leaves nothing to reduce; unknown usage still queues.
+			const tokens = ctx.getContextUsage()?.tokens;
+			const limit = threshold();
+			if (typeof tokens === "number" && tokens < limit) {
+				return { content: [{ type: "text", text: `self_compact not queued: context is at ${tokens} tokens, under the ${limit} threshold; no handoff written` }], details: { queued: false, tokens, threshold: limit } };
+			}
 			const handoff = join(paths().directory, `compact-${new Date().toISOString()}.md`);
 			const customInstructions = `${instructions}\n\nOperator compaction handoff: ${handoff}\n`;
 			try { atomicWriteText(handoff, customInstructions); }

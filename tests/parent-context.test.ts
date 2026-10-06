@@ -8,7 +8,7 @@ import { CpBridge } from "../src/cp-bridge.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { parentCompactInstructions, parentSettings } from "../src/parent-context.ts";
+import { digestsInContext, parentCompactInstructions, parentSettings } from "../src/parent-context.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
 import { WorkerProcess } from "../src/worker-process.ts";
 import { COMMAND_POST_EXTENSION, MockProvider, createAgentDir, createScratchHome, startRpc } from "./harness/index.ts";
@@ -24,6 +24,19 @@ test("parentSettings defaults an absent parent.json to 200000 and keeps explicit
 		writeFileSync(file, "{}");
 		assert.deepEqual(parentSettings(home.path), {}, "an explicit file without a valid value stays disabled");
 	} finally { home.cleanup(); }
+});
+
+test("picp-99l: an identical latest digest pair is not re-sent; a compaction or a changed digest still is", () => {
+	const pair = [{ customType: "cp-memory", content: "memory A" }, { customType: "cp-standing-orders", content: "orders A" }];
+	const entry = (customType: string, content: string) => ({ type: "custom_message", customType, content });
+	const resumed = [entry("cp-memory", "memory A"), entry("cp-standing-orders", "orders A"), { type: "message" }];
+	assert.equal(digestsInContext(resumed, pair), true, "a resumed session already holding the pair skips");
+	assert.equal(digestsInContext([...resumed, { type: "compaction" }], pair), false, "post-compact always injects");
+	assert.equal(digestsInContext([], pair), false, "a fresh session injects");
+	assert.equal(digestsInContext(resumed, [pair[0]!, { customType: "cp-standing-orders", content: "orders B" }]), false, "changed orders inject");
+	assert.equal(digestsInContext([entry("cp-memory", "memory old"), entry("cp-standing-orders", "orders A"), entry("cp-memory", "memory A")], pair), true, "only the latest of each type counts");
+	assert.equal(digestsInContext([entry("cp-memory", "memory A"), entry("cp-standing-orders", "orders A"), entry("cp-memory", "memory B")], pair), false, "a newer different memory digest means send");
+	assert.equal(digestsInContext(resumed, [pair[1]!]), false, "a memory digest that disappeared is a change");
 });
 
 test("parent compact instructions name current open decisions, held PR jobs and active mandates from disk", async (t) => {
@@ -140,4 +153,28 @@ test("session start puts memory and standing orders in context before any turn (
 	const text = JSON.stringify(response);
 	assert.match(text, /Wake-turn memory/);
 	assert.match(text, /Wake-turn order/);
+});
+
+test("picp-99l: resuming a parent session with unchanged digests appends no second pair", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "standing-orders.md"), "# Standing orders\n\nResume order.\n");
+	writeFileSync(join(home.path, LAYOUT.learningsFile), "# Learnings\n\n- Resume memory. <!--P-->\n");
+	const provider = await MockProvider.start();
+	const model = provider.addScript("parent-resume", [{ kind: "text", text: "ok" }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const session = join(home.path, "parent-session.jsonl");
+	const start = () => startRpc({ cwd: home.path, env: { ...agent.env, CP_HOME: home.path, CP_MODE: "multi", CP_HEADLESS: "1" },
+		args: ["--no-extensions", "-e", COMMAND_POST_EXTENSION, "--session", session, "--model", model] });
+	let second: ReturnType<typeof start> | undefined;
+	t.after(async () => { await second?.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const first = start();
+	first.send({ type: "prompt", id: "p", message: "Begin." });
+	await first.waitFor((record) => record.type === "agent_settled", 60_000);
+	await first.close();
+	second = start();
+	second.send({ type: "get_messages", id: "ctx" });
+	const text = JSON.stringify(await second.waitFor((record) => record.type === "response" && record.id === "ctx", 60_000));
+	assert.equal(text.split("Resume order.").length - 1, 1, "standing orders once");
+	assert.equal(text.split("Resume memory.").length - 1, 1, "memory once");
 });

@@ -83,6 +83,9 @@ export async function reviewThenHandoff(review: () => Promise<IntegrateResult | 
 
 const bounded = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
+/** The subject prefix of the handoff's Awaiting row; teardown withdraws it when the job closes (picp-pvo). */
+export const HUMAN_REVIEW_SUBJECT = "human-review pr ";
+
 export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: () => AwaitingLike | undefined; runs?: RunRegistry }): HandoffPort {
 	return async (input) => {
 		const { jobId, branch, prUrl, head } = input;
@@ -107,7 +110,7 @@ export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: ()
 		if (handOffDecision(input.verdict) === "default") return undefined;
 		const blocked = await input.review?.();
 		if (blocked) return blocked;
-		const subject = bounded(`human-review pr ${prUrl}`, 200);
+		const subject = bounded(`${HUMAN_REVIEW_SUBJECT}${prUrl}`, 200);
 		try {
 			await deps.awaiting?.()?.declareGated({
 				type: "approval",

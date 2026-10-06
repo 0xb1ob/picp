@@ -84,7 +84,7 @@ import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
 	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, jobInFlight, killedUnreportedWakeup, leaseReturnFailed, type LedgerCloseOutcome,
-	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker,
+	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker, withdrawHumanReview,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { DurableWakeupInput } from "./wakeup-outbox.ts";
@@ -322,6 +322,7 @@ export class Teardown {
 		if (unreported) this.#options.journal?.(killedUnreportedWakeup(this.#options.home, record, closedAt, options.authorization));
 		runs.close(jobId);
 		const ledgerClose = await closeResearchLedgers(this.#options.home, [closedRecord], this.#options.ledger, this.#options.journal);
+		await withdrawHumanReview(this.#options.home, closedRecord, this.#options.journal); // picp-pvo
 
 		let artifactsRemoved = false;
 		if (this.#options.removeArtifacts) {
