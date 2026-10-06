@@ -23,7 +23,8 @@ import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
 import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, type Refusal, refused, templateFromSeed } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { parsePrUrl } from "./ci-watch.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 
@@ -78,6 +79,29 @@ export interface SchedulerPorts {
 	runWatch?: (cwd: string, scriptPath: string, timeoutMs: number) => Promise<WatchRun>;
 	/** A refire schedule's live inputs per fire (defaults, project override, token ceiling); absent or throwing refuses the fire. */
 	mintContext?: (project: string) => MintContext | Refusal;
+	/** The project's GitHub `owner/repo` (its registered clone_url): where a cp-pr-review schedule's PRs must live. Absent or undefined refuses it. */
+	repoOf?: (project: string) => string | undefined;
+}
+
+/** A cp-pr-review schedule reviews at most this many PRs per fire (one `pr:` line each). */
+export const PR_REVIEW_MAX_TARGETS = 20;
+
+/**
+ * A cp-pr-review schedule's targets: every description line starting `pr:` must be exactly
+ * `pr: https://github.com/<owner>/<repo>/pull/<n>` in `repo` (the project's own `owner/repo`), 1-20 distinct. Throws naming the first fault.
+ */
+export function prReviewTargets(description: string, repo: string | undefined): string[] {
+	if (!repo) throw new SchedulerError("cp-pr-review needs the project's GitHub repo: its registered clone_url is not a github.com remote (or this host does not wire it)");
+	const urls = description.split("\n").map((entry) => entry.trim()).filter((entry) => /^pr:/i.test(entry)).map((entry) => entry.slice(3).trim());
+	if (urls.length < 1 || urls.length > PR_REVIEW_MAX_TARGETS) throw new SchedulerError(`cp-pr-review needs 1-${PR_REVIEW_MAX_TARGETS} description lines "pr: https://github.com/${repo}/pull/<n>"; found ${urls.length}`);
+	for (const url of urls) {
+		const pr = parsePrUrl(url);
+		if (!pr || url !== `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`) throw new SchedulerError(`cp-pr-review: ${JSON.stringify(url)} is not a PR url (https://github.com/<owner>/<repo>/pull/<n>)`);
+		if (`${pr.owner}/${pr.repo}`.toLowerCase() !== repo.toLowerCase()) throw new SchedulerError(`cp-pr-review: ${url} is not in the project's repo ${repo}; only its own PRs are reviewed`);
+	}
+	const dupe = urls.find((url, i) => urls.indexOf(url) !== i);
+	if (dupe) throw new SchedulerError(`cp-pr-review: ${dupe} is listed twice`);
+	return urls;
 }
 
 export interface ScheduleEvent {
@@ -180,9 +204,12 @@ export class Scheduler {
 		const manual = input.manual === true;
 		if ([cron, input.watch_script !== undefined, manual].filter(Boolean).length !== 1) throw new SchedulerError("a schedule is exactly one of cron (cron + tz), watch (watch_script + every_seconds + on) or manual (manual:true, Run now only)");
 		if (input.refire && !manual) throw new SchedulerError("refire needs a manual schedule: a cron or watch fire is unattended, so a grant minted per fire would be standing authority");
+		let prTargets: string[] | undefined;
 		if (input.skill !== undefined) {
 			if (!(SCHEDULE_SKILLS as readonly string[]).includes(input.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(input.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
-			if (!manual || input.kind !== "research" || input.delivery !== "local" || input.script_path !== undefined) throw new SchedulerError("skill needs a manual schedule with kind research, delivery local and no script_path");
+			const anchor = SCHEDULE_SKILL_ANCHOR[input.skill as (typeof SCHEDULE_SKILLS)[number]];
+			if (!manual || input.kind !== anchor.kind || input.delivery !== anchor.delivery || input.script_path !== undefined) throw new SchedulerError(`skill needs a manual schedule with kind ${anchor.kind}, delivery ${anchor.delivery} and no script_path`);
+			if (input.skill === "cp-pr-review") prTargets = prReviewTargets(input.description ?? "", this.#ports.repoOf?.(input.project));
 		}
 		if (cron) {
 			parseCron(input.cron as string);
@@ -203,6 +230,10 @@ export class Scheduler {
 		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
 		const seeded = input.refire ? templateFromSeed(mandate as Mandate, input.refire.approval, stamp) : undefined;
 		if (seeded && refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
+		// One reviewer per PR plus the synthesis, all under one fire grant: a template that cannot hold them is refused now, not mid-fan-out.
+		if (seeded && prTargets && seeded.template.job_cap < prTargets.length + 1) {
+			throw new SchedulerError(`cp_schedule add refused: the seed's job cap ${seeded.template.job_cap} is under ${prTargets.length + 1} (${prTargets.length} PR reviews + 1 synthesis per fire)`);
+		}
 		const schedule: Schedule = {
 			id: `sch-${randomBytes(3).toString("hex")}`,
 			name: input.name.trim(),

@@ -95,6 +95,7 @@ Dispatch refreshes a leased worktree's dependencies before the worker starts: wh
 | `prompts/briefs/` | brief templates |
 | `skills/cp-memory/` | memory curation skill |
 | `skills/cp-self-review/` | self-review recipe (parent-expanded manual schedule) |
+| `skills/cp-pr-review/` | read-only PR-review recipe (parent-expanded manual schedule) |
 | `defaults/` | `routing.default.json`, copied once into a new home |
 | `evals/` | the eval corpus and committed results |
 | `tests/` | unit and end-to-end suites against a mock provider |

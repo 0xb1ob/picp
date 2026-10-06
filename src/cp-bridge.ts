@@ -156,7 +156,7 @@ export function operatorPiArgs(packageRoot: string, extra: readonly string[] = [
 }
 
 /** The parent's skills, each `<home>/skills/<name>` when present, else the copy shipped in the package root (a managed home holds state, not the package). */
-export const PARENT_SKILLS = ["cp-memory", "cp-self-review"] as const;
+export const PARENT_SKILLS = ["cp-memory", "cp-self-review", "cp-pr-review"] as const;
 export function parentSkillPaths(home: string, packageRoot: string = PACKAGE_ROOT): string[] {
 	return PARENT_SKILLS.map((name) => (existsSync(join(home, "skills", name, "SKILL.md")) ? join(home, "skills", name) : join(packageRoot, "skills", name)));
 }

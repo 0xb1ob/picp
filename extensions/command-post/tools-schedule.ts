@@ -14,6 +14,7 @@ import { Type } from "typebox";
 import type { Delivery, JobKind } from "../../src/contracts.ts";
 import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults } from "../../src/mandate-defaults.ts";
+import { githubRepoFromCloneUrl } from "../../src/mandate.ts";
 import type { IntakeResult } from "../../src/intake.ts";
 import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts";
 import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
@@ -53,6 +54,8 @@ export function registerScheduleTools(
 				const defaults = loadMandateDefaults(post.home);
 				return { defaults, ...(entry.mandate ? { projectOverride: entry.mandate } : {}), ceiling: defaults.token_ceiling ?? DEFAULT_TOKEN_CEILING };
 			},
+			// cp-pr-review: the PR urls a schedule lists must be in this repo; a non-GitHub clone_url refuses the add.
+			repoOf: (project) => githubRepoFromCloneUrl(post.registry.get(project)?.clone_url ?? ""),
 		});
 	};
 	const buildRunner = (): ScheduleRunner => {
@@ -149,7 +152,7 @@ export function registerScheduleTools(
 		promptSnippet: "Manage cron/watch schedules that file jobs under a mandate (cp_schedule)",
 		promptGuidelines: [
 			"A cp-schedule wake-up (pr/pipeline schedules only) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's, never dispatch them yourself.",
-			"A cp-schedule wake naming a parent-expanded run is yours: follow its skill (cp-self-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
+			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
 			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule): it covers only that schedule's jobs, and a project-wide grant never covers a scheduled job. A paused or expired grant skips the fire, never bypasses it.",
 			"run_now needs the operator's verbatim sentence naming the schedule (its id or name) as operator_quote; never on your own initiative, and never by replaying an earlier sentence: one operator message authorizes one run now per schedule.",
 			"refire:true (manual only) needs approval_quote, the operator's verbatim sentence approving per-fire grants; never propose it yourself. An operator revoke or pause of the fire grant stops the schedule until it is removed and re-added.",
@@ -172,7 +175,7 @@ export function registerScheduleTools(
 			description: Type.Optional(Type.String()),
 			script_path: Type.Optional(Type.String({ description: "Make each fired job a script job (ship/local)" })),
 			manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
-			skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill" })),
+			skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill; cp-pr-review needs 1-20 description lines `pr: https://github.com/<owner>/<repo>/pull/<n>` in the project's own repo" })),
 			refire: Type.Optional(Type.Boolean({ description: "manual only: each Run now mints a fresh grant from mandate_id's (the seed's) saved bounds; needs approval_quote" })),
 			approval_quote: Type.Optional(Type.String({ maxLength: 4000, description: "refire only: the operator's verbatim sentence approving per-fire grants for this schedule" })),
 		}),
