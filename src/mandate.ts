@@ -346,8 +346,11 @@ export class MandateStore {
 		this.#now = options.now ?? (() => new Date());
 	}
 
+	/** Every instant this store writes, normalized once here to second precision (a caller's `…:20.123Z` included). */
 	#stamp(at?: string): string {
-		return at ?? isoTimestamp(this.#now());
+		const date = at === undefined ? this.#now() : new Date(at);
+		if (Number.isNaN(date.getTime())) throw new MandateError(`invalid timestamp ${JSON.stringify(at)}`);
+		return isoTimestamp(date);
 	}
 
 	file(id: string): string {
@@ -383,7 +386,7 @@ export class MandateStore {
 	}
 
 	sweep(now?: string, jobs: readonly MandateUsageJob[] = []): Mandate[] {
-		const at = now ?? this.#stamp();
+		const at = this.#stamp(now);
 		const counted = this.withReviewerSpend(jobs);
 		const out: Mandate[] = [];
 		for (const mandate of this.list()) {

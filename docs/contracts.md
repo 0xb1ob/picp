@@ -7191,7 +7191,8 @@ not recorded: <id> is not a schedule grant …` (the schedule's `last_skip`, log
 by the parent; no job is created). To resume it the
 operator issues a fresh grant with `cp_mandate issue … schedule_grant:true`, then
 `cp_schedule remove` and `add` the schedule under it — a saved schedule's
-`mandate_id` is never rewritten in place. A fire only records an ordinary ledger job — title plus the slot,
+`mandate_id` is never rewritten in place. The scheduler evaluates grants at second precision; `MandateStore`
+normalizes any instant it is handed. A fire only records an ordinary ledger job — title plus the slot,
 label `schedule:<id>`, notes naming the schedule and mandate — and wakes the
 parent with `cp-schedule`; dispatch stays `cp_next`/`cp_dispatch`, so job caps,
 dispatch parallelism, risk gates and review apply unchanged. A fire is skipped,

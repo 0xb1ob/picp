@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Fixed: a schedule fire at a millisecond instant is no longer skipped by another grant's expiry (cp-sch-s1-ez12)
+
+The scheduler handed `MandateStore.sweep` and `mandateRefusal` millisecond instants (`now.toISOString()`); when another grant expired in that sweep, its `expired` escalation was written with a millisecond `at`, the mandate schema refused the write (`/escalations/0/at must match pattern`) and the tick recorded that as the schedule's skip (2026-10-06T00:05Z). The scheduler now evaluates grants at second precision (`isoTimestamp`), and `MandateStore` normalizes every instant it is handed (`sweep`, `issue` `at`, cap and operator pauses) to second precision; an unparsable instant is `MandateError("invalid timestamp …")`. `schedules.json` keeps its millisecond `last_checked_at`/`last_fire`/`created_at`. Migration: none.
+
 ### Operator thread journal (cp-xmw2 S1)
 
 `src/viewer/control-files.ts` gains the operator thread journal `state/operator/threads.jsonl` (0600, append-only, 16 MiB read cap): `open` lines name a tag (`^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag`: trim, ASCII-lowercase, whitespace runs to `-`) under a `th-<12 hex>` id, `bind` lines file a `dc-`/`ask-`/`ans-` id under a thread, `done` lines mark one done; never any message text. `readThreads` folds it like `readAnswers` (torn last line ignored, bad lines counted in `skipped`, a second `open` of one tag aliased to the first id, the newest bind of a ref wins, `error` names an unreadable or oversized file). `src/viewer/control-audit.ts` gains `appendThreadLine` and `bindThread` (opens a tag once, binds idempotently, never throws). Nothing calls them yet and nothing creates the file: the bridge, viewer routes and UI arrive in later slices. Migration: none.
