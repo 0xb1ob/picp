@@ -120,7 +120,7 @@ export class ScheduleControl {
 				await scheduler.remove(id);
 				this.#outcome(request, "done", `removed ${id}`);
 			} else {
-				const event = await scheduler.fireNow(id, request.id);
+				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer });
 				if (event.outcome !== "fired") {
 					this.#outcome(request, "refused", event.reason);
 					return undefined;

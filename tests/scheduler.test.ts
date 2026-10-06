@@ -424,6 +424,29 @@ test("cp-hhuf P6: run now is a manual fire under the slot's checks and never tou
 	await assert.rejects(scheduler.fireNow(schedule.id, "sc-3"), new RegExp(`schedule ${schedule.id} is disabled; enable it first`));
 });
 
+test("S2: a cp_schedule run now whose quote comment fails still fires, names the warning, and its notes keep the quote single-use", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { ledger, ports, grant } = bench(home);
+	const failing = new Proxy(ledger, {
+		get: (target, key) => {
+			if (key === "comment") return async () => { throw new Error("ENOSPC"); };
+			const value = Reflect.get(target, key, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	const scheduler = new Scheduler({ ...ports, ledger: () => failing });
+	const schedule = await scheduler.add({ name: "on demand", project: "demo", mandate_id: grant().id, manual: true, ...job });
+	const trigger = { via: "cp_schedule" as const, tool_call_id: "call-1", operator_quote: "Run on demand now.", decided_by: "operator-quote", source_sha: "0123456789ab" };
+	const fired = await scheduler.fireNow(schedule.id, trigger);
+	assert.equal(fired.outcome, "fired");
+	assert.equal(fired.manual_via, "cp_schedule");
+	assert.match(fired.reason, /warning: the verbatim quote comment was not written \(ENOSPC\); the job notes carry run-now quote sha 0123456789ab/);
+	assert.deepEqual((await ledger.show(fired.job_id as string)).comments, []);
+	await ledger.close(fired.job_id as string, "done");
+	assert.match((await scheduler.fireNow(schedule.id, { ...trigger, tool_call_id: "call-2" })).reason, new RegExp(`already authorized run now ${fired.job_id}`));
+});
+
 test("cp-hhuf P6: a tick fire and a run now started together create exactly one job", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
