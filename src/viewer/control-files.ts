@@ -11,6 +11,8 @@
  *   state/schedule-control.jsonl    0600: Schedules page requests (viewer request lines) and the parent's
  *                                   claimed/outcome lines (cp-hhuf P6)
  *   state/operator/answers.jsonl    0600: answers the operator asked for (bridge posted lines, viewer acked lines)
+ *   state/operator/threads.jsonl    0600: operator threads (cp-xmw2): tags and their dc-/ask-/ans- bindings, never text
+ *                                   (bridge and viewer open/bind lines, viewer done lines)
  *
  * Nothing in this file writes.
  */
@@ -178,6 +180,110 @@ export function readAnswers(stateDir: string): { exists: boolean; answers: Recor
 	return { exists: true, answers: [...byId.values()], skipped, error: null };
 }
 
+/** cp-xmw2: operator threads; the bridge and the viewer append `open`/`bind`, the viewer `done`. Views of one chat, bookkeeping only. */
+export const operatorThreadsFile = (stateDir: string): string => join(stateDir, "operator", "threads.jsonl");
+export const THREAD_TAG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const THREAD_ID_RE = /^th-[a-f0-9]{12}$/;
+export const DASHBOARD_ID_RE = /^dc-\d{14}-[0-9a-f]{8}$/;
+export const THREADS_MAX_BYTES = 16 * 1024 * 1024;
+export const THREADS_LIST_MAX = 100;
+export type ThreadRef = { kind: "dashboard" | "ask" | "answer"; id: string };
+export type ThreadLine =
+	| { type: "open"; by: "bridge" | "viewer"; id: string; at: string; tag: string; peer: string | null }
+	| { type: "bind"; by: "bridge" | "viewer"; at: string; thread: string; ref: ThreadRef; peer: string | null }
+	| { type: "done"; by: "viewer"; id: string; at: string; peer: string | null };
+export interface RecordedThread {
+	id: string;
+	tag: string;
+	opened_at: string;
+	/** Every ref ever bound here, first bind order; the fold's `refs` map names a ref's current thread. */
+	refs: { ref: ThreadRef; at: string; line: number }[];
+	/** Journal line index of the newest recorded bind; null before the first. */
+	last_bind_line: number | null;
+	/** `at` of the open or the newest recorded bind. */
+	last_at: string;
+	/** Journal line index and `at` of the newest done; the thread is done only while done_line > last_bind_line. */
+	done_line: number | null;
+	done_at: string | null;
+}
+
+/** Trim, ASCII-lowercase, collapse whitespace runs to `-`; null unless the result is a tag (1-32 of a-z 0-9 -, first a letter or digit). */
+export function normalizeThreadTag(raw: unknown): string | null {
+	if (typeof raw !== "string") return null;
+	const tag = raw.trim().replace(/[A-Z]/g, (char) => char.toLowerCase()).replace(/\s+/g, "-");
+	return THREAD_TAG_RE.test(tag) ? tag : null;
+}
+
+const THREAD_REF_TEST: Record<ThreadRef["kind"], (id: string) => boolean> = { dashboard: (id) => DASHBOARD_ID_RE.test(id), ask: (id) => isAskId(id), answer: (id) => isAnswerId(id) };
+export function isThreadRef(value: unknown): value is ThreadRef {
+	if (value === null || typeof value !== "object") return false;
+	const { kind, id } = value as Record<string, unknown>;
+	return typeof kind === "string" && typeof id === "string" && Object.hasOwn(THREAD_REF_TEST, kind) && THREAD_REF_TEST[kind as ThreadRef["kind"]](id);
+}
+
+/**
+ * Fold the threads journal in line order. An unterminated last line (torn) is ignored. A complete line that is not JSON,
+ * not an object, has a bad `at`/`by`/`peer` or an unknown `type` counts in `skipped`, as do a repeated open id, a bind or
+ * done for an unknown thread and a bind with a bad ref. An open for a tag already opened under another id makes that id
+ * an alias of the first (two writers opening one new tag at once). A bind of a ref to the thread it already belongs to is
+ * ignored; otherwise the newest bind wins in `refs`. `error` names an unreadable or oversized file (never truncated).
+ */
+export function readThreads(stateDir: string): { exists: boolean; threads: RecordedThread[]; refs: Map<string, string>; skipped: number; error: string | null } {
+	const file = operatorThreadsFile(stateDir);
+	let text: string;
+	try {
+		const size = statSync(file).size;
+		if (size > THREADS_MAX_BYTES) return { exists: true, threads: [], refs: new Map(), skipped: 0, error: `${file} is ${size} bytes, over the ${THREADS_MAX_BYTES} byte cap; move it aside` };
+		text = readFileSync(file, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, threads: [], refs: new Map(), skipped: 0, error: null };
+		return { exists: true, threads: [], refs: new Map(), skipped: 0, error: `${file}: ${(error as Error).message}` };
+	}
+	const rows = text.split("\n");
+	rows.pop(); // "" after the final newline, or the torn last line
+	const byId = new Map<string, RecordedThread>();
+	const byTag = new Map<string, RecordedThread>();
+	const alias = new Map<string, RecordedThread>();
+	const refs = new Map<string, string>();
+	let skipped = 0;
+	const known = (id: unknown): RecordedThread | undefined => (isText(id) ? (byId.get(id) ?? alias.get(id)) : undefined);
+	for (const [index, row] of rows.entries()) {
+		let line: Record<string, unknown>;
+		try {
+			line = JSON.parse(row) as Record<string, unknown>;
+		} catch {
+			skipped++;
+			continue;
+		}
+		if (line === null || typeof line !== "object" || !isText(line.at) || !ANSWER_TIME_RE.test(line.at) || (line.by !== "bridge" && line.by !== "viewer") || (line.peer !== null && !isText(line.peer))) {
+			skipped++;
+			continue;
+		}
+		const at = line.at;
+		const thread = known(line.type === "bind" ? line.thread : line.id);
+		if (line.type === "open" && isText(line.id) && THREAD_ID_RE.test(line.id) && isText(line.tag) && THREAD_TAG_RE.test(line.tag) && !thread) {
+			const first = byTag.get(line.tag);
+			if (first) alias.set(line.id, first);
+			else {
+				const opened: RecordedThread = { id: line.id, tag: line.tag, opened_at: at, refs: [], last_bind_line: null, last_at: at, done_line: null, done_at: null };
+				byId.set(opened.id, opened);
+				byTag.set(opened.tag, opened);
+			}
+		} else if (line.type === "bind" && thread && isThreadRef(line.ref)) {
+			const ref = line.ref;
+			if (refs.get(ref.id) === thread.id) continue; // already filed there: ignored, not counted
+			refs.set(ref.id, thread.id);
+			const seen = thread.refs.find((item) => item.ref.id === ref.id);
+			if (seen) Object.assign(seen, { at, line: index }); // moved back from another thread
+			else thread.refs.push({ ref: { kind: ref.kind, id: ref.id }, at, line: index });
+			Object.assign(thread, { last_bind_line: index, last_at: at });
+		} else if (line.type === "done" && line.by === "viewer" && thread) {
+			Object.assign(thread, { done_line: index, done_at: at });
+		} else skipped++;
+	}
+	return { exists: true, threads: [...byId.values()], refs, skipped, error: null };
+}
+
 export type ControlConfig = { state: "on" | "off" | "invalid"; reason: string };
 
 /** On unless `data/dashboard-control.json` says `{"enabled": false}`; anything else in that file is invalid (fail closed). */
@@ -259,6 +365,6 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
 export type ControlAuditLine =
 	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[] }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string; thread?: string; thread_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };

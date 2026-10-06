@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Operator thread journal (cp-xmw2 S1)
+
+`src/viewer/control-files.ts` gains the operator thread journal `state/operator/threads.jsonl` (0600, append-only, 16 MiB read cap): `open` lines name a tag (`^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag`: trim, ASCII-lowercase, whitespace runs to `-`) under a `th-<12 hex>` id, `bind` lines file a `dc-`/`ask-`/`ans-` id under a thread, `done` lines mark one done; never any message text. `readThreads` folds it like `readAnswers` (torn last line ignored, bad lines counted in `skipped`, a second `open` of one tag aliased to the first id, the newest bind of a ref wins, `error` names an unreadable or oversized file). `src/viewer/control-audit.ts` gains `appendThreadLine` and `bindThread` (opens a tag once, binds idempotently, never throws). Nothing calls them yet and nothing creates the file: the bridge, viewer routes and UI arrive in later slices. Migration: none.
+
 ### Out-of-date wake relays are retired at delivery (cp-nbxo)
 
 The operator relay consumer's delivery-time recheck (`recheckRelay`) now retires a `wake` relay when every escalation its text names was answered or superseded strictly after the relay's `queued_at` and every job it names (its stamp, those escalations' `job_ids`, exact fleet job ids in its text) is `done` or was dispatched, reported or closed after it; the relay becomes a `discard` line `already handled: <ids>`, named once as `retired:` on the next message and on the `cp-relays` status line. A wake with no escalation id, an open, withdrawn, unknown or early-decided escalation, a job with no fleet record or `failed`, an unreadable store, a drain wake or any other relay kind is delivered in full, exactly as before. Migration: none.
