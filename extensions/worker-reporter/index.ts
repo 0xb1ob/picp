@@ -34,7 +34,15 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../../src/worker-merge-guard.ts";
-import { detectHostAuthCopy, hostAuthCopyRefusal } from "../../src/worker-credential-guard.ts";
+import {
+	detectGhAuthStatus,
+	detectHomeBulkCopy,
+	detectHostAuthCopy,
+	ghAuthStatusRefusal,
+	homeBulkCopyRefusal,
+	hostAuthCopyRefusal,
+	redactGithubTokens,
+} from "../../src/worker-credential-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
@@ -473,6 +481,10 @@ export default function (pi: ExtensionAPI): void {
 			if (merge) return { block: true, reason: workerMergeRefusal(merge) };
 			const authCopy = typeof command === "string" ? detectHostAuthCopy(command) : undefined;
 			if (authCopy) return { block: true, reason: hostAuthCopyRefusal(authCopy) };
+			const homeCopy = typeof command === "string" ? detectHomeBulkCopy(command) : undefined;
+			if (homeCopy) return { block: true, reason: homeBulkCopyRefusal(homeCopy) };
+			const ghAuth = typeof command === "string" ? detectGhAuthStatus(command) : undefined;
+			if (ghAuth) return { block: true, reason: ghAuthStatusRefusal(ghAuth) };
 			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
 			// One CI status snapshot per worker process (revive = new process = one more).
 			if (typeof command === "string" && ciStatusQuery(command)) {
@@ -490,10 +502,22 @@ export default function (pi: ExtensionAPI): void {
 	// from a file already on disk — the line(s) actually involved, so a retry is
 	// a correction the model can make without re-reading the whole file.
 	pi.on("tool_result", (event) => {
-		if (event.toolName === "bash" && event.isError) {
-			const text = event.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
-			const enriched = enrichSilentBashFailure(text, event.input);
-			return enriched === text ? undefined : { content: [{ type: "text" as const, text: enriched }] };
+		if (event.toolName === "bash") {
+			// GitHub token shapes reach the model and the session JSONL only as [REDACTED]. The run log's
+			// streamed tool_execution_update is raw and not covered (docs/storage.md Known gaps).
+			let redacted = false;
+			const content = event.content.map((block) => {
+				if (block.type !== "text") return block;
+				const text = redactGithubTokens(block.text);
+				if (text !== block.text) redacted = true;
+				return { ...block, text };
+			});
+			if (event.isError) {
+				const text = content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
+				const enriched = redactGithubTokens(enrichSilentBashFailure(text, event.input));
+				if (enriched !== text) return { content: [{ type: "text" as const, text: enriched }] };
+			}
+			return redacted ? { content } : undefined;
 		}
 		const text = enrichEdits(event);
 		return text === undefined ? undefined : { content: [{ type: "text" as const, text }] };

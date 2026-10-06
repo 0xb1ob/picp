@@ -442,6 +442,13 @@ The refusal text itself sends the worker to `npm run typecheck` and `npm run tes
 A worker `bash` call that copies the host `auth.json` (`cp ~/.pi/agent/auth.json …`, or a
 `for f in auth.json …; do cp ~/.pi/agent/$f` loop) is refused by `src/worker-credential-guard.ts`
 under the same command-position and heredoc rule; only `models.json` may be copied.
+The same module refuses a bulk `cp`/`rsync` of a command-post home — its root, `state/`,
+`data/`, `state/sessions` or all of `state/runs` (an `--exclude` or a glob does not make it
+smaller); one named `state/runs/<id>/` and single files stay allowed — and `gh auth status`/
+`gh auth token`, which print the stored token (`gh api user --jq .login` is the login check).
+Bash tool results pass through `redactGithubTokens` in the worker-reporter `tool_result` hook,
+so a GitHub token shape reaches the model and the pi session transcript only as `[REDACTED]`;
+the run log's streamed `tool_execution_update` is not covered (docs/storage.md Known gaps).
 
 Why this option and not the alternatives the issue weighed: a per-tool-call
 timeout cannot distinguish a 6-minute suite from a 6-minute sleep (the 30-minute
