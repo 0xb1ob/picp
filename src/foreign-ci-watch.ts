@@ -312,10 +312,10 @@ export class ForeignCiWatch {
 	 * The cp-pr-review reviewer dispatch gate (binding decision es-314c8e c).
 	 * `undefined` for a job it does not cover (not research, no `schedule:`
 	 * label, or no foreign PR). Otherwise the CI line the brief carries, or a
-	 * `ForeignCiWaitError` while CI on the PR's head has not completed and the
-	 * job is younger than the timeout. Never a merge or review authorization.
+	 * `ForeignCiWaitError` until CI has completed on the PR's *current* head
+	 * (re-read here) and the job is younger than the timeout. Never a merge or review authorization.
 	 */
-	gate(job: ForeignJobRecord, now: Date = this.#now()): { line: string } | undefined {
+	async gate(job: ForeignJobRecord, now: Date = this.#now()): Promise<{ line: string } | undefined> {
 		if (!job.labels.some((label) => label.startsWith(SCHEDULE_LABEL))) return undefined;
 		try {
 			if (parseJobLabels(job.labels).kind !== "research") return undefined;
@@ -325,22 +325,33 @@ export class ForeignCiWatch {
 		const target = foreignPrJobs([job], this.#deps.ownPrUrls(), this.#deps.repoOf)[0];
 		if (!target) return undefined;
 		const entry = this.store.read().jobs.find((candidate) => candidate.job_id === job.id && candidate.pr_url === target.url);
-		const on = entry?.head_sha ? ` on ${entry.head_sha.slice(0, 12)}` : "";
-		// The watch's last read, not a fresh one: the line names that head, so a reviewer seeing another head treats CI as unknown.
-		if (entry?.last_ci && COMPLETED.has(entry.last_ci)) {
-			const head = entry.head_sha?.slice(0, 12) ?? "?";
-			return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch, head observed ${entry.head_observed_at ?? "?"}; if the PR head is no longer ${head}, CI for it is unknown).` };
-		}
 		if (entry?.ended) return { line: `${target.url}: CI unknown — ${entry.ended}.` };
 		const disabled = this.#deps.disabled?.();
 		if (disabled) return { line: `${target.url}: CI unknown — the CI watch is off (${disabled}).` };
+		const on = entry?.head_sha ? ` on ${entry.head_sha.slice(0, 12)}` : "";
+		let seen = entry?.last_ci ? `${entry.last_ci}${on}` : "not observed yet";
+		// A completed result counts only for the head the reviewer will read: one fresh read-only GET, made only when it could release.
+		if (entry?.last_ci && COMPLETED.has(entry.last_ci) && entry.head_sha) {
+			const current = await this.#currentHead(target);
+			if (current.head === entry.head_sha) return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch; the PR's current head at dispatch).` };
+			seen = `${seen}, but the PR head is now ${current.head ? current.head.slice(0, 12) : `unknown (${current.error})`}`;
+		}
 		const timeout = this.#deps.gateTimeoutMs ?? FOREIGN_CI_GATE_TIMEOUT_MS;
 		const deadline = Date.parse(job.created_at) + timeout;
-		const seen = entry?.last_ci ? `${entry.last_ci}${on}` : "not observed yet";
 		if (!(now.getTime() < deadline)) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
 		throw new ForeignCiWaitError(
 			`${job.id} waits for CI on ${target.url} to complete (${seen}); it is dispatched once CI completes, or with CI "unknown" at ${isoTimestamp(new Date(deadline))} at the latest`,
 		);
+	}
+
+	/** The PR's head right now, through the same read-only `pr` port the tick uses; never throws. */
+	async #currentHead(target: ForeignPr): Promise<{ head?: string; error?: string }> {
+		try {
+			const head = (await this.#deps.pr(target))?.head_sha?.trim();
+			return head ? { head } : { error: "the REST reply carried no head" };
+		} catch (error) {
+			return { error: ((error as Error).message ?? String(error)).split("\n")[0]!.slice(0, 200) };
+		}
 	}
 
 	#selected(): ForeignPr[] {

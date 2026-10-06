@@ -1155,7 +1155,7 @@ export class CommandPost {
 		const job = await this.ledger().show(request.jobId);
 		if (job.script) return dispatcher.dispatchScript(request);
 		// cp-wlhu S5: a cp-pr-review reviewer waits (armed) for its PR's CI, bounded; open blockers are reported first.
-		const gate = (await this.ledger().blockersOf(job.id)).length > 0 ? undefined : this.foreignCi.gate(job);
+		const gate = (await this.ledger().blockersOf(job.id)).length > 0 ? undefined : await this.foreignCi.gate(job);
 		return dispatcher.dispatch(gate ? { ...request, foreignCi: gate.line } : request);
 	}
 

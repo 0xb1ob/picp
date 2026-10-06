@@ -171,26 +171,48 @@ test("evidence only: the ports are read-only, the module reaches no merge or wak
 test("the reviewer gate waits for CI, then carries its state into the brief; past the timeout it goes ahead with CI unknown", async (t) => {
 	const b = bench(t);
 	const reviewer = job();
-	assert.throws(() => b.watch.gate(reviewer), (error: unknown) => error instanceof ForeignCiWaitError && error instanceof BlockedDispatchError && error.blockers.length === 0 && /waits for CI on https:\/\/github\.com\/acme\/widgets\/pull\/7 to complete \(not observed yet\)/.test(error.message));
+	await assert.rejects(b.watch.gate(reviewer), (error: unknown) => error instanceof ForeignCiWaitError && error instanceof BlockedDispatchError && error.blockers.length === 0 && /waits for CI on https:\/\/github\.com\/acme\/widgets\/pull\/7 to complete \(not observed yet\)/.test(error.message));
 	b.state.runs = [{ status: "in_progress", conclusion: null, headSha: HEAD, databaseId: 11 }];
 	await b.watch.tick();
-	assert.throws(() => b.watch.gate(reviewer), /in_progress on d48a81d1f4d3/);
-	assert.match(b.watch.gate(reviewer, new Date("2026-10-06T11:00:00Z"))!.line, /CI unknown — not completed within 60 min of 2026-10-06T10:00:00Z \(last seen: in_progress on d48a81d1f4d3\)/);
+	await assert.rejects(b.watch.gate(reviewer), /in_progress on d48a81d1f4d3/);
+	assert.match((await b.watch.gate(reviewer, new Date("2026-10-06T11:00:00Z")))!.line, /CI unknown — not completed within 60 min of 2026-10-06T10:00:00Z \(last seen: in_progress on d48a81d1f4d3\)/);
 	b.state.runs = [{ status: "completed", conclusion: "success", headSha: HEAD, databaseId: 11 }];
 	b.later(10 * 60_000);
 	await b.watch.tick();
-	assert.equal(b.watch.gate(reviewer)!.line, `${PR}: CI green on d48a81d1f4d3 (foreign CI watch, head observed 2026-10-06T10:05:00Z; if the PR head is no longer d48a81d1f4d3, CI for it is unknown).`);
+	const reads = b.calls.pr;
+	assert.equal((await b.watch.gate(reviewer))!.line, `${PR}: CI green on d48a81d1f4d3 (foreign CI watch; the PR's current head at dispatch).`, "heads match: released");
+	assert.equal(b.calls.pr, reads + 1, "one fresh read-only PR read confirms the head");
 
-	assert.equal(b.watch.gate(job({ labels: ["project:widgets", "delivery:local", "kind:research"] })), undefined, "no schedule label: not a fan-out reviewer");
-	assert.equal(b.watch.gate(job({ labels: ["project:widgets", "delivery:pr", "kind:ship", "schedule:sch-abc123"] })), undefined, "not research");
-	assert.equal(b.watch.gate(job({ external_ref: "https://github.com/acme/other/pull/1" })), undefined, "not the project's repo");
+	assert.equal(await b.watch.gate(job({ labels: ["project:widgets", "delivery:local", "kind:research"] })), undefined, "no schedule label: not a fan-out reviewer");
+	assert.equal(await b.watch.gate(job({ labels: ["project:widgets", "delivery:pr", "kind:ship", "schedule:sch-abc123"] })), undefined, "not research");
+	assert.equal(await b.watch.gate(job({ external_ref: "https://github.com/acme/other/pull/1" })), undefined, "not the project's repo");
 	const offHome = createScratchHome();
 	t.after(() => offHome.cleanup());
 	const off = new ForeignCiWatch({ ...b.deps, home: offHome.path, disabled: () => "gh is not available" });
-	assert.match(off.gate(reviewer)!.line, /CI unknown — the CI watch is off \(gh is not available\)/);
+	assert.match((await off.gate(reviewer))!.line, /CI unknown — the CI watch is off \(gh is not available\)/);
 
 	const snapshot = await referencedMaterial({ task: "review it", prefix: "cp", clone: b.home, worktree: b.home, home: b.home, foreignCi: `${PR}: CI unknown — PR merged.` });
 	assert.match(snapshot, /### Foreign CI\nhttps:\/\/github\.com\/acme\/widgets\/pull\/7: CI unknown — PR merged\./);
+});
+
+test("binding (c) holds for the head the reviewer reads: a success recorded for an old head never releases once the PR moved", async (t) => {
+	const b = bench(t);
+	const reviewer = job();
+	await b.watch.tick(); // green recorded on HEAD
+	b.state.pr = { ...b.state.pr!, head_sha: NEW_HEAD }; // pushed since; the watch has not ticked again
+	await assert.rejects(b.watch.gate(reviewer), (error: unknown) => error instanceof ForeignCiWaitError && /green on d48a81d1f4d3, but the PR head is now aa11bb22cc33/.test((error as Error).message));
+	b.state.prError = "gh api failed: HTTP 502";
+	await assert.rejects(b.watch.gate(reviewer), /but the PR head is now unknown \(gh api failed: HTTP 502\)/, "an unreadable current head is not a match");
+	assert.match((await b.watch.gate(reviewer, new Date("2026-10-06T11:00:00Z")))!.line, /CI unknown — not completed within 60 min .*but the PR head is now unknown/, "the timeout still dispatches, CI unknown");
+	delete b.state.prError;
+	b.state.runs = [{ status: "in_progress", conclusion: null, headSha: NEW_HEAD, databaseId: 12 }];
+	b.later(10 * 60_000);
+	await b.watch.tick(); // the watch refreshes onto the new head: still running
+	await assert.rejects(b.watch.gate(reviewer), /in_progress on aa11bb22cc33/);
+	b.state.runs = [{ status: "completed", conclusion: "failure", headSha: NEW_HEAD, databaseId: 12 }];
+	b.later(10 * 60_000);
+	await b.watch.tick();
+	assert.match((await b.watch.gate(reviewer))!.line, /CI failed on aa11bb22cc33 \(foreign CI watch; the PR's current head at dispatch\)/, "completed on the current head: released");
 });
 
 test("CommandPost.dispatch arms a waiting reviewer; the armed release (no blockers) re-runs the gate every pass and starts it only once CI completed", async (t) => {
@@ -208,6 +230,9 @@ test("CommandPost.dispatch arms a waiting reviewer; the armed release (no blocke
 	// Only the spawn is stubbed: CommandPost.dispatch, its gate and the armed release are the real ones.
 	const spawned: DispatchRequest[] = [];
 	Object.assign(post, { dispatcher: () => ({ dispatch: async (request: DispatchRequest) => (spawned.push(request), { state: "dispatched", job_id: request.jobId }) }) });
+	// The watch keeps the real store and gate; only its read-only GitHub port is a fake (the PR's current head).
+	let currentHead = NEW_HEAD;
+	Object.assign(post, { foreignCi: new ForeignCiWatch({ home: home.path, jobs: () => post.ledger().read().jobs, ownPrUrls: () => [], repoOf, pr: async () => ({ merged: false, state: "open", number: 7, url: PR, head_sha: currentHead }), runs: async () => [] }) });
 
 	let refusal: unknown;
 	await post.dispatch({ jobId: created.id, task: "review it" }).catch((error: unknown) => (refusal = error));
@@ -219,6 +244,9 @@ test("CommandPost.dispatch arms a waiting reviewer; the armed release (no blocke
 	assert.deepEqual([spawned, post.armedDispatches.ids()], [[], [created.id]], "zero blockers never release vacuously: still armed while CI runs");
 
 	post.foreignCi.store.write([{ job_id: created.id, pr_url: PR, head_sha: HEAD, head_observed_at: "2026-10-06T10:05:00Z", last_ci: "green", failures: 0, announced: [] }]);
+	await post.armedDispatches.release();
+	assert.deepEqual([spawned, post.armedDispatches.ids()], [[], [created.id]], "green recorded for an older head: still armed");
+	currentHead = HEAD;
 	await post.armedDispatches.release();
 	assert.deepEqual(post.armedDispatches.ids(), [], "started, so disarmed");
 	assert.equal(spawned.length, 1);
