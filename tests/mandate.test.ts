@@ -255,7 +255,8 @@ test("MandateStore writes every instant it is handed at second precision (2026-1
 	const grown = [{ ...held[0]!, usage: { total_tokens: 5_000, cost_usd: 0.1 } }];
 	const paused = store.sweep("2026-07-01T07:00:20.456Z", grown).find((mandate) => mandate.id === capped.id);
 	assert.deepEqual([paused?.status, paused?.paused_at, paused?.escalations[0]?.at], ["paused", "2026-07-01T07:00:20Z", "2026-07-01T07:00:20Z"]);
-	// An operator pause under a millisecond clock.
+	// pause(id, reason) takes no instant (it stamps from the store clock, truncated before this fix too): the
+	// millisecond-instant pause path is the sweep cap pause asserted above. This pins the clock path only.
 	const operator = issue(store, { at: "2026-07-01T00:00:00Z", expiry: "2026-12-31T00:00:00Z" });
 	assert.equal(store.pause(operator.id).paused_at, "2026-07-01T07:00:20Z");
 	assert.throws(() => store.sweep("garbage"), (error: Error) => error instanceof MandateError && /invalid timestamp/.test(error.message));
