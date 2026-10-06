@@ -82,18 +82,28 @@ test("Map shows today's revoked mission closures and toggles older history in th
   assert.match(root.innerHTML,/#265 · merged/);
   assert.doesNotMatch(root.innerHTML,/>https:\/\/github/);
   for(let i=0;i<4;i++) data.nodes.push({...data.nodes[0]!,id:`cp-more-done-${i}`});
+  data.edges.push({from:"cp-more-done-3",to:"cp-job-2",kind:"open"});
   await act(()=>mount(root,data));
   const more=root.querySelector<HTMLButtonElement>(".map-more-done")!;
   assert.equal(more.textContent,"+4 more done");
+  assert.equal(more.tagName,"BUTTON","native buttons support Enter and Space activation");
+  assert.equal(more.hasAttribute("disabled"),false);assert.notEqual(more.getAttribute("aria-disabled"),"true");
+  assert.ok(Number(more.getAttribute("tabindex") ?? 0)>=0,"the enabled native button stays in the keyboard tab order");
+  assert.equal(more.getAttribute("aria-expanded"),"false");
+  const hiddenEdge=()=>[...root.querySelectorAll(".map-graph .map-edge > title")].find(title=>title.textContent==="cp-job-2 blocked by cp-more-done-3 · open");
+  assert.equal(hiddenEdge(),undefined,"an edge with a collapsed endpoint is initially hidden");
   assert.equal(root.querySelectorAll('.map-graph button[title^="cp-more-done-"]').length,0);
   assert.equal(root.querySelectorAll('.map-done-details a[href^="#job/cp-more-done-"]').length,4,"phone disclosure retains all finished links");
   await act(()=>more.dispatchEvent(new window.Event("click",{bubbles:true})));
   assert.equal(more.getAttribute("aria-expanded"),"true");
   assert.equal(root.querySelectorAll('.map-graph button[title^="cp-more-done-"]').length,4);
+  assert.ok(hiddenEdge()?.parentElement?.querySelector("path"),"expansion restores the hidden endpoint's edge path");
+  assert.ok(hiddenEdge()?.parentElement?.querySelector("polygon"),"the restored edge keeps its arrow");
   await act(()=>pick("cp-more-done-3").dispatchEvent(new window.Event("click",{bubbles:true})));
   assert.match(root.textContent!,/job · cp-more-done-3/);
   await act(()=>more.dispatchEvent(new window.Event("click",{bubbles:true})));
   assert.equal(more.getAttribute("aria-expanded"),"false");
+  assert.equal(hiddenEdge(),undefined,"collapsing again hides that edge with its endpoint");
   assert.match(root.textContent!,/Select a job or mandate/);assert.equal(root.querySelectorAll(".map-node-dim").length,0);
   await act(()=>unmount(root));
  }
