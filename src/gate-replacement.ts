@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ArtifactStore } from "./artifacts.ts";
 import { paths } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -43,7 +44,10 @@ export async function prepareGateReplacement(options: {
 		if (saved.replacement_job_id !== replacementJobId) throw new GateError(`${jobId}: replacement already prepared for ${saved.replacement_job_id}`);
 		return { job_id: jobId, replacement_job_id: saved.replacement_job_id, task_file: saved.task_file };
 	}
-	if (artifacts.has(replacementJobId) || readPriorAttempts(home, replacementJobId).decisions.length) {
+	// A crash can leave inherited gate-N.json before gate-replacement.json. Retry accepts that copy only when it matches exactly.
+	const inherited = prior.decisions.map((decision) => ({ ...decision, job_id: replacementJobId }));
+	const existing = readPriorAttempts(home, replacementJobId).decisions;
+	if (artifacts.has(replacementJobId) || (existing.length > 0 && !isDeepStrictEqual(existing, inherited))) {
 		throw new GateError(`${replacementJobId}: replacement already has an artifact or gate history`);
 	}
 	const dir = join(home, paths.runDir(replacementJobId));
