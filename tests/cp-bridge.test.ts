@@ -743,6 +743,27 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 	}
 });
 
+test("a landed continuation reaches the operator once without a parent reply", async (t) => {
+	for (const startup of [true, false]) await t.test(`startup=${startup}`, async (t) => {
+		const home = createScratchHome();
+		initJobsDocument(home.path, "cp");
+		const content = "[demo] HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7";
+		Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_DURABLE: JSON.stringify({ id: "continuation:done:cp-land:1", content, quiet: true, startup }) });
+		const bridge = new CpBridge();
+		const wakes: BridgeRelay[] = [];
+		bridge.onRelay((relay) => { if (relay.kind === "wake") wakes.push(relay); });
+		t.after(async () => {
+			delete process.env.FAKE_PARENT_WAKE;
+			delete process.env.FAKE_PARENT_WAKE_DURABLE;
+			await bridge.stop();
+			home.cleanup();
+		});
+		await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
+		assert.equal(wakes.length, 1);
+		assert.equal(wakes[0]!.text, content);
+	});
+});
+
 test("a withdrawn escalation is not replayed by a stale tool result in a fresh bridge", async (t) => {
 	const home = createScratchHome();
 	const bridge = new CpBridge();

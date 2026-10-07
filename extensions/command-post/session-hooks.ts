@@ -87,6 +87,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
 		const messages: Array<{ customType: string; content: string; display: false }> = [];
+		messages.push({ customType: "cp-parent-guidance", display: false, content: "Parent only: Put independent tool calls in one assistant message; keep dependent calls sequential. A dispatch turn stops at 15 model rounds: compact or end the turn and report decisions already made instead of further investigation." });
 		try {
 			const post = commandPost();
 			post.scaffoldMemory();

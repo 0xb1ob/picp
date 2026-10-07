@@ -22,6 +22,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
+import { acquireParentLock } from "../src/parent-lock.ts";
+import type { NextActionKind } from "../src/next.ts";
 import { createSessionState } from "../extensions/command-post/shared.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
@@ -1827,6 +1829,90 @@ test("jje.2: a redelivery with an identical stamp is still a replay in a later c
 		assert.match(message.content as string, new RegExp(REPLAYED_WAKEUP_HEADLINE));
 		assert.doesNotMatch(message.content as string, /VERDICT pass|CI green on d48a81d/);
 	}
+});
+
+test("answered checks next once, delivers and confirms quietly without a nudge", async (t) => {
+	const b = benchOf(t);
+	const lock = acquireParentLock({ home: b.home.path });
+	assert.ok(lock.ok);
+	t.after(() => lock.lock.release());
+	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
+	t.after(() => post.shutdown());
+	let kind: NextActionKind = "wait";
+	let calls = 0;
+	let failNext = false;
+	const sent: Array<{ message: WakeupCarrier; options: { triggerTurn?: boolean } }> = [];
+	const state = createSessionState();
+	const branch: Array<Record<string, unknown>> = [];
+	state.live = { hasUI: true, ui: { notify: () => {} }, sessionManager: { getBranch: () => branch } } as unknown as ExtensionContext;
+	const pi = { sendMessage: (message: WakeupCarrier, options: { triggerTurn?: boolean }) => sent.push({ message, options }) } as unknown as ExtensionAPI;
+	const surface = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {}, next: async () => {
+		calls++;
+		if (failNext) throw new Error("next read failed");
+		return { ready: [], action: { kind, reason: "fixture" } };
+	} });
+	for (const action of ["wait", "no_mandate", "draining", "dispatch", "pipeline", "paused", "mission_end"] as const) {
+		kind = action;
+		for (const busy of [false, true]) {
+			if (busy) surface.wakeGate.agentStart();
+			const id = `aw-${action}-${busy}`;
+			post.answered.enqueue({ id, type: "approval", decision: "Proceed", answer: "approve", answered_by: "operator", answered_at: isoTimestamp() });
+			const before = calls;
+			await Promise.all([surface.surfaceAnswered(), surface.surfaceAnswered()]);
+			assert.equal(calls, before + 1, "one next read for coalesced drains");
+			const delivery = sent.at(-1)!;
+			assert.equal(delivery.options.triggerTurn, !["wait", "no_mandate", "draining"].includes(action), `${action}, busy=${busy}`);
+			assert.ok(answeredIdsFromMessage(delivery.message).includes(id));
+			assert.match(delivery.message.content as string, /without calling cp_next again/);
+			assert.equal(post.answered.pending().length, 1, "a queue reservation alone is not arrival evidence");
+			if (delivery.options.triggerTurn) surface.confirmAnsweredArrival(delivery.message);
+			else branch.push({ ...delivery.message, type: "custom_message" });
+			const count = sent.length;
+			surface.wakeGate.agentSettled();
+			await surface.surfaceAnswered();
+			assert.equal(post.answered.pending().length, 0, "quiet arrival is confirmed from the session branch");
+			assert.equal(sent.length, count, "quiet ack causes neither resend nor nudge");
+			assert.equal(calls, before + 1, "confirmed answers need no next read");
+		}
+	}
+	post.answered.enqueue({ id: "aw-retry", type: "approval", decision: "Proceed", answer: "approve", answered_by: "operator", answered_at: isoTimestamp() });
+	failNext = true;
+	await surface.surfaceAnswered();
+	assert.equal(post.answered.stats().in_flight, 0, "a failed next read reserves no emission");
+	failNext = false;
+	await surface.surfaceAnswered();
+	assert.ok(answeredIdsFromMessage(sent.at(-1)!.message).includes("aw-retry"));
+	surface.confirmAnsweredArrival(sent.at(-1)!.message);
+});
+
+test("a durable landed notice is delivered once with no parent turn or nudge", async (t) => {
+	const b = benchOf(t);
+	const lock = acquireParentLock({ home: b.home.path });
+	assert.ok(lock.ok);
+	t.after(() => lock.lock.release());
+	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
+	t.after(() => post.shutdown());
+	const sent: Array<{ message: WakeupCarrier; options: { triggerTurn?: boolean } }> = [];
+	const notices: string[] = [];
+	const state = createSessionState();
+	const branch: Array<Record<string, unknown>> = [];
+	state.live = { hasUI: true, ui: { notify: (text: string) => notices.push(text) }, sessionManager: { getBranch: () => branch } } as unknown as ExtensionContext;
+	const pi = { sendMessage: (message: WakeupCarrier, options: { triggerTurn?: boolean }) => sent.push({ message, options }) } as unknown as ExtensionAPI;
+	const surface = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
+	const entry = { id: "continuation:done:cp-land:1", kind: "recovery" as const, job_id: "cp-land", content: "HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7" };
+	post.durableWakeups.enqueue(entry);
+	surface.wakeGate.agentStart();
+	surface.surfaceDurableWakeups();
+	assert.equal(sent.length, 1);
+	assert.equal(sent[0]!.options.triggerTurn, false);
+	assert.equal(notices.length, 1);
+	assert.equal(post.durableWakeups.pending().length, 1);
+	branch.push({ ...sent[0]!.message, type: "custom_message" });
+	surface.wakeGate.agentSettled();
+	assert.equal(post.durableWakeups.enqueue(entry), false);
+	surface.surfaceDurableWakeups();
+	assert.equal(sent.length, 1, "no resend or nudge");
+	assert.equal(notices.length, 1, "one landed notice for the operator");
 });
 
 // k52: the origin/main half of the CI-watch tick, through the real `surfaceCi` wiring.

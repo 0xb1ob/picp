@@ -611,6 +611,7 @@ export class CommandPost {
 			head: (jobId, owner) => (owner === "fleet" ? this.reportedHeadSha(jobId) : this.ciHead(jobId)),
 			reviewWindow: (jobId, head) => readReviewMergeWindow(options.home, jobId, head),
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
+			relay: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 			onLanded: () => void this.armedDispatches.release(), // unload-parent PR2: a landed blocker may release armed dependents

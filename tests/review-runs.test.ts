@@ -618,6 +618,7 @@ test("passing verdict settles and wakes the parent before deadline integration",
 		reviews: { pending: () => undefined, handBack: () => {} },
 		head: () => "a".repeat(40),
 		notify: () => void order.push("notice"),
+		relay: () => void order.push("notice"),
 	});
 	const registry = new ReviewRuns({
 		home: home.path,

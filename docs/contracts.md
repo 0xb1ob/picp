@@ -607,8 +607,9 @@ Other custom messages wake the parent unasked:
   observation and `stalled` was not. At the per-job wall-clock cap the same
   open call is ended as `wall_clock_exceeded` (`src/bounds.ts`).
 - **`cp-answered`** — a human answered an open decision. Same reason, same
-  shape: the parent must *act* on an answer, and an answer that only lands in a
-  file leaves the work it unblocked waiting for a turn nobody invoked. See
+  shape: delivery always records the answer in context. The process checks
+  `cpNext` once; `wait`, `no_mandate` and `draining` deliver quietly, while
+  actions that need the parent still start a turn. See
   [Awaiting you](#awaiting-you) §An answer wakes the parent.
 - **`cp-ci`** — CI finished for a held PR's current pushed head, or that PR
   merged or closed. The one fact in this list that no process here produces, so
@@ -1058,9 +1059,11 @@ An operator send through the bridge is a `prompt` with `streamingBehavior:
 **Busy-wake gate (cp-vy73).** While the parent's run is busy (`agent_start` to
 `agent_settled`) and one triggering wake-up already went out in that run, later
 wake-ups are sent with `{ triggerTurn: false }`: they ride into the next
-request instead of queueing one follow-up turn each. `cp-answered` always
-triggers, and an idle parent never gets a non-triggering send (pi would append
-it with no turn), so `agent_settled` clears busy before anything else runs.
+request instead of queueing one follow-up turn each. Actionable `cp-answered`
+messages always trigger. Answer acknowledgements whose in-process `cpNext`
+action is `wait`, `no_mandate` or `draining`, and landed-PR continuations, use
+`triggerTurn: false` even when idle and never increment the unseen-notice count.
+`agent_settled` clears busy before anything else runs.
 A non-triggering notice that no later request carried (the run's last turn was
 text-only) would be stranded, so `agent_settled` sends one triggering
 `cp-wakeup-nudge` ("N fleet notice(s) arrived while you were busy; they are
@@ -1069,9 +1072,11 @@ After an operator abort (the run's last assistant message is `aborted`) no
 nudge is sent, so the gate never starts a turn after an Esc; those notices
 reach the model with the next prompt (outboxes still re-send unconfirmed facts
 under their own rules). Two consequences:
-- **Arrival of a non-triggering notice is confirmed by the `context` hook**, at
-  the next model request, never by `message_start` — pi's flush does not emit
-  extension `message_start`/`message_end` for it.
+- **Arrival of an explicitly quiet notice is confirmed from the persisted session
+  branch**, through the same arrival-confirmation functions as triggering messages.
+  pi appends at once when idle or on the current turn's flush; its quiet append
+  bypasses extension `message_start` hooks. The `context` hook remains a backstop.
+  Ordinary coalesced notices continue to confirm at the next model request.
 - **Notice order is not send order.** A non-triggering notice lands at the next
   `turn_end` flush, ahead of an earlier triggering follow-up that pi drains only
   after the current turn.
@@ -1222,6 +1227,13 @@ An existing `parent.json` with an invalid `compact_at_tokens` disables automatic
 Parent-directed `cp-schedule` wakes share this same compaction hold: ordinary PR/pipeline fires, live parent-expanded skill fires (including local skill anchors), and startup recovery of unexpanded anchors. Release sends each offered wake once in offer order with its original content/details, `display: true`, `deliverAs: followUp` and `triggerTurn: true`. Anchor dedupe is recorded at offer time. Only transport waits: schedule/control polling, fire timing, job creation, quote verification/single-use recording, fresh-grant minting, open-fire guards and runner-owned answer/board/local dispatch/teardown retain their existing boundaries. Release never mints another grant. The queue is in memory; a new parent process recovers unexpanded anchors from the ledger. Operator steering and the existing schedule send-first/busy-gate behavior are unchanged.
 
 Home-local `data/standing-orders.md` is ignored by git. The first `session_start` seeds generic operational orders when the file is absent; home-specific model allowlists, wall-clock values and paused projects belong only in the operator/parent-edited file. Later starts, including rotation, and successful in-place compactions load that file without replacing it. Its full contents are injected beside the memory digest from `data/learnings.md` as hidden `nextTurn` messages; a read or write failure is surfaced rather than silently shortening the orders. Keep authorization in the mandate store. `AGENTS.md` and this contract always win on conflict.
+
+The parent extension also injects hidden parent-only guidance beside these
+digests: independent tool calls share one assistant message, dependent calls
+stay sequential, and a dispatch turn stops at 15 model rounds by compacting
+or ending and reporting decisions already made. This is prompt guidance,
+not a runtime abort or a change to the compaction threshold; workers do not
+receive it through `AGENTS.md`.
 
 **Operator compaction.** `self_compact` queues the operator's handoff instructions until `agent_settled`, after all model/tool rounds and automatic continuations finish. Threshold requests use the same settled boundary; the threshold is `data/operator.json` `compact_at_tokens`, default 200000 when absent or invalid. A second request is refused while compaction is pending or running; `turn_end` must not start compaction because it would abort the remaining run. A provider `400` naming `tool_addition` (N5) compacts once per failure streak at `agent_settled`, ahead of the threshold request; a non-error assistant reply ends the streak; a failed streak compaction is not retried in the streak; at most 3 per process, then a notice only; after a streak compaction completes, one follow-up names the bridge relays the failed turns never answered.
 
@@ -3085,11 +3097,16 @@ Each trigger loops `Integrator.advance` while `next: advance` and stops on
 anything else: ordinary `wait` is left to the watcher's next fact; a review-window
 `wait` schedules one deadline event; `review` starts one
 `cp_review` only when no attempt is pending (a revise still goes to the job's
-own implementer, from the review itself); `resolve`, `surface`, `retry` and
-`done` stop with one durable `HELD PR STOPPED`/`LANDED` notice (a `recovery`
-wake-up whose id is job, generation, head, step and `next`, so the same outcome
-is delivered once and a new head or generation is new news). An operational
-fault is never retried here, nothing waits on CI and nothing mints an approval:
+own implementer, from the review itself); `resolve`, `surface` and `retry`
+stop with one durable `HELD PR STOPPED` recovery wake-up. `done` instead relays
+one durable `HELD PR LANDED` notice to the operator from this process, with
+`triggerTurn: false`; it does not wake the parent or ask it to relay or call
+`cp_next`. Notice ids name the job, generation and outcome (and head/step for
+stops), so repeated outcomes deliver once and a new generation is new news.
+The bridge relays the process's landed notification during RPC startup too,
+when quiet custom-message events have no subscriber, and coalesces the two
+notification paths into one operator notice.
+An operational fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.
 A blocked live report (N3) surfaces at the first step, so no `cp_review`
 starts and one `HELD PR STOPPED` notice names its blockers.
@@ -5249,11 +5266,16 @@ unblocked simply sat there. That is the same defect as an envelope that reaches
 nobody, and it gets the same fix, not a poll.
 
 **An answer is a message.** Every *newly recorded* answer reaches the parent as
-a `cp-answered` custom message (`deliverAs: "followUp"`, `triggerTurn: true`),
-carrying the id, the type, the `job_id` if there is one, and the answer text —
-enough to act on without re-reading a file, and never a body. `formatAnsweredNotice`
-says out loud that an approved authorization is permission to act, because an
-approved-then-stalled pipeline is the failure mode this bug creates for shipping.
+a `cp-answered` custom message carrying the id, type, optional `job_id`, and
+answer text — enough to act on without re-reading a file, and never a body.
+Before the drain, the process calls `cpNext` exactly once, including its
+ordinary dropped-dependency escalation side effect. `wait`, `no_mandate` and
+`draining` send with `triggerTurn: false`; `dispatch`, `pipeline`, `paused` and
+`mission_end` retain the triggering follow-up. The recommendation travels in
+the message so the parent acts on it without calling `cp_next` a second time
+for that wake-up. Quiet delivery still runs `confirmAnsweredArrival` on
+observed arrival and never counts toward the unseen-notice nudge. A failed
+next-action read or send leaves the answer queued for the next drain.
 
 **Every source, not just the one that broke.** The sink is injected into the two
 writers, so there is still exactly one writer per decision and no new one:
@@ -5284,8 +5306,9 @@ delivery has two steps and only the second writes `delivered`:
   every due id present — never one message per answer — and records the
   emission. Nothing is marked delivered.
 - `confirmDelivered(ids)` is called by whoever **observed** the message land in
-  the parent's context (the extension's `message_start` and `context` hooks,
-  reading the ids back off the message with `answeredIdsFromMessage`). That is
+  the parent's context (the extension's `message_start` and `context` hooks, or
+  the persisted session branch for explicitly quiet delivery), reading the ids
+  back off the message with `answeredIdsFromMessage`. That is
   the evidence, and it is the only thing that stamps `delivered_at`.
 
 An answer whose wake-up is not observed stays `pending` and is sent again once
@@ -5409,7 +5432,7 @@ its consuming surfaces are gated on holding that lock:
   reaches them (`/cp-decide`, `/cp-authorize`, `/cp-decline`, a headless
   re-entry's writers).
 - `CommandPost.confirmAnswered` — the arrival observer on `message_start` and
-  `context`.
+  `context`, plus `confirmAnsweredArrival` on persisted quiet messages.
 
 A session whose `acquireParentLock` was **refused** therefore reserves nothing,
 emits nothing and acknowledges nothing: it cannot burn a reservation on a

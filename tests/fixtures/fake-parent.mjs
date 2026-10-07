@@ -86,6 +86,14 @@ rl.on("line", (line) => {
 				data: { isStreaming: false, sessionFile: activeSession },
 			},
 		];
+		const quietLanding = process.env.FAKE_PARENT_WAKE_DURABLE && JSON.parse(process.env.FAKE_PARENT_WAKE_DURABLE);
+		if (!woke && quietLanding?.quiet) {
+			woke = true;
+			lines.push({ type: "extension_ui_request", method: "notify", message: quietLanding.content });
+			if (!quietLanding.startup) lines.push({ type: "message_end", message: { role: "custom", customType: "cp-recovery", content: quietLanding.content, details: { durable_id: quietLanding.id } } });
+			process.stdout.write(lines.map((record) => JSON.stringify(record)).join("\n") + "\n");
+			return;
+		}
 		if (!woke && process.env.FAKE_PARENT_WAKE === "1") {
 			woke = true;
 			// FAKE_PARENT_WAKE_TEXT: the parent's prose; FAKE_PARENT_WAKE_JOB: the wake-up's structured job field.
