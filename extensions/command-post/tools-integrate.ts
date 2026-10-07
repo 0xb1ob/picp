@@ -125,7 +125,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			"next: `surface` means a human decision, or a merge the repository refuses (merge pending) — relay it, do not retry it.",
 			"next: `wait` means CI is unfinished or an integration hold is active — the result still names CI for the pushed head. Nothing was merged; release a hold explicitly, then advance again.",
 			"next: `review` means no passing cp_review on this head. Run cp_review on the named head; do not re-review an unchanged one.",
-			"next: `resolve` means the job's own implementer was promoted to fix a conflict or a red suite. Wait for its envelope.",
+			"next: `resolve` means the job's own implementer is still working or being promoted to fix a conflict or a red suite. Wait for its envelope.",
 			"A stale base alone is never rebased: only BEHIND, or a readable up-to-date rule, updates the branch, and the moved head needs CI and cp_review again.",
 		],
 		parameters: Type.Object({

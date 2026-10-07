@@ -1593,6 +1593,89 @@ test("duplicate red CI waits for the active repair, then surfaces a completed fa
 	assert.equal((await b.integrator(world).advance({ jobId: BR })).next, "surface");
 });
 
+for (const permission of ["CLEAN", undefined]) {
+	for (const phase of ["waiting", "launching"] as const) {
+		test(`picp-03o: a ${phase} worker blocks the ${permission === "CLEAN" ? "repo-derived" : "human-checkpoint"} merge until it reports`, async (t) => {
+			const b = await benchOf(t);
+			writeShipEnvelope(b.home, HEAD_A);
+			b.approve(HEAD_A);
+			await reopen(b);
+			// launching is currently script/local-only; exercise the merge guard without writing an invalid fleet.
+			const waiting = b.fleet.require(BR);
+			const mock = phase === "launching" ? t.mock.method(b.fleet, "get", () => ({ ...waiting, phase })) : undefined;
+			const integration = b.integrator({ pr: { ...openPr(), mergeStateStatus: permission } });
+			const result = await integration.advance({ jobId: BR });
+			assert.equal(result.next, "resolve");
+			assert.match(result.reason, new RegExp(`worker phase ${phase}`));
+			assert.match(result.reason, /wait for its report/i);
+			assert.deepEqual(b.calls.filter((call) => !call.startsWith("gh pr view")), []);
+			assert.equal(b.sent.length + b.teardowns.length + b.closed.length, 0);
+			assert.equal(result.record.resolve_attempts, 0, "waiting never spends another promotion");
+			mock?.mock.restore();
+			await reportFix(b, HEAD_A);
+			const resumed = await integration.advance({ jobId: BR });
+			assert.equal(resumed.next, "advance");
+			assert.equal(resumed.record.merge_authority?.kind, permission === "CLEAN" ? "repo_derived" : "human_checkpoint");
+			assert.equal(merges(b).length, 1);
+		});
+	}
+
+	test(`picp-03o: promotion during permission verification stops the ${permission === "CLEAN" ? "repo-derived" : "human-checkpoint"} merge`, async (t) => {
+		const b = await benchOf(t);
+		writeShipEnvelope(b.home, HEAD_A);
+		b.approve(HEAD_A);
+		const run = runnerFor(defaultWorld({ pr: { ...openPr(), mergeStateStatus: permission } }), b.calls, b.worktree);
+		let views = 0;
+		const result = await b.integrator({}, {
+			run: async (cwd, bin, args, options) => {
+				const result = await run(cwd, bin, args, options);
+				if (bin === "gh" && args[0] === "pr" && args[1] === "view" && ++views === 2) await reopen(b);
+				return result;
+			},
+		}).advance({ jobId: BR });
+		assert.equal(result.next, "resolve");
+		assert.match(result.reason, /worker phase waiting/);
+		assert.equal(merges(b).length, 0);
+		assert.equal(result.record.resolve_attempts, 0);
+		await reportFix(b, HEAD_B);
+		assert.equal((await b.integrator(onHead(HEAD_B)).advance({ jobId: BR })).next, "review", "the next report still needs a current-head review");
+		writeReviewPass(b.home, HEAD_B, { attempt: 2 });
+		b.approve(HEAD_B);
+		const resumed = await b.integrator({ ...onHead(HEAD_B), pr: { ...openPr(), headRefOid: HEAD_B, mergeStateStatus: permission } }).advance({ jobId: BR });
+		assert.equal(resumed.next, "advance");
+		assert.equal(matchHeadBinding(merges(b)[0] ?? "")?.head, HEAD_B);
+	});
+}
+
+test("picp-03o: integration cannot merge while its promotion is still in flight", async (t) => {
+	const b = await benchOf(t);
+	writeShipEnvelope(b.home, HEAD_A);
+	const entered = { resolve: () => {}, promise: Promise.resolve() };
+	entered.promise = new Promise<void>((resolve) => { entered.resolve = resolve; });
+	const release = { resolve: () => {}, promise: Promise.resolve() };
+	release.promise = new Promise<void>((resolve) => { release.resolve = resolve; });
+	const world = defaultWorld({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] });
+	const integration = b.integrator({}, {
+		run: runnerFor(world, b.calls, b.worktree),
+		send: async () => {
+			entered.resolve();
+			await release.promise;
+			await reopen(b);
+			return { receipt: "delivered" };
+		},
+	});
+	const first = integration.advance({ jobId: BR });
+	await entered.promise;
+	try {
+		world.runs = defaultWorld().runs;
+		assert.equal((await integration.advance({ jobId: BR })).next, "resolve");
+		assert.equal(merges(b).length, 0);
+	} finally {
+		release.resolve();
+		await first;
+	}
+});
+
 test("red CI waits for a working implementer even before an integration promotion", async (t) => {
 	const b = await benchOf(t, { phase: "waiting" });
 	const result = await b.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }).advance({ jobId: BR });

@@ -2937,6 +2937,7 @@ record. The record (`state/runs/<job-id>/integration.json`,
 |---|---|---|---|
 | — | PR state `CLOSED` unmerged | none | `surface` |
 | — | PR state `MERGED` | jump to `record` | not an error: the receipt is the observer either way |
+| — | worker phase `waiting`/`launching`, or an integration repair promotion is in flight (open PR) | none — re-read from the fleet at the open-PR gate and just before both merge commands | `resolve`: wait for the implementer's report; no second promotion or resolve attempt spent (picp-03o) |
 | — | live `envelope.json` is status `blocked`, or present but unreadable (open PR) | none — checked again just before each merge command | `surface`: blockers in facts; exits are a `done` re-report (`cp_send`) or a human merge on GitHub |
 | `conflict` | `mergeable == CONFLICTING` | promote the implementer | never resolved by this tool |
 | `ci` | a *completed* run whose `headSha` is the pushed head | none | green, or `wait` / `resolve`; zero runs with an **unreadable** workflow list falls back to `authorize`, and with an authoritative empty one falls through to `permit` |
@@ -2954,6 +2955,14 @@ record. The record (`state/runs/<job-id>/integration.json`,
 
 Branch on `next` — `advance | wait | review | resolve | retry | surface | done` — never
 on the prose reason, the same rule the gate's `cause` establishes.
+
+A promotion archives the old report and reopens its slot, so an absent
+`envelope.json` does not mean the worker is finished. An open PR with a
+`waiting` or `launching` worker returns `next: resolve`, naming the phase and
+waiting for its report; an integration repair send still in flight does the
+same. Both merge paths re-read this gate immediately before issuing the merge,
+so a promotion during CI or permission verification also stops it. The next
+accepted report resumes with fresh CI, review and permission checks.
 
 ### Durable integration holds (4r4)
 
