@@ -4,9 +4,10 @@
  * the worker already inherits (`workerEnvironment`): nothing is copied, and OAuth tokens stay in
  * `mcp-auth.json`, which pi reads in place. The implementer, ship workers and the CP parent get no MCP.
  *
- * Why a gateway tool and not `-e builtin:mcp`: a worker runs with an exact `--tools` allowlist, and
- * pi drops every tool not named there from its registry (agent-session.js `_refreshToolRegistry`),
- * so runtime-discovered `mcp__*` tools, `codemode` and `tool_search` could never reach them.
+ * Why a gateway tool and not `-e builtin:mcp`: since pi 1.0.4 the worker's `--tools` allowlist no
+ * longer removes MCP tools (pi `docs/mcp.md`: only an `mcp__*` entry filters them), so builtin MCP
+ * would expose every server tool, writes included. What keeps it out is `--no-extensions`, which
+ * also disables the `builtin:mcp` built-in (pi `docs/settings.md`); workers never pass `-e builtin:mcp`.
  * `extensions/worker-mcp` runs pi's own MCP runtime (`createMcpExtension`), keeps the tools it
  * registers, and serves them through one allowlisted tool, `mcp_call`. Only tools whose server
  * declares `readOnlyHint: true` and not `destructiveHint: true` are listed or callable; a missing

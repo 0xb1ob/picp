@@ -46,7 +46,7 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-coding-agent": "^0.99.1",
+		"@earendil-works/pi-coding-agent": "^1.0.4",
 		"@types/node": "^24.3.0",
 		"linkedom": "^0.18.13",
 		"preact-render-to-string": "^6.7.0",
