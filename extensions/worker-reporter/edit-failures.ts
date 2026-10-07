@@ -166,7 +166,10 @@ export function enrichAnchorEditFailure(errorText: string): { text: string; caus
 	let hint: string;
 	if (/\[E_STALE_ANCHOR\]/.test(errorText)) {
 		cause = "stale_anchor";
-		hint = "the anchors are from before the file changed, or it was never read. Call read on the file now and use anchors from that output.";
+		// "not owned" is a missing claim (never served, usually a typo). A checksum mismatch says the file changed.
+		hint = /not owned in this session/.test(errorText)
+			? "this anchor was never served in this session; it is likely mistyped. Copy it exactly from a fresh read."
+			: "the file changed since read. Call read on the file now and use anchors from that output.";
 	} else if (/\[E_BAD_(REF|SHAPE)\]/.test(errorText)) {
 		cause = "bad_anchor";
 		hint = "pass bare 4-letter anchors (the text before │) from one file per call, and batch only disjoint ranges.";
@@ -239,6 +242,7 @@ const EDIT_TOOLS = ["edit", "replace", "insert"];
  */
 export function createEditResultEnricher(readFile: (path: string) => string) {
 	const misses = createMissCounter();
+	const reportedAborts = new Set<string>();
 	return (event: EditResultEvent): string | undefined => {
 		const input = event.input ?? {};
 		const inputPath = typeof input.path === "string" ? input.path : undefined;
@@ -251,6 +255,15 @@ export function createEditResultEnricher(readFile: (path: string) => string) {
 		}
 		if (!EDIT_TOOLS.includes(event.toolName)) return undefined;
 		const text = event.content.map((block) => (block.type === "text" ? (block.text ?? "") : "")).join("\n");
+		// One cause per replace batch. Hashline still returns one result per call; siblings must not each restate it.
+		if (/\[E_OP_ABORTED\]/.test(text)) {
+			const batch = /\[E_OP_ABORTED\] Batch (\d+)/.exec(text)?.[1] ?? "?";
+			if (/Call Nr \d+ errored \[/.test(text) || reportedAborts.has(batch)) {
+				return `[E_OP_ABORTED] Batch ${batch} discarded; the cause was already reported on the failing call. Nothing was written.`;
+			}
+			reportedAborts.add(batch);
+			return undefined;
+		}
 		let enriched = text;
 		let cause: string | undefined;
 		const scope: MissScope = { path: inputPath };

@@ -6,6 +6,18 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Restart ignores unknown send fields (picp-arr)
+
+The restart gate reads `cp-parent.sends.json` without failing on an optional field its schema does not know. Required fields are still checked. Every other read of that file stays strict, so a writer cannot round-trip a field away. Migration: none.
+
+### One cause per edit batch (picp-y4l)
+
+A failed `replace`/`insert` batch still returns one tool result per call (the tool protocol). The failing call keeps its cause. Later `[E_OP_ABORTED]` siblings, and every sibling that only points at another call's error, become one shared line and are not counted as further misses. Migration: none.
+
+### Stale-anchor hints (picp-kfg evidence)
+
+`[E_STALE_ANCHOR]` "...is not owned in this session" now says the anchor was never served and is likely mistyped: copy it from a fresh read. A checksum mismatch still says the file changed since read. Migration: none.
+
 ### Local teardown with nothing to push (picp-9g8)
 
 A `delivery:local` ship job with a clean tree and no commits ahead of the base tears down without its branch existing on origin (`nothing_to_push`). A local job that committed still has to be pushed; `delivery:pr` is unchanged. Migration: none.

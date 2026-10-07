@@ -109,6 +109,42 @@ export function validateParentSendOutboxFile(value: unknown): ValidationResult<P
 	return validate<ParentSendOutboxFile>(ParentSendOutboxFileSchema, value);
 }
 
+/** Keys the closed schema knows. A restart reader drops the rest instead of failing the file. */
+function withoutUnknownKeys(value: unknown, schema: { properties: Record<string, unknown> }): unknown {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+	const known = new Set(Object.keys(schema.properties));
+	const out: Record<string, unknown> = {};
+	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+		if (known.has(key)) out[key] = child;
+	}
+	return out;
+}
+
+/**
+ * The read that gates restart. Unknown optional fields (a newer writer added one this
+ * process's schema does not know) are dropped, then the closed schema still checks
+ * required fields. Does not write. Every other read stays strict so a round-trip
+ * cannot delete a field this process does not understand.
+ */
+export function readParentSendOutboxForRestart(file: string): ParentSendOutboxFile {
+	if (!existsSync(file)) return EMPTY_PARENT_SEND_OUTBOX;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		throw new ParentSendOutboxError(`${file} is not valid JSON (${(error as Error).message})`);
+	}
+	const fileValue = withoutUnknownKeys(parsed, ParentSendOutboxFileSchema) as { entries?: unknown };
+	if (fileValue && typeof fileValue === "object" && Array.isArray(fileValue.entries)) {
+		fileValue.entries = fileValue.entries.map((entry) => withoutUnknownKeys(entry, ParentSendEntrySchema));
+	}
+	const result = validateParentSendOutboxFile(fileValue);
+	if (!result.ok) {
+		throw new ParentSendOutboxError(`${file} violates the parent send contract:\n  ${result.errors.join("\n  ")}`);
+	}
+	return result.value;
+}
+
 export class ParentSendOutboxError extends Error {}
 
 const OWNER_KEY = Symbol.for("pi-command-post.parent-sends.owner");

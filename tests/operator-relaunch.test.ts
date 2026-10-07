@@ -61,6 +61,11 @@ test("pendingParentSends: unobserved and queued < 24 h counts; observed or older
 		entry("ps-20260101000000-0123abcf", "2026-01-01T00:00:00Z"),
 	] }));
 	assert.deepEqual(pendingParentSends(home, "multi", now), { ids: ["ps-20260102110000-0123abcd"], error: null });
+	const unknown = JSON.parse(readFileSync(file, "utf8")) as { entries: Array<Record<string, unknown>>; later?: boolean };
+	unknown.later = true;
+	unknown.entries[0]!.future_optional = 1;
+	put(file, JSON.stringify(unknown));
+	assert.deepEqual(pendingParentSends(home, "multi", now), { ids: ["ps-20260102110000-0123abcd"], error: null }, "an unknown optional field does not make the outbox unreadable");
 	put(file, "{not json");
 	const broken = pendingParentSends(home, "multi", now);
 	assert.deepEqual(broken.ids, []);

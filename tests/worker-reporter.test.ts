@@ -163,7 +163,12 @@ test("replace/insert failures get a cause and next move, like edit", () => {
 	);
 	assert.equal(stale?.cause, "stale_anchor");
 	assert.equal(stale?.path, "README.md");
-	assert.match(stale?.text ?? "", /cause: stale_anchor — .*Call read/);
+	assert.match(stale?.text ?? "", /cause: stale_anchor — the file changed since read/);
+	const unserved = enrichAnchorEditFailure('[E_STALE_ANCHOR] "EFen" is not owned in this session. Call read() on the target file first.');
+	assert.equal(unserved?.cause, "stale_anchor");
+	assert.match(unserved?.text ?? "", /cause: stale_anchor — this anchor was never served/);
+	assert.match(unserved?.text ?? "", /mistyped/);
+	assert.doesNotMatch(unserved?.text.split("cause:")[1] ?? "", /file changed since read/);
 	assert.equal(enrichAnchorEditFailure('[E_BAD_REF] Invalid anchor "x".')?.cause, "bad_anchor");
 	const invalid = enrichAnchorEditFailure('Validation failed for tool "insert":\n  - lines: required');
 	assert.equal(invalid?.cause, "bad_arguments");
@@ -325,6 +330,25 @@ test("tool_result handler: successes and unrelated results are left untouched", 
 	result("replace", REPLACE_INPUT, STALE("README.md"));
 	result("replace", REPLACE_INPUT, "Replaced lines", false);
 	assert.doesNotMatch(result("replace", REPLACE_INPUT, STALE("README.md")) ?? "", /Identical/);
+});
+
+test("a replace batch reports the cause once; sibling E_OP_ABORTED lines do not restate it or count as misses", () => {
+	const result = stubbedToolResultHandler();
+	const cause = '[E_STALE_ANCHOR] "EFen" is not owned in this session. Call read() on the target file first.';
+	assert.match(result("replace", REPLACE_INPUT, cause) ?? "", /never served/);
+	const sibling = '[E_OP_ABORTED] Batch 3 aborted: [replace] Call Nr 1 errored [E_STALE_ANCHOR]. Nothing was written; the whole batch was discarded.';
+	const first = result("replace", REPLACE_INPUT, sibling) ?? "";
+	const second = result("replace", { ...REPLACE_INPUT, remove_from: "ssPB" }, sibling) ?? "";
+	assert.equal(first, second);
+	assert.match(first, /\[E_OP_ABORTED\] Batch 3 discarded/);
+	assert.doesNotMatch(first, /E_STALE_ANCHOR/);
+	assert.doesNotMatch(second, /Identical/);
+	const primary = "[E_OP_ABORTED] Batch 4 aborted: the file changed after the batch started. Call read for fresh anchors and retry.";
+	assert.equal(result("replace", REPLACE_INPUT, primary), undefined, "the first statement of a batch's own abort is kept");
+	const restated = "[E_OP_ABORTED] Batch 4 aborted: the file changed after the batch started. Nothing was written; the whole batch was discarded.";
+	const again = result("replace", REPLACE_INPUT, restated) ?? "";
+	assert.match(again, /Batch 4 discarded/);
+	assert.doesNotMatch(again, /file changed after/);
 });
 
 test("a bash non-zero exit with no output names the command that failed", () => {

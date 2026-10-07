@@ -16,7 +16,7 @@ import { constants } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { layoutForHome, type Mode } from "./contracts.ts";
 import type { ControlPorts } from "./dashboard-control.ts";
-import { PARENT_SEND_MAX_AGE_HOURS, ParentSendOutbox, parentSendFile } from "./parent-outbox.ts";
+import { PARENT_SEND_MAX_AGE_HOURS, parentSendFile, readParentSendOutboxForRestart } from "./parent-outbox.ts";
 
 export const RELAUNCH_ENV = "CP_OPERATOR_RELAUNCH_FILE";
 export const RELAUNCH_LIMIT = { count: 3, windowMs: 10 * 60_000 };
@@ -71,7 +71,7 @@ export function pendingParentSends(home: string, mode: Mode, now: Date = new Dat
 	const file = parentSendFile(join(resolve(home), layoutForHome(mode, home).sessions, "cp-parent.jsonl"));
 	try {
 		const since = now.getTime() - PARENT_SEND_MAX_AGE_HOURS * 3_600_000;
-		const ids = new ParentSendOutbox({ file }).list().filter((entry) => !entry.owner_observed_at && Date.parse(entry.queued_at) >= since).map((entry) => entry.id);
+		const ids = readParentSendOutboxForRestart(file).entries.filter((entry) => !entry.owner_observed_at && Date.parse(entry.queued_at) >= since).map((entry) => entry.id);
 		return { ids, error: null };
 	} catch (error) {
 		return { ids: [], error: (error as Error).message };
