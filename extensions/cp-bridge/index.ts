@@ -23,7 +23,7 @@ import { OperatorRelayConsumer, RELAY_TICK_MS, recheckRelay } from "../../src/op
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile, relayIdOf } from "../../src/operator-outbox.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
-import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
+import { type Mode, MODES, THINKING_LEVELS, configureLayout, isSafeJobId, JobIdSchema, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
 import { OperatorAnswers } from "../../src/operator-answers.ts";
 import { fileUnderThread, threadTag } from "../../src/operator-threads.ts";
@@ -567,17 +567,18 @@ export default function (pi: ExtensionAPI): void {
 			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart; compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. " +
 			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
+			"thread_bind files job_ids under a dashboard thread on the operator side; bookkeeping only, no authorization, scope assignment, dispatch or decision effect. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
-		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/compact/rotate/model/stop)",
+		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/thread_bind/doctor/version/drain/compact/rotate/model/stop)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
 			"Raise every human question with ask before relaying it; close it with ask_answer using the human's verbatim reply, or ask_withdraw with a reason. Bookkeeping is never authorization; parent decisions still use their existing channel.",
 			"Keep an ask's question short; put the background in its context (plain text, up to 2000 chars): what happened, what each option really does, and the risk. The dashboard shows it on the decision card.",
 			"Post every answer the human asked for with answer (project, their question verbatim, the full answer, evidence_paths; job_id when it is the landing of a kind:research job they requested, any delivery (research report, cp_ask answer or board)): it lands on the dashboard without a parent turn and never pushes. Once per job_id; never for status, relays, decisions (ask/ask_answer) or chat.",
-			"Pass thread (a short tag) on answer or ask only when the human named the thread the question belongs to; never invent one and never for relays; it only files the item on the dashboard.",
-			"A user message `<ask-id>: <label>` whose last line is `[cp-dashboard dc-… — from the dashboard; ask=<ask-id>]` is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
+			"Pass thread (a short tag) on answer or ask only when the human named the thread the question belongs to; never invent one and never for relays; it only files the item on the dashboard. Use thread_bind (thread, job_ids) for jobs created for that topic; bookkeeping only.",
+			"A user message `<ask-id>: <label>` whose dashboard marker carries ask=<ask-id> (and may carry thread=<tag>) is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
 			"Send delegated:true with a short delegation_rule when deciding on the human's behalf; omit it for the human's own answer.",
 			"Use integration_hold with job_id and reason before sending a request to pause merging; it writes immediately even while the parent is busy. Release only when that pause is explicitly lifted, then send cp_integrate advance to resume.",
 			"Send mandates with cp_parent send. Branch on receipt level, never on the word accepted. http_accepted is not this channel.",
@@ -587,7 +588,7 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "thread_bind", "integration_hold", "integration_release", "doctor", "version", "drain", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent; thread_bind files jobs on the operator side only" }),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
@@ -600,7 +601,8 @@ export default function (pi: ExtensionAPI): void {
 			question: Type.Optional(Type.String({ description: "answer: the human's question, verbatim" })),
 			evidence_paths: Type.Optional(Type.Array(Type.String(), { description: "answer: report, board or file paths behind the answer" })),
 			job_id: Type.Optional(Type.String({ description: "integration_hold or integration_release: delivery:pr ship job; answer: the kind:research job, any delivery (local, answer, board), whose landing this answers" })),
-			thread: Type.Optional(Type.String({ maxLength: 64, description: "answer or ask: optional thread tag the human named (a-z 0-9 -, ≤32); files the ans-/ask- id under that dashboard thread; bookkeeping only" })),
+			thread: Type.Optional(Type.String({ maxLength: 64, description: "answer, ask or thread_bind: thread tag the human named (a-z 0-9 -, ≤32); files the ans-/ask-/job id under that dashboard thread; bookkeeping only" })),
+			job_ids: Type.Optional(Type.Array(JobIdSchema, { minItems: 1, description: "thread_bind: job ids to file under thread; no dispatch, scope or authorization effect" })),
 			reason: Type.Optional(Type.String({ description: "ask_withdraw or integration_hold: reason" })),
 			...ParentSendDelegationSchema.properties,
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
@@ -614,6 +616,18 @@ export default function (pi: ExtensionAPI): void {
 					const holds = new IntegrationHolds(target.home);
 					const hold = params.action === "integration_hold" ? holds.hold(params.job_id, params.reason ?? "") : (holds.release(params.job_id), null);
 					return textResult(hold ? `${params.job_id}: integration held: ${hold.reason}` : `${params.job_id}: integration hold released; send the parent cp_integrate advance to resume with all gates rechecked.`, { job_id: params.job_id, hold });
+				}
+				if (params.action === "thread_bind") {
+					if (params.thread === undefined) throw new CpBridgeError("cp_parent thread_bind needs thread and job_ids");
+					const tag = threadTag(params.thread);
+					if (!Array.isArray(params.job_ids) || !params.job_ids.length || !params.job_ids.every(id => typeof id === "string" && isSafeJobId(id))) throw new CpBridgeError("thread_bind job_ids must be a non-empty array of path-safe job ids (1-128 of A-Z a-z 0-9 _ -, first a letter or digit)");
+					const stateDir = operatorStateDir();
+					const filed = params.job_ids.map(job_id => ({ job_id, ...fileUnderThread(stateDir, tag, { kind: "job", id: job_id }) }));
+					const successes = filed.filter(item => item.details.error === null).length;
+					return textResult(`thread_bind: bookkeeping only\n${filed.map(item => `${item.job_id}${item.note}`).join("\n")}`, {
+						state: successes === filed.length ? "filed" : successes ? "partial" : "unfiled",
+						bindings: filed.map(item => ({ job_id: item.job_id, ...item.details })),
+					});
 				}
 				if (params.action === "answer") {
 					if (params.id) throw new CpBridgeError("cp_parent answer posts a new answer; close an ask with ask_answer");
@@ -755,7 +769,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release"].includes(params.action) ? { isError: true } : {}) };
+				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "thread_bind", "integration_hold", "integration_release"].includes(params.action) ? { isError: true } : {}) };
 			}
 		},
 	});

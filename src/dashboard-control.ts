@@ -28,7 +28,7 @@ import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
-	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, readControlConfig, readControlRecord,
+	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
@@ -207,6 +207,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			outcome(id, kind, null, peer, "delivered", null);
 			return { ok: true, result: { id, state: "delivered", deliver } };
 		}
+		const thread = args.thread === undefined ? null : normalizeThreadTag(args.thread);
+		if (args.thread !== undefined && thread === null) return refuse(400, "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit");
 		if (images && (kind !== "message" || images.length < 1 || images.length > UPLOAD_MAX_PER_MESSAGE || new Set(images).size !== images.length || !images.every(isUploadId))) return refuse(400, `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`);
 		// With images the text may be empty: the marker alone carries them.
 		if (kind === "message" && ((!text && !images) || (text ?? "").length > CONTROL_TEXT_MAX)) return refuse(400, `text must be 1-${CONTROL_TEXT_MAX} characters`);
@@ -236,7 +238,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${dashboardMarker(id, askId, images)}`, deliverAs, inline.length ? inline : undefined);
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${dashboardMarker(id, askId, images, thread)}`, deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
@@ -405,7 +407,7 @@ export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject
 	const lines = fresh.map((message) => {
 		const state = message.ask_id ? asks?.get(message.ask_id) : undefined;
 		const note = message.ask_id && asks && state !== "open" ? ` (${message.ask_id} is ${state ?? "unknown"}, no longer open)` : "";
-		return `- ${message.at} (${message.id}): ${message.text}${note}`;
+		return `- ${message.at} (${message.id}): ${message.text}${note}${message.thread ? `\n${dashboardMarker(message.id, message.ask_id, undefined, message.thread)}` : ""}`;
 	});
 	const dropped = stale.map((message) => `- dropped, held longer than 24 h: ${message.at} (${message.id})`);
 	if (fresh.length === 0) {

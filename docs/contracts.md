@@ -1166,7 +1166,16 @@ or an opened ask, the bridge (`src/operator-threads.ts`) files the `ans-`/`ask-`
 failed bind never undoes the post and the tool is not an error: the answer text adds `; thread <tag> NOT filed:
 <error>`, and the ask's JSON result (and details) carry `thread:{tag, id:null, error}`; on success `thread` holds
 the `th-` id. The ask journal line keeps its keys (no `thread`), so the Decisions fold is unchanged. Bookkeeping
-only: a thread grants nothing and the session never sees composer threads.
+only: a thread grants nothing. A dashboard marker with `thread=<tag>` tells the session which human-named tag to pass
+on its answer/ask and to `cp_parent thread_bind` for any jobs it creates.
+
+**Job filing.** `cp_parent thread_bind {thread, job_ids}` files a non-empty array of job ids on the operator side
+only, without a parent turn. Normalize and validate the tag and every id before writing anything; job ids follow
+`JOB_ID_PATTERN` (1-128 of `A-Z a-z 0-9 _ -`, first a letter or digit). Each id is filed through `fileUnderThread` /
+`bindThread` with `ref:{kind:"job",id}`, `by:"bridge"`, `peer:null`. Repeats are idempotent and the newest bind wins.
+The result carries `bindings:[{job_id,tag,id,error}]`, with state `filed`, `partial` or `unfiled`; a failed write never
+throws and its text names each job and `thread <tag> NOT filed: <error>`. Invalid input is a tool error before any
+bind. This is bookkeeping, never authorization, scope assignment, dispatch or decision behavior.
 
 **Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
 without a `cp_parent ask` is forced back once, then carded by the bridge itself.
@@ -5748,7 +5757,7 @@ is literal (`expandPromptTemplates` is never set, so no slash command, template 
 busy is `deliverAs: "followUp"` (Send after this turn) or `"steer"` (Steer now), and Abort turn calls
 `ctx.abort()`. A click on option *Keep* of open ask `ask-abcd` sends `ask-abcd: Keep` (the reply the Awaiting
 screen copies). Every injected message ends with one marker line, `[cp-dashboard dc-… — from the dashboard]`
-(a click adds `; ask=<id>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
+(a click adds `; ask=<id>`; a send with a thread adds `; thread=<tag>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
 an authorization**: it never calls `cp_decide`, a `cp_parent` action or the parent host, and never writes
 `state/operator/asks.jsonl`; the main session records it with `ask_answer` (verbatim) and relays it, by its
 `cp_parent` guideline, and the card stays open until the ask journal says otherwise. Refused: a label that is not
@@ -5781,8 +5790,9 @@ repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 **The viewer's routes** ([`src/viewer/control-api.ts`](../src/viewer/control-api.ts)). `GET
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the
 session's CSRF token, which the page fetches itself; it never writes. `POST /api/operator/message` takes
-`{kind:"message", text, deliver?, thread?}`, `{kind:"answer", ask_id, label}` or `{kind:"abort"}` and refuses, in order
-(`thread` — a tag, only on `message`, never forwarded to the session — is covered under Operator threads):
+`{kind:"message", text, deliver?, thread?}`, `{kind:"answer", ask_id, label, thread?}` or `{kind:"abort"}` and refuses,
+in order (`thread` — a normalized tag on messages and clicks, forwarded to the session's marker — is covered
+under Operator threads):
 
 | Check | Refusal |
 |---|---|
@@ -5822,7 +5832,7 @@ When the session's record is absent, invalid or names a pid that is gone, `GET /
 session's CSRF token does not exist then — and the dashboard says **operator session offline · N held**. The POST
 runs the same chain up to the record step, then, instead of 503: the inbox token (403 `inbox token missing or
 stale`), `abort` is 409 (`nothing to abort; the operator session is offline`), at most 20 waiting (409), and one
-`held` line `{type, id: dc-…, at, text, ask_id}` appended to `state/operator/inbox.jsonl` (0600, one `O_APPEND`
+`held` line `{type, id: dc-…, at, text, ask_id, thread?}` appended to `state/operator/inbox.jsonl` (0600, one `O_APPEND`
 write, like the journal) → 202 `{id, state: "held"}`. A click holds as `<ask>: <label>` with its `ask_id`. At the
 next `session_start`, once dashboard control listens, the session injects every held message younger than 24 h as
 **one** user message, oldest first, headed `[cp-dashboard inbox — N message(s) typed while this session was
@@ -6064,15 +6074,16 @@ journal shows "Answers unavailable".
 ### Operator threads (cp-xmw2)
 
 Threads let the human sort the one operator chat; they are **views of one chat, never separate model contexts**, and
-bookkeeping only (no model call, no push, no authority). The dashboard marker, the control-socket ops and their args and
-the inbox line shape are unchanged.
+bookkeeping only (no model call, no push, no authority). Tagged sends carry their normalized tag to the session's
+marker; untagged messages are unchanged.
 
 **Journal** `state/operator/threads.jsonl` (0600, dir 0700, append-only, one `O_APPEND` write + `fsync` per line through
 [`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts); created on first use; 16 MiB read cap; no rotation). Two
 writers: the operator session's bridge (`by:"bridge"`, `peer:null`) and the viewer (`by:"viewer"`, `peer` = client
 address); `at` is ISO seconds. Lines: `{"type":"open","by","id":"th-<12 hex>","at","tag","peer"}`,
-`{"type":"bind","by","at","thread":"th-…","ref":{"kind":"dashboard"|"ask"|"answer","id":"dc-…"|"ask-…"|"ans-…"},"peer"}`,
+`{"type":"bind","by","at","thread":"th-…","ref":{"kind":"dashboard"|"ask"|"answer"|"job","id":"dc-…"|"ask-…"|"ans-…"|"<job-id>"},"peer"}`,
 `{"type":"done","by":"viewer","id","at","peer"}` — tags, ids, timestamps and addresses, never message, ask or answer text.
+Job refs use the existing path-safe job id contract; they do not add message/ask/answer counts or waiting items.
 A tag is `^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`).
 `readThreads` folds it in line order: the torn last line is ignored; bad lines, unknown types, repeated open ids and
 binds/dones for unknown threads count in `skipped`; a second `open` of a tag aliases its id to the first (two writers
@@ -6106,15 +6117,25 @@ availability, enabled, reason, token, threads, total, warning}`: `threads` are `
 Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "thread_done"`, `thread_id` once parsed)
 in `state/operator/dashboard.jsonl`; no refusal writes a done line. Mark done authorizes and acknowledges nothing.
 
-**Composer `thread`.** `POST /api/operator/message` accepts `thread` on `kind:"message"` only (on `answer`/`abort` it is
-400 `unknown field thread`); a value that does not normalize is 400 `thread must be a tag: 1-32 of a-z 0-9 -, starting
-with a letter or digit`, before any frame. The socket frame is built without it, so the session never sees composer
-threads. After the session's 202 (or the inbox `held` line) the viewer files the `dc-` id: `open` on the tag's first use,
+**Composer `thread`.** `POST /api/operator/message` accepts `thread` on `kind:"message"` and on an ask click
+(`kind:"answer"`); on `abort` it remains 400 `unknown field thread`. A value that does not normalize is 400
+`thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit`, before any frame. The normalized tag
+reaches the socket and the session sees `[cp-dashboard dc-… — from the dashboard; thread=<tag>]`. Clicks keep
+`ask=<id>` and add `; thread=<tag>` only when the click carried one; no thread is inferred from the ask or the
+current view. Image ids still follow as `; images=…`. Untagged markers and frames are unchanged. A held message
+keeps its optional normalized `thread` in the inbox; replay adds that message's tagged footer, while the aggregate
+inbox replay stays shared. After the session's 202 (or the inbox `held` line) the viewer files the `dc-` id: `open`
+on the tag's first use,
 then `bind`. The 202 body gains `thread: {tag, id, error}`; a bind that cannot be written never changes the 202 —
 `thread.error` names why and the viewer logs one line (`viewer: thread bind unwritten for <dc-id>: …`). A send later
 dropped leaves an orphan bind that matches no entry; harmless.
 
 **Transcript filter.** In the Full transcript, **All** (no filter) shows every entry. A selected thread shows its own entries, and a shared entry (a system entry or the inbox replay) only when that entry sits inside the thread's own span — from its first own entry through its last, in file order. A shared entry before the first or after the last is not shown. Another thread's entries are never shown, even inside that span. A thread with no own entries, and a selected tag that has no thread yet (`threadFilter` is `"none"`), shows no entries; a tag with no thread yet still shows `No messages in <tag> yet`.
+
+**Job notices in the transcript.** `assignThreads` uses the newest `job` ref binding: a cp-bridge entry whose
+`bridge.job` is bound owns that thread, is not shared and opens a turn there, so following main-session replies
+are filed there. Unbound bridge entries, other system entries, compactions and aggregate inbox replays stay
+shared and end the current turn. Own dashboard/ask/answer refs still beat a turn's inherited thread.
 
 **Failure and recovery.** A missing journal is `availability: "missing"` (empty list). An unreadable or over-16-MiB one
 is `unavailable` with a warning, done answers 500 and composer binds fail with `thread.error` while the message still

@@ -18,7 +18,7 @@ export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const UPLOAD_MAX_PER_MESSAGE = 8;
 
-export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
+export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */

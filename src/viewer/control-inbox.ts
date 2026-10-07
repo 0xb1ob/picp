@@ -9,13 +9,13 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { controlInboxFile, readControlRecord } from "./control-files.ts";
+import { controlInboxFile, readControlRecord, THREAD_TAG_RE } from "./control-files.ts";
 import { pidAlive } from "./overview-health.ts";
 
 /** Per viewer process; a viewer restart rotates it (the page re-reads it with the status). */
 export const INBOX_TOKEN = randomBytes(32).toString("hex");
 
-export interface HeldMessage { id: string; at: string; text: string; ask_id: string | null }
+export interface HeldMessage { id: string; at: string; text: string; ask_id: string | null; thread?: string }
 
 /** Held lines not yet delivered or dropped, oldest first; `error` names an unreadable file (never silently empty). */
 export function readInbox(stateDir: string): { held: HeldMessage[]; error: string | null } {
@@ -34,7 +34,7 @@ export function readInbox(stateDir: string): { held: HeldMessage[]; error: strin
 			continue; // a torn last line: the next append starts a fresh one
 		}
 		if (typeof line?.id !== "string") continue;
-		if (line.type === "held" && typeof line.at === "string" && typeof line.text === "string") held.set(line.id, { id: line.id, at: line.at, text: line.text, ask_id: typeof line.ask_id === "string" ? line.ask_id : null });
+		if (line.type === "held" && typeof line.at === "string" && typeof line.text === "string") held.set(line.id, { id: line.id, at: line.at, text: line.text, ask_id: typeof line.ask_id === "string" ? line.ask_id : null, ...(typeof line.thread === "string" && THREAD_TAG_RE.test(line.thread) ? { thread: line.thread } : {}) });
 		else if (line.type === "delivered" || line.type === "dropped") held.delete(line.id);
 	}
 	return { held: [...held.values()].sort((a, b) => a.at.localeCompare(b.at)), error: null };

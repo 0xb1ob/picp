@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import type { SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
 import { isAskId, parseDashboardText, readThreads } from "./control-files.ts";
-import { assignThreads } from "./thread-turns.ts";
+import { assignThreads, INBOX_REPLAY_PREFIX } from "./thread-turns.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
@@ -131,7 +131,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    if (!text.trim()) continue; // an empty system/prompt record is nothing the CLI showed
    // Image parts follow the text, so the end-anchored marker is read from the text parts alone. The marker's upload ids
    // render as thumbnails (`images`); image parts a marker does not name stay `[image]`.
-   const dashboard=role === "user" && sides === SIDES.you ? parseDashboardText(textOf(message.content,false)) : undefined;
+   const dashboard=role === "user" && sides === SIDES.you && !text.startsWith(INBOX_REPLAY_PREFIX) ? parseDashboardText(textOf(message.content,false)) : undefined;
    if (dashboard) {
     const shown=!dashboard.images && Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
     const e=entry(base,at,"via","Operator (dashboard)",[dashboard.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;

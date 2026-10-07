@@ -85,3 +85,8 @@ test("the note routes preferences to standing orders and lessons to a capture: l
 	assert.ok(capped.includes("data/standing-orders.md"), "standing-orders line must be inside the first 60 lines");
 	assert.doesNotMatch(OPERATOR_NOTE, /hiccups/);
 });
+
+test("the operator note carries exactly one verbatim dashboard thread instruction", () => {
+	const sentence = "A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.";
+	assert.equal(OPERATOR_NOTE.split("\n").filter(line => line === sentence).length, 1);
+});

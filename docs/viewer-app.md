@@ -402,7 +402,9 @@ success goes back to **All** (a later send or bind reopens the thread). The comp
 in `components/ThreadNav.tsx`, above the text row) offers No thread, each open or waiting tag, a `Done` group and `New
 thread…`, which opens a 32-character tag field with **Use**: the tag is normalized the server's way (trim, lowercase,
 spaces to `-`) and a bad one disables **Use** and shows the rule. A send with a tag carries `thread` in the
-`POST /api/operator/message` body; the injected marker and the socket frame are unchanged, so the session never sees it.
+`POST /api/operator/message` body; its normalized tag reaches the session's footer marker as `; thread=<tag>`.
+The session passes that tag on its answer/ask and files jobs it creates with `cp_parent thread_bind`; bound job
+bridge notices open a turn in that thread. Unbound notices, compactions and the aggregate inbox replay stay shared.
 A bind the server could not write still delivers, and the delivery line adds `· thread not recorded: <error>` as an
 alert (shown on the phone too). The picker and chips are hidden while `/api/threads` is forbidden or unreadable, and the
 sidebar section says `Threads unavailable: <reason>`. Styles: `.session-thread*` in `screens/sessions.css`, `.operator-composer-thread` in `components/control.css`

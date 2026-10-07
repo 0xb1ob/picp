@@ -55,7 +55,7 @@ export type BindThreadResult = { ok: true; thread: string; tag: string; opened: 
 export function bindThread(stateDir: string, input: BindThreadInput): BindThreadResult {
 	const { tag, ref, by, peer, at } = input;
 	if (typeof tag !== "string" || !THREAD_TAG_RE.test(tag)) return { ok: false, error: `thread tag ${JSON.stringify(tag)} is not normalized (1-32 of a-z 0-9 -, first a letter or digit)` };
-	if (!isThreadRef(ref)) return { ok: false, error: `thread ref ${JSON.stringify(ref)} is not a dashboard, ask or answer id` };
+	if (!isThreadRef(ref)) return { ok: false, error: `thread ref ${JSON.stringify(ref)} is not a dashboard, ask, answer or job id` };
 	const journal = readThreads(stateDir);
 	if (journal.error) return { ok: false, error: journal.error };
 	let thread = journal.threads.find((item) => item.tag === tag)?.id;

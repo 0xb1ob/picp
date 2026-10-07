@@ -33,10 +33,9 @@
  * `answer_ack`), then the answer token, the answer existing and not yet acknowledged, and appends one `acked` line to
  * `state/operator/answers.jsonl` before it answers 202. No session, no parent: it only moves the answer to the history.
  *
- * cp-xmw2, operator threads: a `kind:"message"` body may carry `thread` (a tag, normalized by `normalizeThreadTag`). It
- * never reaches the socket frame; after the 202 (or the `held` line) the viewer files the `dc-` id under that thread in
- * `state/operator/threads.jsonl` (`bindThread`), and a failed bind is named in the 202 as `thread.error`. The thread
- * list and the done route live in threads-api.ts.
+ * cp-xmw2, operator threads: message and answer bodies may carry `thread`, normalized by `normalizeThreadTag`.
+ * It reaches the session's marker; after the 202 (or the held line), the viewer files the dc- id via `bindThread`.
+ * A failed bind is named as `thread.error`. The thread list and done route live in threads-api.ts.
  */
 
 import { execFile } from "node:child_process";
@@ -260,26 +259,29 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 }
 
 type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string; thread?: string; thread_id?: string };
-type Body = { kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[] } | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
+type Body = ({ kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[] } | { kind: "answer"; ask_id: string; label: string }) & { thread?: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
-/** A message's optional `thread` (cp-xmw2) comes back beside the body, never in it: the socket frame is built from `body`. */
+/** Normalize a message or click's optional thread before any socket frame or inbox write. */
 function parseBody(json: unknown): { ok: true; body: Body; thread: string | null; parsed: Parsed } | { ok: false; reason: string; parsed: Parsed } {
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
 	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" ? value.kind : null;
 	const text = typeof value?.text === "string" ? value.text : kind === "answer" && typeof value?.label === "string" ? value.label : null;
 	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
 	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(typeof value?.thread === "string" ? { thread: value.thread.slice(0, 64) } : {}) };
-	const keys = { message: ["kind", "text", "deliver", "images", "thread"], answer: ["kind", "ask_id", "label"], abort: ["kind"] };
+	const keys = { message: ["kind", "text", "deliver", "images", "thread"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
 	if (kind === "abort") return { ok: true, body: { kind }, thread: null, parsed };
+	const thread = value.thread === undefined ? null : normalizeThreadTag(value.thread);
+	if (value.thread !== undefined && thread === null) return { ok: false, reason: "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit", parsed };
+	const tagged = thread === null ? {} : { thread };
 	if (kind === "answer") {
 		if (!isAskId(value.ask_id)) return { ok: false, reason: "ask_id must be an ask id", parsed };
 		if (typeof value.label !== "string" || !value.label) return { ok: false, reason: "label must be one of the ask's options", parsed };
-		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label }, thread: null, parsed };
+		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label, ...tagged }, thread, parsed };
 	}
 	const ids = value.images;
 	if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > UPLOAD_MAX_PER_MESSAGE || new Set(ids).size !== ids.length || !ids.every(isUploadId))) return { ok: false, reason: `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`, parsed };
@@ -287,9 +289,7 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 	if (!trimmed && !ids) return { ok: false, reason: "text is empty", parsed };
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	const thread = value.thread === undefined ? null : normalizeThreadTag(value.thread);
-	if (value.thread !== undefined && thread === null) return { ok: false, reason: "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit", parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}) }, thread, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...tagged }, thread, parsed };
 }
 
 /** The journals' timestamp form: ISO seconds, no milliseconds. */
@@ -424,7 +424,7 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	if (inbox.error) return refuse(500, `inbox unreadable: ${inbox.error}`);
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
 	const id = heldId(now);
-	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null });
+	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(thread ? { thread } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
 	return { status: 202, body: threaded(options, { id, state: "held", deliver: "prompt" }, thread, peer, now) };
 }

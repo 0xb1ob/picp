@@ -98,7 +98,7 @@ test("fold: bad lines, unknown threads, bad refs, repeated open ids and unknown 
 		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: B, ref: { kind: "dashboard", id: DC }, peer: null }), // unknown thread
 		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: "dc-1" }, peer: null }),
 		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "answer", id: "ans-short" }, peer: null }),
-		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "job", id: "cp-1" }, peer: null }),
+		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "job", id: "../cp-1" }, peer: null }),
 		JSON.stringify({ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: [DC] }, peer: null }),
 		JSON.stringify({ type: "done", by: "viewer", id: B, at: T1, peer: null }), // unknown thread
 		JSON.stringify({ type: "done", by: "bridge", id: A, at: T1, peer: null }), // done is the viewer's
@@ -171,4 +171,20 @@ test("bindThread never throws: a bad tag or ref writes nothing; an unreadable jo
 	readOnly.append({ type: "open", by: "viewer", id: A, at: T0, tag: "ok", peer: null });
 	chmodSync(readOnly.file, 0o400);
 	if (process.getuid?.() !== 0) assert.deepEqual(bindThread(readOnly.stateDir, { tag: "ok", ref, by: "bridge", peer: null, at: T1 }), { ok: false, error: `${readOnly.file}: EACCES` });
+});
+
+test("job refs fold like other refs: valid job contract ids, newest bind wins, repeats are idempotent", (t) => {
+	const b = bench(t);
+	const bind = (tag: string, id: string) => bindThread(b.stateDir, { tag, ref: { kind: "job", id }, by: "bridge", peer: null, at: T0 });
+	for (const id of ["cp-one", "other_TWO-2", "9", "x".repeat(128)]) assert.ok(bind("one", id).ok);
+	assert.equal(b.lines().length, 5);
+	assert.ok(bind("one", "cp-one").ok);
+	assert.equal(b.lines().length, 5);
+	const moved = bind("two", "cp-one");
+	assert.ok(moved.ok);
+	const read = readThreads(b.stateDir);
+	assert.equal(read.skipped, 0);
+	assert.equal(read.refs.get("cp-one"), moved.thread);
+	for (const id of ["", "../cp-one", "cp/one", "cp.one", "x".repeat(129)]) assert.equal(bind("bad", id).ok, false);
+	assert.equal(b.lines().length, 7, "invalid refs open no thread");
 });
