@@ -55,6 +55,7 @@ export interface RaiseEscalationInput {
 	mandate_id?: string;
 	mandate_clause?: string;
 	evidence_paths?: string[];
+	deferred_refs?: string[];
 	dropped_dependency?: Escalation["dropped_dependency"];
 	checkpoint_job_id?: string;
 	checkpoint_kind?: Escalation["checkpoint_kind"];
@@ -128,11 +129,15 @@ export class EscalationStore {
 	 * anchors on `jobId`, this appends `line` to its question (once) and returns it; a caller that
 	 * gets `undefined` back raises fresh instead.
 	 */
-	async appendToOpenQuestion(jobId: string, kind: EscalationKind, line: string): Promise<Escalation | undefined> {
+	async appendToOpenQuestion(jobId: string, kind: EscalationKind, line: string, deferredRef?: string): Promise<Escalation | undefined> {
 		let result: Escalation | undefined;
 		await this.#mutate((items) => {
 			const existing = items.find((item) => item.status === "open" && item.kind === kind && item.job_ids[0] === jobId);
 			if (!existing) return items;
+			// A deferred ref must be visible in the question the operator answers; overflow gets its own record.
+			if (deferredRef !== undefined && !existing.question.includes(line) &&
+				existing.question.length + line.length + 2 > ESCALATION_QUESTION_MAX_CHARS) return items;
+			if (deferredRef !== undefined) existing.deferred_refs = [...new Set([...(existing.deferred_refs ?? []), deferredRef])];
 			if (!existing.question.includes(line)) {
 				existing.question = `${existing.question}; ${line}`.slice(0, ESCALATION_QUESTION_MAX_CHARS);
 			}
@@ -157,6 +162,7 @@ export class EscalationStore {
 				existing.options = input.options;
 				existing.recommended = input.recommended;
 				existing.evidence_paths = input.evidence_paths ?? existing.evidence_paths;
+				if (input.deferred_refs) existing.deferred_refs = input.deferred_refs;
 				if (input.mandate_clause?.trim()) existing.mandate_clause = input.mandate_clause.trim();
 				if (input.original_text) existing.original_text = input.original_text;
 				result = existing;
@@ -174,6 +180,7 @@ export class EscalationStore {
 				mandate_id: input.mandate_id?.trim() || ESCALATION_NO_MANDATE,
 				mandate_clause: input.mandate_clause?.trim() || ESCALATION_NO_MANDATE,
 				evidence_paths: input.evidence_paths ?? [],
+				...(input.deferred_refs ? { deferred_refs: input.deferred_refs } : {}),
 				created_at: at,
 				status: "open",
 				...(input.dropped_dependency ? { dropped_dependency: input.dropped_dependency } : {}),
@@ -517,7 +524,7 @@ export const CONFLICTING_REF_OPTIONS: EscalationOption[] = [
 	{
 		id: "override",
 		label: "override",
-		consequence: "operator re-issues cp_job create with a corrected ref (or none)",
+		consequence: "retry cp_job create; an answered override admits only the deferred br refs recorded by this check, or use a corrected ref (or none)",
 		cost: "risk of dispatching against the wrong issue",
 	},
 ];
@@ -530,18 +537,20 @@ export const CONFLICTING_REF_OPTIONS: EscalationOption[] = [
  */
 export async function raiseConflictingRef(
 	store: EscalationStore,
-	input: { anchorJobId: string; ref: string; found: string },
+	input: { anchorJobId: string; ref: string; found: string; deferredRef?: string },
 ): Promise<Escalation> {
 	const line = `${input.ref}: ${input.found}`;
-	const extended = await store.appendToOpenQuestion(input.anchorJobId, "conflicting_acceptance", line);
+	const extended = await store.appendToOpenQuestion(input.anchorJobId, "conflicting_acceptance", line, input.deferredRef);
 	if (extended) return extended;
+	const question = `external_ref check failed — ${line}`;
 	return store.raise({
 		job_ids: [input.anchorJobId],
 		kind: "conflicting_acceptance",
-		question: `external_ref check failed — ${line}`.slice(0, ESCALATION_QUESTION_MAX_CHARS),
+		question: question.slice(0, ESCALATION_QUESTION_MAX_CHARS),
 		options: CONFLICTING_REF_OPTIONS,
 		recommended: "relay",
 		evidence_paths: [],
+		...(input.deferredRef !== undefined && question.length <= ESCALATION_QUESTION_MAX_CHARS ? { deferred_refs: [input.deferredRef] } : {}),
 	});
 }
 

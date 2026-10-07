@@ -18,6 +18,10 @@ A failed `replace`/`insert` batch still returns one tool result per call (the to
 
 `[E_STALE_ANCHOR]` "...is not owned in this session" now says the anchor was never served and is likely mistyped: copy it from a fresh read. A checksum mismatch still says the file changed since read. Migration: none.
 
+### Deferred-bead admission overrides (picp-t4n)
+
+`cp_job create` now accepts a still-deferred bead when an answered `override` belongs to that project's reference-check escalation and names the exact verified reference. Job notes record the escalation id and the deferred state. Every other gate still runs; the bead stays unchanged. New escalations store optional `deferred_refs`; legacy single-reference questions match exactly. References that would be truncated out of an aggregated question get separate escalations; an incomplete single refusal grants no exception. Migration: none; older readers reject the new optional field, so remove `deferred_refs` before a downgrade.
+
 ### Local teardown with nothing to push (picp-9g8)
 
 A `delivery:local` ship job with a clean tree and no commits ahead of the base tears down without its branch existing on origin (`nothing_to_push`). A local job that committed still has to be pushed; `delivery:pr` is unchanged. Migration: none.
