@@ -7,6 +7,7 @@ import { build } from "esbuild";
 import { parseHTML } from "linkedom";
 import type { AwaitingDetail, ControlStatusResponse, SessionEntry, ThreadsResponse, ThreadView } from "../src/viewer/api-types.ts";
 import { sessionsView } from "../src/viewer/sessions-view.ts";
+import { assignThreads } from "../src/viewer/thread-turns.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { type ControlBody, type ControlView, deliveryLine } from "../viewer-app/control.ts";
 import { normalizeTag, readThreads, sendThreadDone, threadFilter, type ThreadsView, visibleEntries } from "../viewer-app/threads.ts";
@@ -188,4 +189,23 @@ test("a composer send whose thread was not recorded shows the reason as an alert
 	assert.equal(p.classList.contains("operator-composer-failed"), true);
 	assert.match(p.textContent ?? "", /thread not recorded: EACCES/);
 	await act(() => unmount(root));
+});
+
+test("bound job notices and main replies obey #155's span filter; empty threads stay empty and All is unchanged", t => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const notice = (id: string, job: string) => entry(id, { kind: "system", who: "cp-bridge", text: `notice ${id}`, bridge: { kind: "cp-ci", job, id: null, receipt: null } });
+	const entries = [notice("before", "cp-unbound"), notice("owned", "cp-one"), entry("reply", { text: "long reply " + "word ".repeat(500) }), entry("compact", { kind: "system", who: "compaction", text: "Context compacted" }), notice("owned-again", "cp-one"), entry("tail"), notice("after", "cp-unbound")];
+	assignThreads(entries, new Map([["cp-one", B]]));
+	assert.equal(visibleEntries(entries, null), entries, "All retains the same entries and order");
+	assert.deepEqual(visibleEntries(entries, B).map(e => e.id), ["owned", "reply", "compact", "owned-again", "tail"]);
+	assert.deepEqual(visibleEntries(entries, O), [], "no own entries");
+	assert.deepEqual(visibleEntries(entries, "none"), []);
+	const full = { ...sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!, entries };
+	const owned = screen(full, undefined, threads({ selected: "billing-bug" }));
+	assert.match(owned, /notice owned/);
+	assert.ok(owned.includes("long reply " + "word ".repeat(500)));
+	assert.match(owned, /Context compacted/);
+	assert.doesNotMatch(owned, /notice before|notice after/);
+	assert.doesNotMatch(screen(full, undefined, threads({ selected: "ops" })), /notice owned|long reply|Context compacted/);
+	assert.match(screen(full, undefined, threads({ selected: "brand-new" })), /No messages in brand-new yet/);
 });
