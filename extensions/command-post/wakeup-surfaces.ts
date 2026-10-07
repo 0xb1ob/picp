@@ -361,18 +361,19 @@ export function createWakeupSurfaces(
 		}
 	};
 
+	const landedNotified = new Set<string>();
 	const surfaceDurableWakeups = (): void => {
-		// A reentrant drain from inside `reconcile()`'s own journaling must wait for
-		// the next tick (see `reconcileInProgress` above) instead of racing a caller's
-		// first prompt.
+		// Reentrant drains during reconciliation must not race the caller's first prompt.
 		if (s.reconcileInProgress) return;
 		try {
 			confirmQuietArrivals();
-			// false/string from sendWakeup is a stale suppression: terminal. A throw
-			// (transport) leaves the entry pending; the next sweep retries only that.
+			// Stale suppression is terminal; transport failure leaves the entry pending.
 			commandPost().sweepDurableWakeups((entry) => {
 				const projects = durableWakeupProjects(entry, projectOf(), homeMandateProjects(currentRuntime().home));
-				if (isLandedContinuation(entry.id)) operatorNotify(s.live, entry.content, "info");
+				if (isLandedContinuation(entry.id) && !landedNotified.has(entry.id)) {
+					operatorNotify(s.live, entry.content, "info");
+					landedNotified.add(entry.id);
+				}
 				const sent = sendWakeup(
 					{
 						kind: entry.kind,
@@ -461,8 +462,7 @@ export function createWakeupSurfaces(
 		}
 	};
 
-	// Quiet appends bypass pi's extension message hooks. Observe the persisted branch
-	// after the drain reserves the send, or at settlement if pi deferred the append.
+	// Quiet appends bypass message hooks; observe persistence after drain or deferred append.
 	const confirmQuietArrivals = (): void => {
 		if (quietPending.size === 0) return;
 		for (const entry of s.live?.sessionManager?.getBranch() ?? []) {

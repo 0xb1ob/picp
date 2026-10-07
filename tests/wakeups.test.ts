@@ -1885,7 +1885,7 @@ test("answered checks next once, delivers and confirms quietly without a nudge",
 	surface.confirmAnsweredArrival(sent.at(-1)!.message);
 });
 
-test("a durable landed notice is delivered once with no parent turn or nudge", async (t) => {
+test("a durable landed notice retries failed sends without repeating the UI notice or waking the parent", async (t) => {
 	const b = benchOf(t);
 	const lock = acquireParentLock({ home: b.home.path });
 	assert.ok(lock.ok);
@@ -1897,12 +1897,29 @@ test("a durable landed notice is delivered once with no parent turn or nudge", a
 	const state = createSessionState();
 	const branch: Array<Record<string, unknown>> = [];
 	state.live = { hasUI: true, ui: { notify: (text: string) => notices.push(text) }, sessionManager: { getBranch: () => branch } } as unknown as ExtensionContext;
-	const pi = { sendMessage: (message: WakeupCarrier, options: { triggerTurn?: boolean }) => sent.push({ message, options }) } as unknown as ExtensionAPI;
+	let sendAttempts = 0;
+	let failSend = true;
+	const pi = { sendMessage: (message: WakeupCarrier, options: { triggerTurn?: boolean }) => {
+		sendAttempts++;
+		if (failSend) throw new Error("transport unavailable");
+		sent.push({ message, options });
+	} } as unknown as ExtensionAPI;
 	const surface = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
 	const entry = { id: "continuation:done:cp-land:1", kind: "recovery" as const, job_id: "cp-land", content: "HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7" };
 	post.durableWakeups.enqueue(entry);
 	surface.wakeGate.agentStart();
 	surface.surfaceDurableWakeups();
+	assert.equal(sendAttempts, 1);
+	assert.equal(sent.length, 0);
+	assert.equal(notices.length, 1, "the operator already saw the landing before the failed send");
+	assert.equal(post.durableWakeups.pending().length, 1, "failed transport leaves the entry pending");
+	assert.equal(post.durableWakeups.read().sends?.length ?? 0, 0, "failed transport releases its send reservation");
+	surface.surfaceDurableWakeups();
+	assert.equal(sendAttempts, 2, "the pending send retries immediately");
+	assert.equal(notices.length, 1, "repeated send failure must not repeat the UI notice");
+	failSend = false;
+	surface.surfaceDurableWakeups();
+	assert.equal(sendAttempts, 3);
 	assert.equal(sent.length, 1);
 	assert.equal(sent[0]!.options.triggerTurn, false);
 	assert.equal(notices.length, 1);
@@ -1913,6 +1930,15 @@ test("a durable landed notice is delivered once with no parent turn or nudge", a
 	surface.surfaceDurableWakeups();
 	assert.equal(sent.length, 1, "no resend or nudge");
 	assert.equal(notices.length, 1, "one landed notice for the operator");
+	post.durableWakeups.enqueue({ ...entry, id: "continuation:done:cp-land:2" });
+	surface.surfaceDurableWakeups();
+	assert.equal(notices.length, 2, "a distinct durable id still notifies even with identical content");
+	assert.equal(sent.length, 2);
+	branch.push({ ...sent[1]!.message, type: "custom_message" });
+	surface.surfaceDurableWakeups();
+	assert.equal(post.durableWakeups.pending().length, 0);
+	assert.equal(notices.length, 2);
+	assert.equal(sent.length, 2);
 });
 
 // k52: the origin/main half of the CI-watch tick, through the real `surfaceCi` wiring.
