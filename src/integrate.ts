@@ -31,7 +31,9 @@
  * answer keeps it. See docs/contracts.md, Integration.
  *
  * Shape: `advance` performs at most one mutating step per call and recomputes which step is due
- * from git, `gh` and the review store, never from the stored step. Before merge (both
+ * from git, `gh` and the review store, never from the stored step. Open PRs also re-read the
+ * fleet phase: waiting/launching or an in-flight repair promotion returns next: "resolve"
+ * until the implementer reports (picp-03o). Before merge (both
  * `repo_derived` and `human_checkpoint`) a passing `cp_review` on this head or a recorded
  * patch-equivalent is required; otherwise `next: "review"` and nothing mutates.
  */
@@ -365,8 +367,8 @@ export class Integrator {
 			});
 		}
 
-		const reportBlocked = this.#reportBlocked({ jobId, branch, facts, prUrl, ...(head ? { head } : {}) });
-		if (reportBlocked) return reportBlocked;
+		const deliveryBlocked = this.#deliveryBlocked({ jobId, branch, facts, prUrl, ...(head ? { head } : {}) });
+		if (deliveryBlocked) return deliveryBlocked;
 
 		// --- open: hazards, freshness, conflict, CI, authorization, merge ------
 		const hazard = await this.#worktreeHazard(record.worktree);
@@ -707,7 +709,7 @@ export class Integrator {
 		const strategy: MergeStrategy = request.strategy ?? "squash";
 		const heldBeforeMerge = this.#readHold(jobId);
 		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
-		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
+		const blockedBeforeMerge = this.#deliveryBlocked({ jobId, branch, facts, prUrl, head });
 		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
 			"pr",
@@ -907,7 +909,7 @@ export class Integrator {
 		const strategy: MergeStrategy = request.strategy ?? "squash";
 		const heldBeforeMerge = this.#readHold(jobId);
 		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
-		const blockedBeforeMerge = this.#reportBlocked({ jobId, branch, facts, prUrl, head });
+		const blockedBeforeMerge = this.#deliveryBlocked({ jobId, branch, facts, prUrl, head });
 		if (blockedBeforeMerge) return blockedBeforeMerge;
 		const merged = await this.#run(cwd, "gh", [
 			"pr",
@@ -1815,12 +1817,20 @@ export class Integrator {
 		}
 	}
 
-	/** N3: a live `blocked` (or unreadable) report is never merged; absent and done pass. */
-	#reportBlocked(input: { jobId: string; branch: string; facts: string[]; prUrl: string; head?: string }): IntegrateResult | undefined {
+	/** picp-03o/N3: active work and a live blocked (or unreadable) report are never merged. Re-read before each merge. */
+	#deliveryBlocked(input: { jobId: string; branch: string; facts: string[]; prUrl: string; head?: string }): IntegrateResult | undefined {
 		const { jobId, branch, prUrl, head } = input;
+		const record = this.#options.fleet.get(jobId);
+		const phase = record?.phase;
+		const promoting = this.promoting(jobId);
+		if (phase === "waiting" || phase === "launching" || promoting) {
+			const fact = `worker phase ${phase}${promoting ? "; promotion in flight" : ""}`;
+			return this.#write({ jobId, branch, step: "start", next: "resolve", facts: [...input.facts, fact], prUrl, ...(head ? { headSha: head } : {}),
+				reason: `${jobId}: ${fact}. The implementer is already working; wait for its report. Nothing was merged and no further promotion was sent.` });
+		}
 		const report = readLiveReport(this.#options.home, jobId);
 		if (report.state === "absent" || report.state === "done") return undefined;
-		const generation = (this.#options.fleet.get(jobId)?.supersessions ?? 0) + 1;
+		const generation = (record?.supersessions ?? 0) + 1;
 		const blockers = report.state === "blocked" ? report.blockers : [];
 		const facts = [...input.facts, `envelope generation ${generation}: ${report.state === "blocked" ? "blocked" : `unreadable: ${report.detail}`}`];
 		for (const blocker of blockers) facts.push(`blocker: ${blocker}`);

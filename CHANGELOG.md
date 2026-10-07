@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Integration waits for active workers (picp-03o)
+
+`cp_integrate` returns `next: resolve` while an open PR's worker is `waiting` or `launching`, or its integration repair promotion is still in flight. It checks again immediately before both merge commands, so a promotion during CI or permission verification cannot merge the old delivery. The next accepted report resumes with fresh gates; waiting spends no further promotion attempt. Migration: none.
+
 ### Operator relays and compaction (picp-75g, N5)
 
 - **Relays (picp-75g):** an idle-settle reclaim re-emits an unacked relay at most once per id per consumer and session file, so an id is handed off at most twice before its ack; a new process or session file still re-emits. No relay pass (recheck, journal, hand-off) runs while the operator's own compaction runs; one pass runs when it ends, so a relay that reached context during compaction is never re-injected after it.
