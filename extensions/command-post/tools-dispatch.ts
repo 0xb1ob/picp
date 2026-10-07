@@ -84,6 +84,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 		promptSnippet: "Dispatch a br job to a worker (cp_dispatch)",
 		promptGuidelines: [
 			"Use cp_dispatch to start work on a br job; never do the job yourself.",
+			"A ship job cut from a synthesis gets a short fix list as task_file, not the previous report inlined as task. Do not re-open a merged job and do not raise the compact threshold so a long reread fits.",
 			"cp_dispatch returning state:promote means send the existing worker a new brief instead of dispatching.",
 			"cp_dispatch with dry_run:true answers 'which model and effort would this job get, and why' and takes nothing. It is optional — never a required step before a dispatch — and it reserves nothing: the dispatch recomputes from the live config. Reach for it when a job is uncertain or expensive, not as a habit.",
 			"Leave scope or risk absent when you do not know it: the axis is then assessed from the task's own words and recorded as inferred or defaulted. Never invent S/low to fill the schema, and never dispatch an extra worker just to classify a task.",
@@ -97,7 +98,8 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				Type.String({
 					description:
 						"A file whose contents become the task (e.g. a research artifact exported with cp_artifact get). " +
-						"Read in code, so its body never enters this session. Use instead of task, never with it.",
+						"Read in code, so its body never enters this session. Use instead of task, never with it. " +
+						"A ship cut from a synthesis or board report is a short fix list you write (that item's fix, files, constraints, test plan) — never the previous synthesis or report.md, and never a reason to raise the compact threshold.",
 				}),
 			),
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),

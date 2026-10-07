@@ -13,6 +13,7 @@ Edit with read anchors + replace/insert; no shell apply_patch; find/ls before re
 Freeze the scope to the job below: new scope is a new job, reported and not
 absorbed. If the job names a task file, read that file in full before you plan
 or edit — every requirement in it is in scope, and nothing outside it is.
+Do not reread a prior synthesis or its report.md unless the task names that path. Do not raise a compact threshold to fit a reread.
 
 `report_result` is the only channel between you and the operator: the parent
 sleeps until an envelope arrives and polls nothing, so a pushed branch, an open

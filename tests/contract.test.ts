@@ -50,6 +50,8 @@ test("every slash command the contract names is registered", () => {
 test("AGENTS.md stays at or under the 250-line diet cap", () => {
 	const lines = AGENTS.split("\n").length;
 	assert.ok(lines <= 250, `AGENTS.md is ${lines} lines, over the 250-line cap`);
+	assert.match(AGENTS, /short fix list/);
+	assert.match(AGENTS, /until the branch moves/);
 });
 
 test("every cp_ tool the contract names is registered", () => {

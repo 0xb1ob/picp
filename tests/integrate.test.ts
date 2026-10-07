@@ -1823,6 +1823,25 @@ test("a conflict is handed back once, with the resync the server-side rebase req
 	const second = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
 	assert.equal(second.next, "surface");
 	assert.equal(b.sent.length, 1, "one promote, then a human");
+	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 1);
+
+	// picp-0lj: the same head does not hand the conflict off again.
+	const third = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	assert.equal(third.next, "wait");
+	assert.match(third.reason, /until the branch moves/);
+	assert.equal(b.sent.length, 1);
+	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 1);
+
+	// A moved branch is a new handoff, still once.
+	const moved = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	assert.equal(moved.next, "resolve");
+	assert.equal(b.sent.length, 2);
+	const movedAgain = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	assert.equal(movedAgain.next, "surface");
+	const movedQuiet = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	assert.equal(movedQuiet.next, "wait");
+	assert.equal(b.sent.length, 2);
+	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 2);
 });
 
 test("no live implementer surfaces; nothing is dispatched in its place", async (t) => {
@@ -1839,6 +1858,10 @@ test("no live implementer surfaces; nothing is dispatched in its place", async (
 		.advance({ jobId: BR });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /no live worker/);
+	// A failed promote does not spend the handoff: the same head can still be asked once.
+	const asked = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	assert.equal(asked.next, "resolve");
+	assert.equal(b.sent.length, 1);
 });
 
 test("with no sender wired at all, a conflict surfaces rather than silently stalling", async (t) => {

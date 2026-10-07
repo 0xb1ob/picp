@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Ship briefs and one conflict handoff (picp-k2o, picp-0lj)
+
+A ship job cut from a synthesis is dispatched with a short fix list as `task_file` (the item's fix, files, constraints, and test plan), not the previous synthesis or `report.md` inlined as `task`. The ship brief tells the worker not to reread that synthesis unless the task names it as evidence, and not to raise the compact threshold so a long reread fits. A conflicting PR is handed to its implementer once per head; a later `cp_integrate` for that same head returns `next: wait` and does not journal another `integration_surfaced`. A new head is a new handoff. This is not a reason to serialize the fleet. Migration: none.
+
 ### Restart ignores unknown send fields (picp-arr)
 
 The restart gate reads `cp-parent.sends.json` without failing on an optional field its schema does not know. Required fields are still checked. Every other read of that file stays strict, so a writer cannot round-trip a field away. Migration: none.
