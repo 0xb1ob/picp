@@ -150,6 +150,9 @@ export type MergeReceipt = Replace<Static<typeof MergeReceiptSchema>, { strategy
 // Integration (cp-uug) — state/runs/<job-id>/integration.json
 // ---------------------------------------------------------------------------
 
+/** Minimum time from a complete diff-review pass to a Command Post merge. */
+export const REVIEW_MERGE_WINDOW_MS = 30_000;
+
 /**
  * The merge sequence, as steps. Each one has a precondition read from git or
  * `gh` and a postcondition verified in code, which is the whole argument for a
@@ -200,7 +203,7 @@ export const IntegrationStepSchema = StringEnum([...INTEGRATION_STEPS]);
  *  | next | meaning |
  *  |---|---|
  *  | `advance` | one step landed; call `cp_integrate` again |
- *  | `wait` | CI is unfinished for the pushed head; nothing to do yet |
+ *  | `wait` | CI, an integration hold, or the review merge deadline is pending |
  *  | `review` | no passing `cp_review` on this head; run it, never re-review an unchanged one |
  *  | `resolve` | the job's own implementer was promoted; wait for its report |
  *  | `retry` | an operational fault (gh 403, rate limit); nothing was mutated |

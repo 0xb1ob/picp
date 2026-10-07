@@ -5,6 +5,7 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema } from "./core.ts";
 import { type CheckpointKind, CheckpointKindSchema, DelegationProvenanceFields } from "./escalations.ts";
 import type { Replace } from "./internal.ts";
+import { ReviewerModelSchema } from "./routing.ts";
 
 // ---------------------------------------------------------------------------
 // Mandate — operator-issued bounded authority (autonomy-programme-cur.2.1)
@@ -177,6 +178,7 @@ export const MandateSchema = Type.Object(
 		expiry: IsoTimestampSchema,
 		projects: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { minItems: 1, maxItems: 32 }),
 		objective: Type.String({ minLength: 1, maxLength: 2000 }),
+		reviewer_model: Type.Optional(ReviewerModelSchema),
 		job_ids: Type.Optional(Type.Array(JobIdSchema, { maxItems: 64 })),
 		/** A schedule-only grant (schedlater S3): covers only the jobs of the one schedule naming it; a grant without it covers no scheduled job. */
 		schedule_grant: Type.Optional(Type.Literal(true)),

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { MandateSchema, ProjectSchema, ReviewerModelSchema } from "../src/contracts.ts";
 import {
 	ANSWER_CARD_COLLAPSED_LINES,
 	ANSWER_ENTRY_TYPE,
@@ -94,6 +95,19 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // ---------------------------------------------------------------------------
 // primitives
 // ---------------------------------------------------------------------------
+
+test("reviewer model is additive, bounded and exact; legacy records still validate", () => {
+	const project = { name: "demo", clone_url: "https://github.com/o/demo.git", delivery: "pr", registered_at: "2026-10-07T10:00:00Z" };
+	const mandate = { schema_version: 1, id: "md-aabbcc", issued_by: { channel: "operator_chat" }, issued_at: "2026-10-07T10:00:00Z", expiry: "2026-10-08T10:00:00Z", projects: ["demo"], objective: "review", allowed_actions: ["review"], spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 3, ask_on: [], status: "active", decisions: [], escalations: [] };
+	for (const [schema, record] of [[ProjectSchema, project], [MandateSchema, mandate]] as const) {
+		assert.equal(validate(schema, record).ok, true);
+		assert.equal(validate(schema, { ...record, reviewer_model: "provider/model/variant" }).ok, true, "first slash separates provider from model");
+		for (const reviewer_model of [null, "", "provider", "/model", "provider/", "provider/has space", `p/${"x".repeat(128)}`]) assert.equal(validate(schema, { ...record, reviewer_model }).ok, false);
+		const incomplete = { ...record, reviewer_model: "provider/model", ...("name" in record ? { name: undefined } : { objective: undefined }) };
+		assert.equal(validate(schema, incomplete).ok, false, "the optional field never relaxes mandatory fields");
+	}
+	assert.equal(validate(ReviewerModelSchema, "provider/model").ok, true);
+});
 
 test("job ids are path-safe or rejected", () => {
 	for (const ok of ["cp-t02-contracts-vuh", "abc", "A1_b-2"]) {

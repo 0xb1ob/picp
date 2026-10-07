@@ -40,6 +40,9 @@ import {
 } from "../src/ci-watch.ts";
 import { detectCiWait } from "../src/ci-wait.ts";
 import { HeldContinuation } from "../src/held-continuation.ts";
+import type { HeldContinuationDeps } from "../src/held-continuation.ts";
+import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
+import { readReviewMergeWindow } from "../src/review-merge-window.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 import {
 	CI_WATCH_IDLE_MULTIPLIER,
@@ -820,7 +823,7 @@ function heldRecord(jobId: string, overrides: Partial<FleetRecord> = {}): FleetR
 	} as unknown as FleetRecord;
 }
 
-function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } = {}): ContinuationBench {
+function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } & Partial<Pick<HeldContinuationDeps, "reviewWindow" | "now" | "schedule" | "review">> = {}): ContinuationBench {
 	const records = options.records ?? [heldRecord("cp-4wz")];
 	const bench: Omit<ContinuationBench, "continuation"> = {
 		records,
@@ -836,6 +839,9 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 	};
 	const continuation = new HeldContinuation({
 		enabled: () => options.enabled ?? true,
+		reviewWindow: options.reviewWindow,
+		now: options.now,
+		schedule: options.schedule,
 		fleet: {
 			get: (jobId: string) => bench.records.find((entry) => entry.job_id === jobId),
 			list: () => bench.records,
@@ -846,6 +852,12 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 			bench.advances.push(jobId);
 			await new Promise((resolve) => setImmediate(resolve));
 			bench.during.step?.(jobId);
+			const window = options.reviewWindow?.(jobId, HEAD);
+			if (window) {
+				bench.peak.now -= 1;
+				const record = { schema_version: SCHEMA_VERSION, job_id: jobId, branch: jobId, step: "merge" as const, next: "wait" as const, facts: [], reason: "review window", head_sha: HEAD, resolve_attempts: 0, started_at: isoTimestamp(), updated_at: isoTimestamp() };
+				return { ...record, record, review_resume_at: window.review_resume_at };
+			}
 			const steps = bench.script.get(jobId) ?? ["wait"];
 			const next = steps.length > 1 ? (steps.shift() as IntegrationNext) : (steps[0] as IntegrationNext);
 			bench.peak.now -= 1;
@@ -853,6 +865,7 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		},
 		review: async (jobId) => {
 			bench.reviews.push(jobId);
+			if (options.review) return options.review(jobId);
 			return { next: "wait", surface: "review", attempt: 1, model: "mock/reviewer", deadline: "2026-08-31T18:15:00Z", key: `${jobId}#review-1`, head_sha: HEAD };
 		},
 		reviews: {
@@ -869,22 +882,143 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 	return { ...bench, continuation };
 }
 
-test("jje.2 green: envelope starts the review, a passing verdict merges and finishes — no parent turn", async () => {
-	const b = continuationBench();
+test("green: verdict returns promptly, a single deadline resumes merge without a parent turn", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const clock = deadlineClock("2026-10-07T10:00:00Z");
+	const b = continuationBench({ now: clock.now, schedule: clock.schedule, reviewWindow: (jobId, head) => readReviewMergeWindow(home.path, jobId, head, clock.now()) });
+	t.after(() => b.continuation.stop());
 	b.script.set("cp-4wz", ["review"]);
-	const envelope = await b.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 });
-	assert.equal(envelope.action, "review_started");
-	assert.deepEqual(b.reviews, ["cp-4wz"], "one cp_review, started by the parent itself");
-	assert.deepEqual(b.handedBack, ["cp-4wz#review-1"], "handed back at once, so the verdict is not held behind a caller");
-	assert.equal(b.notices.length, 0, "a started review is not a stop: its cp-verdict is the next wake-up");
-
+	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 })).action, "review_started");
+	assert.deepEqual(b.reviews, ["cp-4wz"]);
+	assert.deepEqual(b.handedBack, ["cp-4wz#review-1"]);
+	writeWindowPass(home.path, "cp-4wz", HEAD, clock.now().toISOString());
 	b.script.set("cp-4wz", ["advance", "done"]);
-	await b.continuation.onVerdict({ jobId: "cp-4wz", surface: "review", attempt: 1, headSha: HEAD, content: "", details: { next: "proceed" } });
-	assert.deepEqual(b.advances, ["cp-4wz", "cp-4wz", "cp-4wz"], "merge, then finish, in one continuation");
+	const verdict = { jobId: "cp-4wz", surface: "review" as const, attempt: 1, headSha: HEAD, content: "", details: { next: "proceed" } };
+	await b.continuation.onVerdict(verdict);
+	assert.deepEqual(b.advances, ["cp-4wz"], "no GitHub step during verdict handback");
+	assert.match(b.notices[0]?.content ?? "", /HELD PR WAITING.*\n.*10:00:30/);
+	const due = [...clock.tasks][0]?.due;
+	await b.continuation.onVerdict(verdict);
+	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: NEW_HEAD, generation: 1 })).action, "stale");
+	assert.equal(clock.tasks.size, 1, "a stale head event cannot cancel the current deadline");
+	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: HEAD, generation: 0 })).action, "stale");
+	assert.equal(clock.tasks.size, 1, "an old generation cannot cancel the current deadline");
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.equal(clock.tasks.size, 1);
+	assert.equal([...clock.tasks][0]?.due, due, "duplicate pass/CI keeps the original deadline");
 	assert.equal(b.notices.length, 1);
-	assert.match(b.notices[0]?.content ?? "", /HELD PR LANDED — cp-4wz/);
-	assert.match(b.notices[0]?.content ?? "", /cp_next/);
-	assert.equal(b.notices[0]?.keys, undefined, "a landing notice is about the job being done, so it is never stale for it");
+	let laneFree = false;
+	await b.continuation.serialize("cp-4wz", async () => { laneFree = true; });
+	assert.ok(laneFree, "the project lane is released while waiting");
+	clock.tick(due! - 1);
+	assert.equal(b.advances.length, 2, "the earlier CI observation is the only extra step");
+	clock.tick(due!);
+	await b.continuation.serialize("cp-4wz", async () => {});
+	assert.equal(b.advances.length, 4, "one merge and finish sequence at the deadline");
+	assert.equal(clock.tasks.size, 0);
+	assert.match(b.notices[1]?.content ?? "", /HELD PR LANDED/);
+});
+
+
+for (const guard of ["head", "missing_head", "generation", "phase", "closed", "drain", "disabled", "stop"]) {
+	test(`deadline resumes through the ${guard} guard without mutation`, async (t) => {
+		const home = createScratchHome(); t.after(() => home.cleanup());
+		const clock = deadlineClock("2026-10-07T10:00:00Z");
+		writeWindowPass(home.path, "cp-4wz", HEAD, clock.now().toISOString());
+		let draining = false;
+		const options = { now: clock.now, schedule: clock.schedule, reviewWindow: (jobId: string, head: string) => readReviewMergeWindow(home.path, jobId, head, clock.now()), enabled: true, draining: () => draining };
+		const b = continuationBench(options); t.after(() => b.continuation.stop());
+		await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: HEAD });
+		assert.equal(clock.tasks.size, 1);
+		if (guard === "head") b.heads.set("cp-4wz", NEW_HEAD);
+		if (guard === "missing_head") b.heads.set("cp-4wz", "");
+		if (guard === "generation") b.records[0]!.supersessions = 1;
+		if (guard === "phase") b.records[0]!.phase = "waiting";
+		if (guard === "closed") b.records[0]!.phase = "done";
+		if (guard === "drain") draining = true;
+		if (guard === "disabled") options.enabled = false;
+		if (guard === "stop") b.continuation.stop();
+		clock.tick(Date.parse("2026-10-07T10:00:30Z"));
+		await b.continuation.serialize("cp-4wz", async () => {});
+		assert.deepEqual(b.advances, []);
+		assert.deepEqual(b.reviews, []);
+		assert.equal(clock.tasks.size, 0);
+	});
+}
+
+test("restart arms only the remaining interval; expired pass advances and retry never re-arms", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const clock = deadlineClock("2026-10-07T10:00:00Z");
+	writeWindowPass(home.path, "cp-4wz", HEAD, clock.now().toISOString());
+	const options = { now: clock.now, schedule: clock.schedule, reviewWindow: (jobId: string, head: string) => readReviewMergeWindow(home.path, jobId, head, clock.now()) };
+	const original = continuationBench(options);
+	await original.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: HEAD });
+	original.continuation.stop();
+	assert.equal(clock.tasks.size, 0);
+	clock.tick(Date.parse("2026-10-07T10:00:25Z"));
+	const restarted = continuationBench(options); t.after(() => restarted.continuation.stop());
+	restarted.script.set("cp-4wz", ["retry"]);
+	await restarted.continuation.resume();
+	assert.equal(clock.tasks.size, 1);
+	assert.equal([...clock.tasks][0]?.due, Date.parse("2026-10-07T10:00:30Z"));
+	clock.tick(Date.parse("2026-10-07T10:00:30Z"));
+	await restarted.continuation.serialize("cp-4wz", async () => {});
+	assert.equal(restarted.advances.length, 2);
+	assert.match(restarted.notices.at(-1)?.content ?? "", /STOPPED.*retry/);
+	assert.equal(clock.tasks.size, 0);
+	clock.tick(clock.now().getTime() + 60_000);
+	assert.equal(restarted.advances.length, 2);
+	const expired = continuationBench(options); t.after(() => expired.continuation.stop());
+	expired.script.set("cp-4wz", ["done"]);
+	await expired.continuation.resume();
+	assert.equal(expired.advances.length, 1);
+	assert.equal(clock.tasks.size, 0);
+});
+
+test("a valid new head/generation replaces the timer; canceled deadlines never drive", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const clock = deadlineClock("2026-10-07T10:00:00Z");
+	writeWindowPass(home.path, "cp-4wz", HEAD, clock.now().toISOString());
+	const b = continuationBench({ now: clock.now, schedule: clock.schedule, reviewWindow: (jobId, head) => readReviewMergeWindow(home.path, jobId, head, clock.now()) });
+	t.after(() => b.continuation.stop());
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: HEAD });
+	clock.tick(Date.parse("2026-10-07T10:00:05Z"));
+	b.heads.set("cp-4wz", NEW_HEAD);
+	writeWindowPass(home.path, "cp-4wz", NEW_HEAD, clock.now().toISOString(), { attempt: 2 });
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: NEW_HEAD });
+	assert.equal(clock.tasks.size, 1);
+	clock.tick(Date.parse("2026-10-07T10:00:10Z"));
+	b.records[0]!.supersessions = 1;
+	writeWindowPass(home.path, "cp-4wz", NEW_HEAD, clock.now().toISOString(), { attempt: 3 });
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "verdict", head: NEW_HEAD });
+	assert.equal(clock.tasks.size, 1);
+	assert.equal([...clock.tasks][0]?.due, Date.parse("2026-10-07T10:00:40Z"));
+	clock.tick(Date.parse("2026-10-07T10:00:35Z"));
+	assert.equal(b.advances.length, 0);
+	b.script.set("cp-4wz", ["done"]);
+	clock.tick(Date.parse("2026-10-07T10:00:40Z"));
+	await b.continuation.serialize("cp-4wz", async () => {});
+	assert.equal(b.advances.length, 1);
+	assert.equal(clock.tasks.size, 0);
+});
+
+test("synchronous patch equivalence releases the lane and waits on its new durable pass", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const clock = deadlineClock("2026-10-07T10:00:00Z");
+	const b = continuationBench({ now: clock.now, schedule: clock.schedule,
+		reviewWindow: (jobId, head) => readReviewMergeWindow(home.path, jobId, head, clock.now()),
+		review: async (jobId) => ({ next: "proceed", path: "equivalence.json", verdict: writeWindowPass(home.path, jobId, HEAD, clock.now().toISOString(), { equivalent_to: { head_sha: NEW_HEAD, attempt: 1 } }) }) });
+	t.after(() => b.continuation.stop());
+	b.script.set("cp-4wz", ["review"]);
+	const result = await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.equal(result.action, "wait");
+	assert.equal(b.advances.length, 1);
+	assert.equal(clock.tasks.size, 1);
+	b.script.set("cp-4wz", ["done"]);
+	clock.tick(Date.parse("2026-10-07T10:00:30Z"));
+	await b.continuation.serialize("cp-4wz", async () => {});
+	assert.equal(b.advances.length, 2);
+	assert.equal(b.reviews.length, 1, "reading the deadline never starts another reviewer");
 });
 
 test("4B1-T6: driving(job) is true during an advance and false after, including after a throwing step", async () => {

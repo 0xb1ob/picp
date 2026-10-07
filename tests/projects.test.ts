@@ -22,6 +22,42 @@ import {
 import { Ledger } from "../src/ledger.ts";
 import { createScratchHome, createScratchLedger, createScratchRepo, git, type ScratchHome, type ScratchRepo } from "./harness/index.ts";
 
+
+test("reviewer preference persists, displays, replaces and clears; refusals do not write", async (t) => {
+	const home = withHome(t);
+	const registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git" });
+	await registry.setReviewerModel("demo", "a/first");
+	assert.equal(new ProjectRegistry({ home: home.path }).get("demo")?.reviewer_model, "a/first");
+	assert.match(formatProjects(registry.list()), /a\/first/);
+	await registry.setReviewerModel("demo", " b/second ");
+	assert.equal(registry.get("demo")?.reviewer_model, "b/second");
+	const before = readFileSync(registry.file, "utf8");
+	for (const value of ["invalid", "   ", "a/has space", `a/${"x".repeat(129)}`]) await assert.rejects(registry.setReviewerModel("demo", value));
+	await assert.rejects(registry.setReviewerModel("absent", null));
+	assert.equal(readFileSync(registry.file, "utf8"), before);
+	await registry.setReviewerModel("demo", null);
+	assert.equal(new ProjectRegistry({ home: home.path }).get("demo")?.reviewer_model, undefined);
+	assert.doesNotMatch(formatProjects(registry.list()), /reviewer model/);
+});
+
+
+test("cp_project reviewer_model dispatches set/clear and displays the saved preference", async (t) => {
+	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git" });
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never);
+	const run = (params: Record<string, unknown>) => tools.get("cp_project")!.execute("c", params, undefined, undefined, {});
+	await run({ action: "reviewer_model", name: "demo", reviewer_model: "a/review" });
+	assert.equal(registry.get("demo")?.reviewer_model, "a/review");
+	const show = await run({ action: "show", name: "demo" }) as { content: Array<{ text: string }> };
+	assert.match(show.content[0]!.text, /a\/review/);
+	await assert.rejects(run({ action: "reviewer_model", name: "demo" }), /needs reviewer_model/);
+	await run({ action: "reviewer_model", name: "demo", reviewer_model: null });
+	assert.equal(registry.get("demo")?.reviewer_model, undefined);
+});
 function withHome(t: { after(fn: () => void): void }): ScratchHome {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

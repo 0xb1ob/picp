@@ -11,6 +11,7 @@ export function formatMandate(mandate: Mandate, jobs: readonly MandateUsageJob[]
 		`  expiry: ${mandate.expiry}`,
 		`  projects: ${mandate.projects.join(", ")}`,
 		`  objective: ${mandate.objective}`,
+		...(mandate.reviewer_model ? [`  reviewer model: ${mandate.reviewer_model}`] : []),
 		...(mandate.schedule_grant ? ["  schedule grant: covers only the jobs of the one schedule naming it"] : []),
 		...(mandate.job_ids && mandate.job_ids.length > 0 ? [`  jobs: ${mandate.job_ids.join(", ")}`] : []),
 		`  allowed: ${mandate.allowed_actions.join(", ")}`,

@@ -3029,7 +3029,8 @@ sequence above by itself on four triggers:
 | startup | `session_start`, after `reconcile`: every held `delivery:pr` ship job, once |
 
 Each trigger loops `Integrator.advance` while `next: advance` and stops on
-anything else: `wait` is left to the watcher's next fact; `review` starts one
+anything else: ordinary `wait` is left to the watcher's next fact; a review-window
+`wait` schedules one deadline event; `review` starts one
 `cp_review` only when no attempt is pending (a revise still goes to the job's
 own implementer, from the review itself); `resolve`, `surface`, `retry` and
 `done` stop with one durable `HELD PR STOPPED`/`LANDED` notice (a `recovery`
@@ -3039,6 +3040,35 @@ fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.
 A blocked live report (N3) surfaces at the first step, so no `cp_review`
 starts and one `HELD PR STOPPED` notice names its blockers.
+
+**Review-to-merge window (picp-cz1).** Every Command Post merge path, manual or
+automatic, waits until a complete pass for its current head reaches
+`decided_at + REVIEW_MERGE_WINDOW_MS` (30 seconds). A new patch-equivalence pass
+owns its own deadline. Replays and restarts read the durable verdict timestamp
+without rewriting it; old passes proceed through the normal gates immediately.
+There is no duration setting or zero-window bypass. Flagged/final-fix exceptions
+without a complete pass timestamp, observed external merges, and human handoff
+retain their existing rules.
+
+A passing verdict yields promptly: its local window check runs before the
+existing deferred-row recheck and verdict transport, publishes one `HELD PR
+WAITING` notice naming the head, deadline and hold command, and releases the
+project lane and reviewer handback. A synchronous equivalence pass does the
+same. Envelope/startup/CI integration waits expose transient `review_resume_at`
+and arm the same cancellable one-shot timer. This is a deadline event, not a CI
+poll. Duplicate events retain the original due time; head/generation/window
+changes cancel and replace it.
+
+At expiry the original trigger re-enters the lane and checks enabled ownership,
+phase, envelope generation, owning head, drain, durable hold, CI, complete review
+and repository permission again. A hold written during the window prevents the
+merge and leaves no timer retry. Retry/surface/resolve outcomes stop normally.
+Startup reconciliation reconstructs only the remaining interval from disk;
+shutdown cancels timers and stops queued steps. Transport or the bounded
+deferred-row hook may delay delivery: the minimum starts at the durable pass,
+not an operator receipt acknowledgment. To pause longer, use `cp_integrate
+{action: "hold", job_id, reason}`; release removes the hold and a later ordinary
+advance still rechecks every gate.
 
 **A drain stops the cadence (unload-parent PR2).** While `state/drain.json`
 exists — or cannot be read, which fails closed — a trigger acts on nothing and
@@ -7774,6 +7804,41 @@ keeps everything cp-eff was protecting:
   candidate by construction; an unavailable one is a `RoutingError` **before the
   lease**, because the person who named it is the person to tell. Same for a
   `cp_gate`/`cp_review` `model` and a `QualityConfig.model`.
+- **Reviewer preferences (picp-cz1)** apply to both plan gates and diff reviews,
+  including automatic `ci_green` reviews and pipeline factory calls. Projects and
+  individual mandates may store optional `reviewer_model`: a trimmed exact
+  `provider/model` reference, at most 128 characters and without whitespace (the
+  first slash separates the provider). Existing records remain valid and unset
+  preferences keep rubric/profile routing. No subject worker model or objective
+  prose supplies a reviewer preference.
+
+  ```text
+  cp_project action:reviewer_model name:picp reviewer_model:openai/gpt-6.1-sol
+  cp_project action:reviewer_model name:picp reviewer_model:null
+  cp_mandate action:issue projects:[picp] objective:<objective> reviewer_model:openai/gpt-6.1-sol
+  cp_mandate action:reviewer_model mandate_id:<id> reviewer_model:openai/gpt-6.1-sol
+  cp_mandate action:reviewer_model mandate_id:<id> reviewer_model:null
+  ```
+
+  Show/list displays configured preferences. Null clears by omitting the stored
+  field; issue accepts a string or absence and refuses null. Malformed, oversized,
+  whitespace-only values and unknown ids refuse without writes. Preference edits
+  preserve all status, expiry, bounds and authority, including expired grants;
+  they do not renew or resume anything or alter a pending attempt/existing pass.
+
+  Selection is explicit call model, then newest eligible configured covering
+  mandate (active before permitted expired in-flight continuations, newest
+  `issued_at`, then descending mandate id to break ties), then current project,
+  then existing routing. Coverage/standing uses the subject's actual project,
+  kind, named job and schedule grant; unrelated, excluded, paused and revoked
+  grants supply no preference. Schedule-template inheritance is unchanged.
+  Selection grants no review permission; the existing spend boundary still binds.
+  Selected models feed the existing single-candidate override: allowlist,
+  authentication/availability, capacity and profile thinking checks still run,
+  with no provider substitution. Scope/risk remains inherited from the subject.
+  When selected, `cp:reviewer_model_selected` records surface, attempt, model,
+  source (`explicit`, `mandate` or `project`) and optional mandate id beside
+  `routing_resolved`; wholly unset settings add no selection event.
 - **No cross-source fall-through.** An exhausted rubric row refuses
   (`refusal: "exhausted"`); it does not fall to the profile default. The row is
   operator policy for that class of job, and running something else there is the

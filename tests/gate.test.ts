@@ -35,6 +35,8 @@ import {
 	type VerdictRecord,
 } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
+import { ProjectRegistry } from "../src/projects.ts";
+import { MandateStore } from "../src/mandate.ts";
 import {
 	awaitVerdict,
 	BACKSTOP_POLL_INTERVAL_MS,
@@ -643,6 +645,8 @@ interface Bench {
 	provider: MockProvider;
 	artifacts: ArtifactStore;
 	fleet: FleetStore;
+	registry: ProjectRegistry;
+	mandates: MandateStore;
 	manager: WorkerManager;
 	runs: RunRegistry;
 	gate: Gate;
@@ -681,6 +685,9 @@ async function benchOf(
 	const artifacts = new ArtifactStore({ home: home.path });
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
+	const registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git" });
+	const mandates = new MandateStore(home.path);
 	const manager = new WorkerManager({
 		home: home.path,
 		workerReporterPath: WORKER_REPORTER_EXTENSION,
@@ -698,6 +705,8 @@ async function benchOf(
 		artifacts,
 		manager,
 		fleet,
+		registry,
+		mandates,
 		runs,
 		sender,
 		routing,
@@ -722,6 +731,8 @@ async function benchOf(
 		provider,
 		artifacts,
 		fleet,
+		registry,
+		mandates,
 		manager,
 		runs,
 		gate,
@@ -806,6 +817,57 @@ function verdictCall(jobId: string, overrides: Partial<GateReview> = {}): Script
 		calls: [{ name: "report_verdict", args: { ...review({ job_id: jobId, ...overrides }) } }],
 		usage: { prompt_tokens: 900, completion_tokens: 40 },
 	};
+}
+
+test("configured gate preferences reach spawn/argv, preserve axes and effort, and reread settings", { timeout: 120_000 }, async (t) => {
+	const b = await benchOf(t);
+	const cases = ["project", "mandate", "explicit", "reread"] as const;
+	const models = cases.map((source) => b.script(`gate-pref-${source}`, [verdictCall(`cp-pref-${source}`)]));
+	b.seal();
+	const spawns = captureSpawns(b.manager);
+	for (const [index, source] of cases.entries()) {
+		const jobId = `cp-pref-${source}`, model = models[index]!;
+		b.writeArtifact(jobId);
+		await b.subjectRecord(jobId, { scope: "L", risk: "high", inferred: false });
+		await b.registry.setReviewerModel("demo", source === "reread" ? model : models[0]!);
+		if (source === "mandate" || source === "explicit") b.mandates.issue({ projects: ["demo"], job_ids: [jobId], objective: "review", reviewer_model: models[1]!, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 });
+		const result = await b.gate.gateAndWait({ jobId, ...(source === "explicit" ? { model } : {}) });
+		assert.equal(result.model, model);
+		assert.equal(result.verdict.verdict, "pass");
+		assert.equal(argOf(spawns[index]?.args ?? [], "--model"), model);
+		assert.equal(argOf(spawns[index]?.args ?? [], "--thinking"), "high", "model-only preference retains profile effort");
+		const events = readFileSync(join(b.home, paths.gateRunDir(jobId, 1), "events.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+		const selected = events.find((event) => event.type === "reviewer_model_selected");
+		assert.equal(selected?.payload.source, source === "reread" ? "project" : source);
+		assert.equal(selected?.payload.model, model);
+		const routing = events.find((event) => event.type === "routing_resolved")?.payload;
+		assert.deepEqual([routing.scope, routing.risk, routing.provenance], ["L", "high", { scope: "inherited", risk: "inherited" }]);
+		await b.registry.setReviewerModel("demo", "unavailable/reviewer");
+		const grant = b.mandates.list().find((grant) => grant.job_ids?.includes(jobId));
+		if (grant) b.mandates.setReviewerModel(grant.id, "unavailable/reviewer");
+		const reused = await b.gate.start({ jobId });
+		assert.ok(!isGateWait(reused));
+		assert.equal(reused.model, model, "a complete pass is retained when preferences change");
+		assert.equal(spawns.length, index + 1, "preference changes cannot spend another review");
+	}
+});
+
+for (const refusal of ["allowlist", "availability", "effort"] as const) {
+	test(`configured gate preference refuses ${refusal} without fallback`, async (t) => {
+		let chosen = "";
+		const b = await benchOf(t, { probe: { isAvailable: (model) => refusal !== "availability" || model !== chosen, supportedThinking: (model) => refusal === "effort" && model === chosen ? ["low"] : ["high"] } });
+		const jobId = `cp-pref-${refusal}`;
+		chosen = b.script(`gate-refuse-${refusal}`, [verdictCall(jobId)]);
+		const spare = b.script(`gate-spare-${refusal}`, [verdictCall(jobId)]);
+		b.routing.rubric.push({ id: "available-spare", role: "gate-reviewer", model: spare, fallbacks: [spare] });
+		if (refusal === "allowlist") b.routing.allow = [spare];
+		b.writeArtifact(jobId); await b.subjectRecord(jobId);
+		await b.registry.setReviewerModel("demo", chosen);
+		b.seal();
+		const spawns = captureSpawns(b.manager);
+		await assert.rejects(() => b.gate.start({ jobId }));
+		assert.equal(spawns.length, 0);
+	});
 }
 
 test("pass: a reviewer verdict becomes a recorded decision, and the artifact never leaves the store", { timeout: 120_000 }, async (t) => {
@@ -896,6 +958,8 @@ test("start returns wait at once, writes pending.json, and the verdict arrives a
 	assert.equal(b.sent.length, 0);
 
 	// A second start while one is pending is refused with the pending record.
+	await b.registry.setReviewerModel("demo", "unavailable/reviewer");
+	await assert.rejects(() => b.gate.start({ jobId }), /already has a gate review in flight/);
 	await assert.rejects(() => b.gate.start({ jobId, model }), /already has a gate review in flight/);
 
 	b.reviews.handBack(started.key);

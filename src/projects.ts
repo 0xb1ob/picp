@@ -230,6 +230,17 @@ export class ProjectRegistry {
 		return this.require(name);
 	}
 
+	/** Null resets to mandate/rubric routing by omitting the persisted preference. */
+	async setReviewerModel(name: string, model: string | null): Promise<Project> {
+		await this.mutate((projects) => {
+			const index = projects.findIndex((entry) => entry.name === name);
+			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
+			const { reviewer_model: _drop, ...rest } = projects[index] as Project;
+			projects[index] = model === null ? rest : { ...rest, reviewer_model: typeof model === "string" ? model.trim() : model };
+		});
+		return this.require(name);
+	}
+
 	/** Absolute path of the canonical clone (whether or not it exists yet). */
 	pathOf(name: string): string {
 		return join(this.home, paths.projectDir(name));
@@ -487,6 +498,7 @@ export function formatProjects(
 		lines.push(
 			`  ${project.name}${project.archived ? " [archived]" : ""}  delivery:${project.delivery}${project.merge_policy === "human_handoff" ? " merge:human_handoff" : ""}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
 			`    ${project.clone_url}${project.base_branch ? `  base=${project.base_branch}` : ""}`,
+			...(project.reviewer_model ? [`    reviewer model: ${project.reviewer_model}`] : []),
 		);
 	}
 	return lines.join("\n");

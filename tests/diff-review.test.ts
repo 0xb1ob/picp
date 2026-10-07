@@ -389,6 +389,7 @@ interface ReviewBench {
 	reviews: ReviewRuns;
 	/** The review's own mandate store: empty unless a test issues a grant. */
 	mandates: MandateStore;
+	registry: ProjectRegistry;
 	/** The very object the review routes with; rows can only name a mock model once its script exists. */
 	routing: RoutingConfig;
 	script(name: string, steps: ScriptStep[], options?: ScriptOptions): string;
@@ -404,7 +405,7 @@ interface ReviewBench {
 	liveImplementer(jobId: string): Promise<void>;
 }
 
-async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void }): Promise<ReviewBench> {
+async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void }, options: { probe?: ModelProbe } = {}): Promise<ReviewBench> {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: PROJECT });
 	const provider = await MockProvider.start();
@@ -429,7 +430,7 @@ async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void })
 		briefsDir: BRIEFS_DIR,
 		manager,
 		routing,
-		probe: MOCK_ONLY,
+		probe: options.probe ?? MOCK_ONLY,
 		fleet,
 		runs,
 		sender,
@@ -459,6 +460,7 @@ async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void })
 		sent,
 		reviews,
 		mandates,
+		registry,
 		routing,
 		script: (name, steps, options) => provider.addScript(name, steps, options),
 		seal: () => agentDir.writeModels(provider),
@@ -571,6 +573,56 @@ test("the diff-review ladder is gate.ts's, by import: no fork, no copy, no secon
 		diff_stat: { files: 1, truncated: false },
 	}).ok, false, "a DiffVerdict must not validate as a GateVerdict — the two schemas stay separate");
 });
+
+test("configured diff preferences reach spawn/argv, preserve inherited axes/effort and reread settings", { timeout: 120_000 }, async (t) => {
+	const b = await reviewBenchOf(t);
+	const cases = ["project", "mandate", "explicit", "reread"] as const;
+	const models = cases.map((source) => b.script(`review-pref-${source}`, [verdictCall(`cp-diffpref-${source}`)]));
+	b.seal();
+	const spawns = captureSpawns(b.manager);
+	for (const [index, source] of cases.entries()) {
+		const jobId = `cp-diffpref-${source}`, model = models[index]!;
+		b.pushJobBranch(jobId); await b.shipRecord(jobId, { routing: { scope: "L", risk: "high", inferred: false } });
+		await b.registry.setReviewerModel(PROJECT, source === "reread" ? model : models[0]!);
+		if (source === "mandate" || source === "explicit") b.mandates.issue({ projects: [PROJECT], job_ids: [jobId], objective: "review", reviewer_model: models[1]!, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 });
+		const result = await b.review.reviewAndWait({ jobId, ...(source === "explicit" ? { model } : {}) });
+		assert.equal(result.model, model);
+		assert.equal(result.verdict.verdict, "pass");
+		assert.equal(argOf(spawns[index]?.args ?? [], "--model"), model);
+		assert.equal(argOf(spawns[index]?.args ?? [], "--thinking"), "high");
+		const events = readFileSync(join(b.home, paths.reviewRunDir(jobId, 1), "events.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+		const selected = events.find((event) => event.type === "reviewer_model_selected");
+		assert.equal(selected?.payload.source, source === "reread" ? "project" : source);
+		assert.equal(selected?.payload.model, model);
+		const routing = events.find((event) => event.type === "routing_resolved")?.payload;
+		assert.deepEqual([routing.scope, routing.risk, routing.provenance], ["L", "high", { scope: "inherited", risk: "inherited" }]);
+		await b.registry.setReviewerModel(PROJECT, "unavailable/reviewer");
+		const grant = b.mandates.list().find((grant) => grant.job_ids?.includes(jobId));
+		if (grant) b.mandates.setReviewerModel(grant.id, "unavailable/reviewer");
+		const reused = await b.review.start({ jobId });
+		assert.ok(!isDiffReviewWait(reused));
+		assert.equal(reused.verdict.model, model, "the same-head complete pass survives a preference change");
+		assert.equal(spawns.length, index + 1);
+	}
+});
+
+for (const refusal of ["allowlist", "availability", "effort"] as const) {
+	test(`configured diff preference refuses ${refusal} without fallback`, async (t) => {
+		let chosen = "";
+		const b = await reviewBenchOf(t, { probe: { isAvailable: (model) => refusal !== "availability" || model !== chosen, supportedThinking: (model) => refusal === "effort" && model === chosen ? ["low"] : ["high"] } });
+		const jobId = `cp-diffpref-${refusal}`;
+		chosen = b.script(`review-refuse-${refusal}`, [verdictCall(jobId)]);
+		const spare = b.script(`review-spare-${refusal}`, [verdictCall(jobId)]);
+		b.routing.rubric.push({ id: "available-spare", role: "gate-reviewer", model: spare, fallbacks: [spare] });
+		if (refusal === "allowlist") b.routing.allow = [spare];
+		b.pushJobBranch(jobId); await b.shipRecord(jobId);
+		await b.registry.setReviewerModel(PROJECT, chosen);
+		b.seal();
+		const spawns = captureSpawns(b.manager);
+		await assert.rejects(() => b.review.start({ jobId }));
+		assert.equal(spawns.length, 0);
+	});
+}
 
 // ---------------------------------------------------------------------------
 // cp-reviewer-routing: the reviewer inherits the ship job's own route
@@ -1755,8 +1807,9 @@ test("a second start while one is pending is refused, and the refusal names the 
 	const started = await b.review.start({ jobId, model });
 	assert.ok(isDiffReviewWait(started), JSON.stringify(started));
 
+	await b.registry.setReviewerModel(PROJECT, "unavailable/reviewer");
 	await assert.rejects(
-		() => b.review.start({ jobId, model }),
+		() => b.review.start({ jobId }),
 		(error: Error) => {
 			assert.match(error.message, new RegExp(head));
 			assert.match(error.message, /wait for its cp-verdict wake-up instead of starting another; do not re-issue/);

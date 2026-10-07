@@ -184,6 +184,7 @@ export interface IssueMandateInput {
 	dispatch_parallelism?: number;
 	exclusions?: Mandate["exclusions"];
 	ask_on?: MandateAskOn[];
+	reviewer_model?: string;
 	at?: string;
 	/** Where each defaultable field came from (autonomy-programme-cur.2.5): `resolveMandateGrant`'s output. */
 	provenance?: MandateProvenance;
@@ -514,6 +515,7 @@ export class MandateStore {
 			projects,
 			objective: stripSendMarkers(input.objective), // never the bridge's `[cp-send <id> ...]` lines
 			...(input.job_ids && input.job_ids.length > 0 ? { job_ids: input.job_ids } : {}),
+			...(input.reviewer_model !== undefined ? { reviewer_model: typeof input.reviewer_model === "string" ? input.reviewer_model.trim() : input.reviewer_model } : {}),
 			...(input.schedule_grant ? { schedule_grant: true as const } : {}),
 			allowed_actions: allowed,
 			...(input.dispatch_parallelism ? { dispatch_parallelism: input.dispatch_parallelism } : {}),
@@ -547,6 +549,12 @@ export class MandateStore {
 		const written = this.#write(this.#underCeiling(input.risk_preapproval ? withPreapproval(mandate, input.risk_preapproval) : mandate));
 		this.supersedeEscalations(jobs);
 		return written;
+	}
+
+	/** Preference only: never refreshes status, caps or authority. Null clears by omission. */
+	setReviewerModel(id: string, model: string | null): Mandate {
+		const { reviewer_model: _drop, ...rest } = this.require(id);
+		return this.#write(model === null ? rest : { ...rest, reviewer_model: typeof model === "string" ? model.trim() : model });
 	}
 
 	pause(id: string, reason = "operator"): Mandate {

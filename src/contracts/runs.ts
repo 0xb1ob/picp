@@ -133,6 +133,8 @@ export const CP_EVENT_KINDS = [
 	"teardown_refused",
 	/** The routing decision and the inputs it was given (cp-rte). */
 	"routing_resolved",
+	/** The exact reviewer preference selected for this attempt, beside routing_resolved. */
+	"reviewer_model_selected",
 	/**
 	 * The task this job was dispatched with, frozen to
 	 * `state/runs/<id>/original-task.md` (do8.3). The payload is a path, a byte

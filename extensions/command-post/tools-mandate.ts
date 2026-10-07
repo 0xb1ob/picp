@@ -46,6 +46,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"outside it they stay pending. Authorization is delegated only through this store, never USER.md prose.",
 		promptSnippet: "Issue or inspect bounded authority (cp_mandate)",
 		promptGuidelines: [
+			"reviewer_model is a reviewer preference only: set or clear it on this grant without resuming, renewing or widening authority. Issue refuses null; existing-grant null clears. Configured models must pass normal capability checks and never fall back.",
 			"Call cp_mandate issue with only projects and objective when the operator grants bounded authority in advance — " +
 				"expiry, spend/job caps, allowed actions and ask_on all resolve from data/mandate-defaults.json (and a project override); " +
 				"never ask the human for them, never invent numbers. Pass an explicit field only when the human named one.",
@@ -60,15 +61,16 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"Revoke, expiry and a replacing grant close that grant's open escalations as superseded, no answer needed; cp_mandate supersede_stale does the same on demand for records left open before this rule.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set"], {
-				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json",
+			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set", "reviewer_model"], {
+				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json; reviewer_model sets or clears only a grant's reviewer preference",
 			}),
-			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk: the mandate id (md-…). show with an id returns that grant at any status" })),
+			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk/reviewer_model: the mandate id (md-…). show with an id returns that grant at any status" })),
 			statuses: Type.Optional(
 				Type.Array(StringEnum([...MANDATE_STATUSES]), {
 					description: "show with no mandate_id: which statuses to list. Omitted (or empty): active and paused only. Pass revoked and/or expired, or any subset, to list closed grants. Ignored when mandate_id is set",
 				}),
 			),
+			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Exact provider/model for gate and diff reviews. issue accepts string or absence; reviewer_model action accepts null to clear. Explicit call model wins, then newest eligible active mandate, expired continuation, project, existing routing." })),
 			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session. revoke: the operator's verbatim words revoking the grant, recorded as revoked_by operator; without it the revoke is recorded as the parent's, which never stops a schedule's fires" })),
 			risk_preapproval: Type.Optional(
 				Type.Object(
@@ -146,6 +148,11 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					// SAFETY: Extension tool details are JSON records consumed by the bridge.
 					return { content: [{ type: "text", text }], details: { superseded: closed } as unknown as Record<string, unknown> };
 				}
+				if (params.action === "reviewer_model") {
+					if (!params.mandate_id || params.reviewer_model === undefined) throw new MandateError("cp_mandate reviewer_model needs mandate_id and reviewer_model (provider/model or null)");
+					const mandate = post.mandates.setReviewerModel(params.mandate_id, params.reviewer_model);
+					return { content: [{ type: "text", text: `${mandate.id} reviewer model: ${mandate.reviewer_model ?? "unset"}` }], details: mandate as unknown as Record<string, unknown> };
+				}
 				const operatorTexts = () => operatorTextsFromEntries(ctx.sessionManager.getEntries());
 				if (params.action === "preapprove_risk") {
 					if (!params.mandate_id || !params.operator_quote) throw new MandateError("cp_mandate preapprove_risk needs mandate_id and operator_quote");
@@ -173,6 +180,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					// SAFETY: Extension tool details are JSON records consumed by the bridge.
 					return { content: [{ type: "text", text: `${mandate.id} ${said[action]}` }], details: mandate as unknown as Record<string, unknown> };
 				}
+				if (params.reviewer_model === null) throw new MandateError("cp_mandate issue: reviewer_model must be a provider/model string or absent; null only clears an existing grant");
 				if (!params.projects?.length) throw new MandateError("cp_mandate issue needs projects");
 				const archived = params.projects.filter((name) => post.registry.get(name)?.archived);
 				if (archived.length) throw new MandateError(`cp_mandate issue refused: archived project(s) ${archived.join(", ")} — unarchive with cp_project unarchive first`);
@@ -233,6 +241,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					dispatch_parallelism: resolved.dispatch_parallelism,
 					ask_on: resolved.ask_on,
 					provenance: resolved.provenance,
+					...(params.reviewer_model !== undefined ? { reviewer_model: params.reviewer_model } : {}),
 					...(params.channel ? { channel: params.channel } : {}),
 					...(jobIds?.length ? { job_ids: jobIds } : {}),
 					...(params.schedule_grant ? { schedule_grant: true as const } : {}),

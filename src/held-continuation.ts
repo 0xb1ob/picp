@@ -38,6 +38,7 @@ import { shaMatches } from "./merge-ask.ts";
 import type { ReviewRuns, ReviewWakeup } from "./review-runs.ts";
 import type { RunRegistry } from "./runs.ts";
 import { boundedWakeupId } from "./wakeup-outbox.ts";
+import type { ReviewMergeWindow } from "./review-merge-window.ts";
 
 /** How many handled keys a process remembers before it forgets them all (at worst, one repeat pass). */
 const CONTINUATION_KEY_MEMORY = 512;
@@ -106,6 +107,11 @@ export interface HeldContinuationDeps {
 	draining?: () => boolean;
 	/** A held PR landed (`done`): its dependents may be released (`ArmedDispatches.release`); never throws into the step. */
 	onLanded?: (jobId: string) => void;
+	/** Local verdict read only; no GitHub calls or authority retained across the deadline. */
+	reviewWindow?: (jobId: string, head: string) => ReviewMergeWindow | undefined;
+	now?: () => Date;
+	/** Returns a cancellation function for one deadline event. */
+	schedule?: (delayMs: number, callback: () => void) => () => void;
 }
 
 const NEXT_HINT: Readonly<Record<string, string>> = Object.freeze({
@@ -144,9 +150,17 @@ export class HeldContinuation {
 	readonly #seen = new Set<string>();
 	/** Jobs whose continuation is mid-drive (one at a time per lane). */
 	readonly #driving = new Set<string>();
+	readonly #timers = new Map<string, { identity: string; trigger: ContinuationTrigger; cancel: () => void }>();
+	#stopped = false;
 
 	constructor(deps: HeldContinuationDeps) {
 		this.#deps = deps;
+	}
+
+	stop(): void {
+		this.#stopped = true;
+		for (const timer of this.#timers.values()) timer.cancel();
+		this.#timers.clear();
 	}
 
 	/** True while a continuation step sequence is driving this job (HeldRelease never releases it then). */
@@ -181,6 +195,7 @@ export class HeldContinuation {
 		const trigger: ContinuationTrigger = { ...observed, ...(generation !== undefined ? { generation } : {}), ...(head ? { head } : {}) };
 		const key = continuationKey(trigger);
 		const skip = (action: ContinuationAction, reason: string): ContinuationOutcome => ({ job_id: trigger.jobId, key, action, steps: 0, reason });
+		if (this.#stopped) return skip("stopped", "the continuation was stopped");
 		if (!this.#deps.enabled()) return skip("disabled", "the continuation is off in this process");
 		// Not added to #seen: the drain ends in a restart, and startup `resume()` owes this job its pass.
 		if (this.#draining()) {
@@ -279,12 +294,32 @@ export class HeldContinuation {
 		for (let step = 1; step <= max; step += 1) {
 			// Before every step, not once: a worker, a push or a promote can land between
 			// two awaited steps, and a stale trigger must not keep reviewing or merging.
+			if (this.#stopped) return out("stopped", step - 1, "the continuation was stopped");
+			if (!this.#deps.enabled()) return out("disabled", step - 1, "the continuation is off in this process");
 			const stale = this.#stale(trigger);
 			if (stale) return out(stale.action, step - 1, stale.reason, stale.action === "wait" ? "wait" : undefined);
 			if (this.#draining()) return out("draining", step - 1, `${jobId}: a drain started mid-sequence — no further step; startup resumes it`);
+			const timer = this.#timers.get(jobId);
+			if (timer && (timer.trigger.head !== trigger.head || timer.trigger.generation !== trigger.generation)) {
+				timer.cancel();
+				this.#timers.delete(jobId);
+			}
+			if (trigger.event === "verdict") {
+				const window = trigger.head ? this.#deps.reviewWindow?.(jobId, trigger.head) : undefined;
+				if (window) return out("wait", step - 1, this.#arm(trigger, window), "wait");
+			}
 			const result = await this.#deps.advance(jobId);
+			if (this.#stopped) return out("stopped", step, "the continuation was stopped");
+			if (!this.#deps.enabled()) return out("disabled", step, "the continuation is off in this process");
+			if (this.#draining()) return out("draining", step, `${jobId}: a drain started mid-step; startup resumes it`);
 			if (result.next === "advance") continue;
-			if (result.next === "wait") return out("wait", step, result.reason, "wait");
+			if (result.next === "wait") {
+				if (result.review_resume_at && result.head_sha && trigger.head && shaMatches(result.head_sha, trigger.head)) {
+					const window = this.#deps.reviewWindow?.(jobId, trigger.head) ?? { head_sha: result.head_sha, attempt: trigger.attempt ?? 0, decided_at: "", review_resume_at: result.review_resume_at };
+					if (!this.#stopped) this.#arm(trigger, window);
+				}
+				return out("wait", step, result.reason, "wait");
+			}
 			const tag = `${result.head_sha?.slice(0, 12) ?? "-"}:${result.step}`;
 			if (result.next === "review") {
 				// The awaited step may have outlived the trigger: never spend a review on a stale one.
@@ -309,7 +344,14 @@ export class HeldContinuation {
 					this.#deps.reviews.handBack(started.key);
 					return out("review_started", step, `${jobId}: cp_review attempt ${started.attempt} started on ${started.head_sha.slice(0, 12)}`, "review");
 				}
-				if (started.next === "proceed") continue;
+				if (started.next === "proceed") {
+					const stale = this.#stale(trigger);
+					if (stale) return out(stale.action, step, stale.reason);
+					if (this.#stopped || !this.#deps.enabled() || this.#draining()) continue; // ordinary guards run before the next step
+					const window = trigger.head ? this.#deps.reviewWindow?.(jobId, trigger.head) : undefined;
+					if (window) return out("wait", step, this.#arm(trigger, window), "wait");
+					continue;
+				}
 				const reason = `${jobId}: cp_review decided ${started.verdict.verdict}/${started.verdict.cause ?? "none"} without a pass (next ${started.next})`;
 				this.#notice(jobId, `${tag}:review`, "surface", reason, result.pr_url);
 				return out("stopped", step, reason, "surface");
@@ -321,6 +363,27 @@ export class HeldContinuation {
 		const reason = `${jobId}: ${max} integration steps advanced without settling`;
 		this.#notice(jobId, "exhausted", "surface", reason);
 		return out("stopped", max, reason, "surface");
+	}
+
+	/** A single deadline event releases the lane now and re-enters all ordinary guards later. */
+	#arm(trigger: ContinuationTrigger, window: ReviewMergeWindow): string {
+		const identity = `${trigger.jobId}@${trigger.generation}|${window.head_sha}|${window.attempt}|${window.review_resume_at}`;
+		const reason = `review passed on ${window.head_sha.slice(0, 12)}; merge waits until ${window.review_resume_at}. To hold: cp_integrate action:hold job_id:${trigger.jobId} reason:<reason>.`;
+		if (this.#timers.get(trigger.jobId)?.identity === identity) return reason;
+		this.#timers.get(trigger.jobId)?.cancel();
+		const schedule = this.#deps.schedule ?? ((delay, callback) => {
+			const timer = setTimeout(callback, delay);
+			timer.unref();
+			return () => clearTimeout(timer);
+		});
+		const cancel = schedule(Math.max(0, Date.parse(window.review_resume_at) - (this.#deps.now?.() ?? new Date()).getTime()), () => {
+			if (this.#timers.get(trigger.jobId)?.identity !== identity) return;
+			this.#timers.delete(trigger.jobId);
+			void this.trigger(trigger).catch((error) => this.#notice(trigger.jobId, `timer:${identity}`, "retry", `deadline continuation failed: ${(error as Error).message.split("\n")[0]}`));
+		});
+		this.#timers.set(trigger.jobId, { identity, trigger, cancel });
+		this.#deps.notify({ id: boundedWakeupId(`continuation:window:${identity}`), job_id: trigger.jobId, keys: [trigger.jobId], content: `HELD PR WAITING — ${trigger.jobId}\n  ${reason}` });
+		return reason;
 	}
 
 	/** Fail closed: a drain flag that cannot be read is a drain (`readDrain` throws on an unreadable file). */

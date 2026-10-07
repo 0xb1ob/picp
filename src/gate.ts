@@ -80,6 +80,9 @@ import type { RunRegistry } from "./runs.ts";
 import type { Sender } from "./send.ts";
 import { taskAddendaBlock } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
+import type { MandateStore } from "./mandate.ts";
+import type { ProjectRegistry } from "./projects.ts";
+import { selectReviewerModel } from "./reviewer-model.ts";
 
 export class GateError extends Error {}
 
@@ -178,6 +181,8 @@ export interface GateOptions {
 	routing: RoutingConfig;
 	probe: ModelProbe;
 	fleet?: FleetStore;
+	registry?: ProjectRegistry;
+	mandates?: MandateStore;
 	/** The job's own run log, for the `cp:gate_decided` marker. */
 	runs?: RunRegistry;
 	/** Present: a `revise` is delivered to the live planner (promote). */
@@ -835,7 +840,8 @@ export class Gate {
 		const attempt = prior.attempt;
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(jobId);
-		const route = await this.#route(profile, jobId, record, request.model);
+		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
+		const route = await this.#route(profile, jobId, record, selection?.model);
 		const model = route.decision.model;
 
 		// The reviewer sees one file, in a directory that contains nothing else.
@@ -864,6 +870,7 @@ export class Gate {
 		// spawn that could fail (cp-reviewer-routing): inputs, provenance and the
 		// effort, not just the model.
 		recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: "gate", attempt, ...route }));
+		if (selection) recorder.cp("reviewer_model_selected", { surface: "gate", attempt, ...selection });
 		const key = `${jobId}#gate-${attempt}`;
 		const timeoutMs = this.#options.reviewTimeoutMs ?? resolveReviewTimeoutMs(home);
 		const deadline = isoTimestamp(new Date(now().getTime() + timeoutMs));
