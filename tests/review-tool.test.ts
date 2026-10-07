@@ -106,6 +106,7 @@ test(
 			"deliver_revise",
 			"job_id",
 			"model",
+			"replacement_job_id",
 		]);
 
 		// 2. The refusal. It comes from the dispatch-record precondition, so it
