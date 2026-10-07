@@ -1262,8 +1262,8 @@ result, or its relay acked in the operator relay outbox below) or an
 operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
 corrupt outbox refuses `cp_parent start`, naming the file. Downgrade: an older
-binary rejects a sends file carrying `pending_notice_at`, exactly like
-`outer_retry_attempts` below.
+binary's strict read rejects a sends file carrying `pending_notice_at`, exactly like
+`outer_retry_attempts` below. The restart gate (`readParentSendOutboxForRestart`) drops unknown keys first, so a newer optional field cannot by itself block restart. Every other read, including `cp_parent start`, still rejects the file.
 
 **Transient retry budget.** The H1 outer ladder (`OUTER_RETRY_DELAYS_MS`,
 `MAX_OUTER_RETRIES`) spends its budget on the send's own record:
@@ -5870,7 +5870,7 @@ reason, in order:
 |---|---|
 | `data/dashboard-control.json` on | 403 `dashboard control is off (…)` |
 | supported: the bridge has the `shutdown`, `parentSends` and `relaunchFile` ports and `CP_OPERATOR_RELAUNCH_FILE` is an absolute path | 409 `unsupported: this session was not started by a cp-operator that relaunches it; restart it once by hand: /quit, then cp-operator -c` |
-| idle, no queued messages, no injected dashboard request the session has not seen, no dashboard answer click on an ask still open in `asks.jsonl`, no `cp_parent send` from the last 24 h without an observed outcome (`<sessions>/cp-parent.sends.json`; unreadable refuses too) | 409 `not now: <blocker>; <blocker>` |
+| idle, no queued messages, no injected dashboard request the session has not seen, no dashboard answer click on an ask still open in `asks.jsonl`, no `cp_parent send` from the last 24 h without an observed outcome (`<sessions>/cp-parent.sends.json`; invalid JSON or a failed required field refuses; an unknown optional field does not) | 409 `not now: <blocker>; <blocker>` |
 | the session file is absolute, `.jsonl` and on disk | 409 `the session file … is not on disk; nothing to resume` |
 | the marker is written | 500 `failed: relaunch marker unwritable (…)`, outcome `failed` |
 | — | outcome `restarting`; the reply is written, then (50 ms later) pi's own `ctx.shutdown()` through the compaction idle gate |

@@ -315,6 +315,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			if (result.action.kind === "mission_end") body += `\nmemory: ${cmdPost.curationPlan().pending.length} pending candidate(s) \u2014 cp_memory curate only when above 0`;
 			if (params.full) seenNext.delete(params.project ?? "");
 			const text = dedupeNext(seenNext, params.project ?? "", body, isoTimestamp(new Date()));
+			// picp-dez: details stay the full NextResult. pi sends tool content only, so an unchanged one-line text does not replay this block.
 			return { content: [{ type: "text", text }], details: result as unknown as Record<string, unknown> };
 		},
 	});

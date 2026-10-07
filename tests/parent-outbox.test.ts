@@ -15,6 +15,7 @@ import {
 	parentSendFile,
 	ParentSendOutbox,
 	ParentSendOutboxError,
+	readParentSendOutboxForRestart,
 	receiptOf,
 	sendIdOfMessage,
 	sendIdsInText,
@@ -39,6 +40,23 @@ test("enqueue is on disk before it returns, with a well-formed id", () => {
 	const onDisk = JSON.parse(readFileSync(box.file, "utf8")) as { entries: Array<{ id: string; state: string }> };
 	assert.deepEqual(onDisk.entries.map((item) => [item.id, item.state]), [[entry.id, "queued"]]);
 	assert.throws(() => box.enqueue(""), ParentSendOutboxError);
+});
+
+test("restart read drops unknown optional fields; the strict read still rejects them", () => {
+	const box = outbox();
+	const entry = box.enqueue("ship it");
+	const raw = JSON.parse(readFileSync(box.file, "utf8")) as { entries: Array<Record<string, unknown>>; future_top?: number };
+	raw.future_top = 1;
+	raw.entries[0]!.future_optional = "later";
+	writeFileSync(box.file, JSON.stringify(raw));
+	assert.throws(() => box.read(), ParentSendOutboxError);
+	const tolerant = readParentSendOutboxForRestart(box.file);
+	assert.equal(tolerant.entries[0]?.id, entry.id);
+	assert.equal("future_optional" in tolerant.entries[0]!, false);
+	assert.equal("future_top" in tolerant, false);
+	raw.entries[0]!.state = "nope";
+	writeFileSync(box.file, JSON.stringify(raw));
+	assert.throws(() => readParentSendOutboxForRestart(box.file), ParentSendOutboxError);
 });
 
 test("delegation survives reload and batching without changing legacy send records", () => {
