@@ -18,7 +18,7 @@ export function clock(at: Date): string {
  const name = zone(at);
  return name ? `${time(at.toISOString())} ${name}` : time(at.toISOString());
 }
-/** Local time plus zone for an ISO timestamp. `seconds` adds `:SS` (the desktop updated line). */
+/** Local time plus zone for an ISO timestamp. `seconds` adds `:SS` (the desktop page header's full updated time, its title). */
 export function stamp(iso: string, seconds = false): string {
  const name = zone(new Date(iso));
  const clockTime = time(iso, seconds);

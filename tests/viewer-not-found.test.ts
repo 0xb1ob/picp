@@ -47,8 +47,8 @@ test("404 recovery has circular kind-specific icons and only observed worker alt
 	const known = [flight("cp-working","working"),flight("cp-launching","launching"),...['waiting','idle','held','done','failed','queued'].map(phase=>flight(`cp-${phase}`,phase)),flight("cp-script","working","script.ts")];
 	const doc = parseHTML(html(notFoundFor(workers("cp-missing"),404,known)!)).document;
 	assert.equal(doc.querySelector(".not-found-heading h1")?.textContent,"Sessions");
-	assert.equal(doc.querySelector(".not-found-crumb a")?.getAttribute("href"),"#sessions");
-	assert.equal(doc.querySelector(".not-found-crumb code")?.textContent,"cp-missing");
+	assert.equal(doc.querySelector(".not-found-heading .page-header-detail")?.textContent,"cp-missing");
+	assert.equal(doc.querySelector(".not-found-back")?.getAttribute("href"),"#sessions");
 	assert.ok(doc.querySelector('.not-found-illustration[aria-hidden="true"] svg path'));
 	const links = [...doc.querySelectorAll(".not-found-workers a")];
 	assert.deepEqual(links.map(e=>e.getAttribute("href")),["#sessions?view=workers&id=cp-working","#sessions?view=workers&id=cp-launching"]);

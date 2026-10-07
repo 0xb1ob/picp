@@ -12,6 +12,7 @@ import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { ShellContext } from "../components/Shell.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
@@ -255,7 +256,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
  return <div class="sessions">
-  <h1 class="session-title">Sessions</h1>
+  <PageHeader title="Sessions"/>
   <aside class="session-sidebar" aria-label="Session streams">
    <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
    {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}

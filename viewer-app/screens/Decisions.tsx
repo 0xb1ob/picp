@@ -2,6 +2,7 @@ import type { DecisionsResponse } from "../../src/viewer/api-types.ts";
 import type { AnswersControlView } from "../answers-control.ts";
 import type { ControlView } from "../control.ts";
 import { AnswersSection } from "./Answers.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import { elapsed } from "../format.ts";
 import { AwaitingScreen } from "./Awaiting.tsx";
 import { DecidedScreen } from "./Decided.tsx";
@@ -15,7 +16,7 @@ export function Decisions({data,control,answers}: {data:DecisionsResponse;contro
  const questions = data.parent_questions, unavailable = data.availability.escalations === "unavailable";
  const oldest = Math.max(0,...questions.map(q => q.age_seconds));
  return <div class="decisions">
-  <h1>Decisions</h1>
+  <PageHeader title="Decisions"/>
   <section id="awaiting" tabIndex={-1} aria-label="Awaiting you"><AwaitingScreen data={data} control={control}/></section>
   {data.answers.availability !== "missing" && <section id="answers" tabIndex={-1} aria-label="Answers to acknowledge"><AnswersSection data={data.answers} control={answers}/></section>}
   {(unavailable || questions.length > 0) && <details class={`decisions-handled${oldest >= 600 ? " decisions-handled-overdue" : ""}`}>

@@ -3,6 +3,7 @@ import type { ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types
 import { observedTime } from "../format.ts";
 import { composerHref, jobHref, navigation } from "../routes.ts";
 import { ADD_SCHEDULE_DRAFT, latestRequest, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
+import { PageHeader } from "../components/PageHeader.tsx";
 import "./jobs.css";
 import "./schedules.css";
 
@@ -70,7 +71,7 @@ export function ScheduleControls({s, control}: {s:ScheduleItem; control:Schedule
 
 export function Schedules({data, control}: {data:SchedulesResponse; control?:ScheduleControlView}) {
  return <div class="jobs-screen schedule-screen">
-  <header class="schedule-heading"><h1>Schedules</h1><p>Saved triggers and the jobs they fired.</p></header>
+  <header class="schedule-heading"><PageHeader title="Schedules"/><p>Saved triggers and the jobs they fired.</p></header>
   <div class="schedule-toolbar">
    <nav class="board-view" aria-label="Schedules and files">{navigation.filter(n => n.id === "schedules" || n.id === "files").map(n => <a key={n.id} href={n.href} aria-current={n.id === "schedules" ? "page" : undefined}>{n.label}</a>)}</nav>
    {control && <p role="status" class="job-meta">{scheduleControlLine(control.status)}</p>}

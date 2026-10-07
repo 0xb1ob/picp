@@ -2,6 +2,7 @@ import { useContext } from "preact/hooks";
 import type { FlightJob } from "../../src/viewer/api-types.ts";
 import { sessionHref } from "../routes.ts";
 import { Icon } from "./icons.tsx";
+import { PageHeader } from "./PageHeader.tsx";
 import type { Route } from "../routes.ts";
 import { ShellContext } from "./Shell.tsx";
 import "./not-found.css";
@@ -45,7 +46,7 @@ export function NotFound({kind, id, title, body, back, searchLabel, workers}: No
  const openSearch = useContext(ShellContext).openSearch;
  const Heading = kind === "worker" ? "h2" : "h1";
  return <div class={`not-found not-found-${kind}`}>
-  {kind === "worker" && <header class="not-found-heading"><nav class="not-found-crumb" aria-label="Breadcrumb"><a href="#sessions">← Sessions</a> / <code>{id}</code></nav><h1>Sessions</h1></header>}
+  {kind === "worker" && <header class="not-found-heading"><PageHeader title="Sessions" detail={id}/></header>}
   <section class="not-found-recovery" aria-labelledby="not-found-title">
    <span class="not-found-illustration" aria-hidden="true"><Icon name={kind === "worker" ? "sessions" : "search"} size={28}/></span>
    <Heading id="not-found-title">{title}</Heading>

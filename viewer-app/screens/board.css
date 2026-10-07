@@ -34,13 +34,13 @@
 .board-empty { padding: 18px 4px; font-size: 13px; color: var(--board-dim); text-align: center; }
 .shell-main-board { padding: 16px; overflow: hidden; }
 @media (min-width: 900px) {
- .shell-main-board { padding: 28px 32px 32px; }
+ .shell-main-board { padding: 0 40px 32px; }
  .board-screen { display: grid; grid-template-columns: auto minmax(0,1fr); grid-template-rows: auto auto minmax(0,1fr) auto; gap: 16px 12px; }
  .board-screen:has(> .board-lane-note) { grid-template-rows: auto auto auto minmax(0,1fr) auto; }
  .board-phone { display: none; }
  .board-desktop { display: block; }
  .board-heading { display: contents; }
- .board-heading h1 { grid-column: 1 / -1; grid-row: 1; font-size: 32px; min-height: 44px; margin-right: 248px; }
+ .board-heading > .page-header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 4px; }
  .board-heading .jobs-views { grid-column: 1; grid-row: 2; }
  .board-toolbar { grid-column: 2; grid-row: 2; }
  .board-toolbar .board-fold { white-space: nowrap; font-size: 11px; }

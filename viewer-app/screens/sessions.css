@@ -1,5 +1,5 @@
 .sessions { display: flex; height: 100%; min-height: 0; }
-.session-title { display: none; }
+.sessions > .page-header { display: none; }
 .session-sidebar { display: none; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The mobile top bar (mobile-chat-layout): one row, at most 48 px; desktop keeps the sidebar and heading. */
@@ -135,7 +135,7 @@
 .session-dot-held { background: transparent; border: 1.5px solid var(--blue); }
 .session-dot-failed { border-radius: 2px; background: var(--muted); }
 .shell-main:has(> .sessions), .shell-main:has(> .session-loading) { padding: 0; overflow: hidden; }
-/* The page bar (desktop) and an error banner sit above .sessions in .shell-main: it takes what is left, never `height: 100%` on top of them, or the composer is pushed below the viewport. */
+/* An error banner can sit above .sessions in .shell-main: it takes what is left, never `height: 100%` on top of it, or the composer is pushed below the viewport. */
 .shell-main:has(> .sessions) { display: flex; flex-direction: column; }
 .shell-main > .sessions { flex: 1 1 0; }
 /* Operator threads (cp-xmw2): below 900 px one chip row right above the composer, scrolling sideways; at 900 px and up the sidebar lists them. */
@@ -146,10 +146,8 @@
 .session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
- .sessions { display: grid; grid-template-columns: 250px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); gap: 20px; padding: 28px 40px 40px; }
- .session-title { display: block; grid-column: 1 / -1; margin-right: 248px; }
- /* Share S1's title band without adding a flow row above the remaining-height screen (PR 110). */
- .shell-main:has(> .sessions):not(:has(> .overview-error)) > .shell-page-bar { margin: 24px 40px -68px auto; position: relative; z-index: 4; }
+ .sessions { display: grid; grid-template-columns: 250px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); gap: 20px; padding: 0 40px 40px; }
+ .sessions > .page-header { display: flex; grid-column: 1 / -1; }
  .session-panel { min-height: 0; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
  .session-sidebar { min-height: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
  .session-sidebar h2 { margin: 0 0 6px; padding: 0 10px; font-size: 12px; color: var(--dim); }

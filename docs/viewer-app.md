@@ -322,7 +322,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   their `dc-…` id and the ask a click answered.
 - **Restart session** (cp-aqxl; `components/RestartSession.tsx`, `use-restart.ts`,
   `restart-control.ts`; docs/contracts.md §Dashboard control): the last row of the shell's
-  **⋮ More actions** menu (`components/MoreMenu.tsx`). The menu is always there — after Search on the phone header, and in the desktop page bar — with Refresh now (reloads, and shows the last updated time), Copy link to this view, Notifications (the push phase, linking to `#more` where the toggle stays) and Viewer (the version badge). Restart session
+  **⋮ More actions** menu (`components/MoreMenu.tsx`). The menu is always there — after Search on the phone header, and at the right end of the desktop page header row (`components/PageHeader.tsx`) — with Refresh now (reloads, and shows the last updated time), Copy link to this view, Notifications (the push phase, linking to `#more` where the toggle stays) and Viewer (the version badge). Restart session
   is shown only when the operator control view is available **and a session runs**, or while its own restart is under way
   (a dot on the button while a restart runs or the version level is alert; the status line stays inside the menu); Esc or a tap outside closes the menu, and a half-made confirm with it. The same Restart row is in
   the ⋯ sheet on the mobile Sessions top bar, which replaces the shell header — never inline in the composer or the Overview.

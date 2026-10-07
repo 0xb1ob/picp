@@ -4,6 +4,7 @@ import { elapsed, money, percent, phaseText, prNumber, shortSha, time } from "..
 import { jobHref } from "../routes.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import "./jobs.css";
 import { CiSignal, ModelName, PhaseDot, reviewText } from "../components/JobSignals.tsx";
 export { CiSignal, PhaseDot, reviewText };
@@ -51,7 +52,7 @@ export function Jobs({data}:{data:JobsResponse}) {
  const live=data.jobs.filter(inFlight); const done=data.jobs.filter(j=>["done","failed"].includes(j.phase) && j.finished_today); const queued=data.jobs.filter(j=>j.phase==="queued");
  const older=data.jobs.filter(j=>["done","failed"].includes(j.phase) && !j.finished_today).length;
  const {groups, empty} = doneGroups(done, data.projects);
- return <div class="jobs-screen"><header class="jobs-heading"><h1>Jobs</h1><div class="jobs-toolbar"><JobsViews current="jobs"/>
+ return <div class="jobs-screen"><header class="jobs-heading"><PageHeader title="Jobs"/><div class="jobs-toolbar"><JobsViews current="jobs"/>
  <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div><p>held = waiting on CI or review, normal for hours</p></div></header>
  {filter!=="done" && <section class="jobs-group"><header><h2>In flight · {live.length}</h2><p>held = waiting on CI or review, normal for hours</p></header>{live.length>0 && <JobColumns/>}{live.map(job=><JobRow key={job.id} job={job}/>)}{!live.length && <p class="jobs-empty">Nothing in flight.</p>}</section>}
  {filter==="all" && queued.length>0 && <section class="jobs-group"><header><h2>Queued · {queued.length}</h2></header>{queued.map(job=><JobRow key={job.id} job={job}/>)}</section>}

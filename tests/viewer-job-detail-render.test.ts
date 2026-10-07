@@ -64,9 +64,10 @@ test("merged job shows the PR, the short merge sha and two copy buttons", () => 
  assert.match(html, /<a href="#map"><code>md-active<\/code> →<\/a>/);
 });
 
-test("desktop breadcrumb links back to jobs and names the id", () => {
- const html = detail({id: "cp-merged", title: "Landed"});
- assert.match(html, /<a href="#jobs">← Jobs<\/a> \/ <code>cp-merged<\/code>/);
+test("desktop header row links back to jobs, then the title and the id", () => {
+ const row = parseHTML(detail({id: "cp-merged", title: "Landed"})).document.querySelector(".job-detail-heading > .page-header")!;
+ assert.deepEqual([...row.children].slice(0,3).map(e => [e.tagName, e.textContent]), [["A","Jobs"],["H1","Landed"],["CODE","cp-merged"]]);
+ assert.equal(row.querySelector("a.page-header-back")?.getAttribute("href"), "#jobs");
 });
 
 
@@ -75,7 +76,7 @@ test("hero spans the body and contains title then phase, PR, CI and review badge
  const {document} = parseHTML(html);
  const hero = document.querySelector(".job-detail > .job-detail-heading")!;
  assert.ok(hero, "hero must sit above both body columns");
- assert.deepEqual([...hero.children].map(e=>e.tagName), ["NAV","H1","DIV","P"]);
+ assert.deepEqual([...hero.children].map(e=>e.className || e.tagName), ["page-header","job-badges","P"]);
  const badges = hero.querySelector(".job-badges")!;
  assert.deepEqual([...badges.children].map(e=>e.textContent), ["held","#12 open ↗","CI green aaaaaaa","review 1 / 5 · pass"]);
  assert.equal(badges.querySelector("a")?.getAttribute("href"), "https://github.com/acme/widgets/pull/12");

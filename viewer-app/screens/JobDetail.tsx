@@ -3,6 +3,7 @@ import { elapsed, money, prNumber, shortSha, time } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { PhaseDot, CiSignal, ModelName } from "../components/JobSignals.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import "./job-detail.css";
 
 function ModelFact({job}: {job: ViewerJob}) {
@@ -55,8 +56,7 @@ export function JobDetail({data}: {data: JobResponse}) {
  const job = data.job;
  return <div class="job-detail">
   <header class="job-detail-heading">
-   <nav class="job-crumb"><a href="#jobs">← Jobs</a> / <code>{job.id}</code></nav>
-   <h1>{job.title ?? job.id}</h1>
+   <PageHeader back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
    <div class="job-badges"><span class={`job-badge job-badge-${job.phase}`}><PhaseDot phase={job.phase}/>{job.phase}</span>{job.pr_url && <a class="job-badge job-badge-pr" href={job.pr_url}>{prNumber(job.pr_url)}{job.pr_status && ` ${job.pr_status}`} ↗</a>}<CiSignal job={job} badge/><span class="job-badge job-badge-review">review {reviewFact(job)}</span></div>
    {job.phase === "held" && <p>held = waiting on CI or review, normal for hours</p>}
   </header>

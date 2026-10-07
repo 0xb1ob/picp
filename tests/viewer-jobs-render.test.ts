@@ -26,7 +26,7 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  assert.deepEqual(visibleBoard(board,"all").jobs.map((j:ViewerJob)=>j.id),["cp-render","cp-inactive"]);
  assert.deepEqual(visibleBoard(board,"md-paused").jobs.map((j:ViewerJob)=>j.id),["cp-inactive"]);
  const rendered=screen("Board",board);assert.match(rendered,/All mandates/);assert.match(rendered,/board-chip-status">paused/);assert.match(rendered,/href="#job\/cp-render"/);assert.doesNotMatch(rendered,/<script>|style=|onclick=/i);
- assert.match(rendered,/<h1>Jobs<\/h1>/);assert.doesNotMatch(rendered,/>Mandates</);
+ assert.match(rendered,/<h1 title="Jobs">Jobs<\/h1>/);assert.doesNotMatch(rendered,/>Mandates</);
  // All mandates includes inactive landed jobs, so the default count matches Overview and Jobs.
  board.jobs=[...board.jobs,{...job,id:"cp-landed",phase:"done",mandate_id:"md-paused"}];
  const grid=screen("Board",board);

@@ -34,7 +34,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  assert.match(picked,/class="session-bridge-line">bridge woke cp-x · owner observed</);
  assert.match(picked,/class="session-bridge-details"/); assert.doesNotMatch(picked,/session-bridge-details" open/);
  const doc=parseHTML(`<body>${picked}</body>`).document;
- assert.equal(doc.querySelector('.sessions > h1')?.textContent,"Sessions","the desktop title stays inside the direct-child screen");
+ assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Sessions","the desktop title row stays inside the direct-child screen");
  assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator ↔ you");
  assert.equal(doc.querySelector('.session-heading label')?.firstChild?.textContent,"Transcript");
  assert.equal(doc.querySelector('.session-heading label select')?.getAttribute("aria-label"),"Operator session file");

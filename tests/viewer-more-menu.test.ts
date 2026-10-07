@@ -107,34 +107,68 @@ test("⋮ menu: its classes are styled by shell.css alone, so no other screen's 
 	}
 });
 
-test("shell exposes the desktop live clock and shortcut without wrapping Sessions", async () => {
- const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; export const draw=()=>render(h(Shell,{current:{screen:"sessions",query:"view=you"},awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},h("div",{class:"sessions"})));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
- const {draw} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
- const {document} = parseHTML(draw());
- assert.ok(document.querySelector(".shell-main > .sessions"));
- assert.ok(document.querySelector(".shell-page-bar .shell-live-live > span"));
- assert.equal(document.querySelector(".shell-page-bar time")?.getAttribute("datetime"),"2026-10-06T08:30:00Z");
- assert.match(document.querySelector(".shell-page-bar time")?.textContent ?? "",/^updated /);
- assert.equal(document.querySelector(".shell-desktop-search kbd")?.textContent,"⌘K");
-});
-
-test("desktop title clearance skips real recovery headings and still targets Overview", async () => {
- const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {NotFound,notFoundFor} from "./viewer-app/components/NotFound.tsx"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const draw=(current,data)=>render(h(Shell,{current,awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},data?h(Overview,{data}):h(NotFound,notFoundFor(current,404))));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
- const {draw} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
- const css = readFileSync(join(REPO_ROOT,"viewer-app/styles/shell.css"),"utf8");
- const selector = /([^{}]+)\{ margin-right: 248px; \}/.exec(css)?.[1]?.trim();
- assert.ok(selector,"the desktop title reservation exists");
- for (const current of [{screen:"job",jobId:"cp-doesnotexist"},{screen:"sessions",query:"view=workers&id=cp-doesnotexist"}]) {
-  const doc = parseHTML(draw(current)).document;
-  const heading = doc.querySelector('.shell-main > .not-found > .not-found-recovery > :is(h1,h2)');
-  assert.equal(heading?.textContent, current.screen === "job" ? "No job cp-doesnotexist" : "No worker session cp-doesnotexist");
-  assert.ok(doc.querySelector(selector) === null,"recovery content below the clock needs no top-band clearance");
- }
+test("desktop page header: one row per page with a short updated time, the ⋮ menu and exactly one <h1>", async () => {
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {NotFound,notFoundFor} from "./viewer-app/components/NotFound.tsx"; import {Overview} from "./viewer-app/screens/Overview.tsx"; import {JobDetail} from "./viewer-app/screens/JobDetail.tsx"; const shell=(current,child)=>render(h(Shell,{current,awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},child)); export const bare=()=>shell({screen:"sessions",query:"view=you"},h("div",{class:"sessions"})); export const missing=current=>shell(current,h(NotFound,notFoundFor(current,404))); export const overview=data=>shell({screen:"overview"},h(Overview,{data})); export const job=data=>shell({screen:"job",jobId:data.job.id},h(JobDetail,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const draw = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ // A screen with no header of its own (here a bare Sessions stand-in, or loading): the shell's fallback row, no <h1>.
+ const bare = parseHTML(draw.bare()).document;
+ assert.ok(bare.querySelector(".shell-main > .sessions"));
+ const fallback = bare.querySelector(".shell-main > .page-header.page-header-fallback")!;
+ assert.equal(fallback.querySelector("p")?.textContent,"Sessions");
+ assert.ok(fallback.querySelector(".page-header-end > .shell-live-live > span"),"the live dot stays");
+ const clock = fallback.querySelector(".page-header-end time")!;
+ assert.equal(clock.getAttribute("datetime"),"2026-10-06T08:30:00Z");
+ assert.match(clock.textContent ?? "",/^Updated \d\d:\d\d$/,"no seconds, no zone");
+ assert.match(clock.getAttribute("title") ?? "",/^Updated \d\d:\d\d:\d\d/,"the full time is its title");
+ assert.ok(fallback.querySelector(".page-header-end > .shell-more:last-child"),"⋮ is the row's last item");
+ assert.equal(bare.querySelectorAll("h1").length,0);
+ assert.equal(bare.querySelector(".shell-desktop-search kbd")?.textContent,"⌘K");
+ // A job 404 keeps the recovery <h1>; the fallback row names Jobs and the id.
+ const job404 = parseHTML(draw.missing({screen:"job",jobId:"cp-doesnotexist",section:null})).document;
+ assert.deepEqual([...job404.querySelectorAll("h1")].map(e => e.textContent),["No job cp-doesnotexist"]);
+ assert.equal(job404.querySelector(".page-header-fallback > p")?.textContent,"Jobs");
+ assert.equal(job404.querySelector(".page-header-fallback > .page-header-detail")?.textContent,"cp-doesnotexist");
+ // A worker 404 draws its own row: the one <h1> is Sessions, the id muted after it; the recovery title is an <h2>.
+ const worker404 = parseHTML(draw.missing({screen:"sessions",section:null,query:"view=workers&id=cp-doesnotexist"})).document;
+ assert.deepEqual([...worker404.querySelectorAll("h1")].map(e => e.textContent),["Sessions"]);
+ assert.equal(worker404.querySelector(".not-found-heading > .page-header > .page-header-detail")?.textContent,"cp-doesnotexist");
+ assert.equal(worker404.querySelector(".not-found-recovery > h2")?.textContent,"No worker session cp-doesnotexist");
  const {overview} = await import("../src/viewer/overview-view.ts");
  const {createScratchHome} = await import("./harness/index.ts");
  const home = createScratchHome();
  try {
-  const data = overview({home:home.path,stateDir:join(home.path,".pi-command-post/state")});
-  assert.equal(parseHTML(draw({screen:"overview"},data)).document.querySelector(selector)?.className,"overview-heading");
+  const page = parseHTML(draw.overview(overview({home:home.path,stateDir:join(home.path,".pi-command-post/state")}))).document;
+  assert.deepEqual([...page.querySelectorAll("h1")].map(e => e.textContent),["Overview"]);
+  const row = page.querySelector(".overview-heading .page-header:not(.page-header-fallback)")!;
+  assert.ok(row.querySelector("h1 + .page-header-end > .shell-live + .shell-more"),"title, then status, then ⋮");
  } finally { home.cleanup(); }
+ // JobDetail: the job's title is the <h1>, its id follows muted; a long title is whole in the title attribute.
+ const title = "A long job title ".repeat(12).trim();
+ const jobView = {id:"cp-long",title,phase:"held",pr_url:null,pr_status:null,merge_sha:null,ci:null,review:null,review_attempts:0,head:null,summary:null,failure:null,model:null,script_path:null,context:null,routing:null,routing_facts:null,mandate_id:null,cost_usd:null,elapsed_seconds:null,limit_seconds:null};
+ const detail = parseHTML(draw.job({job:jobView,questions:[],asks:[],timeline:[],timeline_truncated:false,artifact_href:null,artifact_name:null,files_href:null,run_href:null})).document;
+ const h1s = [...detail.querySelectorAll("h1")];
+ assert.equal(h1s.length,1);
+ assert.equal(h1s[0]!.getAttribute("title"),title);
+ assert.equal(detail.querySelector(".job-detail-heading > .page-header > .page-header-detail")?.textContent,"cp-long");
+});
+
+test("desktop page header CSS: a compact hairline row, transparent below 900 px, and no overlay hacks left", () => {
+ const dirs = ["viewer-app/components","viewer-app/screens","viewer-app/styles"];
+ for (const sheet of dirs.flatMap(dir => readdirSync(join(REPO_ROOT,dir)).filter(f => f.endsWith(".css")).map(f => `${dir}/${f}`))) {
+  const css = readFileSync(join(REPO_ROOT,sheet),"utf8");
+  assert.doesNotMatch(css,/margin-right: 248px|shell-page-bar|session-title|job-crumb|not-found-crumb/,sheet);
+  assert.doesNotMatch(css,/z-index: 4; \}/,`${sheet}: no title-band overlay`);
+ }
+ const css = readFileSync(join(REPO_ROOT,"viewer-app/styles/shell.css"),"utf8");
+ const at = css.indexOf("@media (min-width: 900px) {");
+ const phone = css.slice(0,at), desktop = css.slice(at);
+ assert.match(phone,/\.page-header \{ display: contents; \}/,"below 900 px the screen's own <h1> layout is unchanged");
+ assert.match(phone,/\.page-header-back, \.page-header-detail, \.page-header-end, \.page-header-fallback \{ display: none; \}/);
+ const row = /\n \.page-header \{([^}]*)\}/.exec(desktop)?.[1] ?? "";
+ assert.match(row,/height: 56px/);
+ assert.match(row,/border-bottom: 1px solid var\(--border\)/,"a hairline in the existing border token");
+ assert.doesNotMatch(row,/background|position|z-index|margin/,"on the page surface, in flow");
+ assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 19px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
+ assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 40px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
+ assert.match(desktop,/\.shell-main:has\(\.page-header:not\(\.page-header-fallback\)\) > \.page-header-fallback \{ display: none; \}/);
 });

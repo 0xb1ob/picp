@@ -7,6 +7,7 @@ import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
+import { PageHeader } from "../components/PageHeader.tsx";
 function Chip({href,tone,label,value,title}: {href?:string;tone:string;label:string;value:string;title?:string | undefined}) {
  const body = <><span class="overview-meta"><span class={`overview-dot overview-dot-${tone}`}/>{label}</span><strong title={title ? `${value}\n${title}` : value}>{value}</strong></>;
  return href ? <a href={href} class="overview-chip">{body}</a> : <div class="overview-chip">{body}</div>;
@@ -100,7 +101,7 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
  const blockerPhase = (id: string, phase: string | null) => { const live = data.in_flight.find(f => f.id === id)?.phase ?? phase; return live ? phaseText(live) : null; };
  const costs = data.shipped_today.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  const more = data.shipped_today.length - LANDED_ROWS;
- return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><h1>Overview</h1>{paused.length > 0 && <p class="overview-subtitle">{paused.map(project => <span key={project} class="overview-paused-pill">{project} paused</span>)}</p>}</div></div>
+ return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><PageHeader title="Overview"/>{paused.length > 0 && <p class="overview-subtitle">{paused.map(project => <span key={project} class="overview-paused-pill">{project} paused</span>)}</p>}</div></div>
   {data.warnings.length > 0 && <div role="status" class="overview-error">{data.warnings.map(w => <p key={w.section}>{w.section}: {w.message}</p>)}</div>}
   <div class="overview-status"><Health data={data}/><Services data={data} control={control}/></div>
   {data.availability.asks !== "unavailable" && !data.awaiting.items.length ? <section id="awaiting" tabIndex={-1} class="overview-clear" aria-label="Needs you"><a href="#decided"><Icon name="check" size={16}/><div><strong>Nothing needs you</strong><span>{decidedLine(data)} →</span></div></a></section> : <Block id="awaiting" title={<><span class={`overview-square${data.availability.asks !== "unavailable" && data.awaiting.items.length ? " overview-square-attention" : ""}`}/>Needs you &middot; {count(data.awaiting.count)}</>}>
