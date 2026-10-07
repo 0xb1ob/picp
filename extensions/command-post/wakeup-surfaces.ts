@@ -25,7 +25,9 @@ import { scheduledJobIds } from "../../src/relay-scope.ts";
 import { SendFirstGate } from "../../src/send-first-gate.ts";
 import { contextOver, type HoldContext, ParentCompactHold } from "../../src/parent-compact-hold.ts";
 import { parentContextLog } from "../../src/parent-context.ts";
-import { durableIdsFromMessage } from "../../src/wakeup-outbox.ts";
+import { cpNext, formatNext } from "../../src/next.ts";
+import { holdsParentLock } from "../../src/parent-lock.ts";
+import { durableIdsFromMessage, isLandedContinuation } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
 import { formatWedgedNotice } from "../../src/wedged.ts";
 import { currentRuntime, runtimeOrRefusal, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
@@ -52,7 +54,7 @@ export function answerCardChannel(home: string, jobId: string, live: { mode?: st
 export function createWakeupSurfaces(
 	pi: ExtensionAPI,
 	s: SessionState,
-	late: { commandPost: () => CommandPost; repaintWidget: () => void; mainCi?: { exec?: CommandRunner; tick?: typeof runMainCiTick } },
+	late: { commandPost: () => CommandPost; repaintWidget: () => void; mainCi?: { exec?: CommandRunner; tick?: typeof runMainCiTick }; next?: typeof cpNext },
 ) {
 	const commandPost = () => late.commandPost();
 	const repaintWidget = () => late.repaintWidget();
@@ -191,8 +193,8 @@ export function createWakeupSurfaces(
 	 * cp-vy73 (PR-3): the busy-wake gate. While a run is busy and one triggering
 	 * wake-up already guarantees it another request, later wake-ups ride along
 	 * with `triggerTurn: false` instead of queueing one follow-up turn each.
-	 * `answered` always triggers, and an idle session never gets a
-	 * non-triggering send: pi would append it with no turn (cp-cc45 F6).
+	 * Actionable `answered` always triggers. Explicit acknowledgements may stay
+	 * quiet even while idle and never contribute to the stranded-notice nudge.
 	 * A non-triggering notice that no later request carried (the run's last
 	 * turn was text-only) is stranded, so `agent_settled` sends one triggering
 	 * nudge for it (F3: counted against the last provider request) — except
@@ -236,10 +238,11 @@ export function createWakeupSurfaces(
 			if ((last as { stopReason?: unknown } | undefined)?.stopReason === "aborted") gate.aborted = true;
 		},
 		agentSettled: (ctx?: HoldContext): void => {
-			// Idle first (F6): anything sent from here on triggers its own turn.
+			// Idle first: ordinary wakes trigger; explicit acknowledgements stay quiet.
 			gate.busy = false;
 			gate.triggered = false;
 			sendFirst.settled();
+			confirmQuietArrivals();
 			compactHold.settled(reading(ctx));
 			// After an abort held wakes wait for the next message or wake, like the nudge below.
 			if (!gate.aborted) releaseHeld();
@@ -253,16 +256,18 @@ export function createWakeupSurfaces(
 			if (compactHold.offer(nudge) === "send") nudge();
 		},
 	};
+	const quietPending = new Set<string>();
 	const sendWakeup = (
 		stamp: Omit<WakeupStamp, "issued_at">,
 		content: string,
 		details: Record<string, unknown>,
+		triggerTurn = true,
 	): boolean => {
 		const notifier = new WakeupNotifier({
 			facts: wakeupFactsNow(),
 			send: (message: WakeupMessage) => {
 				const deliver = (): void => {
-					const quiet = gate.busy && gate.triggered && stamp.kind !== "answered";
+					const quiet = !triggerTurn || (gate.busy && gate.triggered && stamp.kind !== "answered");
 					pi.sendMessage(
 						{
 							customType: message.customType,
@@ -273,8 +278,8 @@ export function createWakeupSurfaces(
 						},
 						quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
 					);
-					if (quiet) gate.nonTriggeringSent++;
-					else if (gate.busy) gate.triggered = true;
+					if (quiet && triggerTurn) gate.nonTriggeringSent++;
+					else if (!quiet && gate.busy) gate.triggered = true;
 				};
 				// unload-parent PR3: an unanswered operator send goes first; held wakes count as sent (not acked).
 				releaseHeld();
@@ -285,43 +290,15 @@ export function createWakeupSurfaces(
 			projectOf: projectOf(),
 		});
 		const result = notifier.send(stamp, content, details);
+		if (result.sent && !triggerTurn) for (const id of [...answeredIdsFromMessage(result.message), ...durableIdsFromMessage(result.message)]) quietPending.add(id);
 		suppressionReason = result.verdict.reason ?? "stale";
 		return result.sent;
 	};
 
 	/**
-	 * cp-answer-doesnt-wake: an answered decision wakes the parent, exactly once.
-	 *
-	 * A report reaches this session as `cp-envelope` and a wedged tool call as
-	 * `cp-wedged`; a human's answer reached *nothing*, so a decision the operator
-	 * had already given sat in `state/awaiting.json` while the work it unblocked
-	 * waited for a turn that was never invoked. This is the third instance of one
-	 * pattern, delivered the same way as the first two: a `followUp` with
-	 * `triggerTurn`, carrying the id, the type, the job and the answer, so the
-	 * parent can act without re-reading a file.
-	 *
-	 * Delivery is a *drain*, not a callback, and that is what makes it honest:
-	 * `CommandPost` queues every recorded answer in `state/answered.json` first,
-	 * this sends whatever is queued, and an answer given with no live parent (a
-	 * headless `/cp-authorize`), or one whose send failed, is sent on the next
-	 * drain instead of being dropped — while `delivered` being on disk is what
-	 * stops a restart replaying yesterday's answers as fresh wake-ups.
-	 *
-	 * **Sending is not delivering** (cp-nx7). `pi.sendMessage` queues a `followUp`
-	 * that pi delivers on the parent's next turn, which can be minutes later, so
-	 * nothing is marked delivered here. The `message_start` hook below sees the
-	 * message actually land in the parent's context and confirms it *then*; an
-	 * answer nobody was observed receiving stays pending and is sent again.
-	 *
-	 * **And sent again is not sent repeatedly** (cp-5mgg). The drain emits only
-	 * what is *due* — an answer whose emission is on disk and inside its retry
-	 * window is left alone — so these three triggers cannot compound into three
-	 * copies of one authorization, which is exactly what they did. The last line
-	 * of defence is in the `context` hook below: a copy carrying only ids an
-	 * earlier message already delivered is rewritten as a replay, never as news.
-	 *
-	 * Three triggers, no poll: the answer itself, `session_start`, and the widget
-	 * tick that already reads these files.
+	 * Answered drains coalesce into one cpNext read; only actionable results wake.
+	 * Quiet delivery confirms persisted arrivals through confirmAnsweredArrival.
+	 * Failed or deferred sends stay queued for the next answer, start or widget tick.
 	 */
 	/**
 	 * cp-u3o4: the answer surface.
@@ -384,16 +361,19 @@ export function createWakeupSurfaces(
 		}
 	};
 
+	const landedNotified = new Set<string>();
 	const surfaceDurableWakeups = (): void => {
-		// A reentrant drain from inside `reconcile()`'s own journaling must wait for
-		// the next tick (see `reconcileInProgress` above) instead of racing a caller's
-		// first prompt.
+		// Reentrant drains during reconciliation must not race the caller's first prompt.
 		if (s.reconcileInProgress) return;
 		try {
-			// false/string from sendWakeup is a stale suppression: terminal. A throw
-			// (transport) leaves the entry pending; the next sweep retries only that.
+			confirmQuietArrivals();
+			// Stale suppression is terminal; transport failure leaves the entry pending.
 			commandPost().sweepDurableWakeups((entry) => {
 				const projects = durableWakeupProjects(entry, projectOf(), homeMandateProjects(currentRuntime().home));
+				if (isLandedContinuation(entry.id) && !landedNotified.has(entry.id)) {
+					operatorNotify(s.live, entry.content, "info");
+					landedNotified.add(entry.id);
+				}
 				const sent = sendWakeup(
 					{
 						kind: entry.kind,
@@ -404,9 +384,11 @@ export function createWakeupSurfaces(
 					},
 					entry.content,
 					{ durable_id: entry.id },
+					!isLandedContinuation(entry.id),
 				);
 				return sent ? true : suppressionReason;
 			});
+			confirmQuietArrivals();
 		} catch {
 			// Transport failed. Still pending; next sweep retries. Stale ones already discarded.
 		}
@@ -422,35 +404,45 @@ export function createWakeupSurfaces(
 		}
 	};
 
-	const surfaceAnswered = (): void => {
-		try {
-			commandPost().drainAnswered((decisions) => {
-				const text = formatAnsweredNotice(decisions, projectOf());
-				operatorNotify(s.live, text, "info");
-				// cp-p6m: stamped like every other wake-up, and — alone among the four —
-				// never suppressed by the staleness check. An answer is a fact about
-				// what a human did, not a claim about a phase, so it cannot become
-				// false; the failure mode on this path is a *lost* decision, which is
-				// the whole reason src/answered.ts exists.
-				// The stamp rides on top of cp-nx7's delivery, it does not replace it:
-				// `details.answered` still carries every coalesced decision (that is the
-				// arrival evidence `answeredIdsFromMessage` reads), nothing is marked
-				// delivered here, and an answered wake-up is never withheld.
-				sendWakeup(
-					{
-						kind: "answered",
-						...(decisions.length === 1 && decisions[0]?.job_id ? { job_id: decisions[0].job_id } : {}),
-						keys: decisions.map((decision) => decision.id),
-						projects: projectsFor(decisions.map((decision) => decision.job_id)),
-					},
-					text,
-					{ answered: decisions },
-				);
-			});
-		} catch {
-			// Nothing was marked delivered, so the answer is still queued and the next
-			// drain retries it. A wake-up must never be able to break its own trigger.
-		}
+	let answeredPass: Promise<void> | undefined;
+	const surfaceAnswered = (): Promise<void> => {
+		if (answeredPass) return answeredPass;
+		answeredPass = (async () => {
+			try {
+				const post = commandPost();
+				if (!holdsParentLock({ home: post.home })) return;
+				confirmQuietArrivals();
+				const stats = post.answered.stats();
+				if (stats.pending === stats.in_flight) return;
+				const next = await (late.next ?? cpNext)({
+					packageRoot: post.packageRoot, ledger: post.ledger(), registry: post.registry,
+					fleet: post.fleet, mandates: post.mandates, escalations: post.escalations, pipelines: post.pipelines,
+					queued: () => post.dispatchQueue.ids(),
+				});
+				const triggerTurn = !["wait", "no_mandate", "draining"].includes(next.action.kind);
+				post.drainAnswered((decisions) => {
+					const text = `${formatAnsweredNotice(decisions, projectOf())}\n${formatNext(next)}\nNext action already checked in this process; act on this recommendation without calling cp_next again for this wake-up.`;
+					operatorNotify(s.live, text, "info");
+					// Answers are never stale. Both quiet and triggering sends carry every
+					// id and are confirmed only by confirmAnsweredArrival on observed arrival.
+					sendWakeup(
+						{
+							kind: "answered",
+							...(decisions.length === 1 && decisions[0]?.job_id ? { job_id: decisions[0].job_id } : {}),
+							keys: decisions.map((decision) => decision.id),
+							projects: projectsFor(decisions.map((decision) => decision.job_id)),
+						},
+						text,
+						{ answered: decisions, next },
+						triggerTurn,
+					);
+				});
+				confirmQuietArrivals();
+			} catch (error) {
+				operatorNotify(s.live, `pi-command-post: answered wake-up failed; answer remains queued: ${(error as Error).message}`, "warning");
+			}
+		})().finally(() => { answeredPass = undefined; });
+		return answeredPass;
 	};
 
 	/**
@@ -467,6 +459,19 @@ export function createWakeupSurfaces(
 		} catch {
 			// An unconfirmed answer is re-sent; a throw here must never break the
 			// message pipeline it is observing.
+		}
+	};
+
+	// Quiet appends bypass message hooks; observe persistence after drain or deferred append.
+	const confirmQuietArrivals = (): void => {
+		if (quietPending.size === 0) return;
+		for (const entry of s.live?.sessionManager?.getBranch() ?? []) {
+			if (entry.type !== "custom_message") continue;
+			const ids = [...answeredIdsFromMessage(entry), ...durableIdsFromMessage(entry)];
+			if (!ids.some((id) => quietPending.has(id))) continue;
+			confirmAnsweredArrival(entry);
+			confirmDurableArrival(entry);
+			for (const id of ids) quietPending.delete(id);
 		}
 	};
 

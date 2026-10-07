@@ -255,7 +255,7 @@ export function digestsInContext(
 		const entry = branch[index]!;
 		if (entry.type === "custom_message" && entry.customType && !latest.has(entry.customType)) latest.set(entry.customType, entry.content);
 	}
-	return messages.length > 0 && DIGEST_TYPES.every((type) => latest.get(type) === messages.find((message) => message.customType === type)?.content);
+	return messages.length > 0 && [...new Set([...DIGEST_TYPES, ...messages.map((message) => message.customType)])].every((type) => latest.get(type) === messages.find((message) => message.customType === type)?.content);
 }
 
 export function standingOrdersDigest(home: string): string | undefined {

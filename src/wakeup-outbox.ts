@@ -43,6 +43,11 @@ export function boundedCauseId(prefix: string, cause: string): string {
 	return `${prefix}${cause.slice(0, 30)}…${cause.slice(-70)}:${createHash("sha256").update(raw).digest("hex").slice(0, 12)}`;
 }
 
+/** A completed held-PR continuation is operator news, never a parent turn. */
+export function isLandedContinuation(id: string): boolean {
+	return id.startsWith("continuation:done:") || (id.startsWith("continuation:") && id.endsWith(":done"));
+}
+
 /** issue #2: the durable id prefix of a killed_unreported notice; cp-bridge relays it straight to the operator. */
 export const KILLED_UNREPORTED_WAKEUP_PREFIX = "killed-unreported:";
 

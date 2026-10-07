@@ -92,6 +92,9 @@ test("picp-99l: an identical latest digest pair is not re-sent; a compaction or 
 	assert.equal(digestsInContext([entry("cp-memory", "memory old"), entry("cp-standing-orders", "orders A"), entry("cp-memory", "memory A")], pair), true, "only the latest of each type counts");
 	assert.equal(digestsInContext([entry("cp-memory", "memory A"), entry("cp-standing-orders", "orders A"), entry("cp-memory", "memory B")], pair), false, "a newer different memory digest means send");
 	assert.equal(digestsInContext(resumed, [pair[1]!]), false, "a memory digest that disappeared is a change");
+	const guidance = { customType: "cp-parent-guidance", content: "parent guidance" };
+	assert.equal(digestsInContext(resumed, [...pair, guidance]), false, "an old pair needs the new parent guidance");
+	assert.equal(digestsInContext([...resumed, entry(guidance.customType, guidance.content)], [...pair, guidance]), true);
 });
 
 test("parent compact instructions name current open decisions, held PR jobs and active mandates from disk", async (t) => {
@@ -189,6 +192,8 @@ test("successful parent compaction re-delivers both current digests exactly once
 		.filter((message) => ["cp-memory", "cp-standing-orders"].includes(message.customType ?? "") && message.content?.includes("Refreshed"));
 	assert.equal(digests.length, 2);
 	assert.ok(digests.every((message) => message.display === false));
+	assert.match(next, /15 model rounds/);
+	assert.equal(next.split("Parent only: Put independent tool calls").length - 1, 1);
 });
 
 test("session start puts memory and standing orders in context before any turn (triggerTurn:false, not nextTurn)", { timeout: 120_000 }, async (t) => {
@@ -208,6 +213,13 @@ test("session start puts memory and standing orders in context before any turn (
 	const text = JSON.stringify(response);
 	assert.match(text, /Wake-turn memory/);
 	assert.match(text, /Wake-turn order/);
+	assert.match(text, /Put independent tool calls in one assistant message/);
+	assert.match(text, /15 model rounds/);
+	assert.match(text, /compact or end the turn and report decisions already made/);
+	const guidance = (response.data as { messages: Array<{ customType?: string; display?: boolean }> }).messages.filter((message) => message.customType === "cp-parent-guidance");
+	assert.equal(guidance.length, 1);
+	assert.equal(guidance[0]!.display, false);
+	assert.equal(provider.requests("parent-start").length, 0, "guidance starts no model turn");
 });
 
 test("picp-99l: resuming a parent session with unchanged digests appends no second pair", { timeout: 120_000 }, async (t) => {
@@ -232,4 +244,5 @@ test("picp-99l: resuming a parent session with unchanged digests appends no seco
 	const text = JSON.stringify(await second.waitFor((record) => record.type === "response" && record.id === "ctx", 60_000));
 	assert.equal(text.split("Resume order.").length - 1, 1, "standing orders once");
 	assert.equal(text.split("Resume memory.").length - 1, 1, "memory once");
+	assert.equal(text.split("Parent only: Put independent tool calls").length - 1, 1, "guidance once on resume");
 });

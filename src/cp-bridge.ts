@@ -22,7 +22,7 @@ import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
-import { durableIdsFromMessage, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
+import { durableIdsFromMessage, isLandedContinuation, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
 import { cleanSegmentEnd, wakeSpans } from "./bridge-segments.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
@@ -37,7 +37,7 @@ import { readParentLock } from "./parent-lock.ts";
 import { existingSavedSession, recordSpawnedSession } from "./parent-control.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
 import type { ModelProbe } from "./routing.ts";
-import { STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
+import { boundedSeen, STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
 import { NONINTERACTIVE_WORKER_ENV, STRIPPED_ENV_KEYS } from "./worker-manager.ts";
 import {
 	WorkerProcess,
@@ -283,6 +283,7 @@ export class CpBridge {
 	#stopping = false;
 	#generation = 0;
 	#ready = false;
+	#landedUnseen = boundedSeen();
 	#booting = false;
 	#deathsBeforeReady = 0;
 	#lastReplyAt: string | undefined;
@@ -520,11 +521,7 @@ export class CpBridge {
 		}, bridgePaths);
 	}
 
-	/**
-	 * `discardPending` (the operator's `cp_parent stop`): sends that never landed
-	 * end `undeliverable`, relayed once. Without it (session shutdown) they stay
-	 * queued for the next start.
-	 */
+	/** Operator stop discards sends that never landed; session shutdown keeps them. */
 	async stop(options: { discardPending?: boolean } = {}): Promise<WorkerExit | undefined> {
 		this.#stopping = true;
 		const proc = this.#proc;
@@ -632,7 +629,12 @@ export class CpBridge {
 		});
 	}
 
+	#relayLanding(text: string): void {
+		if (this.#landedUnseen(text.replace(/^\[[^\]\n]+\] /, ""))) this.#emit({ kind: "wake", stale: false, text, receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
+	}
 	#onEvent(event: WorkerEvent): void {
+		// RPC notifications survive startup, when quiet custom-message events have no subscriber yet.
+		if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && /^(?:\[[^\]\n]+\] )?HELD PR LANDED — /.test(event.message)) this.#relayLanding(event.message);
 		if (event.type === "agent_start") {
 			if (!this.#runOpen) this.#turn = freshTurn();
 			this.#runOpen = true;
@@ -644,6 +646,7 @@ export class CpBridge {
 			// Idle-bead notices, the one drain outcome wake (durable id `drain:<started>:<outcome>`, kept as `drainId` for the delivery recheck) and a `killed-unreported:` notice (issue #2) reach the operator directly.
 			const durableIds = durableIdsFromMessage(message), drainId = durableIds.find((id) => id.startsWith("drain:"));
 			const directWake = drainId !== undefined || durableIds.some((id) => id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
+			if (message?.role === "custom" && durableIds.some(isLandedContinuation)) this.#relayLanding(textOf(message));
 			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [], ...(drainId ? { drainId } : {}) });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
 			if (stamped) { this.#turn.jobId = stamped; for (const ids of [this.#turn.jobIds, this.#turn.segJobIds]) if (!ids.includes(stamped)) ids.push(stamped); }
@@ -776,8 +779,7 @@ export class CpBridge {
 		relay: BridgeRelay,
 		about: { job_ids: readonly string[]; mandate_id?: string } = { job_ids: relay.jobId ? [relay.jobId] : [] },
 	): void {
-		// cp-project-grouped-reporting: a relay about a job (or, failing that, a
-		// mandate) opens with its project.
+		// Relays about jobs or mandates open with their project.
 		const home = this.#home;
 		// Text the parent already opened with a bracketed project is left as written.
 		if (home && (about.job_ids.length > 0 || about.mandate_id) && !/^\[[^\]\n]+\] /.test(relay.text)) {

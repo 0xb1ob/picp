@@ -808,6 +808,8 @@ interface ContinuationBench {
 	pending: Set<string>;
 	handedBack: string[];
 	notices: { id: string; job_id: string; content: string; keys?: string[] }[];
+	relays: ContinuationBench["notices"];
+	wakes: ContinuationBench["notices"];
 	/** Most integration steps ever running at once. */
 	peak: { now: number; max: number };
 	/** Runs inside each `advance`, i.e. while a step is in flight. */
@@ -834,6 +836,8 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		pending: new Set(),
 		handedBack: [],
 		notices: [],
+		relays: [],
+		wakes: [],
 		peak: { now: 0, max: 0 },
 		during: {},
 	};
@@ -874,7 +878,8 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		},
 		// Every source reads HEAD unless a case moves it; "" plays a source that cannot be read.
 		head: (jobId) => bench.heads.get(jobId) ?? HEAD,
-		notify: (notice) => void bench.notices.push(notice),
+		notify: (notice) => { bench.notices.push(notice); bench.wakes.push(notice); },
+		relay: (notice) => { bench.notices.push(notice); bench.relays.push(notice); },
 		...(options.writeBack ? { writeBack: options.writeBack } : {}),
 		...(options.draining ? { draining: options.draining } : {}),
 		...(options.onLanded ? { onLanded: options.onLanded } : {}),
@@ -917,6 +922,8 @@ test("green: verdict returns promptly, a single deadline resumes merge without a
 	assert.equal(b.advances.length, 4, "one merge and finish sequence at the deadline");
 	assert.equal(clock.tasks.size, 0);
 	assert.match(b.notices[1]?.content ?? "", /HELD PR LANDED/);
+	assert.equal(b.wakes.length, 1, "HELD PR WAITING still wakes");
+	assert.equal(b.relays.length, 1, "the landing only relays");
 });
 
 
@@ -1036,6 +1043,26 @@ test("4B1-T6: driving(job) is true during an advance and false after, including 
 	const failed = await b.continuation.trigger({ jobId: "cp-4wz", event: "startup" });
 	assert.equal(failed.action, "error");
 	assert.equal(b.continuation.driving("cp-4wz"), false);
+});
+
+test("a landed continuation relays once without waking the parent; actionable stops still wake", async () => {
+	const b = continuationBench();
+	b.script.set("cp-4wz", ["done"]);
+	const trigger = { jobId: "cp-4wz", event: "ci_green" as const, head: HEAD };
+	await b.continuation.trigger(trigger);
+	await b.continuation.trigger(trigger);
+	assert.equal(b.relays.length, 1);
+	assert.equal(b.wakes.length, 0);
+	assert.match(b.relays[0]!.content, /HELD PR LANDED/);
+	assert.ok(b.relays[0]!.content.includes(PR));
+	assert.doesNotMatch(b.relays[0]!.content, /then cp_next|relay the PR URL/);
+	for (const next of ["surface", "retry", "resolve"] as const) {
+		const stopped = continuationBench();
+		stopped.script.set("cp-4wz", [next]);
+		await stopped.continuation.trigger(trigger);
+		assert.equal(stopped.wakes.length, 1, next);
+		assert.equal(stopped.relays.length, 0, next);
+	}
 });
 
 test("laf: a HELD PR LANDED notice names the tracker write-back; a stop, or no writeBack dep, adds nothing", async () => {

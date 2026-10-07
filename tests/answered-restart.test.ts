@@ -33,15 +33,14 @@
  * window expired. A parent with nothing to do and an answer waiting is exactly
  * what "it looked stuck" describes.
  *
- * The smallest available reconciliation signal is therefore the turn itself,
- * and it is what these tests assert at the boundary:
+ * The inherited answer must arrive even when no parent turn is needed.
+ * These tests assert at the boundary:
  *
  *  1. the wake-up is emitted by the first drain of the new session, well inside
  *     `ANSWERED_DELIVERY_RETRY_SECONDS` (the assertion is the timeout: a
  *     regression makes this wait 120s and fail);
- *  2. it reaches the parent's context, triggers a real turn, and is stamped
- *     `delivered` by the arrival observer — the state a live parent should be
- *     in is reached, rather than an indicator being repainted to claim it;
+ *  2. arrival is stamped `delivered`; no_mandate stays quiet, while a dispatch
+ *     recommendation still triggers a real parent turn;
  *  3. no `setWorking*` / `setStatus` UI request is ever issued by this
  *     extension, before or after that turn settles, so nothing here can leave a
  *     parent *showing* work it is not doing.
@@ -54,6 +53,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { AnsweredOutbox } from "../src/answered.ts";
+import { MandateStore } from "../src/mandate.ts";
+import { createScratchLedger } from "./harness/index.ts";
 import { type AnsweredDecision, LAYOUT, SCHEMA_VERSION, validateAnsweredOutboxFile } from "../src/contracts.ts";
 import {
 	COMMAND_POST_EXTENSION,
@@ -122,7 +123,7 @@ test(
 		outboxLeftByADeadParent(home.path);
 
 		const provider = await MockProvider.start();
-		// One cheap turn: the wake-up triggers it, the model acknowledges, done.
+		// Any accidental model turn is observable through this provider.
 		const model = provider.addScript("u9q-restart-boundary", [{ kind: "text", text: "acknowledged" }], {
 			onExhausted: "repeat",
 		});
@@ -154,19 +155,12 @@ test(
 		assert.match(notice.message as string, /aw-checkpoint-cp-ship\.merge-f7b8769f0606/);
 		assert.match(notice.message as string, /approved means dispatch it/, "an authorization still says what it is");
 
-		// 2. It reached the parent's context: pi took a real turn on it (the
-		//    wake-up is a `followUp` with `triggerTurn`), and the extension's
-		//    arrival observer stamped it delivered. That is the reconciliation —
-		//    the parent is actually working on the answer, not merely shown as busy.
-		await child.waitForSettled(120_000);
-		assert.ok(
-			child.eventsOfType("message_start").length > 0,
-			"the wake-up did not produce a turn: the parent would have stayed idle with an answer waiting",
-		);
-		assert.ok(
-			provider.requests("u9q-restart-boundary").length > 0,
-			"no model request was made, so the parent's 'working' state would have been a claim rather than a fact",
-		);
+		// A no_mandate acknowledgement enters context and confirms without a model turn.
+		child.send({ id: "quiet-context", type: "get_messages" });
+		const messages = await child.waitFor((record) => record.type === "response" && record.id === "quiet-context");
+		assert.match(JSON.stringify(messages), /cp-answered/);
+		assert.equal(provider.requests("u9q-restart-boundary").length, 0);
+		assert.equal(child.eventsOfType("agent_start").length, 0);
 		await waitFor(
 			() => new AnsweredOutbox({ home: home.path }).delivered(ANSWER.id),
 			(delivered) => delivered,
@@ -202,13 +196,16 @@ test(
 );
 
 test(
-	"u9q: the same holds for the record a post-fix parent leaves behind when it dies",
+	"an inherited answer still triggers a parent turn when cpNext recommends dispatch",
 	{ timeout: 180_000 },
 	async (t) => {
 		// The going-forward shape: the emission names the process that made it, and
 		// that process is gone. Same wiring, same first drain, same immediacy.
 		const home = createScratchHome();
 		outboxLeftByADeadParent(home.path, { owner: DEAD_SESSION });
+		const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+		await scratch.ledger.create({ project: "demo", title: "Ready work", kind: "ship", delivery: "pr" });
+		new MandateStore(home.path).issue({ projects: ["demo"], objective: "Dispatch ready work", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5 });
 
 		const provider = await MockProvider.start();
 		const model = provider.addScript("u9q-restart-boundary-owned", [{ kind: "text", text: "acknowledged" }], {
@@ -237,5 +234,8 @@ test(
 			60_000,
 		);
 		assert.match(notice.message as string, /aw-checkpoint-cp-ship\.merge-f7b8769f0606/);
+		await child.waitForSettled(120_000);
+		assert.ok(provider.requests("u9q-restart-boundary-owned").length > 0, "a dispatch recommendation still wakes the parent");
+		await waitFor(() => new AnsweredOutbox({ home: home.path }).delivered(ANSWER.id), (delivered) => delivered, { timeoutMs: 30_000, what: "actionable answer confirmed" });
 	},
 );

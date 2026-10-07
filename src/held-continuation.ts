@@ -39,6 +39,7 @@ import type { ReviewRuns, ReviewWakeup } from "./review-runs.ts";
 import type { RunRegistry } from "./runs.ts";
 import { boundedWakeupId } from "./wakeup-outbox.ts";
 import type { ReviewMergeWindow } from "./review-merge-window.ts";
+import { operatorNotify } from "./parent-session.ts";
 
 /** How many handled keys a process remembers before it forgets them all (at worst, one repeat pass). */
 const CONTINUATION_KEY_MEMORY = 512;
@@ -99,6 +100,8 @@ export interface HeldContinuationDeps {
 	head: (jobId: string, owner: "fleet" | "observed") => string | undefined;
 	/** One durable notice; ids repeat for the same outcome, so the outbox delivers it once. */
 	notify: (notice: { id: string; job_id: string; content: string; keys?: string[] }) => void;
+	/** A landing is relayed to the operator without a parent wake-up. */
+	relay?: HeldContinuationDeps["notify"];
 	runs?: RunRegistry;
 	maxSteps?: number;
 	/** One line naming the tracker write-back for a landed job (laf); never throws. */
@@ -115,7 +118,7 @@ export interface HeldContinuationDeps {
 }
 
 const NEXT_HINT: Readonly<Record<string, string>> = Object.freeze({
-	done: "merged, torn down and closed without a parent turn: relay the PR URL, then cp_next.",
+	done: "merged, torn down and closed without a parent turn.",
 	resolve: "the job's own implementer was promoted to fix it; its next envelope resumes this. Wait — never re-dispatch.",
 	surface: "stopped on a human or repository decision: relay it. Nothing retries this automatically.",
 	retry: "an operational fault; nothing was mutated and nothing retries automatically. Call cp_integrate once the cause clears.",
@@ -406,8 +409,9 @@ export class HeldContinuation {
 	#notice(jobId: string, tag: string, next: string, reason: string, prUrl?: string): void {
 		const generation = (this.#deps.fleet.get(jobId)?.supersessions ?? 0) + 1;
 		try {
-			this.#deps.notify({
-				id: boundedWakeupId(`continuation:${jobId}:${generation}:${tag}`),
+			const deliver = next === "done" ? (this.#deps.relay ?? ((notice) => operatorNotify(undefined, notice.content))) : this.#deps.notify;
+			deliver({
+				id: boundedWakeupId(next === "done" ? `continuation:done:${jobId}:${generation}` : `continuation:${jobId}:${generation}:${tag}`),
 				job_id: jobId,
 				content: formatContinuationNotice(jobId, next, reason, prUrl, next === "done" ? this.#deps.writeBack?.(jobId) : undefined),
 				// A stop is stale once the job is done; the landing notice is about exactly that.
