@@ -19,11 +19,11 @@
  *    HEAD. Opt-in only: a job with no pipeline record, or no `review` block, is
  *    invisible to that step and tears down exactly as it always did.
  *
- * The gate is keyed on kind and **not** on delivery. `delivery:local` means "no
- * PR, and no hold" — never "do not publish": returning a lease recycles the
- * worktree, and the branch survives only in `projects/<name>`, which is a
- * disposable clone-on-demand cache. Work that lives only there is parked, not
- * delivered (T29, measured).
+ * The gate is keyed on kind. `delivery:local` is "no PR, and no hold", not "do
+ * not publish" — a returned lease recycles the worktree and `projects/<name>`
+ * is a disposable cache (T29). Exception: a local ship job with a clean tree
+ * and zero commits ahead of the base passes as `nothing_to_push`; it has
+ * nothing to put on origin. A local job that committed still must be pushed.
  *
  * The merged-and-absorbed check is the ported recovery, mechanised
  * (`reports/operating-knowledge.md#teardown-merged-auto-deleted-head-branch`):
@@ -32,22 +32,9 @@
  * the **two-dot tree diff** `git diff <branch> origin/<base>` being empty while
  * the head branch is gone from origin: main already holds this exact content.
  *
- * cp-vk1 corrected both halves of the origin question, from two real teardowns:
- *
- *  - **The remote is asked, not a remote-tracking ref.** `refs/remotes/origin/*`
- *    in a worker worktree (a separate clone under `.treehouse/`) goes stale on
- *    its own, so a branch already deleted upstream still had a ref equal to the
- *    local tip and passed the gate as `(pushed)`. That false pass is now
- *    impossible: every "is it on origin?" question goes through `git ls-remote`.
- *  - **Landing is confirmed from the PR, not from ancestry.** Squash and rebase
- *    merges both rewrite the commit, so the two-dot tree diff is only empty
- *    while the base has not moved on — for a repo that squash-merges
- *    everything, the check could never succeed once main advanced, and the
- *    refusal's own fix ("or confirm the PR merged") named no mechanism. It has
- *    one now: `cp_merged` writes a merge receipt from what `gh pr view`
- *    reported, and this gate reads it (`merged` pass reason). The tree-diff
- *    check stays as a receipt-free fallback, and `force` stays for the
- *    genuinely unprovable case — still claiming no pass reason.
+ * cp-vk1: "on origin?" is `git ls-remote`, never a remote-tracking ref, and a
+ * landing is a merge receipt (`merged`), not ancestry. The two-dot tree diff
+ * stays a receipt-free fallback; `force` still claims no pass reason.
  *
  * Order matters: gates → graceful worker shutdown with an **observed** close →
  * lease return → fleet `done` → ledger close for research/answer → artifact cleanup.
@@ -144,6 +131,8 @@ export type GatePassReason =
 	/** A merge receipt (cp_merged) says GitHub merged this exact head. */
 	| "merged"
 	| "merged_head_deleted"
+	/** delivery:local, clean tree, zero commits ahead of the base (picp-9g8). */
+	| "nothing_to_push"
 	| "clean_research";
 
 export interface TeardownResult {
@@ -349,11 +338,10 @@ export class Teardown {
 	/**
 	 * Pure-ish: runs git, decides, changes nothing.
 	 *
-	 * Keyed on **kind only**, deliberately. `delivery` decides whether a PR is
-	 * opened and whether the parent holds the worker — it does *not* relax this
-	 * gate, because `projects/<name>` is a disposable cache (gitignored,
-	 * clone-on-demand) and work that exists only there has been parked, not
-	 * delivered. See docs/contracts.md §Teardown.
+	 * Keyed on **kind**. `delivery` does not relax this gate except a local ship
+	 * job with zero commits ahead of the base (`nothing_to_push`, picp-9g8) —
+	 * `projects/<name>` is a disposable cache, so committed work must be pushed.
+	 * See docs/contracts.md §Teardown.
 	 */
 	async checkGates(worktree: string, branch: string, kind: JobKind): Promise<GateOutcome> {
 		if (!isDirectory(worktree)) {
@@ -407,15 +395,26 @@ export class Teardown {
 	}
 
 	/**
-	 * Ship must be **pushed**, or provably already landed — for every delivery.
-	 *
-	 * `delivery:local` means "no PR, and the parent does not hold the worker"; it
-	 * does **not** mean "do not publish". Measured reason (T29): returning a lease
-	 * recycles the worktree for the next job, and the job's branch survives only
-	 * in `projects/<name>` — a gitignored, clone-on-demand **cache** the system is
-	 * free to delete and re-clone. Work that lives only there is parked, not
-	 * delivered, so the gate asks the same question of every ship job.
+	 * picp-9g8: delivery:local with zero commits ahead of the base has nothing
+	 * to publish, so teardown does not require the job branch on origin.
 	 */
+	async #localNothingToPush(worktree: string, branch: string, base: string): Promise<boolean> {
+		if (this.#options.fleet.get(branch)?.delivery !== "local") return false;
+		const remote = await this.#remoteTip(worktree, base);
+		// Remote base sha first. A missing object falls through to the local
+		// tracking ref — ponytail: a forged origin/<base> could hide commits;
+		// fetch that sha before counting if this pass ever loses work.
+		const revs = remote.ok && remote.sha ? [remote.sha, `origin/${base}`] : [`origin/${base}`];
+		for (const rev of revs) {
+			const ahead = await this.#git(worktree, ["rev-list", "--count", `${rev}..HEAD`]);
+			if (ahead.status !== 0) continue;
+			const count = Number.parseInt(ahead.stdout.trim(), 10);
+			if (!Number.isFinite(count)) return false;
+			return count === 0;
+		}
+		return false;
+	}
+
 	async #shipGate(worktree: string, branch: string, base: string): Promise<GateOutcome> {
 		const head = (await this.#git(worktree, ["rev-parse", "HEAD"])).stdout.trim();
 		if (head.length === 0) {
@@ -463,6 +462,7 @@ export class Teardown {
 		const upstreamOutcome = await this.#upstreamGate(worktree, branch, head);
 		if (upstreamOutcome) return upstreamOutcome;
 
+		if (await this.#localNothingToPush(worktree, branch, base)) return { ok: true, reason: "nothing_to_push" };
 		// Nothing is on origin. Two ways that is still fine, in order of strength.
 		//
 		// 1. A merge receipt: `gh pr view` said MERGED, with a merge commit, for this

@@ -2689,7 +2689,7 @@ Kind-aware gates, ported from `cmdp teardown`. **Delivery does not appear here**
 
 | kind | gate | pass reasons |
 |---|---|---|
-| ship | clean porcelain, work on the job branch, **and** pushed; for failed/waiting non-script jobs, the current HEAD must also match an accepted current-generation ship/done report or an exact landed merge receipt | `pushed` (the branch **on origin** == HEAD), `upstream` (the branch its upstream names, on the remote, == HEAD), `merged` (a merge receipt for this head), `merged_head_deleted` |
+| ship | clean porcelain, work on the job branch, **and** pushed; for failed/waiting non-script jobs, the current HEAD must also match an accepted current-generation ship/done report or an exact landed merge receipt | `pushed` (the branch **on origin** == HEAD), `upstream` (the branch its upstream names, on the remote, == HEAD), `merged` (a merge receipt for this head), `merged_head_deleted`, `nothing_to_push` (delivery:local, clean, zero commits ahead of the base — the job branch need not exist on origin) |
 | research | clean porcelain **and** no local commits past `origin/<base>` | `clean_research` |
 
 ### Where the work lives, and why delivery does not relax the gate
@@ -2723,6 +2723,8 @@ follow-up promote is needed"), and it matches the one other place delivery is
 read: intake's `next` is `hold` for `pr` and `teardown` for everything else.
 The ship brief says the same in the worker's own words, so a brief and a gate
 can never disagree about it.
+
+**Nothing to push (picp-9g8).** A `delivery:local` ship job whose tree is clean and whose HEAD has zero commits ahead of the base tears down with `nothing_to_push`. The count uses the base sha from `git ls-remote` when this clone has that object, otherwise `origin/<base>..HEAD` (the same local ref the research gate counts). No job branch on origin is required, because there is nothing of this job's to lose when the lease is recycled. A local job that did commit is unchanged: it still has to be pushed. `delivery:pr` is unchanged. A dirty tree is still `dirty`.
 
 **`unreachable_work` (new in T29).** Because a returned slot is *reused*, a
 commit that no branch points at is lost the moment the next job takes it. So
