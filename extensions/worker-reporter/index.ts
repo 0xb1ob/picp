@@ -45,6 +45,7 @@ import {
 } from "../../src/worker-credential-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
+import { registerWorkerCompactionGuard } from "./compaction.ts";
 import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
 export {
 	BASH_COMMAND_ECHO_MAX,
@@ -457,6 +458,7 @@ export const NO_ANSWER_TEXT = [
 
 export default function (pi: ExtensionAPI): void {
 	const context = loadJobContext();
+	registerWorkerCompactionGuard(pi);
 	const state: ReporterState = { attempts: 0, reported: false };
 	let ciStatusQueries = 0;
 	const enrichEdits = createEditResultEnricher((path) => readFileSync(resolve(process.cwd(), path), "utf8"));
