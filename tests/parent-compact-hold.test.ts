@@ -8,8 +8,11 @@ import { registerSessionHooks } from "../extensions/command-post/session-hooks.t
 import { createSessionPost } from "../extensions/command-post/session-post.ts";
 import { createSessionState } from "../extensions/command-post/shared.ts";
 import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
+import { registerScheduleTools } from "../extensions/command-post/tools-schedule.ts";
+import { MandateStore } from "../src/mandate.ts";
+import { createScratchLedger } from "./harness/index.ts";
 import { CommandPost } from "../src/command-post.ts";
-import { LAYOUT } from "../src/contracts.ts";
+import { isoTimestamp, LAYOUT } from "../src/contracts.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
 import { type ContextReading, PARENT_COMPACT_HOLD_MS, PARENT_COMPACT_START_MS, ParentCompactHold } from "../src/parent-compact-hold.ts";
 import { frameBatch } from "../src/parent-outbox.ts";
@@ -55,23 +58,47 @@ const ctxAt = (tokens: number, branch: unknown[] = [], mode = "rpc") => ({ mode,
 const OVER = ctxAt(210000);
 const triggering = { deliverAs: "followUp", triggerTurn: true };
 
-type Sent = { message: { customType?: string; content: string }; options: { triggerTurn?: boolean; deliverAs?: string } };
+type Sent = { message: { customType?: string; content: string; display?: boolean; details?: Record<string, unknown> }; options: { triggerTurn?: boolean; deliverAs?: string } };
+type ExecuteSchedule = (id: string, params: Record<string, unknown>, signal: undefined, update: undefined, ctx: unknown) => Promise<{ content: Array<{ text: string }> }>;
 function open() {
-	const handlers = new Map<string, (event?: unknown, ctx?: unknown) => unknown>();
+	const handlers = new Map<string, Array<(event?: unknown, ctx?: unknown) => unknown>>();
 	const sent: Sent[] = [];
+	let executeSchedule: ExecuteSchedule;
 	const pi = {
-		on(name: string, handler: (event?: unknown, ctx?: unknown) => unknown) { handlers.set(name, handler); },
+		on(name: string, handler: (event?: unknown, ctx?: unknown) => unknown) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
 		registerEntryRenderer() {},
+		registerTool(tool: { name: string; execute: ExecuteSchedule }) { if (tool.name === "cp_schedule") executeSchedule = tool.execute; },
 		sendMessage(message: Sent["message"], options: Sent["options"]) { sent.push({ message, options }); },
 	} as unknown as ExtensionAPI;
 	const state = createSessionState();
 	state.post = post;
 	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
 	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
-	const fire = (name: string, event: unknown = {}, ctx?: unknown) => handlers.get(name)?.(event, ctx);
+	const scheduleHome = createScratchHome();
+	after(() => scheduleHome.cleanup());
+	const ledger = createScratchLedger({ home: scheduleHome.path, knownProjects: ["demo"] }).ledger;
+	const mandates = new MandateStore(scheduleHome.path);
+	const schedulePost = { home: scheduleHome.path, ledger: () => ledger, mandates, fleet: { read: () => ({ jobs: [] }) },
+		registry: { pathOf: () => scheduleHome.path, archivedNames: () => [], get: () => ({}) } };
+	registerScheduleTools(pi, { commandPost: () => schedulePost, setLive: () => {} } as never, () => true, () => {}, () => {}, (deliver) => {
+		if (wakeups.compactHold.offer(deliver) === "send") deliver();
+	});
+	const schedule = async (tag: string) => {
+		const seed = mandates.issue({ projects: ["demo"], objective: tag, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 1000000 }, job_cap: 2, schedule_grant: true });
+		const call = (params: Record<string, unknown>, quote = "") => executeSchedule("call-1", params, undefined, undefined, { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: quote } }] } });
+		const added = await call({ action: "add", name: `SYNTH-NOTICE ${tag}`, project: "demo", mandate_id: seed.id, manual: true, title: tag, kind: "ship", delivery: "pr" });
+		const id = /added (sch-[0-9a-f]{6})/.exec(added.content[0]!.text)![1]!;
+		const quote = `Run ${id} now.`;
+		return call({ action: "run_now", id, operator_quote: quote }, quote);
+	};
+	const fire = (name: string, event: unknown = {}, ctx?: unknown) => {
+		let result: unknown;
+		for (const handler of handlers.get(name) ?? []) { const value = handler(event, ctx); if (value !== undefined) result = value; }
+		return result;
+	};
 	const wake = (tag: string, kind: WakeupKind = "ci") => wakeups.sendWakeup(kind === "answered" ? { kind, keys: [`aw-${tag}`] } : { kind }, `SYNTH-NOTICE ${tag}`, kind === "answered" ? { answered: [] } : {});
 	const tags = () => sent.map((entry) => entry.message.content.match(/SYNTH-NOTICE (\S+)/)?.[1] ?? entry.message.customType);
-	return { fire, wake, sent, tags, hold: wakeups.compactHold };
+	return { fire, wake, schedule, sent, tags, hold: wakeups.compactHold };
 }
 
 test("T3(a): the pure hold — settle, timers, failures, busy phase, runStarted, not_over", () => {
@@ -129,29 +156,35 @@ test("T3(a): the pure hold — settle, timers, failures, busy phase, runStarted,
 	assert.match(lines.at(-1)!, /reason=not_over/);
 });
 
-test("T3(b): over the threshold, settle holds every wake until session_compact", (t) => {
+test("T3(b): over the threshold, settle holds fleet and schedule wakes in offer order until session_compact", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const count = mark();
 	const p = open();
 	p.fire("agent_settled", {}, OVER);
-	for (const [tag, kind] of [["C1", "ci"], ["E1", "envelope"], ["A1", "answered"]] as const) assert.equal(p.wake(tag, kind), true);
+	p.wake("C1");
+	await p.schedule("S1");
+	p.wake("E1", "envelope");
+	await p.schedule("S2");
+	p.wake("A1", "answered");
 	assert.equal(p.sent.length, 0, "no wake reaches pi while held");
 	p.fire("session_compact", {});
 	assert.equal(p.sent.length, 0, "released after pi's compact() returns");
 	t.mock.timers.tick(0);
-	assert.deepEqual(p.tags(), ["C1", "E1", "A1"]);
-	assert.ok(p.sent.every((entry) => entry.options.triggerTurn === true));
+	assert.deepEqual(p.tags(), ["C1", "S1", "E1", "S2", "A1"]);
+	assert.ok(p.sent.every((entry) => entry.options.triggerTurn === true && entry.options.deliverAs === "followUp"));
+	assert.ok(p.sent.filter((entry) => entry.message.customType === "cp-schedule").every((entry) => entry.message.display === true && entry.message.details?.outcome === "fired"));
 	assert.equal(count(/hold engaged phase=settled/), 1);
 	assert.equal(count(/hold released reason=compacted/), 1);
 });
 
-test("T3(c)/(d): below the threshold, or off a headless parent, nothing holds", () => {
+test("T3(c)/(d): below the threshold, or off a headless parent, nothing holds", async () => {
 	const count = mark();
 	for (const ctx of [ctxAt(150000), ctxAt(210000, [], "tui")]) {
 		const p = open();
 		p.fire("agent_settled", {}, ctx);
 		assert.equal(p.wake("now"), true);
-		assert.deepEqual(p.sent.map((entry) => entry.options), [triggering]);
+		await p.schedule("immediate");
+		assert.deepEqual(p.sent.map((entry) => entry.options), [triggering, triggering]);
 	}
 	assert.equal(count(/hold /), 0);
 });
@@ -175,7 +208,7 @@ test("T3(e): N6 — a length stop cancels pi's threshold compaction and never ho
 	t.mock.timers.tick(0);
 });
 
-test("T3(f): an over-threshold run holds every wake, including the send-first release, until compaction", (t) => {
+test("T3(f): an over-threshold run holds every wake, including schedule and send-first release, until compaction", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const count = mark();
 	const p = open();
@@ -185,6 +218,7 @@ test("T3(f): an over-threshold run holds every wake, including the send-first re
 	p.wake("W1");
 	p.wake("W2", "envelope");
 	assert.equal(p.sent.length, 0, "neither followUp nor quiet");
+	await p.schedule("S1");
 	const operatorSend = { role: "user", content: [{ type: "text", text: frameBatch([{ id: "ps-20300101000000-0000000a", text: "SYNTH operator question" }]) }] };
 	p.fire("message_start", { message: operatorSend });
 	p.wake("W3");
@@ -198,43 +232,67 @@ test("T3(f): an over-threshold run holds every wake, including the send-first re
 	assert.equal(p.sent.length, 0);
 	p.fire("session_compact", {});
 	t.mock.timers.tick(0);
-	assert.deepEqual(p.tags(), ["W1", "W2", "W3"]);
+	assert.deepEqual(p.tags(), ["W1", "W2", "S1", "W3"]);
 	assert.ok(p.sent.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
 	assert.equal(count(/hold released reason=compacted/), 1);
 });
 
-test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases", (t) => {
+test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const count = mark();
 	const p = open();
-	const run = (tag: string) => {
+	const run = async (tag: string) => {
 		p.fire("agent_start");
 		p.fire("turn_end", { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] }, OVER);
-		p.wake(tag);
+		await p.schedule(tag);
 		p.fire("agent_settled", {}, OVER);
 		assert.equal(p.tags().includes(tag), false, `${tag} held`);
 	};
-	run("G1");
+	await run("G1");
+	assert.deepEqual(p.fire("session_before_compact", { reason: "threshold", preparation: { tokensBefore: 255640 }, branchEntries: [LENGTH_STOP] }), { cancel: true });
+	p.fire("session_compact_failed", { reason: "threshold", aborted: true });
+	assert.deepEqual(p.sent, [], "threshold cancellation cannot release a schedule wake");
 	p.fire("session_compact_failed", { reason: "manual" });
-	run("G2");
+	await run("G2");
 	t.mock.timers.tick(PARENT_COMPACT_START_MS);
-	run("G3");
+	await run("G3");
 	p.fire("session_before_compact", { reason: "manual" });
 	t.mock.timers.tick(PARENT_COMPACT_HOLD_MS);
 	assert.deepEqual(p.tags(), ["G1", "G2", "G3"]);
 	for (const reason of ["failed", "start_timeout", "cap_timeout"]) assert.equal(count(new RegExp(`hold released reason=${reason} `)), 1, reason);
 	assert.equal(count(/hold disabled failures=3/), 1);
 	assert.equal(p.hold.enabled, false);
+	p.fire("agent_settled", {}, OVER);
+	await p.schedule("disabled");
+	assert.equal(p.tags().at(-1), "disabled", "disabled holding delivers schedules immediately");
 	p.fire("session_compact", {});
 	t.mock.timers.tick(0);
 	assert.equal(p.hold.enabled, true, "a compaction re-enables");
 
 	p.fire("agent_settled", {}, OVER);
-	p.wake("H1");
+	await p.schedule("H1");
 	p.fire("agent_start");
 	assert.equal(p.tags().includes("H1"), false, "agent_start is not a release");
 	p.fire("agent_settled", {}, OVER);
 	assert.equal(p.tags().includes("H1"), false);
 	t.mock.timers.tick(PARENT_COMPACT_START_MS);
 	assert.equal(p.tags().filter((tag) => tag === "H1").length, 1);
+});
+
+test("schedule wakes release on a below-threshold settle, and deliver immediately with context control disabled", async () => {
+	const p = open();
+	p.fire("agent_settled", {}, OVER);
+	await p.schedule("under");
+	assert.deepEqual(p.sent, []);
+	p.fire("agent_settled", {}, ctxAt(150000));
+	assert.deepEqual(p.tags(), ["under"]);
+	const settings = join(home.path, LAYOUT.data, "parent.json");
+	try {
+		writeFileSync(settings, JSON.stringify({ compact_at_tokens: null }));
+		p.fire("agent_settled", {}, OVER);
+		await p.schedule("off");
+		assert.deepEqual(p.tags(), ["under", "off"]);
+	} finally {
+		writeFileSync(settings, JSON.stringify({ compact_at_tokens: 200000 }));
+	}
 });
