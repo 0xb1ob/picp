@@ -537,12 +537,11 @@ export default function (pi: ExtensionAPI): void {
 		version = startVersionLine({ home: () => backstopTarget().home, ctx: () => sessionCtx });
 	});
 
-	// autonomy-programme-cur.5.3: a bounded, static note so the main LLM knows
-	// how to operate the parent without a human explaining it. Appended once
-	// per turn at a fixed position — nothing here varies by state, which is
-	// what keeps the prefix cacheable.
+	// Persist the static note as a transcript section so human prompts and bridge
+	// relays share system bytes. Returning systemPrompt forces a projection only
+	// inside session.prompt(); sendCustomMessage skips that hook and projection.
 	pi.on("before_agent_start", async (event) => {
-		return { systemPrompt: `${event.systemPrompt}\n\n${OPERATOR_NOTE}` };
+		event.systemPromptOptions.sections.operator_note = OPERATOR_NOTE;
 	});
 
 	pi.registerCommand("cp-bridge", {
