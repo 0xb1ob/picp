@@ -1282,6 +1282,38 @@ test("ship + delivery:local: committed but unpushed is still refused", { timeout
 	assert.ok(b.repo.remoteBranches().includes(jobId), "the work is on the remote, off this machine");
 });
 
+test("ship + delivery:local: no commits of its own tears down without an origin branch", { timeout: 60_000 }, async (t) => {
+	// picp-9g8: the base has moved, so the two-dot "already merged" check does not
+	// apply, and the branch was never pushed. There is still nothing to lose.
+	const b = benchOf(t);
+	const jobId = "cp-local-empty";
+	const worktree = b.worktree(jobId);
+	await b.addJob(jobId, worktree, "ship", "local");
+	advanceBase(b.repo, "src/moved.ts", "export const moved = 1;\n");
+
+	writeFileSync(join(worktree, "scratch.txt"), "dirty\n");
+	const dirty = await b.teardown.teardown(jobId);
+	assert.equal(dirty.torn_down, false);
+	assert.equal(dirty.failure?.code, "dirty");
+	rmSync(join(worktree, "scratch.txt"));
+
+	const torn = await b.teardown.teardown(jobId);
+	assert.equal(torn.torn_down, true, formatTeardown(torn));
+	assert.equal(torn.reason, "nothing_to_push");
+	assert.equal(torn.lease_returned, true);
+	assert.equal(b.fleet.require(jobId).phase, "done");
+	assert.equal(b.fleet.require(jobId).closed_reason, "gated");
+	assert.ok(!b.repo.remoteBranches().includes(jobId), "nothing was pushed");
+
+	const prId = "cp-pr-empty";
+	const prTree = b.worktree(prId);
+	await b.addJob(prId, prTree, "ship", "pr");
+	advanceBase(b.repo, "src/moved-again.ts", "export const movedAgain = 1;\n");
+	const refused = await b.teardown.teardown(prId);
+	assert.equal(refused.torn_down, false, "delivery:pr with no commits still needs a push");
+	assert.equal(refused.failure?.code, "unpushed");
+});
+
 test("ship: work on a detached HEAD is refused as unreachable, not as unpushed", { timeout: 60_000 }, async (t) => {
 	// Measured (T29): `treehouse return` recycles the worktree for the next job,
 	// while refs/heads/<branch> survives in the clone. So a commit no branch
