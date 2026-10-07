@@ -66,6 +66,9 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-landed-pr { grid-area: pr; display: flex; align-items: center; min-height: 44px; }
 .overview-merge { grid-area: merge; }
 @media (min-width: 900px) {
+ /* The header row leads the page, above an alarm; paused pills read as content under it. */
+ .overview > .overview-heading { order: -1; display: block; }
+ .overview-subtitle { margin-top: 16px; }
  .overview-health { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); }
  .overview-chip { padding: 14px 16px; }
  .overview-chip strong { font-size: 14px; }

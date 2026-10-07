@@ -178,7 +178,7 @@ test("nonadjacent dependency labels clear the done control in a collapsed column
 test("map prioritizes active projects, selects nothing until a pick, and keeps every job title",async()=>{
  const {screen}=await renderer();const data=mapQaFixture();const html=screen(data,true);
  assert.doesNotMatch(html,/md-old|md-revoked/);assert.match(html,/Show 2 expired or revoked mandates/);assert.ok(html.includes(`title="${mapObjective}"`));
- assert.match(html,/<h1>Jobs<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
+ assert.match(html,/<h1 title="Jobs">Jobs<\/h1>/);assert.doesNotMatch(html,/#mandates|Open mandates/);
  assert.ok(html.indexOf("<h2>pi-command-post-system")<html.indexOf("<h2>aaa-paused"));
  assert.match(html,/Select a job or mandate/);assert.match(html,/Nothing is dimmed until you pick one/);
  assert.doesNotMatch(html,/map-node-dim/);assert.doesNotMatch(html,/job · cp-job-/);

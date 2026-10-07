@@ -15,15 +15,8 @@
 .not-found-workers a > span:not(.job-dot) { color: var(--muted); }
 .not-found-workers a > span:last-child { margin-left: auto; }
 @media (min-width: 900px) {
- .not-found-heading { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(248px,1fr); align-items: center; gap: 16px; }
- .not-found-heading h1 { font-size: 32px; }
- .not-found-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: var(--muted); }
- .not-found-crumb a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+ .not-found-heading { display: block; }
  .not-found-recovery { max-width: 468px; padding-top: 168px; }
  .not-found-recovery > p { max-width: 400px; }
  .not-found-actions { flex-direction: row; justify-content: center; max-width: none; }
-}
-@media (min-width: 900px) and (max-width: 1199px) {
- .not-found-heading { grid-template-columns: minmax(0,1fr) auto; margin-right: 248px; }
- .not-found-heading h1 { font-size: 28px; }
 }

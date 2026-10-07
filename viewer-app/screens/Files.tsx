@@ -1,12 +1,13 @@
 import type { FilesResponse } from "../../src/viewer/api-types.ts";
 import { Icon } from "../components/icons.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import { filesHref, jobHref, sessionHref } from "../routes.ts";
 export function Files({data}: {data:FilesResponse}) {
  const projects=data.roots.filter(r=>r.kind === "project"), worktrees=data.roots.filter(r=>r.kind === "worktree");
  const selected=data.roots.find(r=>r.id===data.selected), listing=data.listing;
  const path=(name:string)=>data.path ? `${data.path}/${name}` : name;
  return <div class={selected ? "files files-open" : "files"}>
-  <div><h1>Files</h1><p class="files-subtitle">Clones and live worktrees · open read-only, 512 KiB cap</p></div>
+  <div><PageHeader title="Files"/><p class="files-subtitle">Clones and live worktrees · open read-only, 512 KiB cap</p></div>
   <section aria-labelledby="file-projects"><h2 id="file-projects">Projects</h2>{!projects.length && <p class="files-empty">No projects</p>}{projects.map(p=><div class="file-project" key={p.id}><Icon name="files" size={18}/><a class="file-root" href={filesHref(p.id)} aria-current={data.selected === p.id ? "location" : undefined}><span>{p.label}{p.paused && <span class="file-paused">paused</span>}</span><small>clone</small></a></div>)}</section>
   <section aria-labelledby="file-worktrees"><h2 id="file-worktrees">Live worktrees · {worktrees.length}</h2>{!worktrees.length && <p class="files-empty">No live worktrees</p>}{worktrees.map(w=><div class="file-worktree" key={w.id}>
    <div class="file-worktree-title"><span class={`session-dot session-dot-${w.phase ?? "unknown"}`}/><a href={filesHref(w.id)}><code>{w.job_id}</code></a><span>{w.phase ?? "unknown"}</span></div>

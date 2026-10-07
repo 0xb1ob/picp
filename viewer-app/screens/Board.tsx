@@ -5,6 +5,7 @@ import { jobHref } from "../routes.ts";
 import { PhaseDot, reviewText, CiSignal, ModelName } from "../components/JobSignals.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
+import { PageHeader } from "../components/PageHeader.tsx";
 import "./jobs.css";
 import "./board.css";
 
@@ -49,7 +50,7 @@ export function Board({data}:{data:BoardResponse}) {
  const folded=columns.filter(c=>!filled.includes(c));
  const selected=data.lanes.find(l=>l.id===mandate);
  return <div class="board-screen">
-  <header class="board-heading"><h1>Jobs</h1><JobsViews current="board"/></header>
+  <header class="board-heading"><PageHeader title="Jobs"/><JobsViews current="board"/></header>
   <div class="board-toolbar">
    <div class="board-filters" role="group" aria-label="Filter by mandate">
     <button type="button" aria-pressed={mandate==="all"} onClick={()=>setMandate("all")}>All mandates</button>

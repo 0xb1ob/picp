@@ -112,7 +112,7 @@ test("audit P4 #24 #26: one Decisions page stacks Awaiting, a collapsed Being ha
  const {page,shell} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
  const data = decisionsScreen({home:home.path,stateDir:join(home.path, LAYOUT.state)});
  const empty = page(data);
- assert.equal((empty.match(/<h1>/g) ?? []).length,1,"one page title"); assert.match(empty,/<h1>Decisions<\/h1>/);
+ assert.equal((empty.match(/<h1[\s>]/g) ?? []).length,1,"one page title"); assert.match(empty,/<h1 title="Decisions">Decisions<\/h1>/);
  assert.match(empty,/Nothing needs you/); assert.match(empty,/Nothing here for this filter/); assert.doesNotMatch(empty,/Being handled/,"no parent questions: no Being handled line");
  const at = (html:string,needle:string) => { const i = html.indexOf(needle); assert.ok(i >= 0,needle); return i; };
  assert.ok(at(empty,'id="awaiting"') < at(empty,'id="decided"'),"Awaiting sits above the Decided log");

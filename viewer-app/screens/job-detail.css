@@ -2,8 +2,6 @@
 .job-detail-body, .job-detail-main, .job-detail-side { display: contents; }
 .job-detail-heading { display: flex; flex-direction: column; gap: 12px; }
 .job-detail h1 { font-size: 23px; line-height: 1.3; order: 2; }
-.job-crumb { display: none; align-items: center; gap: 6px; font-size: 13px; color: var(--secondary); }
-.job-crumb a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
 .job-detail-heading > p { font-size: 13px; color: var(--dim); order: 3; }
 .job-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; order: 1; }
 .job-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--subtle); border: 1px solid var(--tag-border); border-radius: 999px; padding: 3px 10px; }
@@ -66,8 +64,7 @@
  .job-detail-main:empty { display: none; }
  .job-detail-side { grid-area: 1 / 2 / 3 / 3; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
  .job-timeline { grid-column: 1; }
- .job-detail h1 { font-size: 32px; order: 1; }
- .job-crumb { display: flex; margin-right: 248px; }
+ .job-detail-heading { gap: 16px; }
  .job-badges { order: 2; }
  .job-facts { display: flex; flex-direction: column; gap: 12px; }
  .job-facts > div { display: grid; grid-template-columns: 114px minmax(0,1fr); gap: 12px; align-items: baseline; }
