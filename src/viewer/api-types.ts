@@ -34,7 +34,7 @@ export interface SessionEntry {
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
  /** Full transcript (cp-xmw2): the th- id this entry is filed under, by the turn rule (src/viewer/thread-turns.ts). */
  thread?: string;
- /** Full transcript (cp-xmw2): a system entry or the inbox replay, shown under every thread. */
+ /** Full transcript (cp-xmw2): a system entry or the inbox replay. Shown in a thread only inside that thread's own span. */
  shared?: true;
  /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */
  answer_id?: string;

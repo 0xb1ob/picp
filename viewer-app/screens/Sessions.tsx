@@ -245,7 +245,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
- // Operator threads (cp-xmw2): the selected thread's entries plus every shared one; the pinned decisions are never filtered.
+ // Operator threads (cp-xmw2): own entries, plus shared ones inside that thread's own span; pinned decisions are never filtered.
  const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, shown=visibleEntries(data.entries,filter);
  const rowList=rows(shown), starts=groupStarts(rowList);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;

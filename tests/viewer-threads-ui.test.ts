@@ -26,13 +26,27 @@ const entry = (id: string, extra: Partial<SessionEntry> = {}): SessionEntry => (
 const status: ControlStatusResponse = { generated_at: "2026-10-06T08:30:00Z", enabled: true, running: true, reason: null, token: "t".repeat(64), busy: false, pending: false, session_file: "op.jsonl", recent: [], offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: true, herdr: false }, resume: { tmux: false, herdr: false } };
 const detail = (id: string): AwaitingDetail => ({ id, project: "demo", question: `Question ${id}`, created_at: "2026-10-06T08:20:00Z", recommendation: "Keep", source_escalation: null, job_ids: [], context: null, evidence_paths: [], options: [{ label: "Keep", consequence: "Paused", reply: `${id}: Keep` }], reason: null, source_created_at: null, mandate_id: null, mandate_status: null, spend: null, spend_cap: null, mandate_objective: null, jobs: [], escalation: null, evidence: [] });
 
-test("visibleEntries: All shows every entry; a thread shows its own plus shared; a new tag shows only shared", () => {
-	const entries = [entry("a", { thread: B }), entry("b", { thread: O }), entry("s", { kind: "system", shared: true }), entry("u")];
+test("visibleEntries: All is unchanged; shared entries only inside the thread's own span; none and an empty thread show nothing", () => {
+	const entries = [
+		entry("shared-before", { kind: "system", shared: true }),
+		entry("other-before", { thread: O }),
+		entry("own-first", { thread: B }),
+		entry("shared-inside", { kind: "system", shared: true }),
+		entry("other-inside", { thread: O }),
+		entry("loose-inside"),
+		entry("own-last", { thread: B }),
+		entry("shared-after", { kind: "system", shared: true }),
+	];
 	const ids = (filter: string | null) => visibleEntries(entries, filter).map(e => e.id);
-	assert.deepEqual(ids(threadFilter(list(), null)), ["a", "b", "s", "u"]);
-	assert.deepEqual(ids(threadFilter(list(), "billing-bug")), ["a", "s"]);
+	assert.deepEqual(ids(null), entries.map(e => e.id), "All");
+	assert.deepEqual(ids(threadFilter(list(), null)), entries.map(e => e.id));
+	assert.deepEqual(ids(B), ["own-first", "shared-inside", "own-last"]);
+	assert.deepEqual(ids(threadFilter(list(), "billing-bug")), ["own-first", "shared-inside", "own-last"]);
+	assert.deepEqual(ids(O), ["other-before", "shared-inside", "other-inside"], "shared outside this thread's span stays out; the other thread's own entries do not leak in");
 	assert.equal(threadFilter(list(), "brand-new"), "none");
-	assert.deepEqual(ids(threadFilter(list(), "brand-new")), ["s"]);
+	assert.deepEqual(ids("none"), []);
+	assert.deepEqual(ids(threadFilter(list(), "brand-new")), []);
+	assert.deepEqual(ids("th-0123456789ac"), [], "a thread with no own entries");
 	assert.equal(threadFilter({ error: "HTTP 403" }, "billing-bug"), null, "no list: nothing is filtered");
 	assert.equal(threadFilter(list({ availability: "unavailable", threads: [] }), "billing-bug"), null);
 	assert.equal(threadFilter(list({ availability: "missing", threads: [] }), "billing-bug"), "none", "a missing journal is an empty list");
@@ -44,7 +58,7 @@ test("visibleEntries: All shows every entry; a thread shows its own plus shared;
 test("Sessions: chips with aria-pressed and All by default, the sidebar section, the filter, and every open ask still pinned", async t => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const full = sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!;
-	full.entries = [entry("e-bill", { text: "about billing", thread: B }), entry("e-ops", { text: "about ops", thread: O }), entry("e-relay", { kind: "system", who: "cp-bridge", text: "relay line", tag: "bridge", shared: true })];
+	full.entries = [entry("e-bill", { text: "about billing", thread: B }), entry("e-ops", { text: "about ops", thread: O }), entry("e-relay", { kind: "system", who: "cp-bridge", text: "relay line", tag: "bridge", shared: true }), entry("e-ops-tail", { text: "ops tail", thread: O }), entry("e-after", { kind: "system", who: "cp-bridge", text: "after relay", tag: "bridge", shared: true })];
 	full.open_asks = [detail("ask-aaaa"), detail("ask-bbbb")];
 	const control: ControlView = { status, delivery: null, send: () => {} };
 
@@ -63,13 +77,14 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|<h2>Threads/, "Decisions view: no threads");
 
 	const filtered = screen(full, control, threads({ selected: "ops" }));
-	assert.match(filtered, /about ops/); assert.match(filtered, /relay line/, "shared entries show under every thread");
+	assert.match(filtered, /about ops/); assert.match(filtered, /ops tail/); assert.match(filtered, /relay line/, "a shared entry between this thread's own entries is shown");
+	assert.doesNotMatch(filtered, /after relay/, "a shared entry after the last own entry stays out");
 	assert.doesNotMatch(filtered, /about billing/);
 	assert.match(filtered, /2 decisions waiting/, "the pinned section is never filtered");
 	assert.match(filtered, /Question ask-aaaa[\s\S]*Question ask-bbbb/);
 	const fresh = screen(full, control, threads({ selected: "brand-new" }));
 	assert.match(fresh, /No messages in brand-new yet/);
-	assert.doesNotMatch(fresh, /about ops|about billing/);
+	assert.doesNotMatch(fresh, /about ops|about billing|relay line|after relay/);
 	assert.match(fresh, /<button type="button" class="session-thread-chip" aria-pressed="true">brand-new<\/button>/, "a new tag shows as the pressed chip");
 	assert.doesNotMatch(screen(full, control, threads({ status: { error: "threads are served only under --require-tailnet" } })), /session-threads|aria-label="Thread"/, "no list: no chips, no picker");
 });

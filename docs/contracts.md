@@ -6114,6 +6114,8 @@ then `bind`. The 202 body gains `thread: {tag, id, error}`; a bind that cannot b
 `thread.error` names why and the viewer logs one line (`viewer: thread bind unwritten for <dc-id>: …`). A send later
 dropped leaves an orphan bind that matches no entry; harmless.
 
+**Transcript filter.** In the Full transcript, **All** (no filter) shows every entry. A selected thread shows its own entries, and a shared entry (a system entry or the inbox replay) only when that entry sits inside the thread's own span — from its first own entry through its last, in file order. A shared entry before the first or after the last is not shown. Another thread's entries are never shown, even inside that span. A thread with no own entries, and a selected tag that has no thread yet (`threadFilter` is `"none"`), shows no entries; a tag with no thread yet still shows `No messages in <tag> yet`.
+
 **Failure and recovery.** A missing journal is `availability: "missing"` (empty list). An unreadable or over-16-MiB one
 is `unavailable` with a warning, done answers 500 and composer binds fail with `thread.error` while the message still
 delivers; nothing is truncated — move the file aside (deleting it clears all grouping and loses nothing else). The
