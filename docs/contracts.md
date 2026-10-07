@@ -1851,6 +1851,19 @@ biases a review before the evidence does. So `ROLE_PACKAGES`
 | `gate-reviewer` | nothing | same for compression; a standing minimalism lens on every verdict has no measured evidence behind it here |
 | `implementer` | `@dietrichgebert/ponytail`, `pi-lens` (trial), `pi-hashline-edit-pro` | minimal, root-cause, verified changes are the job. pi-lens loads only with `--no-read-guard` (`PACKAGE_FLAGS`): its read guard's one per-edit exemption is the `/lens-allow-edit` slash command, which no headless worker can type; `tests/pi-lens-headless.test.ts` proves the flag against the installed pi-lens |
 
+**Hashline compaction verification (Refs picp-kfg).** `pi-hashline-edit-pro`
+owns the anchor registry; picp does not restore or clear its claims on
+compaction. `tests/pi-hashline-compaction.test.ts` uses the real implementer
+extension order to check original-anchor reuse after manual and automatic
+threshold compaction, and `E_STALE_ANCHOR` rejection with preserved external
+bytes when the target line changes. The investigation passed on pi 1.0.4 and
+hashline 6.1.2. Run `npm run test:one -- tests/pi-hashline-compaction.test.ts`;
+set `CP_REQUIRE_HASHLINE_TESTS=1` to fail instead of skipping when hashline is
+absent. An absent-package CI skip does not prove installed-package behavior.
+The historical partial anchor-ownership loss remains unexplained: this
+coverage verifies current behavior and does not establish the old trigger,
+an upstream fix, or resolution of picp-kfg, which remains open.
+
 **Web access (cp-if9x).** Availability is read from pi-web-access's own config
 (`web-search.json`, located as the package does: `webSearchConfigPath`) and env
 names only, never a network probe (`src/web-provider.ts`). No config, or
