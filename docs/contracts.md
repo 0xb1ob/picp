@@ -3004,7 +3004,8 @@ accepted report resumes with fresh CI, review and permission checks.
 ### Durable integration holds (4r4)
 
 `cp_integrate hold <job-id> reason` (tool arguments: `action: "hold"`,
-`job_id`, `reason`) pauses that job until `cp_integrate release <job-id>`.
+`job_id`, `reason`) pauses integration until `cp_integrate release <job-id>`;
+bounded CI repair may still hand work back to the job's implementer.
 `status` includes the active hold even before any integration attempt.
 The operator bridge exposes `cp_parent integration_hold` and
 `integration_release` with `job_id` and a hold `reason`. These write directly
@@ -3015,18 +3016,46 @@ The validated record lives at `state/runs/<job-id>/integration-hold.json`
 (under the mode's state directory), separate from the parent-owned fleet file.
 It survives process restarts and head changes. Manual and automatic integration
 read it at entry and again immediately before both the repository-permitted
-and human-checkpoint merge commands. An active or unreadable hold returns
-`next: wait` with the reason; neither green CI nor an approved checkpoint
-clears it. Unknown jobs, non-PR jobs, unsafe ids and empty reasons are refused.
+and human-checkpoint merge commands. An active or unreadable hold prevents
+integration; neither green CI nor an approved checkpoint clears it. Unknown
+jobs, non-PR jobs, unsafe ids and empty reasons are refused.
 
-**A hold pauses merging only (picp-wzq).** The held entry step still reads the
-PR and its CI for the pushed head, read-only: one `gh pr view` and one
-`gh run list`, recorded as `gh:`/`ci:` facts with the head sha and PR url (a red
-`ci:` fact names its run, as in §The CI/PR watch), and the reason leads with `CI <state> on
-<head12>`. It never promotes, reruns, updates the branch, readies, or merges, and
-it still returns `next: wait`. A hold caught right before a merge command keeps
-the facts that step already read. During a drain, or on an unreadable hold or
-drain file, it starts no process at all and records `ci: not read — <why>`.
+**Held CI repair (sweep item 14, B1).** A valid per-job hold permits one bounded
+CI repair through the existing `Integrator.#resolve` and `Sender` repair path.
+The held entry reads the PR and CI for its pushed head: one `gh pr view` and
+one `gh run list`, recorded as sourced `gh:`/`ci:` facts with head SHA, PR URL,
+and the failing run ID/URL when available. Green, pending, unknown, unreadable,
+or wrong-head CI remains `next: wait`. Repair requires an open PR with a proven
+matching job branch and current-head failed CI, an eligible reported held
+ship/PR job, a done (or legacy absent) live report, and no unfinished worktree
+rebase, merge or cherry-pick. A confirming PR read must still name that open
+branch and head. Hold/drain, fleet/report generation, worker identity and
+promotion state are rechecked after awaited reads; changed or unreadable
+eligibility admits no repair. A hold released mid-probe requires a fresh advance.
+
+A delivered repair returns `step: ci`, `next: resolve`, the hold reason, CI
+provenance and sender receipt. A refused sender or completed failed repair
+surfaces the existing cause. The cumulative per-job `resolve_attempts` and
+`INTEGRATE_MAX_RESOLVE` allowance survives new heads, reports, held-green reads
+and restarts. Waiting/launching/promoting workers get no further handoff. The
+same worker/session/model/lease/branch, mandate repair permission, caps, risk
+checks and envelope reopening remain the sender's rules; no replacement is
+dispatched and no repair refusal is automatically retried. CI observation and
+startup use the existing serialized held continuation even when parent notice
+transport is delayed.
+
+The durable hold stays unchanged. This behavior applies to existing QA holds
+as well as new holds: automatic repair can move the branch during QA. No
+infrastructure rerun, review, server-side branch update, draft-ready operation,
+merge, teardown, head deletion, job close, or merge authorization starts on the
+held entry path. A hold caught at either pre-merge check still returns `wait`
+with the facts already read. A drain, or unreadable drain/hold, starts no process
+at entry and prevents further work if it appears during the probe. Explicit
+release removes only the hold; the next ordinary advance rechecks CI,
+current-head review and its 30-second window, worker phase/live report, the
+main-CI latch, repository permission and applicable checkpoint/handoff rules.
+Migration: none; hold files and notice schemas are unchanged.
+
 `cp_integrate status` prints the record's facts and the watcher's last CI read
 (`ci-watch:`, from `state/ci-watch.json`), never calling `gh`.
 

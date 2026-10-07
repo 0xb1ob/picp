@@ -20,6 +20,10 @@ Reference lookups use kind plus id throughout binding, folding, counts/waiting a
 
 Parent-directed `cp-schedule` notices now use the existing compaction hold, including PR/pipeline fires, local skill anchors and startup recovery of unexpanded anchors. Held notices release once in offer order; fires, fresh grants, quote/open-fire checks, polling and runner-owned answer/board/local work keep their existing timing. Migration: none.
 
+### Bounded CI repair during integration holds (sweep item 14, B1)
+
+Valid per-job integration holds, including existing QA holds, now allow one existing bounded handoff to repair failed CI on the open PR's current pushed head. Repair retains the hold, cumulative allowance, same-worker sender permission and envelope reopening; green CI still waits for explicit release and fresh integration gates. Drain/unreadable state remains a full pause, and no rerun, review, update, ready, merge or teardown starts while held. Automatic repair may move the branch during QA. Migration: none; hold files and CI notices keep their shapes.
+
 ### Ship briefs and one conflict handoff (picp-k2o, picp-0lj)
 
 A ship job cut from a synthesis is dispatched with a short fix list as `task_file` (the item's fix, files, constraints, and test plan), not the previous synthesis or `report.md` inlined as `task`. The ship brief tells the worker not to reread that synthesis unless the task names it as evidence, and not to raise the compact threshold so a long reread fits. A conflicting PR is handed to its implementer once per head; a later `cp_integrate` for that same head returns `next: wait` and does not journal another `integration_surfaced`. A new head is a new handoff. This is not a reason to serialize the fleet. Migration: none.
