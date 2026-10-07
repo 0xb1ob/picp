@@ -192,7 +192,7 @@ sits in **Awaiting you** until its own rules are satisfied — there is **no ses
 authority** a human can grant. Where this home
 cannot read the CI state or the merge permission, a per-head human
 authorization is the fallback, answered by `cp_decide` with an operator
-quote. Conflicts and red suites promote the job's own implementer once per head;
+quote. Conflicts and red suites promote the job's own implementer (conflicts: once per head; red CI: one repair per job);
 never merge red, never dispatch a replacement for a conflict fix. A conflict already handed off for this head waits until the branch moves — do not `cp_revive` or `cp_send` it again. A project with `merge_policy: human_handoff` (`cp_project`) is never merged here: after a passing review and green CI its PR is handed to a human on GitHub (one `human-review pr` row, `next: surface`); a change request is a `cp_send` to the same job.
 
 ## Reporting to the operator
