@@ -80,7 +80,7 @@ CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
 CI_WATCH_INTERVAL_MS	value	7167448c735abb91	d55d01d0341ed0ba
 CI_WATCH_KEEP_ANNOUNCED	value	565599989d7b8406	1a6562590ef19d10
 CI_WATCH_MAX_BACKOFF_MS	value	6ecd5f312ec3ee6a	d1d282f04815e254
-CP_EVENT_KINDS	value	0ac53bc0b4d1433b	bee14662e8c2af61
+CP_EVENT_KINDS	value	73731ba0cc1fcba8	9b192774f36d4f46
 Checkpoint	type	d1c462e0c6aa9937	-
 CheckpointDecision	type	1a7bb07fade60614	-
 CheckpointDecisionSchema	value	e4ce39719c2509de	fc45a9911b41c900
@@ -101,7 +101,7 @@ CiWatchJobSchema	value	bdb72f0e135d76ef	898debb712735da7
 Confidence	type	b626807470740910	-
 ContractError	class	e6cbe92ed1ab171c	e200d9d8db2fc02b
 CpEventKind	type	d73f96cfd2161fd9	-
-CpEventKindSchema	value	28b4ba70f9a2809b	1d689f532f61e5cc
+CpEventKindSchema	value	28b4ba70f9a2809b	cb31c0ebe1954d25
 CurrentToolSchema	value	8ac5ec202fe7c032	cbcc4590e0baed94
 DEATH_MESSAGE_TYPE	value	0bd493782cc0def1	210bdf086fd1826b
 DECISION_CONTEXT_LINE_MAX_CHARS	value	5a616797cd2968ab	a512db2741cd2069
@@ -324,7 +324,7 @@ MandateFieldSourceSchema	value	a2d3848e5d1c474b	424bfc3b8f6273c5
 MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandateProvenance	type	483039dec428e70a	-
 MandateRevokedBy	type	72adc3133e08ada6	-
-MandateSchema	value	75e6368355dd0baf	9d240517d6648a31
+MandateSchema	value	9fa57d9bd0a33333	90a7404920978c0c
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -382,8 +382,8 @@ ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
 Project	type	8c0e88cc1e4401c8	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
-ProjectRegistrySchema	value	1cc8877e8fc45666	6478c41300c5e39a
-ProjectSchema	value	96b79a59aad9d7ad	5d6f7eccfdc7dbe5
+ProjectRegistrySchema	value	1cc8877e8fc45666	51708bce8e52c879
+ProjectSchema	value	1c7f6f5659dcfd4d	146ea61c63512052
 QUALITY_LENSES	value	9d9728612bd80e96	da1ad1cd9d71c6cc
 QUALITY_PANEL_SLOT	value	9dac97ccd7bc9dfb	e80fdef4566bcfb0
 QUESTION_ANSWER_MAX_CHARS	value	72be5ce6a6f549aa	40510175845988f1
@@ -417,6 +417,7 @@ RECOVERY_POLICY_ACTIONS	value	8edc4fefae2f735d	38d571a8fc6cd1eb
 RESEARCH_ARTIFACT_SECTIONS	value	2d6e361bb9bb23ad	632b3705eab1d5b5
 REVIEW_DIALOG_TITLE	value	75e8155892745791	48dc634a81d3cd0e
 REVIEW_MAX_ATTEMPTS	value	56e0dbd2013b4fce	ef2d127de37b942b
+REVIEW_MERGE_WINDOW_MS	value	b136108c868b4884	891937cb335016e9
 REVIEW_ORIGINAL_TASK_MAX_BYTES	value	4df681eb2e1ce13d	3bb78535cc9555ff
 REVIEW_SURFACES	value	99d4c3a17ee2cd26	48ec4d7c9d777cf8
 RISKS	value	704c18a55a68b3e9	88dd67a2576f195b
@@ -437,6 +438,7 @@ ReviewApproval	type	c00e17ac99273360	-
 ReviewApprovalSchema	value	7568f2851e72d9bd	6f4d0a8aafa49e49
 ReviewSurface	type	5085d1c636efb2af	-
 ReviewSurfaceSchema	value	6a7a5b18f703fd02	12610825d26662c8
+ReviewerModelSchema	value	9698c5952d660e7c	e7c940aecd33252e
 Risk	type	939fab96717aaecf	-
 RiskPreapproval	type	ec3984a617b90ede	-
 RiskPreapprovalSchema	value	01540058697e2382	c1401b1f9c803300

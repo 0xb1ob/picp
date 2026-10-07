@@ -37,6 +37,7 @@ import { RunRecorder } from "../src/run-artifacts.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { awaitingListText } from "../extensions/command-post/index.ts";
 import { assertReviewAllowed, raiseTokenCap } from "../src/mandate-usage.ts";
+import { readFileSync } from "node:fs";
 import { createScratchHome, createScratchLedger, REPO_ROOT } from "./harness/index.ts";
 import { batchRiskHigh } from "../src/risk-batch.ts";
 
@@ -66,6 +67,50 @@ function issue(
 		...over,
 	}, jobs);
 }
+
+test("reviewer preference round-trips and changes only the setting, including expired grants", (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const original = issue(store, { reviewer_model: "a/first" });
+	assert.equal(new MandateStore(home.path).require(original.id).reviewer_model, "a/first");
+	assert.match(store.show(original.id), /a\/first/);
+	const before = readFileSync(store.file(original.id), "utf8");
+	for (const value of ["invalid", "   ", "a/has space", `a/${"x".repeat(129)}`]) assert.throws(() => store.setReviewerModel(original.id, value));
+	assert.throws(() => store.setReviewerModel("md-absent", null));
+	assert.equal(readFileSync(store.file(original.id), "utf8"), before);
+	const changed = store.setReviewerModel(original.id, " b/second ");
+	assert.deepEqual(changed, { ...original, reviewer_model: "b/second" });
+	const { reviewer_model: _model, ...without } = original;
+	assert.deepEqual(store.setReviewerModel(original.id, null), without);
+	const past = new MandateStore(home.path, { now: () => new Date(Date.now() - 2 * 86_400_000) });
+	const issued = issue(past, { expiry: earlier(), reviewer_model: "a/expired" });
+	store.sweep(isoTimestamp());
+	const expired = store.require(issued.id);
+	assert.equal(expired.status, "expired");
+	assert.deepEqual(store.setReviewerModel(expired.id, "b/expired"), { ...expired, reviewer_model: "b/expired" });
+});
+
+test("cp_mandate forwards issue reviewer preference and set/clear; null on issue refuses", async (t) => {
+	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	const post = { home: home.path, fleet: { read: () => ({ jobs: [] }) }, registry: { get: () => ({ clone_url: "https://github.com/o/demo.git" }) }, ledger: () => ({}), escalations: {}, mandates: store };
+	registerMandateTools({ on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => post, setLive: () => {}, refreshWidget: () => {}, projectOf: () => () => undefined, createdThisTurn: [] } as never);
+	const run = (params: Record<string, unknown>) => tools.get("cp_mandate")!.execute("c", params, undefined, undefined, {});
+	const args = { action: "issue", projects: ["demo"], objective: "finish the approved work", reviewer_model: "a/review" };
+	await run(args);
+	const grant = store.list()[0]!;
+	assert.equal(grant.reviewer_model, "a/review");
+	await run({ action: "reviewer_model", mandate_id: grant.id, reviewer_model: "b/review" });
+	assert.equal(store.require(grant.id).reviewer_model, "b/review");
+	await run({ action: "reviewer_model", mandate_id: grant.id, reviewer_model: null });
+	assert.equal(store.require(grant.id).reviewer_model, undefined);
+	await assert.rejects(run({ ...args, reviewer_model: null }), /null only clears/);
+	await assert.rejects(run({ action: "reviewer_model", mandate_id: grant.id }), /needs mandate_id and reviewer_model/);
+	assert.equal(store.list().length, 1);
+});
 
 test("cp_mandate is parent-only", () => {
 	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_mandate"));

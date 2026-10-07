@@ -196,11 +196,6 @@ export class HeldContinuation {
 		const key = continuationKey(trigger);
 		const skip = (action: ContinuationAction, reason: string): ContinuationOutcome => ({ job_id: trigger.jobId, key, action, steps: 0, reason });
 		if (this.#stopped) return skip("stopped", "the continuation was stopped");
-		const timer = this.#timers.get(trigger.jobId);
-		if (timer && (timer.trigger.head !== trigger.head || timer.trigger.generation !== trigger.generation)) {
-			timer.cancel();
-			this.#timers.delete(trigger.jobId);
-		}
 		if (!this.#deps.enabled()) return skip("disabled", "the continuation is off in this process");
 		// Not added to #seen: the drain ends in a restart, and startup `resume()` owes this job its pass.
 		if (this.#draining()) {
@@ -304,6 +299,11 @@ export class HeldContinuation {
 			const stale = this.#stale(trigger);
 			if (stale) return out(stale.action, step - 1, stale.reason, stale.action === "wait" ? "wait" : undefined);
 			if (this.#draining()) return out("draining", step - 1, `${jobId}: a drain started mid-sequence — no further step; startup resumes it`);
+			const timer = this.#timers.get(jobId);
+			if (timer && (timer.trigger.head !== trigger.head || timer.trigger.generation !== trigger.generation)) {
+				timer.cancel();
+				this.#timers.delete(jobId);
+			}
 			if (trigger.event === "verdict") {
 				const window = trigger.head ? this.#deps.reviewWindow?.(jobId, trigger.head) : undefined;
 				if (window) return out("wait", step - 1, this.#arm(trigger, window), "wait");

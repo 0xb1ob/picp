@@ -123,7 +123,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		promptGuidelines: [
 			"Call cp_integrate advance for the next PR to merge; it does one step and returns `next`. Call it again while next is `advance`.",
 			"next: `surface` means a human decision, or a merge the repository refuses (merge pending) — relay it, do not retry it.",
-			"next: `wait` means CI is unfinished or an integration hold is active — the result still names CI for the pushed head. Nothing was merged; release a hold explicitly, then advance again.",
+			"next: `wait` means CI, a hold, or the fixed 30-second window after a complete review pass is pending. review_resume_at names its deadline; the held-PR continuation resumes once then, without another CI event. To pause longer, write a hold; release it explicitly, then advance with all gates rechecked.",
 			"next: `review` means no passing cp_review on this head. Run cp_review on the named head; do not re-review an unchanged one.",
 			"next: `resolve` means the job's own implementer is still working or being promoted to fix a conflict or a red suite. Wait for its envelope.",
 			"A stale base alone is never rebased: only BEHIND, or a readable up-to-date rule, updates the branch, and the moved head needs CI and cp_review again.",

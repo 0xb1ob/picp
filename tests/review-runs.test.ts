@@ -33,6 +33,8 @@ import { HeldContinuation } from "../src/held-continuation.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 import { createScratchHome, readRunEvents } from "./harness/index.ts";
 
+import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
+import { readReviewMergeWindow } from "../src/review-merge-window.ts";
 interface Bench {
 	home: string;
 	runs: RunRegistry;
@@ -593,10 +595,11 @@ test("a pending.json that does not validate is skipped and reported, never throw
 	assert.equal(readFileSync(file, "utf8"), "{not json", "and it is never rewritten");
 });
 
-test("jje.2: a passing diff review continues integration at verdict due time — decision on disk first, wake-up after", async (t) => {
+test("passing verdict settles and wakes the parent before deadline integration", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const order: string[] = [];
+	const clock = deadlineClock("2026-10-07T10:00:00Z");
 	const record = {
 		job_id: "cp-v2", branch: "cp-v2", project: "demo", kind: "ship", phase: "held", delivery: "pr",
 		reported_at: "2026-09-05T09:00:00Z", supersessions: 0,
@@ -604,6 +607,8 @@ test("jje.2: a passing diff review continues integration at verdict due time —
 	} as unknown as FleetRecord;
 	const continuation = new HeldContinuation({
 		enabled: () => true,
+		now: clock.now, schedule: clock.schedule,
+		reviewWindow: (jobId, head) => readReviewMergeWindow(home.path, jobId, head, clock.now()),
 		fleet: { get: () => record, list: () => [record] } as never,
 		advance: async (jobId) => {
 			order.push(existsSync(join(home.path, paths.reviewFile(jobId, 1))) ? "advance:decided" : "advance:undecided");
@@ -624,14 +629,21 @@ test("jje.2: a passing diff review continues integration at verdict due time —
 		jobId: "cp-v2", surface: "review", attempt: 1, model: "mock/reviewer", deadline: "2026-09-05T10:15:00Z",
 		wait: () => new Promise<string>((resolve) => (release = resolve)),
 		finish: async (outcome) => {
-			const file = join(home.path, paths.reviewFile("cp-v2", 1));
-			mkdirSync(join(file, ".."), { recursive: true });
-			writeFileSync(file, JSON.stringify({ outcome }));
+			assert.equal(outcome, "pass");
+			writeWindowPass(home.path, "cp-v2", "a".repeat(40), clock.now().toISOString());
 			return { jobId: "cp-v2", surface: "review", attempt: 1, headSha: "a".repeat(40), content: "pass", details: { next: "proceed" } };
 		},
 	});
 	registry.handBack(wait.key);
 	release("pass");
 	await registry.settled(wait.key);
-	assert.deepEqual(order, ["advance:decided", "notice", "wakeup"], "the continuation reads the persisted verdict and settles before the parent is woken");
+	assert.deepEqual(order, ["notice", "wakeup"], "durable pass and notice reach the operator without a GitHub read or merge");
+	assert.equal(registry.pending("cp-v2", "review"), undefined, "the reviewer slot is released during the interval");
+	clock.tick(Date.parse("2026-10-07T10:00:30Z") - 1);
+	assert.deepEqual(order, ["notice", "wakeup"]);
+	clock.tick(clock.now().getTime() + 1);
+	await continuation.serialize("cp-v2", async () => {});
+	assert.deepEqual(order, ["notice", "wakeup", "advance:decided", "notice"]);
+	assert.equal(clock.tasks.size, 0);
+	continuation.stop();
 });

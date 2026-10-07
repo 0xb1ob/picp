@@ -46,6 +46,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"outside it they stay pending. Authorization is delegated only through this store, never USER.md prose.",
 		promptSnippet: "Issue or inspect bounded authority (cp_mandate)",
 		promptGuidelines: [
+			"reviewer_model is a reviewer preference only: set or clear it on this grant without resuming, renewing or widening authority. Issue refuses null; existing-grant null clears. Configured models must pass normal capability checks and never fall back.",
 			"Call cp_mandate issue with only projects and objective when the operator grants bounded authority in advance — " +
 				"expiry, spend/job caps, allowed actions and ask_on all resolve from data/mandate-defaults.json (and a project override); " +
 				"never ask the human for them, never invent numbers. Pass an explicit field only when the human named one.",
@@ -61,7 +62,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		],
 		parameters: Type.Object({
 			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set", "reviewer_model"], {
-				description: "issue/pause/resume/revoke/show; raise_tokens (never USD); preapprove_risk; supersede_stale; defaults_show/defaults_set; reviewer_model sets or clears only a grant's reviewer preference",
+				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json; reviewer_model sets or clears only a grant's reviewer preference",
 			}),
 			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk/reviewer_model: the mandate id (md-…). show with an id returns that grant at any status" })),
 			statuses: Type.Optional(

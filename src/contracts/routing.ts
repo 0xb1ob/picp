@@ -5,7 +5,6 @@ import { type Static, Type } from "typebox";
 import { type Role, RoleSchema } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";
 
-
 /** Reviewer preferences enter the existing override tier; they add no routing pins. */
 export const ReviewerModelSchema = Type.String({ minLength: 3, maxLength: 128, pattern: "^[^\\s/]+/[^\\s]+$" });
 /**

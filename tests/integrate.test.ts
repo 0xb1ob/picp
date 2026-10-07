@@ -76,6 +76,8 @@ import { createScratchHome, fakeWorkerManager, readRunEvents } from "./harness/i
 import { HeldRelease } from "../src/held-release.ts";
 import { HeldContinuation } from "../src/held-continuation.ts";
 
+import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
+import { readReviewMergeWindow } from "../src/review-merge-window.ts";
 const BR = "cp-int1";
 const PR_URL = "https://github.com/o/r/pull/61";
 const HEAD_A = "aaaaaaaaaaaa1111111111111111111111111111";
@@ -489,6 +491,7 @@ interface Bench {
 }
 
 interface BenchOptions {
+	now?: () => Date;
 	run?: CommandRunner;
 	/** `undefined` means no sender is wired at all. */
 	send?: (jobId: string, message: string) => Promise<{ receipt: string; error?: string }>;
@@ -606,6 +609,7 @@ async function benchOf(
 				projectDir: () => home.path,
 				runs,
 				run,
+				...(options.now ? { now: options.now } : {}),
 				...(options.noAwaiting ? {} : { awaiting: () => new AwaitingStore({ home: home.path }) }),
 				...(options.infraRerun ? { infraRerun: options.infraRerun } : {}),
 				...(options.mainCiScope ? { mainCiScope: options.mainCiScope } : {}),
@@ -625,6 +629,66 @@ async function benchOf(
 	};
 }
 
+for (const fallback of [false, true]) {
+	test(`30-second review minimum and hold race: ${fallback ? "approved human checkpoint" : "repository permission"}`, async (t) => {
+		const b = await benchOf(t);
+		const clock = deadlineClock("2026-10-07T10:00:00Z");
+		writeWindowPass(b.home, BR, HEAD_A, clock.now().toISOString());
+		if (fallback) b.approve(HEAD_A);
+		const world = fallback ? { pr: { ...openPr(), mergeStateStatus: undefined } } : {};
+		const integrator = b.integrator(world, { now: clock.now });
+		clock.tick(Date.parse("2026-10-07T10:00:30Z") - 1);
+		const waiting = await integrator.advance({ jobId: BR });
+		assert.equal(waiting.next, "wait");
+		assert.equal(waiting.review_resume_at, "2026-10-07T10:00:30.000Z");
+		assert.equal(count(b, "gh pr merge"), 0);
+		const holds = new IntegrationHolds(b.home);
+		holds.hold(BR, "pause after verdict");
+		clock.tick(clock.now().getTime() + 1);
+		const held = await integrator.advance({ jobId: BR });
+		assert.equal(held.next, "wait");
+		assert.match(held.reason, /hold/);
+		assert.equal(held.review_resume_at, undefined);
+		assert.equal(count(b, "gh pr merge"), 0);
+		holds.release(BR);
+		const merged = await integrator.advance({ jobId: BR });
+		assert.equal(merged.next, "advance");
+		assert.equal(merged.record.merge_authority?.kind, fallback ? "human_checkpoint" : "repo_derived");
+		assert.equal(count(b, "gh pr merge"), 1);
+		assert.equal(matchHeadBinding(b.calls.find((call) => call.startsWith("gh pr merge"))!)?.head, HEAD_A);
+	});
+	test(`deadline continuation rechecks hold, head, CI and permission (${fallback ? "fallback" : "repo"})`, async (t) => {
+		for (const change of ["hold", "unreadable_hold", "head", "ci", "permission", "none"]) {
+			const b = await benchOf(t);
+			const clock = deadlineClock("2026-10-07T10:00:00Z");
+			writeWindowPass(b.home, BR, HEAD_A, clock.now().toISOString());
+			if (fallback) b.approve(HEAD_A);
+			const world = defaultWorld(fallback ? { pr: { ...openPr(), mergeStateStatus: undefined } } : {});
+			const integrator = b.integrator(world, { now: clock.now, run: runnerFor(world, b.calls, b.worktree) });
+			const continuation = new HeldContinuation({ enabled: () => true, fleet: b.fleet,
+				head: () => HEAD_A, advance: async (jobId) => {
+					const result = await integrator.advance({ jobId });
+					if (result.step === "merge" && result.next === "advance") world.pr = { ...openPr(), state: "MERGED", mergedAt: "2026-10-07T10:00:30Z", mergeCommit: { oid: MERGE_COMMIT } };
+					return result;
+				},
+				review: async () => assert.fail("no new reviewer on resume"), reviews: { pending: () => undefined, handBack: () => {} },
+				reviewWindow: (jobId, head) => readReviewMergeWindow(b.home, jobId, head, clock.now()),
+				now: clock.now, schedule: clock.schedule, notify: () => {} });
+			t.after(() => continuation.stop());
+			assert.equal((await continuation.trigger({ jobId: BR, event: "verdict", head: HEAD_A })).action, "wait");
+			assert.equal(count(b, "gh pr view"), 0, "verdict handback only reads local evidence");
+			if (change === "hold") new IntegrationHolds(b.home).hold(BR, "during window");
+			if (change === "unreadable_hold") { const file = new IntegrationHolds(b.home).file(BR); mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, "{"); }
+			if (change === "head") world.pr = { ...openPr(), headRefOid: HEAD_B };
+			if (change === "ci") world.runs = [{ status: "in_progress", conclusion: null, headSha: HEAD_A }];
+			if (change === "permission") world.pr = { ...openPr(), mergeStateStatus: "BLOCKED" };
+			clock.tick(Date.parse("2026-10-07T10:00:30Z"));
+			await continuation.serialize(BR, async () => {});
+			assert.equal(count(b, "gh pr merge"), change === "none" ? 1 : 0, change);
+			assert.equal(clock.tasks.size, 0, "no timer retries a stopped/waiting result");
+		}
+	});
+}
 /**
  * The `--match-head-commit` binding as it appears in a captured `gh pr merge`
  * argv: where the flag is, and the sha immediately after it. `undefined` means

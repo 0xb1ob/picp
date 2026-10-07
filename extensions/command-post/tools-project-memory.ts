@@ -28,9 +28,10 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 		promptGuidelines: [
 			"Use cp_project add before the first dispatch into a repository this home has never worked in.",
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
+			"reviewer_model sets the exact model for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model"], { description: "list, add, show, archive/unarchive, set merge_policy, or set/clear reviewer_model" }),
+			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, or set/clear reviewer_model" }),
 			name: Type.Optional(Type.String({ description: "Project name; required except for list" })),
 			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "reviewer_model: exact provider/model for plan gates and diff reviews; null clears. Eligible mandate preference takes precedence; unusable models refuse." })),
 			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy: repo (default; cp_integrate merges when the repository permits) or human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post)" })),

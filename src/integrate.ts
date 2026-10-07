@@ -87,6 +87,7 @@ import type { CommandRunner, MergeStore, RecordMergeResult } from "./merges.ts";
 import { EscalationStore, raiseMergeRefused } from "./escalation.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { TeardownResult } from "./teardown.ts";
+import { readReviewMergeWindow } from "./review-merge-window.ts";
 
 /**
  * Just enough of `AwaitingStore` for the "merge pending" reminder (cp-e0c).
@@ -107,8 +108,6 @@ export interface AwaitingLike {
 	}): Promise<{ item: { id: string }; raised: boolean }>;
 	withdraw(id: string): Promise<unknown>;
 }
-
-import { readReviewMergeWindow } from "./review-merge-window.ts";
 
 export class IntegrateError extends Error {}
 
