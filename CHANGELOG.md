@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Worker compaction policy blocks (picp-jan)
+
+A worker records one session error when its summarizer is blocked by a provider content, safety, or Terms of Service policy. Subsequent compactions of that transcript are cancelled before calling the summarizer, including after worker revival. A fresh session is unaffected; other failures retain pi's normal behavior. No compact threshold or pi settings change. Migration: none.
+
 ### Mandate show lists live grants (picp-xpx)
 
 `cp_mandate show` with no id returns active and paused grants only. Pass `statuses` (`revoked`, `expired`, or any subset of `active|paused|revoked|expired`) to list closed grants. A show that names a mandate id still returns that grant, including a revoked one. Migration: none.
