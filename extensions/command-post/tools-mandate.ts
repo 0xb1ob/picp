@@ -9,6 +9,7 @@ import {
 	isoTimestamp,
 	JOB_KINDS,
 	MANDATE_ACTIONS,
+	MANDATE_STATUSES,
 	MANDATE_ASK_ON,
 	MANDATE_CHANNELS,
 	MANDATE_DEFAULTABLE_FIELDS,
@@ -53,7 +54,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"A schedule runs only under a schedule_grant:true grant, which covers nothing but that one schedule's jobs; a project-wide grant never covers a scheduled job.",
 			"A risk:high checkpoint stays pending unless ask_on omits it and the objective names the job. Merge stays pending when ask_on includes merge.",
 			"When the operator pre-approves risk:high for a mandate's work, record their verbatim words with cp_mandate preapprove_risk mandate_id operator_quote (job_ids narrows it), or risk_preapproval on issue: covered risk:high dispatches and promotions then proceed with an audit row, no escalation. Never merge, never a script, never a job outside the grant; force push, data deletion, credential handling and external publishing in the task still escalate.",
-			"cp_mandate show lists every auto-decision taken under the grant, and which source (explicit/project/home) set each field. pause/revoke stop new auto-decisions; in-flight workers are not killed.",
+			"cp_mandate show with no id lists active and paused grants only; pass statuses to include revoked or expired. It lists every auto-decision under those grants and which source (explicit/project/home) set each field. Never paste a grant objective into the prompt. pause/revoke stop new auto-decisions; in-flight workers are not killed.",
 			"A token cap reached (pause_reason token_cap) is yours to decide, never an operator ask: cp_mandate raise_tokens mandate_id spend_tokens reason, up to the home's token_ceiling; the grant resumes and in-flight work continues. The USD cap is never yours to raise \u2014 it, and the ceiling, are budget_exhausted.",
 			"The job cap limits new dispatches only; it never pauses a grant or stalls review, repair or merge of a job it already covers. A project-wide grant's job cap counts other mandates' jobs in its projects (src/mandate-accounting.ts), so prefer named job_ids with home-default bounds; issue warns on a project-wide grant.",
 			"Revoke, expiry and a replacing grant close that grant's open escalations as superseded, no answer needed; cp_mandate supersede_stale does the same on demand for records left open before this rule.",
@@ -62,7 +63,12 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			action: StringEnum(["issue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set"], {
 				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json",
 			}),
-			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk: the mandate id (md-…)" })),
+			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk: the mandate id (md-…). show with an id returns that grant at any status" })),
+			statuses: Type.Optional(
+				Type.Array(StringEnum([...MANDATE_STATUSES]), {
+					description: "show with no mandate_id: which statuses to list. Omitted (or empty): active and paused only. Pass revoked and/or expired, or any subset, to list closed grants. Ignored when mandate_id is set",
+				}),
+			),
 			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session. revoke: the operator's verbatim words revoking the grant, recorded as revoked_by operator; without it the revoke is recorded as the parent's, which never stops a schedule's fires" })),
 			risk_preapproval: Type.Optional(
 				Type.Object(
@@ -130,7 +136,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					};
 				}
 				if (params.action === "show") {
-					const text = post.mandates.show(params.mandate_id?.trim() || undefined, jobs);
+					const text = post.mandates.show(params.mandate_id?.trim() || undefined, jobs, params.statuses);
 					return { content: [{ type: "text", text }], details: { text } };
 				}
 				if (params.action === "supersede_stale") {
