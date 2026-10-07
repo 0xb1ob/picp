@@ -97,7 +97,7 @@ test("4B2-T4: the scheduler tick drains the queue despite a scheduler fault, and
 		registerScheduleTools(
 			{ on: (event: string, fn: () => Promise<void>) => hooks.set(event, fn), registerTool: () => {}, sendMessage: () => {} } as never,
 			{ commandPost: () => post } as never,
-			() => holds, () => {}, () => {},
+			() => holds, () => {}, () => {}, (deliver) => deliver(),
 		);
 		t.after(() => hooks.get("session_shutdown")!());
 		await hooks.get("session_start")!();
