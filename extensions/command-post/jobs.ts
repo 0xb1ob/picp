@@ -230,12 +230,24 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				const mismatch = describeRefMismatch(params.external_ref, verification);
 				if (mismatch) {
 					const anchorJobId = `verify-${project}`;
-					await raiseConflictingRef(ports.escalations(), { anchorJobId, ref: params.external_ref, found: mismatch });
-					throw new Error(
-						`cp_job create refused: ${mismatch} \u2014 raised a conflicting_acceptance escalation (job_ids [${anchorJobId}]); relay it, do not dispatch`,
-					);
+					const store = ports.escalations();
+					const deferred = verification.status === "found" && verification.kind === "br" && verification.state === "deferred";
+					const override = deferred ? store.list({ jobId: anchorJobId, kind: "conflicting_acceptance", status: "answered" }).find((item) =>
+						item.job_ids.length === 1 && item.answer?.trim().toLowerCase() === "override" &&
+						item.answered_at !== undefined && item.answered_at >= item.created_at &&
+						(item.deferred_refs !== undefined ? item.deferred_refs.includes(ref)
+							// Legacy records lack structured refs: require the complete single-ref question and an explicit DB pin.
+							: BR_SHOW_RE.exec(params.external_ref ?? "")?.[1] !== undefined && item.question === `external_ref check failed — ${params.external_ref}: ${mismatch}`)) : undefined;
+					if (!override) {
+						await raiseConflictingRef(store, { anchorJobId, ref: params.external_ref, found: mismatch, ...(deferred ? { deferredRef: ref } : {}) });
+						throw new Error(
+							`cp_job create refused: ${mismatch} \u2014 raised a conflicting_acceptance escalation (job_ids [${anchorJobId}]); relay it, do not dispatch`,
+						);
+					}
+					refNote = `${describeRefVerification(verification)}; deferred-bead admission override: ${override.id}`;
+				} else {
+					refNote = describeRefVerification(verification);
 				}
-				refNote = describeRefVerification(verification);
 			}
 			const created = await ledger.create({
 				title,

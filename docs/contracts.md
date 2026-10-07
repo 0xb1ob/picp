@@ -7651,6 +7651,23 @@ bad refs named in the same mission read as one open question, not two).
 ignorance is not a finding — and the job is created normally with the fact (or
 the failure) recorded on `notes`, which `cp_job show` then prints.
 
+**Deferred-bead overrides (picp-t4n).** On retry, a verified `br` bead still in
+`deferred` may pass this state check when its project's `verify-<project>`
+`conflicting_acceptance` escalation has an answered `override`. New refusal
+records carry optional `deferred_refs`: exact references after the same project
+DB pin used for verification and storage. Aggregated questions retain each
+explicitly checked deferred reference once; a reference that would be truncated
+out of the question gets its own escalation. A single refusal too long to show
+completely records no override reference. A legacy record without `deferred_refs`
+counts only when its complete single-reference question matches the current
+refusal and explicitly pins the DB; bare legacy refs cannot identify a database.
+Substrings, aggregated or truncated legacy questions grant no exception.
+The created job's notes retain the verified deferred state and the exact `es-`
+id used. No bead or answered escalation is mutated. Other refs, databases,
+projects, closed/missing/wrong-kind refs and every other intake or dispatch gate
+still follow their existing checks. This is admission for that reference, not
+dispatch authority.
+
 
 Every job carries labels, and they are the dispatchability contract:
 

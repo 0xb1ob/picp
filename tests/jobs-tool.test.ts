@@ -523,6 +523,133 @@ test("cp_job create: a br show ref with status closed refuses", async (t) => {
 	assert.deepEqual((await runJobAction({ action: "list", all: true }, p)).details.jobs, []);
 });
 
+test("picp-t4n: an answered legacy override admits only its deferred bead and records the es", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const ref = "br --db '/project/.beads/beads.db' show picp-80q --json";
+	const input = { action: "create", title: "parent-context plan", project: "demo", delivery: "local", kind: "research", external_ref: ref } as const;
+	let state = "deferred";
+	const verifyRef = (url: string) => verifyExternalRef(url, { exec: async (command, args) => {
+		assert.equal(command, "br");
+		assert.deepEqual(args, ["--db", "/project/.beads/beads.db", "--no-auto-flush", "--no-auto-import", "show", "picp-80q", "--json"]);
+		return JSON.stringify([{ status: state, title: "Parent context" }]);
+	} });
+	const overrides = p.escalations();
+	const es = await overrides.raise({
+		job_ids: ["verify-demo"], kind: "conflicting_acceptance",
+		question: `external_ref check failed — ${ref}: ${ref} is deferred, not open: "Parent context"`,
+		options: [{ id: "override", label: "override", consequence: "admit this bead", cost: "operator accepts deferral" }], recommended: "override",
+	});
+	await overrides.answer(es.id, { answer: "override", by: "operator-quote", basis: { operator_quote: `${es.id}: override.` } });
+	const answered = overrides.get(es.id);
+	// A deferred approval cannot authorize the same bead after it closes.
+	state = "closed";
+	await assert.rejects(runJobAction(input, { ...p, verifyRef }), /closed, not open/);
+	state = "deferred";
+	const result = await runJobAction(input, { ...p, verifyRef });
+	const job = result.details.job as { id: string; status: string; external_ref: string; notes: string; tracker?: unknown };
+	assert.equal(job.status, "open");
+	assert.equal(job.external_ref, ref);
+	assert.equal(job.tracker, undefined);
+	assert.match(job.notes, /verified: br deferred/);
+	assert.ok(job.notes.includes(`deferred-bead admission override: ${es.id}`));
+	assert.deepEqual(overrides.get(es.id), answered, "admission never rewrites the answered escalation");
+	assert.equal(state, "deferred", "the tracker is read only");
+	assert.equal((await runJobAction(input, { ...p, verifyRef })).details.existing, true);
+});
+
+test("picp-t4n: aggregated overrides bind exact pinned deferred refs, never another bead, DB, project or mismatch", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const db = "/project/beads.db";
+	p.ledger = new Ledger({ home: scratch.path, knownProjects: ["demo"], beadsDbFor: () => db });
+	const refs = ["br show picp-80q --json", "br show picp-other --json"];
+	const input = { action: "create", title: "plan", project: "demo", delivery: "local", kind: "research" } as const;
+	const verifyRef = async (url: string) => ({ status: "found", kind: "br", state: "deferred", title: "Deferred bead", url }) as const;
+	const create = (external_ref: string) => runJobAction({ ...input, title: external_ref, external_ref }, { ...p, verifyRef });
+	for (const ref of [...refs, refs[0]!]) await assert.rejects(create(ref), /deferred, not open/);
+	const store = p.escalations();
+	const es = store.open()[0]!;
+	assert.equal(store.open().length, 1);
+	assert.deepEqual(es.deferred_refs, refs.map((ref) => p.ledger.normalizeRef(ref, "demo")));
+	await store.answer(es.id, { answer: "override", by: "operator-quote", basis: { operator_quote: `${es.id}: override.` } });
+	for (const external_ref of ["br show picp-80q-extra --json", "br --db '/other/beads.db' show picp-80q --json"]) {
+		await assert.rejects(create(external_ref), /deferred, not open/);
+	}
+	await assert.rejects(runJobAction({ ...input, project: "other", external_ref: refs[0] }, { ...p, verifyRef }), /deferred, not open/);
+	for (const verification of [
+		{ status: "found", kind: "br", state: "closed", title: "Closed bead", url: refs[0]! },
+		{ status: "found", kind: "pr", state: "merged", title: "Landed", url: "https://github.com/o/r/issues/12" },
+		{ status: "not_found", url: "/missing.md" },
+	] as const) {
+		await assert.rejects(runJobAction({ ...input, external_ref: verification.url }, { ...p, verifyRef: async () => verification }), /cp_job create refused/);
+	}
+	// An override grants no delivery, schedule, script, label or archived-project exception.
+	for (const change of [{ delivery: "pipeline" }, { delivery: "answer" }, { labels: ["schedule:sch-abc123"] }, { script_path: "../bad.sh" }, { labels: ["bad,label"] }]) {
+		await assert.rejects(runJobAction({ ...input, external_ref: refs[0], ...change } as JobActionInput, { ...p, verifyRef }), /pipeline|answer|schedule|script|label/);
+	}
+	const archived = new Ledger({ home: scratch.path, knownProjects: ["demo"], archivedProjects: ["demo"], beadsDbFor: () => db });
+	await assert.rejects(runJobAction({ ...input, external_ref: refs[0] }, { ...p, ledger: archived, verifyRef }), /archived/);
+	assert.equal(scratch.document().jobs.length, 0, "all gates refuse before creating any job");
+	for (const ref of refs) {
+		const result = await create(ref);
+		const job = result.details.job as { external_ref: string; notes: string };
+		assert.equal(job.external_ref, p.ledger.normalizeRef(ref, "demo"));
+		assert.ok(job.notes.includes(`deferred-bead admission override: ${es.id}`));
+	}
+	assert.equal(scratch.document().jobs.length, 2);
+});
+
+test("picp-t4n: a capped question cannot authorize an undisclosed deferred ref", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	let title = "x".repeat(450);
+	const verifyRef = async (url: string) => ({ status: "found", kind: "br", state: "deferred", title, url }) as const;
+	const create = (id: string) => runJobAction({ action: "create", title: id, project: "demo", delivery: "local", external_ref: `br --db '/project/beads.db' show ${id} --json` }, { ...p, verifyRef });
+	for (const id of ["picp-one", "picp-two"]) await assert.rejects(create(id), /deferred, not open/);
+	const store = p.escalations();
+	const open = store.open();
+	assert.equal(open.length, 2, "each complete refusal gets a question when aggregation would truncate it");
+	for (const es of open) {
+		assert.equal(es.deferred_refs?.length, 1);
+		assert.ok(es.question.endsWith(`"${title}"`));
+		await store.answer(es.id, { answer: "override", by: "operator-quote" });
+	}
+	await create("picp-one");
+	await create("picp-two");
+	title = "x".repeat(1100);
+	await assert.rejects(create("picp-long"), /deferred, not open/);
+	const capped = store.open()[0]!;
+	assert.equal(capped.question.length, 1000);
+	assert.equal(capped.deferred_refs, undefined, "an incomplete refusal records no authority-bearing ref");
+	await store.answer(capped.id, { answer: "override", by: "operator-quote" });
+	await assert.rejects(create("picp-long"), /deferred, not open/);
+	assert.equal(scratch.document().jobs.length, 2);
+});
+
+test("picp-t4n: only an answered override on this admission escalation counts", async (t) => {
+	for (const disposition of ["open", "relay", "withdrawn", "superseded", "wrong-kind", "wrong-anchor", "legacy-substring", "legacy-unpinned"]) {
+		await t.test(disposition, async (t) => {
+			const { ports: p, scratch } = ports(t);
+			const ref = disposition === "legacy-unpinned" ? "br show picp-80q --json" : "br --db '/project/beads.db' show picp-80q --json";
+			if (disposition === "legacy-unpinned") p.ledger = new Ledger({ home: scratch.path, beadsDbFor: () => "/new-project/beads.db" });
+			const mismatch = `${ref} is deferred, not open: "Bead"`;
+			const store = p.escalations();
+			const es = await store.raise({
+				job_ids: [disposition === "wrong-anchor" ? "verify-other" : "verify-demo"],
+				kind: disposition === "wrong-kind" ? "plan_approval" : "conflicting_acceptance",
+				question: disposition === "legacy-substring" ? `different question; external_ref check failed — ${ref}: ${mismatch}` : `external_ref check failed — ${ref}: ${mismatch}`,
+				...(disposition.startsWith("legacy-") ? {} : { deferred_refs: [ref] }),
+				options: [{ id: "relay", label: "relay", consequence: "refuse", cost: "none" }, { id: "override", label: "override", consequence: "admit", cost: "operator accepts deferral" }], recommended: "relay",
+			});
+			if (disposition === "withdrawn") await store.withdraw(es.id);
+			else if (disposition === "superseded") store.supersede(() => "replaced");
+			else if (disposition !== "open") await store.answer(es.id, { answer: disposition === "relay" ? "relay" : "override", by: "operator-quote" });
+			await assert.rejects(runJobAction({ action: "create", title: "plan", project: "demo", delivery: "local", external_ref: ref }, {
+				...p, verifyRef: async (url) => ({ status: "found", kind: "br", state: "deferred", title: "Bead", url }),
+			}), /deferred, not open/);
+			assert.equal(scratch.document().jobs.length, 0);
+		});
+	}
+});
+
 test("cp_job create auto-links a job whose br ref names a bead on the active connection, and says why otherwise (laf)", async (t) => {
 	const { ports: p } = ports(t);
 	const conn = { id: "demo-beads", project: "demo", adapter: "beads", endpoint: "/dbs/demo.db", intake_enabled: false, write_enabled: true, status: "active", connected_at: "2026-09-01T00:00:00Z" } as const;
