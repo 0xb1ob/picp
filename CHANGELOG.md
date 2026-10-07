@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Mandate show lists live grants (picp-xpx)
+
+`cp_mandate show` with no id returns active and paused grants only. Pass `statuses` (`revoked`, `expired`, or any subset of `active|paused|revoked|expired`) to list closed grants. A show that names a mandate id still returns that grant, including a revoked one. Migration: none.
+
 ### Integration waits for active workers (picp-03o)
 
 `cp_integrate` returns `next: resolve` while an open PR's worker is `waiting` or `launching`, or its integration repair promotion is still in flight. It checks again immediately before both merge commands, so a promotion during CI or permission verification cannot merge the old delivery. The next accepted report resumes with fresh gates; waiting spends no further promotion attempt. Migration: none.

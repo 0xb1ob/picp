@@ -177,6 +177,59 @@ test("auto-decision journals the clause; revoke leaves pending pending", (t) => 
 	assert.equal(left.decided_by, undefined);
 });
 
+test("no-id cp_mandate show lists active and paused only; statuses lists revoked and expired; show(id) still returns a revoked grant", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const active = issue(store, { objective: "live work" });
+	const paused = issue(store, { objective: "held work" });
+	store.pause(paused.id);
+	const revoked = issue(store, { objective: "revoked-objective-token" });
+	store.revoke(revoked.id);
+	const expired = issue(store, { objective: "expired-objective-token", expiry: earlier(1_000), at: earlier(10_000) });
+
+	const listed = store.show();
+	assert.match(listed, new RegExp(active.id));
+	assert.match(listed, new RegExp(paused.id));
+	assert.doesNotMatch(listed, new RegExp(revoked.id));
+	assert.doesNotMatch(listed, new RegExp(expired.id));
+	assert.doesNotMatch(listed, /revoked-objective-token/);
+	assert.doesNotMatch(listed, /expired-objective-token/);
+	assert.equal(store.show(undefined, [], []), listed);
+	assert.equal(store.require(expired.id).status, "expired", "the no-id show still sweeps");
+
+	const closed = store.show(undefined, [], ["revoked", "expired"]);
+	assert.match(closed, new RegExp(revoked.id));
+	assert.match(closed, new RegExp(expired.id));
+	assert.doesNotMatch(closed, new RegExp(active.id));
+	assert.match(store.show(undefined, [], ["revoked"]), new RegExp(revoked.id));
+	assert.doesNotMatch(store.show(undefined, [], ["revoked"]), new RegExp(expired.id));
+
+	const one = store.show(revoked.id, [], ["active"]);
+	assert.match(one, new RegExp(`^${revoked.id}: revoked`));
+	assert.match(one, /revoked-objective-token/);
+
+	const dropped = createScratchHome();
+	t.after(() => dropped.cleanup());
+	const lone = new MandateStore(dropped.path);
+	const gone = issue(lone, { objective: "revoked-only" });
+	lone.revoke(gone.id);
+	assert.equal(lone.show(), "no mandates");
+
+	const { registerMandateTools } = await import("../extensions/command-post/tools-mandate.ts");
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }>();
+	registerMandateTools({ on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> }) => tools.set(tool.name, tool) } as never, {
+		commandPost: () => ({ home: store.home, mandates: store, fleet: { read: () => ({ jobs: [] }) }, runs: {} }),
+		setLive: () => {},
+		refreshWidget: () => {},
+		projectOf: () => () => undefined,
+		createdThisTurn: [],
+	} as never);
+	const viaTool = await tools.get("cp_mandate")!.execute("c", { action: "show", statuses: ["revoked"] }, undefined, undefined, {});
+	assert.match(viaTool.content[0]!.text, new RegExp(revoked.id));
+	assert.doesNotMatch(viaTool.content[0]!.text, new RegExp(active.id));
+});
+
 test("a raised gate flag is never mandate-decided", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

@@ -3774,6 +3774,8 @@ is pure: given a pending checkpoint (kind, job, project, routing `risk`/`scope`,
 artifact hash) and the mandates on disk it returns `permitted (mandate id,
 clause)` or `not permitted (reason)`.
 
+**`cp_mandate show`.** With no id it lists active and paused grants only, after the sweep that expires and pauses. `statuses` (`active`, `paused`, `revoked`, `expired`, any subset) is the explicit filter; omitted, the default stays active and paused. With a mandate id it returns that grant at any status and ignores `statuses`. The text includes each listed grant's objective for inspection; do not copy objectives into the parent prompt.
+
 | Input | Permitted? |
 |---|---|
 | active mandate, project listed, action allowed, risk not high, cap not reached, `ask_on` not hit | yes, clause names the action and project |

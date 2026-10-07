@@ -742,9 +742,16 @@ export class MandateStore {
 		return this.#refresh(this.#write(this.#underCeiling({ ...m, spend_cap: { ...m.spend_cap, usd } })), this.#stamp(), this.withReviewerSpend(jobs));
 	}
 
-	show(id?: string, jobs: readonly MandateUsageJob[] = []): string {
+	/**
+	 * No id: active and paused only, unless `statuses` names a subset (revoked and expired included).
+	 * `show(id)` returns that grant at any status; the filter is ignored.
+	 */
+	show(id?: string, jobs: readonly MandateUsageJob[] = [], statuses?: readonly Mandate["status"][]): string {
 		const counted = this.withReviewerSpend(jobs);
-		const mandates = id ? [this.#refresh(this.require(id), this.#stamp(), counted)] : this.sweep(undefined, jobs);
+		const live = statuses?.length ? statuses : (["active", "paused"] as const);
+		const mandates = id
+			? [this.#refresh(this.require(id), this.#stamp(), counted)]
+			: this.sweep(undefined, jobs).filter((mandate) => (live as readonly string[]).includes(mandate.status));
 		if (mandates.length === 0) return "no mandates";
 		return mandates.map((mandate) => formatMandate(mandate, counted)).join("\n\n");
 	}
