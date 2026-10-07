@@ -82,6 +82,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { CapacityReader } from "./capacity.ts";
 import { dirname, join } from "node:path";
+import { selectReviewerModel } from "./reviewer-model.ts";
 import {
 	type Delivery,
 	DIFF_REVIEW_MAX_BYTES,
@@ -638,7 +639,8 @@ export class DiffReview {
 		// task it was dispatched with (do8.4). Both are files; neither is inlined.
 		const taskCopy = copyOriginalTask({ home, jobId, scratch });
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
-		const route = await this.#route(profile, jobId, record, request.model);
+		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
+		const route = await this.#route(profile, jobId, record, selection?.model);
 		const model = route.decision.model;
 		const brief = assembleBrief({
 			profile,
@@ -660,6 +662,7 @@ export class DiffReview {
 		const recorder = RunRecorder.open({ home, jobId, dir: runDir });
 		// The decision this attempt is about to spawn, recorded once (cp-reviewer-routing).
 		recorder.cp("routing_resolved", reviewerRoutingEvent({ surface: "review", attempt, ...route }));
+		if (selection) recorder.cp("reviewer_model_selected", { surface: "review", attempt, ...selection });
 		const key = `${jobId}#review-${attempt}`;
 		const timeoutMs = this.#options.reviewTimeoutMs ?? resolveReviewTimeoutMs(home);
 		const deadline = isoTimestamp(new Date(now().getTime() + timeoutMs));

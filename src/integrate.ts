@@ -108,6 +108,8 @@ export interface AwaitingLike {
 	withdraw(id: string): Promise<unknown>;
 }
 
+import { readReviewMergeWindow } from "./review-merge-window.ts";
+
 export class IntegrateError extends Error {}
 
 /** The `gh pr view --json` fields this module asks for, and nothing else. */
@@ -203,6 +205,7 @@ export interface IntegrateResult {
 	record: IntegrationRecord;
 	pr_url?: string;
 	head_sha?: string;
+	review_resume_at?: string; // transient deadline, derived from the durable review pass
 	/** Present when this call recorded (or re-read) the merge receipt. */
 	merge?: RecordMergeResult;
 	/** Present when this call ran the teardown gate. */
@@ -707,6 +710,8 @@ export class Integrator {
 			decided_at: isoTimestamp(this.#now()),
 		};
 		const strategy: MergeStrategy = request.strategy ?? "squash";
+		const window = this.#reviewWindowWait({ jobId, branch, facts, prUrl, head });
+		if (window) return window;
 		const heldBeforeMerge = this.#readHold(jobId);
 		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
 		const blockedBeforeMerge = this.#deliveryBlocked({ jobId, branch, facts, prUrl, head });
@@ -907,6 +912,8 @@ export class Integrator {
 			decided_at: existing.decided_at ?? isoTimestamp(this.#now()),
 		};
 		const strategy: MergeStrategy = request.strategy ?? "squash";
+		const window = this.#reviewWindowWait({ jobId, branch, facts, prUrl, head });
+		if (window) return window;
 		const heldBeforeMerge = this.#readHold(jobId);
 		if (heldBeforeMerge) return this.#heldResult(jobId, branch, heldBeforeMerge, { facts, prUrl, headSha: head });
 		const blockedBeforeMerge = this.#deliveryBlocked({ jobId, branch, facts, prUrl, head });
@@ -1675,6 +1682,13 @@ export class Integrator {
 		return undefined;
 	}
 
+	#reviewWindowWait(input: { jobId: string; branch: string; facts: string[]; prUrl: string; head: string }): IntegrateResult | undefined {
+		const window = readReviewMergeWindow(this.#options.home, input.jobId, input.head, this.#now());
+		if (!window) return undefined;
+		const reason = `${input.jobId}: review passed on ${input.head.slice(0, 12)}; merge waits until ${window.review_resume_at}. To hold: cp_integrate action:hold job_id:${input.jobId} reason:<reason>.`;
+		return this.#write({ ...input, headSha: input.head, step: "merge", next: "wait", facts: [...input.facts, reason], reason, reviewResumeAt: window.review_resume_at });
+	}
+
 	// -- record ---------------------------------------------------------------
 
 	#write(input: {
@@ -1686,6 +1700,7 @@ export class Integrator {
 		reason: string;
 		prUrl?: string;
 		headSha?: string;
+		reviewResumeAt?: string;
 		approvedHead?: string;
 		mergeAuthority?: MergeAuthority;
 		merge?: RecordMergeResult;
@@ -1732,6 +1747,7 @@ export class Integrator {
 			record: parsed.value,
 			...(input.prUrl ? { pr_url: input.prUrl } : {}),
 			...(input.headSha ? { head_sha: input.headSha } : {}),
+			...(input.reviewResumeAt ? { review_resume_at: input.reviewResumeAt } : {}),
 			...(input.merge ? { merge: input.merge } : {}),
 			...(input.teardown ? { teardown: input.teardown } : {}),
 			...(input.resolveReceipt ? { resolve_receipt: input.resolveReceipt } : {}),

@@ -5,6 +5,9 @@ import { type Static, Type } from "typebox";
 import { type Role, RoleSchema } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";
 
+
+/** Reviewer preferences enter the existing override tier; they add no routing pins. */
+export const ReviewerModelSchema = Type.String({ minLength: 3, maxLength: 128, pattern: "^[^\\s/]+/[^\\s]+$" });
 /**
  * Effort level, the model's and the rubric row's (T13/cp-eff). Defined here,
  * ahead of `FleetRecordSchema`/`StatusJobSchema`, because both need it for the

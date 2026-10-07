@@ -5,6 +5,7 @@ import { type Static, Type } from "typebox";
 import { type Delivery, DeliverySchema, IsoTimestampSchema, PROJECT_NAME_PATTERN, validate, type ValidationResult } from "./core.ts";
 import { type MandateAction, MandateActionSchema, type MandateAskOn, MandateAskOnSchema } from "./mandates.ts";
 import type { Narrow, Replace } from "./internal.ts";
+import { ReviewerModelSchema } from "./routing.ts";
 
 export const ProjectSchema = Type.Object(
 	{
@@ -21,6 +22,7 @@ export const ProjectSchema = Type.Object(
 		archived: Type.Optional(Type.Boolean()),
 		/** Who lands a reviewed, green PR: absent or `repo` means cp_integrate merges when the repo permits; `human_handoff` hands it to a human on GitHub and never merges. */
 		merge_policy: Type.Optional(StringEnum(["repo", "human_handoff"])),
+		reviewer_model: Type.Optional(ReviewerModelSchema),
 		/**
 		 * Per-project mandate defaults (autonomy-programme-cur.2.5): overrides
 		 * `data/mandate-defaults.json` field-by-field, absent means "use the home

@@ -114,6 +114,7 @@ import {
 import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
+import { readReviewMergeWindow } from "./review-merge-window.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
@@ -345,8 +346,8 @@ export class CommandPost {
 			runs: this.runs,
 			...(options.sendWakeup ? { wakeup: options.sendWakeup } : {}),
 			beforeWakeup: async (wakeup) => {
-				await options.beforeWakeup?.(wakeup);
 				await this.continuation.onVerdict(wakeup);
+				await options.beforeWakeup?.(wakeup);
 			},
 			// A finish with no safe cp-verdict must not leave a held PR silently waiting: one durable notice per attempt.
 			onFinishFailure: (pending, reason) => this.#journalDurable({
@@ -607,6 +608,7 @@ export class CommandPost {
 			review: (jobId) => this.diffReview({ jobId }),
 			reviews: this.reviewRuns,
 			head: (jobId, owner) => (owner === "fleet" ? this.reportedHeadSha(jobId) : this.ciHead(jobId)),
+			reviewWindow: (jobId, head) => readReviewMergeWindow(options.home, jobId, head),
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,
 			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
@@ -1249,6 +1251,8 @@ export class CommandPost {
 			routing: loadRoutingConfig(this.home),
 			probe: this.probe(),
 			fleet: this.fleet,
+			registry: this.registry,
+			mandates: this.mandates,
 			runs: this.runs,
 			sender: this.sender,
 			reviews: this.reviewRuns,
@@ -1629,6 +1633,7 @@ export class CommandPost {
 
 	/** session_shutdown: never leave orphaned children behind. */
 	async shutdown(): Promise<void> {
+		this.continuation.stop();
 		// Nothing announces a verdict during teardown: the reviewers die with the
 		// manager below, and the chains that resolve after that would otherwise be
 		// sending wake-ups into a session that is closing (spec 2026-09-05).
