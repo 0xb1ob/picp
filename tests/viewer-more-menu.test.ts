@@ -156,6 +156,37 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  assert.equal(detail.querySelector(".job-detail-heading > .page-header > .page-header-detail")?.textContent,"cp-long");
 });
 
+test("fallback header survives a shell-only re-render and returns when the screen drops its header", async t => {
+ const result = await build({stdin:{contents:'import {h,render} from "preact"; import {useState} from "preact/hooks"; import {act} from "preact/test-utils"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {PageHeader} from "./viewer-app/components/PageHeader.tsx"; function Screen(){ const [on,setOn]=useState(true); return h("div",{class:"screen"}, h("button",{type:"button",class:"drop",onClick:()=>setOn(false)},"drop"), on && h(PageHeader,{title:"Overview"})); } export {act}; export const mount=root=>render(h(Shell,{current:{screen:"overview",section:null},awaiting:0,status:"live",updatedAt:"2026-10-07T08:30:00Z"}, h(Screen)), root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const {act,mount,unmount}=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const {window,document}=parseHTML("<html><body><div id='root'></div></body></html>");
+ const originals=["window","document","fetch"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ Object.defineProperty(globalThis,"window",{configurable:true,value:window});
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ Object.defineProperty(globalThis,"fetch",{configurable:true,value:()=>Promise.resolve(new Response("{}",{status:503}))});
+ window.matchMedia=(()=>({matches:false,addEventListener(){},removeEventListener(){}})) as unknown as typeof window.matchMedia;
+ const proto = window.Element.prototype as Element & {showModal?:() => void; close?:() => void};
+ proto.showModal=()=>{};
+ proto.close=()=>{};
+ const root=document.getElementById("root")!;
+ t.after(()=>{unmount(root); for (const [key,descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis,key,descriptor); else Reflect.deleteProperty(globalThis,key); }});
+ const menus=()=>root.querySelectorAll(".shell-main .shell-more").length;
+ await act(()=>mount(root));
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.equal(root.querySelector(".page-header-fallback"),null);
+ assert.equal(menus(),1,"one ⋮ in the screen header");
+ root.querySelector<HTMLButtonElement>(".shell-search")!.focus=()=>{};
+ await act(()=>root.querySelector<HTMLButtonElement>(".shell-search")!.click());
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.equal(root.querySelector(".page-header-fallback"),null,"opening search does not mount a second header");
+ assert.equal(menus(),1);
+ await act(()=>root.querySelector<HTMLButtonElement>(".drop")!.click());
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.ok(root.querySelector(".shell-main > .page-header-fallback"),"dropping the screen header brings the fallback back");
+ assert.equal(root.querySelector(".screen .page-header"),null);
+ assert.equal(menus(),1);
+});
+
 test("desktop page header CSS: a compact hairline row, transparent below 900 px, and no overlay hacks left", () => {
  const dirs = ["viewer-app/components","viewer-app/screens","viewer-app/styles"];
  for (const sheet of dirs.flatMap(dir => readdirSync(join(REPO_ROOT,dir)).filter(f => f.endsWith(".css")).map(f => `${dir}/${f}`))) {
@@ -168,6 +199,7 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  const phone = css.slice(0,at), desktop = css.slice(at);
  assert.match(phone,/\.page-header \{ display: contents; \}/,"below 900 px the screen's own <h1> layout is unchanged");
  assert.match(phone,/\.page-header-back, \.page-header-detail, \.page-header-end, \.page-header-fallback \{ display: none; \}/);
+ assert.doesNotMatch(phone,/\.shell-main:has\(> \.page-header-fallback\)/,"the fallback flex column is desktop-only");
  const row = /\n \.page-header \{([^}]*)\}/.exec(desktop)?.[1] ?? "";
  assert.match(row,/height: 56px/);
  assert.match(row,/border-bottom: 1px solid var\(--border\)/,"a hairline in the existing border token");

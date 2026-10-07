@@ -54,9 +54,6 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-more-panel .operator-restart { flex-direction: column; align-items: stretch; }
 .shell-more-panel .operator-restart-line { flex-basis: auto; }
 .shell-main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 20px 16px 40px; overflow-wrap: anywhere; }
-/* The fallback row renders after the screen so it can see that row; visually it stays first. */
-.shell-main:has(> .page-header-fallback) { display: flex; flex-direction: column; }
-.shell-main > .page-header-fallback { order: -1; }
 .shell-header-subpage { padding: 0 8px; justify-content: flex-start; }
 .shell-header-subpage .shell-brand { flex: 1; }
 .shell-sidebar { display: none; }
@@ -121,6 +118,9 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  /* A screen that draws its own header hides the shell's; loading and unavailable pages keep it. */
  /* One gap under the hairline on every screen. Screen rules use this, not their own number. */
  .shell { --page-header-gap: 24px; }
+ /* Fallback renders after the screen (so the claim is visible) and only where the row is shown. */
+ .shell-main:has(> .page-header-fallback) { display: flex; flex-direction: column; }
+ .shell-main > .page-header-fallback { order: -1; }
  .page-header-fallback { margin-bottom: var(--page-header-gap); }
  .shell-main:has(.page-header:not(.page-header-fallback)) > .page-header-fallback { display: none; }
  .shell-main:not(:has(> .page-header-fallback)) > .overview-error { margin-top: var(--page-header-gap); }

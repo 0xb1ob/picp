@@ -1,5 +1,5 @@
 import { type ComponentChildren, createContext } from "preact";
-import { useContext, useEffect, useState } from "preact/hooks";
+import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { FlightJob, OverviewResponse, ShippedJob } from "../../src/viewer/api-types.ts";
 import { SearchDialog } from "./SearchDialog.tsx";
 import type { Route } from "../routes.ts";
@@ -13,12 +13,24 @@ import { PageHeader, routeTitle } from "./PageHeader.tsx";
 import { useVersion, type VersionState } from "../use-version.ts";
 function Brand() { return <div class="shell-brand"><code>command-post</code></div>; }
 /** What a screen with its own top bar (Sessions on mobile) and every desktop page header need from the shell: the live state, search and the ⋮ menu's inputs. */
-/** What a screen with its own top bar (Sessions on mobile) and every desktop page header need from the shell: the live state, search and the ⋮ menu's inputs. */
 export const ShellContext = createContext<{status:string;openSearch:() => void;control?:ControlView | undefined;version?:VersionState;updatedAt?:string | null}>({status:"unknown",openSearch:() => {}});
-/** Set by a screen's own PageHeader while it renders, so the fallback row is not mounted beside it. */
-export const HeaderSlot = createContext<{owned:boolean} | null>(null);
+/** A screen's PageHeader claims this once. The count survives a Shell-only re-render (search, control) that skips those children. */
+export type HeaderSlotApi = {readonly owned:boolean; claim:() => void; release:() => void; listen:(fn:() => void) => () => void};
+export const HeaderSlot = createContext<HeaderSlotApi | null>(null);
+function createHeaderSlot(): HeaderSlotApi {
+ let n = 0;
+ const listeners = new Set<() => void>();
+ return {
+  get owned() { return n > 0; },
+  claim() { n++; },
+  release() { n = Math.max(0, n - 1); for (const fn of listeners) fn(); },
+  listen(fn) { listeners.add(fn); return () => { listeners.delete(fn); }; },
+ };
+}
 function FallbackHeader({current}: {current:Route}) {
  const slot = useContext(HeaderSlot);
+ const [, bump] = useState(0);
+ useEffect(() => slot?.listen(() => bump(n => n + 1)), [slot]);
  if (slot?.owned) return null;
  return <PageHeader title={routeTitle(current)} detail={current.jobId} fallback/>;
 }
@@ -27,6 +39,8 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const control = useControl(true,updatedAt,[]);
  // One version read for every badge (the ⋮ row and the Sessions top bar): mount, 60 s, tab visible.
  const version = useVersion();
+ const headerSlot = useRef<HeaderSlotApi | null>(null);
+ if (headerSlot.current === null) headerSlot.current = createHeaderSlot();
  const [searchOpen,setSearchOpen] = useState(false);
  const [search,setSearch] = useState<{jobs:FlightJob[] | null; landed:ShippedJob[] | null; error:string | null}>({jobs:null, landed:null, error:null});
  useEffect(() => {
@@ -58,7 +72,7 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
   <div class="shell-header-right">{plain ? live : when}<button type="button" aria-label="Search navigation and in-flight jobs" aria-haspopup="dialog" title="Search" onClick={openSearch} class="shell-search"><Icon name="search"/></button><MoreMenu control={control} version={version} updatedAt={updatedAt}/></div>
  </header>
   <aside class="shell-sidebar"><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/><div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div></aside>
-  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt}}><HeaderSlot.Provider value={{owned:false}}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
+  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt}}><HeaderSlot.Provider value={headerSlot.current}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
   {searchOpen && <SearchDialog jobs={search.jobs} landed={search.landed} error={search.error} onClose={() => setSearchOpen(false)}/>}
  </div>;
 }

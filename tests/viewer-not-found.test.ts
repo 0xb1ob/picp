@@ -75,6 +75,8 @@ test("404 CSS keeps phone targets and provides a wider desktop recovery with hor
 	assert.match(desktop,/\.not-found-heading \.page-header-back \{ display: none/);
 	const phone = css.split("@media (max-width: 899px)")[1]!.split("@media")[0]!;
 	assert.match(phone,/\.not-found-heading \.page-header-detail \{ display: block/);
+	assert.match(phone,/\.page-header > h1 \{[^}]*clip-path: inset\(50%\)/);
+	assert.doesNotMatch(phone,/\.page-header > h1[^{]*display:\s*none/);
 	assert.match(phone,/\.page-header-back::after \{ content: "\/"/);
 });
 

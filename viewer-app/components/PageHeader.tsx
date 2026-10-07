@@ -1,4 +1,4 @@
-import { useContext } from "preact/hooks";
+import { useContext, useLayoutEffect, useRef } from "preact/hooks";
 import { stamp, time } from "../format.ts";
 import { navigation, type Route } from "../routes.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
@@ -18,7 +18,12 @@ export function routeTitle(route: Route): string {
  */
 export function PageHeader({title, detail, back, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; fallback?: boolean}) {
  const slot = useContext(HeaderSlot);
- if (slot && !fallback) slot.owned = true;
+ const claimed = useRef(false);
+ if (slot && !fallback && !claimed.current) { claimed.current = true; slot.claim(); }
+ useLayoutEffect(() => {
+  if (!slot || fallback) return;
+  return () => { claimed.current = false; slot.release(); };
+ }, [slot, fallback]);
  const {status, updatedAt = null, control, version} = useContext(ShellContext);
  const Title = fallback ? "p" : "h1";
  return <div class={fallback ? "page-header page-header-fallback" : "page-header"}>
