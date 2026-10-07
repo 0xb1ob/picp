@@ -50,15 +50,21 @@ export function normalizeTag(raw: string): string | null {
 export const threadsReady = (status: ThreadsStatus | null | undefined): status is ThreadsResponse =>
  status != null && !("error" in status) && status.availability !== "unavailable";
 
-/** The filter a selection means: null shows all; a th- id; "none" for a tag no thread has yet (shared entries only). */
+/** The filter a selection means: null shows all; a th- id; "none" for a tag no thread has yet (no entries). */
 export function threadFilter(status: ThreadsStatus | null | undefined, selected: string | null | undefined): string | null {
  if (!selected || !threadsReady(status)) return null;
  return status.threads.find(t => t.tag === selected)?.id ?? "none";
 }
 
-/** One predicate: everything for All, else the thread's own entries plus every shared one. */
-export const visibleEntries = (entries: SessionEntry[], filter: string | null): SessionEntry[] =>
- filter === null ? entries : entries.filter(e => e.shared || e.thread === filter);
+/** All (`null`) is every entry. A thread shows its own entries, and a shared entry only inside its own span (first own entry through last). `"none"`, or a thread with no own entries, shows nothing. */
+export function visibleEntries(entries: SessionEntry[], filter: string | null): SessionEntry[] {
+ if (filter === null) return entries;
+ if (filter === "none") return [];
+ const first = entries.findIndex(e => e.thread === filter);
+ const last = entries.findLastIndex(e => e.thread === filter);
+ if (first < 0) return [];
+ return entries.slice(first, last + 1).filter(e => e.shared || e.thread === filter);
+}
 
 const waitingCount = (view: ThreadView): number => view.waiting ? view.waiting.asks + view.waiting.answers : 0;
 /** The chip's waiting badge, e.g. ` · 2`. */

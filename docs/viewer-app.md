@@ -389,10 +389,8 @@ page column at 1440 px.
 sorts the one chat into threads: views of one session, never separate contexts, and no model call. `use-threads.ts` reads
 `GET /api/threads` (`threads.ts`) on mount, on every refresh and after each Mark done. One selection, a thread **tag**,
 is kept in `localStorage` `cp-thread` (absent is **All**; a storage that refuses the write warns and the choice holds for
-the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread
-plus every `shared` one — bridge relays, system entries, the inbox replay; **All** shows everything), the chips, the
-sidebar and the composer picker. A tag with no thread yet shows only shared entries and `No messages in <tag> yet`; its
-first send creates it. The pinned "N decisions waiting" section is never filtered. Below 900 px a `<nav
+the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread, plus a `shared` one — a bridge relay, a system entry, the inbox replay — only between that thread's first and last own entry; **All** shows everything), the chips, the
+sidebar and the composer picker. A tag with no thread yet shows no entries and `No messages in <tag> yet`; its first send creates it. A thread with no own entries shows none either. The pinned "N decisions waiting" section is never filtered. Below 900 px a `<nav
 class="session-threads" aria-label="Threads">` chip row sits right above the composer: **All**, then each thread not
 done, its label the tag plus a waiting badge (`· 2`, open asks plus unacknowledged answers, spelled out in its
 `aria-label`), `aria-pressed` on the selected one, then **Mark done** for it; 44 px chips, the row scrolls sideways and
