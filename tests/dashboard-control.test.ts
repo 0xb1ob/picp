@@ -87,6 +87,9 @@ test("parsers: config defaults on and opts out with enabled:false; record and ma
 	assert.deepEqual(parseDashboardText(dashboardMarker(id, null, eight)), { body: "", id, askId: null, images: eight }, "eight ids, no text");
 	assert.equal(parseDashboardText(`x\n\n[cp-dashboard ${id} — from the dashboard; images=im-1.png]`), undefined, "a malformed image id is not a marker");
 	assert.equal(parseDashboardText(dashboardMarker(id, null, [...eight, one])), undefined, "nine ids are not a marker");
+	assert.deepEqual(parseDashboardText(`hello\n\n[cp-dashboard ${id} — from the dashboard; thread=billing-bug]`), { body: "hello", id, askId: null, thread: "billing-bug" });
+	assert.deepEqual(parseDashboardText(`click\n\n[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}]`), { body: "click", id, askId: "ask-abcd", thread: "billing-bug", images: [one] });
+	for (const tag of ["-bad", "Bad", "bad tag", "x".repeat(33)]) assert.equal(parseDashboardText(`[cp-dashboard ${id} — from the dashboard; thread=${tag}]`), undefined);
 });
 
 test("lifecycle: {enabled:false} opens nothing; on (default) binds a 0600 socket and record; a bad socket token journals nothing; stop removes both", async (t) => {
@@ -196,6 +199,23 @@ test("clicks: the verbatim label with the ask id; unknown label 400, settled ask
 	for (const request of lines.filter((l) => l.type === "request").slice(1)) {
 		assert.deepEqual(lines.filter((l) => l.id === request.id && l.type === "outcome").map((l) => l.state), ["refused"], "and one final outcome");
 	}
+});
+
+test("threaded sends: normalize the tag in the footer; clicks keep ask=; invalid tags inject nothing", async (t) => {
+	const { stateDir } = scratch(t);
+	put(join(stateDir, "operator", "asks.jsonl"), ASKS.map((a) => JSON.stringify(a)).join("\n") + "\n");
+	const fake = fakePorts();
+	const { record } = await listening(t, stateDir, fake.ports);
+	assert.ok((await controlRequest(record, "send", { kind: "message", text: "billing?", thread: "  Billing Bug " })).ok);
+	assert.match(fake.state.injected[0]![0], /^billing\?\n\n\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard; thread=billing-bug\]$/);
+	assert.ok((await controlRequest(record, "send", { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "Billing Bug" })).ok);
+	assert.match(fake.state.injected[1]![0], /^ask-abcd: Keep\n\n\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard; ask=ask-abcd; thread=billing-bug\]$/);
+	for (const thread of ["-bad", "x".repeat(33), 7, null]) {
+		const refused = await controlRequest(record, "send", { kind: "message", text: "bad", thread });
+		assert.equal(refused.ok, false);
+		assert.match(refused.ok ? "" : refused.error, /thread must be a tag/);
+	}
+	assert.equal(fake.state.injected.length, 2);
 });
 
 test("states: a throwing inject fails with its message (and frees the click); abort is refused idle, called busy; turning control off refuses the next frame", async (t) => {
@@ -356,4 +376,12 @@ test("inbox (cp-daemon P3): at listen the held messages arrive once, oldest firs
 	const again = fakePorts();
 	await listening(t, stateDir, again.ports, { now: () => now }).then(({ control }) => control.stop());
 	assert.equal(again.state.injected.length, 0, "a second session start delivers nothing twice");
+});
+
+test("held thread tags survive replay without changing untagged messages or sharing the replay turn", async (t) => {
+	const { stateDir } = scratch(t);
+	put(controlInboxFile(stateDir), JSON.stringify({ type: "held", id: "dc-20261006080000-89abcdef", at: "2026-10-06T08:00:00Z", text: "later", ask_id: null, thread: "billing-bug" }) + "\n");
+	const fake = fakePorts();
+	await listening(t, stateDir, fake.ports, { now: () => new Date("2026-10-06T08:01:00Z") });
+	assert.equal(fake.state.injected[0]![0], "[cp-dashboard inbox — 1 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]\n- 2026-10-06T08:00:00Z (dc-20261006080000-89abcdef): later\n[cp-dashboard dc-20261006080000-89abcdef — from the dashboard; thread=billing-bug]");
 });

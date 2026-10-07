@@ -134,3 +134,43 @@ test("fileUnderThread never throws on a bad ref and names the failure", (t) => {
 	assert.equal(filed.details.id, null);
 	assert.match(filed.note, /thread billing NOT filed: thread ref/);
 });
+
+test("thread_bind files job refs locally, normalizes, repeats without writes, and moves a job to the newest thread", async (t) => {
+	const b = await bench(t);
+	const params = { action: "thread_bind", thread: "  Billing Bug ", job_ids: ["cp-one", "other_TWO-2"] };
+	const bound = await b.tool.execute("bind", params);
+	assert.equal(bound.isError, undefined);
+	assert.equal(bound.details.state, "filed");
+	assert.deepEqual(b.lines().map((line) => [line.type, line.by, line.peer]), [["open", "bridge", null], ["bind", "bridge", null], ["bind", "bridge", null]]);
+	assert.deepEqual(b.lines().slice(1).map(line => line.ref), [{ kind: "job", id: "cp-one" }, { kind: "job", id: "other_TWO-2" }]);
+	const journal = readThreads(b.stateDir);
+	assert.equal(journal.skipped, 0);
+	assert.equal(journal.refs.get("job:cp-one"), journal.threads[0]!.id);
+	assert.equal(journal.threads[0]!.tag, "billing-bug");
+	await b.tool.execute("repeat", params);
+	assert.equal(b.lines().length, 3);
+	await b.tool.execute("move", { action: "thread_bind", thread: "ops", job_ids: ["cp-one"] });
+	assert.equal(readThreads(b.stateDir).refs.get("job:cp-one"), readThreads(b.stateDir).threads[1]!.id);
+	assert.equal(b.read("asks.jsonl"), null);
+	assert.equal(b.read("answers.jsonl"), null);
+	assert.equal(existsSync(join(b.stateDir, "parent.lock")), false, "no parent started for bookkeeping");
+});
+
+test("thread_bind validates the whole request before writes; a journal failure is named without throwing", async (t) => {
+	const b = await bench(t);
+	for (const params of [
+		{ thread: "bad!", job_ids: ["cp-one"] }, { job_ids: ["cp-one"] },
+		{ thread: "ok" }, { thread: "ok", job_ids: [] }, { thread: "ok", job_ids: "cp-one" },
+		...[["cp-one", "../bad"], ["cp-one", 7], ["cp-one", ""], ["cp-one", "x".repeat(129)]].map(job_ids => ({ thread: "ok", job_ids })),
+	]) {
+		const refused = await b.tool.execute("bad", { action: "thread_bind", ...params });
+		assert.equal(refused.isError, true, JSON.stringify(params));
+		assert.equal(b.read("threads.jsonl"), null, "all fields checked before the first bind");
+	}
+	mkdirSync(operatorThreadsFile(b.stateDir), { recursive: true });
+	const failed = await b.tool.execute("blocked", { action: "thread_bind", thread: "ok", job_ids: ["cp-one"] });
+	assert.equal(failed.isError, undefined);
+	assert.equal(failed.details.state, "unfiled");
+	assert.match(failed.content[0]!.text, /cp-one.*thread ok NOT filed: .*threads\.jsonl/);
+	assert.deepEqual(failed.details.bindings, [{ job_id: "cp-one", tag: "ok", id: null, error: (failed.details.bindings as Array<{ error: string }>)[0]!.error }]);
+});

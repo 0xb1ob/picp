@@ -2,8 +2,8 @@
  * cp-xmw2 S4, the viewer's thread routes: `GET /api/threads` lists threads with their derived state (waiting, done,
  * open) and is --require-tailnet only; `POST /api/threads/done` refuses in the dashboard-control order and then its own
  * (shape, token, journal, known, asks/answers readable, not waiting, not done), journals each refusal as kind
- * `thread_done`, and answers 202 only with its `done` line on disk. A composer message with `thread` keeps the socket
- * frame exactly as before and files the returned (or held) `dc-` id in `state/operator/threads.jsonl`.
+ * `thread_done`, and answers 202 only with its `done` line on disk. Tagged sends forward the normalized thread
+ * to the session marker and file the returned (or held) dc- id in state/operator/threads.jsonl.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -60,7 +60,7 @@ async function setup(t: import("node:test").TestContext, viewer: Partial<ViewerO
 }
 
 const open = (id: string, tag: string, at: string): ThreadLine => ({ type: "open", by: "viewer", id, at, tag, peer: null });
-const bind = (thread: string, kind: "dashboard" | "ask" | "answer", id: string, at: string): ThreadLine => ({ type: "bind", by: "bridge", at, thread, ref: { kind, id }, peer: null });
+const bind = (thread: string, kind: "dashboard" | "ask" | "answer" | "job", id: string, at: string): ThreadLine => ({ type: "bind", by: "bridge", at, thread, ref: { kind, id }, peer: null });
 const done = (id: string, at: string): ThreadLine => ({ type: "done", by: "viewer", id, at, peer: null });
 
 /** alpha waits on an open ask; beta on an unacknowledged answer; gamma's refs are settled (open); delta is done; eps was done, then a bind reopened it. */
@@ -91,6 +91,7 @@ test("the list: states, reasons and counts, order, the token only while control 
 	assert.equal(existsSync(operatorThreadsFile(stateDir)), false, "reading never creates the journal");
 
 	fixture(stateDir);
+	appendThreadLine(stateDir, bind(BETA, "job", "cp-one", "2026-10-06T08:00:03Z"));
 	const list = await call(port, LIST);
 	assert.equal(list.body.availability, "ok");
 	assert.match(String(list.body.token), /^[0-9a-f]{64}$/);
@@ -112,6 +113,17 @@ test("the list: states, reasons and counts, order, the token only while control 
 	assert.deepEqual([off.body.enabled, off.body.token, (off.body.threads as unknown[]).length], [false, null, 5], "off: the list stays, the token goes");
 	assert.match(String(off.body.reason), /^Dashboard control is off/);
 	assert.equal(existsSync(controlJournalFile(stateDir)), false, "the list never writes");
+});
+
+test("job id collisions do not move legacy counts, waiting reasons or the done refusal", async (t) => {
+	const { stateDir, port } = await setup(t);
+	fixture(stateDir);
+	const before = await call(port, LIST);
+	for (const id of [DC1, "ask-abcd", "ans-bbbbbbbbbbbb"]) assert.ok(appendThreadLine(stateDir, bind(EPS, "job", id, "2026-10-06T08:00:07Z")).ok);
+	const after = await call(port, LIST);
+	assert.deepEqual(after.body.threads, before.body.threads, "job refs with existing ids add no counts and remove no waiting items");
+	const refused = await call(port, DONE, json(String(after.body.token), { id: ALPHA }));
+	assert.equal(refused.status, 409, "an open ask still blocks done after a colliding job bind");
 });
 
 test("every done refusal, in order, is one viewer line of kind thread_done and never a done line; then 202 with its done line", async (t) => {
@@ -215,14 +227,14 @@ async function session(t: import("node:test").TestContext, stateDir: string) {
 	return { frames, csrf: "c".repeat(64) };
 }
 
-test("a composer send with a thread: the frame args are exactly {kind, text, peer}; the 202 names the thread; the dc- id is bound", async (t) => {
+test("a composer send forwards the normalized thread; the 202 names it and binds the dc- id; untagged sends stay unchanged", async (t) => {
 	const { stateDir, port } = await setup(t);
 	const { frames, csrf } = await session(t, stateDir);
 	const sent = await call(port, MESSAGE, json(csrf, { kind: "message", text: "hello", thread: "  Billing Bug " }));
 	assert.equal(sent.status, 202, JSON.stringify(sent.body));
 	assert.equal(frames.length, 1);
 	assert.equal(frames[0]!.op, "send");
-	assert.deepEqual(frames[0]!.args, { kind: "message", text: "hello", peer: "127.0.0.1" }, "the thread never reaches the session");
+	assert.deepEqual(frames[0]!.args, { kind: "message", text: "hello", thread: "billing-bug", peer: "127.0.0.1" });
 	const thread = sent.body.thread as { tag: string; id: string; error: null };
 	assert.deepEqual([thread.tag, thread.error], ["billing-bug", null]);
 	assert.match(thread.id, /^th-[0-9a-f]{12}$/);
@@ -238,16 +250,19 @@ test("a composer send with a thread: the frame args are exactly {kind, text, pee
 	const plain = await call(port, MESSAGE, json(csrf, { kind: "message", text: "no thread" }));
 	assert.equal(plain.status, 202);
 	assert.equal("thread" in plain.body, false, "no thread named: today's body");
+	assert.deepEqual(frames[2]!.args, { kind: "message", text: "no thread", peer: "127.0.0.1" }, "untagged frame unchanged");
 	assert.equal(lines(operatorThreadsFile(stateDir)).length, 3);
 
 	const bad = await call(port, MESSAGE, json(csrf, { kind: "message", text: "x", thread: "-nope" }));
 	assert.deepEqual([bad.status, bad.body.error], [400, "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit"]);
 	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "message", text: "x", thread: "x".repeat(33) }))).status, 400);
 	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "message", text: "x", thread: 7 }))).status, 400);
-	const answer = await call(port, MESSAGE, json(csrf, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "billing-bug" }));
-	assert.deepEqual([answer.status, answer.body.error], [400, "unknown field thread"]);
+	const answer = await call(port, MESSAGE, json(csrf, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "  Billing Bug " }));
+	assert.equal(answer.status, 202);
+	assert.deepEqual(frames[3]!.args, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "billing-bug", peer: "127.0.0.1" });
+	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "bad!" }))).status, 400);
 	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "abort", thread: "billing-bug" }))).status, 400);
-	assert.equal(frames.length, 3, "no refused request reaches the session");
+	assert.equal(frames.length, 4, "no refused request reaches the session");
 	assert.equal(lines(controlJournalFile(stateDir)).at(-1)!.thread, "billing-bug", "the refusal records the thread it parsed");
 
 	// A bind that cannot be written never changes the 202; the body names why.
@@ -255,7 +270,7 @@ test("a composer send with a thread: the frame args are exactly {kind, text, pee
 	mkdirSync(operatorThreadsFile(stateDir));
 	const unbound = await call(port, MESSAGE, json(csrf, { kind: "message", text: "still sent", thread: "billing-bug" }));
 	assert.equal(unbound.status, 202);
-	assert.equal(frames.length, 4, "the message was delivered");
+	assert.equal(frames.length, 5, "the message was delivered");
 	const failed = unbound.body.thread as { tag: string; id: null; error: string };
 	assert.deepEqual([failed.tag, failed.id], ["billing-bug", null]);
 	assert.match(failed.error, /threads\.jsonl/);
@@ -267,7 +282,8 @@ test("offline: a held message with a thread binds the held dc- id", async (t) =>
 	const held = await call(port, MESSAGE, json(inbox, { kind: "message", text: "later", thread: "deploys" }));
 	assert.equal(held.status, 202, JSON.stringify(held.body));
 	assert.equal(held.body.state, "held");
-	assert.deepEqual(lines(controlInboxFile(stateDir)).map((l) => Object.keys(l).sort()), [["ask_id", "at", "id", "text", "type"]], "the inbox line keeps its shape");
+	assert.deepEqual(lines(controlInboxFile(stateDir)).map((l) => Object.keys(l).sort()), [["ask_id", "at", "id", "text", "thread", "type"]]);
+	assert.equal(lines(controlInboxFile(stateDir))[0]!.thread, "deploys");
 	const journal = lines(operatorThreadsFile(stateDir));
 	assert.deepEqual(journal.map((l) => l.type), ["open", "bind"]);
 	assert.deepEqual(journal[1]!.ref, { kind: "dashboard", id: held.body.id });

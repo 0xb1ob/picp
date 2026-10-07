@@ -11,7 +11,7 @@
  *   state/schedule-control.jsonl    0600: Schedules page requests (viewer request lines) and the parent's
  *                                   claimed/outcome lines (cp-hhuf P6)
  *   state/operator/answers.jsonl    0600: answers the operator asked for (bridge posted lines, viewer acked lines)
- *   state/operator/threads.jsonl    0600: operator threads (cp-xmw2): tags and their dc-/ask-/ans- bindings, never text
+ *   state/operator/threads.jsonl    0600: operator threads (cp-xmw2): tags and dc-/ask-/ans-/job bindings, never text
  *                                   (bridge and viewer open/bind lines, viewer done lines)
  *
  * Nothing in this file writes.
@@ -21,6 +21,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pushDataDir, readPushConfig } from "./push-files.ts";
 import { UPLOAD_ID_SOURCE } from "./uploads.ts";
+import { isSafeId } from "./sessions.ts";
 
 export const CONTROL_PROTOCOL = 1;
 /** Composer text cap; with its JSON envelope it fits the body cap. */
@@ -40,7 +41,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; thread?: string }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -187,7 +188,9 @@ export const THREAD_ID_RE = /^th-[a-f0-9]{12}$/;
 export const DASHBOARD_ID_RE = /^dc-\d{14}-[0-9a-f]{8}$/;
 export const THREADS_MAX_BYTES = 16 * 1024 * 1024;
 export const THREADS_LIST_MAX = 100;
-export type ThreadRef = { kind: "dashboard" | "ask" | "answer"; id: string };
+export type ThreadRef = { kind: "dashboard" | "ask" | "answer" | "job"; id: string };
+/** Ref identity includes its kind; a path-safe job id may also be a dashboard, ask or answer id. */
+export const threadRefKey = (ref: ThreadRef): string => `${ref.kind}:${ref.id}`;
 export type ThreadLine =
 	| { type: "open"; by: "bridge" | "viewer"; id: string; at: string; tag: string; peer: string | null }
 	| { type: "bind"; by: "bridge" | "viewer"; at: string; thread: string; ref: ThreadRef; peer: string | null }
@@ -214,7 +217,7 @@ export function normalizeThreadTag(raw: unknown): string | null {
 	return THREAD_TAG_RE.test(tag) ? tag : null;
 }
 
-const THREAD_REF_TEST: Record<ThreadRef["kind"], (id: string) => boolean> = { dashboard: (id) => DASHBOARD_ID_RE.test(id), ask: (id) => isAskId(id), answer: (id) => isAnswerId(id) };
+const THREAD_REF_TEST: Record<ThreadRef["kind"], (id: string) => boolean> = { dashboard: (id) => DASHBOARD_ID_RE.test(id), ask: (id) => isAskId(id), answer: (id) => isAnswerId(id), job: isSafeId };
 export function isThreadRef(value: unknown): value is ThreadRef {
 	if (value === null || typeof value !== "object") return false;
 	const { kind, id } = value as Record<string, unknown>;
@@ -226,7 +229,7 @@ export function isThreadRef(value: unknown): value is ThreadRef {
  * not an object, has a bad `at`/`by`/`peer` or an unknown `type` counts in `skipped`, as do a repeated open id, a bind or
  * done for an unknown thread and a bind with a bad ref. An open for a tag already opened under another id makes that id
  * an alias of the first (two writers opening one new tag at once). A bind of a ref to the thread it already belongs to is
- * ignored; otherwise the newest bind wins in `refs`. `error` names an unreadable or oversized file (never truncated).
+ * ignored; otherwise the newest bind wins in `refs`, keyed by kind and id. `error` names an unreadable or oversized file (never truncated).
  */
 export function readThreads(stateDir: string): { exists: boolean; threads: RecordedThread[]; refs: Map<string, string>; skipped: number; error: string | null } {
 	const file = operatorThreadsFile(stateDir);
@@ -271,9 +274,10 @@ export function readThreads(stateDir: string): { exists: boolean; threads: Recor
 			}
 		} else if (line.type === "bind" && thread && isThreadRef(line.ref)) {
 			const ref = line.ref;
-			if (refs.get(ref.id) === thread.id) continue; // already filed there: ignored, not counted
-			refs.set(ref.id, thread.id);
-			const seen = thread.refs.find((item) => item.ref.id === ref.id);
+			const key = threadRefKey(ref);
+			if (refs.get(key) === thread.id) continue; // already filed there: ignored, not counted
+			refs.set(key, thread.id);
+			const seen = thread.refs.find((item) => threadRefKey(item.ref) === key);
 			if (seen) Object.assign(seen, { at, line: index }); // moved back from another thread
 			else thread.refs.push({ ref: { kind: ref.kind, id: ref.id }, at, line: index });
 			Object.assign(thread, { last_bind_line: index, last_at: at });
@@ -340,17 +344,17 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 }
 
 /** The last line of every message the dashboard injects: an id, never an instruction; attached images list their upload ids. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[]): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}]`;
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}]`;
 }
 
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; images=(${UPLOAD_ID_SOURCE}(?:,${UPLOAD_ID_SOURCE}){0,7}))?\\]\\s*$`);
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${UPLOAD_ID_SOURCE}(?:,${UPLOAD_ID_SOURCE}){0,7}))?\\]\\s*$`);
 
-/** A dashboard-sent user message: its body without the marker, the request id, the ask a click answered and its image ids. */
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; images?: string[] } | undefined {
+/** A dashboard-sent user message: its body without the marker, request id, clicked ask, optional thread and image ids. */
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[] } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
-	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { images: match[3].split(",") } : {}) };
+	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);

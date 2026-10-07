@@ -5,7 +5,7 @@
  * bind names. With asks or answers unreadable `waiting` is null and the state falls back to done/open.
  */
 import type { SourceAvailability, ThreadView } from "./api-types.ts";
-import { readAnswers, readThreads, THREADS_LIST_MAX } from "./control-files.ts";
+import { readAnswers, readThreads, threadRefKey, THREADS_LIST_MAX } from "./control-files.ts";
 import { asks } from "./overview-decisions.ts";
 import type { ViewerState } from "./sessions.ts";
 
@@ -40,7 +40,7 @@ export function threadsView(state: ViewerState): ThreadsView {
 	const openAsks = new Set(askSource.value.filter((record) => record.state === "open").map((record) => record.ask.id));
 	const unacked = new Set(answers.answers.filter((answer) => answer.acked_at === null).map((answer) => answer.id));
 	const all = journal.threads.map((thread): ThreadView => {
-		const refs = thread.refs.filter((item) => journal.refs.get(item.ref.id) === thread.id).map((item) => item.ref);
+		const refs = thread.refs.filter((item) => journal.refs.get(threadRefKey(item.ref)) === thread.id).map((item) => item.ref);
 		const count = (kind: string) => refs.filter((ref) => ref.kind === kind).length;
 		const waiting = blind ? null : { asks: refs.filter((ref) => ref.kind === "ask" && openAsks.has(ref.id)).length, answers: refs.filter((ref) => ref.kind === "answer" && unacked.has(ref.id)).length };
 		const done = thread.done_line !== null && (thread.last_bind_line === null || thread.done_line > thread.last_bind_line);

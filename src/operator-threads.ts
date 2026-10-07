@@ -1,6 +1,6 @@
 /**
- * cp-xmw2 S2: the optional `thread` on `cp_parent ask`/`answer`. Operator-session bookkeeping only; never authority.
- * The tag is validated before any journal write; filing the ask-/ans- id afterwards never throws, it names its failure.
+ * cp-xmw2: operator-session thread bookkeeping for cp_parent ask/answer/thread_bind; never authority.
+ * Validate inputs before writes; fileUnderThread never throws and names a failed bind.
  */
 import { isoTimestamp } from "./contracts.ts";
 import { bindThread } from "./viewer/control-audit.ts";

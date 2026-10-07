@@ -1,4 +1,5 @@
 import type { SessionEntry } from "./api-types.ts";
+import { threadRefKey } from "./control-files.ts";
 
 /** The head of the one user message that replays held dashboard messages (src/dashboard-control.ts). */
 export const INBOX_REPLAY_PREFIX = "[cp-dashboard inbox — ";
@@ -8,21 +9,22 @@ const isOpener = (e: SessionEntry): boolean => (e.kind === "say" || e.kind === "
 
 /**
  * cp-xmw2 turn rule: file each Full transcript entry under a thread (a `th-` id) or mark it `shared`. `refs` maps a
- * `dc-`/`ask-`/`ans-` id to its thread (readThreads, newest bind wins). System entries and the inbox replay are shared
- * and end the current turn; an Operator say/via opens one. An entry takes its own ref's thread, else its turn's thread
- * (the opener's own, else the first own one in the turn); entries outside any turn use only their own ref.
+ * dashboard/ask/answer/job kind-and-id key to its thread (readThreads, newest bind wins). A bound cp-bridge job notice owns and
+ * opens a turn. Other system entries and the inbox replay are shared and end the turn; an Operator say/via opens one.
+ * An entry takes its own ref's thread, else the opener's or first own ref in its turn; outside a turn, own ref only.
  */
 export function assignThreads(entries: SessionEntry[], refs: ReadonlyMap<string, string>): void {
-	const own = (e: SessionEntry): string | undefined => (e.dashboard_id && refs.get(e.dashboard_id)) || (e.ask_id && refs.get(e.ask_id)) || (e.answer_id && refs.get(e.answer_id)) || undefined;
+	const jobThread = (e: SessionEntry): string | undefined => e.kind === "system" && e.who === "cp-bridge" && e.bridge?.job ? refs.get(threadRefKey({ kind: "job", id: e.bridge.job })) : undefined;
+	const own = (e: SessionEntry): string | undefined => jobThread(e) || (e.dashboard_id && refs.get(threadRefKey({ kind: "dashboard", id: e.dashboard_id }))) || (e.ask_id && refs.get(threadRefKey({ kind: "ask", id: e.ask_id }))) || (e.answer_id && refs.get(threadRefKey({ kind: "answer", id: e.answer_id }))) || undefined;
 	const turns: SessionEntry[][] = [];
 	let turn: SessionEntry[] | null = null;
 	for (const e of entries) {
-		if (isShared(e)) {
+		if (isShared(e) && !jobThread(e)) {
 			e.shared = true;
 			turn = null;
 			continue;
 		}
-		if (isOpener(e)) turns.push((turn = []));
+		if (isOpener(e) || jobThread(e)) turns.push((turn = []));
 		if (turn) turn.push(e);
 		else {
 			const thread = own(e);

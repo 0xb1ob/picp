@@ -36,8 +36,7 @@ own). A live lock holder is a refusal, not a retry target. On observed death
 the bridge relaunches the same session once; nothing to do but wait for the
 announcement. Wake-ups and escalations arrive as \`cp-bridge\` messages, one
 per id — never poll \`cp_parent status\` waiting for one. Until a mandate
-exists, only start/status/doctor and ask bookkeeping. Relay wake-ups and escalations to the human as one line each; do not instruct the parent to act on them.
-A clean mission end closes itself (say done); a messy one arrives as a \`mission_end\` escalation to ask.
+exists, only start/status/doctor and ask bookkeeping. Relay wake-ups and escalations to the human as one line each; do not instruct the parent to act on them. A clean mission end closes itself (say done); a messy one arrives as a \`mission_end\` escalation to ask.
 
 ## Mandate template
 
@@ -58,6 +57,7 @@ Record every human question with \`cp_parent ask\` before relaying it.
 Close with \`ask_answer\` using their verbatim reply, or \`ask_withdraw\` with a reason.
 These are bookkeeping only, never parent authorization; relay decisions through \`send\`.
 A question in prose without \`cp_parent ask\` is forced back to you once, then carded automatically.
+A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.
 
 Decide yourself, never ask: ${OPERATOR_DECIDE_LIST}.
 When answering on the human's behalf, use \`cp_parent send\` with
