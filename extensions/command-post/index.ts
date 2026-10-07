@@ -93,7 +93,9 @@ export default function (pi: ExtensionAPI): void {
 	registerIntegrateTools(pi, deps);
 	registerReviewTools(pi, deps);
 	registerSendStatusTools(pi, deps);
-	registerScheduleTools(pi, deps, () => s.parentLock !== undefined, (get) => { s.scheduleRunner = get; }, (result) => session.wakeEnvelope(result));
+	registerScheduleTools(pi, deps, () => s.parentLock !== undefined, (get) => { s.scheduleRunner = get; }, (result) => session.wakeEnvelope(result), (deliver) => {
+		if (wakeups.compactHold.offer(deliver) === "send") deliver();
+	});
 	registerTrackerTools(pi, deps, () => s.parentLock !== undefined);
 	registerPushTick(pi, deps, () => s.parentLock !== undefined);
 	registerServiceAlertTick(pi, deps, () => s.parentLock !== undefined);

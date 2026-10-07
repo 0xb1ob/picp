@@ -10,6 +10,10 @@ are recorded here with the migration; the binding detail lives in
 
 A selected operator thread shows a shared entry (bridge relay, system line, inbox replay) only between its first and last own entry. A new tag, or a thread with no own entries, shows no entries and keeps `No messages in <tag> yet`. **All** is unchanged. Migration: none.
 
+### Schedule wakes wait for parent compaction (sweep item 14 A1)
+
+Parent-directed `cp-schedule` notices now use the existing compaction hold, including PR/pipeline fires, local skill anchors and startup recovery of unexpanded anchors. Held notices release once in offer order; fires, fresh grants, quote/open-fire checks, polling and runner-owned answer/board/local work keep their existing timing. Migration: none.
+
 ### Ship briefs and one conflict handoff (picp-k2o, picp-0lj)
 
 A ship job cut from a synthesis is dispatched with a short fix list as `task_file` (the item's fix, files, constraints, and test plan), not the previous synthesis or `report.md` inlined as `task`. The ship brief tells the worker not to reread that synthesis unless the task names it as evidence, and not to raise the compact threshold so a long reread fits. A conflicting PR is handed to its implementer once per head; a later `cp_integrate` for that same head returns `next: wait` and does not journal another `integration_surfaced`. A new head is a new handoff. This is not a reason to serialize the fleet. Migration: none.

@@ -34,6 +34,7 @@ export function namesToken(text: string, word: string, flags: "" | "i"): boolean
 export function registerScheduleTools(
 	pi: ExtensionAPI, deps: ExtensionDeps, holdsLock: () => boolean,
 	shareRunner: (get: () => ScheduleRunner | undefined) => void, wakeEnvelope: (result: IntakeResult) => void,
+	deferParentWake: (deliver: () => void) => void,
 ): void {
 	let scheduler: Scheduler | undefined;
 	let runner: ScheduleRunner | undefined;
@@ -68,12 +69,16 @@ export function registerScheduleTools(
 	};
 	// The fleet owner only: a session without the lock never tears anything down.
 	shareRunner(() => (holdsLock() ? (runner ??= buildRunner()) : undefined));
+	// Hold only parent transport: fires, fresh grants, polling and runner dispatch happen now.
+	const sendParent = (text: string, details: Record<string, unknown>): void => deferParentWake(() => {
+		pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details }, { deliverAs: "followUp", triggerTurn: true });
+	});
 	const woken = new Set<string>();
-	/** One `cp-schedule` wake per anchor per process: the live fire's wake and the restart sweep never double up. */
+	/** One offer per anchor per process: dedupe now, even if transport is held until compaction. */
 	const wakeParent = (anchorId: string, text: string, details: Record<string, unknown>): void => {
 		if (woken.has(anchorId)) return;
 		woken.add(anchorId);
-		pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details }, { deliverAs: "followUp", triggerTurn: true });
+		sendParent(text, details);
 	};
 	const handle = (event: ScheduleEvent, active: ScheduleRunner): void => {
 		const text = formatScheduleEvent(event);
@@ -82,7 +87,7 @@ export function registerScheduleTools(
 		else if (event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)) {
 			log(text);
 			void active.onFired(event);
-		} else pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details: { ...event } }, { deliverAs: "followUp", triggerTurn: true });
+		} else sendParent(text, { ...event });
 	};
 	const tick = async (): Promise<void> => {
 		// 4b-2 backstop: the queue's own owns() decides; a scheduler fault never stops it.
