@@ -35,9 +35,11 @@ async function freePort(): Promise<number> {
  * A zombie is not alive. A viewer that outlives its launcher is reparented to
  * PID 1, and a container whose PID 1 never reaps (the Nomad CI runner's is
  * `timeout`) leaves it a zombie forever, which `kill(pid, 0)` still finds.
- * State Z means the process has exited and its listen socket is closed; a node
- * zombie keeps `Threads:` > 1 (libuv) until something reaps it, so that count
- * must not keep the wait alive.
+ * picp-t39: that node zombie stays `Threads:` > 1, so `Z && Threads==1` (what
+ * `isPidAlive` uses) never ends this wait. State Z means the leader has exited.
+ * It does not mean the listen fd is closed: a zombie leader whose other threads
+ * are still exiting (`Threads:` > 1) can still hold the port. Exit checks that
+ * need the port wait for `portInUse` false as well.
  */
 function alive(pid: number): boolean {
 	try {
@@ -97,7 +99,8 @@ test("start: a free port gets this session's own viewer, and stop ends it", asyn
 		}
 	}
 	viewer.stop();
-	await until("the viewer to exit", () => !alive(viewer.pid as number));
+	// Z alone is not "port free": a leader with threads still exiting can hold the fd.
+	await until("the viewer to exit and release the port", async () => !alive(viewer.pid as number) && !(await portInUse(port)));
 	assert.equal(await portInUse(port), false);
 });
 
@@ -220,7 +223,7 @@ test("without --host, the operator uses the tailnet address for parent board lin
 	await assert.rejects(runOperator([], { piBin: FAKE_PI, viewer: { port, command: [process.execPath, FAKE_VIEWER, String(port)] } }), /require-tailnet/);
 	const viewer = await startViewer({ port });
 	t.after(() => viewer.stop());
-	await until("cp-view to reject the missing tailnet address", () => !alive(viewer.pid as number));
+	await until("cp-view to exit and release the port", async () => !alive(viewer.pid as number) && !(await portInUse(port)));
 	assert.equal(await portInUse(port), false);
 });
 
@@ -243,12 +246,34 @@ test("CP_OPERATOR_VIEWER=service: cp-view.service serves the dashboard, so the s
 	const port = await freePort();
 	const dir = mkdtempSync(join(tmpdir(), "cp-operator-service-"));
 	const pidFile = join(dir, "viewer.pid");
-	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_VIEWER_PIDFILE: pidFile, CP_OPERATOR_VIEWER: "service" });
+	const report = join(dir, "viewer-spawns.json");
+	// picp-t39 strict-equal on existsSync(pidFile): the fake viewer writes that file in its
+	// listen callback, so the check can pass before an async spawn, and the old 200ms sleep
+	// could also observe another test's FAKE_VIEWER_PIDFILE. This pi runs only after
+	// startViewer has returned; uv_spawn has already put a spawned viewer in /proc.
+	const pi = join(dir, "pi.mjs");
+	writeFileSync(pi, `#!/usr/bin/env node
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+const needle = ${JSON.stringify(FAKE_VIEWER)};
+const portArg = ${JSON.stringify(String(port))};
+const hits = [];
+for (const pid of readdirSync("/proc")) {
+	if (!/^\\d+$/.test(pid)) continue;
+	let text = "";
+	try { text = readFileSync("/proc/" + pid + "/cmdline", "utf8"); } catch { continue; }
+	const args = text.split("\\0").filter(Boolean);
+	if (args.includes(needle) && args.includes(portArg)) hits.push(pid);
+}
+writeFileSync(${JSON.stringify(report)}, JSON.stringify(hits));
+`);
+	chmodSync(pi, 0o755);
+	Object.assign(process.env, { FAKE_VIEWER_PIDFILE: pidFile, CP_OPERATOR_VIEWER: "service" });
 	t.after(() => {
-		for (const key of ["FAKE_PI_EXIT_CODE", "FAKE_VIEWER_PIDFILE", "CP_OPERATOR_VIEWER"]) delete process.env[key];
+		for (const key of ["FAKE_VIEWER_PIDFILE", "CP_OPERATOR_VIEWER"]) delete process.env[key];
 		rmSync(dir, { recursive: true, force: true });
 	});
-	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: fakeViewer(port) }), 0);
+	assert.equal(await runOperator([], { piBin: pi, viewer: fakeViewer(port) }), 0);
+	assert.deepEqual(JSON.parse(readFileSync(report, "utf8")), [], "no session viewer was spawned");
 	assert.equal(existsSync(pidFile), false, "no session viewer was spawned");
 	assert.equal(await portInUse(port), false);
 });
