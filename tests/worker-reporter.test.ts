@@ -351,6 +351,37 @@ test("a replace batch reports the cause once; sibling E_OP_ABORTED lines do not 
 	assert.doesNotMatch(again, /file changed after/);
 });
 
+test("an E_OP_ABORTED line with no batch id is never deduped onto another operation", () => {
+	const result = stubbedToolResultHandler();
+	const unknown = "[E_OP_ABORTED] aborted with no batch id: [replace] Call Nr 1 errored [E_STALE_ANCHOR]. Nothing was written.";
+	const other = "[E_OP_ABORTED] a different operation failed. Call Nr 2 errored [E_BAD_SHAPE].";
+	assert.equal(result("replace", REPLACE_INPUT, unknown), undefined);
+	assert.equal(result("insert", INSERT_INPUT, other), undefined);
+	assert.equal(result("replace", { ...REPLACE_INPUT, remove_from: "ssPB" }, unknown), undefined);
+});
+
+test("a successful edit, replace, or insert clears remembered abort batches", () => {
+	const result = stubbedToolResultHandler();
+	const successes: Array<[string, Record<string, unknown>, string]> = [
+		["replace", REPLACE_INPUT, "Replaced lines"],
+		["insert", INSERT_INPUT, "Inserted"],
+		["edit", { path: "src/x.ts", oldText: "a", newText: "b" }, "edited"],
+	];
+	for (const [batch, [tool, input, text]] of successes.map((success, i) => [`${i + 9}`, success] as const)) {
+		const primary = `[E_OP_ABORTED] Batch ${batch} aborted: the file changed after the batch started. Call read for fresh anchors and retry.`;
+		const restated = `[E_OP_ABORTED] Batch ${batch} aborted: the file changed after the batch started. Nothing was written; the whole batch was discarded.`;
+		assert.equal(result("replace", REPLACE_INPUT, primary), undefined);
+		assert.match(result("replace", REPLACE_INPUT, restated) ?? "", new RegExp(`Batch ${batch} discarded`));
+		assert.equal(result(tool, input, text, false), undefined);
+		assert.equal(result("replace", REPLACE_INPUT, primary), undefined, `${tool} success lets batch ${batch} be stated again`);
+	}
+	const stuck = "[E_OP_ABORTED] Batch 12 aborted: the file changed after the batch started. Nothing was written; the whole batch was discarded.";
+	const stated = "[E_OP_ABORTED] Batch 12 aborted: the file changed after the batch started. Call read for fresh anchors and retry.";
+	assert.equal(result("replace", REPLACE_INPUT, stated), undefined);
+	assert.equal(result("read", { path: "src/x.ts" }, "file text", false), undefined);
+	assert.match(result("replace", REPLACE_INPUT, stuck) ?? "", /Batch 12 discarded/);
+});
+
 test("a bash non-zero exit with no output names the command that failed", () => {
 	const silent = "(no output)\n\nCommand exited with code 1";
 	assert.equal(

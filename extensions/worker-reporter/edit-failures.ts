@@ -247,6 +247,8 @@ export function createEditResultEnricher(readFile: (path: string) => string) {
 		const input = event.input ?? {};
 		const inputPath = typeof input.path === "string" ? input.path : undefined;
 		if (!event.isError) {
+			// A finished edit/replace/insert is new work; remembered batches must not swallow it.
+			if (EDIT_TOOLS.includes(event.toolName)) reportedAborts.clear();
 			// Progress: a read or successful edit clears that file's run; a successful
 			// replace/insert may not name a file, so it clears all.
 			if ((event.toolName === "read" || event.toolName === "edit") && inputPath) misses.reset(inputPath);
@@ -258,10 +260,11 @@ export function createEditResultEnricher(readFile: (path: string) => string) {
 		// One cause per replace batch. Hashline still returns one result per call; siblings must not each restate it.
 		if (/\[E_OP_ABORTED\]/.test(text)) {
 			const batch = /\[E_OP_ABORTED\] Batch (\d+)/.exec(text)?.[1] ?? "?";
-			if (/Call Nr \d+ errored \[/.test(text) || reportedAborts.has(batch)) {
+			// No numeric id: these are independent operations, never one shared batch.
+			if (batch !== "?" && (/Call Nr \d+ errored \[/.test(text) || reportedAborts.has(batch))) {
 				return `[E_OP_ABORTED] Batch ${batch} discarded; the cause was already reported on the failing call. Nothing was written.`;
 			}
-			reportedAborts.add(batch);
+			if (batch !== "?") reportedAborts.add(batch);
 			return undefined;
 		}
 		let enriched = text;
