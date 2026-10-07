@@ -41,6 +41,7 @@
  .decision-desktop { display: initial; }
  .decision-phone { display: none !important; }
  .decision-heading p { font-size: 14px; }
+ .decisions > .page-header { margin-bottom: calc(var(--page-header-gap) - 28px); }
  .decision-kinds li { min-height: 0; }
  .decision-parent { gap: 12px; }
  .decision-parent-item { padding: 14px; background: var(--background); }

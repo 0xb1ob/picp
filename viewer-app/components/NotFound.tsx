@@ -46,7 +46,7 @@ export function NotFound({kind, id, title, body, back, searchLabel, workers}: No
  const openSearch = useContext(ShellContext).openSearch;
  const Heading = kind === "worker" ? "h2" : "h1";
  return <div class={`not-found not-found-${kind}`}>
-  {kind === "worker" && <header class="not-found-heading"><PageHeader title="Sessions" detail={id}/></header>}
+  {kind === "worker" && <header class="not-found-heading"><PageHeader title="Sessions" detail={id} back={{href:"#sessions", label:"← Sessions"}}/></header>}
   <section class="not-found-recovery" aria-labelledby="not-found-title">
    <span class="not-found-illustration" aria-hidden="true"><Icon name={kind === "worker" ? "sessions" : "search"} size={28}/></span>
    <Heading id="not-found-title">{title}</Heading>

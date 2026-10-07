@@ -40,7 +40,7 @@
  .board-phone { display: none; }
  .board-desktop { display: block; }
  .board-heading { display: contents; }
- .board-heading > .page-header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 4px; }
+ .board-heading > .page-header { grid-column: 1 / -1; grid-row: 1; margin-bottom: calc(var(--page-header-gap) - 16px); }
  .board-heading .jobs-views { grid-column: 1; grid-row: 2; }
  .board-toolbar { grid-column: 2; grid-row: 2; }
  .board-toolbar .board-fold { white-space: nowrap; font-size: 11px; }

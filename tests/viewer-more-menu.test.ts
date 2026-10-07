@@ -131,6 +131,8 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  // A worker 404 draws its own row: the one <h1> is Sessions, the id muted after it; the recovery title is an <h2>.
  const worker404 = parseHTML(draw.missing({screen:"sessions",section:null,query:"view=workers&id=cp-doesnotexist"})).document;
  assert.deepEqual([...worker404.querySelectorAll("h1")].map(e => e.textContent),["Sessions"]);
+ assert.equal(worker404.querySelector(".page-header-fallback"), null, "the worker 404 row is its own header");
+ assert.equal(worker404.querySelector(".not-found-heading .page-header-back")?.textContent,"← Sessions");
  assert.equal(worker404.querySelector(".not-found-heading > .page-header > .page-header-detail")?.textContent,"cp-doesnotexist");
  assert.equal(worker404.querySelector(".not-found-recovery > h2")?.textContent,"No worker session cp-doesnotexist");
  const {overview} = await import("../src/viewer/overview-view.ts");
@@ -141,6 +143,8 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
   assert.deepEqual([...page.querySelectorAll("h1")].map(e => e.textContent),["Overview"]);
   const row = page.querySelector(".overview-heading .page-header:not(.page-header-fallback)")!;
   assert.ok(row.querySelector("h1 + .page-header-end > .shell-live + .shell-more"),"title, then status, then ⋮");
+  assert.equal(page.querySelector(".page-header-fallback"), null, "no second header, no second ⋮");
+  assert.equal(page.querySelectorAll(".shell-main .shell-more").length, 1);
  } finally { home.cleanup(); }
  // JobDetail: the job's title is the <h1>, its id follows muted; a long title is whole in the title attribute.
  const title = "A long job title ".repeat(12).trim();
@@ -171,4 +175,6 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 19px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
  assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 40px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
  assert.match(desktop,/\.shell-main:has\(\.page-header:not\(\.page-header-fallback\)\) > \.page-header-fallback \{ display: none; \}/);
+ assert.match(desktop,/--page-header-gap: 24px/);
+ assert.match(desktop,/\.page-header-fallback \{ margin-bottom: var\(--page-header-gap\); \}/);
 });
