@@ -30,12 +30,14 @@ import {
 	type ReviewSurface,
 	type Risk,
 	MINIMAL_PLAN_SUMMARY,
+	unreportedWorkPresent,
 	SCHEMA_VERSION,
 	type Scope,
 	type SelfAssessment,
 	type TaskImpact,
 } from "../src/contracts.ts";
 import { nextAction } from "../src/gate.ts";
+import { MAX_RECOVERY_PROMPTS, MAX_REPORT_NUDGES } from "../src/settle.ts";
 import { QuestionStore } from "../src/questions.ts";
 import { ReviewApprovalStore } from "../src/review-approval.ts";
 import { initJobsDocument } from "../src/ledger.ts";
@@ -728,6 +730,26 @@ async function artifactWritten(b: Bench, researchId: string): Promise<string> {
 	return b.post.artifacts.file(researchId);
 }
 
+/**
+ * The hung planner is nudged once it settles without an envelope, and that nudge
+ * is its own turn. A revise sent during it is a steer (`queued`); sent after the
+ * budget is spent and the worker is idle, it is a prompt (`delivered`). Wait for
+ * the latter so the receipt does not depend on which turn the gate finishes in.
+ */
+async function hungPlannerIdle(b: Bench, researchId: string): Promise<void> {
+	await waitFor(
+		() => {
+			const record = b.post.fleet.get(researchId);
+			const settles = record?.unreported_settles ?? 0;
+			const bound = unreportedWorkPresent(record?.unreported_work) ? MAX_RECOVERY_PROMPTS : MAX_REPORT_NUDGES;
+			const busy = b.post.manager.get(researchId)?.worker.busy ?? true;
+			return { settles, bound, busy };
+		},
+		(state) => state.settles > state.bound && !state.busy,
+		{ timeoutMs: 60_000, what: "the hung planner idle after its report nudge" },
+	);
+}
+
 test(
 	"pipeline: two dep-linked issues, hung-planner gate, one revise, authorization, implementer hand-off",
 	{ skip: SKIP, timeout: 300_000 },
@@ -766,6 +788,7 @@ test(
 		// --- the planner writes its artifact and hangs (no envelope) -------
 		const artifactPath = await artifactWritten(b, researchId);
 		assert.equal(b.post.fleet.get(researchId)?.reported_at, undefined, "this run is the hung-planner case");
+		await hungPlannerIdle(b, researchId);
 
 		// --- advance #1: spawn the gate reviewer and return at once -----------
 		const first = await b.post.advancePipeline(researchId);
