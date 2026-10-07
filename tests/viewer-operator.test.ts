@@ -11,7 +11,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import { OPERATOR_BUILTIN_EXTENSIONS, OPERATOR_SIGNALS, operatorModelArgs, operatorWeb, portInUse, runOperator, startViewer } from "../src/viewer/operator.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import { createViewer } from "../src/viewer/server.ts";
@@ -35,8 +35,9 @@ async function freePort(): Promise<number> {
  * A zombie is not alive. A viewer that outlives its launcher is reparented to
  * PID 1, and a container whose PID 1 never reaps (the Nomad CI runner's is
  * `timeout`) leaves it a zombie forever, which `kill(pid, 0)` still finds.
- * A zombie leader with threads still running (`Threads:` > 1) is still
- * exiting and may hold its port, so it counts as alive.
+ * State Z means the process has exited and its listen socket is closed; a node
+ * zombie keeps `Threads:` > 1 (libuv) until something reaps it, so that count
+ * must not keep the wait alive.
  */
 function alive(pid: number): boolean {
 	try {
@@ -46,7 +47,7 @@ function alive(pid: number): boolean {
 	}
 	try {
 		const status = readFileSync(`/proc/${pid}/status`, "utf8");
-		return !(/^State:\s+Z/m.test(status) && /^Threads:\s+1$/m.test(status));
+		return !/^State:\s+Z/m.test(status);
 	} catch {
 		return true; // no procfs: kill(pid, 0) is all there is
 	}
@@ -69,12 +70,32 @@ function pidIn(file: string): number | undefined {
 
 const fakeViewer = (port: number) => ({ host: "127.0.0.1", port, command: [process.execPath, FAKE_VIEWER, String(port)] });
 
+describe("cp-operator viewer lifecycle", { concurrency: 1 }, () => {
 test("start: a free port gets this session's own viewer, and stop ends it", async () => {
-	const port = await freePort();
-	const viewer = await startViewer(fakeViewer(port));
-	assert.equal(viewer.reused, false);
-	assert.equal(typeof viewer.pid, "number");
-	await until("the viewer to listen", () => portInUse(port));
+	let port = 0;
+	let viewer!: Awaited<ReturnType<typeof startViewer>>;
+	// freePort releases before the child binds; a stolen port kills the child. Retry that, don't sit in until().
+	for (let attempt = 1; ; attempt++) {
+		port = await freePort();
+		try {
+			viewer = await startViewer(fakeViewer(port));
+		} catch (error) {
+			if (attempt >= 3 || !/cannot verify|another home/.test(String(error))) throw error;
+			continue;
+		}
+		assert.equal(viewer.reused, false);
+		assert.equal(typeof viewer.pid, "number");
+		try {
+			await until("the viewer to listen", () => {
+				if (!alive(viewer.pid as number)) throw new Error(`viewer pid ${viewer.pid} exited before listening on ${port}`);
+				return portInUse(port);
+			});
+			break;
+		} catch (error) {
+			viewer.stop();
+			if (attempt >= 3 || !/exited before listening/.test(String(error))) throw error;
+		}
+	}
 	viewer.stop();
 	await until("the viewer to exit", () => !alive(viewer.pid as number));
 	assert.equal(await portInUse(port), false);
@@ -228,7 +249,6 @@ test("CP_OPERATOR_VIEWER=service: cp-view.service serves the dashboard, so the s
 		rmSync(dir, { recursive: true, force: true });
 	});
 	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: fakeViewer(port) }), 0);
-	await new Promise((resolve) => setTimeout(resolve, 200));
 	assert.equal(existsSync(pidFile), false, "no session viewer was spawned");
 	assert.equal(await portInUse(port), false);
 });
@@ -280,4 +300,5 @@ test("operatorModelArgs: the wrapper's CP_OPERATOR_MODEL becomes --model, never 
 	}
 	assert.deepEqual(operatorModelArgs(["-c"], {}), ["-c"]);
 	assert.deepEqual(operatorModelArgs([], { CP_OPERATOR_MODEL: " " }), [], "blank is unset");
+});
 });
