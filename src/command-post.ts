@@ -72,6 +72,7 @@ import { githubRepoFromCloneUrl, MandateStore } from "./mandate.ts";
 import { memoLogin, resolveMainCiScope } from "./main-ci.ts";
 import { EscalationStore } from "./escalation.ts";
 import { Gate, type GateRequest, type GateStart } from "./gate.ts";
+import { prepareGateReplacement } from "./gate-replacement.ts";
 import { ContextGuard, type GuardDecision, type GuardRequest } from "./guards.ts";
 import {
 	type AdvanceResult,
@@ -1259,6 +1260,11 @@ export class CommandPost {
 			escalations: this.escalations,
 			...(this.#options.parentEnv ? { parentEnv: this.#options.parentEnv } : {}),
 		});
+	}
+
+	async replacePlanner(jobId: string, replacementJobId: string) {
+		return prepareGateReplacement({ home: this.home, jobId, replacementJobId, ledger: this.ledger(),
+			fleet: this.fleet, artifacts: this.artifacts });
 	}
 
 	async gate(request: GateRequest): Promise<GateStart> {

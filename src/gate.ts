@@ -1197,13 +1197,16 @@ export class Gate {
 	}
 
 	/**
-	 * A revise is a promote, not a new dispatch: the planner is still alive
-	 * with the whole investigation in context. If it is not, that is reported —
-	 * never quietly re-run.
+	 * Prefer the live planner; a closed planner uses the explicit replacement
+	 * preparation path, followed by normal dispatch with all its gates.
 	 */
 	async #deliverRevise(result: GateResult): Promise<void> {
 		const sender = this.#options.sender;
 		if (!sender) return;
+		if (this.#options.fleet?.get(result.verdict.job_id)?.phase === "done") {
+			result.revise_error = `Planner is torn down. Create a fresh research job with the same project and delivery, then use cp_gate action: replace_planner, job_id: ${result.verdict.job_id}, replacement_job_id: <new job id>; dispatch with the returned task_file.`;
+			return;
+		}
 		try {
 			const receipt = await sender.send({
 				jobId: result.verdict.job_id,

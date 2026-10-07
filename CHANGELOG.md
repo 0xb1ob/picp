@@ -22,6 +22,10 @@ A failed `replace`/`insert` batch still returns one tool result per call (the to
 
 A `delivery:local` ship job with a clean tree and no commits ahead of the base tears down without its branch existing on origin (`nothing_to_push`). A local job that committed still has to be pushed; `delivery:pr` is unchanged. Migration: none.
 
+### Replacement planner after a late gate revision (picp-ox6)
+
+A gate revision for a torn-down planner now names `cp_gate replace_planner`. Given a fresh research job, this action prepares a dispatch task file pointing at copies of the previous plan, original scope and full gate feedback. The original job stays closed; normal dispatch still enforces authorization and budgets. The replacement inherits the spent revision allowance. Migration: none.
+
 ### Worker compaction policy blocks (picp-jan)
 
 A worker records one session error when its summarizer is blocked by a provider content, safety, or Terms of Service policy. Subsequent compactions of that transcript are cancelled before calling the summarizer, including after worker revival. A fresh session is unaffected; other failures retain pi's normal behavior. No compact threshold or pi settings change. Migration: none.

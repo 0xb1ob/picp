@@ -62,6 +62,8 @@ import { ReviewRuns, type ReviewWakeup } from "../src/review-runs.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { Sender } from "../src/send.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
+import { initJobsDocument, Ledger } from "../src/ledger.ts";
+import { prepareGateReplacement } from "../src/gate-replacement.ts";
 import {
 	argOf,
 	captureSpawns,
@@ -1351,6 +1353,60 @@ test("revise: the verdict is promoted to the still-live planner, once", { timeou
 			`attempt ${attempt}'s evidence was removed`,
 		);
 	}
+});
+
+test("late revise: a torn-down planner seeds one replacement without reopening the old job (picp-ox6)", { timeout: 120_000 }, async (t) => {
+	const b = await benchOf(t);
+	initJobsDocument(b.home, "cp");
+	const ledger = new Ledger({ home: b.home });
+	const old = await ledger.create({ title: "old planner", project: "demo", kind: "research", delivery: "pipeline" });
+	const replacement = await ledger.create({ title: "replacement planner", project: "demo", kind: "research", delivery: "pipeline" });
+	b.writeArtifact(old.id, "# Original plan\nkeep the scope\n");
+	b.writeOriginalTask(old.id, "original scope");
+	await b.subjectRecord(old.id);
+	await b.fleet.patch(old.id, { phase: "done" });
+	await ledger.close(old.id, "research completed");
+	const model = b.script("late-revise", [verdictCall(old.id, {
+		verdict: "revise", reasons: ["test plan missing"], revisions: ["name the exact commands"],
+	})]);
+	const passModel = b.script("replacement-pass", [verdictCall(replacement.id)]);
+	b.seal();
+	const result = await b.gate.gateAndWait({ jobId: old.id, model });
+	assert.equal(result.next, "revise");
+	assert.equal(result.revise_receipt, undefined);
+	assert.match(result.revise_error ?? "", /replace_planner/);
+	// Full pre-cap feedback, rather than the bounded tool-facing verdict, seeds the next planner.
+	const rawPath = join(b.home, paths.gateFileRaw(old.id, 1));
+	writeFileSync(rawPath, JSON.stringify({ ...result.verdict, revisions: ["full revision ".repeat(100)] }));
+	const options = { home: b.home, jobId: old.id, replacementJobId: replacement.id, ledger, fleet: b.fleet, artifacts: b.artifacts };
+	const seeded = await prepareGateReplacement(options);
+	assert.deepEqual(await prepareGateReplacement(options), seeded, "retry is idempotent");
+	const dir = join(b.home, paths.runDir(replacement.id));
+	assert.equal(readFileSync(join(dir, "previous-plan.md"), "utf8"), readFileSync(b.artifacts.file(old.id), "utf8"));
+	assert.equal(readFileSync(join(dir, "gate-1-raw.json"), "utf8"), readFileSync(rawPath, "utf8"));
+	assert.equal(readFileSync(join(dir, "original-task.md"), "utf8"), "original scope");
+	const task = readFileSync(seeded.task_file, "utf8");
+	assert.match(task, /replacement read-only planner/);
+	assert.ok(task.includes(b.artifacts.file(replacement.id)));
+	assert.ok(!JSON.stringify(seeded).includes("keep the scope"), "artifact bodies never enter the tool result");
+	assert.equal(b.artifacts.has(replacement.id), false, "only the replacement may file its revised plan");
+	assert.equal((await ledger.show(old.id)).status, "closed");
+	assert.equal(b.fleet.get(old.id)?.phase, "done");
+	const prior = readPriorAttempts(b.home, replacement.id);
+	assert.equal(prior.priorRevise, true);
+	assert.equal(decideGate({ jobId: replacement.id, attempt: prior.attempt, prior, model, review: review({ job_id: replacement.id, verdict: "revise", revisions: ["again"] }) }).cause, "policy");
+	const another = await ledger.create({ title: "another replacement", project: "demo", kind: "research", delivery: "pipeline" });
+	await assert.rejects(prepareGateReplacement({ ...options, replacementJobId: another.id }), /already prepared/);
+	const wrong = await ledger.create({ title: "ship", project: "demo", kind: "ship", delivery: "pipeline" });
+	await assert.rejects(prepareGateReplacement({ ...options, replacementJobId: wrong.id }), /fresh, undispatched research/);
+	await b.fleet.patch(old.id, { phase: "held" });
+	await assert.rejects(prepareGateReplacement(options), /torn-down, closed research/);
+	await b.fleet.patch(old.id, { phase: "done" });
+	b.writeArtifact(replacement.id, "# Revised plan\nexact test commands\n");
+	const passed = await b.gate.gateAndWait({ jobId: replacement.id, model: passModel });
+	assert.equal(passed.verdict.verdict, "pass");
+	assert.equal(passed.verdict.attempt, 2);
+	await assert.rejects(prepareGateReplacement({ ...options, jobId: replacement.id, replacementJobId: another.id }), /torn-down, closed research/);
 });
 
 test("flags: a reviewer pass with a flag is escalated FLAGGED, and may still be authorized", { timeout: 120_000 }, async (t) => {
