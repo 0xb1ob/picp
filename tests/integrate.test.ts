@@ -762,19 +762,183 @@ test("integration hold persists across instances; explicit release resumes with 
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
-test("picp-wzq: a held red head is sourced (run id and URL) and nobody is promoted, rerun or asked", async (t) => {
+test("a held red head uses one sourced CI repair while integration remains paused", async (t) => {
 	const b = await benchOf(t);
-	new IntegrationHolds(b.home).hold(BR, "browser QA");
+	const holds = new IntegrationHolds(b.home);
+	const hold = holds.hold(BR, "browser QA");
 	const runs = [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 37458827243, attempt: 1 }];
 	const result = await b.integrator({ runs }, { infraRerun: async () => assert.fail("no infra rerun while held") }).advance({ jobId: BR });
-	assert.equal(result.next, "wait");
-	assert.equal(result.step, "merge");
+	assert.equal(result.next, "resolve");
+	assert.equal(result.step, "ci");
 	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
-	assert.match(result.reason, new RegExp(`^${BR}: CI failed on aaaaaaaaaaaa \\(run 37458827243\\); integration held: browser QA`));
-	assert.equal(b.sent.length, 0);
+	assert.match(result.reason, /integration held: browser QA/);
+	assert.equal(result.head_sha, HEAD_A);
+	assert.equal(result.pr_url, PR_URL);
+	assert.equal(result.record.resolve_attempts, 1);
+	assert.equal(b.sent.length, 1);
+	assert.match(b.sent[0]!.message, /run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243/);
+	assert.match(b.sent[0]!.message, /integration hold remains active/);
+	assert.equal(b.calls.length, 3, "PR, CI, then confirming PR read only");
 	onlyHeldReads(b.calls);
+	assert.deepEqual(holds.get(BR), hold);
+	assert.equal(b.teardowns.length + b.closed.length, 0);
 	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
 	assert.equal(b.awaiting().list().length, 0);
+});
+
+const heldRed = { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 77 }] };
+
+test("held repair requires an open, proven branch and current-head failed CI", async (t) => {
+	const cases: Array<Partial<World>> = [
+		{ pr: { ...openPr(), headRefName: "other" }, ...heldRed },
+		{ pr: { ...openPr(), headRefName: undefined }, ...heldRed },
+		{ pr: { ...openPr(), headRefOid: undefined }, ...heldRed },
+		{ pr: { ...openPr(), headRefOid: "not-a-sha" }, ...heldRed },
+		{ pr: { ...openPr(), state: "CLOSED" }, ...heldRed },
+		{ pr: mergedPr(), ...heldRed },
+		{ pr: { fail: "HTTP 403" }, ...heldRed },
+		{ runs: { fail: "HTTP 403" } },
+		{ runs: [] },
+		{ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A }] },
+		{ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_B }] },
+		{ ...heldRed, permHead: HEAD_B },
+	];
+	for (const world of cases) {
+		const b = await benchOf(t);
+		const holds = new IntegrationHolds(b.home);
+		const hold = holds.hold(BR, "QA");
+		const result = await b.integrator(world).advance({ jobId: BR });
+		assert.equal(result.next, "wait", JSON.stringify(world));
+		assert.equal(b.sent.length + b.teardowns.length + b.closed.length, 0);
+		assert.deepEqual(holds.get(BR), hold);
+		onlyHeldReads(b.calls);
+	}
+	for (const stdout of ["{", "null", "{}", '[{"conclusion":"failure"}]']) {
+		const b = await benchOf(t);
+		new IntegrationHolds(b.home).hold(BR, "QA");
+		const run = runnerFor(defaultWorld(heldRed), b.calls);
+		const result = await b.integrator({}, { run: async (cwd, bin, args) => {
+			const answer = await run(cwd, bin, args);
+			return args[0] === "run" ? { ...answer, stdout } : answer;
+		} }).advance({ jobId: BR });
+		assert.equal(result.next, "wait", stdout);
+		assert.equal(b.sent.length, 0);
+		onlyHeldReads(b.calls);
+	}
+});
+
+test("held repair refuses blocked/unreadable reports and unfinished worktree operations", async (t) => {
+	for (const hazard of ["blocked", "unreadable", "rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"]) {
+		const b = await benchOf(t);
+		new IntegrationHolds(b.home).hold(BR, "QA");
+		if (hazard === "blocked") writeBlockedEnvelope(b.home, HEAD_A);
+		else if (hazard === "unreadable") writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
+		else {
+			const gitDir = join(b.worktree, "linked-git");
+			mkdirSync(gitDir, { recursive: true });
+			writeFileSync(join(b.worktree, ".git"), `gitdir: ${gitDir}\n`);
+			writeFileSync(join(gitDir, hazard), "in progress");
+		}
+		const result = await b.integrator(heldRed).advance({ jobId: BR });
+		assert.equal(result.next, "surface", hazard);
+		assert.equal(b.sent.length, 0);
+		assert.equal(result.record.resolve_attempts, 0);
+		assert.ok(new IntegrationHolds(b.home).get(BR));
+		onlyHeldReads(b.calls);
+	}
+});
+
+test("held repair waits for active, failed, terminal or unreported fleet records", async (t) => {
+	for (const phase of ["waiting", "launching", "failed", "done", "unreported", "held"] as const) {
+		const b = await benchOf(t);
+		new IntegrationHolds(b.home).hold(BR, "QA");
+		const record = b.fleet.require(BR);
+		const changed = { ...record, phase, ...(phase === "held" ? { reported_at: undefined } : {}) };
+		const mock = t.mock.method(b.fleet, "get", () => changed);
+		const result = await b.integrator(heldRed).advance({ jobId: BR });
+		assert.equal(result.next, "wait", phase);
+		assert.equal(b.sent.length, 0);
+		assert.equal(result.record.resolve_attempts, 0);
+		onlyHeldReads(b.calls);
+		mock.mock.restore();
+	}
+});
+
+test("held repair revalidates after paused CI and confirming PR reads", async (t) => {
+	for (const at of ["ci", "confirm"]) {
+		for (const change of ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "unreadable-report", "waiting", "generation", "hazard", "hold-reason", "closed", "branch", "unreadable-pr"]) {
+			const b = await benchOf(t);
+			const holds = new IntegrationHolds(b.home);
+			holds.hold(BR, "QA");
+			const world = defaultWorld(heldRed);
+			const run = runnerFor(world, b.calls);
+			let enter!: () => void;
+			let resume!: () => void;
+			const entered = new Promise<void>((resolve) => { enter = resolve; });
+			const release = new Promise<void>((resolve) => { resume = resolve; });
+			let views = 0;
+			const integration = b.integrator({}, { run: async (cwd, bin, args) => {
+				if (args[0] === "pr" && args[1] === "view") views++;
+				if (at === "ci" ? args[0] === "run" : args[0] === "pr" && views === 2) {
+					enter();
+					await release;
+				}
+				return run(cwd, bin, args);
+			} });
+			const advancing = integration.advance({ jobId: BR });
+			await entered;
+			try {
+				if (change === "drain" || change === "invalid-drain") writeFileSync(drainFile(b.home), change === "drain" ? JSON.stringify({ started_at: isoTimestamp(), jobs: [] }) : "{");
+				if (change === "invalid-hold") writeFileSync(holds.file(BR), "{");
+				if (change === "release") holds.release(BR);
+				if (change === "blocked") writeBlockedEnvelope(b.home, HEAD_A);
+				if (change === "unreadable-report") writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
+				if (change === "waiting") await b.fleet.patch(BR, { phase: "waiting" });
+				if (change === "generation") await b.fleet.patch(BR, { supersessions: 1 });
+				if (change === "hazard") mkdirSync(join(b.worktree, ".git", "rebase-merge"), { recursive: true });
+				if (change === "hold-reason") holds.hold(BR, "updated QA reason");
+				if (change === "closed") world.pr = { ...openPr(), state: "CLOSED" };
+				if (change === "branch") world.pr = { ...openPr(), headRefName: "other" };
+				if (change === "unreadable-pr") world.pr = { fail: "HTTP 403" };
+			} finally { resume(); }
+			const result = await advancing;
+			assert.equal(result.next, change === "hold-reason" ? "resolve" : ["blocked", "unreadable-report", "hazard"].includes(change) ? "surface" : "wait", `${at}/${change}`);
+			assert.equal(b.sent.length, change === "hold-reason" ? 1 : 0, `${at}/${change}`);
+			if (change === "hold-reason") assert.match(result.reason, /updated QA reason/);
+			if (at === "ci" && ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "waiting", "generation", "hazard"].includes(change)) assert.equal(b.calls.length, 2, "no confirming subprocess after refusal");
+			onlyHeldReads(b.calls);
+		}
+	}
+});
+
+test("held repair uses the cumulative allowance across heads, green reads and restarts", async (t) => {
+	const b = await benchOf(t);
+	const holds = new IntegrationHolds(b.home);
+	holds.hold(BR, "QA");
+	assert.equal((await b.integrator(heldRed).advance({ jobId: BR })).next, "resolve");
+	const green = await b.integrator().advance({ jobId: BR });
+	assert.equal(green.next, "wait");
+	assert.equal(green.record.resolve_attempts, 1);
+	for (const head of [HEAD_A, HEAD_B]) {
+		const red = await b.integrator(onHead(head, "failure")).advance({ jobId: BR });
+		assert.equal(red.next, "surface");
+		assert.equal(red.record.resolve_attempts, 1);
+	}
+	assert.equal(b.sent.length, 1);
+	assert.ok(holds.get(BR));
+	onlyHeldReads(b.calls);
+});
+
+test("held repair surfaces sender refusal without spending an attempt or removing the hold", async (t) => {
+	const b = await benchOf(t);
+	const holds = new IntegrationHolds(b.home);
+	const hold = holds.hold(BR, "QA");
+	const result = await b.integrator(heldRed, { send: async () => { throw new Error("repair permission refused"); } }).advance({ jobId: BR });
+	assert.equal(result.next, "surface");
+	assert.equal(result.resolve_error, "repair permission refused");
+	assert.equal(result.record.resolve_attempts, 0);
+	assert.deepEqual(holds.get(BR), hold);
+	onlyHeldReads(b.calls);
 });
 
 test("picp-wzq: a drain (or an unreadable drain file) under a hold starts no process and says CI was not read", async (t) => {
