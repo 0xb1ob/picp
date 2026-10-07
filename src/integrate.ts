@@ -1240,7 +1240,19 @@ export class Integrator {
 				reason: `${input.reason} The implementer is already working; wait for its report.`,
 			});
 		}
-		const prior = this.get(input.jobId)?.resolve_attempts ?? 0;
+		const priorRec = this.get(input.jobId);
+		// picp-0lj: one conflict handoff per head; a repeat waits until the branch moves.
+		const sameConflictHead = input.step === "conflict" && !!input.headSha && priorRec?.head_sha === input.headSha && priorRec.step === "conflict" && (priorRec.resolve_attempts ?? 0) >= 1 && (priorRec.next === "surface" || priorRec.next === "wait");
+		if (sameConflictHead) {
+			return this.#write({
+				...common,
+				next: "wait",
+				facts: [...input.facts, "conflict already handed off for this head"],
+				reason: `${input.reason} Already handed off for this head; waiting until the branch moves.`,
+			});
+		}
+		// A moved branch does not inherit the previous head's spent promote.
+		const prior = input.step === "conflict" && !!input.headSha && priorRec?.head_sha !== input.headSha ? 0 : (priorRec?.resolve_attempts ?? 0);
 
 		if (prior >= INTEGRATE_MAX_RESOLVE) {
 			return this.#write({

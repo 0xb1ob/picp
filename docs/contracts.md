@@ -2965,7 +2965,7 @@ record. The record (`state/runs/<job-id>/integration.json`,
 | — | PR state `MERGED` | jump to `record` | not an error: the receipt is the observer either way |
 | — | worker phase `waiting`/`launching`, or an integration repair promotion is in flight (open PR) | none — re-read from the fleet at the open-PR gate and just before both merge commands | `resolve`: wait for the implementer's report; no second promotion or resolve attempt spent (picp-03o) |
 | — | live `envelope.json` is status `blocked`, or present but unreadable (open PR) | none — checked again just before each merge command | `surface`: blockers in facts; exits are a `done` re-report (`cp_send`) or a human merge on GitHub |
-| `conflict` | `mergeable == CONFLICTING` | promote the implementer | never resolved by this tool |
+| `conflict` | `mergeable == CONFLICTING` | promote the implementer once for this head | repeating that head's operator surface returns `wait` with no new event; a new head is a new handoff |
 | `ci` | a *completed* run whose `headSha` is the pushed head | none | green, or `wait` / `resolve`; zero runs with an **unreadable** workflow list falls back to `authorize`, and with an authoritative empty one falls through to `permit` |
 | `permit` | CI green on the pushed head | re-read `gh pr view`, evaluate `evaluateMergePermission` | `permitted` (merge), `pending` (merge-pending reminder, no merge), `retry` (head still resolving, or moved), or `unreadable` (fallback to `authorize`) |
 | `fresh` | `permit` read `BEHIND`, or `BLOCKED` with a readable `strict_required_status_checks_policy: true` rule **and** `merge-base --is-ancestor origin/<base> origin/<branch>` exit 1 — a stale base alone, or unreadable ancestry, is never a rebase | `gh pr update-branch --rebase` | the head moved, so CI, `cp_review` **and** any authorization are void |
@@ -3410,7 +3410,7 @@ The branch has exactly one writer at any moment, and the boundaries are code:
    `gh run list`). It never pushes commits from a worktree;
 3. a conflict, or CI red after a rebase, is handed **back** to the job's own
    implementer with `cp_send` and a message generated in code — one promote,
-   then a human (`INTEGRATE_MAX_RESOLVE`, the shape of `GATE_MAX_REVISE`). A
+   then a human (`INTEGRATE_MAX_RESOLVE`, the shape of `GATE_MAX_REVISE`). Repeating that surface for the same head waits until the branch moves and does not surface again. A
    replacement is never dispatched in its place. The message's first
    instruction is `git fetch origin && git reset --hard origin/<branch>`,
    because a server-side rebase leaves the worker's own clone behind origin;

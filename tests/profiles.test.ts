@@ -507,6 +507,8 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 	assert.doesNotMatch(ship, /Run the full suite on the rebased tree|Run CI's `npm test`|full suite after rebase/i, "brief-ship must leave the full suite to CI");
 	assert.match(ship, /never run full `npm test` locally/i);
 	assert.match(ship, /Nomad CI runs the full suite on the pushed head/i);
+	assert.match(ship, /prior synthesis/);
+	assert.match(ship, /compact threshold/);
 	assert.match(ship, /Inspect the diff, then commit/i, "the diff is read before the commit");
 
 	const required: [RegExp, string][] = [
@@ -548,7 +550,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
-	assert.ok(ship.length < 8500, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // cp-sfqs: +silent-bash and viewer-work lines from the cp-ad1s audit; cp-hu4g: +regenerate-before-push line; cp-apx0: +agent-isolation paragraph
+	assert.ok(ship.length < 8700, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // picp-k2o: one line — do not reread a prior synthesis
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");
 });

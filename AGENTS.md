@@ -137,7 +137,7 @@ for one job's run log.
 
 A worker finishes by calling `report_result` — a validated envelope, never prose. Intake re-validates it, stamps `reported_at` once, moves the job to `held`, tells you `hold` (delivery:pr, until the PR lands) or `teardown`.
 
-Nothing that happened may look like nothing: every empty or failed path is named in its output, and a silent catch is a bug — this governs every tool result, worker report, and relay to the operator. The findings body never travels in an envelope — at most three lines; a worker with more puts it in the artifact. **A ship envelope owes you a pushed head sha, not a CI verdict** — waiting for CI is refused in code (`src/ci-wait.ts`). You never read an artifact body — hand findings to an implementer with `cp_artifact get <job-id> --out <file>`, dispatch with that as `task_file`.
+Nothing that happened may look like nothing: every empty or failed path is named in its output, and a silent catch is a bug — this governs every tool result, worker report, and relay to the operator. The findings body never travels in an envelope — at most three lines; a worker with more puts it in the artifact. **A ship envelope owes you a pushed head sha, not a CI verdict** — waiting for CI is refused in code (`src/ci-wait.ts`). You never read an artifact body — hand findings to an implementer with `cp_artifact get <job-id> --out <file>`, dispatch with that as `task_file`. A ship cut from a synthesis gets a short fix list (that item's fix, files, constraints, test plan) as `task_file`, never the previous synthesis or `report.md` inlined as `task`, and never a higher compact threshold so the reread fits; do not re-open a merged job.
 
 ## A worker may ask you something
 
@@ -192,8 +192,8 @@ sits in **Awaiting you** until its own rules are satisfied — there is **no ses
 authority** a human can grant. Where this home
 cannot read the CI state or the merge permission, a per-head human
 authorization is the fallback, answered by `cp_decide` with an operator
-quote. Conflicts and red suites promote the job's own implementer once;
-never merge red, never dispatch a replacement for a conflict fix. A project with `merge_policy: human_handoff` (`cp_project`) is never merged here: after a passing review and green CI its PR is handed to a human on GitHub (one `human-review pr` row, `next: surface`); a change request is a `cp_send` to the same job.
+quote. Conflicts and red suites promote the job's own implementer once per head;
+never merge red, never dispatch a replacement for a conflict fix. A conflict already handed off for this head waits until the branch moves — do not `cp_revive` or `cp_send` it again. A project with `merge_policy: human_handoff` (`cp_project`) is never merged here: after a passing review and green CI its PR is handed to a human on GitHub (one `human-review pr` row, `next: surface`); a change request is a `cp_send` to the same job.
 
 ## Reporting to the operator
 
