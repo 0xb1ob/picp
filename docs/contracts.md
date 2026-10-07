@@ -2227,9 +2227,20 @@ Mechanics that matter:
   review on a different model, route the role elsewhere or pass an override
   (cp-eff removed the rung; the ordered `fallbacks` of pi-command-post-0a9 are
   resolution-time and never a retry).
-- **Revise is a promote, never a re-dispatch.** The gate sends the revisions to
-  the live planner through `cp_send`; if there is no live worker, that is
-  reported (`revise_error`), never silently turned into a new research run.
+- **Revise prefers the live planner.** The gate sends revisions through
+  `cp_send`. A torn-down planner instead gets a `revise_error` naming
+  `cp_gate action: replace_planner, job_id: <old>, replacement_job_id: <new>`.
+  Create a fresh research job with the same project and delivery first. This
+  action prepares a `task_file` pointing at copies of the old plan, frozen
+  scope (when available), and `gate-N-raw.json` (or the complete uncapped
+  decision when no overflow occurred). It returns paths, never artifact bodies.
+  Dispatch the new job through normal `cp_dispatch` with that task file; no
+  authorization, budget, or dispatch gate is bypassed. The old job stays closed.
+  Only one replacement may be prepared; retries for that replacement reuse the
+  files. Gate history is inherited, so the one revision allowance stays spent.
+  For a pipeline, use `cp_pipeline reanchor` before dispatch/advance; its existing
+  checkpoint and implementation restrictions still apply. This differs from
+  an independent superseding plan, whose reanchor starts with fresh gate history.
 - **The revise text asks for an edit; a reply is enough.** `reviseMessage`
   tells the planner to rewrite the artifact in place and answer in its
   **reply**: the artifact is the deliverable and the gate re-reads it from disk,

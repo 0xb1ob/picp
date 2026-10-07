@@ -252,11 +252,12 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The research job whose artifact is reviewed" }),
 			action: Type.Optional(
-				StringEnum(["start", "status"], {
+				StringEnum(["start", "status", "replace_planner"], {
 					description:
-						"start (default): spawn a NEW reviewer attempt (spend) and return wait, or the decision if this attempt is already decided. status: read what is pending and decided, spawning and changing nothing — use it to look up a verdict.",
+						"start (default): spawn a NEW reviewer attempt (spend) and return wait, or the decision if this attempt is already decided. status: read pending and decided attempts. replace_planner: prepare a fresh research job with the old plan and gate feedback after planner teardown; dispatch separately using the returned task_file.",
 				}),
 			),
+			replacement_job_id: Type.Optional(Type.String({ description: "replace_planner: a fresh research job in the same project and delivery; prepares a task_file for normal cp_dispatch" })),
 			model: Type.Optional(Type.String({ description: "Explicit reviewer model override (provider/model-id)" })),
 			deliver_revise: Type.Optional(
 				Type.Boolean({ description: "Promote a revise verdict to the live planner. Default true." }),
@@ -270,6 +271,14 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				return {
 					content: [{ type: "text" as const, text: formatGateStatus(params.job_id, status) }],
 					details: status as unknown as Record<string, unknown>,
+				};
+			}
+			if (params.action === "replace_planner") {
+				if (!params.replacement_job_id) throw new Error("cp_gate replace_planner needs replacement_job_id");
+				const result = await post.replacePlanner(params.job_id, params.replacement_job_id);
+				return {
+					content: [{ type: "text" as const, text: `Replacement planner ${result.replacement_job_id} prepared. Dispatch it with task_file: ${result.task_file}. For a pipeline, cp_pipeline reanchor to this replacement before advancing it. The original job stays closed.` }],
+					details: result,
 				};
 			}
 			const result = await post.gate({
