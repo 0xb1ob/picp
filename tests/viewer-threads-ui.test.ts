@@ -195,7 +195,7 @@ test("bound job notices and main replies obey #155's span filter; empty threads 
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const notice = (id: string, job: string) => entry(id, { kind: "system", who: "cp-bridge", text: `notice ${id}`, bridge: { kind: "cp-ci", job, id: null, receipt: null } });
 	const entries = [notice("before", "cp-unbound"), notice("owned", "cp-one"), entry("reply", { text: "long reply " + "word ".repeat(500) }), entry("compact", { kind: "system", who: "compaction", text: "Context compacted" }), notice("owned-again", "cp-one"), entry("tail"), notice("after", "cp-unbound")];
-	assignThreads(entries, new Map([["cp-one", B]]));
+	assignThreads(entries, new Map([["job:cp-one", B]]));
 	assert.equal(visibleEntries(entries, null), entries, "All retains the same entries and order");
 	assert.deepEqual(visibleEntries(entries, B).map(e => e.id), ["owned", "reply", "compact", "owned-again", "tail"]);
 	assert.deepEqual(visibleEntries(entries, O), [], "no own entries");

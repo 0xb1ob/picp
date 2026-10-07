@@ -17,7 +17,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AnswerLine, CONTROL_TEXT_MAX, controlInboxFile, controlJournalFile, type ControlAuditLine, type InboxLine, isThreadRef, operatorAnswersFile, operatorThreadsFile, readThreads, scheduleControlFile, type ScheduleControlLine, THREAD_TAG_RE, type ThreadLine, type ThreadRef } from "./control-files.ts";
+import { type AnswerLine, CONTROL_TEXT_MAX, controlInboxFile, controlJournalFile, type ControlAuditLine, type InboxLine, isThreadRef, operatorAnswersFile, operatorThreadsFile, readThreads, scheduleControlFile, type ScheduleControlLine, THREAD_TAG_RE, type ThreadLine, type ThreadRef, threadRefKey } from "./control-files.ts";
 
 export function appendControlAudit(stateDir: string, line: ControlAuditLine): { ok: true } | { ok: false; error: string } {
 	const clipped = "text" in line && typeof line.text === "string" && line.text.length > CONTROL_TEXT_MAX ? { ...line, text: line.text.slice(0, CONTROL_TEXT_MAX) } : line;
@@ -64,7 +64,7 @@ export function bindThread(stateDir: string, input: BindThreadInput): BindThread
 		thread = `th-${randomBytes(6).toString("hex")}`;
 		const open = appendThreadLine(stateDir, { type: "open", by, id: thread, at, tag, peer });
 		if (!open.ok) return open;
-	} else if (journal.refs.get(ref.id) === thread) return { ok: true, thread, tag, opened: false };
+	} else if (journal.refs.get(threadRefKey(ref)) === thread) return { ok: true, thread, tag, opened: false };
 	const bind = appendThreadLine(stateDir, { type: "bind", by, at, thread, ref: { kind: ref.kind, id: ref.id }, peer });
 	return bind.ok ? { ok: true, thread, tag, opened } : bind;
 }

@@ -59,13 +59,13 @@ test("fold: open, bind and done in line order; a later bind reopens; the newest 
 		refs: [{ ref: { kind: "dashboard", id: DC }, at: T0, line: 1 }, { ref: { kind: "answer", id: ANS }, at: T1, line: 2 }],
 	});
 	assert.ok(thread!.done_line! > thread!.last_bind_line!, "done after the last bind");
-	assert.deepEqual([...read.refs], [[DC, A], [ANS, A]]);
+	assert.deepEqual([...read.refs], [[`dashboard:${DC}`, A], [`answer:${ANS}`, A]]);
 
 	b.append({ type: "open", by: "bridge", id: B, at: T2, tag: "other", peer: null });
 	b.append({ type: "bind", by: "bridge", at: T2, thread: B, ref: { kind: "answer", id: ANS }, peer: null });
 	b.append({ type: "bind", by: "bridge", at: T2, thread: A, ref: { kind: "ask", id: ASK }, peer: null });
 	read = readThreads(b.stateDir);
-	assert.equal(read.refs.get(ANS), B, "the newest bind wins");
+	assert.equal(read.refs.get(`answer:${ANS}`), B, "the newest bind wins");
 	const a = read.threads.find((item) => item.id === A)!;
 	assert.equal(a.last_bind_line, 6);
 	assert.ok(a.done_line! < a.last_bind_line!, "a later bind reopens the thread");
@@ -81,7 +81,7 @@ test("fold: a second open of one tag aliases to the first id; binds and done to 
 	const read = readThreads(b.stateDir);
 	assert.equal(read.skipped, 0);
 	assert.deepEqual(read.threads.map((item) => [item.id, item.tag, item.refs.length, item.done_at]), [[A, "race", 2, T2]]);
-	assert.deepEqual([...read.refs], [[ANS, A], [DC, A]]);
+	assert.deepEqual([...read.refs], [[`answer:${ANS}`, A], [`dashboard:${DC}`, A]]);
 });
 
 test("fold: bad lines, unknown threads, bad refs, repeated open ids and unknown types count in skipped; a repeat bind is ignored", (t) => {
@@ -150,7 +150,7 @@ test("bindThread: opens a tag once, binds, is idempotent per ref, writes 0600 un
 		{ type: "bind", by: "bridge", at: T1, thread: first.thread, ref: { kind: "answer", id: ANS }, peer: null },
 	]);
 	const read = readThreads(b.stateDir);
-	assert.deepEqual([read.skipped, read.threads.length, read.refs.get(DC), read.refs.get(ANS)], [0, 1, first.thread, first.thread]);
+	assert.deepEqual([read.skipped, read.threads.length, read.refs.get(`dashboard:${DC}`), read.refs.get(`answer:${ANS}`)], [0, 1, first.thread, first.thread]);
 });
 
 test("bindThread never throws: a bad tag or ref writes nothing; an unreadable journal or failed append is an error", (t) => {
@@ -184,7 +184,36 @@ test("job refs fold like other refs: valid job contract ids, newest bind wins, r
 	assert.ok(moved.ok);
 	const read = readThreads(b.stateDir);
 	assert.equal(read.skipped, 0);
-	assert.equal(read.refs.get("cp-one"), moved.thread);
+	assert.equal(read.refs.get("job:cp-one"), moved.thread);
 	for (const id of ["", "../cp-one", "cp/one", "cp.one", "x".repeat(129)]) assert.equal(bind("bad", id).ok, false);
 	assert.equal(b.lines().length, 7, "invalid refs open no thread");
+});
+
+test("job ids matching legacy ref ids bind, deduplicate and move independently by kind", (t) => {
+	const b = bench(t);
+	const refs = [{ kind: "dashboard", id: DC }, { kind: "ask", id: ASK }, { kind: "answer", id: ANS }] as const;
+	const bind = (tag: string, ref: (typeof refs)[number] | { kind: "job"; id: string }) => bindThread(b.stateDir, { tag, ref, by: "bridge", peer: null, at: T1 });
+	for (const ref of refs) {
+		assert.ok(bind("one", ref).ok);
+		assert.ok(bind("one", { kind: "job", id: ref.id }).ok);
+	}
+	assert.equal(b.lines().length, 7, "each kind gets its own unchanged journal bind line");
+	assert.equal(readThreads(b.stateDir).threads[0]!.refs.length, 6, "the fold retains both kinds in one thread");
+	for (const ref of refs) {
+		assert.ok(bind("one", ref).ok);
+		assert.ok(bind("one", { kind: "job", id: ref.id }).ok);
+	}
+	assert.equal(b.lines().length, 7, "repeats are idempotent per kind and id");
+	for (const ref of refs) assert.ok(bind("two", ref).ok);
+	const read = readThreads(b.stateDir);
+	assert.equal(read.skipped, 0);
+	assert.equal(read.refs.size, 6);
+	for (const ref of refs) {
+		assert.equal(read.refs.get(`${ref.kind}:${ref.id}`), read.threads[1]!.id);
+		assert.equal(read.refs.get(`job:${ref.id}`), read.threads[0]!.id, "moving the legacy ref leaves the job filed");
+	}
+	assert.ok(bind("two", { kind: "job", id: DC }).ok);
+	assert.ok(bind("one", { kind: "job", id: DC }).ok);
+	assert.equal(readThreads(b.stateDir).threads[1]!.refs.length, 4, "a distinct job ref is retained alongside the dashboard ref");
+	assert.equal(readThreads(b.stateDir).refs.get(`dashboard:${DC}`), read.threads[1]!.id, "moving the job leaves the dashboard filed");
 });

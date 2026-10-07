@@ -145,12 +145,12 @@ test("thread_bind files job refs locally, normalizes, repeats without writes, an
 	assert.deepEqual(b.lines().slice(1).map(line => line.ref), [{ kind: "job", id: "cp-one" }, { kind: "job", id: "other_TWO-2" }]);
 	const journal = readThreads(b.stateDir);
 	assert.equal(journal.skipped, 0);
-	assert.equal(journal.refs.get("cp-one"), journal.threads[0]!.id);
+	assert.equal(journal.refs.get("job:cp-one"), journal.threads[0]!.id);
 	assert.equal(journal.threads[0]!.tag, "billing-bug");
 	await b.tool.execute("repeat", params);
 	assert.equal(b.lines().length, 3);
 	await b.tool.execute("move", { action: "thread_bind", thread: "ops", job_ids: ["cp-one"] });
-	assert.equal(readThreads(b.stateDir).refs.get("cp-one"), readThreads(b.stateDir).threads[1]!.id);
+	assert.equal(readThreads(b.stateDir).refs.get("job:cp-one"), readThreads(b.stateDir).threads[1]!.id);
 	assert.equal(b.read("asks.jsonl"), null);
 	assert.equal(b.read("answers.jsonl"), null);
 	assert.equal(existsSync(join(b.stateDir, "parent.lock")), false, "no parent started for bookkeeping");

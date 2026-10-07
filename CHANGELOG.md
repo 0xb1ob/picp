@@ -14,6 +14,8 @@ A selected operator thread shows a shared entry (bridge relay, system line, inbo
 
 Tagged dashboard messages now carry the normalized tag in their footer, including ask clicks that carry one and held messages on replay. `cp_parent thread_bind` files job refs as operator-side bookkeeping; bound job bridge notices open a turn in that thread for the main-session reply. Unbound notices and compactions stay shared, and #155's empty-thread / span filter and All view are preserved. Migration: none; `job` refs and inbox `thread` are additive.
 
+Reference lookups use kind plus id throughout binding, folding, counts/waiting and transcript attribution, so a valid job id matching a dashboard, ask or answer id cannot cross-file it. The journal line schema is unchanged.
+
 ### Schedule wakes wait for parent compaction (sweep item 14 A1)
 
 Parent-directed `cp-schedule` notices now use the existing compaction hold, including PR/pipeline fires, local skill anchors and startup recovery of unexpanded anchors. Held notices release once in offer order; fires, fresh grants, quote/open-fire checks, polling and runner-owned answer/board/local work keep their existing timing. Migration: none.

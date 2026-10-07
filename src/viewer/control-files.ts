@@ -189,6 +189,8 @@ export const DASHBOARD_ID_RE = /^dc-\d{14}-[0-9a-f]{8}$/;
 export const THREADS_MAX_BYTES = 16 * 1024 * 1024;
 export const THREADS_LIST_MAX = 100;
 export type ThreadRef = { kind: "dashboard" | "ask" | "answer" | "job"; id: string };
+/** Ref identity includes its kind; a path-safe job id may also be a dashboard, ask or answer id. */
+export const threadRefKey = (ref: ThreadRef): string => `${ref.kind}:${ref.id}`;
 export type ThreadLine =
 	| { type: "open"; by: "bridge" | "viewer"; id: string; at: string; tag: string; peer: string | null }
 	| { type: "bind"; by: "bridge" | "viewer"; at: string; thread: string; ref: ThreadRef; peer: string | null }
@@ -227,7 +229,7 @@ export function isThreadRef(value: unknown): value is ThreadRef {
  * not an object, has a bad `at`/`by`/`peer` or an unknown `type` counts in `skipped`, as do a repeated open id, a bind or
  * done for an unknown thread and a bind with a bad ref. An open for a tag already opened under another id makes that id
  * an alias of the first (two writers opening one new tag at once). A bind of a ref to the thread it already belongs to is
- * ignored; otherwise the newest bind wins in `refs`. `error` names an unreadable or oversized file (never truncated).
+ * ignored; otherwise the newest bind wins in `refs`, keyed by kind and id. `error` names an unreadable or oversized file (never truncated).
  */
 export function readThreads(stateDir: string): { exists: boolean; threads: RecordedThread[]; refs: Map<string, string>; skipped: number; error: string | null } {
 	const file = operatorThreadsFile(stateDir);
@@ -272,9 +274,10 @@ export function readThreads(stateDir: string): { exists: boolean; threads: Recor
 			}
 		} else if (line.type === "bind" && thread && isThreadRef(line.ref)) {
 			const ref = line.ref;
-			if (refs.get(ref.id) === thread.id) continue; // already filed there: ignored, not counted
-			refs.set(ref.id, thread.id);
-			const seen = thread.refs.find((item) => item.ref.id === ref.id);
+			const key = threadRefKey(ref);
+			if (refs.get(key) === thread.id) continue; // already filed there: ignored, not counted
+			refs.set(key, thread.id);
+			const seen = thread.refs.find((item) => threadRefKey(item.ref) === key);
 			if (seen) Object.assign(seen, { at, line: index }); // moved back from another thread
 			else thread.refs.push({ ref: { kind: ref.kind, id: ref.id }, at, line: index });
 			Object.assign(thread, { last_bind_line: index, last_at: at });

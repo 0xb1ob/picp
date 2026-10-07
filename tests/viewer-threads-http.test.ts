@@ -115,6 +115,17 @@ test("the list: states, reasons and counts, order, the token only while control 
 	assert.equal(existsSync(controlJournalFile(stateDir)), false, "the list never writes");
 });
 
+test("job id collisions do not move legacy counts, waiting reasons or the done refusal", async (t) => {
+	const { stateDir, port } = await setup(t);
+	fixture(stateDir);
+	const before = await call(port, LIST);
+	for (const id of [DC1, "ask-abcd", "ans-bbbbbbbbbbbb"]) assert.ok(appendThreadLine(stateDir, bind(EPS, "job", id, "2026-10-06T08:00:07Z")).ok);
+	const after = await call(port, LIST);
+	assert.deepEqual(after.body.threads, before.body.threads, "job refs with existing ids add no counts and remove no waiting items");
+	const refused = await call(port, DONE, json(String(after.body.token), { id: ALPHA }));
+	assert.equal(refused.status, 409, "an open ask still blocks done after a colliding job bind");
+});
+
 test("every done refusal, in order, is one viewer line of kind thread_done and never a done line; then 202 with its done line", async (t) => {
 	const { stateDir, options, port } = await setup(t);
 	fixture(stateDir);

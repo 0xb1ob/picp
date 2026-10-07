@@ -6089,7 +6089,9 @@ Job refs use the existing path-safe job id contract; they do not add message/ask
 A tag is `^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`).
 `readThreads` folds it in line order: the torn last line is ignored; bad lines, unknown types, repeated open ids and
 binds/dones for unknown threads count in `skipped`; a second `open` of a tag aliases its id to the first (two writers
-racing); the newest bind of a ref wins.
+racing); the newest bind of a ref wins. Ref identity is `(kind, id)`: in-memory lookups use `kind:id`, so a job whose
+id matches a dashboard, ask or answer id cannot move or suppress that other ref, its counts/waiting, or its transcript
+turn. Bind lines retain their existing `{kind,id}` shape; no journal migration is required.
 
 **Derived state** (`src/viewer/threads-view.ts`; nothing stored): `waiting` while a ref the thread holds is an open ask
 (`asks.jsonl`) or an unacknowledged answer (`answers.jsonl`) — `waiting: {asks, answers}`; else `done` while its newest
