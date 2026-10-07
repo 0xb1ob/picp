@@ -68,7 +68,8 @@ progress::-moz-progress-bar { background: var(--secondary); }
 @media (min-width: 900px) {
  /* The header row leads the page, above an alarm; paused pills read as content under it. */
  .overview > .overview-heading { order: -1; display: block; }
- .overview-subtitle { margin-top: 16px; }
+ .overview-subtitle { margin-top: var(--page-header-gap); }
+ .overview > .overview-heading { margin-bottom: calc(var(--page-header-gap) - 28px); }
  .overview-health { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); }
  .overview-chip { padding: 14px 16px; }
  .overview-chip strong { font-size: 14px; }

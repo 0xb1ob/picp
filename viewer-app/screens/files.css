@@ -29,7 +29,7 @@
  /* The header row spans the page; the roots list keeps its readable width under it. */
  .files { max-width: none; margin: 0; }
  .files:not(.files-open) > :not(:first-child) { max-width: 760px; }
- .files-subtitle { margin-top: 20px; }
+ .files-subtitle { margin-top: var(--page-header-gap); }
  /* An open listing takes the right column; the roots stay a readable list on the left. */
  .files-open { max-width: none; display: grid; grid-template-columns: minmax(0,380px) minmax(0,1fr); grid-template-rows: auto auto 1fr auto; gap: 24px 40px; align-items: start; }
  .files-open > div:first-child, .files-open > .files-policy { grid-column: 1 / -1; }

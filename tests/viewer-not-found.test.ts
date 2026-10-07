@@ -47,6 +47,8 @@ test("404 recovery has circular kind-specific icons and only observed worker alt
 	const known = [flight("cp-working","working"),flight("cp-launching","launching"),...['waiting','idle','held','done','failed','queued'].map(phase=>flight(`cp-${phase}`,phase)),flight("cp-script","working","script.ts")];
 	const doc = parseHTML(html(notFoundFor(workers("cp-missing"),404,known)!)).document;
 	assert.equal(doc.querySelector(".not-found-heading h1")?.textContent,"Sessions");
+	assert.equal(doc.querySelector(".not-found-heading .page-header-back")?.textContent,"← Sessions");
+	assert.equal(doc.querySelector(".not-found-heading .page-header-back")?.getAttribute("href"),"#sessions");
 	assert.equal(doc.querySelector(".not-found-heading .page-header-detail")?.textContent,"cp-missing");
 	assert.equal(doc.querySelector(".not-found-back")?.getAttribute("href"),"#sessions");
 	assert.ok(doc.querySelector('.not-found-illustration[aria-hidden="true"] svg path'));
@@ -70,6 +72,12 @@ test("404 CSS keeps phone targets and provides a wider desktop recovery with hor
 	const desktop = css.split("@media (min-width: 900px) {")[1]!;
 	assert.match(desktop,/\.not-found-recovery \{[^}]*max-width: 468px/);
 	assert.match(desktop,/\.not-found-actions \{[^}]*flex-direction: row/);
+	assert.match(desktop,/\.not-found-heading \.page-header-back \{ display: none/);
+	const phone = css.split("@media (max-width: 899px)")[1]!.split("@media")[0]!;
+	assert.match(phone,/\.not-found-heading \.page-header-detail \{ display: block/);
+	assert.match(phone,/\.page-header > h1 \{[^}]*clip-path: inset\(50%\)/);
+	assert.doesNotMatch(phone,/\.page-header > h1[^{]*display:\s*none/);
+	assert.match(phone,/\.page-header-back::after \{ content: "\/"/);
 });
 
 

@@ -43,6 +43,7 @@
  .schedule-controls .schedule-remove { margin-left: auto; }
  /* The tagline leaves the header row; the How schedules run aside says it at length. */
  .schedule-heading > p { display: none; }
+ .schedule-heading { margin-bottom: calc(var(--page-header-gap) - 22px); }
 }
 @media (min-width: 1200px) {
  .schedule-layout { grid-template-columns: minmax(0,1fr) 288px; gap: 32px; align-items: start; }

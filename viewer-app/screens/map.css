@@ -100,7 +100,7 @@
  .map-phone { display: none; }
  .map-status[title] { display: none; }
  .map-desktop { display: block; }
- .map-heading { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+ .map-heading { display: flex; flex-direction: column; align-items: stretch; gap: var(--page-header-gap); }
  .map-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
  .map-legend-summary { flex-wrap: nowrap; }
  .mandate-history-toggle { margin-left: auto; }

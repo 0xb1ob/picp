@@ -1,8 +1,8 @@
-import { useContext } from "preact/hooks";
+import { useContext, useLayoutEffect, useRef } from "preact/hooks";
 import { stamp, time } from "../format.ts";
 import { navigation, type Route } from "../routes.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
-import { ShellContext } from "./Shell.tsx";
+import { HeaderSlot, ShellContext } from "./Shell.tsx";
 
 /** The page title a route shows before its screen has data: Board, Map and a job are Jobs views. */
 export function routeTitle(route: Route): string {
@@ -12,10 +12,18 @@ export function routeTitle(route: Route): string {
 /**
  * The one desktop header row of the main content: an optional parent link (`Jobs /`), the page's <h1> and a muted id,
  * then the live status and the ⋮ menu. Below 900 px the row is `display: contents` and only the <h1> shows, where the
- * screen always had it. Shell draws a `fallback` row (no <h1>) while a screen has none of its own: loading,
- * unavailable, a job 404.
+ * screen always had it — except the worker 404, which keeps its id and the way back to Sessions.
+ * Shell draws a `fallback` row (no <h1>) only while a screen has none of its own: loading,
+ * unavailable, a job 404. A screen's own row claims HeaderSlot while it renders.
  */
 export function PageHeader({title, detail, back, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; fallback?: boolean}) {
+ const slot = useContext(HeaderSlot);
+ const claimed = useRef(false);
+ if (slot && !fallback && !claimed.current) { claimed.current = true; slot.claim(); }
+ useLayoutEffect(() => {
+  if (!slot || fallback) return;
+  return () => { claimed.current = false; slot.release(); };
+ }, [slot, fallback]);
  const {status, updatedAt = null, control, version} = useContext(ShellContext);
  const Title = fallback ? "p" : "h1";
  return <div class={fallback ? "page-header page-header-fallback" : "page-header"}>

@@ -16,7 +16,7 @@
 .more-push-steps { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--secondary); }
 .more-push > p { margin: 0 0 8px; }
 @media (min-width: 900px) {
- .more { max-width: none; margin: 0; }
+ .more { max-width: none; margin: 0; gap: var(--page-header-gap); }
  .more > :not(.page-header) { width: 100%; max-width: 390px; margin: 0 auto; }
  .more-menu > .more-phone { display: none; }
 }

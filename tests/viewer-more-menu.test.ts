@@ -131,6 +131,8 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  // A worker 404 draws its own row: the one <h1> is Sessions, the id muted after it; the recovery title is an <h2>.
  const worker404 = parseHTML(draw.missing({screen:"sessions",section:null,query:"view=workers&id=cp-doesnotexist"})).document;
  assert.deepEqual([...worker404.querySelectorAll("h1")].map(e => e.textContent),["Sessions"]);
+ assert.equal(worker404.querySelector(".page-header-fallback"), null, "the worker 404 row is its own header");
+ assert.equal(worker404.querySelector(".not-found-heading .page-header-back")?.textContent,"← Sessions");
  assert.equal(worker404.querySelector(".not-found-heading > .page-header > .page-header-detail")?.textContent,"cp-doesnotexist");
  assert.equal(worker404.querySelector(".not-found-recovery > h2")?.textContent,"No worker session cp-doesnotexist");
  const {overview} = await import("../src/viewer/overview-view.ts");
@@ -141,6 +143,8 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
   assert.deepEqual([...page.querySelectorAll("h1")].map(e => e.textContent),["Overview"]);
   const row = page.querySelector(".overview-heading .page-header:not(.page-header-fallback)")!;
   assert.ok(row.querySelector("h1 + .page-header-end > .shell-live + .shell-more"),"title, then status, then ⋮");
+  assert.equal(page.querySelector(".page-header-fallback"), null, "no second header, no second ⋮");
+  assert.equal(page.querySelectorAll(".shell-main .shell-more").length, 1);
  } finally { home.cleanup(); }
  // JobDetail: the job's title is the <h1>, its id follows muted; a long title is whole in the title attribute.
  const title = "A long job title ".repeat(12).trim();
@@ -150,6 +154,37 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  assert.equal(h1s.length,1);
  assert.equal(h1s[0]!.getAttribute("title"),title);
  assert.equal(detail.querySelector(".job-detail-heading > .page-header > .page-header-detail")?.textContent,"cp-long");
+});
+
+test("fallback header survives a shell-only re-render and returns when the screen drops its header", async t => {
+ const result = await build({stdin:{contents:'import {h,render} from "preact"; import {useState} from "preact/hooks"; import {act} from "preact/test-utils"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {PageHeader} from "./viewer-app/components/PageHeader.tsx"; function Screen(){ const [on,setOn]=useState(true); return h("div",{class:"screen"}, h("button",{type:"button",class:"drop",onClick:()=>setOn(false)},"drop"), on && h(PageHeader,{title:"Overview"})); } export {act}; export const mount=root=>render(h(Shell,{current:{screen:"overview",section:null},awaiting:0,status:"live",updatedAt:"2026-10-07T08:30:00Z"}, h(Screen)), root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const {act,mount,unmount}=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const {window,document}=parseHTML("<html><body><div id='root'></div></body></html>");
+ const originals=["window","document","fetch"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ Object.defineProperty(globalThis,"window",{configurable:true,value:window});
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ Object.defineProperty(globalThis,"fetch",{configurable:true,value:()=>Promise.resolve(new Response("{}",{status:503}))});
+ window.matchMedia=(()=>({matches:false,addEventListener(){},removeEventListener(){}})) as unknown as typeof window.matchMedia;
+ const proto = window.Element.prototype as Element & {showModal?:() => void; close?:() => void};
+ proto.showModal=()=>{};
+ proto.close=()=>{};
+ const root=document.getElementById("root")!;
+ t.after(()=>{unmount(root); for (const [key,descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis,key,descriptor); else Reflect.deleteProperty(globalThis,key); }});
+ const menus=()=>root.querySelectorAll(".shell-main .shell-more").length;
+ await act(()=>mount(root));
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.equal(root.querySelector(".page-header-fallback"),null);
+ assert.equal(menus(),1,"one ⋮ in the screen header");
+ root.querySelector<HTMLButtonElement>(".shell-search")!.focus=()=>{};
+ await act(()=>root.querySelector<HTMLButtonElement>(".shell-search")!.click());
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.equal(root.querySelector(".page-header-fallback"),null,"opening search does not mount a second header");
+ assert.equal(menus(),1);
+ await act(()=>root.querySelector<HTMLButtonElement>(".drop")!.click());
+ await act(async()=>{await new Promise(done=>setImmediate(done));});
+ assert.ok(root.querySelector(".shell-main > .page-header-fallback"),"dropping the screen header brings the fallback back");
+ assert.equal(root.querySelector(".screen .page-header"),null);
+ assert.equal(menus(),1);
 });
 
 test("desktop page header CSS: a compact hairline row, transparent below 900 px, and no overlay hacks left", () => {
@@ -164,6 +199,7 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  const phone = css.slice(0,at), desktop = css.slice(at);
  assert.match(phone,/\.page-header \{ display: contents; \}/,"below 900 px the screen's own <h1> layout is unchanged");
  assert.match(phone,/\.page-header-back, \.page-header-detail, \.page-header-end, \.page-header-fallback \{ display: none; \}/);
+ assert.doesNotMatch(phone,/\.shell-main:has\(> \.page-header-fallback\)/,"the fallback flex column is desktop-only");
  const row = /\n \.page-header \{([^}]*)\}/.exec(desktop)?.[1] ?? "";
  assert.match(row,/height: 56px/);
  assert.match(row,/border-bottom: 1px solid var\(--border\)/,"a hairline in the existing border token");
@@ -171,4 +207,6 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 19px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
  assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 40px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
  assert.match(desktop,/\.shell-main:has\(\.page-header:not\(\.page-header-fallback\)\) > \.page-header-fallback \{ display: none; \}/);
+ assert.match(desktop,/--page-header-gap: 24px/);
+ assert.match(desktop,/\.page-header-fallback \{ margin-bottom: var\(--page-header-gap\); \}/);
 });

@@ -64,7 +64,7 @@
  .job-detail-main:empty { display: none; }
  .job-detail-side { grid-area: 1 / 2 / 3 / 3; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
  .job-timeline { grid-column: 1; }
- .job-detail-heading { gap: 16px; }
+ .job-detail-heading { gap: var(--page-header-gap); }
  .job-badges { order: 2; }
  .job-facts { display: flex; flex-direction: column; gap: 12px; }
  .job-facts > div { display: grid; grid-template-columns: 114px minmax(0,1fr); gap: 12px; align-items: baseline; }
