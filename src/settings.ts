@@ -28,6 +28,9 @@ import {
 	type SettingsSnapshot,
 	type SettingSource,
 	type SettingValue,
+	ReviewerModelSchema,
+	type RoutingConfig,
+	validate,
 } from "./contracts.ts";
 import { resolveReviewTimeoutMs } from "./gate.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults, loadTokenCeiling } from "./mandate-defaults.ts";
@@ -151,12 +154,22 @@ function settle(owner: SettingFileOwner, read: OwnerRead<unknown>, values: (resu
 	return { read, views };
 }
 
-/** Only the two `CP_JOB_*` values are ever read from the env. */
+/** The two `CP_JOB_*` values enter the revision; the two model pins below are read for provenance only (not writable). */
 function envView(name: (typeof ENV_KEYS)[number], env: NodeJS.ProcessEnv): { source: SettingSource; diagnostic?: string } {
 	const raw = env[name];
 	if (parsePositiveInt(raw) !== undefined) return { source: "env" };
 	if (raw === undefined) return { source: "code" };
 	return { source: "code", diagnostic: `${name}=${JSON.stringify(raw).slice(0, 200)} is not a positive integer; the default applies` };
+}
+
+/** `models.parent`/`models.operator`: the owner file's valid `model` (file), else the env pin (env), else unset (code). */
+function modelView(key: "models.parent" | "models.operator", read: OwnerRead<unknown>, env: NodeJS.ProcessEnv): View {
+	const field = SETTING_FIELDS.find((row) => row.key === key) as SettingField;
+	const raw = at(parsed(read.text), field.file_key);
+	if (raw !== undefined && validate(ReviewerModelSchema, raw.json).ok) return { value: raw.json as string, source: "file", status: "ok" };
+	const pinned = env[field.env as string]?.trim();
+	const view: View = pinned ? { value: pinned, source: "env", status: "ok" } : { value: null, source: "code", status: "ok" };
+	return raw === undefined ? view : { ...view, status: "fallback", diagnostic: "invalid model; ignored" };
 }
 
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };
@@ -205,18 +218,20 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	},
 	parent: {
 		file: dataFile("parent.json"),
-		read: (home, _env, file) => {
+		read: (home, env, file) => {
 			const read = readOwnerConsistently(file, () => {
 				const limit = parentSettings(home).compact_at_tokens;
 				if (limit === undefined) throw new Error(`${file} needs compact_at_tokens as a positive safe integer in valid JSON; parent compaction is off until then`);
 				return limit;
 			});
-			return settle("parent", read, (limit: number) => ({ "sessions.parent_compact_at_tokens": limit }));
+			const out = settle("parent", read, (limit: number) => ({ "sessions.parent_compact_at_tokens": limit }));
+			out.views["models.parent"] = modelView("models.parent", read, env);
+			return out;
 		},
 	},
 	operator: {
 		file: dataFile("operator.json"),
-		read: (_home, _env, file) => {
+		read: (_home, env, file) => {
 			const read = readOwnerConsistently(file, () => operatorCompactThreshold(file));
 			if (read.state === "valid") {
 				const raw = parsed(read.text);
@@ -226,6 +241,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			}
 			const out = settle("operator", read, (value: number) => ({ "sessions.operator_compact_at_tokens": value }));
 			if (read.state === "invalid" && read.result !== undefined) out.views["sessions.operator_compact_at_tokens"] = { value: read.result, source: "code", status: "fallback" };
+			out.views["models.operator"] = modelView("models.operator", read, env);
 			return out;
 		},
 	},
@@ -276,7 +292,8 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	},
 	routing: {
 		file: (home) => join(home, LAYOUT.routingFile),
-		read: (home, _env, file) => settle("routing", readOwnerConsistently(file, () => [...loadRoutingConfig(home).allow]), (allow: string[]) => ({ "models.allow": allow })),
+		read: (home, _env, file) =>
+			settle("routing", readOwnerConsistently(file, () => loadRoutingConfig(home)), (config: RoutingConfig) => ({ "models.allow": [...config.allow], "models.rubric": [...config.rubric] })),
 	},
 };
 

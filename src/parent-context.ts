@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LAYOUT } from "./contracts.ts";
+import { LAYOUT, layoutForHome, ReviewerModelSchema, validate } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
 import { EscalationStore } from "./escalation.ts";
 import { FleetStore } from "./fleet.ts";
@@ -52,6 +52,14 @@ export function parentSettings(home: string): { compact_at_tokens?: number } {
 	}
 	const limit = (value as { compact_at_tokens?: unknown } | null)?.compact_at_tokens;
 	return typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0 ? { compact_at_tokens: limit } : {};
+}
+
+/** `data/parent.json` `model` (dashboard Settings): a valid `provider/model` ref, else undefined (absent, unreadable or invalid = today's behaviour). */
+export function parentModelSetting(home: string): string | undefined {
+	try {
+		const model: unknown = JSON.parse(readFileSync(join(home, layoutForHome("multi", home).data, "parent.json"), "utf8"))?.model;
+		return validate(ReviewerModelSchema, model).ok ? (model as string) : undefined;
+	} catch { return undefined; }
 }
 
 export function parentCompactInstructions(home: string): string {

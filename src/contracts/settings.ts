@@ -14,6 +14,7 @@ import { IsoTimestampSchema, type ValidationResult, validate } from "./core.ts";
 import { DEFAULT_BUDGET_CONFIG, DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS } from "./limits.ts";
 import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
+import { ReviewerModelSchema, RoutingRuleSchema } from "./routing.ts";
 
 export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
@@ -59,10 +60,12 @@ export const SETTING_APPLIES = [
 	"next_pipeline",
 	"next_quota_read",
 	"next_update_run",
+	"next_parent_start",
+	"next_operator_launch",
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
-export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list"] as const;
+export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "rubric"] as const;
 export type SettingValueType = (typeof SETTING_VALUE_TYPES)[number];
 
 export const SETTING_KEYS = [
@@ -84,6 +87,9 @@ export const SETTING_KEYS = [
 	"sessions.parent_compact_at_tokens",
 	"sessions.operator_compact_at_tokens",
 	"models.allow",
+	"models.rubric",
+	"models.parent",
+	"models.operator",
 	"review.timeout_ms",
 	"review.quality_verify",
 	"review.quality_completeness",
@@ -97,7 +103,7 @@ export const SETTING_KEYS = [
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
-export const SettingValueSchema = Type.Union([Type.Number(), Type.Boolean(), Type.Array(Type.String()), Type.Null()]);
+export const SettingValueSchema = Type.Union([Type.Number(), Type.Boolean(), Type.String(), Type.Array(Type.String()), Type.Array(RoutingRuleSchema), Type.Null()]);
 export type SettingValue = Static<typeof SettingValueSchema>;
 
 export interface SettingField {
@@ -140,7 +146,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 28 fields, in `SETTING_KEYS` order. */
+/** The 31 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -173,6 +179,13 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("models", "routing", { applies: "next_dispatch", on_invalid: "refuse" }, {
 		allow: { file_key: "allow", type: "string_list", max_items: 64, default: ["*/*"], editable: false, label: "Allowed models", help: "Model patterns routing may pick; absent routing.json allows every model." },
+		rubric: { file_key: "rubric", type: "rubric", max_items: 64, default: [], label: "Worker models", help: "Model, fallbacks and thinking per rubric row; restore puts back the shipped rows." },
+	}),
+	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
+		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Next parent start or rotation when cp_parent start names no model; beats CP_PARENT_MODEL and the saved control model. Empty unsets it; cp_parent model switches now." },
+	}),
+	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
+		operator: { file_key: "model", env: "CP_OPERATOR_MODEL", type: "model_ref", default: null, label: "Operator model", help: "Next fresh cp-operator launch; beats CP_OPERATOR_MODEL, never an explicit --model. A resumed or restarted session keeps its recorded model. Empty unsets it." },
 	}),
 	...group("review", "gate", { applies: "next_review_attempt", on_invalid: "refuse" }, {
 		timeout_ms: { file_key: "review_timeout_ms", type: "integer", minimum: GATE_REVIEW_TIMEOUT_MIN_MS, maximum: GATE_REVIEW_TIMEOUT_MAX_MS, default: 300_000, label: "Review timeout (ms)", help: "How long one review attempt may take before it counts as operational." },
@@ -220,6 +233,10 @@ export function settingValueSchema(field: SettingField): TSchema {
 			return Type.Array(StringEnum([...(field.enum ?? [])]), items);
 		case "string_list":
 			return Type.Array(Type.String({ minLength: 1, ...(field.max_length === undefined ? {} : { maxLength: field.max_length }) }), items);
+		case "model_ref":
+			return Type.Union([ReviewerModelSchema, Type.Null()]);
+		case "rubric":
+			return Type.Array(RoutingRuleSchema, items);
 	}
 }
 

@@ -33,7 +33,10 @@ import {
 	type SettingValue,
 	validate,
 	validateSettingValue,
+	normalizeLegacyRoles,
+	RoutingConfigSchema,
 } from "./contracts.ts";
+import { PACKAGE_ROOT } from "./home.ts";
 import { atomicWriteText, durableAppend } from "./json-store.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
 import { readSettings } from "./settings.ts";
@@ -45,9 +48,10 @@ export const settingsAuditFile = (home: string): string => join(home, LAYOUT.dat
  * Restore per key: `delete` where an absent key is the owner's default; `default` writes the catalog default
  * (= the scaffold value) where an absent key refuses or disables; `installer_seed` restores what cp-install
  * seeds on an installed home (`data/daemon.json` generated_by cp-install: enabled true, interval_min 15),
- * else the catalog behaviour (enabled false; interval deleted).
+ * else the catalog behaviour (enabled false; interval deleted); `shipped_rubric` puts back the shipped
+ * `defaults/routing.default.json` model, fallbacks and thinking on every row whose id matches (other rows untouched).
  */
-export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "default" | "installer_seed">>> = Object.freeze({
+export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "default" | "installer_seed" | "shipped_rubric">>> = Object.freeze({
 	"grants.expiry_hours": "default",
 	"grants.spend_usd": "default",
 	"grants.spend_tokens": "default",
@@ -64,6 +68,9 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"sessions.wall_clock_seconds": "default",
 	"sessions.parent_compact_at_tokens": "default",
 	"sessions.operator_compact_at_tokens": "delete",
+	"models.rubric": "shipped_rubric",
+	"models.parent": "delete",
+	"models.operator": "delete",
 	"review.timeout_ms": "delete",
 	"review.quality_verify": "delete",
 	"review.quality_completeness": "delete",
@@ -101,6 +108,8 @@ export interface SettingsWriteSeams {
 	readBack?: (home: string, env: NodeJS.ProcessEnv) => SettingsSnapshot;
 	isPidAlive?: (pid: number) => boolean;
 	onBeforeReclaim?: () => void;
+	/** The shipped routing template a `models.rubric` restore reads. Default: this package's `defaults/routing.default.json`. */
+	shippedRouting?: () => unknown;
 }
 
 export interface PlannedChange { key: SettingKey; file_key: string; action: "set" | "delete"; old: SettingValue; old_source: string; new: SettingValue }
@@ -156,6 +165,11 @@ function baseDocument(owner: SettingFileOwner, path: string): Record<string, unk
 			return { ...DEFAULT_GATE_CONFIG };
 		case "update":
 			return { enabled: false };
+		case "parent":
+			// A model-only parent.json would read as invalid and turn compaction off: keep the absent-file threshold.
+			return { compact_at_tokens: FIELD.get("sessions.parent_compact_at_tokens")?.default };
+		case "routing":
+			throw new Refusal(409, `${path} is absent: worker routing uses each profile's model; nothing to edit`);
 		case "capacity":
 			throw new Refusal(409, `${path} is absent: configure the gateway with cp-install --gateway-url first`);
 		default:
@@ -168,7 +182,73 @@ const OWNER_SCHEMA: Partial<Record<SettingFileOwner, unknown>> = {
 	budgets: BudgetConfigSchema,
 	gate: GateConfigSchema,
 	quality: QualityConfigSchema,
+	// Checked with legacy role words mapped forward (as `loadRoutingConfig` reads it); written as spelled.
+	routing: RoutingConfigSchema,
 };
+
+const RULE_FIXED_KEYS = ["id", "role", "project", "scope", "risk", "note"] as const;
+const RULE_MODEL_KEYS = ["model", "fallbacks", "thinking"] as const;
+
+/**
+ * A `models.rubric` set: `submitted` (the snapshot's rows, edited) may change only model, fallbacks and thinking of
+ * the existing rows, in place. Any other change, or a different count or order, is 400 with one error per row.
+ * Returns the raw rows with those three keys replaced (empty fallbacks and absent thinking are deleted).
+ */
+export function mergeRubric(rawRows: unknown, submitted: readonly Record<string, unknown>[]): unknown[] {
+	const raw = Array.isArray(rawRows) ? rawRows : [];
+	const errors: string[] = [];
+	if (raw.length !== submitted.length) errors.push(`models.rubric: ${submitted.length} rows sent for ${raw.length}; rows cannot be added, removed or reordered here`);
+	const merged = raw.map((row, index) => {
+		const next = submitted[index];
+		const current = normalizeLegacyRoles(clone(row)) as Record<string, unknown>;
+		if (!isObject(row) || !next) return row;
+		if (RULE_FIXED_KEYS.some((key) => JSON.stringify(current[key]) !== JSON.stringify(next[key]))) {
+			errors.push(`row ${String(current.id)}: only model, fallbacks and thinking may change`);
+			return row;
+		}
+		const out = clone(row);
+		out.model = next.model;
+		if (Array.isArray(next.fallbacks) && next.fallbacks.length) out.fallbacks = clone(next.fallbacks);
+		else delete out.fallbacks;
+		if (next.thinking !== undefined) out.thinking = next.thinking;
+		else delete out.thinking;
+		return out;
+	});
+	if (errors.length) throw new Refusal(400, "models.rubric: only model, fallbacks and thinking may change on the existing rows", errors);
+	return merged;
+}
+
+/** The `shipped_rubric` restore: each raw row whose id the template has gets the template's model/fallbacks/thinking; other rows stay. */
+export function restoreShippedRubric(rawRows: unknown, template: unknown): unknown[] {
+	const shipped = new Map((isObject(template) && Array.isArray(template.rubric) ? template.rubric : []).filter(isObject).map((row) => [row.id, row]));
+	return (Array.isArray(rawRows) ? rawRows : []).map((row) => {
+		const source = isObject(row) ? shipped.get(row.id) : undefined;
+		if (!isObject(row) || !source) return row;
+		const out = clone(row);
+		for (const key of RULE_MODEL_KEYS) {
+			if (key in source) out[key] = clone(source[key]);
+			else delete out[key];
+		}
+		return out;
+	});
+}
+
+function shippedRouting(seams: SettingsWriteSeams): unknown {
+	try {
+		const template = (seams.shippedRouting ?? (() => JSON.parse(readFileSync(join(PACKAGE_ROOT, "defaults/routing.default.json"), "utf8"))))();
+		if (isObject(template) && Array.isArray(template.rubric)) return template;
+	} catch {
+		// refused below
+	}
+	throw new Refusal(409, "the shipped routing defaults (defaults/routing.default.json) are unreadable; nothing restored");
+}
+
+/** What the read model shows once a change lands: rubric rows with legacy roles mapped; an unset model falls to its env pin. */
+function readBackValue(field: SettingField, action: "set" | "delete", value: SettingValue, env: NodeJS.ProcessEnv): SettingValue {
+	if (field.type === "rubric") return normalizeLegacyRoles(clone(value));
+	if (field.type === "model_ref" && action === "delete") return env[field.env as string]?.trim() || null;
+	return value;
+}
 
 function hasAt(doc: Record<string, unknown>, fileKey: string): { found: boolean; value?: unknown } {
 	let node: unknown = doc;
@@ -244,8 +324,10 @@ function resolveKeys(request: SettingsWriteRequest): SettingKey[] {
 	return [...new Set(keys)] as SettingKey[];
 }
 
-/** One owner's planned writes. Pure apart from reading the owner bytes and `data/daemon.json`. */
-function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsWriteRequest): Write[] {
+type PlanContext = { env: NodeJS.ProcessEnv; seams: SettingsWriteSeams };
+
+/** One owner's planned writes. Pure apart from reading the owner bytes, `data/daemon.json` and the shipped routing template. */
+function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsWriteRequest, context: PlanContext): Write[] {
 	const keys = resolveKeys(request);
 	const writes: Write[] = [];
 	let installed: boolean | undefined;
@@ -286,11 +368,15 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			const present = hasAt(doc, fileKey);
 			let action: "set" | "delete" = "set";
 			let value: SettingValue;
-			if (request.mode === "set") value = request.changes[field.key] as SettingValue;
-			else {
+			if (request.mode === "set") {
+				value = request.changes[field.key] as SettingValue;
+				if (field.type === "model_ref" && value === null) action = "delete"; // unset, never a stored null
+				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;
+			} else {
 				const restore = RESTORE_ACTIONS[field.key];
 				if (restore === "installer_seed") installed ??= installedHome(home);
 				if (restore === "default") value = field.default;
+				else if (restore === "shipped_rubric") value = restoreShippedRubric(present.value, shippedRouting(context.seams)) as SettingValue;
 				else if (restore === "installer_seed" && installed) value = INSTALLER_UPDATE_SEED[fileKey as keyof typeof INSTALLER_UPDATE_SEED];
 				else if (restore === "installer_seed" && field.key === "maintenance.update_enabled") value = field.default;
 				else {
@@ -305,11 +391,11 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 				if (present.found && JSON.stringify(present.value) === JSON.stringify(value)) continue;
 				setAt(doc, fileKey, value);
 			}
-			changes.push({ key: field.key, file_key: fileKey, action, ...old, new: value, expected: value });
+			changes.push({ key: field.key, file_key: fileKey, action, ...old, new: value, expected: readBackValue(field, action, value, context.env) });
 		}
 		const schema = OWNER_SCHEMA[owner];
 		if (schema !== undefined) {
-			const checked = validate(schema, doc);
+			const checked = validate(schema, owner === "routing" ? normalizeLegacyRoles(clone(doc)) : doc);
 			if (!checked.ok) throw new Refusal(400, `${status.path} would violate its owner schema`, checked.errors);
 		}
 		if (!changes.length || JSON.stringify(doc) === before) continue;
@@ -327,9 +413,9 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 const publicChanges = (writes: Write[]): PlannedChange[] => writes.flatMap((write) => write.changes.map(({ expected: _expected, ...change }) => change));
 
 /** The same planner a dry run and a real apply use: `{state: "planned"}` or the refusal, nothing written. */
-export function planSettings(home: string, snapshot: SettingsSnapshot, request: SettingsWriteRequest): SettingsApplyResult {
+export function planSettings(home: string, snapshot: SettingsSnapshot, request: SettingsWriteRequest, context: PlanContext = { env: process.env, seams: {} }): SettingsApplyResult {
 	try {
-		const writes = planWrites(home, snapshot, request);
+		const writes = planWrites(home, snapshot, request, context);
 		return { status: 200, state: "planned", revision: snapshot.revision, changes: publicChanges(writes) };
 	} catch (error) {
 		if (error instanceof Refusal) return { status: error.status, state: "refused", error: redact(error.message, home), ...(error.errors ? { errors: error.errors } : {}) };
@@ -413,7 +499,7 @@ export function applySettings(home: string, input: SettingsApplyInput, seams: Se
 	const at = () => isoTimestamp(now());
 	if (input.dry_run) {
 		const snapshot = readSettings(home, env);
-		return { ...planSettings(home, snapshot, input.request), snapshot };
+		return { ...planSettings(home, snapshot, input.request, { env, seams }), snapshot };
 	}
 	if (input.expected_revision === null) return { status: 428, state: "refused", error: "If-Match is required: send the revision you last read" };
 	const auditFile = settingsAuditFile(home);
@@ -442,7 +528,7 @@ export function applySettings(home: string, input: SettingsApplyInput, seams: Se
 		if (input.expected_revision !== snapshot.revision) return refused(412, "the settings changed since this page read them; review the fresh snapshot", { revision: snapshot.revision, snapshot });
 		let writes: Write[];
 		try {
-			writes = planWrites(home, snapshot, input.request);
+			writes = planWrites(home, snapshot, input.request, { env, seams });
 		} catch (error) {
 			if (error instanceof Refusal) return refused(error.status, redact(error.message, home), error.errors ? { errors: error.errors } : {});
 			throw error;

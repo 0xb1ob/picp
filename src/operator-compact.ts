@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { layoutForHome, type Mode } from "./contracts.ts";
+import { layoutForHome, type Mode, ReviewerModelSchema, validate } from "./contracts.ts";
 import { atomicWriteText } from "./json-store.ts";
 import { relayIdsOfMessage } from "./operator-outbox.ts";
 
@@ -29,6 +29,22 @@ export function operatorCompactThreshold(settingsFile: string): number {
 		const value = JSON.parse(readFileSync(settingsFile, "utf8"))?.compact_at_tokens;
 		return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : OPERATOR_COMPACT_DEFAULT_TOKENS;
 	} catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
+}
+
+/**
+ * `model` from the operator settings file (dashboard Settings): a valid `provider/model` ref, else undefined.
+ * Absent file → undefined; an unreadable file or invalid JSON throws, so `cp-operator` can say why it fell back.
+ */
+export function operatorModelSetting(settingsFile: string): string | undefined {
+	let text: string;
+	try {
+		text = readFileSync(settingsFile, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+	const model: unknown = JSON.parse(text)?.model;
+	return validate(ReviewerModelSchema, model).ok ? (model as string) : undefined;
 }
 
 export type OperatorCompactControl = {
