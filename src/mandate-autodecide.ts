@@ -5,6 +5,7 @@
 import type { CheckpointStore } from "./checkpoint.ts";
 import { type Checkpoint, checkpointAwaitingId, isoTimestamp } from "./contracts.ts";
 import { evaluateAuthority, type MandateStore, type MandateSubject } from "./mandate.ts";
+import { projectDenial } from "./mandate-defaults.ts";
 
 export function autoDecideCheckpoint(
 	store: CheckpointStore,
@@ -13,6 +14,7 @@ export function autoDecideCheckpoint(
 	mandates: MandateStore,
 ): Checkpoint {
 	if (checkpoint.decision !== "pending") return checkpoint;
+	if (projectDenial(mandates.home, subject.project)) return checkpoint;
 	const now = subject.now ?? isoTimestamp();
 	const jobs = mandates.withReviewerSpend(subject.usageJobs ?? []);
 	mandates.sweep(now, jobs);

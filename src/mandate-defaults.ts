@@ -17,6 +17,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+	type GrantScopePolicy,
 	isoTimestamp,
 	LAYOUT,
 	type MandateAction,
@@ -24,6 +25,7 @@ import {
 	MandateDefaultsSchema,
 	type MandateDefaults,
 	MANDATE_DEFAULTABLE_FIELDS,
+	MandatePolicySchema,
 	type MandateDefaultableField,
 	type MandateFieldSource,
 	type MandateProvenance,
@@ -143,7 +145,71 @@ export function formatMandateDefaults(defaults: MandateDefaults): string {
 	}
 	lines.push(`  token_ceiling: ${defaults.token_ceiling ?? DEFAULT_TOKEN_CEILING}`);
 	if (defaults.notes.token_ceiling) lines.push(`    ${defaults.notes.token_ceiling}`);
+	lines.push(`  scope_policy: ${defaults.scope_policy ?? "project_wide_allowed"} (file-only)`);
+	lines.push(`  deny_projects: ${defaults.deny_projects?.join(", ") || "(none)"} (file-only)`);
 	return lines.join("\n");
+}
+
+/** File-only machine policy keys (cp-7re9): hand-edited in the file, never `defaults_set` or a Settings field. */
+export const MANDATE_POLICY_FIELDS = ["scope_policy", "deny_projects"] as const;
+export interface MandatePolicy {
+	scope_policy: GrantScopePolicy;
+	deny_projects: string[];
+}
+
+/**
+ * The machine grant policy, read fresh per call. Lenient: only the two policy
+ * keys are validated, so a bad grant-default field never blocks dispatch; an
+ * unreadable file or an invalid policy key throws naming the file (fail closed).
+ */
+export function loadMandatePolicy(home: string): MandatePolicy {
+	const file = join(home, LAYOUT.mandateDefaultsFile);
+	if (!existsSync(file)) return { scope_policy: "project_wide_allowed", deny_projects: [] };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		throw new MandateDefaultsError(
+			`${file} is not valid JSON (${(error as Error).message}); the machine policy (scope_policy, deny_projects) is unknown, refusing`,
+		);
+	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new MandateDefaultsError(`${file} must be a JSON object; the machine policy (scope_policy, deny_projects) is unknown, refusing`);
+	}
+	const record = parsed as Record<string, unknown>;
+	const picked = Object.fromEntries(MANDATE_POLICY_FIELDS.filter((key) => key in record).map((key) => [key, record[key]]));
+	const result = validate<Partial<MandatePolicy>>(MandatePolicySchema, picked);
+	if (!result.ok) throw new MandateDefaultsError(`${file} scope_policy/deny_projects violate the contract: ${result.errors.join("; ")}`);
+	return { scope_policy: result.value.scope_policy ?? "project_wide_allowed", deny_projects: result.value.deny_projects ?? [] };
+}
+
+/** Why `project` is closed to new dispatch, send, grant and mandate decision; undefined when it is open. */
+export function projectDenial(home: string, project: string): string | undefined {
+	try {
+		if (!loadMandatePolicy(home).deny_projects.includes(project)) return undefined;
+	} catch (error) {
+		return `settings: ${(error as Error).message}; the project deny list is unknown, so ${project} is refused`;
+	}
+	return `settings: project ${project} is denied (${LAYOUT.mandateDefaultsFile} deny_projects); no new dispatch, send, grant or mandate decision there \u2014 a running worker is not stopped`;
+}
+
+/** Why `MandateStore.issue` must refuse this grant under the machine policy; undefined when it may proceed. */
+export function grantPolicyRefusal(
+	home: string,
+	grant: { projects: readonly string[]; named: boolean; schedule: boolean },
+): string | undefined {
+	let policy: MandatePolicy;
+	try {
+		policy = loadMandatePolicy(home);
+	} catch (error) {
+		return (error as Error).message;
+	}
+	const denied = grant.projects.find((project) => policy.deny_projects.includes(project));
+	if (denied !== undefined) return `${projectDenial(home, denied)}; grant issue refused`;
+	if (policy.scope_policy === "named_jobs_only" && !grant.named && !grant.schedule) {
+		return `settings: grants.scope_policy=named_jobs_only requires explicit job_ids; project-wide issue refused (${LAYOUT.mandateDefaultsFile})`;
+	}
+	return undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -76,13 +76,15 @@ export function jobToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
 export class WorkerBoundsConfigError extends Error {}
 
 /**
- * Home-local `data/worker-bounds.json` `wall_clock_seconds`, or undefined when
- * the file is absent. A present file without a valid field (missing, misspelled
- * or not a positive integer) refuses, naming the file and field: a cap the
- * operator wrote must never silently fall back.
- * This is the path that survives the parent launch — `CP_*` env is stripped.
+ * Home-local `data/worker-bounds.json`, or undefined when the file is absent.
+ * `wall_clock_seconds`, when present, must be a positive integer;
+ * `allow_dispatch_override` (cp-7re9), when present, must be a boolean. A
+ * present file with neither, or with an invalid one, refuses naming the file
+ * and field: a cap the operator wrote must never silently fall back. Unknown
+ * keys are ignored. This is the path that survives the parent launch — `CP_*`
+ * env is stripped.
  */
-export function homeWallClockSeconds(home: string): number | undefined {
+export function homeWorkerBounds(home: string): { wall_clock_seconds?: number; allow_dispatch_override: boolean } | undefined {
 	const file = join(home, LAYOUT.workerBoundsFile);
 	if (!existsSync(file)) return undefined;
 	let parsed: unknown;
@@ -94,37 +96,57 @@ export function homeWallClockSeconds(home: string): number | undefined {
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new WorkerBoundsConfigError(`${file} must be a JSON object like {"wall_clock_seconds": 5400}; fix or remove it`);
 	}
-	const wall = (parsed as Record<string, unknown>).wall_clock_seconds;
-	if (typeof wall !== "number" || !Number.isInteger(wall) || wall < 1) {
+	const record = parsed as Record<string, unknown>;
+	const flag = record.allow_dispatch_override;
+	if (flag !== undefined && typeof flag !== "boolean") {
 		throw new WorkerBoundsConfigError(
-			`${file} wall_clock_seconds must be a positive integer (seconds), got ${JSON.stringify(wall)}; fix or remove the field`,
+			`${file} allow_dispatch_override must be true or false, got ${JSON.stringify(flag)}; fix or remove the field`,
 		);
 	}
-	return wall;
+	const wall = record.wall_clock_seconds;
+	if (flag === undefined || wall !== undefined) {
+		if (typeof wall !== "number" || !Number.isInteger(wall) || wall < 1) {
+			throw new WorkerBoundsConfigError(
+				`${file} wall_clock_seconds must be a positive integer (seconds), got ${JSON.stringify(wall)}; fix or remove the field`,
+			);
+		}
+	}
+	return { ...(wall !== undefined ? { wall_clock_seconds: wall as number } : {}), allow_dispatch_override: flag ?? true };
+}
+
+/** Home-local `data/worker-bounds.json` `wall_clock_seconds`, or undefined when absent (file or field); refuses as `homeWorkerBounds`. */
+export function homeWallClockSeconds(home: string): number | undefined {
+	return homeWorkerBounds(home)?.wall_clock_seconds;
 }
 
 /**
  * Wall clock: explicit override > home `data/worker-bounds.json` > env > default.
  * Tool-call cap: explicit override > env > default. Resolve once at dispatch and
  * freeze the result on the record; revive/redispatch reuse the frozen value.
+ * With a home whose file says `allow_dispatch_override: false` (cp-7re9), an
+ * explicit override that differs from the machine value (home or env or
+ * default) refuses instead of winning; an equal one passes. A home file is
+ * read whenever `home` is given, override or not, so a broken file refuses.
  */
 export function resolveJobHardBounds(
 	override: HardBoundOverride | undefined = undefined,
 	env: NodeJS.ProcessEnv = process.env,
 	home?: string,
 ): JobHardBounds {
-	const wall = override?.wall_clock_seconds;
-	const tools = override?.tool_call_cap;
-	return {
-		wall_clock_seconds:
-			typeof wall === "number" && Number.isFinite(wall) && wall > 0
-				? Math.floor(wall)
-				: ((home !== undefined ? homeWallClockSeconds(home) : undefined) ?? jobWallClockSeconds(env)),
-		tool_call_cap:
-			typeof tools === "number" && Number.isFinite(tools) && tools > 0
-				? Math.floor(tools)
-				: jobToolCallCap(env),
+	const policy = home !== undefined ? homeWorkerBounds(home) : undefined;
+	const machine = { wall_clock_seconds: policy?.wall_clock_seconds ?? jobWallClockSeconds(env), tool_call_cap: jobToolCallCap(env) };
+	const bound = (name: keyof JobHardBounds): number => {
+		const value = override?.[name];
+		if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return machine[name];
+		const floored = Math.floor(value);
+		if (policy?.allow_dispatch_override === false && floored !== machine[name]) {
+			throw new WorkerBoundsConfigError(
+				`settings: ${name} override ${floored} conflicts with enforced machine value ${machine[name]} (${LAYOUT.workerBoundsFile} allow_dispatch_override=false)`,
+			);
+		}
+		return floored;
 	};
+	return { wall_clock_seconds: bound("wall_clock_seconds"), tool_call_cap: bound("tool_call_cap") };
 }
 
 /**

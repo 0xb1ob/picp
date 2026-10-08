@@ -32,13 +32,13 @@ import {
 } from "../src/mandate.ts";
 import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
 import { join } from "node:path";
-import { paths } from "../src/contracts.ts";
+import { LAYOUT, paths } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS, setMandateDefault } from "../src/mandate-defaults.ts";
 import { RunRecorder } from "../src/run-artifacts.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { awaitingListText } from "../extensions/command-post/index.ts";
 import { assertReviewAllowed, raiseTokenCap } from "../src/mandate-usage.ts";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createScratchHome, createScratchLedger, REPO_ROOT } from "./harness/index.ts";
 import { batchRiskHigh } from "../src/risk-batch.ts";
 
@@ -276,6 +276,45 @@ test("auto-decision journals the clause; revoke leaves pending pending", (t) => 
 	const left = autoDecideCheckpoint(still, open, subject({ jobId: "cp-ship2" }), other);
 	assert.equal(left.decision, "pending");
 	assert.equal(left.decided_by, undefined);
+});
+
+test("cp-7re9: autoDecideCheckpoint in a denied project leaves the checkpoint pending and journals nothing; the grant keeps its standing", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const mandates = new MandateStore(home.path);
+	const grant = issue(mandates);
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ deny_projects: ["demo"] }));
+	const checkpoints = new CheckpointStore(home.path);
+	const pending = checkpoints.request({ jobId: "cp-ship1", question: "Authorize implementation of cp-ship1?" });
+	const left = autoDecideCheckpoint(checkpoints, pending, subject(), mandates);
+	assert.equal(left.decision, "pending");
+	assert.equal(left.decided_by, undefined);
+	assert.equal(mandates.require(grant.id).decisions.length, 0, "nothing journaled");
+	assert.equal(mandates.require(grant.id).status, "active", "no retroactive revocation");
+	// Removing the key restores today's behaviour on the next call.
+	writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({}));
+	assert.equal(autoDecideCheckpoint(checkpoints, pending, subject(), mandates).decision, "approved");
+});
+
+test("cp-7re9: issue honours deny_projects and scope_policy, and a malformed mandate-defaults.json refuses naming the file", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const mandates = new MandateStore(home.path);
+	const standing = issue(mandates, { objective: "issued before the policy" });
+	const file = join(home.path, LAYOUT.mandateDefaultsFile);
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	const base = SCAFFOLD_MANDATE_DEFAULTS;
+	writeFileSync(file, JSON.stringify({ ...base, deny_projects: ["demo"] }));
+	assert.throws(() => issue(mandates), /settings: project demo is denied .*grant issue refused/);
+	writeFileSync(file, JSON.stringify({ ...base, scope_policy: "named_jobs_only" }));
+	assert.throws(() => issue(mandates), /named_jobs_only requires explicit job_ids; project-wide issue refused/);
+	assert.deepEqual(issue(mandates, { job_ids: ["cp-ship1"] }).job_ids, ["cp-ship1"], "a named grant still issues");
+	writeFileSync(file, "{ not json");
+	assert.throws(() => issue(mandates, { job_ids: ["cp-ship1"] }), (error: Error) => error.message.includes(file) && /not valid JSON/.test(error.message));
+	assert.equal(mandates.require(standing.id).status, "active", "an existing grant is never revoked by policy");
+	writeFileSync(file, JSON.stringify(base));
+	assert.ok(issue(mandates).id, "removing the keys restores project-wide issue");
 });
 
 test("no-id cp_mandate show lists active and paused only; statuses lists revoked and expired; show(id) still returns a revoked grant", async (t) => {

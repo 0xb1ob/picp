@@ -199,11 +199,27 @@ export type RoutingRule = Replace<
 	{ role: Role; scope?: Scope[]; risk?: Risk; thinking?: ThinkingLevel; fallbacks?: string[] }
 >;
 
+const DENY_LIST = Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64 });
+
 export const RoutingConfigSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
 		/** minimatch patterns on `provider/model-id`; empty = allow nothing. */
 		allow: Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 }),
+		/**
+		 * Per-role deny patterns, checked after `allow` on every candidate,
+		 * overrides and reviewer preferences included; absent denies nothing (cp-7re9).
+		 */
+		deny_by_role: Type.Optional(
+			Type.Object(
+				{
+					planner: Type.Optional(DENY_LIST),
+					implementer: Type.Optional(DENY_LIST),
+					"gate-reviewer": Type.Optional(DENY_LIST),
+				},
+				{ additionalProperties: false },
+			),
+		),
 		rubric: Type.Array(RoutingRuleSchema, { maxItems: 64 }),
 	},
 	{ additionalProperties: false },

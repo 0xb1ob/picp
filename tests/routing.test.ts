@@ -246,6 +246,54 @@ test("the allowlist is a fail-closed gate on every source", () => {
 	assert.throws(() => pickModel({ ...base, override: "mock/anything" }, nothing), /nothing is allowed/);
 });
 
+test("role deny is a fail-closed gate on every source and never bypassed by an override (cp-7re9)", (t) => {
+	const config: RoutingConfig = { schema_version: SCHEMA_VERSION, allow: ["mock/*"], deny_by_role: { planner: ["mock/denied*"] }, rubric: [] };
+	const planner = withoutFallbacks(profileFor("planner"));
+	const base = { profile: planner, jobId: "cp-x", project: "demo", kind: "research" as const };
+	const denied = /^settings: model mock\/denied-1 is not allowed for role planner \(.*data\/routing\.json deny_by_role\.planner matches mock\/denied\*\)/;
+
+	// override: one candidate, refused hard
+	const override = refusalOf(() => resolveModel({ ...base, override: "mock/denied-1" }, config, ALWAYS_AVAILABLE));
+	assert.equal(override.refusal, "allowlist");
+	assert.match(override.message, denied);
+	// single-model rubric row: refused hard, naming the row
+	const row = refusalOf(() => pickModel(base, { ...config, rubric: [{ id: "r", role: "planner", model: "mock/denied-1" }] }));
+	assert.deepEqual([row.refusal, row.rule], ["allowlist", "r"]);
+	assert.match(row.message, denied);
+	// the profile default is not exempt
+	const profile = { ...planner, frontmatter: { ...planner.frontmatter, model: "mock/denied-1" } };
+	const fromProfile = refusalOf(() => pickModel({ ...base, profile }, config));
+	assert.equal(fromProfile.refusal, "allowlist");
+	assert.match(fromProfile.message, denied);
+
+	// a fallback walk skips denied members as allowlist; nothing left is exhausted
+	const walk: RoutingConfig = { ...config, rubric: [{ id: "w", role: "planner", model: "mock/denied-1", fallbacks: ["mock/denied-2", "mock/ok"] }] };
+	const walked = resolveModel(base, walk, ALWAYS_AVAILABLE);
+	assert.equal(walked.model, "mock/ok");
+	assert.deepEqual(walked.attempted?.map((step) => step.refusal), ["allowlist", "allowlist"]);
+	const allDenied: RoutingConfig = { ...config, rubric: [{ id: "w", role: "planner", model: "mock/denied-1", fallbacks: ["mock/denied-2"] }] };
+	const exhausted = refusalOf(() => resolveModel(base, allDenied, ALWAYS_AVAILABLE));
+	assert.equal(exhausted.refusal, "exhausted");
+	assert.match(exhausted.message, /mock\/denied-2 \(allowlist\)/);
+
+	// another role's deny does not affect a planner
+	const otherRole: RoutingConfig = { ...config, deny_by_role: { implementer: ["mock/denied*"] } };
+	assert.equal(resolveModel({ ...base, override: "mock/denied-1" }, otherRole, ALWAYS_AVAILABLE).model, "mock/denied-1");
+
+	// the file: accepted with deny_by_role, refused with an unknown role key (file + validation error)
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	const file = join(home.path, LAYOUT.routingFile);
+	writeFileSync(file, JSON.stringify({ schema_version: 1, allow: ["mock/*"], deny_by_role: { planner: ["mock/denied*"] }, rubric: [] }));
+	assert.deepEqual(loadRoutingConfig(home.path).deny_by_role, { planner: ["mock/denied*"] });
+	writeFileSync(file, JSON.stringify({ schema_version: 1, allow: ["mock/*"], deny_by_role: { qa: ["mock/x"] }, rubric: [] }));
+	assert.throws(
+		() => loadRoutingConfig(home.path),
+		(error: Error) => error.message.includes(file) && /violates the routing contract/.test(error.message) && /deny_by_role/.test(error.message),
+	);
+});
+
 test("glob matching covers the shapes the allowlist actually uses", () => {
 	assert.ok(matchesPattern("anthropic/*", "anthropic/claude-sonnet-5"));
 	assert.ok(!matchesPattern("anthropic/*", "openai/gpt-5"));

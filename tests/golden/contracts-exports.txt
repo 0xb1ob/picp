@@ -238,6 +238,7 @@ GATE_RUBRIC_STATEMENT	value	3133865b8ea863cc	4df7ca88e1dfc20c
 GATE_VERDICTS	value	5e5da3162dce4011	31140a68683f1754
 GATE_VERDICT_WORD_CAP	value	70da9ec4c40d39ae	983bd614bb5afece
 GATE_VETO_FLAGS	value	d66e6bd3e297433c	9ce7842350aabd7b
+GRANT_SCOPE_POLICIES	value	0294b6e5b7d5cabf	2a15ec4f36159489
 GateCause	type	b3bd6d0b547643d1	-
 GateCauseSchema	value	a8303f1053e9c7ad	9b4c723a71922585
 GateConfig	type	40f29471d2999cf2	-
@@ -250,6 +251,7 @@ GateVerdict	type	a439cf5b43b7b70f	-
 GateVerdictSchema	value	7592ecaa51981f51	92f597ce9a38cda0
 GateVerdictValue	type	32e5e38a98e50a11	-
 GateVerdictValueSchema	value	6648286d7eec85a3	aebcc3b1d2b23263
+GrantScopePolicy	type	974527ac8ac2b662	-
 INTEGRATE_MAX_RESOLVE	value	bdc87c3025204441	6b86b273ff34fce1
 INTEGRATION_NEXT	value	76acfaafa365cf85	a5da09bd007cd5ff
 INTEGRATION_STEPS	value	e66c7fc997894dca	2174cf26134b9f08
@@ -315,13 +317,14 @@ MandateChannelSchema	value	67315ce4de204a31	b0334d67cf02a618
 MandateDecisionRecord	type	bda9734b6209885c	-
 MandateDecisionRecordSchema	value	d5ae9f379d399c41	74a314c5f55bbc1e
 MandateDefaultableField	type	066b993e666de65b	-
-MandateDefaults	type	a58f2ad5101b46b5	-
-MandateDefaultsSchema	value	11a2687249fc9362	1e03d8d49fbdc56d
+MandateDefaults	type	aa14abf954d531ac	-
+MandateDefaultsSchema	value	11326b382a87f197	be2e6317e91ec364
 MandateEscalation	type	415ffe6cae7d08a7	-
 MandateEscalationSchema	value	a66d4ef8adc7c2f4	6d75ac43c722cbc0
 MandateFieldSource	type	f3ed4ab652ec1e92	-
 MandateFieldSourceSchema	value	a2d3848e5d1c474b	424bfc3b8f6273c5
 MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
+MandatePolicySchema	value	287571ca3a575413	7e2399a0a1ee09c2
 MandateProvenance	type	483039dec428e70a	-
 MandateRevokedBy	type	72adc3133e08ada6	-
 MandateSchema	value	9fa57d9bd0a33333	90a7404920978c0c
@@ -450,7 +453,7 @@ RiskSchema	value	b4055cddc5ebe49b	4c69b248be0b796e
 Role	type	489e2b166077591d	-
 RoleSchema	value	f6981b169f7fab5b	26b77ce3a05c5aff
 RoutingConfig	type	f35e564a2a7be818	-
-RoutingConfigSchema	value	2f8c21b224c1cb84	b58449dc7b855d55
+RoutingConfigSchema	value	5b40c23441a93495	f537e95614499782
 RoutingDecision	type	eb363b1452614b94	-
 RoutingDecisionSchema	value	be4fb67b23ad9fa9	0ac0d6e95a854157
 RoutingProvenance	type	58f656d3598ca361	-
@@ -526,7 +529,7 @@ SelfAssessmentSchema	value	3e225669247ca924	9e41b14edffd5de8
 SendReceipt	type	2af6a2fb487748a2	-
 SendReceiptSchema	value	aefce3dcea736c98	b05c2bee5c930c23
 SettingApplies	type	4b601007050063df	-
-SettingField	type	bc038f5c209ca9aa	-
+SettingField	type	b7fb8c7ab0902894	-
 SettingFieldView	type	f2d82ccd2a724d61	-
 SettingFieldViewSchema	value	bf6647d03a2e1d59	f40210347466e23b
 SettingFileOwner	type	2267dfd1c1d5f2f8	-

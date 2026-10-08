@@ -82,8 +82,49 @@ test("a present but malformed data/worker-bounds.json refuses, naming the file a
 	assert.throws(() => homeWallClockSeconds(home), /worker-bounds\.json is not valid JSON/);
 	writeFileSync(file, "[1800]");
 	assert.throws(() => homeWallClockSeconds(home), /must be a JSON object/);
-	// An explicit override does not even need the file to be readable.
-	assert.equal(resolveJobHardBounds({ wall_clock_seconds: 8 }, {}, home).wall_clock_seconds, 8);
+	// cp-7re9 flip: an explicit override no longer skips the file; a broken file refuses it too, naming the file.
+	assert.throws(
+		() => resolveJobHardBounds({ wall_clock_seconds: 8 }, {}, home),
+		(error: Error) => error instanceof WorkerBoundsConfigError && error.message.includes(file) && /must be a JSON object/.test(error.message),
+	);
+});
+
+test("allow_dispatch_override=false enforces the machine value", (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-bounds-policy-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	mkdirSync(join(home, LAYOUT.data), { recursive: true });
+	const file = join(home, LAYOUT.workerBoundsFile);
+	const env = { CP_JOB_WALL_CLOCK_SECONDS: "99", CP_JOB_TOOL_CALL_CAP: "40" };
+	writeFileSync(file, JSON.stringify({ wall_clock_seconds: 1800, allow_dispatch_override: false }));
+	assert.deepEqual(resolveJobHardBounds({ wall_clock_seconds: 1800 }, env, home), { wall_clock_seconds: 1800, tool_call_cap: 40 });
+	assert.throws(
+		() => resolveJobHardBounds({ wall_clock_seconds: 8 }, env, home),
+		(error: Error) =>
+			error instanceof WorkerBoundsConfigError &&
+			/settings: wall_clock_seconds override 8 conflicts with enforced machine value 1800/.test(error.message) &&
+			error.message.includes("data/worker-bounds.json allow_dispatch_override=false"),
+	);
+	// The tool cap's machine value is env-only: a differing cap refuses, an equal one passes.
+	assert.throws(() => resolveJobHardBounds({ tool_call_cap: 3 }, env, home), /tool_call_cap override 3 conflicts with enforced machine value 40/);
+	assert.equal(resolveJobHardBounds({ tool_call_cap: 40 }, env, home).tool_call_cap, 40);
+	assert.throws(() => resolveJobHardBounds({ tool_call_cap: 3 }, {}, home), /conflicts with enforced machine value 900/);
+	// Flag-only file: the machine wall clock is env, else the default.
+	writeFileSync(file, JSON.stringify({ allow_dispatch_override: false }));
+	assert.equal(resolveJobHardBounds(undefined, env, home).wall_clock_seconds, 99);
+	assert.equal(resolveJobHardBounds({ wall_clock_seconds: 99 }, env, home).wall_clock_seconds, 99);
+	assert.throws(() => resolveJobHardBounds({ wall_clock_seconds: 98 }, env, home), /conflicts with enforced machine value 99/);
+	assert.throws(() => resolveJobHardBounds({ wall_clock_seconds: 98 }, {}, home), /conflicts with enforced machine value 5400/);
+	// true or absent keeps today's precedence: the override wins.
+	for (const body of [{ wall_clock_seconds: 1800, allow_dispatch_override: true }, { wall_clock_seconds: 1800 }, { allow_dispatch_override: true }]) {
+		writeFileSync(file, JSON.stringify(body));
+		assert.deepEqual(resolveJobHardBounds({ wall_clock_seconds: 8, tool_call_cap: 3 }, env, home), { wall_clock_seconds: 8, tool_call_cap: 3 });
+	}
+	// A non-boolean flag refuses, naming the file and the field.
+	writeFileSync(file, JSON.stringify({ wall_clock_seconds: 1800, allow_dispatch_override: "no" }));
+	assert.throws(
+		() => resolveJobHardBounds(undefined, env, home),
+		(error: Error) => error instanceof WorkerBoundsConfigError && error.message.includes(file) && /allow_dispatch_override must be true or false, got "no"/.test(error.message),
+	);
 });
 
 test("rearm starts a fresh wall-clock round without resetting the tool count (fake clock)", async (t) => {

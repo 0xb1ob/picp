@@ -38,6 +38,7 @@ import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { MandateStore } from "./mandate.ts";
+import { projectDenial } from "./mandate-defaults.ts";
 import { decidePlanSend, recordPlanRevise, vetoedReviseRefusal } from "./plan-followup.ts";
 import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
@@ -214,6 +215,8 @@ export class Sender {
 		// that is a refusal with a path, never a silently unreportable promote.
 		const reopen = decideReopen(record);
 		if (reopen.kind === "refuse") throw new SendError(reopen.reason);
+		const denied = projectDenial(home, record.project);
+		if (denied) throw new SendError(denied);
 
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
 		if (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined && this.#options.mandates) {

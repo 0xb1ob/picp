@@ -216,6 +216,25 @@ test("an archived project is refused for dispatch until it is unarchived", { tim
 	assert.equal((await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" })).status, "ok");
 });
 
+test("cp-7re9: a project in deny_projects is refused (project_denied) until the operator removes it; a broken file refuses too", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t);
+	const file = join(f.home.path, LAYOUT.mandateDefaultsFile);
+	mkdirSync(join(f.home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(file, JSON.stringify({ deny_projects: ["demo"] }));
+	const denied = await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" });
+	assert.equal(denied.status, "fail");
+	assert.deepEqual(codes(denied), ["project_denied"]);
+	assert.match(formatPreflight(denied), /project demo is denied \(.*mandate-defaults\.json deny_projects\)/);
+	assert.match(formatPreflight(denied), /fix: the operator removes demo from deny_projects/);
+	writeFileSync(file, JSON.stringify({}));
+	assert.equal((await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" })).status, "ok", "removing the key is the recovery");
+	writeFileSync(file, "{ nope");
+	const broken = await f.preflight.check({ project: "demo", jobId: "cp-new", model: "mock/big" });
+	assert.deepEqual(codes(broken), ["project_denied"]);
+	assert.ok(broken.findings[0]?.message.includes(file), broken.findings[0]?.message);
+	assert.match(broken.findings[0]?.message ?? "", /is not valid JSON \(/);
+});
+
 test("git preflight catches a leftover branch, a wrong base and a detached primary", { timeout: 60_000 }, async (t) => {
 	const f = await fixture(t);
 

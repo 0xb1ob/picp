@@ -118,7 +118,7 @@ export interface SettingField {
 	default: SettingValue;
 	applies: SettingApplies;
 	on_invalid: SettingOnInvalid;
-	/** What PR2 may write; env-only and routing fields stay false until PR3. */
+	/** What the Settings write API may write. Routing (`models.allow`) and the env-only tool-call cap stay false (cp-7re9); the PR3 policy keys are owner-file keys outside the catalog, preserved by every write. */
 	editable: boolean;
 	label: string;
 	help: string;
