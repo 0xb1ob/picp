@@ -1,6 +1,7 @@
 import type { Listing, Root } from "./explorer.ts";
 import type { SessionRow } from "./sessions.ts";
 import type { Schedule } from "./schedule-core.ts";
+import type { SettingField, SettingKey, SettingsSnapshot, SettingValue } from "../contracts.ts";
 
 export type SessionTier = "you" | "parent" | "workers";
 /**
@@ -79,6 +80,32 @@ export interface OperatorUploadResponse { id: string; mime: string; bytes: numbe
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }
 /** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
 export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }
+/** One `data/settings-audit.jsonl` line as the operator session returns it (src/settings-write.ts `SettingsAuditLine`). */
+export interface SettingsAuditRow { v: 1; type: "intent" | "applied" | "failed" | "recovered" | "refused"; id: string | null; at: string; [field: string]: unknown }
+/** `GET /api/settings`: read through the operator session; offline or unsupported is `snapshot: null`, never a projection. */
+export interface SettingsResponse {
+	generated_at: string;
+	enabled: boolean;
+	running: boolean;
+	supported: boolean;
+	writable: boolean;
+	reason: string | null;
+	snapshot: SettingsSnapshot | null;
+	catalog: SettingField[] | null;
+	audit: SettingsAuditRow[];
+}
+/** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */
+export interface SettingsWriteResponse {
+	status: number;
+	state: "planned" | "unchanged" | "applied" | "stale" | "refused" | "failed";
+	error?: string;
+	errors?: string[];
+	revision?: string;
+	snapshot?: SettingsSnapshot;
+	changes?: Array<{ key: SettingKey; file_key: string; action: "set" | "delete"; old: SettingValue; old_source: string; new: SettingValue }>;
+	audit_warning?: string;
+	audit?: string;
+}
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse {
 	id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort";

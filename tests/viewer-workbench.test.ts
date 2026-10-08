@@ -227,6 +227,9 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		if (name !== "operator-upload-api.ts" && name !== "uploads.ts") assert.doesNotMatch(text, /\bwriteUpload\b/, `${name} stores an upload`);
 		if (name === "control-api.ts" || name === "control-files.ts") assert.doesNotMatch(text, /parent-host|OperatorAsks|operator-asks/, `${name} reaches the parent or the ask journal`);
 	}
+	// cp-7bsr PR2: the Settings routes are covered by the loop above (dependency-free, write-free, no audit writer); pin that they are in it.
+	assert.ok(standalone().includes("settings-api.ts"), "settings-api.ts is a standalone viewer module");
+	assert.doesNotMatch(readFileSync(join(VIEWER, "settings-api.ts"), "utf8"), /from "\.\/(?!control-api|control-files|control-inbox|api-types)[^"]*"/, "settings-api.ts imports only the control modules and api-types");
 	assert.doesNotMatch(readFileSync(join(VIEWER, "push-subscriptions.ts"), "utf8"), /appendFileSync|createWriteStream|unlinkSync|\bappendFile\s*\(/);
 	const audit = readFileSync(join(VIEWER, "control-audit.ts"), "utf8");
 	assert.doesNotMatch(audit, /writeFileSync|renameSync|rmSync|unlinkSync|truncate/, "the audit writer only appends");
