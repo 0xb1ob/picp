@@ -60,7 +60,9 @@ async function setup(t: import("node:test").TestContext, viewer: Partial<ViewerO
 
 async function bridge(t: import("node:test").TestContext, stateDir: string) {
 	const injected: Array<[string, string | undefined]> = [];
-	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle: () => true, hasPendingMessages: () => false, sessionFile: () => "/tmp/op.jsonl" };
+	const sessionFile = join(stateDir, "operator-session.jsonl");
+	writeFileSync(sessionFile, "");
+	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle: () => true, hasPendingMessages: () => false, sessionFile: () => sessionFile };
 	const control = await startDashboardControl({ stateDir, ports, deliveredWaitMs: 20, log: () => {} }) as DashboardControl;
 	assert.equal(control.state, "listening");
 	t.after(() => control.stop());

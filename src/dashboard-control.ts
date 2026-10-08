@@ -122,6 +122,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const append = options.append ?? ((line: ControlAuditLine) => appendControlAudit(stateDir, line));
 	const waitMs = options.deliveredWaitMs ?? 2_000;
 	const duplicateMs = options.duplicateWindowMs ?? 600_000;
+	const startedAt = now().toISOString();
 	const config = readControlConfig(stateDir);
 	if (config.state !== "on") return { state: "off", reason: config.reason };
 	const socketPath = controlSocketFile(stateDir);
@@ -197,7 +198,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied));
 		const id = supplied && !duplicate ? supplied : newControlId(now());
 		const tag = normalizeThreadTag(args.thread);
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(tag ? { thread: tag } : {}) });
+		const sessionFile = ports.sessionFile();
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(tag ? { thread: tag } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
@@ -372,7 +374,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const tmp = `${recordFile}.${process.pid}.tmp`;
 	try {
 		const commit = (await LOADED_COMMIT)?.sha;
-		writeFileSync(tmp, `${JSON.stringify({ version: 1, pid: process.pid, socket: socketPath, token, csrf, started_at: now().toISOString(), ...(commit ? { commit } : {}) }, null, 2)}\n`, { mode: 0o600 });
+		writeFileSync(tmp, `${JSON.stringify({ version: 1, pid: process.pid, socket: socketPath, token, csrf, started_at: startedAt, ...(commit ? { commit } : {}) }, null, 2)}\n`, { mode: 0o600 });
 		renameSync(tmp, recordFile);
 	} catch (error) {
 		server.close();
@@ -399,6 +401,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		stop() {
 			if (stopped) return;
 			stopped = true;
+			for (const [id, entry] of open) if (entry.kind === "message") outcome(id, entry.kind, entry.askId, entry.peer, "dropped", "target operator session ended");
+			open.clear();
 			server.close();
 			for (const socket of connections) socket.destroy();
 			rmSync(socketPath, { force: true });

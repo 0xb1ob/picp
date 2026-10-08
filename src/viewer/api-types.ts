@@ -49,7 +49,7 @@ export interface TranscriptAsk {
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
 export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string; client_id?: string};
-export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed"; reason: string | null; ask_id: string | null; body: ControlMessageBody }
+export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody }
 /** `GET /api/operator/control`: can this page steer the operator session, and the session's CSRF token when it can. */
 export interface ControlStatusResponse {
  generated_at: string; enabled: boolean; running: boolean; reason: string | null; token: string | null;

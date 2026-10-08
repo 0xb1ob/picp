@@ -53,8 +53,9 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
   for (const send of status.sends ?? []) {
    if (dismissed.includes(send.id) || transcriptHasSend(entries,send.id)) continue;
    const index = items.findIndex(item=>item.id === send.id);
+   if (send.state === "dropped") { if (index >= 0) items.splice(index,1); dismissed.push(send.id); continue; }
    // Delivered journal history is not a new pending send. Known sends stay visible through the read/stream race.
-   if (index < 0) { if (send.state !== "delivered" && !items.some(item=>item.state === "sending")) items.push({...send,key:send.id}); }
+   if (index < 0) { if (send.state !== "delivered" && !items.some(item=>item.state === "sending")) items.push({...send,state:send.state,key:send.id}); }
    else items[index] = {...items[index]!,state:send.state,reason:send.reason ?? items[index]!.reason};
   }
   for (const item of items) {
