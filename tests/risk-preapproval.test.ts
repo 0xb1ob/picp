@@ -113,16 +113,33 @@ test("uncovered jobs, scripts and hard-stop text escalate exactly as without a p
 	assert.equal(fresh.escalations.list().length, 0);
 });
 
-test("caps still bind a pre-approved job, and a refusal writes no audit row", async (t) => {
+test("the selected serial grant still caps a pre-approved job, and a refusal writes no audit row", async (t) => {
 	const { store, mandate, job } = await setup(t);
-	const serial = grant(store, { dispatch_parallelism: 1 });
+	const serial = grant(store, { job_ids: [job.id, "cp-busy"], dispatch_parallelism: 1 });
 	store.preapproveRisk(mandate.id, verified([job.id]));
 	store.preapproveRisk(serial.id, verified([job.id]));
+	assert.equal(store.selection("dispatch", { jobId: job.id, project: "demo", kind: "ship" })?.grant.id, serial.id);
 	await assert.rejects(
 		() => store.assertDispatchAllowed({ jobId: job.id, project: "demo", kind: "ship", risk: "high" }, [{ job_id: "cp-busy", project: "demo", phase: "waiting" }]),
 		/dispatch-parallelism 1 is full/,
 	);
 	assert.equal(store.require(serial.id).risk_preapproved, undefined);
+	assert.equal(store.require(mandate.id).risk_preapproved, undefined);
+});
+
+test("a nonselected full serial grant cannot veto a pre-approved dispatch", async (t) => {
+	const { store, mandate, job } = await setup(t);
+	const serial = grant(store, { dispatch_parallelism: 1 });
+	const selected = grant(store, { job_ids: [job.id, "cp-busy"] });
+	store.preapproveRisk(selected.id, verified([job.id]));
+	const permission = await store.assertDispatchAllowed(
+		{ jobId: job.id, project: "demo", kind: "ship", risk: "high" },
+		[{ job_id: "cp-busy", project: "demo", phase: "waiting" }],
+	);
+	assert.equal(permission.selected?.id, selected.id);
+	assert.deepEqual(store.require(selected.id).risk_preapproved?.map((row) => [row.job_id, row.use]), [[job.id, "dispatch"]]);
+	assert.equal(store.require(serial.id).risk_preapproved, undefined);
+	assert.equal(store.require(mandate.id).risk_preapproved, undefined);
 });
 
 test("a pre-approval never reaches a merge or a checkpoint, and never widens or outlives a grant", async (t) => {
