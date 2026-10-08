@@ -84,6 +84,7 @@ export function Settings({view}: {view: SettingsView}) {
   if (at !== index) return row;
   const next: RoutingRule = {...row, ...patch};
   if (!next.thinking) delete next.thinking;
+  if (!next.fallbacks?.length) delete next.fallbacks;
   return next;
  }) as SettingValue);
  const field = (key: SettingKey) => {
