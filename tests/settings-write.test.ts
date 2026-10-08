@@ -332,3 +332,36 @@ test("audit journal: 0600, actor dashboard, peer, request_id and old→new; no u
 	const text = readFileSync(settingsAuditFile(home), "utf8");
 	for (const secret of ["sk-test-secret", "secret-gateway", "/v1/secret-path", home]) assert.ok(!text.includes(secret), `audit leaks ${secret}`);
 });
+
+test("Settings writes preserve the hand-added PR3 policy keys (cp-7re9)", (t) => {
+	const home = scratch(t);
+	const policy = { scope_policy: "named_jobs_only", deny_projects: ["demo"] };
+	put(home, "worker-bounds", { wall_clock_seconds: 100, allow_dispatch_override: false });
+	put(home, "mandate-defaults", { ...SCAFFOLD_MANDATE_DEFAULTS, ...policy });
+	const owners = (home: string) => Object.fromEntries(snap(home).owners.map((owner) => [owner.owner, owner.state]));
+	assert.deepEqual([owners(home)["worker-bounds"], owners(home)["mandate-defaults"]], ["valid", "valid"]);
+	const set = apply(home, { mode: "set", changes: { "sessions.wall_clock_seconds": 200, "grants.job_cap": 7 } });
+	assert.deepEqual([set.status, set.state], [200, "applied"], JSON.stringify(set));
+	assert.deepEqual(json(home, "worker-bounds"), { wall_clock_seconds: 200, allow_dispatch_override: false });
+	assert.deepEqual(json(home, "mandate-defaults"), { ...SCAFFOLD_MANDATE_DEFAULTS, job_cap: 7, ...policy });
+	const restore = apply(home, { mode: "restore", all: true });
+	assert.deepEqual([restore.status, restore.state], [200, "applied"], JSON.stringify(restore));
+	assert.deepEqual(json(home, "worker-bounds"), { wall_clock_seconds: 5400, allow_dispatch_override: false });
+	assert.deepEqual(json(home, "mandate-defaults"), { ...SCAFFOLD_MANDATE_DEFAULTS, ...policy });
+
+	// A flag-only file is a valid owner; a set adds the field beside the flag.
+	const flagOnly = scratch(t);
+	put(flagOnly, "worker-bounds", { allow_dispatch_override: false });
+	assert.equal(owners(flagOnly)["worker-bounds"], "valid");
+	const added = apply(flagOnly, { mode: "set", changes: { "sessions.wall_clock_seconds": 200 } });
+	assert.equal(added.status, 200, JSON.stringify(added));
+	assert.deepEqual(json(flagOnly, "worker-bounds"), { allow_dispatch_override: false, wall_clock_seconds: 200 });
+
+	// A non-boolean flag makes the owner invalid: the write is refused and the bytes stay.
+	const broken = scratch(t);
+	put(broken, "worker-bounds", { allow_dispatch_override: "no" });
+	const before = readFileSync(file(broken, "worker-bounds"));
+	const refused = apply(broken, { mode: "set", changes: { "sessions.wall_clock_seconds": 200 } });
+	assert.equal(refused.status, 409, JSON.stringify(refused));
+	assert.deepEqual(readFileSync(file(broken, "worker-bounds")), before);
+});

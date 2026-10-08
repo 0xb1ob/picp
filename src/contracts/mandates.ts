@@ -2,7 +2,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema } from "./core.ts";
+import { IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, PROJECT_NAME_PATTERN } from "./core.ts";
 import { type CheckpointKind, CheckpointKindSchema, DelegationProvenanceFields } from "./escalations.ts";
 import type { Replace } from "./internal.ts";
 import { ReviewerModelSchema } from "./routing.ts";
@@ -270,6 +270,22 @@ export type Mandate = Replace<
 >;
 
 /**
+ * File-only machine grant policy in `data/mandate-defaults.json` (cp-7re9):
+ * `scope_policy` (named-only grants) and `deny_projects`. Hand-edited, never
+ * settable through `cp_mandate defaults_set` or the Settings catalog; absent
+ * keys keep today's behaviour.
+ */
+export const GRANT_SCOPE_POLICIES = ["project_wide_allowed", "named_jobs_only"] as const;
+export type GrantScopePolicy = (typeof GRANT_SCOPE_POLICIES)[number];
+export const MandatePolicySchema = Type.Object(
+	{
+		scope_policy: Type.Optional(StringEnum([...GRANT_SCOPE_POLICIES])),
+		deny_projects: Type.Optional(Type.Array(Type.String({ pattern: PROJECT_NAME_PATTERN }), { maxItems: 64 })),
+	},
+	{ additionalProperties: false },
+);
+
+/**
  * `data/mandate-defaults.json` (autonomy-programme-cur.2.5): the home-level
  * knobs `cp_mandate issue` falls back to when the operator names only a
  * project and an objective. Scaffolded once with conservative values
@@ -289,10 +305,11 @@ export const MandateDefaultsSchema = Type.Object(
 		exclude_paths: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 32 }),
 		/** One line per field above, explaining why it defaults the way it does \u2014 the comment JSON has no room for. */
 		notes: Type.Record(Type.String(), Type.String({ maxLength: 400 })),
+		...MandatePolicySchema.properties,
 	},
 	{ additionalProperties: false },
 );
 export type MandateDefaults = Replace<
 	Static<typeof MandateDefaultsSchema>,
-	{ allowed_actions: MandateAction[]; ask_on: MandateAskOn[] }
+	{ allowed_actions: MandateAction[]; ask_on: MandateAskOn[]; scope_policy?: GrantScopePolicy }
 >;
