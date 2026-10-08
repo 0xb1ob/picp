@@ -2,28 +2,42 @@ import type { SessionEntry } from "../src/viewer/api-types.ts";
 import type { ControlStatus, PendingSend } from "./control.ts";
 
 export const PENDING_KEY = "cp-operator-pending-sends";
-export interface PendingState { items: PendingSend[]; dismissed: string[] }
+export interface PendingState { items: PendingSend[]; dismissed: string[]; error?: string }
 export const emptyPending = (): PendingState => ({items:[],dismissed:[]});
 
 export function readPending(): PendingState {
  if (typeof window === "undefined") return emptyPending();
  try {
-  const raw = window.localStorage?.getItem(PENDING_KEY);
+  const storage = window.localStorage;
+  if (!storage) throw new Error("browser storage is unavailable");
+  const raw = storage.getItem(PENDING_KEY);
   if (!raw) return emptyPending();
   const value = JSON.parse(raw) as PendingState;
-  if (!Array.isArray(value.items) || !Array.isArray(value.dismissed) || !value.dismissed.every(id=>typeof id === "string")) throw new Error("invalid pending-send record");
-  const items = value.items.map(item=>{
-   if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
-   for (const [field,ids] of Object.entries(item.body)) if ((field === "images" || field === "files") && (!Array.isArray(ids) || !ids.every(id=>typeof id === "string"))) throw new Error("invalid pending attachments");
-   return item.state === "sending" ? {...item,state:"failed" as const,reason:"Send interrupted by reload; check the transcript before retrying"} : item;
+  if (!value || !Array.isArray(value.items)) throw new Error("invalid pending-send list");
+  let skipped = 0;
+  const items = value.items.flatMap(item=>{
+   try {
+    if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || (item.reason !== null && typeof item.reason !== "string") || (item.ask_id !== null && typeof item.ask_id !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || (item.body.deliver !== undefined && !["prompt","followUp","steer"].includes(item.body.deliver)) || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
+    for (const [field,ids] of Object.entries(item.body)) if ((field === "images" || field === "files") && (!Array.isArray(ids) || !ids.every(id=>typeof id === "string"))) throw new Error("invalid pending attachments");
+    return [item.state === "sending" ? {...item,state:"failed" as const,reason:"Send interrupted by reload; check the transcript before retrying"} : item];
+   } catch { skipped++; return []; }
   });
-  return {items,dismissed:value.dismissed};
- } catch (error) { console.warn(`pending sends unreadable: ${(error as Error).message}`); return emptyPending(); }
+  const dismissed = Array.isArray(value.dismissed) ? value.dismissed.filter(id=>typeof id === "string") : [];
+  skipped += Array.isArray(value.dismissed) ? value.dismissed.length-dismissed.length : 1;
+  return {items,dismissed,...(skipped ? {error:`Queued-message recovery incomplete: ${skipped} invalid stored entries skipped; valid sends retained. Check the transcript before retrying.`} : {})};
+ } catch (error) { return {...emptyPending(),error:`Queued messages could not be recovered from browser storage: ${error instanceof Error ? error.message : "unavailable"}. Check the transcript before retrying.`}; }
 }
 
-export function rememberPending(value: PendingState): void {
- try { window.localStorage?.setItem(PENDING_KEY,JSON.stringify(value)); }
- catch (error) { console.warn(`pending sends not persisted: ${(error as Error).message}`); }
+export function rememberPending(value: PendingState): PendingState {
+ try {
+  const storage = window.localStorage;
+  if (!storage) throw new Error("browser storage is unavailable");
+  storage.setItem(PENDING_KEY,JSON.stringify({items:value.items,dismissed:value.dismissed}));
+  return value;
+ } catch (error) {
+  const message = `Queued messages not persisted: ${error instanceof Error ? error.message : "browser storage unavailable"}. Kept in this view only; check the transcript after reload.`;
+  return {...value,error:value.error?.includes(message) ? value.error : [value.error,message].filter(Boolean).join(" ")};
+ }
 }
 
 /** A delivered status is not a transcript entry. Held sends appear inside the CLI's aggregate inbox replay. */
@@ -50,5 +64,5 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
   }
  }
  items.sort((a,b)=>a.at.localeCompare(b.at));
- return {items,dismissed};
+ return {...value,items,dismissed};
 }
