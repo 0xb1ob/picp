@@ -6,7 +6,7 @@ import { layoutForHome, type Mode } from "./contracts.ts";
 import { atomicWriteText } from "./json-store.ts";
 import { relayIdsOfMessage } from "./operator-outbox.ts";
 
-const DEFAULT_THRESHOLD = 200000;
+export const OPERATOR_COMPACT_DEFAULT_TOKENS = 200000;
 const WORK_FOCUS = "operator delegation and standing mandate, in-flight jobs and PRs with heads, open decisions, what's on hold, next steps, and the latest handoff paths";
 
 const AUTO = "operator-auto-compact";
@@ -21,6 +21,14 @@ export function isToolAdditionRejection(message: unknown): boolean {
 	const { role, stopReason, errorMessage } = message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
 	return role === "assistant" && stopReason === "error" && typeof errorMessage === "string"
 		&& /\btool_addition\b/.test(errorMessage) && /\b400\b|invalid_request_error/.test(errorMessage);
+}
+
+/** `compact_at_tokens` from the operator settings file; absent, unreadable or invalid is the default. */
+export function operatorCompactThreshold(settingsFile: string): number {
+	try {
+		const value = JSON.parse(readFileSync(settingsFile, "utf8"))?.compact_at_tokens;
+		return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : OPERATOR_COMPACT_DEFAULT_TOKENS;
+	} catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
 }
 
 export type OperatorCompactControl = {
@@ -57,12 +65,7 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 			return typeof value === "string" && value.trim() ? value : directory;
 		} catch { return directory; }
 	};
-	const threshold = () => {
-		try {
-			const value = JSON.parse(readFileSync(paths().settings, "utf8"))?.compact_at_tokens;
-			return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_THRESHOLD;
-		} catch { return DEFAULT_THRESHOLD; }
-	};
+	const threshold = () => operatorCompactThreshold(paths().settings);
 	const notify = (ctx: ExtensionContext, text: string, type: "info" | "error") => {
 		if (ctx.hasUI) ctx.ui.notify(text, type);
 		else pi.sendMessage({ customType: "operator-compact", content: text, display: true }, { deliverAs: "nextTurn" });

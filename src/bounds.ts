@@ -51,11 +51,16 @@ export interface HardBoundOverride {
 	tool_call_cap?: number;
 }
 
-function positiveInt(raw: string | undefined, fallback: number): number {
-	if (raw === undefined || raw.trim() === "") return fallback;
+/** A positive env integer (floored), or undefined when absent, blank, non-finite or ≤0. */
+export function parsePositiveInt(raw: string | undefined): number | undefined {
+	if (raw === undefined || raw.trim() === "") return undefined;
 	const parsed = Number(raw);
-	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
 	return Math.floor(parsed);
+}
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+	return parsePositiveInt(raw) ?? fallback;
 }
 
 /** `CP_JOB_WALL_CLOCK_SECONDS` or 90 minutes. A typo keeps the default. */
