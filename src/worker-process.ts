@@ -305,6 +305,11 @@ export class WorkerProcess {
 			this.#failAllPending(new WorkerError(`worker process error: ${error.message}`));
 		});
 
+		// A write to a child that is going away fails with EPIPE: `request`'s write callback rejects
+		// that request, and `close` fails the rest. Without a listener the stream's own 'error'
+		// event would be an uncaught exception that kills the parent process.
+		child.stdin?.on("error", () => {});
+
 		child.stdout?.setEncoding("utf8");
 		child.stdout?.on("data", (chunk: string) => this.#consume(chunk));
 		child.stderr?.setEncoding("utf8");
