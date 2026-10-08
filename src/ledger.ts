@@ -43,6 +43,7 @@ import {
 	isSafeScriptPath,
 	isSafeLedgerPrefix,
 	type Job,
+	jobLabelErrors,
 	JOB_ID_MINT_RETRIES,
 	JOB_ID_SUFFIX_LENGTH,
 	JOB_KINDS,
@@ -89,9 +90,10 @@ export function formatJobLabels(job: JobLabels): string[] {
 	return labels;
 }
 
-function labelValue(labels: readonly string[], prefix: string): string | undefined {
+function labelValue(labels: readonly string[], prefix: string, strict = true): string | undefined {
 	const found = labels.filter((label) => label.startsWith(prefix)).map((label) => label.slice(prefix.length));
 	if (found.length > 1) {
+		if (!strict) return undefined;
 		throw new LedgerError(`job carries ${found.length} ${prefix} labels (${found.join(", ")}); exactly one is allowed`);
 	}
 	return found[0];
@@ -141,6 +143,8 @@ export function requireJobLabels(job: Pick<Job, "id" | "labels">): JobLabels {
 	const rawRisk = labelValue(labels, LABEL_PREFIX.risk);
 	if (rawRisk && !parsed.risk) problems.push(`${LABEL_PREFIX.risk}${rawRisk} is not one of ${RISKS.join("|")}`);
 	if (problems.length > 0) throw new LedgerError(`${job.id} is not dispatchable: ${problems.join("; ")}`);
+	const errors = jobLabelErrors(labels);
+	if (errors.length > 0) throw new LedgerError(`${job.id} is not dispatchable: ${errors.join("; ")}`);
 	return {
 		project: parsed.project as string,
 		delivery: parsed.delivery as Delivery,
@@ -189,7 +193,7 @@ function readJobsDocumentAt(file: string): JobsDocument {
 	} catch (error) {
 		throw new LedgerError(`${file} is not JSON: ${(error as Error).message}`);
 	}
-	const result = validateJobsDocument(stripLegacyJobFields(parsed));
+	const result = validateJobsDocument(stripLegacyJobFields(parsed), { tolerateLegacyLabels: true });
 	if (!result.ok) throw new LedgerError(`${file} violates the jobs contract:\n  ${result.errors.join("\n  ")}`);
 	return result.value;
 }
@@ -420,7 +424,7 @@ export class Ledger {
 		return this.#mutate((doc) => {
 			const duplicate = doc.jobs.find((job) => job.status !== "closed" && (
 				(externalRef !== undefined && this.#projected(job).external_ref === externalRef) ||
-				(parseJobLabels(job.labels).project === input.project && normalizeJobTitle(job.title) === normalizeJobTitle(title))
+				(labelValue(job.labels, LABEL_PREFIX.project, false) === input.project && normalizeJobTitle(job.title) === normalizeJobTitle(title))
 			));
 			if (duplicate && duplicate.script?.path !== input.scriptPath) {
 				throw new LedgerError(`${duplicate.id}: action mismatch for duplicate title/ref (existing ${duplicate.script?.path ?? "model"}, requested ${input.scriptPath ?? "model"})`);
@@ -507,10 +511,8 @@ export class Ledger {
 			...formatJobLabels({ project: input.project, delivery: input.delivery, ...(input.kind ? { kind: input.kind } : {}), ...(input.risk ? { risk: input.risk } : {}) }),
 			...(input.labels ?? []),
 		];
-		const risks = labels.filter((label) => label.startsWith(LABEL_PREFIX.risk));
-		if (risks.length > 1 || risks.some((label) => !(RISKS as readonly string[]).includes(label.slice(LABEL_PREFIX.risk.length)))) {
-			throw new LedgerError(`labels ${risks.join(", ")}: a job carries at most one risk:<${RISKS.join("|")}> label`);
-		}
+		const errors = jobLabelErrors(labels);
+		if (errors.length > 0) throw new LedgerError(errors.join("; "));
 		return { title, labels, externalRef };
 	}
 
@@ -555,7 +557,7 @@ export class Ledger {
 			if (job.status === "closed") continue;
 			const projected = this.#projected(job);
 			if (incomingRef && projected.external_ref === incomingRef) return projected;
-			if (parseJobLabels(job.labels).project === input.project && normalizeJobTitle(job.title) === titleKey) {
+			if (labelValue(job.labels, LABEL_PREFIX.project, false) === input.project && normalizeJobTitle(job.title) === titleKey) {
 				return projected;
 			}
 		}
@@ -768,7 +770,7 @@ export class Ledger {
 	 */
 	#projected(job: Job): Job {
 		if (!job.external_ref) return job;
-		const project = parseJobLabels(job.labels).project;
+		const project = labelValue(job.labels, LABEL_PREFIX.project, false);
 		const normalized = project ? this.normalizeRef(job.external_ref, project) : job.external_ref;
 		return normalized === job.external_ref ? job : { ...job, external_ref: normalized };
 	}

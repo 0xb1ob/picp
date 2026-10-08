@@ -82,7 +82,7 @@ test("riskkw-f10: create records risk as a label and refuses a second or malform
 	const job = await scratch.ledger.create({ title: "r", project: "demo", delivery: "pr", risk: "high" });
 	assert.deepEqual(job.labels, ["project:demo", "delivery:pr", "risk:high"]);
 	await assert.rejects(scratch.ledger.create({ title: "r2", project: "demo", delivery: "pr", risk: "high", labels: ["risk:low"] }), /at most one risk:/);
-	await assert.rejects(scratch.ledger.create({ title: "r3", project: "demo", delivery: "pr", labels: ["risk:bogus"] }), /at most one risk:/);
+	await assert.rejects(scratch.ledger.create({ title: "r3", project: "demo", delivery: "pr", labels: ["risk:bogus"] }), /risk:bogus is not one of/);
 	await assert.rejects(scratch.ledger.create({ title: "r4", project: "demo", delivery: "pr", risk: "medium" as never }), /risk .* must be one of/);
 	const before = JSON.stringify(scratch.document());
 	await assert.rejects(scratch.ledger.update(job.id, { addLabels: ["risk:bogus"] }));
@@ -199,6 +199,42 @@ test("intake refuses what the contract forbids, before anything is written", asy
 	);
 	await assert.rejects(ledger.create({ title: "x", project: "demo", delivery: "pr", labels: ["a,b"] }), /may not contain a comma/);
 	assert.deepEqual(scratch.document().jobs, [], "nothing was written");
+});
+
+test("reserved extra labels refuse before minting or writing, including identical duplicates", async (t) => {
+	const scratch = createScratchLedger({ knownProjects: ["demo"] });
+	t.after(() => scratch.cleanup());
+	let mints = 0;
+	const ledger = new Ledger({ home: scratch.path, random: () => { mints++; return 0; } });
+	const before = readFileSync(ledger.file, "utf8");
+	for (const label of ["project:demo", "project:other", "delivery:local", "delivery:board", "kind:ship", "kind:research", "risk:low", "risk:high"]) {
+		const input = { title: "bad", project: "demo", delivery: "local", kind: "ship", risk: "low", labels: [label] } as const;
+		await assert.rejects(ledger.create(input), /labels/);
+		await assert.rejects(ledger.createTracked({ ...input, tracker: { connection_id: "demo", item_id: "bad" } }), /labels/);
+		assert.equal(readFileSync(ledger.file, "utf8"), before, label);
+	}
+	assert.equal(mints, 0, "refused intake never mints an id");
+});
+
+test("legacy conflicting labels remain readable and searchable, refuse writes, and permit ID repair", async (t) => {
+	const scratch = createScratchLedger({ knownProjects: ["demo"] });
+	t.after(() => scratch.cleanup());
+	const ledger = new Ledger({ home: scratch.path, beadsDbFor: () => "/demo/beads.db" });
+	for (const extra of ["project:other", "delivery:board", "kind:research", "risk:bogus"]) {
+		const bad = { ...JOB, labels: [...JOB.labels, extra], external_ref: "br show old --json" };
+		writeFileSync(ledger.file, JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [bad, { ...JOB, id: "cp-b", title: "healthy" }] }));
+		const before = readFileSync(ledger.file, "utf8");
+		assert.equal((await ledger.list()).length, 2);
+		assert.equal((await ledger.show(bad.id)).id, bad.id);
+		assert.equal(ledger.findDuplicate({ project: "demo", title: "healthy" })?.id, "cp-b");
+		assert.equal(ledger.findDuplicate({ project: "demo", title: "absent" }), undefined);
+		await assert.rejects(ledger.comment("cp-b", "touch"), /refusing to write/);
+		assert.equal(readFileSync(ledger.file, "utf8"), before);
+		await ledger.update(bad.id, { removeLabels: [extra] });
+		assert.deepEqual(requireJobLabels(await ledger.show(bad.id)), { project: "demo", delivery: "pr", kind: "ship" });
+		await assert.rejects(ledger.importJobs([{ ...JOB, id: "cp-c", labels: [...JOB.labels, "project:other"] }]), /refusing to write/);
+		assert.equal((await ledger.list()).length, 2);
+	}
 });
 
 test("create writes a valid record with the job labels, defaults and the actor-free shape", async (t) => {

@@ -2,7 +2,8 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { ContractError, IsoTimestampSchema, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
+import { ContractError, DELIVERIES, IsoTimestampSchema, JOB_KINDS, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
+import { RISKS } from "./routing.ts";
 
 import { REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./reviews.ts";
 import { DelegationProvenanceFields } from "./escalations.ts";
@@ -134,16 +135,39 @@ export function findDependencyCycle(jobs: readonly Job[]): string[] | undefined 
 	return undefined;
 }
 
+/** Reserved labels are singular; identical duplicates are invalid too. Shared by intake and persisted validation. */
+export function jobLabelErrors(labels: readonly string[]): string[] {
+	const errors: string[] = [];
+	for (const [prefix, required, values] of [
+		["project:", true, undefined],
+		["delivery:", true, DELIVERIES],
+		["kind:", false, JOB_KINDS],
+		["risk:", false, RISKS],
+	] as const) {
+		const found = labels.filter((label) => label.startsWith(prefix)).map((label) => label.slice(prefix.length));
+		if (found.length > 1 || (required && found.length !== 1)) {
+			errors.push(`labels ${prefix}: ${required ? "exactly" : "at most"} one ${prefix} label is allowed (found ${found.length})`);
+		}
+		for (const value of found) {
+			if (values ? !(values as readonly string[]).includes(value) : !/^[A-Za-z0-9_-]+$/.test(value)) {
+				errors.push(`label ${prefix}${value} is not ${values ? `one of ${values.join("|")}` : "a valid project name"}`);
+			}
+		}
+	}
+	return errors;
+}
+
 /**
  * Cross-record invariants shape validation cannot express. `ids` are faults in
  * a single record; `deps` are faults in the graph. Both empty means sound.
  */
-export function jobsInvariantErrors(doc: JobsDocument): { ids: string[]; deps: string[] } {
+export function jobsInvariantErrors(doc: JobsDocument, options: { tolerateLegacyLabels?: boolean } = {}): { ids: string[]; deps: string[] } {
 	const ids: string[] = [];
 	const deps: string[] = [];
 	const seen = new Set<string>();
 	const trackerKeys = new Map<string, string>();
 	for (const job of doc.jobs) {
+		if (!options.tolerateLegacyLabels) ids.push(...jobLabelErrors(job.labels).map((error) => `${job.id}: ${error}`));
 		if (seen.has(job.id)) ids.push(`duplicate id ${job.id}`);
 		seen.add(job.id);
 		if (!job.id.startsWith(`${doc.prefix}-`)) ids.push(`${job.id} does not carry this document's prefix ${doc.prefix}-`);
@@ -229,10 +253,11 @@ export function stripLegacyJobFields(value: unknown): LegacyJobsInput {
 	};
 }
 
-export function validateJobsDocument(value: unknown): ValidationResult<JobsDocument> {
+/** `tolerateLegacyLabels` is for read-only inspection and ID repair; writes always use the strict default. */
+export function validateJobsDocument(value: unknown, options: { tolerateLegacyLabels?: boolean } = {}): ValidationResult<JobsDocument> {
 	const shape = validate<JobsDocument>(JobsDocumentSchema, value);
 	if (!shape.ok) return shape;
-	const invariants = jobsInvariantErrors(shape.value);
+	const invariants = jobsInvariantErrors(shape.value, options);
 	const errors = [...invariants.ids, ...invariants.deps];
 	if (errors.length > 0) return { ok: false, errors };
 	return shape;

@@ -7818,6 +7818,15 @@ Every job carries labels, and they are the dispatchability contract:
 | `kind:<axis>` | no | `ship` \| `research` |
 | `risk:<level>` | no | `low` \| `high` — recorded by `cp_job create risk` / `cp_pipeline start risk`; read by the risk:high gate (H6), a low never routes |
 
+Reserved namespaces `project:`, `delivery:`, `kind:` and `risk:` are singular:
+exactly one project and delivery, at most one kind and risk, with valid values.
+Identical duplicates are rejected, never stored or silently deduplicated.
+Intake checks the generated labels together with extras before minting or writing;
+every ledger mutation validates the resulting document. Legacy label faults are
+tolerated on reads so list/search and ID-based label repair remain available.
+List rows mark the affected record with `[label error: ...]`; a mutation refuses
+until the resulting document satisfies the label contract.
+
 `requireJobLabels(issue)` is the fail-closed read: dispatch calls it before a
 lease exists, so an issue that cannot say which project and delivery it is
 never reaches a worktree. Label values are restricted to
