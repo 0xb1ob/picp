@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { readPendingSends } from "../src/viewer/control-pending.ts";
 import { INBOX_MAX_AGE_MS, controlJournalFile } from "../src/viewer/control-files.ts";
+import { LAYOUT } from "../src/contracts.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 test("accepted sends settle by target metadata and 24h TTL, preserving live FIFO and final outcomes", t => {
  const home = createScratchHome(); t.after(() => home.cleanup());
- const stateDir = join(home.path, "state");
+ const stateDir = join(home.path, LAYOUT.state);
  mkdirSync(join(stateDir,"operator"),{recursive:true});
  const now = new Date("2026-10-08T12:00:00Z");
  const since = "2026-10-07T10:00:00Z";
