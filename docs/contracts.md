@@ -4209,6 +4209,35 @@ agrees; disagreement falls through to home. Every resolved field's source
 / `defaults_set <key> <value>` (and `/cp-mandate-defaults` in a TUI parent) read
 and atomically write the home file.
 
+**Grant policy (file-only, cp-7re9).** The same file may carry two hand-edited
+policy keys that `defaults_set` refuses as unknown defaults and the Settings
+catalog does not expose: `scope_policy` (`project_wide_allowed` | `named_jobs_only`)
+and `deny_projects` (project names). They are read per call by a lenient loader
+(`loadMandatePolicy`): only these two keys are validated, so a bad grant default
+never blocks dispatch, but unparseable JSON or an invalid policy key refuses,
+naming the file and the error. Under `named_jobs_only`, `MandateStore.issue`
+refuses a grant with no `job_ids` and writes nothing; named grants (a verified
+`risk_preapproval` included), schedule seed grants and every fire grant pass, so
+schedules keep firing. A project in `deny_projects` (and, with a broken file,
+every project) is refused at: model and script dispatch (preflight
+`project_denied`, before the lease and in the post-lease re-check; `cp_check`
+shows it), every `cp_send`, every `issue` (`cp_mandate issue`, and a schedule
+fire mint, which is skipped with the reason), and mandate-basis decisions
+(`autoDecideCheckpoint` leaves the checkpoint pending; `cp_decide` with a mandate
+basis throws). Operator-quote decisions, teardown, revive, bounded recovery,
+`cp_review` and running workers are not gated (review and merge gating is a later
+slice). Nothing is retroactive: an issued grant keeps its standing and is never
+revoked or re-checked. `cp_mandate defaults_show` prints both keys.
+
+**Rollback.** Remove the policy key from its owner file first (`deny_by_role`
+from `routing.json`, `allow_dispatch_override` from `worker-bounds.json`,
+`scope_policy`/`deny_projects` from `mandate-defaults.json`); every read is per
+call, so the next call behaves as before, with no restart. Only then revert the
+code: the older closed schemas refuse these keys, so a revert with the keys still
+present makes `routing.json` and `mandate-defaults.json` invalid, and a flag-only
+`worker-bounds.json` refuses every dispatch (with `wall_clock_seconds` present the
+older code silently ignores the flag). A downgrade refusal is a later slice.
+
 `exclusions.paths` matches are substring (`value === needle`, `startsWith`, `includes`) except when a
 needle contains `*` (autonomy-programme-cur.2.6): `**/` at the start means "any directory or none",
 a trailing `*` means "any suffix", so the scaffolded `**/.env*` actually excludes `.env`,
@@ -6484,6 +6513,8 @@ widget tick, and a fresh session re-announces a still-wedged call on purpose.
 
 **Hard bounds (`src/bounds.ts`).** Per-job wall-clock per round (default 5400s / 90 minutes) and a cap on `tool_execution_start` events (default 900). Wall-clock precedence: per-dispatch override on `cp_dispatch` > home-local `data/worker-bounds.json` `{"wall_clock_seconds": <positive integer>}` > env `CP_JOB_WALL_CLOCK_SECONDS` > default. The home file exists because the bridge strips `CP_*` before the parent launches, so an env cap never reached workers; a present file whose `wall_clock_seconds` is missing, misspelled or not a positive integer refuses the dispatch, naming the file and field, instead of falling back. Tool-call cap: override > `CP_JOB_TOOL_CALL_CAP` > default. The effective bounds are resolved once and frozen on the fleet record (`bounds`) for direct, script and both pipeline dispatches (start and advance); revive and bounded-recovery redispatch reuse the recorded value, never re-resolve it. A round starts at spawn and again when `cp_send` delivers a prompt to an idle worker (`HardBoundsWatch.rearm`, run log `wall_clock_rearmed: true`); a steer, a follow_up (queued) or a failed send never rearms, and the tool-call count is never reset. A breach requests a graceful stop then kill on the observed-close path, records `failed` with `wall_clock_exceeded` or `tool_call_cap_exceeded` (class names the bound and the measured value), leaves the worktree untouched, and wakes the parent once as `cp-bound` with settle-boundary evidence of what is on disk. `/doctor` reports the effective caps as `config.bounds.wall_clock` and `config.bounds.tool_call_cap`. Soft cost/token budgets are unchanged. Mission-level caps (total spend, total jobs) are declared here and enforced by the mandate ticket, not this module. A wedged call still fires at 30 minutes; at the wall-clock cap the job is ended.
 
+**Binding bounds (`allow_dispatch_override`, cp-7re9).** `data/worker-bounds.json` may also carry `"allow_dispatch_override": <boolean>`; a flag-only file (no `wall_clock_seconds`) is valid, and a non-boolean flag refuses naming the file and field. With `false`, an explicit `wall_clock_seconds` or `tool_call_cap` that differs from the machine value refuses with `settings: <bound> override <x> conflicts with enforced machine value <y> (data/worker-bounds.json allow_dispatch_override=false)`; an equal value passes. The machine value is home `wall_clock_seconds` > env > 5400 for the wall clock and env > 900 for tool calls. The check is in `resolveJobHardBounds`, so it covers direct, queued, pipeline (start and advance, including a stage replaying `wallClockSeconds`) and script dispatch, before preflight and before any lease. Absent or `true` keeps the precedence above. The home file is now read whenever a home is given, override or not, so a malformed file refuses an override dispatch too (it used to skip the file). Revive and bounded recovery keep reusing the frozen `record.bounds` and never re-check.
+
 **Why a duration is allowed here when phases forbid one.** `stalled` is still
 retired and nothing about a *phase* is inferred from age. Four things keep
 this on the right side of that line:
@@ -7960,6 +7991,24 @@ cp-cxt):
 3. **profile default** — the profile's `model` and `thinking`
    (`source: "profile"`)
 
+**Role deny (`deny_by_role`, cp-7re9).** An optional
+`deny_by_role: { planner?, implementer?, "gate-reviewer"? }` lists minimatch
+patterns (≤64 each, 1–128 chars) on `provider/model-id`. It is checked after
+`allow` on **every** candidate: the explicit override (`cp_dispatch model`, a
+`cp_gate`/`cp_review` model, a project or mandate `reviewer_model`, a
+`QualityConfig.model`), a single-model rubric row, the profile default, and each
+member of a fallback walk. A one-candidate source that matches refuses with
+`RoutingError` refusal `allowlist`, message
+`settings: model <ref> is not allowed for role <role> (…; data/routing.json deny_by_role.<role> matches <pattern>)`;
+nothing spawns and nothing falls back. In a walk a denied member is skipped as
+`allowlist`, and a walk with nothing left is `exhausted`. Plan gates, diff
+reviews and quality voters resolve through the same `resolveWithCapacity` →
+`pickModel`, so the deny reaches every reviewer surface. The file is read per
+call: the next spawn or review sees an edit; a live, promoted or revived worker
+keeps the model it has. An invalid `deny_by_role` (unknown role key, non-array,
+empty or overlong pattern) makes the whole file invalid, exactly like any
+invalid `routing.json` today. Absent, nothing is denied.
+
 **Fallback is capability-gated and confined to the picked source.** A rubric
 row and a profile may carry `fallbacks: […]` (≤4 refs) after `model`. The
 allowlist, availability and effective effort gates filter `[model, ...fallbacks]`
@@ -8676,6 +8725,14 @@ and all restores skip non-editable fields. A restore never creates an absent own
 the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,
 `{schema_version}` for `gate.json`, `{enabled: false}` for `update.json` (created 0600) and
 `{}` otherwise. `capacity.json` is never created here (409, use `cp-install --gateway-url`).
+
+**Policy keys outside the catalog (cp-7re9).** `routing.json` `deny_by_role`,
+`worker-bounds.json` `allow_dispatch_override` and `mandate-defaults.json`
+`scope_policy`/`deny_projects` are owner-file keys, hand-edited and not catalog fields: a
+`set` naming one is 400 unknown setting. A `set` or `restore` edits the parsed owner document
+in place, so it keeps them byte-for-byte in value (`worker-bounds` has no owner schema;
+`mandate-defaults` validates against `MandateDefaultsSchema`, which carries both keys), and
+because they live in the owner's bytes they move `revision` through the owner sha256.
 
 **Transaction** (`src/settings-write.ts`). It is synchronous, with no `await` between lock and
 release:
