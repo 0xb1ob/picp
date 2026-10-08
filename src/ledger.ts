@@ -32,6 +32,7 @@ import { randomInt } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { normalizeExternalRef } from "./beads.ts";
 import {
 	collectLegacyJobFields,
@@ -778,10 +779,13 @@ export class Ledger {
 	/** Read → mutate a clone → validate → archive retired fields → atomic write, serialized per file. */
 	#mutate<T>(fn: (doc: JobsDocument) => T): Promise<T> {
 		return queued(this.file, async () => {
-			const draft = structuredClone(this.read());
+			const before = this.read();
+			const draft = structuredClone(before);
 			const out = fn(draft);
-			const result = validateJobsDocument(draft);
-			if (!result.ok) throw new LedgerError(`refusing to write an invalid jobs document:\n  ${result.errors.join("\n  ")}`);
+			const result = validateJobsDocument(draft, { tolerateLegacyLabels: true });
+			const previous = new Map(before.jobs.map((job) => [job.id, job]));
+			const labelErrors = draft.jobs.flatMap((job) => isDeepStrictEqual(job, previous.get(job.id)) ? [] : jobLabelErrors(job.labels).map((error) => `${job.id}: ${error}`));
+			if (!result.ok || labelErrors.length > 0) throw new LedgerError(`refusing to write an invalid jobs document:\n  ${[...(!result.ok ? result.errors : []), ...labelErrors].join("\n  ")}`);
 			// Mandatory and before the write: `this.read()` already dropped the
 			// retired fields, so this is the last moment they exist anywhere.
 			archiveLegacyJobFields(this.file, legacyArchiveFile(this.home), isoTimestamp(this.#now()));

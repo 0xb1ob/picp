@@ -2,7 +2,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { ContractError, DELIVERIES, IsoTimestampSchema, JOB_KINDS, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
+import { ContractError, DELIVERIES, IsoTimestampSchema, isSafeProjectName, JOB_KINDS, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { RISKS } from "./routing.ts";
 
 import { REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./reviews.ts";
@@ -149,7 +149,7 @@ export function jobLabelErrors(labels: readonly string[]): string[] {
 			errors.push(`labels ${prefix}: ${required ? "exactly" : "at most"} one ${prefix} label is allowed (found ${found.length})`);
 		}
 		for (const value of found) {
-			if (values ? !(values as readonly string[]).includes(value) : !/^[A-Za-z0-9_-]+$/.test(value)) {
+			if (values ? !(values as readonly string[]).includes(value) : !isSafeProjectName(value)) {
 				errors.push(`label ${prefix}${value} is not ${values ? `one of ${values.join("|")}` : "a valid project name"}`);
 			}
 		}
@@ -253,7 +253,7 @@ export function stripLegacyJobFields(value: unknown): LegacyJobsInput {
 	};
 }
 
-/** `tolerateLegacyLabels` is for read-only inspection and ID repair; writes always use the strict default. */
+/** Strict by default; legacy-aware mutations separately enforce labels on every added or changed record. */
 export function validateJobsDocument(value: unknown, options: { tolerateLegacyLabels?: boolean } = {}): ValidationResult<JobsDocument> {
 	const shape = validate<JobsDocument>(JobsDocumentSchema, value);
 	if (!shape.ok) return shape;

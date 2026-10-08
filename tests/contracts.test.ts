@@ -1035,14 +1035,14 @@ test("jobs invariants enforce singular reserved labels and their valid values", 
 		base.filter((label) => !label.startsWith("project:")),
 		base.filter((label) => !label.startsWith("delivery:")),
 		...["project:demo", "project:other", "delivery:local", "delivery:board", "kind:ship", "kind:research", "risk:low", "risk:high"].map((label) => [...base, label]),
-		...["project:bad name", "project:", "delivery:fax", "delivery:", "kind:vibes", "kind:", "risk:medium", "risk:"].map((label) => [...base.filter((old) => old.split(":")[0] !== label.split(":")[0]), label]),
+		...["project:bad name", "project:", "project:-demo", "project:_demo", `project:${"a".repeat(65)}`, "delivery:fax", "delivery:", "kind:vibes", "kind:", "risk:medium", "risk:"].map((label) => [...base.filter((old) => old.split(":")[0] !== label.split(":")[0]), label]),
 	];
 	for (const labels of invalid) {
 		const doc = { ...emptyJobsDocument("cp"), jobs: [job({ id: "cp-bad", labels })] };
 		assert.ok(jobsInvariantErrors(doc).ids.some((error) => error.startsWith("cp-bad:")), labels.join(", "));
 		assert.equal(validateJobsDocument(doc).ok, false, labels.join(", "));
 	}
-	for (const labels of [["project:demo", "delivery:local"], [...base, "phase:7"]]) {
+	for (const labels of [["project:demo", "delivery:local"], [`project:${"A".repeat(64)}`, "delivery:pr"], ["project:Demo_1-a", "delivery:local"], [...base, "phase:7"]]) {
 		assert.equal(validateJobsDocument({ ...emptyJobsDocument("cp"), jobs: [job({ id: "cp-ok", labels })] }).ok, true);
 	}
 });

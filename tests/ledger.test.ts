@@ -228,13 +228,38 @@ test("legacy conflicting labels remain readable and searchable, refuse writes, a
 		assert.equal((await ledger.show(bad.id)).id, bad.id);
 		assert.equal(ledger.findDuplicate({ project: "demo", title: "healthy" })?.id, "cp-b");
 		assert.equal(ledger.findDuplicate({ project: "demo", title: "absent" }), undefined);
-		await assert.rejects(ledger.comment("cp-b", "touch"), /refusing to write/);
+		await assert.rejects(ledger.comment(bad.id, "touch"), /refusing to write/);
 		assert.equal(readFileSync(ledger.file, "utf8"), before);
 		await ledger.update(bad.id, { removeLabels: [extra] });
 		assert.deepEqual(requireJobLabels(await ledger.show(bad.id)), { project: "demo", delivery: "pr", kind: "ship" });
 		await assert.rejects(ledger.importJobs([{ ...JOB, id: "cp-c", labels: [...JOB.labels, "project:other"] }]), /refusing to write/);
 		assert.equal((await ledger.list()).length, 2);
 	}
+});
+
+test("untouched legacy faults permit healthy writes and sequential ID repairs, but touched faults refuse", async (t) => {
+	const scratch = createScratchLedger({ knownProjects: ["demo"] });
+	t.after(() => scratch.cleanup());
+	const { ledger } = scratch;
+	const first = { ...JOB, labels: [...JOB.labels, "delivery:board"] };
+	const second = { ...JOB, id: "cp-second", labels: ["project:demo"] };
+	const healthy = { ...JOB, id: "cp-healthy" };
+	writeFileSync(ledger.file, JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [first, second, healthy] }));
+	await ledger.comment(healthy.id, "works despite legacy faults");
+	const created = await ledger.create({ title: "new", project: "demo", delivery: "local" });
+	assert.deepEqual((await ledger.show(first.id)).labels, first.labels);
+	assert.deepEqual((await ledger.show(second.id)).labels, second.labels);
+	const before = readFileSync(ledger.file, "utf8");
+	await assert.rejects(ledger.comment(first.id, "still invalid"), /refusing to write/);
+	await assert.rejects(ledger.update(second.id, { notes: "still missing delivery" }), /not dispatchable/);
+	assert.equal(readFileSync(ledger.file, "utf8"), before, "invalid touched records persist nothing");
+	await ledger.update(first.id, { removeLabels: ["delivery:board"] });
+	assert.equal(requireJobLabels(await ledger.show(first.id)).delivery, "pr");
+	assert.deepEqual((await ledger.show(second.id)).labels, second.labels, "the other fault survives unchanged");
+	await ledger.close(created.id, "healthy close");
+	await ledger.update(second.id, { addLabels: ["delivery:local"] });
+	assert.equal(requireJobLabels(await ledger.show(second.id)).delivery, "local");
+	assert.equal((await ledger.show(healthy.id)).comments.length, 1);
 });
 
 test("create writes a valid record with the job labels, defaults and the actor-free shape", async (t) => {
