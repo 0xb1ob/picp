@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Settings writes and API (cp-7bsr)
+
+The dashboard can now change and restore the 26 editable settings. `GET /api/settings`, `POST /api/settings/apply` and `POST /api/settings/restore` are served only under `--require-tailnet`. They need `If-Match` (a stale revision is 412, a missing one 428) and the session CSRF token, and they forward to the operator session's control socket (`settings_get`, `settings_apply`). The session validates each change against the catalog and writes the knob's own owner file under `data/`; there is no overlay or projection. Every write is journaled in `data/settings-audit.jsonl` (0600) before and after, under `state/settings.lock`, and is rolled back on a write or read-back failure. Restore deletes a key where absent means default and writes the catalog default where absence refuses or disables. Auto-update restores to the installer seed on an installed home. `dry_run` previews a change. `models.allow` and `sessions.tool_call_cap` stay read-only (403). Migration: none. A running operator session answers `unsupported` until it restarts once. The new files are `data/settings-audit.jsonl` and `state/settings.lock`.
+
 ### Settings catalog and read-only snapshot (cp-kdow)
 
 `src/contracts/settings.ts` adds one frozen 28-field catalog of the home's per-machine settings (`SETTING_KEYS`, `SETTING_FIELDS`, `validateSettingValue`) and the closed `SettingsSnapshotSchema`. `readSettings(home, env)` (`src/settings.ts`) reports each field's effective value, source and status, plus per-owner fingerprints and a revision. It does this by calling every owner's existing loader per call, and it never writes or caches. No runtime caller uses it yet. `CommandPost.budgets()` now delegates to `loadBudgetConfig` (`src/budget-config.ts`), with the same outcomes. Migration: none; the contract surface only grows.

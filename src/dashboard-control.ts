@@ -14,6 +14,8 @@
  *    knows the op, so an older one answers `unknown op` and the viewer asks for a restart instead of dropping images;
  *  - `abort` → abort the running turn;
  *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
+ *  - `settings_get` / `settings_apply` → Settings (src/settings-control.ts), only with the `settings` port; they write
+ *    no dashboard.jsonl line, their record is data/settings-audit.jsonl.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
  * a request that cannot be journaled is refused and never injected. At listen (cp-daemon P3) the messages the
  * dashboard held in `state/operator/inbox.jsonl` while no session ran are delivered once (`deliverInbox`).
@@ -66,6 +68,8 @@ export interface ControlPorts {
 	shutdown?(): void;
 	relaunchFile?(): string | undefined;
 	parentSends?(): { ids: string[]; error: string | null };
+	/** Settings (src/settings-control.ts); absent: settings_get/settings_apply are unknown ops; their record is data/settings-audit.jsonl. */
+	settings?: { get(): unknown; apply(args: Record<string, unknown>): { status: number } };
 }
 
 export interface ControlOutcome { id: string; kind: ControlKind; state: string; at: string; reason: string | null; ask_id: string | null }
@@ -299,6 +303,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "send_images" && ports.prepareImage) return request(args, "send", true);
 		if (frame.op === "send_files") return request(args, "send", true, true);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
+		if (frame.op === "settings_get" && ports.settings) return { ok: true, result: ports.settings.get() };
+		if (frame.op === "settings_apply" && ports.settings) return { ok: true, result: ports.settings.apply(args) };
 		return { ok: false, status: 400, error: `unknown op ${String(frame.op)}` };
 	};
 

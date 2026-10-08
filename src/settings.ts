@@ -1,6 +1,6 @@
 /**
- * Settings read model (cp-kdow PR1): read model only; owners stay authoritative; no runtime
- * caller until PR2 adds one to the guard allowlist (tests/settings.test.ts).
+ * Settings read model (cp-kdow PR1): read model only; owners stay authoritative. Runtime callers:
+ * src/settings-write.ts, src/settings-control.ts (allowlisted in tests/settings.test.ts).
  *
  * `readSettings` calls each owner's existing loader per call and reports every catalog field
  * (src/contracts/settings.ts) with its effective value, source and status, plus a fingerprint

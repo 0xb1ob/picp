@@ -5837,6 +5837,9 @@ writes the 0600 record `state/operator/dashboard.json` (`pid`, `socket`, a fresh
 `csrf` per session start, and an optional `commit` — the version view's, below). Frames are NDJSON `{v, token, id, op, args}`; a wrong socket token closes the
 connection. `session_shutdown` closes the socket and removes the record. No new network listener: with no
 operator session there is no socket, and the dashboard says **session not running**.
+Optional capability ops: `settings_get` and `settings_apply` answer only when the bridge spreads the `settings` port
+(§Settings writes). An older bridge answers `unknown op`, and the viewer maps that to 409 unsupported, as for restart.
+They write no `dashboard.jsonl` line; their record is `data/settings-audit.jsonl`.
 
 **Version view** ([`src/viewer/version-view.ts`](../src/viewer/version-view.ts), cp-kz20). `GET /api/version` (GET
 only, Host-bound like every viewer route; no write route), the cp-bridge footer status `cp-version` and `/cp-version`'s
@@ -8631,7 +8634,74 @@ One rule covers an absent file: the `capacity.*` fields report the catalog defau
 status `disabled`, because quota reads are off until `capacity.json` exists. The
 endpoint url/path and the gateway key never enter the snapshot. Env values are those
 the calling process sees. `CP_*` is stripped from the bridge-launched parent, so env
-provenance can differ by process. Writes and an API arrive in a later slice.
+provenance can differ by process.
+
+### Settings writes
+
+The dashboard changes and restores the editable fields through the operator session
+(cp-7bsr PR2). There is no `data/settings.json` overlay, projection or effective file: each
+write lands in the knob's own owner file, and the owner files stay authoritative.
+
+**Socket ops.** The cp-bridge spreads `settingsPorts` (`src/settings-control.ts`) into
+dashboard control (§Dashboard control). `settings_get {}` returns `{snapshot, catalog:
+SETTING_FIELDS, audit}` (the last ≤20 audit lines). `settings_apply {mode: "set" | "restore",
+changes? | keys? | section? | all?, expected_revision, dry_run, request_id, peer}` checks the args
+strictly (400) and returns `{status, state, error?, errors?, revision?, snapshot?, changes?,
+audit_warning?}`, where `state` is `planned`, `unchanged`, `applied`, `stale`, `refused` or
+`failed`. The actor is always `dashboard`, whatever the frame says.
+
+**HTTP routes** (`src/viewer/settings-api.ts`, only under `--require-tailnet`):
+`GET /api/settings`, `POST /api/settings/apply` (`{changes, request_id, dry_run?}`) and
+`POST /api/settings/restore` (exactly one of `{keys}`, `{section}` or `{all: true}`, plus
+`request_id` and `dry_run?`). A write passes the shared guarded chain, then the body shape
+(400), then `If-Match: "<revision>"` (required unless `dry_run`; missing is 428, malformed is
+400), then a live session (409 `offline`), then the session CSRF token (403). The session's
+status passes through: 200, 400 (shape or range, with per-key `errors`), 403 (a read-only key
+such as `models.allow` or `sessions.tool_call_cap`), 409 (lock busy, invalid owner, absent
+`capacity.json`), 412 (stale, with the fresh snapshot), 500 (rolled back) and 503 (audit
+unwritable). An older bridge answers `unknown op`, which becomes 409 unsupported. `dry_run`
+stands in for a separate validate route.
+
+**Restore table** (`RESTORE_ACTIONS`): `grants.*`, `budgets.*`, `sessions.wall_clock_seconds`
+and `sessions.parent_compact_at_tokens` write the catalog default, because their owners
+refuse or disable on a present file without the key. `sessions.operator_compact_at_tokens`,
+`review.*` and `capacity.*` (`quota.*`) delete the key, since absent means default. An emptied
+`quota` object goes too. For `maintenance.update_enabled` and
+`maintenance.update_interval_min`, an installed home (`data/daemon.json` `generated_by:
+"cp-install"`) gets the installer seed (`enabled: true`, `interval_min: 15`). Any other home
+gets `enabled: false` and loses `interval_min`. An unreadable `daemon.json` is 409. Section
+and all restores skip non-editable fields. A restore never creates an absent owner file.
+
+**Absent-file bases.** A `set` on an absent owner builds on what that owner means when absent:
+the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,
+`{schema_version}` for `gate.json`, `{enabled: false}` for `update.json` (created 0600) and
+`{}` otherwise. `capacity.json` is never created here (409, use `cp-install --gateway-url`).
+
+**Transaction** (`src/settings-write.ts`). It is synchronous, with no `await` between lock and
+release:
+
+1. Take `state/settings.lock`, which is O_EXCL with a nonce. A dead holder is reclaimed once.
+   Busy or unreadable is 409.
+2. Finalise a dangling `intent` once as a `recovered` line. Each owner is `applied`,
+   `not_written` or `changed_since`. A non-JSON last line is 503.
+3. Check the revision (412).
+4. Plan and fully validate the change: the catalog first, then the whole candidate against the
+   owner schema. An invalid or unstable owner is 409 ("fix it by hand first").
+5. Append the `intent`.
+6. Write each owner atomically, keeping its mode.
+7. Read back through `readSettings`.
+8. Append `applied {revision}`.
+
+A write or read-back failure restores every touched owner from the prior bytes held in memory
+(a file this write created is unlinked) and appends `failed`. Refusals after the lock append one
+`refused` line. A dry run plans on a fresh snapshot without the lock or the audit.
+
+**Audit** `data/settings-audit.jsonl` (0600, append-only, never read back as configuration):
+`intent {id, actor, peer, request_id, mode, base_revision, writes: [{owner, path,
+prior_sha256, next_sha256, changes: [{key, file_key, action, old, old_source, new}]}]}`,
+`applied`, `failed {reason, rolled_back}`, `recovered {owners}` and `refused {status, reason}`.
+Values are catalog values only. The capacity url/path, the gateway key and the home path never
+enter a line.
 
 ## Budgets and failure taxonomy
 

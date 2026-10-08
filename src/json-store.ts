@@ -25,12 +25,18 @@
  * document is an exception, never a file.
  */
 
-import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, fchmodSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
-export function atomicWriteJson(file: string, value: unknown): void {
-	atomicWriteText(file, `${JSON.stringify(value, null, 2)}\n`);
+/** `mode`: the file's permission bits regardless of umask; `syncDir`: fsync the directory after the rename. */
+export interface AtomicWriteOptions {
+	mode?: number;
+	syncDir?: boolean;
+}
+
+export function atomicWriteJson(file: string, value: unknown, options?: AtomicWriteOptions): void {
+	atomicWriteText(file, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
 /**
@@ -40,14 +46,16 @@ export function atomicWriteJson(file: string, value: unknown): void {
  */
 let tmpCounter = 0;
 
-export function atomicWriteText(file: string, text: string): void {
+export function atomicWriteText(file: string, text: string, options?: AtomicWriteOptions): void {
 	mkdirSync(dirname(file), { recursive: true });
 	tmpCounter = (tmpCounter + 1) % Number.MAX_SAFE_INTEGER;
 	const tmp = `${file}.${process.pid}.${tmpCounter}.tmp`;
 	try {
 		const buffer = Buffer.from(text, "utf8");
-		const fd = openSync(tmp, "w");
+		const fd = options?.mode === undefined ? openSync(tmp, "w") : openSync(tmp, "w", options.mode);
 		try {
+			// The create mode is masked by umask; fchmod states it exactly.
+			if (options?.mode !== undefined) fchmodSync(fd, options.mode);
 			// Loop: a short write on the staging file would rename in a truncated
 			// document, which is precisely what this function exists to prevent. Safe
 			// to loop because nothing else ever writes to this per-call temp name.
@@ -66,6 +74,15 @@ export function atomicWriteText(file: string, text: string): void {
 		throw error;
 	}
 	renameSync(tmp, file);
+	if (options?.syncDir) {
+		// The rename itself is durable only once the directory entry is flushed.
+		const dir = openSync(dirname(file), "r");
+		try {
+			fsyncSync(dir);
+		} finally {
+			closeSync(dir);
+		}
+	}
 }
 
 /**
@@ -74,10 +91,10 @@ export function atomicWriteText(file: string, text: string): void {
  * kernel, so this is the only mechanism that is safe for a file two processes
  * may add to at once — and the only one an append-only contract can be held to.
  */
-export function durableAppend(file: string, text: string): void {
+export function durableAppend(file: string, text: string, options?: { mode?: number }): void {
 	mkdirSync(dirname(file), { recursive: true });
 	const buffer = Buffer.from(text, "utf8");
-	const fd = openSync(file, "a");
+	const fd = openSync(file, "a", options?.mode ?? 0o666);
 	try {
 		// Exactly one write, deliberately: `O_APPEND` is atomic per call, so a
 		// second call to finish a short write could land after another process's

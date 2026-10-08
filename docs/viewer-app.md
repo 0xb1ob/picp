@@ -8,7 +8,9 @@ authority or decision endpoint. Decisions still go through the operator chat.
 Its writes are a browser's own Web Push subscription (see Web Push below), under `--require-tailnet`
 one message into the operator's own running session with its audit line (see Dashboard control below) — a message is
 exactly what the human could type in that chat, never an authorization — and an Answers acknowledgement, one `acked`
-line in `state/operator/answers.jsonl` that reaches no session and no parent and is not a decision.
+line in `state/operator/answers.jsonl` that reaches no session and no parent and is not a decision. A Settings write is
+an operator-configuration change, forwarded to the operator's own session, which validates, audits and writes the owner
+file; never a decision, grant or authorization.
 
 ## Build And Security
 
@@ -34,7 +36,8 @@ subscription under `data/push/subscriptions/`, the dashboard-control audit line 
 `state/operator/dashboard.jsonl`, a Schedules page `request` line in `state/schedule-control.jsonl`, which the
 parent reads, an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard, and a thread `open`/`bind`/`done` line in `state/operator/threads.jsonl`, likewise), contact a gateway, invoke policy stores, probe process
 liveness or communicate with a parent or worker (dashboard control talks only to the
-operator's own session, over its owner-only socket). Build failure is logged to
+operator's own session, over its owner-only socket). No viewer request writes a settings file: a Settings change is one
+`settings_apply` frame to that session, which writes the owner file. Build failure is logged to
 stderr and `/` returns a generic 503 without paths, stack traces or a classic
 fallback. Identity, health, published boards and JSON APIs remain usable.
 Recovery is reinstalling/rebuilding, not deleting state or silently using an old
@@ -50,7 +53,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
 loosened. The separate published-board policy still forbids scripts. Host binding,
-GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack` and `POST /api/threads/done`) and explorer
+GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack`, `POST /api/threads/done`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
 ## Routes
@@ -69,6 +72,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 | Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
 | Threads | `GET /api/threads` (list + this viewer's thread token), `POST /api/threads/done` (only under `--require-tailnet`; appends one `done` line, no session or parent) |
+| Settings | `GET /api/settings`, `POST /api/settings/apply`, `POST /api/settings/restore` (only under `--require-tailnet`; forwarded to the operator session, which validates, audits and writes the owner file) |
 
 Native `hashchange` drives routing, including Back/Forward. Empty, malformed and
 unknown fragments show Overview. Legacy root session, files and dashboard hashes

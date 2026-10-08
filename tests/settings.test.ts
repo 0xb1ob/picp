@@ -441,13 +441,13 @@ function sourceFiles(dir: string): string[] {
 
 const specifiers = (text: string) => [...text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((match) => match[1] as string);
 
-test("(l) import guard: nothing in src/ or extensions/ imports src/settings.ts; the contract imports only siblings", () => {
+test("(l) import guard: only src/settings-control.ts and src/settings-write.ts import src/settings.ts; the contract imports only siblings", () => {
 	const target = join(REPO_ROOT, "src/settings.ts");
-	const allowlist: string[] = [];
+	const allowlist: string[] = ["src/settings-control.ts", "src/settings-write.ts"];
 	const importers = [...sourceFiles("src"), ...sourceFiles("extensions")].filter((file) =>
 		specifiers(readFileSync(file, "utf8")).some((spec) => spec.startsWith(".") && resolve(dirname(file), spec) === target),
 	);
-	assert.deepEqual(importers.map((file) => relative(REPO_ROOT, file)), allowlist, "PR2 adds its importers here explicitly");
+	assert.deepEqual(importers.map((file) => relative(REPO_ROOT, file)).sort(), allowlist, "PR2's importers, named explicitly");
 	const contract = specifiers(readFileSync(join(REPO_ROOT, "src/contracts/settings.ts"), "utf8"));
 	assert.ok(contract.length > 0);
 	for (const spec of contract) {
