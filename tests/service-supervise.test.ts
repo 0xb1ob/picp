@@ -34,6 +34,7 @@ function ports(overrides: Partial<SupervisePorts> = {}): SupervisePorts & { line
 		stoppedGen: () => undefined,
 		draining: () => false,
 		savedModel: () => undefined,
+		configuredModel: () => undefined,
 		alive: () => false,
 		sleep: async (ms) => { sleeps.push(ms); await new Promise((done) => setImmediate(done)); },
 		log: (line) => void lines.push(line),
@@ -58,6 +59,20 @@ test("start: CP_PARENT_MODEL wins over the saved model; the saved model is the f
 		assert.deepEqual(client.requests, [["start", { home: "/h", mode: "multi", model: expected }]]);
 		client.close();
 		assert.equal(await run, 1, "host gone with no drain or stop → exit 1");
+	}
+});
+
+test("start: a data/parent.json model avoids exit 78 with no env or saved model; the supervisor never sends modelExplicit", async () => {
+	for (const [model, saved, expected] of [[undefined, undefined, "file/m"], [undefined, "saved/m", "file/m"], ["env/m", "saved/m", "env/m"]] as const) {
+		const client = fakeClient(undefined);
+		const p = ports({ attach: async () => client, savedModel: () => saved, configuredModel: () => "file/m" });
+		const run = supervise({ home: "/h", ...(model ? { model } : {}) }, p);
+		await new Promise((done) => setImmediate(done));
+		// No modelExplicit key: CP_PARENT_MODEL is env, so bridge.start lets the file model beat it (tests/cp-bridge.test.ts).
+		assert.deepEqual(client.requests, [["start", { home: "/h", mode: "multi", model: expected }]]);
+		assert.ok(p.lines.some((line) => line.endsWith("(file/m)")), p.lines.join("\n"));
+		client.close();
+		assert.equal(await run, 1);
 	}
 });
 

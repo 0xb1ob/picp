@@ -17,7 +17,7 @@ import {
 	type ThinkingLevel,
 	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
-import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus } from "./parent-context.ts";
+import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
 import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
@@ -36,7 +36,6 @@ import { deliverableRelay, type EnvelopeSummary, envelopeSummaryOf, scheduleJobI
 import { readParentLock } from "./parent-lock.ts";
 import { existingSavedSession, recordSpawnedSession } from "./parent-control.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
-import type { ModelProbe } from "./routing.ts";
 import { boundedSeen, STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
 import { NONINTERACTIVE_WORKER_ENV, STRIPPED_ENV_KEYS } from "./worker-manager.ts";
 import {
@@ -82,6 +81,8 @@ export interface ParentStartOptions {
 	home: string;
 	mode: Mode;
 	model: string;
+	/** The caller named `model` (cp_parent start model): `data/parent.json` `model` is then skipped. */
+	modelExplicit?: boolean;
 	thinking?: ThinkingLevel;
 	piBin?: string;
 	sessionFile?: string;
@@ -187,37 +188,7 @@ export function buildParentArgv(options: {
 	return args;
 }
 
-/**
- * cp-0wq7/cur.5.4: never invent a parent model. `CP_PARENT_MODEL`, then the
- * operator session's own model (explicit `sessionModel`, which the caller
- * builds from `ctx.model` or `PI_PROVIDER`+`PI_MODEL`), then refuse naming
- * both options.
- */
-export function resolveParentModel(
-	env: { CP_PARENT_MODEL?: string; PI_PROVIDER?: string; PI_MODEL?: string },
-	sessionModel?: string,
-): string {
-	const fromEnv = env.CP_PARENT_MODEL?.trim();
-	if (fromEnv) return fromEnv;
-	if (sessionModel?.trim()) return sessionModel.trim();
-	const provider = env.PI_PROVIDER?.trim();
-	const modelId = env.PI_MODEL?.trim();
-	if (provider && modelId) return `${provider}/${modelId}`;
-	throw new CpBridgeError(
-		"cp_parent start needs a model: set CP_PARENT_MODEL, or run the operator with a model selected " +
-			"(PI_PROVIDER/PI_MODEL or --model) so its own model is reused",
-	);
-}
-
-/** Refuse an unknown/unauthenticated model before spawn, naming what pi does know. */
-export function requireAvailableParentModel(model: string, probe: ModelProbe): void {
-	if (probe.isAvailable(model)) return;
-	const available = probe.available?.() ?? [];
-	throw new CpBridgeError(
-		`cp_parent start refuses ${model}: not available (unknown to pi, or its provider has no configured auth). ` +
-			`Known: ${available.join(", ") || "(none)"}.`,
-	);
-}
+export { requireAvailableParentModel, resolveParentModel } from "./parent-model.ts";
 
 export function bridgePaths(
 	home: string,
@@ -332,7 +303,7 @@ export class CpBridge {
 		try { if (existsSync(controlFile)) saved = JSON.parse(readFileSync(controlFile, "utf8")); }
 		catch (error) { throw new CpBridgeError(`parent control unreadable: ${controlFile}: ${(error as Error).message}`); }
 		const sessionFile = options.sessionFile ?? existingSavedSession(saved.sessionFile) ?? join(home, LAYOUT.sessions, "cp-parent.jsonl");
-		const model = saved.model ?? options.model;
+		const model = (options.modelExplicit ? undefined : parentModelSetting(home)) ?? saved.model ?? options.model;
 		mkdirSync(join(sessionFile, ".."), { recursive: true });
 		this.#options = { ...options, model };
 		this.#model = model;
@@ -488,6 +459,10 @@ export class CpBridge {
 			if (!existsSync(old)) throw new CpBridgeError(`session file missing; cannot archive ${old}`);
 			renameSync(old, archivedFile);
 			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(this.#missionEnd ? { lastMissionEnd: this.#missionEnd } : {}) });
+			// dashboard Settings: a configured parent model applies at rotation; a refusal keeps the running one.
+			const configured = parentModelSetting(this.#home);
+			const kept = this.#model;
+			if (configured && configured !== kept) await this.#setModel(proc, configured).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept ${kept}: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
 			return { sessionFile: current, archivedFile };
 		} finally { this.#controlBusy = false; }
 	}
@@ -497,13 +472,18 @@ export class CpBridge {
 		if (slash < 1 || slash === model.length - 1 || !this.#home) throw new CpBridgeError("model needs provider/model-id");
 		this.#controlBusy = true;
 		try {
-			const response = await proc.request("set_model", { provider: model.slice(0, slash), modelId: model.slice(slash + 1) }, this.#options?.requestTimeoutMs);
-			if (response.success === false) throw new CpBridgeError(`set_model rejected: ${response.error ?? "unknown error"}`);
-			this.#model = model;
-			if (this.#options) this.#options.model = model;
-			atomicWriteJson(join(this.#home, LAYOUT.sessions, "cp-parent-control.json"), { sessionFile: this.#sessionFile, model });
+			await this.#setModel(proc, model);
 			return { model };
 		} finally { this.#controlBusy = false; }
+	}
+	/** `set_model`; on success the running model, the start options and the control file follow it. */
+	async #setModel(proc: WorkerProcess, model: string): Promise<void> {
+		const slash = model.indexOf("/");
+		const response = await proc.request("set_model", { provider: model.slice(0, slash), modelId: model.slice(slash + 1) }, this.#options?.requestTimeoutMs);
+		if (response.success === false) throw new CpBridgeError(`set_model ${model} rejected: ${response.error ?? "unknown error"}`);
+		this.#model = model;
+		if (this.#options) this.#options.model = model;
+		atomicWriteJson(join(this.#home!, LAYOUT.sessions, "cp-parent-control.json"), { sessionFile: this.#sessionFile, model });
 	}
 	#recordControl(update: Record<string, unknown>): void {
 		if (!this.#home) return;

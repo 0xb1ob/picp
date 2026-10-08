@@ -31,6 +31,7 @@ import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
+import { parentModelSetting } from "../../src/parent-context.ts";
 import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
 import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
@@ -665,11 +666,13 @@ export default function (pi: ExtensionAPI): void {
 					if ((params.mode as string | undefined) === "single") throw new CpBridgeError(`cp_parent start: ${SINGLE_MODE_REMOVED}; omit mode or pass multi`);
 					if (!params.home) throw new CpBridgeError("cp_parent start needs home");
 					const mode: Mode = "multi";
-					// cur.5.4: never let the LLM guess a model. Explicit beats resolved;
-					// resolved is CP_PARENT_MODEL, then the operator's own model.
+					// cur.5.4: never let the LLM guess a model. Explicit beats configured (data/parent.json
+					// `model`, dashboard Settings) beats resolved: CP_PARENT_MODEL, then the operator's own model.
 					const sessionModel = ctx?.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+					const explicit = params.model?.trim();
 					const model =
-						params.model?.trim() ||
+						explicit ||
+						parentModelSetting(params.home) ||
 						resolveParentModel(
 							{
 								CP_PARENT_MODEL: process.env.CP_PARENT_MODEL,
@@ -688,6 +691,7 @@ export default function (pi: ExtensionAPI): void {
 								home: params.home,
 								mode,
 								model,
+								...(explicit ? { modelExplicit: true } : {}),
 								...(params.thinking ? { thinking: params.thinking } : {}),
 								...(process.env.CP_PARENT_PI_BIN ? { piBin: process.env.CP_PARENT_PI_BIN } : {}),
 							}) as { already: boolean; pid?: number; sessionFile: string };

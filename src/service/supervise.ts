@@ -6,8 +6,10 @@
  * replaced — it only decides when cp-daemon should try again:
  *
  *  - startup joins or spawns; a host running no parent gets `start` with
- *    `CP_PARENT_MODEL`, else the saved `cp-parent-control.json` model, else the
- *    supervisor exits 78 (`RestartPreventExitStatus=78`: no crash loop);
+ *    `CP_PARENT_MODEL`, else `data/parent.json` `model` (dashboard Settings), else the saved
+ *    `cp-parent-control.json` model, else the supervisor exits 78 (`RestartPreventExitStatus=78`: no crash loop).
+ *    It never sends `modelExplicit`: the env pin is not an explicit choice, so `bridge.start` lets the
+ *    `parent.json` model beat it (file beats env);
  *  - a live parent lock with no responsive host is retried every 60 s, logged once;
  *  - host lost: a blip reconnects, a newer generation is joined; while
  *    `state/drain.json` exists or the stop marker names the watched generation
@@ -25,6 +27,7 @@ import { drainFile } from "../drain.ts";
 import { isPidAlive } from "../fleet.ts";
 import { resolveHome } from "../home.ts";
 import { attachParentHost, currentHost, type HostRecord, ParentHostClient, parentHostPaths, readStopMarker } from "../parent-host.ts";
+import { parentModelSetting } from "../parent-context.ts";
 
 export const EXIT_NO_MODEL = 78;
 export const FOREIGN_LOCK_RETRY_MS = 60_000;
@@ -47,6 +50,8 @@ export interface SupervisePorts {
 	stoppedGen(): number | undefined;
 	draining(): boolean;
 	savedModel(): string | undefined;
+	/** `data/parent.json` `model` (dashboard Settings). */
+	configuredModel(): string | undefined;
 	alive(pid: number): boolean;
 	sleep(ms: number): Promise<void>;
 	log(line: string): void;
@@ -79,14 +84,15 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 		}
 	}
 	if (client.parentPid === undefined) {
-		const model = options.model?.trim() || ports.savedModel();
+		const configured = ports.configuredModel();
+		const model = options.model?.trim() || configured || ports.savedModel();
 		if (!model) {
-			ports.log("no parent model (no CP_PARENT_MODEL, no saved model): set one with cp-install --parent-model (data/daemon.json), or start the parent once with cp_parent start; not restarting");
+			ports.log("no parent model (no CP_PARENT_MODEL, no data/parent.json model, no saved model): set one in dashboard Settings or with cp-install --parent-model (data/daemon.json), or start the parent once with cp_parent start; not restarting");
 			client.disconnect();
 			return EXIT_NO_MODEL;
 		}
 		const started = await client.request("start", { home: options.home, mode: "multi", model, ...(options.piBin ? { piBin: options.piBin } : {}) }) as { pid?: number; already?: boolean };
-		ports.log(`host pid ${client.hostPid}: ${started.already ? "parent already running" : "started parent"} pid ${started.pid ?? "?"} (${model})`);
+		ports.log(`host pid ${client.hostPid}: ${started.already ? "parent already running" : "started parent"} pid ${started.pid ?? "?"} (${configured ?? model})`);
 	} else ports.log(`attached to host pid ${client.hostPid}, parent pid ${client.parentPid}`);
 	let gen = ports.current().gen;
 	for (;;) {
@@ -142,6 +148,7 @@ export function hostPorts(home: string, overrides: Partial<SupervisePorts> = {})
 			}
 			return typeof model === "string" && model.trim() ? model.trim() : undefined;
 		},
+		configuredModel: () => parentModelSetting(home),
 		alive: isPidAlive,
 		sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
 		log: (line) => console.error(`supervise: ${line}`),
