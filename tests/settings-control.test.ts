@@ -55,7 +55,7 @@ test("settings_get: snapshot, the full catalog and the audit tail; settings_appl
 	const first = await get(record);
 	assert.match(first.snapshot.revision, /^[0-9a-f]{64}$/);
 	assert.deepEqual(first.catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(first.catalog.length, 28);
+	assert.equal(first.catalog.length, 31);
 	assert.deepEqual(first.audit, []);
 
 	const preview = await apply(record, { mode: "set", changes: { "review.timeout_ms": 60_000 }, expected_revision: null, dry_run: true });

@@ -2,7 +2,7 @@ import type { SettingField, SettingKey, SettingValue } from "../src/contracts.ts
 import type { SettingsResponse, SettingsWriteResponse } from "../src/viewer/api-types.ts";
 import { failure } from "./control.ts";
 
-/** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the #171 owner-file API. */
+/** Settings page (cp-settings-minimal): GET the snapshot, POST apply/restore through the owner-file settings API (PR 171). */
 export const SETTINGS_URL = "/api/settings";
 export const SETTINGS_APPLY_URL = "/api/settings/apply";
 export const SETTINGS_RESTORE_URL = "/api/settings/restore";

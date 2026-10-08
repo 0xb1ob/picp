@@ -345,7 +345,7 @@ test("runOperator: the data/operator.json model beats CP_OPERATOR_MODEL; an unre
 		const stderr: string[] = [];
 		const write = process.stderr.write;
 		process.stderr.write = ((chunk: string) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
-		try { assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { home, port: 1 }, relaunchFile: join(home, "relaunch.json") }), 0); }
+		try { assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(home, "relaunch.json") }), 0); }
 		finally { process.stderr.write = write; }
 		const { args } = JSON.parse(readFileSync(addressFile, "utf8")) as { args: string[] };
 		return { model: args.includes("--model") ? args[args.indexOf("--model") + 1] : undefined, stderr };
