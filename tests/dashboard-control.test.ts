@@ -162,7 +162,7 @@ test("delivery: a message is injected as a user message with the marker; idle is
 
 	const lines = journal(stateDir);
 	const first = lines[0]!;
-	assert.deepEqual({ ...first, id: undefined, at: undefined }, { type: "request", by: "bridge", id: undefined, at: undefined, peer: "100.64.0.9", kind: "message", text: "hello there", ask_id: null, deliver: "prompt" });
+	assert.deepEqual({ ...first, id: undefined, at: undefined, session_started_at: undefined, session_file: undefined }, { type: "request", by: "bridge", id: undefined, at: undefined, session_started_at: undefined, session_file: undefined, peer: "100.64.0.9", kind: "message", text: "hello there", ask_id: null, deliver: "prompt" });
 	assert.deepEqual(lines.filter((l) => l.id === first.id).map((l) => l.type === "outcome" ? l.state : l.type), ["request", "injected", "queued"]);
 	const second = lines.find((l) => l.type === "request" && l.text === "next")!;
 	assert.deepEqual(lines.filter((l) => l.id === second.id).map((l) => l.type === "outcome" ? l.state : l.type), ["request", "injected", "delivered"]);
@@ -171,6 +171,14 @@ test("delivery: a message is injected as a user message with the marker; idle is
 	assert.equal(journal(stateDir).filter((l) => l.id === first.id && l.state === "delivered").length, 1, "a later sighting marks the queued one delivered, once");
 	control.observe({ role: "user", content: text });
 	assert.equal(journal(stateDir).filter((l) => l.id === first.id && l.state === "delivered").length, 1);
+	assert.equal(typeof first.session_started_at, "string");
+	assert.equal(first.session_file, "/tmp/operator-session.jsonl");
+	fake.state.echo = false;
+	const pending = await controlRequest(record, "send", {kind:"message",text:"abandoned"});
+	const pendingId = pending.ok && (pending.result as {id:string}).id;
+	control.stop(); control.stop();
+	assert.equal(journal(stateDir).filter(row=>row.id === pendingId && row.state === "dropped").length,1,"shutdown settles unseen accepted messages exactly once");
+	assert.equal(journal(stateDir).filter(row=>row.id === first.id && row.state === "dropped").length,0,"delivered outcomes survive shutdown");
 });
 
 test("clicks: the verbatim label with the ask id; unknown label 400, settled ask 409, a second click 409; asks.jsonl never changes", async (t) => {

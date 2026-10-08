@@ -253,3 +253,17 @@ test("text-capable composer uploads into the FIFO, keeps chips through failure/r
  assert.match(s.root.querySelector(".session-file-link")!.textContent!,/notes.md/);
  await s.reply({id,state:"delivered",deliver:"prompt"});assert.deepEqual(s.bubbleTexts(),[]);
 });
+
+test("dropped sends disappear on fresh load and stored reload without failures or delivery",async t=>{
+ const ids=["dc-20261008035752-31390177","dc-20261008035836-576ebc32"];
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[...ids.map(id=>pending(id,{id})),pending("live")],dismissed:[]})]]);
+ const s=await stage(t,store);
+ const sends=[...ids.map(id=>({id,at,state:"dropped" as const,reason:"target operator session ended",ask_id:null,body:{kind:"message" as const,text:"unwanted text"}})),{id:"dc-live",at,state:"queued" as const,reason:null,ask_id:null,body:{kind:"message" as const,text:"queued live"}}];
+ s.status({...status,sends});await s.show();
+ assert.deepEqual(s.bubbleTexts(),["queued live"]);
+ assert.equal(s.root.querySelectorAll(".session-pending-failed").length,0);
+ assert.equal(s.posted.length,0,"settlement never delivers or retries text");
+ await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"]);
+ store.clear();await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"],"fresh browser cannot recover a dropped bubble");
+ assert.equal(s.posted.length,0);
+});
