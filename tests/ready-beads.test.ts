@@ -141,7 +141,7 @@ test("cp_next surfaces beads with spare slots, hides them at capacity, and repor
 	const { ports, registry } = await bench(t);
 	cloneDb(registry, "demo");
 	ports.beadExec = async () => JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }]);
-	for (let i = 0; i < 2; i++) ports.mandates.issue({ projects: ["demo"], objective: `grant ${i}`, expiry: isoTimestamp(new Date(Date.now() + 86400000)), spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, dispatch_parallelism: 2 });
+	for (let i = 0; i < 2; i++) ports.mandates.issue({ projects: ["demo"], objective: `grant ${i}`, expiry: isoTimestamp(new Date(Date.now() + 86400000)), spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, dispatch_parallelism: 2, at: isoTimestamp(new Date(Date.now() - 60_000 + i * 1_000)) });
 	await ports.fleet.add(worker("cp-one"));
 	assert.match(formatNext(await cpNext(ports)), /1 ready beads have no job/);
 	await ports.fleet.add(worker("cp-two"));

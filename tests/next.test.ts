@@ -720,7 +720,7 @@ for (const answer of ["proceed", "drop", "reopen"] as const) {
 		await ports.ledger.addDep(dependent.id, blocker.id);
 		await ports.ledger.drop(blocker.id, "no result");
 		// Two covering grants must not mint two questions for the same pair.
-		for (let i = 0; i < 2; i++) ports.mandates.issue({ projects: ["demo"], objective: `work ${i}`, job_ids: [dependent.id], expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+		for (let i = 0; i < 2; i++) ports.mandates.issue({ projects: ["demo"], objective: `work ${i}`, job_ids: [dependent.id], expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, at: isoTimestamp(new Date(Date.now() - 60_000 + i * 1_000)) });
 		const first = await cpNext(ports, "demo");
 		assert.equal(first.action.kind, "wait");
 		assert.match(formatNext(first), /closed as dropped/);
