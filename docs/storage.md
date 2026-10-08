@@ -100,6 +100,8 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `update.json` (0600) | `src/service/install.ts` (written once, only when absent; `--no-update` → `enabled: false`) | the auto-update switch `{enabled, interval_min}`: absent is off, invalid is `config_invalid` (read by `src/service/update.ts`, `docs/service.md` §Auto-update) | H | install once, then the operator |
 | `daemon.json` (0600) | `src/service/install.ts` (`--force` replaces a changed one; `--uninstall` and a failed migration remove it); read by `src/service/daemon-files.ts` | the cp-daemon config `{schema_version, generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?}`; invalid names the bad field and cp-daemon exits 78 | H | install only |
 
+**Settings read model.** `src/settings.ts` `readSettings` reads ten owner files from the table above per call: `budgets.json`, `gate.json`, `worker-bounds.json`, `quality.json`, `capacity.json`, `parent.json`, `operator.json`, `routing.json`, `mandate-defaults.json` and `update.json`. The result is a snapshot that is never written; there is no `settings-effective.json`. Each knob keeps its one owner file; `settings.json` at the runtime root stays the mode preference.
+
 ### `<home>/.pi-command-post/state/`
 
 | Path | Writer | What | Class | Who may write |

@@ -56,6 +56,7 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
 - [Ledger](#ledger)
 - [Routing config](#routing-config)
 - [Gate config](#gate-config)
+- [Settings catalog](#settings-catalog)
 - [Budgets and failure taxonomy](#budgets-and-failure-taxonomy)
 - [Delivery receipts](#delivery-receipts)
   - [A promoted brief may replace the frozen task](#a-promoted-brief-may-replace-the-frozen-task)
@@ -8598,6 +8599,39 @@ runner retrying an operational fault) or a freshly constructed one
 (`ok`, always — there is nothing to clamp against, unlike the budget ceiling),
 naming whether it came from `data/gate.json` or the default, the same way it
 reports `config.budget.<profile>`.
+
+## Settings catalog
+
+`src/contracts/settings.ts` is the single list of the home's per-machine settings:
+`SETTING_KEYS` and `SETTING_FIELDS` (28 fields, frozen). Each field names its section,
+its owner file (or env var), its type and range, its code default, when it applies,
+what the consumer does with an invalid value (`on_invalid`), whether a later writer may
+edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
+against its field; tests pin every range and default to the owner's own schema, constant
+or loader.
+
+`readSettings(home, env)` (`src/settings.ts`) is a per-call read model: it calls each
+owner's existing loader, never stores or caches the result, and never writes. The owners
+and their loaders stay authoritative; nothing in `src/` reads through the snapshot yet.
+The snapshot (`SettingsSnapshotSchema`) carries:
+
+- **`owners`**: one row per owner file, with its runtime-relative path, a `state`
+  (`absent`, `valid`, `invalid`, or `unstable` when the bytes changed during the read and
+  again on the one retry), the sha256 of its bytes, and an error capped at 500 characters
+  with the home path shown as `<home>`.
+- **`fields`**: each field's effective `value` and `source`. The source is `file` when the
+  valid owner file has the key, `env` for a valid `CP_JOB_*` value, and otherwise `code`.
+  It is `none` when there is no value. The `status` is `ok` (applied now), `fallback`
+  (the loader's value after an invalid input), `disabled` (the feature is off now) or
+  `refused` (the consumer refuses its operation).
+- **`revision`**: a sha256 over the owner fingerprints and the two observed `CP_JOB_*`
+  env values, so it changes when bytes change, not on an mtime-only touch.
+
+One rule covers an absent file: the `capacity.*` fields report the catalog defaults with
+status `disabled`, because quota reads are off until `capacity.json` exists. The
+endpoint url/path and the gateway key never enter the snapshot. Env values are those
+the calling process sees. `CP_*` is stripped from the bridge-launched parent, so env
+provenance can differ by process. Writes and an API arrive in a later slice.
 
 ## Budgets and failure taxonomy
 
