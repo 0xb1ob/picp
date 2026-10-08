@@ -38,8 +38,8 @@ import {
 } from "../src/contracts.ts";
 import { DEFAULT_REVIEW_TIMEOUT_MS, resolveReviewTimeoutMs } from "../src/gate.ts";
 import { DEFAULT_TOKEN_CEILING, loadMandateDefaults, loadTokenCeiling, SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
-import { OPERATOR_COMPACT_DEFAULT_TOKENS, operatorCompactThreshold } from "../src/operator-compact.ts";
-import { DEFAULT_PARENT_COMPACT_TOKENS, parentSettings } from "../src/parent-context.ts";
+import { OPERATOR_COMPACT_DEFAULT_TOKENS, operatorCompactThreshold, operatorModelSetting } from "../src/operator-compact.ts";
+import { DEFAULT_PARENT_COMPACT_TOKENS, parentModelSetting, parentSettings } from "../src/parent-context.ts";
 import { QUALITY_OFF } from "../src/quality.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG, loadRoutingConfig } from "../src/routing.ts";
@@ -83,10 +83,10 @@ function snapshot(home: string, env: NodeJS.ProcessEnv = {}): SettingsSnapshot {
 	return snap;
 }
 
-test("(a) catalog: 28 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 28);
+test("(a) catalog: 31 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 31);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 28);
+	assert.equal(new Set(SETTING_KEYS).size, 31);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -98,6 +98,8 @@ test("(a) catalog: 28 unique keys in SETTING_KEYS order, every default valid, ev
 	assert.deepEqual(validateSettingValue("nope.nothing", 1), { ok: false, errors: ["unknown setting nope.nothing"] });
 	assert.equal(fieldOf("sessions.tool_call_cap").editable, false);
 	assert.equal(fieldOf("models.allow").editable, false);
+	for (const key of ["models.rubric", "models.parent", "models.operator"] as const) assert.equal(fieldOf(key).editable, true, key);
+	assert.deepEqual(SETTING_KEYS.slice(SETTING_KEYS.indexOf("models.allow"), SETTING_KEYS.indexOf("models.allow") + 4), ["models.allow", "models.rubric", "models.parent", "models.operator"]);
 });
 
 test("(b) default parity: every catalog literal equals its owner's constant or loader", (t) => {
@@ -113,6 +115,9 @@ test("(b) default parity: every catalog literal equals its owner's constant or l
 	assert.equal(fieldOf("sessions.parent_compact_at_tokens").default, DEFAULT_PARENT_COMPACT_TOKENS);
 	assert.equal(fieldOf("sessions.operator_compact_at_tokens").default, OPERATOR_COMPACT_DEFAULT_TOKENS);
 	assert.deepEqual(fieldOf("models.allow").default, DEFAULT_ROUTING_CONFIG.allow);
+	assert.deepEqual(fieldOf("models.rubric").default, DEFAULT_ROUTING_CONFIG.rubric);
+	assert.equal(fieldOf("models.parent").default, null);
+	assert.equal(fieldOf("models.operator").default, null);
 	assert.equal(fieldOf("review.timeout_ms").default, DEFAULT_REVIEW_TIMEOUT_MS);
 	assert.equal(fieldOf("review.quality_verify").default, QUALITY_OFF.verify);
 	assert.equal(fieldOf("review.quality_completeness").default, QUALITY_OFF.completeness);
@@ -155,6 +160,15 @@ function probes(field: SettingField): unknown[] {
 		}
 		case "string_list":
 			return [[], ["a/b"], [""], ["x".repeat(field.max_length ?? 1)], ["x".repeat((field.max_length ?? 1) + 1)], Array((field.max_items ?? 1) + 1).fill("a"), 5];
+		case "model_ref":
+			return [null, "a/b", "anthropic/claude-opus-5-5", "ab", "a/", "/b", "a b/c", "", `a/${"x".repeat(126)}`, `a/${"x".repeat(127)}`, 5, true];
+		case "rubric": {
+			const row = { id: "r1", role: "implementer", model: "a/b" };
+			return [
+				[], [row], [{ ...row, thinking: "high", fallbacks: ["c/d"], scope: ["S"], risk: "low", note: "n" }], [{ ...row, model: "" }], [{ ...row, extra: 1 }],
+				[{ ...row, role: "researcher" }], [{ ...row, thinking: "huge" }], [{ ...row, fallbacks: Array(5).fill("c/d") }], Array((field.max_items ?? 1) + 1).fill(row), "x", null,
+			];
+		}
 	}
 }
 
@@ -176,8 +190,14 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 	};
 	const loaders: Partial<Record<SettingFileOwner, (field: SettingField, value: unknown) => boolean>> = {
 		"worker-bounds": (_field, value) => (write(home, "worker-bounds", { wall_clock_seconds: value }), accepts(() => homeWallClockSeconds(home), value)),
-		parent: (_field, value) => (write(home, "parent", { compact_at_tokens: value }), parentSettings(home).compact_at_tokens === value),
-		operator: (_field, value) => (write(home, "operator", { compact_at_tokens: value }), operatorCompactThreshold(ownerFile(home, "operator")) === value),
+		parent: (field, value) =>
+			field.file_key === "model"
+				? (write(home, "parent", { compact_at_tokens: 200000, model: value }), parentModelSetting(home) === (value ?? undefined))
+				: (write(home, "parent", { compact_at_tokens: value }), parentSettings(home).compact_at_tokens === value),
+		operator: (field, value) =>
+			field.file_key === "model"
+				? (write(home, "operator", { compact_at_tokens: 200000, model: value }), operatorModelSetting(ownerFile(home, "operator")) === (value ?? undefined))
+				: (write(home, "operator", { compact_at_tokens: value }), operatorCompactThreshold(ownerFile(home, "operator")) === value),
 		capacity: (field, value) => {
 			const key = (field.file_key as string).split(".")[1] as "five_hour";
 			write(home, "capacity", { ...CAPACITY_MIN, quota: { [key]: value } });
@@ -229,6 +249,9 @@ function loaderValues(home: string): Partial<Record<SettingKey, unknown>> {
 		"sessions.parent_compact_at_tokens": parentSettings(home).compact_at_tokens,
 		"sessions.operator_compact_at_tokens": operatorCompactThreshold(ownerFile(home, "operator")),
 		"models.allow": loadRoutingConfig(home).allow,
+		"models.rubric": loadRoutingConfig(home).rubric,
+		"models.parent": parentModelSetting(home) ?? null,
+		"models.operator": operatorModelSetting(ownerFile(home, "operator")) ?? null,
 		"review.timeout_ms": resolveReviewTimeoutMs(home),
 		"review.quality_verify": false,
 		"review.quality_completeness": false,
@@ -239,7 +262,7 @@ function loaderValues(home: string): Partial<Record<SettingKey, unknown>> {
 	};
 }
 
-test("(d) empty home: every owner absent; 25 fields ok from code at the loader's value; capacity disabled at its defaults", (t) => {
+test("(d) empty home: every owner absent; 28 fields ok from code at the loader's value; capacity disabled at its defaults", (t) => {
 	const home = scratch(t);
 	const snap = snapshot(home);
 	assert.deepEqual(snap.owners.map((row) => row.owner), [...SETTING_FILE_OWNERS]);
@@ -247,7 +270,7 @@ test("(d) empty home: every owner absent; 25 fields ok from code at the loader's
 		assert.deepEqual(row, { owner: row.owner, path: OWNER_FILE[row.owner], state: "absent", sha256: null });
 	}
 	const expected = loaderValues(home);
-	assert.equal(Object.keys(expected).length, 25);
+	assert.equal(Object.keys(expected).length, 28);
 	for (const [key, value] of Object.entries(expected)) {
 		assert.deepEqual(view(snap, key as SettingKey), { key, value, source: "code", status: "ok" }, key);
 	}
@@ -277,13 +300,13 @@ test("(e) a valid override per owner: source file, status ok, the written value"
 		"mandate-defaults": { ...SCAFFOLD_MANDATE_DEFAULTS, job_cap: 7, token_ceiling: undefined },
 		budgets: { ...DEFAULT_BUDGET_CONFIG, spawn_cap: 5 },
 		"worker-bounds": { wall_clock_seconds: 120 },
-		parent: { compact_at_tokens: 12345 },
-		operator: { compact_at_tokens: 54321 },
+		parent: { compact_at_tokens: 12345, model: "anthropic/claude-opus-5-5" },
+		operator: { compact_at_tokens: 54321, model: "openai/gpt-5" },
 		gate: { schema_version: 1, review_timeout_ms: 60_000 },
 		quality: { verify: true, voters: 3 },
 		capacity: { ...CAPACITY_MIN, quota: { five_hour: 70, balance_margin: null } },
 		update: { enabled: true, interval_min: 30 },
-		routing: { schema_version: 1, allow: ["anthropic/*"], rubric: [] },
+		routing: { schema_version: 1, allow: ["anthropic/*"], rubric: [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }] },
 	};
 	for (const [owner, body] of Object.entries(files)) write(home, owner as SettingFileOwner, body);
 	const snap = snapshot(home, { CP_JOB_WALL_CLOCK_SECONDS: "600" });
@@ -309,6 +332,14 @@ test("(e) a valid override per owner: source file, status ok, the written value"
 	assertView("maintenance.update_enabled", true);
 	assertView("maintenance.update_interval_min", 30);
 	assertView("models.allow", ["anthropic/*"]);
+	assertView("models.rubric", [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }]);
+	assertView("models.parent", "anthropic/claude-opus-5-5");
+	assertView("models.operator", "openai/gpt-5");
+	// The home file beats the env pins; the pins are provenance only and never move the revision.
+	const pinned = snapshot(home, { CP_JOB_WALL_CLOCK_SECONDS: "600", CP_PARENT_MODEL: "env/parent", CP_OPERATOR_MODEL: "env/operator" });
+	assert.deepEqual(view(pinned, "models.parent"), { key: "models.parent", value: "anthropic/claude-opus-5-5", source: "file", status: "ok" });
+	assert.deepEqual(view(pinned, "models.operator"), { key: "models.operator", value: "openai/gpt-5", source: "file", status: "ok" });
+	assert.equal(pinned.revision, snap.revision);
 });
 
 test("(f) an invalid owner file: the consumer's own behaviour, no throw, a redacted error", (t) => {
@@ -327,6 +358,8 @@ test("(f) an invalid owner file: the consumer's own behaviour, no throw, a redac
 	const expected = (key: SettingKey) => {
 		if (key === "grants.token_ceiling") return { value: 0, source: "code", status: "fallback" };
 		if (key === "sessions.operator_compact_at_tokens") return { value: OPERATOR_COMPACT_DEFAULT_TOKENS, source: "code", status: "fallback" };
+		// No valid `model` key in the bytes: unset, exactly what the bridge and cp-operator read.
+		if (key === "models.parent" || key === "models.operator") return { value: null, source: "code", status: "ok" };
 		const disabled = ["parent", "capacity", "update"].includes(fieldOf(key).owner);
 		return { value: null, source: "none", status: disabled ? "disabled" : "refused" };
 	};
@@ -367,6 +400,20 @@ test("(g) env provenance: valid env is env, the home file beats it, a rejected v
 	const filed = snapshot(home, { CP_JOB_WALL_CLOCK_SECONDS: "600" });
 	assert.deepEqual(view(filed, "sessions.wall_clock_seconds"), { key: "sessions.wall_clock_seconds", value: 120, source: "file", status: "ok" });
 	assert.equal(resolveJobHardBounds(undefined, { CP_JOB_WALL_CLOCK_SECONDS: "600" }, home).wall_clock_seconds, 120);
+
+	// Model pins: env when no file key, the file when valid, an invalid key is a fallback to the pin; never in the revision.
+	const env = { CP_PARENT_MODEL: " env/parent ", CP_OPERATOR_MODEL: "env/operator" };
+	const pins = snapshot(home, env);
+	assert.deepEqual(view(pins, "models.parent"), { key: "models.parent", value: "env/parent", source: "env", status: "ok" });
+	assert.deepEqual(view(pins, "models.operator"), { key: "models.operator", value: "env/operator", source: "env", status: "ok" });
+	assert.equal(pins.revision, snapshot(home).revision);
+	write(home, "parent", { compact_at_tokens: 200000, model: "not a model" });
+	write(home, "operator", { model: "file/operator" });
+	const mixed = snapshot(home, env);
+	assert.deepEqual(view(mixed, "models.parent"), { key: "models.parent", value: "env/parent", source: "env", status: "fallback", diagnostic: "invalid model; ignored" });
+	assert.deepEqual(view(mixed, "models.operator"), { key: "models.operator", value: "file/operator", source: "file", status: "ok" });
+	assert.equal(parentModelSetting(home), undefined);
+	assert.equal(operatorModelSetting(ownerFile(home, "operator")), "file/operator");
 });
 
 test("(h) revision: stable on an unchanged home, moves on bytes and env, not on an mtime-only touch", (t) => {

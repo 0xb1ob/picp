@@ -214,7 +214,7 @@ test("operator launcher loads the bridge, pi's built-in MCP extensions and the w
 	assert.match(script, /exec node "\$ROOT\/src\/viewer\/operator\.ts" "\$@"/);
 	const launcher = readFileSync(join(PACKAGE_ROOT, "src/viewer/operator.ts"), "utf8");
 	// The supervise loop (src/operator-relaunch.ts) hands each run its args: the CLI's first, `--session <file>` on a relaunch.
-	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args\), \[\.\.\.OPERATOR_BUILTIN_EXTENSIONS, \.\.\.web\.extensions\]\)/);
+	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args, process\.env, model\), \[\.\.\.OPERATOR_BUILTIN_EXTENSIONS, \.\.\.web\.extensions\]\)/);
 	assert.deepEqual(OPERATOR_BUILTIN_EXTENSIONS, ["builtin:mcp", "builtin:codemode", "builtin:tool-search"]);
 	assert.match(launcher, /firstArgs: piArgs/);
 	assert.equal(script.includes("extensions/command-post") || launcher.includes("extensions/command-post"), false);
@@ -506,6 +506,82 @@ test("model changes without restarting the parent or its live worker and persist
 	t.after(() => next.stop());
 	await next.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
 	assert.equal(next.status().model, "mock/other");
+});
+
+test("start model precedence: data/parent.json model beats the saved control model and a resolved model; an explicit start model beats the file", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	mkdirSync(join(home.path, LAYOUT.sessions), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), JSON.stringify({ model: "mock/saved" }));
+	const startWith = async (options: { model: string; modelExplicit?: boolean }) => {
+		const bridge = new CpBridge();
+		t.after(() => bridge.stop());
+		await bridge.start({ home: home.path, mode: "multi", piBin: FAKE_PARENT, ...options });
+		const model = bridge.status().model;
+		await bridge.stop();
+		return model;
+	};
+	assert.equal(await startWith({ model: "mock/env" }), "mock/saved", "absent model key: the saved control model still wins, as before");
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
+	assert.equal(await startWith({ model: "mock/env" }), "mock/file", "the file beats the saved control model and the env/session model");
+	assert.equal(await startWith({ model: "mock/explicit", modelExplicit: true }), "mock/saved", "an explicit start model skips the file; the saved control model still beats it, as today");
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ model: "not a model" }));
+	assert.equal(await startWith({ model: "mock/env" }), "mock/saved", "an invalid file model is ignored");
+});
+
+test("rotate applies the configured parent model; a set_model rejection keeps the running model, relays one error and still returns", async (t) => {
+	const home = createScratchHome();
+	process.env.FAKE_PARENT_REJECT_MODEL = "mock/bad";
+	const bridge = new CpBridge();
+	t.after(async () => { delete process.env.FAKE_PARENT_REJECT_MODEL; await bridge.stop(); home.cleanup(); });
+	const relays: BridgeRelay[] = [];
+	bridge.onRelay((relay) => relays.push(relay));
+	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
+	const parentFile = join(home.path, LAYOUT.data, "parent.json");
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(parentFile, JSON.stringify({ compact_at_tokens: 1000, model: "mock/next" }));
+	const first = await bridge.rotate();
+	assert.equal(bridge.status().model, "mock/next");
+	assert.equal(bridge.status().sessionFile, first.sessionFile);
+	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model, "mock/next");
+	assert.deepEqual(relays.filter((relay) => relay.kind === "error"), []);
+
+	writeFileSync(parentFile, JSON.stringify({ compact_at_tokens: 1000, model: "mock/bad" }));
+	const second = await bridge.rotate();
+	assert.notEqual(second.sessionFile, first.sessionFile, "the rotation itself completed");
+	assert.equal(bridge.status().model, "mock/next", "the old model stays");
+	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model, "mock/next");
+	const errors = relays.filter((relay) => relay.kind === "error");
+	assert.equal(errors.length, 1);
+	assert.match(errors[0]!.text, /^parent rotate kept mock\/next: set_model mock\/bad rejected: Model not found: mock\/bad$/);
+	assert.equal((await bridge.send("after a refused switch")).reply, "reply: after a refused switch");
+});
+
+test("rotate keeps an explicit start model and a live cp_parent model switch over data/parent.json; absent explicit, the file applies", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
+	const control = () => JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model;
+
+	const explicit = new CpBridge();
+	t.after(() => explicit.stop());
+	await explicit.start({ home: home.path, mode: "multi", model: "mock/explicit", modelExplicit: true, piBin: FAKE_PARENT });
+	assert.equal(explicit.status().model, "mock/explicit");
+	await explicit.rotate();
+	assert.equal(explicit.status().model, "mock/explicit", "an explicit start model survives rotation");
+	assert.equal(control(), "mock/explicit");
+	await explicit.stop();
+
+	const live = new CpBridge();
+	t.after(() => live.stop());
+	await live.start({ home: home.path, mode: "multi", model: "mock/env", piBin: FAKE_PARENT });
+	assert.equal(live.status().model, "mock/file", "no explicit model: the file wins at start");
+	await live.model("mock/live");
+	await live.rotate();
+	assert.equal(live.status().model, "mock/live", "a live cp_parent model switch survives rotation");
+	assert.equal(control(), "mock/live");
 });
 
 test("standing orders seed once, survive operator edits, and deliver beyond 8000 characters", (t) => {
@@ -1714,6 +1790,34 @@ test("cp_parent starts again immediately after stopping the host", { timeout: 90
 	assert.match((await invoke("stop")).content[0]!.text, /stopped code=0/);
 	// An explicit mode: "multi" is accepted unchanged.
 	assert.match((await invoke("start", { mode: "multi" })).content[0]!.text, /started pid=/);
+});
+
+test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an explicit model is sent as modelExplicit and beats the file", { timeout: 90_000 }, async (t) => {
+	const argvFile = join(scratch(), "argv");
+	const ctx = hostHome(t, { CP_PARENT_PI_BIN: FAKE_PARENT, FAKE_PARENT_ARGV: argvFile, CP_PARENT_MODEL: "mock/env" });
+	mkdirSync(join(ctx.home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(ctx.home, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
+	const tools = new Map<string, { execute: (_id: string, params: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }> }>();
+	bridgeExtension({
+		registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never),
+		registerCommand: () => {},
+		on: () => {},
+		sendMessage: () => {},
+	} as never);
+	const tool = tools.get("cp_parent")!;
+	const modelArg = () => { const argv = JSON.parse(lines(argvFile).at(-1)!) as string[]; return argv[argv.indexOf("--model") + 1]; };
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
+	assert.equal(modelArg(), "mock/file");
+	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
+	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home, model: "mock/explicit" })).content[0]!.text, /started pid=/);
+	assert.equal(modelArg(), "mock/explicit", "explicit beats the file (no saved control model in the way)");
+	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
+	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
+	rmSync(join(ctx.home, LAYOUT.data, "parent.json"));
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
+	assert.equal(modelArg(), "mock/env", "no file: resolveParentModel (CP_PARENT_MODEL), as before");
+	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 });
 
 test("cp_parent start retires a dead saved target and attaches to the new live parent holding the lock", { timeout: 90_000 }, async (t) => {

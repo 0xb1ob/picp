@@ -64,7 +64,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Decisions | `#decisions`; `#awaiting`, `#answers` and `#decided` open it scrolled to its Awaiting you, Answers to acknowledge and Decided sections |
 | Sessions | `#sessions?view=you`, `#sessions?view=you&transcript=1&session=<file-id>`, `#sessions?view=parent`, `#sessions?view=workers&id=<id>` |
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
-| Reports / Schedules / Files | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` |
+| Reports / Schedules / Files / Settings | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` / `#settings` |
 | Search | Shell dialog (f7g.7), available from every screen |
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
@@ -86,7 +86,7 @@ Mandates page is removed: Map lanes carry every grant, and `#mandates` and
 Navigation (dashboard audit P4): the desktop sidebar has six items — Overview, Decisions (with the
 awaiting badge), Jobs, Sessions, Reports, More — and the phone tab bar five: Overview, Decisions, Jobs,
 Sessions, More, with Reports under More on phone only. Jobs carries a List | Board | Map toggle on all
-three views, and Board and Map light the Jobs item. More holds Schedules, Files and Notifications on
+three views, and Board and Map light the Jobs item. More holds Schedules, Files, Settings and Notifications on
 both layouts. Decisions is one page (`/api/decisions`, the Awaiting asks as `items` plus the Decided log
 as `decided`): the one-click Awaiting you cards on top, then "Being handled · N (oldest Xm)" — the
 parent's questions the operator session is still handling, collapsed, amber past 10 minutes, and
@@ -425,6 +425,20 @@ alert (shown on the phone too). The picker and chips are hidden while `/api/thre
 sidebar section says `Threads unavailable: <reason>`. Styles: `.session-thread*` in `screens/sessions.css`, `.operator-composer-thread` in `components/control.css`
 (44 px controls, 16 px fields below 900 px, palette tokens only, no inline styles); tags render as text, long ones
 ellipsize in their chip at 390 px and in the 300 px sidebar at 1440 px.
+
+**Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
+`use-settings-control.ts`, `settings-control.ts`). `#settings`, under More, has exactly three sections, each with its own
+**Save** and **Restore defaults** (a `confirm()` first): **Worker models** (one row per `data/routing.json` rubric entry:
+the id and `role · scope · risk · project` chips, a model input, comma-separated fallbacks and a thinking select whose
+blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
+model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
+its source; empty unsets it) and **Grant defaults** (the `grants.*` fields from the catalog). It reads `GET /api/settings`
+on mount and after each write; a write is one `POST /api/settings/apply` (only the drafted keys) or `/restore` with
+`If-Match` and the operator session's `x-cp-control-token` from `/api/operator/control`. A 412 swaps in the fresh
+snapshot and keeps the drafts ("Changed on disk"), a 400 lists its errors, and every control is disabled with the reason
+when the response is not `writable`. The last five audit lines sit at the foot. `screens/settings.css`: one column at
+390 px with 44 px controls and `overflow-wrap: anywhere`; a label/input grid from 900 px. Screenshots:
+`docs/tui-verification/settings-minimal.md`.
 
 ## Live Data
 

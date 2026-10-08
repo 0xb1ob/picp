@@ -325,5 +325,41 @@ test("operatorModelArgs: the wrapper's CP_OPERATOR_MODEL becomes --model, never 
 	}
 	assert.deepEqual(operatorModelArgs(["-c"], {}), ["-c"]);
 	assert.deepEqual(operatorModelArgs([], { CP_OPERATOR_MODEL: " " }), [], "blank is unset");
+	// The data/operator.json model (dashboard Settings) beats the env pin, never an argv model or a resume.
+	assert.deepEqual(operatorModelArgs([], env, "file/m"), ["--model", "file/m"]);
+	assert.deepEqual(operatorModelArgs([], {}, "file/m"), ["--model", "file/m"]);
+	for (const argv of [["--model", "x"], ["--session", "s"], ["-c"]]) assert.deepEqual(operatorModelArgs(argv, env, "file/m"), argv, argv.join(" "));
+});
+
+test("runOperator: the data/operator.json model beats CP_OPERATOR_MODEL; an unreadable file is one stderr line and the env pin", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-operator-model-"));
+	const addressFile = join(home, "address.json");
+	const settings = join(home, LAYOUT.data, "operator.json");
+	mkdirSync(join(home, LAYOUT.data), { recursive: true });
+	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0", CP_OPERATOR_VIEWER: "service", CP_OPERATOR_MODEL: "env/m" });
+	t.after(() => {
+		for (const key of ["FAKE_PI_EXIT_CODE", "FAKE_PI_ADDRESS_FILE", "CP_OPERATOR_WEB", "CP_OPERATOR_VIEWER", "CP_OPERATOR_MODEL"]) delete process.env[key];
+		rmSync(home, { recursive: true, force: true });
+	});
+	const run = async () => {
+		const stderr: string[] = [];
+		const write = process.stderr.write;
+		process.stderr.write = ((chunk: string) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
+		try { assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(home, "relaunch.json") }), 0); }
+		finally { process.stderr.write = write; }
+		const { args } = JSON.parse(readFileSync(addressFile, "utf8")) as { args: string[] };
+		return { model: args.includes("--model") ? args[args.indexOf("--model") + 1] : undefined, stderr };
+	};
+	assert.deepEqual(await run(), { model: "env/m", stderr: [] }, "absent file: the env pin, as before");
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 1000, model: "file/m" }));
+	assert.deepEqual(await run(), { model: "file/m", stderr: [] });
+	writeFileSync(settings, JSON.stringify({ model: "not a model" }));
+	assert.deepEqual(await run(), { model: "env/m", stderr: [] }, "an invalid model is ignored");
+	rmSync(settings);
+	mkdirSync(settings);
+	const unreadable = await run();
+	assert.equal(unreadable.model, "env/m");
+	assert.equal(unreadable.stderr.length, 1);
+	assert.match(unreadable.stderr[0]!, /^cp-operator: operator model setting unreadable \(.*operator\.json: EISDIR.*\); falling back to CP_OPERATOR_MODEL\n$/);
 });
 });

@@ -199,6 +199,10 @@ rl.on("line", (line) => {
 		return;
 	}
 	if (type === "set_model") {
+		if (process.env.FAKE_PARENT_REJECT_MODEL && `${record.provider}/${record.modelId}` === process.env.FAKE_PARENT_REJECT_MODEL) {
+			write({ type: "response", command: type, id, success: false, error: `Model not found: ${record.provider}/${record.modelId}` });
+			return;
+		}
 		write({ type: "response", command: type, id, success: true, data: { provider: record.provider, id: record.modelId } });
 		return;
 	}

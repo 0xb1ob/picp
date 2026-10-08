@@ -12,8 +12,8 @@ import { DEFAULT_BUDGET_CONFIG, LAYOUT, SETTING_FIELDS, type SettingFileOwner, t
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
 import { readSettings } from "../src/settings.ts";
 import { acquireSettingsLock } from "../src/settings-lock.ts";
-import { applySettings, INSTALLER_UPDATE_SEED, RESTORE_ACTIONS, type SettingsApplyInput, settingsAuditFile, type SettingsWriteRequest, type SettingsWriteSeams } from "../src/settings-write.ts";
-import { createScratchHome } from "./harness/index.ts";
+import { applySettings, INSTALLER_UPDATE_SEED, mergeRubric, RESTORE_ACTIONS, restoreShippedRubric, type SettingsApplyInput, settingsAuditFile, type SettingsWriteRequest, type SettingsWriteSeams } from "../src/settings-write.ts";
+import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const OWNER_FILE: Record<Exclude<SettingFileOwner, "routing">, string> = {
 	"mandate-defaults": LAYOUT.mandateDefaultsFile,
@@ -107,6 +107,9 @@ test("restore table: RESTORE_ACTIONS is pinned; restore all deletes or writes pe
 		"sessions.wall_clock_seconds": "default",
 		"sessions.parent_compact_at_tokens": "default",
 		"sessions.operator_compact_at_tokens": "delete",
+		"models.rubric": "shipped_rubric",
+		"models.parent": "delete",
+		"models.operator": "delete",
 		"review.timeout_ms": "delete",
 		"review.quality_verify": "delete",
 		"review.quality_completeness": "delete",
@@ -364,4 +367,127 @@ test("Settings writes preserve the hand-added PR3 policy keys (cp-7re9)", (t) =>
 	const refused = apply(broken, { mode: "set", changes: { "sessions.wall_clock_seconds": 200 } });
 	assert.equal(refused.status, 409, JSON.stringify(refused));
 	assert.deepEqual(readFileSync(file(broken, "worker-bounds")), before);
+});
+
+test("models.parent/models.operator: set into an absent file keeps parent compaction on; null unsets; restore deletes; bad refs are 400", (t) => {
+	const home = scratch(t);
+	const set = apply(home, { mode: "set", changes: { "models.parent": "anthropic/claude-opus-5-5", "models.operator": "openai/gpt-5" } });
+	assert.deepEqual([set.status, set.state], [200, "applied"], JSON.stringify(set));
+	assert.deepEqual(json(home, "parent"), { compact_at_tokens: 200000, model: "anthropic/claude-opus-5-5" }, "the absent-file threshold is written beside the model");
+	assert.deepEqual(json(home, "operator"), { model: "openai/gpt-5" });
+	assert.deepEqual(view(set.snapshot!, "models.parent"), { key: "models.parent", value: "anthropic/claude-opus-5-5", source: "file", status: "ok" });
+	assert.deepEqual(view(set.snapshot!, "sessions.parent_compact_at_tokens"), { key: "sessions.parent_compact_at_tokens", value: 200000, source: "file", status: "ok" });
+	assert.equal(set.snapshot!.owners.find((row) => row.owner === "parent")?.state, "valid");
+
+	// Unset with an env pin present: the key goes, never a stored null, and the read-back is the pin.
+	const unset = apply(home, { mode: "set", changes: { "models.parent": null } }, { env: { CP_PARENT_MODEL: "env/parent" } });
+	assert.deepEqual([unset.status, unset.state], [200, "applied"], JSON.stringify(unset));
+	assert.deepEqual(json(home, "parent"), { compact_at_tokens: 200000 });
+	assert.deepEqual(unset.changes!.map((change) => [change.key, change.action, change.new]), [["models.parent", "delete", null]]);
+	assert.deepEqual(view(unset.snapshot!, "models.parent"), { key: "models.parent", value: "env/parent", source: "env", status: "ok" });
+	assert.deepEqual([apply(home, { mode: "set", changes: { "models.parent": null } }).state], ["unchanged"]);
+
+	const restored = apply(home, { mode: "restore", keys: ["models.parent", "models.operator"] });
+	assert.deepEqual([restored.status, restored.state], [200, "applied"], JSON.stringify(restored));
+	assert.deepEqual(json(home, "operator"), {});
+	for (const value of ["nope", "a b/c", "", 5]) {
+		const bad = apply(home, { mode: "set", changes: { "models.operator": value } });
+		assert.equal(bad.status, 400, JSON.stringify(value));
+		assert.match(bad.errors?.[0] ?? "", /^models\.operator: /);
+	}
+});
+
+const RUBRIC = [
+	{ id: "risky", role: "researcher", risk: "high", model: "anthropic/claude-opus-5-5", fallbacks: ["openai/gpt-6.1-sol"], thinking: "xhigh", note: "legacy role word" },
+	{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-opus-5-5" },
+	{ id: "custom", role: "implementer", project: "demo", scope: ["S"], model: "openai/gpt-5", fallbacks: ["anthropic/claude-haiku"] },
+];
+const ROUTING_DOC = { schema_version: 1, allow: ["anthropic/*", "openai/*"], deny_by_role: { implementer: ["openai/gpt-4*"] }, rubric: RUBRIC };
+const routingFile = (home: string) => join(home, LAYOUT.routingFile);
+const routing = (home: string) => JSON.parse(readFileSync(routingFile(home), "utf8"));
+
+test("models.rubric set: only model, fallbacks and thinking change in place; legacy roles, allow and deny_by_role survive", (t) => {
+	const home = scratch(t);
+	writeFileSync(routingFile(home), JSON.stringify(ROUTING_DOC));
+	const rows = structuredClone(view(snap(home), "models.rubric")!.value) as Array<Record<string, unknown>>;
+	assert.equal(rows[0]!.role, "planner", "the snapshot shows the legacy word mapped forward");
+	rows[0]!.model = "openai/gpt-6.1-sol";
+	rows[0]!.fallbacks = [];
+	rows[1]!.thinking = "high";
+	rows[1]!.fallbacks = ["openai/gpt-6.1-sol"];
+	delete rows[2]!.fallbacks;
+	const result = apply(home, { mode: "set", changes: { "models.rubric": rows } });
+	assert.deepEqual([result.status, result.state], [200, "applied"], JSON.stringify(result));
+	assert.deepEqual(routing(home), {
+		...ROUTING_DOC,
+		rubric: [
+			{ id: "risky", role: "researcher", risk: "high", model: "openai/gpt-6.1-sol", thinking: "xhigh", note: "legacy role word" },
+			{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-opus-5-5", thinking: "high", fallbacks: ["openai/gpt-6.1-sol"] },
+			{ id: "custom", role: "implementer", project: "demo", scope: ["S"], model: "openai/gpt-5" },
+		],
+	});
+	assert.equal(view(result.snapshot!, "models.rubric")?.source, "file");
+	assert.deepEqual([apply(home, { mode: "set", changes: { "models.rubric": view(snap(home), "models.rubric")!.value } }).state], ["unchanged"]);
+
+	const before = readFileSync(routingFile(home));
+	const fixed = structuredClone(view(snap(home), "models.rubric")!.value) as Array<Record<string, unknown>>;
+	fixed[1]!.role = "implementer";
+	fixed[2]!.note = "edited";
+	const immutable = apply(home, { mode: "set", changes: { "models.rubric": fixed } });
+	assert.equal(immutable.status, 400, JSON.stringify(immutable));
+	assert.deepEqual(immutable.errors, ["row reviews: only model, fallbacks and thinking may change", "row custom: only model, fallbacks and thinking may change"]);
+	const current = view(snap(home), "models.rubric")!.value as Array<Record<string, unknown>>;
+	const reordered = apply(home, { mode: "set", changes: { "models.rubric": [current[1], current[0], current[2]] } });
+	assert.equal(reordered.status, 400);
+	assert.deepEqual(reordered.errors, ["row risky: only model, fallbacks and thinking may change", "row reviews: only model, fallbacks and thinking may change"]);
+	const shorter = apply(home, { mode: "set", changes: { "models.rubric": current.slice(0, 2) } });
+	assert.equal(shorter.status, 400);
+	assert.match(shorter.errors?.[0] ?? "", /2 rows sent for 3/);
+	assert.equal(apply(home, { mode: "set", changes: { "models.rubric": [{ ...current[0], model: "" }, current[1], current[2]] } }).status, 400, "schema-invalid rows never reach the merge");
+	assert.ok(readFileSync(routingFile(home)).equals(before), "every refusal leaves the bytes");
+	assert.throws(() => mergeRubric(RUBRIC, [{ ...RUBRIC[0], role: "planner", id: "other" }]), /only model, fallbacks and thinking/);
+});
+
+test("models.rubric restore: the shipped model/fallbacks/thinking per matching row id; other rows untouched; absent routing.json is 409 / no-op", (t) => {
+	const home = scratch(t);
+	const template = { schema_version: 1, allow: ["*/*"], rubric: [
+		{ id: "risky", role: "planner", risk: "high", model: "anthropic/claude-opus-5-5", thinking: "high" },
+		{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-sonnet-5-5", fallbacks: ["openai/gpt-6.1-sol"] },
+		{ id: "shipped-only", role: "implementer", model: "anthropic/claude-haiku" },
+	] };
+	writeFileSync(routingFile(home), JSON.stringify(ROUTING_DOC));
+	const seams: SettingsWriteSeams = { shippedRouting: () => template };
+	const result = apply(home, { mode: "restore", keys: ["models.rubric"] }, {}, seams);
+	assert.deepEqual([result.status, result.state], [200, "applied"], JSON.stringify(result));
+	assert.deepEqual(routing(home).rubric, [
+		{ id: "risky", role: "researcher", risk: "high", model: "anthropic/claude-opus-5-5", thinking: "high", note: "legacy role word" },
+		{ id: "reviews", role: "gate-reviewer", model: "anthropic/claude-sonnet-5-5", fallbacks: ["openai/gpt-6.1-sol"] },
+		RUBRIC[2],
+	], "fallbacks the template lacks are deleted; the hand-added row stays; a template-only row is not added");
+	assert.deepEqual(routing(home).deny_by_role, ROUTING_DOC.deny_by_role);
+	assert.deepEqual(restoreShippedRubric([{ id: "x", role: "planner", model: "a/b" }], template), [{ id: "x", role: "planner", model: "a/b" }]);
+
+	const unreadable = apply(home, { mode: "restore", keys: ["models.rubric"] }, {}, { shippedRouting: () => { throw new Error("ENOENT"); } });
+	assert.equal(unreadable.status, 409);
+	assert.match(unreadable.error ?? "", /shipped routing defaults .* unreadable/);
+
+	// The real shipped template: an edited copy of it restores to the file byte-for-byte in value.
+	const shipped = JSON.parse(readFileSync(join(REPO_ROOT, "defaults/routing.default.json"), "utf8"));
+	const edited = structuredClone(shipped);
+	edited.rubric[0].model = "openai/gpt-5";
+	delete edited.rubric[1].fallbacks;
+	edited.rubric[2].thinking = "low";
+	writeFileSync(routingFile(home), JSON.stringify(edited));
+	const real = apply(home, { mode: "restore", section: "models" });
+	assert.deepEqual([real.status, real.state], [200, "applied"], JSON.stringify(real));
+	assert.deepEqual(routing(home), shipped);
+
+	const absent = scratch(t);
+	const before = listing(absent);
+	const refused = apply(absent, { mode: "set", changes: { "models.rubric": [] } });
+	assert.equal(refused.status, 409);
+	assert.match(refused.error ?? "", /routing\.json is absent: worker routing uses each profile's model/);
+	assert.deepEqual([apply(absent, { mode: "restore", keys: ["models.rubric"] }).state], ["unchanged"]);
+	assert.equal(existsSync(routingFile(absent)), false);
+	assert.deepEqual(listing(absent).filter((row) => !row.startsWith(relative(absent, settingsAuditFile(absent)))), before);
 });

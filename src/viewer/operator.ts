@@ -7,8 +7,8 @@
  * and on SIGINT, SIGTERM and SIGHUP. A viewer already listening on the port is
  * reused only for the same home, never killed. A remote seat is ssh or tmux onto this session.
  * With `CP_OPERATOR_VIEWER=service` (the installed `cp-operator` wrapper) `cp-view.service`
- * serves the dashboard and no session viewer starts; its `CP_OPERATOR_MODEL` becomes pi's `--model`
- * (`operatorModelArgs`: never over an explicit model flag or a resumed session).
+ * serves the dashboard and no session viewer starts; `data/operator.json` `model` (dashboard Settings), else its
+ * `CP_OPERATOR_MODEL`, becomes pi's `--model` (`operatorModelArgs`: never over an explicit model flag or a resumed session).
  * Restart session (cp-aqxl): pi gets `CP_OPERATOR_RELAUNCH_FILE`; when pi exits leaving a marker there that names its
  * own pid (the dashboard restart), pi is relaunched here with exactly `--session <file>`, at most 3 times per 10 min.
  */
@@ -17,7 +17,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
+import { layoutForHome } from "../contracts.ts";
 import { operatorPiArgs } from "../cp-bridge.ts";
+import { operatorModelSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
 import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
@@ -103,11 +105,25 @@ export async function startViewer(options: ViewerOptions = {}): Promise<Operator
 /** Flags that pick the model, or resume a session (pi restores its recorded model): the installed model never overrides them. */
 const MODEL_CHOOSING_FLAGS = ["--model", "--models", "--provider", "-c", "--continue", "-r", "--resume", "--session", "--session-id", "--fork"];
 
-/** `--model $CP_OPERATOR_MODEL` (the wrapper's pin) ahead of `piArgs`, unless they already pick a model or resume a session. */
-export function operatorModelArgs(piArgs: readonly string[], env: NodeJS.ProcessEnv = process.env): string[] {
-	const model = env.CP_OPERATOR_MODEL?.trim();
+/**
+ * `--model <m>` ahead of `piArgs`, unless they already pick a model or resume a session. `<m>` is the
+ * `data/operator.json` `model` (dashboard Settings, `configured`), else the wrapper's `CP_OPERATOR_MODEL` pin.
+ */
+export function operatorModelArgs(piArgs: readonly string[], env: NodeJS.ProcessEnv = process.env, configured?: string): string[] {
+	const model = configured ?? env.CP_OPERATOR_MODEL?.trim();
 	if (!model || piArgs.some((arg) => MODEL_CHOOSING_FLAGS.includes(arg.split("=", 1)[0] as string))) return [...piArgs];
 	return ["--model", model, ...piArgs];
+}
+
+/** `data/operator.json` `model` of `home`; unreadable is one stderr line and undefined (the env pin applies). */
+export function configuredOperatorModel(home: string | undefined): string | undefined {
+	if (!home) return undefined;
+	const file = join(home, layoutForHome("multi", home).data, "operator.json");
+	try { return operatorModelSetting(file); }
+	catch (error) {
+		process.stderr.write(`cp-operator: operator model setting unreadable (${file}: ${(error as Error).message}); falling back to CP_OPERATOR_MODEL\n`);
+		return undefined;
+	}
 }
 
 /** Run one operator session to its exit code, with the viewer's lifetime bound to it. */
@@ -136,6 +152,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	process.on("exit", stopViewer);
 	// Restart session: pi gets the marker path; a marker naming the exited child relaunches it here (src/operator-relaunch.ts).
 	const relaunchFile = options.relaunchFile ?? defaultRelaunchFile();
+	const model = configuredOperatorModel(options.viewer?.home ?? targetHome());
 	let current: ChildProcess | undefined;
 	let signalled = false;
 	const onSignal = (signal: NodeJS.Signals) => {
@@ -146,7 +163,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
 	try {
 		return await superviseOperatorPi({
-			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions]), {
+			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, model), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions]), {
 				stdio: "inherit",
 				env: { ...process.env, ...env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
 			}),
@@ -172,6 +189,11 @@ function defaultRelaunchFile(): string | undefined {
 		process.stderr.write(`cp-operator: Restart session unavailable (no home resolved: ${(error as Error).message})\n`);
 		return undefined;
 	}
+}
+
+/** The selected home, or undefined: no home resolved is already one stderr line from `defaultRelaunchFile`. */
+function targetHome(): string | undefined {
+	try { return resolveOperatorTarget().home; } catch { return undefined; }
 }
 
 if (import.meta.main) {

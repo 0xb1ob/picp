@@ -11,6 +11,8 @@ import { JobDetail } from "./screens/JobDetail.tsx";
 import { Board } from "./screens/Board.tsx";
 import { Reports } from "./screens/Reports.tsx";
 import { Schedules } from "./screens/Schedules.tsx";
+import { Settings } from "./screens/Settings.tsx";
+import { useSettingsControl } from "./use-settings-control.ts";
 import { useRoute } from "./use-route.ts";
 import { useScreenData } from "./use-screen-data.ts";
 import { Shell, ShellContext } from "./components/Shell.tsx";
@@ -47,6 +49,7 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
 export function App() {
  const current = useRoute();
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
+ if (current.screen === "settings") return <SettingsPage current={current}/>;
  return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
@@ -64,6 +67,12 @@ function DecisionPage({current}: {current:Route}) {
   {resource.error && <p role="alert" class="overview-error">{resource.error}{resource.data && " · showing last recorded data"}</p>}
   {resource.data ? <Decisions data={resource.data} control={control} answers={answers}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
  </Shell>;
+}
+/** Settings (under More): its own GET and writes, no stream; once read it reloads only after a write, so the shell says stale, never live. */
+function SettingsPage({current}: {current:Route}) {
+ const view = useSettingsControl();
+ const data = view.status && !("error" in view.status) ? view.status : null;
+ return <Shell current={current} awaiting={null} status={!view.status ? "connecting" : data ? "stale" : "offline"} updatedAt={data?.generated_at ?? null}><Settings view={view}/></Shell>;
 }
 function JobsRoute({current}:{current:Route}) {
  const url = current.screen === "job" ? `/api/job/${encodeURIComponent(current.jobId!)}` : `/api/${current.screen}`;

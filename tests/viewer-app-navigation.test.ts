@@ -41,7 +41,7 @@ test("audit P4: every pre-consolidation hash keeps resolving, and the nav shows 
  // The hashes the app answered before phase 4, each with the screen (and section) it lands on now.
  for (const [hash,screen,section] of [
   ["#overview","overview",null],["#more","more",null],["#awaiting","decisions","awaiting"],["#decided","decisions","decided"],
-  ["#jobs","jobs",null],["#board","board",null],["#map","map",null],["#reports","reports",null],["#schedules","schedules",null],
+  ["#jobs","jobs",null],["#board","board",null],["#map","map",null],["#reports","reports",null],["#schedules","schedules",null],["#settings","settings",null],
   ["#files","files",null],["#sessions","sessions",null],["#job/cp-a","job",null],["#overview/awaiting","overview","awaiting"],["#dashboard","jobs",null],
  ] as const) {
   assert.equal(route(hash).screen,screen,hash); assert.equal(route(hash).section,section,hash);
@@ -51,5 +51,5 @@ test("audit P4: every pre-consolidation hash keeps resolving, and the nav shows 
  assert.deepEqual(primaryNav(true),["overview","decisions","jobs","sessions","reports","more"]);
  assert.deepEqual(primaryNav(false),["overview","decisions","jobs","sessions","more"]);
  // Board and Map light Jobs; Schedules and Files light More (Reports too, on phone only).
- for (const [screen,desktop,owner] of [["board",true,"jobs"],["map",false,"jobs"],["job",true,"jobs"],["schedules",true,"more"],["files",false,"more"],["reports",true,"reports"],["reports",false,"more"],["decisions",false,"decisions"]] as const) assert.equal(navOwner(screen,desktop),owner,`${screen} ${desktop}`);
+ for (const [screen,desktop,owner] of [["board",true,"jobs"],["map",false,"jobs"],["job",true,"jobs"],["schedules",true,"more"],["files",false,"more"],["settings",true,"more"],["settings",false,"more"],["reports",true,"reports"],["reports",false,"more"],["decisions",false,"decisions"]] as const) assert.equal(navOwner(screen,desktop),owner,`${screen} ${desktop}`);
 });

@@ -124,7 +124,7 @@ test("settings write routes: the session's outcomes pass through with no viewer 
 	const status = await call(port, SETTINGS_PATH);
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 28);
+	assert.equal((status.body.catalog as unknown[]).length, 31);
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
 

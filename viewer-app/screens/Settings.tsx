@@ -1,0 +1,110 @@
+import type { ComponentChildren } from "preact";
+import { useState } from "preact/hooks";
+import type { RoutingRule, SettingField, SettingKey, SettingValue, ThinkingLevel } from "../../src/contracts.ts";
+import type { SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
+import { PageHeader } from "../components/PageHeader.tsx";
+import { type Drafts, fieldOf, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
+import "./settings.css";
+
+/** The browser bundle takes no values from src/contracts.ts; the type pins this list to `ThinkingLevel`. */
+const THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const MODEL_PATTERN = "[^\\s/]+/\\S+";
+const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.operator"];
+const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
+const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
+const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
+const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
+
+function auditLine(row: SettingsAuditRow): string {
+ const reason = typeof row.reason === "string" ? `: ${row.reason}` : "";
+ const mode = typeof row.mode === "string" ? ` ${row.mode}` : "";
+ return `${row.at} · ${row.type}${mode}${reason}`;
+}
+
+function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; children: ComponentChildren}) {
+ const changes = pick(drafts, keys);
+ const save = async () => { if (await view.save(changes)) setDrafts(current => omit(current, keys)); };
+ const reset = async () => {
+  if (!restore || !(globalThis.confirm?.(restoreText) ?? true)) return;
+  if (await view.restore(restore)) setDrafts(current => omit(current, keys));
+ };
+ return <section class="settings-section" aria-label={title}>
+  <h2>{title}</h2>
+  <p class="settings-help">{help}</p>
+  {children}
+  {restore && <div class="settings-actions">
+   <button type="button" class="settings-primary" disabled={disabled || !Object.keys(changes).length} onClick={() => void save()}>Save</button>
+   <button type="button" disabled={disabled} onClick={() => void reset()}>Restore defaults</button>
+  </div>}
+ </section>;
+}
+
+function Rubric({rows, setRow, disabled}: {rows: RoutingRule[]; setRow: (index: number, patch: Partial<RoutingRule>) => void; disabled: boolean}) {
+ return <ol class="settings-rules">{rows.map((row, index) => <li key={row.id} class="settings-rule">
+  <div class="settings-rule-head"><code>{row.id}</code><span class="settings-chips" title={row.note}>{[row.role, row.scope?.join("/"), row.risk && `risk ${row.risk}`, row.project].filter(Boolean).join(" · ")}</span></div>
+  <label>Model<input type="text" value={row.model} pattern={MODEL_PATTERN} required disabled={disabled} spellcheck={false} onInput={event => setRow(index, {model: event.currentTarget.value.trim()})}/></label>
+  <label>Fallbacks<input type="text" value={(row.fallbacks ?? []).join(", ")} placeholder="provider/model, … (up to 4)" disabled={disabled} spellcheck={false} onChange={event => setRow(index, {fallbacks: lines(event.currentTarget.value)})}/></label>
+  <label>Thinking<select value={row.thinking ?? ""} disabled={disabled} onChange={event => setRow(index, {thinking: (event.currentTarget.value || undefined) as ThinkingLevel | undefined})}>
+   <option value="">profile default</option>
+   {THINKING.map(level => <option key={level} value={level}>{level}</option>)}
+  </select></label>
+ </li>)}</ol>;
+}
+
+function Field({field, value, source, set, disabled}: {field: SettingField; value: SettingValue | undefined; source: string | undefined; set: (value: SettingValue) => void; disabled: boolean}) {
+ const id = `setting-${field.key.replace(/\./g, "-")}`;
+ const meta = <span class="settings-meta">{source ? `from ${source}` : ""}</span>;
+ if (field.type === "enum_list") {
+  const chosen = Array.isArray(value) ? value as string[] : [];
+  return <fieldset class="settings-field" disabled={disabled}><legend>{field.label} {meta}</legend><p class="settings-help">{field.help}</p>
+   <div class="settings-checks">{(field.enum ?? []).map(option => <label key={option}><input type="checkbox" checked={chosen.includes(option)} onChange={event => set(event.currentTarget.checked ? [...chosen, option] : chosen.filter(item => item !== option))}/>{option}</label>)}</div>
+  </fieldset>;
+ }
+ const input = field.type === "string_list"
+  ? <textarea id={id} rows={3} disabled={disabled} onChange={event => set(lines(event.currentTarget.value))} value={Array.isArray(value) ? (value as string[]).join("\n") : ""}/>
+  : field.type === "model_ref"
+   ? <input id={id} type="text" value={typeof value === "string" ? value : ""} pattern={MODEL_PATTERN} placeholder="unset · provider/model" disabled={disabled} spellcheck={false} onInput={event => set(event.currentTarget.value.trim() || null)}/>
+   : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" ? 1 : "any"} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
+ return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}</div>;
+}
+
+export function Settings({view}: {view: SettingsView}) {
+ const [drafts, setDrafts] = useState<Drafts>({});
+ const status = view.status;
+ const header = <header class="settings-heading"><PageHeader title="Settings"/><p>Worker, parent and operator models, and the defaults new grants start from. Saved to this home's owner files.</p></header>;
+ if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p></div>;
+ if ("error" in status || !status.snapshot || !status.catalog) return <div class="settings-screen">{header}<p role="alert" class="overview-error">Settings unavailable: {"error" in status ? status.error : status.reason ?? "no snapshot"}</p></div>;
+ const data: SettingsResponse = status;
+ const disabled = !data.writable || !view.token || view.busy;
+ const set = (key: SettingKey, value: SettingValue) => setDrafts(current => ({...current, [key]: value}));
+ const view_ = (key: SettingKey) => data.snapshot?.fields.find(field => field.key === key);
+ const routingAbsent = status.snapshot.owners.find(owner => owner.owner === "routing")?.state === "absent";
+ const rows = (valueOf(data, drafts, "models.rubric") ?? []) as RoutingRule[];
+ const setRow = (index: number, patch: Partial<RoutingRule>) => set("models.rubric", rows.map((row, at) => {
+  if (at !== index) return row;
+  const next: RoutingRule = {...row, ...patch};
+  if (!next.thinking) delete next.thinking;
+  if (!next.fallbacks?.length) delete next.fallbacks;
+  return next;
+ }) as SettingValue);
+ const field = (key: SettingKey) => {
+  const spec = fieldOf(data, key);
+  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} set={value => set(key, value)} disabled={disabled}/>;
+ };
+ const notice = view.notice;
+ return <div class="settings-screen">
+  {header}
+  {!data.writable || !view.token ? <p role="status" class="settings-readonly">Read only: {data.reason ?? "no operator session serves dashboard control; start it to change settings"}</p> : null}
+  {notice && <div role={notice.kind === "ok" ? "status" : "alert"} class={`settings-notice settings-${notice.kind}`}><p>{notice.text}</p>{notice.errors.length > 0 && <ul>{notice.errors.map(error => <li key={error}>{error}</li>)}</ul>}</div>}
+  <Section title="Worker models" help="Model, fallbacks and thinking per data/routing.json rubric row; the rest of each row is fixed here. Applies at the next dispatch." keys={["models.rubric"]} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ["models.rubric"]}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches? Rows you added stay." disabled={disabled}>
+   {routingAbsent ? <p class="settings-readonly">No data/routing.json: workers use each profile's own model.</p> : <Rubric rows={rows} setRow={setRow} disabled={disabled}/>}
+  </Section>
+  <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models?" disabled={disabled}>
+   {PEOPLE_MODELS.map(field)}
+  </Section>
+  <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled}>
+   {GRANTS.map(field)}
+  </Section>
+  <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>
+ </div>;
+}
