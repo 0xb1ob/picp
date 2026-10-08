@@ -162,7 +162,7 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "");
 });
 
-test("cp-7re9: a script job in a denied project is refused by preflight project_denied, before the risk:high gate and before any lease", async (t) => {
+test("cp-7re9: a script job in a denied project is refused by preflight project_denied, before the risk:high gate and before any lease", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 30_000 }, async (t) => {
  const home = createScratchHome();
  const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
  t.after(() => { home.cleanup(); repo.cleanup(); });
