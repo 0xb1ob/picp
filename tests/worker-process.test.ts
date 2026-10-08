@@ -787,3 +787,25 @@ test("decoder: a message_update is a delta, never a cumulative message snapshot"
 	assert.equal(worker.busy, false);
 	assert.equal(worker.settledCount, 1);
 });
+
+test("a request to a worker that closed its stdin rejects; the EPIPE is never an uncaught error", { timeout: 10_000 }, async () => {
+	// CI run 37755884836: a fake parent going away mid-write surfaced `write EPIPE` as an uncaught
+	// stdin 'error' event, failing whichever test was running. The write callback owns that failure.
+	let ready!: () => void;
+	const started = new Promise<void>((resolve) => (ready = resolve));
+	const worker = WorkerProcess.spawn({
+		cwd: process.cwd(),
+		model: "mock/does-not-matter",
+		piBin: process.execPath,
+		argv: ["-e", "require('node:fs').closeSync(0); process.stdout.write(JSON.stringify({ type: 'agent_start' }) + '\\n'); setInterval(() => {}, 1000)"],
+		onEvent: (event) => event.type === "agent_start" && ready(),
+	});
+	try {
+		await started;
+		await assert.rejects(worker.request("get_state", {}, 5_000), /failed to write get_state to worker: .*EPIPE|stdin is closed/);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	} finally {
+		process.kill(worker.pid as number);
+		await worker.closed;
+	}
+});

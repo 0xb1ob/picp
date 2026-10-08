@@ -36,20 +36,17 @@ import {
 } from "./merge-ask.ts";
 import { holdsParentLock } from "./parent-lock.ts";
 import { lastFiledEnvelopeFile } from "./supersede.ts";
+import { loadBudgetConfig } from "./budget-config.ts";
 import {
 	type AnsweredDecision,
 	type BudgetConfig,
-	BudgetConfigSchema,
 	type AnswerCardRecord,
 	ContractError,
-	DEFAULT_BUDGET_CONFIG,
 	isoTimestamp,
 	isScriptFleetRecord,
-	LAYOUT,
 	paths,
 	type DoctorReport,
 	type StatusSnapshot,
-	validate,
 } from "./contracts.ts";
 import { CapacityReader } from "./capacity.ts";
 import { DiffReview, type DiffReviewRequest, type DiffReviewStart } from "./diff-review.ts";
@@ -1095,19 +1092,7 @@ export class CommandPost {
 	}
 
 	budgets(): BudgetConfig {
-		const file = join(this.home, LAYOUT.budgetsFile);
-		if (!existsSync(file)) return DEFAULT_BUDGET_CONFIG;
-		let input: unknown;
-		try {
-			input = JSON.parse(readFileSync(file, "utf8"));
-		} catch (error) {
-			throw new ContractError(`${file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
-		}
-		const result = validate<BudgetConfig>(BudgetConfigSchema, input);
-		if (!result.ok) {
-			throw new Error(`${file} violates the budget contract:\n  ${result.errors.join("\n  ")}`);
-		}
-		return result.value;
+		return loadBudgetConfig(this.home);
 	}
 
 	/** The live registry, or nothing. Resolved per call, never cached. */

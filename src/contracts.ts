@@ -39,3 +39,4 @@ export * from "./contracts/modes.ts";
 export * from "./contracts/layout.ts";
 export * from "./contracts/projects.ts";
 export * from "./contracts/trackers.ts";
+export * from "./contracts/settings.ts";

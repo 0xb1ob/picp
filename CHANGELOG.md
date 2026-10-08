@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Settings catalog and read-only snapshot (cp-kdow)
+
+`src/contracts/settings.ts` adds one frozen 28-field catalog of the home's per-machine settings (`SETTING_KEYS`, `SETTING_FIELDS`, `validateSettingValue`) and the closed `SettingsSnapshotSchema`. `readSettings(home, env)` (`src/settings.ts`) reports each field's effective value, source and status, plus per-owner fingerprints and a revision. It does this by calling every owner's existing loader per call, and it never writes or caches. No runtime caller uses it yet. `CommandPost.budgets()` now delegates to `loadBudgetConfig` (`src/budget-config.ts`), with the same outcomes. Migration: none; the contract surface only grows.
+
 ### Operator chat queued bubbles (cp-chat-queued-bubbles-xsa8)
 
 Every composer send stays visible in a FIFO bubble after the latest transcript entry, with text, attachment chips, send time and queue position. Delivered status waits for actual transcript arrival; matching dashboard ids promote without a gap or duplicate, including transcript arrival before the POST acknowledgement via the optional `client_id`. Reload reconstructs the queue from control/inbox journals and stored unseen sends; late failures and dropped holds stay visible with Retry/Discard. Thread selection and bottom-follow include pending bubbles, with accessible state announcements and light/dark phone/desktop styles. Migration: none; control status adds optional `sends`/`sends_error`, message bodies accept optional `client_id`, and request audit lines can record the existing thread tag.
