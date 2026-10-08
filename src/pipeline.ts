@@ -38,6 +38,7 @@ import type { ArtifactStore } from "./artifacts.ts";
 import type { AnsweredSink } from "./answered.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import type { MandateStore, MandateUsageJob } from "./mandate.ts";
+import { inFlightRecord, selectGrant } from "./mandate-permission.ts";
 import { autoDecideCheckpoint } from "./mandate-autodecide.ts";
 import { gateOverride, type EscalationStore, raiseForGate } from "./escalation.ts";
 import {
@@ -1376,7 +1377,7 @@ export class PipelineRunner {
 			would_make_wrong: "a requirement the artifact does not cover",
 			verified: (verdict.reasons[0] ?? "gate passed").slice(0, 400),
 		};
-		const blocking = this.#blockingMandate();
+		const blocking = this.#blockingMandate(record);
 		await raisePlanApproval(store, {
 			researchId: record.research_id,
 			shipId: record.ship_id,
@@ -1388,11 +1389,14 @@ export class PipelineRunner {
 		});
 	}
 
-	#blockingMandate(): { mandate_id: string; mandate_clause: string } | undefined {
-		const hit = (this.#options.mandates?.list() ?? []).find(
-			(mandate) => mandate.status === "active" && mandate.ask_on.includes("plan_approval"),
-		);
-		if (!hit) return undefined;
+	#blockingMandate(record: PipelineRecord): { mandate_id: string; mandate_clause: string } | undefined {
+		const mandates = this.#options.mandates;
+		if (!mandates) return undefined;
+		const job = { jobId: record.ship_id, project: record.project, jobKind: "ship" as const, ...mandates.scheduleOf(record.ship_id) };
+		const flight = inFlightRecord(job, this.#mandateJobs());
+		const selected = selectGrant(mandates.list(), "implement", { ...job, startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now());
+		if (selected?.at.standing !== "permit" || selected.at.cause !== "active" || !selected.grant.ask_on.includes("plan_approval")) return undefined;
+		const hit = selected.grant;
 		return { mandate_id: hit.id, mandate_clause: `${hit.id}: ask_on includes plan_approval` };
 	}
 

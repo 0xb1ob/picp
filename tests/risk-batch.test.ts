@@ -42,6 +42,25 @@ async function setup(t: { after(fn: () => void): void }) {
 	return { home, ledger, mandates, escalations, job, refuse, bytes, deps };
 }
 
+test("tv8: overlapping askers use one selected grant; selected nonasking and requested-ID mismatch write nothing", async (t) => {
+	const s = await setup(t);
+	const a = await s.job("a", "high"); const b = await s.job("b", "high");
+	const broad = grant(s.mandates);
+	const selected = grant(s.mandates, [a, b]);
+	await s.refuse(a); await s.refuse(b);
+	const before = s.bytes();
+	await assert.rejects(batchRiskHigh(s.deps, { jobIds: [a, b], mandateId: broad.id }), new RegExp(`asking mandate is ${selected.id}`));
+	assert.equal(s.bytes(), before);
+	s.mandates.save({ ...selected, ask_on: [] });
+	await assert.rejects(batchRiskHigh(s.deps, { jobIds: [a, b] }), /no active mandate with ask_on risk:high covers/);
+	assert.equal(s.bytes(), before, "nonselected asker cannot lend authority");
+	s.mandates.save(selected);
+	const result = await batchRiskHigh(s.deps, { jobIds: [a, b] });
+	assert.equal(result.escalation.mandate_id, selected.id);
+	await s.escalations.answer(result.escalation.id, { answer: "approve", by: "operator-quote" });
+	await s.mandates.assertDispatchAllowed({ jobId: a, project: PROJECT, risk: "high" });
+});
+
 test("batchRiskHigh: every refusal writes nothing; a valid batch is one sorted approve/drop record and the per-job rows withdrawn", async (t) => {
 	const s = await setup(t);
 	const mandate = grant(s.mandates);

@@ -8,7 +8,7 @@
 import { ESCALATION_QUESTION_MAX_CHARS, type Escalation, isoTimestamp } from "./contracts.ts";
 import { EscalationError, type EscalationStore } from "./escalation.ts";
 import { type Ledger, parseJobLabels } from "./ledger.ts";
-import { covers, isActive } from "./mandate-accounting.ts";
+import { selectGrant } from "./mandate-permission.ts";
 import type { MandateStore } from "./mandate.ts";
 
 export const RISK_BATCH_MIN = 2;
@@ -32,9 +32,9 @@ export async function batchRiskHigh(
 	const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
 	if (duplicates.length > 0) refuse(`duplicate job ids: ${duplicates.join(", ")}`);
 
-	// Read-only from here until the raise: list() + isActive, never sweep() (a sweep may write).
+	// Read-only until the raise: selection uses list/clock, never sweep (which may write).
 	const now = isoTimestamp(new Date());
-	const asking = deps.mandates.list().filter((mandate) => isActive(mandate, now) && mandate.ask_on.includes("risk:high"));
+	const grants = deps.mandates.list();
 	const records = deps.escalations.list({ kind: "risk_high_irreversible" });
 	const unknown: string[] = [];
 	const ungated: string[] = [];
@@ -55,7 +55,8 @@ export async function batchRiskHigh(
 		if (!row && parsed.risk !== "high") ungated.push(id);
 		if (records.some((entry) => entry.job_ids.includes(id) && entry.status === "answered" && APPROVE.test((entry.answer ?? "").trim()))) approved.push(id);
 		const job = { jobId: id, project: parsed.project ?? "", ...(parsed.kind ? { jobKind: parsed.kind } : {}), ...deps.mandates.scheduleOf(id) };
-		askers.set(id, asking.filter((mandate) => covers(mandate, job)).map((mandate) => mandate.id));
+		const selected = selectGrant(grants, "dispatch", { ...job, inFlight: false }, now);
+		askers.set(id, selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant.id] : []);
 	}
 	if (unknown.length > 0) refuse(`unknown job ids: ${unknown.join(", ")}`);
 	if (approved.length > 0) refuse(`already approved: ${approved.join(", ")}`);

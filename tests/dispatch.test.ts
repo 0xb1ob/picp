@@ -161,6 +161,26 @@ async function bench(
 	};
 }
 
+test("tv8: model dispatch and preview expose the selected grant; its cap refuses before a lease", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	const job = await b.ledger.create({ title: "selected", project: "demo", delivery: "local", kind: "ship" });
+	const base = { projects: ["demo"], objective: "ship", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 };
+	mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
+	const selected = mandates.issue({ ...base, job_ids: [job.id, "cp-counted"], job_cap: 1 });
+	await b.fleet.add({ job_id: "cp-counted", project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase: "done", branch: "cp-counted", worktree: "/wt", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+		worker: { pid: 4242, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: b.model, started_at: isoTimestamp() } });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const request = { jobId: job.id, task: "Bump x.", model: b.model, fetch: false };
+	assert.equal((await dispatcher.preview(request)).mandate_id, selected.id);
+	await assert.rejects(dispatcher.dispatch(request), new RegExp(`mandate ${selected.id} job cap 1 reached`));
+	assert.equal(b.fleet.get(job.id), undefined);
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")), "selected refusal happens before lease");
+	mandates.save({ ...selected, job_cap: 10 });
+	const result = await dispatcher.dispatch(request);
+	assert.equal(result.mandate_id, selected.id);
+});
+
 test("model-only dispatcher refuses declared scripts without falling through to routing", { skip: SKIP }, async (t) => {
 	const b = await bench(t);
 	const job = await b.ledger.create({ title: "run", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
@@ -500,6 +520,7 @@ test("a second dispatch of the same job is refused with the promote instruction"
 
 	const second = await b.dispatcher.dispatch({ jobId: job.id, task: "do it again", model: b.model, fetch: false });
 	assert.equal(second.state, "promote");
+	assert.equal("mandate_id" in second, false, "promote did not execute the permission gate");
 	assert.equal(second.receipt, "refused");
 	assert.equal(second.promote?.job_id, job.id);
 	assert.match(second.promote?.instruction ?? "", /cp_send/);
@@ -1268,6 +1289,7 @@ test("a successful dispatch deletes no branch at all", { skip: SKIP, timeout: 18
 
 	const result = await dispatcher.dispatch({ jobId: job.id, task: "do it", model: b.model, fetch: false });
 	assert.equal(result.state, "dispatched");
+	assert.equal("mandate_id" in result, false, "unmandated dispatch fabricates no grant");
 	assert.ok(!deletedBranch(log, job.id), "the happy path issues no branch deletion");
 	assert.ok(!log.some((args) => args[0] === "switch" && args[1] === "--detach"), "and never leaves the job branch");
 	assert.equal(git(result.worktree, "symbolic-ref", "--short", "HEAD"), job.id);
@@ -1333,7 +1355,7 @@ function previewBench(t: { after(fn: () => void): void }): PreviewBench {
 				probe: probe ?? ALWAYS_AVAILABLE,
 				// A preview that reaches any of these is a preview with side effects.
 				registry: forbidden<ProjectRegistry>("the project registry"),
-				fleet: forbidden<FleetStore>("the fleet"),
+				fleet: mandates ? new FleetStore({ home: home.path }) : forbidden<FleetStore>("the fleet"),
 				preflight: forbidden<Preflight>("preflight"),
 				leases: forbidden<LeaseManager>("the lease manager"),
 				manager: forbidden<WorkerManager>("the worker manager"),
@@ -1371,6 +1393,7 @@ test("preview: the route, resolved by the dispatch path, with nothing taken", as
 	// job's own words, exactly as a dispatch would have inferred it.
 	assert.equal(preview.preview, true);
 	assert.equal(preview.job_id, job.id);
+	assert.equal("mandate_id" in preview, false);
 	assert.equal(preview.project, "demo");
 	assert.equal(preview.kind, "ship");
 	assert.equal(preview.delivery, "pr");

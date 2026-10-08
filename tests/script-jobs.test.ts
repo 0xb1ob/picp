@@ -27,12 +27,17 @@ test("script dispatch leases a branch, intakes once, and cannot replay", { skip:
  const ledger = post.ledger();
  const fleet = post.fleet;
  const job = await ledger.create({ title: "run", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
+ const base = { projects: ["demo"], objective: "script", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 };
+ post.mandates.issue(base);
+ const selected = post.mandates.issue({ ...base, job_ids: [job.id] });
  const preview = await post.previewDispatch({ jobId: job.id });
  assert.equal("executor" in preview && preview.executor, "script");
+ assert.equal(preview.mandate_id, selected.id);
  assert.equal(fleet.get(job.id), undefined);
  await assert.rejects(post.dispatch({ jobId: job.id, task: "ignored" }), /task is not accepted/);
  const result = await post.dispatch({ jobId: job.id });
  assert.equal("executor" in result && result.executor, "script");
+ assert.equal(result.mandate_id, selected.id);
  assert.equal(result.branch, job.id);
  assert.equal(fleet.require(job.id).worker, undefined);
  assert.equal(fleet.require(job.id).schedule_id, undefined, "schedlater S3: an unscheduled record carries no schedule_id");
@@ -150,6 +155,7 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  const job = await post.ledger().create({ title: "rotate production credentials", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
  const preview = await post.previewDispatch({ jobId: job.id });
  assert.equal(preview.mandate_gate, "would ask: risk:high");
+ assert.equal(preview.mandate_id, post.mandates.list()[0]!.id);
  await assert.rejects(post.dispatch({ jobId: job.id }), /risk:high under ask_on/);
  assert.equal(post.fleet.get(job.id), undefined);
  assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "");
@@ -178,7 +184,8 @@ test("script cap: home worker-bounds.json reaches the runner and the record; ove
  writeFileSync(configFile, JSON.stringify({ wall_clock_seconds: 77 }));
  const homed = await post.ledger().create({ title: "home cap", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
  assert.equal((await dispatcher.preview({ jobId: homed.id })).wall_clock_seconds, 77);
- await dispatcher.dispatch({ jobId: homed.id });
+ assert.equal("mandate_id" in await dispatcher.preview({ jobId: homed.id }), false);
+ assert.equal("mandate_id" in await dispatcher.dispatch({ jobId: homed.id }), false);
  assert.equal(post.fleet.require(homed.id).bounds?.wall_clock_seconds, 77);
  await waitFor(() => post.fleet.require(homed.id).phase, (phase) => phase !== "waiting" && phase !== "launching", { timeoutMs: 10_000 });
  assert.equal((await post.tearDown(homed.id)).torn_down, true);

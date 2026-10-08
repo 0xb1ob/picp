@@ -2642,6 +2642,26 @@ test("mandate: an active grant auto-decides the ship checkpoint and dispatches",
 	);
 });
 
+test("tv8: plan escalation metadata belongs to the selected ship grant, never unrelated askers", async (t) => {
+	for (const asks of [true, false]) {
+		const home = createScratchHome(); t.after(() => home.cleanup());
+		const mandates = new MandateStore(home.path);
+		const researchId = "cp-selected-research"; const shipId = "cp-selected-ship";
+		const base = { projects: ["demo"], objective: "handoff", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 50, tokens: 1_000_000 }, job_cap: 10 };
+		mandates.issue({ ...base, job_ids: [researchId], ask_on: ["plan_approval"] });
+		mandates.issue({ ...base, projects: ["other"], ask_on: ["plan_approval"] });
+		mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)), ask_on: ["plan_approval"] });
+		const selected = mandates.issue({ ...base, job_ids: [shipId], ask_on: asks ? ["plan_approval"] : [], allowed_actions: asks ? ["implement"] : ["review"] });
+		const escalations = new EscalationStore({ home: home.path });
+		const { runner, calls } = handoffBench(home.path, { researchId, shipId, mandates, escalations });
+		const result = await runner.advance(researchId);
+		assert.equal(result.next, "authorize"); assert.deepEqual(calls, []);
+		const row = escalations.open()[0]!;
+		assert.equal(row.mandate_id, asks ? selected.id : "no mandate", "a selected action denial does not borrow a nonselected plan asker");
+		if (asks) assert.equal(row.mandate_clause, `${selected.id}: ask_on includes plan_approval`);
+	}
+});
+
 test("mandate: a gate flag blocks auto-approval and raises one plan-approval escalation", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

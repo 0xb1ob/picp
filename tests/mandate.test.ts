@@ -26,6 +26,7 @@ import {
 	type MandateSubject,
 	MandateStore,
 	projectWideCapWarning,
+	mandateSpend,
 	resolveMandateJobIds,
 	resolveMandateObjectiveRef,
 } from "../src/mandate.ts";
@@ -67,6 +68,61 @@ function issue(
 		...over,
 	}, jobs);
 }
+
+test("tv8: selected named grant alone binds risk, job cap and parallelism; overlapping coverage still counts", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const broad = issue(store, { id: "md-e94d25", job_cap: 1, dispatch_parallelism: 1, at: earlier() });
+	const named = issue(store, { id: "md-a994c5", job_ids: ["cp-target", "cp-other"], ask_on: [], job_cap: 1, dispatch_parallelism: 1 });
+	const job = { jobId: "cp-target", project: "demo", kind: "ship" as const, risk: "high" as const };
+	const broadFull = [{ job_id: "cp-broad", project: "demo", kind: "ship" as const, phase: "waiting", usage: { cost_usd: 1, total_tokens: 100 } }];
+	assert.equal((await store.assertDispatchAllowed(job, broadFull)).selected?.id, named.id, "broad risk/cap/slot cannot veto");
+	assert.equal(store.wouldAskRiskHigh(job, "high"), false, "select before filtering ask_on");
+	store.save({ ...broad, job_cap: 10, dispatch_parallelism: 10, ask_on: [] });
+	const namedFull = [...broadFull, { job_id: "cp-other", project: "demo", kind: "ship" as const, phase: "held", usage: { cost_usd: 2, total_tokens: 200 } }];
+	await assert.rejects(store.assertDispatchAllowed(job, namedFull), new RegExp(`mandate ${named.id} job cap 1 reached`));
+	store.save({ ...named, job_cap: 10 });
+	await assert.rejects(store.assertDispatchAllowed(job, namedFull.map((entry) => ({ ...entry, phase: "waiting" }))), (error: unknown) => {
+		assert.ok(error instanceof MandateError); assert.equal(error.code, "parallelism_full"); assert.match(error.message, new RegExp(named.id)); return true;
+	});
+	const completed = [...broadFull, { job_id: "cp-target", project: "demo", phase: "held", usage: { cost_usd: 3, total_tokens: 300 }, reviewer_usage: { cost_usd: 0.5, total_tokens: 50 } }];
+	assert.deepEqual(mandateSpend(broad, completed), { usd: 4.5, tokens: 450, jobs: 2, inFlight: 1 });
+	assert.deepEqual(mandateSpend(named, completed), { usd: 3.5, tokens: 350, jobs: 1, inFlight: 0 });
+	assert.equal((await store.assertDispatchAllowed(job, completed)).selected?.id, named.id, "an already-counted selected job continues");
+	store.save({ ...store.require(named.id), ask_on: ["risk:high"] });
+	assert.equal(store.wouldAskRiskHigh(job, "high"), true);
+	await assert.rejects(store.assertDispatchAllowed(job, []), /risk:high under ask_on/);
+	assert.equal(new EscalationStore({ home: home.path }).open().find((row) => row.job_ids.includes(job.jobId))?.mandate_id, named.id);
+	const pre = { operator_quote: "Approve the risky work.", decided_by: "operator-quote" as const, scope: "named_jobs" as const, job_ids: [job.jobId], granted_at: isoTimestamp() };
+	store.preapproveRisk(broad.id, pre);
+	await assert.rejects(store.assertDispatchAllowed(job), /risk:high under ask_on/, "nonselected approval cannot authorize");
+	store.preapproveRisk(named.id, pre);
+	await store.assertDispatchAllowed(job);
+	assert.equal(store.require(named.id).risk_preapproved?.length, 1);
+	assert.equal(store.require(broad.id).risk_preapproved, undefined, "only selected approval is audited");
+});
+
+test("tv8: selected checkpoint denial is final in either input order", (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const broad = issue(store, { at: earlier(), ask_on: [], objective: "cp-ship1" });
+	const named = issue(store, { job_ids: ["cp-ship1"], ask_on: [], objective: "cp-ship1" });
+	const cases: Array<[Partial<Mandate>, Partial<MandateSubject>, RegExp]> = [
+		[{ allowed_actions: ["review"] }, {}, /implement is not an allowed action/],
+		[{ ask_on: ["plan_approval"] }, {}, /ask_on includes plan_approval/],
+		[{ exclusions: { paths: ["src/secret"] } }, { pathHints: ["src/secret.ts"] }, /path .* is excluded/],
+		[{ exclusions: { subsystems: ["auth"] } }, { subsystem: "auth" }, /subsystem auth is excluded/],
+		[{ ask_on: ["risk:high"] }, { risk: "high" }, /risk:high/],
+		[{ job_cap: 1 }, { usageJobs: [{ job_id: "cp-counted", project: "demo" }] }, /job cap reached/],
+	];
+	for (const [over, input, reason] of cases) {
+		const selected = { ...named, ...over, ...(over.job_cap ? { job_ids: ["cp-ship1", "cp-counted"] } : {}) };
+		for (const order of [[broad, selected], [selected, broad]]) {
+			const result = evaluateAuthority(subject(input), order);
+			assert.equal(result.permitted, false); if (!result.permitted) { assert.match(result.reason, new RegExp(named.id)); assert.match(result.reason, reason); }
+		}
+	}
+});
 
 test("reviewer preference round-trips and changes only the setting, including expired grants", (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
@@ -674,7 +730,7 @@ test("a revoked grant predating dispatch has no standing for review, repair or m
 	const job = { jobId: "cp-new", project: "demo", kind: "ship" as const };
 	const jobs = [{ job_id: job.jobId, project: job.project, kind: job.kind, dispatched_at: isoTimestamp(now), phase: "held" }];
 	for (const use of ["review", "repair", "merge"] as const) {
-		assert.deepEqual(store.assertPermitted(use, job, jobs), { active: [] }, `${use}: old revocation does not speak`);
+		assert.deepEqual(store.assertPermitted(use, job, jobs), {}, `${use}: old revocation does not speak`);
 		const older = [{ ...jobs[0]!, dispatched_at: "2026-09-22T12:00:00Z" }];
 		assert.throws(() => store.assertPermitted(use, job, older), /revoked/, `${use}: revocation after dispatch still speaks`);
 		const sameTime = [{ ...jobs[0]!, dispatched_at: revoked.revoked_at! }];
@@ -688,7 +744,7 @@ test("a revoked grant predating dispatch has no standing for review, repair or m
 	createScratchLedger({ home: home.path });
 	const created = await new Ledger({ home: home.path, now: () => now }).create({ title: "later job", project: "demo", delivery: "pr", kind: "ship" });
 	for (const use of ["review", "repair", "merge"] as const) {
-		assert.deepEqual(store.assertPermitted(use, { ...job, jobId: created.id }), { active: [] }, `${use}: creation time is the fallback before dispatch`);
+		assert.deepEqual(store.assertPermitted(use, { ...job, jobId: created.id }), {}, `${use}: creation time is the fallback before dispatch`);
 	}
 });
 
@@ -756,7 +812,7 @@ test("after expiry: in-flight review, repair, same-kind promotion and failed-job
 	await store.assertDispatchAllowed({ ...job(), promotion: true }, fleet);
 	await store.assertDispatchAllowed(job(), [{ ...fleet[0]!, phase: "failed" }]);
 	// repair of the in-flight job continues; another job, project or kind does not. (Reviewer starts: see the next test.)
-	assert.equal(store.assertPermitted("repair", job(), fleet).continuing?.id, expired.id);
+	assert.deepEqual(store.assertPermitted("repair", job(), fleet), { selected: store.require(expired.id), cause: "expired" });
 	assert.throws(() => store.assertPermitted("repair", job("cp-ghost"), fleet), /no fleet record of that kind/);
 	assert.throws(() => store.assertPermitted("repair", job(), [{ ...fleet[0]!, project: "other" }]), /no fleet record/);
 	assert.throws(() => store.assertPermitted("repair", job(), research), /no fleet record of that kind/);
@@ -776,7 +832,7 @@ test("after expiry: in-flight review, repair, same-kind promotion and failed-job
 	assert.throws(() => strict.assertPermitted("repair", job(), fleet), /repair is not an allowed action/);
 	await assert.rejects(() => strict.assertDispatchAllowed({ ...job(), promotion: true }, fleet), /repair is not an allowed action/);
 	issue(strict, { objective: "next round" });
-	assert.equal(strict.assertPermitted("repair", job(), fleet).active.length, 1, "an active grant decides");
+	assert.equal(strict.assertPermitted("repair", job(), fleet).cause, "active", "an active grant decides");
 	const kindHome = createScratchHome();
 	t.after(() => kindHome.cleanup());
 	const byKind = new MandateStore(kindHome.path);
@@ -790,7 +846,7 @@ test("after expiry: in-flight review, repair, same-kind promotion and failed-job
 	const afterExpiry = new MandateStore(crossHome.path, { now: () => new Date(Date.now() + 120_000) });
 	assert.equal(afterExpiry.require(lapsing.id).status, "active", "still active on disk before the check");
 	await assert.rejects(() => afterExpiry.assertDispatchAllowed(job("cp-new1"), fleet), /expired at .* fresh start/);
-	assert.equal(afterExpiry.assertPermitted("repair", job(), fleet).continuing?.id, lapsing.id);
+	assert.equal(afterExpiry.assertPermitted("repair", job(), fleet).selected?.id, lapsing.id);
 
 	// A newer active grant speaks instead; a revoked-only project never refuses human dispatch.
 	const fresh = issue(store, { objective: "next round" });
@@ -826,7 +882,7 @@ test("a reviewer start keeps its pre-rule path under an expired grant: no fleet 
 		if (refused) assert.throws(() => assertReviewAllowed(store, job, jobs), refused, label);
 		else {
 			assert.doesNotThrow(() => assertReviewAllowed(store, job, jobs), label);
-			assert.deepEqual(store.assertPermitted("review", job, jobs), { active: [] }, `${label}: the expired grant does not speak`);
+			assert.deepEqual(store.assertPermitted("review", job, jobs), {}, `${label}: the expired grant does not speak`);
 		}
 		if (repairRefused) assert.throws(() => store.assertPermitted("repair", job, jobs), repairRefused, `${label}: repair keeps its policy`);
 		else assert.doesNotThrow(() => store.assertPermitted("repair", job, jobs), `${label}: repair keeps its policy`);

@@ -112,7 +112,7 @@ test("spawn cap (4B2-T6): at spawn_cap cp_next still recommends dispatch and say
 	assert.match(full.action.reason, /spawn cap 10 full: 10 live worker processes \(held: cp-a1\) — cp_dispatch queues it/);
 
 	const room = await cpNext({ ...ports, capacity: () => ({ active: 9, cap: 10, held: [] }) }, "demo");
-	assert.deepEqual([room.action.kind, room.action.job_id, room.action.reason], ["dispatch", job.id, `dispatch ${job.id}`]);
+	assert.deepEqual([room.action.kind, room.action.job_id, room.action.reason], ["dispatch", job.id, `dispatch ${job.id} under ${room.mandate!.id}`]);
 });
 
 test("spawn cap: every grant's dispatch carries the queue reason, others included; a pipeline step (gate-reviewer reserve) keeps its recommendation", async (t) => {
@@ -462,6 +462,54 @@ test("a project-wide grant on a project with history recommends dispatch: earlie
 	const next = await cpNext(ports, "demo");
 	assert.deepEqual([next.mandate?.id, next.mandate?.status, next.action.kind, next.action.job_id], [grant.id, "active", "dispatch", job.id]);
 	assert.deepEqual([next.mandate?.spend_usd, next.mandate?.tokens, next.mandate?.jobs_used], [0, 0, 0]);
+});
+
+test("tv8: capped broad grant cannot veto a named supplement; next and dispatch select the same grant", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const ports = bench(home);
+	const created = await ports.ledger.create({ title: "incident", project: "demo", delivery: "pr", kind: "ship" });
+	const job = { ...created, id: "cp-sweep-xpx-985n" };
+	const doc = ports.ledger.read();
+	writeFileSync(ports.ledger.file, JSON.stringify({ ...doc, jobs: doc.jobs.map((entry) => entry.id === created.id ? job : entry) }));
+	const base = { projects: ["demo"], objective: "sweep", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 3 };
+	const broad = ports.mandates.issue({ ...base, id: "md-e94d25", at: isoTimestamp(new Date(Date.now() - 60_000)) });
+	for (const n of [1, 2, 3]) await ports.fleet.add(fleetRecord({ job_id: `cp-old${n}`, phase: "held", reported_at: isoTimestamp(), usage: { ...EMPTY_USAGE, cost_usd: 1, total_tokens: 100 } }));
+	const named = ports.mandates.issue({ ...base, id: "md-a994c5", job_ids: [job.id] });
+	const next = await cpNext(ports, "demo");
+	assert.deepEqual([next.mandate?.id, next.action.kind, next.action.job_id], [named.id, "dispatch", job.id]);
+	assert.deepEqual((next.others ?? []).flatMap((view) => view.ready.map((entry) => entry.id)), [], "one selected ready partition");
+	const permission = await ports.mandates.assertDispatchAllowed({ jobId: job.id, project: "demo", kind: "ship" }, ports.fleet.read().jobs);
+	assert.equal(permission.selected?.id, next.mandate?.id);
+	await ports.fleet.add(fleetRecord({ job_id: job.id, phase: "held", reported_at: isoTimestamp(), usage: { ...EMPTY_USAGE, cost_usd: 2, total_tokens: 200 } }));
+	const after = await cpNext(ports, "demo");
+	const broadView = [after, ...(after.others ?? [])].find((view) => view.mandate?.id === broad.id)!;
+	assert.deepEqual([broadView.mandate?.jobs_used, broadView.mandate?.spend_usd, broadView.mandate?.tokens], [4, 5, 500], "overlapping coverage still counts the target");
+});
+
+test("tv8: selected full grant waits without broad fallback; queued membership is selected once", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const ports = bench(home);
+	const first = await ports.ledger.create({ title: "first", project: "demo", delivery: "pr", kind: "ship" });
+	const second = await ports.ledger.create({ title: "second", project: "demo", delivery: "pr", kind: "ship" });
+	const base = { projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, dispatch_parallelism: 1 };
+	const broad = ports.mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
+	const named = ports.mandates.issue({ ...base, job_ids: [first.id, second.id] });
+	const queued = await cpNext({ ...ports, queued: () => [first.id] }, "demo");
+	const views = [queued, ...(queued.others ?? [])];
+	assert.deepEqual(views.flatMap((view) => view.ready.map((job) => job.id)), [second.id]);
+	assert.match(views.find((view) => view.mandate?.id === named.id)!.action.reason, /1 queued/);
+	assert.doesNotMatch(views.find((view) => view.mandate?.id === broad.id)!.action.reason, /queued/);
+	ports.mandates.save({ ...named, job_cap: 1 });
+	await ports.fleet.add(fleetRecord({ job_id: first.id, phase: "held", reported_at: isoTimestamp() }));
+	await ports.ledger.claim(first.id, first.id);
+	const full = await cpNext(ports, "demo");
+	assert.equal([full, ...(full.others ?? [])].some((view) => view.action.kind === "dispatch"), false);
+	assert.match([full, ...(full.others ?? [])].find((view) => view.mandate?.id === named.id)!.action.reason, new RegExp(`${named.id} job cap 1 reached`));
+	ports.mandates.save({ ...ports.mandates.require(named.id), job_cap: 10 });
+	await ports.fleet.patch(first.id, { phase: "waiting" });
+	const serial = await cpNext(ports, "demo");
+	assert.equal([serial, ...(serial.others ?? [])].some((view) => view.action.kind === "dispatch"), false);
+	assert.match([serial, ...(serial.others ?? [])].find((view) => view.mandate?.id === named.id)!.action.reason, new RegExp(`${named.id} dispatch-parallelism 1 is full`));
 });
 
 test("mission end escalates once", async (t) => {
