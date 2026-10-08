@@ -28,7 +28,7 @@ export interface PendingSend extends Delivery { key: string; at: string; body: C
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
 /** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; retry?(key: string): void; discard?(key: string): void; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function failure(response: Response): Promise<string> {

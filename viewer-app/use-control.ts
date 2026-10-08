@@ -17,11 +17,11 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const [starting, setStarting] = useState<Starting | null>(null);
  const [pending, setPending] = useState<PendingState>(()=>composer ? readPending() : emptyPending());
  const requests = useRef<Promise<unknown>>(Promise.resolve());
- const updatePending = (change: (value: PendingState)=>PendingState) => setPending(value=>{const next=change(value); rememberPending(next); return next;});
+ const updatePending = (change: (value: PendingState)=>PendingState) => setPending(value=>rememberPending(change(value)));
  const transcriptKey = entries.map(e=>`${e.id}:${e.dashboard_id ?? ""}`).join("|");
  useEffect(()=>{
   if (!composer || !active) return;
-  setPending(value=>{const next=reconcilePending(value,status,entries); if (JSON.stringify(next) === JSON.stringify(value)) return value; rememberPending(next); return next;});
+  setPending(value=>{const next=reconcilePending(value,status,entries); return JSON.stringify(next) === JSON.stringify(value) ? value : rememberPending(next);});
  },[active,composer,status,transcriptKey,refreshKey]);
  useEffect(() => {
   if (!active) return;
@@ -59,7 +59,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   const key = `dc-${at.replace(/[-:T]/g,"").slice(0,14)}-${random}`;
   updatePending(value=>{
    const prior=value.items.find(item=>item.key === retryKey);
-   return {items:[...value.items.filter(item=>item.key !== retryKey),{key,at,id:key,state:"sending",reason:null,ask_id,body}],dismissed:prior?.id ? [...value.dismissed,prior.id] : value.dismissed};
+   return {...value,items:[...value.items.filter(item=>item.key !== retryKey),{key,at,id:key,state:"sending",reason:null,ask_id,body}],dismissed:prior?.id ? [...value.dismissed,prior.id] : value.dismissed};
   });
   // The server takes one POST at a time per address. Keep requests FIFO even when the operator sends quickly.
   requests.current = requests.current.then(async ()=>{
@@ -93,7 +93,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const upload = (controlImages(status) || controlFiles(status)) && controlReady(status) ? (file: File) => uploadImage(fetcher, controlToken(status), file) : undefined;
  const visible = composer ? reconcilePending(pending,status,entries).items : undefined;
  const retry = (key: string) => { const item=pending.items.find(item=>item.key === key && item.state === "failed"); if(item) enqueue(item.body,item.ask_id ?? undefined,key); };
- const discard = (key: string) => updatePending(value=>{const found=value.items.find(item=>item.key === key && item.state === "failed"); return found ? {items:value.items.filter(item=>item !== found),dismissed:found.id ? [...value.dismissed,found.id] : value.dismissed} : value;});
+ const discard = (key: string) => updatePending(value=>{const found=value.items.find(item=>item.key === key && item.state === "failed"); return found ? {...value,items:value.items.filter(item=>item !== found),dismissed:found.id ? [...value.dismissed,found.id] : value.dismissed} : value;});
  const cardDelivery = visible?.findLast(item=>item.ask_id !== null);
- return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,retry,discard} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {})};
+ return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {})};
 }

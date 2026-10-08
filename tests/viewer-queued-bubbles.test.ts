@@ -67,6 +67,77 @@ async function stage(t:TestContext, store=new Map<string,string>()) {
   remount:async()=>{await act(()=>unmount(root));await show();}};
 }
 
+test("ordinary sends without an ask recover queued and failed records, including stored records with omitted ask_id",async t=>{
+ const s=await stage(t);await s.show();
+ await act(()=>{s.control.send({kind:"message",text:"ordinary queued"});s.control.send({kind:"message",text:"ordinary failed"});});await s.flush();
+ const id=(s.posted[0] as {client_id:string}).client_id;
+ await s.reply({id,state:"queued",deliver:"followUp"});
+ await s.reply({error:"connection refused"},503);
+ assert.ok(s.posted.every(body=>!Object.hasOwn(body as object,"ask_id")),"ordinary POSTs have no ask");
+ const stored=JSON.parse(s.store.get("cp-operator-pending-sends")!) as {items:Record<string,unknown>[];dismissed:string[]};
+ assert.deepEqual(stored.items.map(item=>item.ask_id),[null,null],"current enqueue persists null consistently");
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
+ assert.deepEqual(s.control.pending?.map(item=>item.state),["queued","failed"]);
+ // Recover older records that omitted the optional ask id, using actual enqueued sends rather than fixtures.
+ for(const item of stored.items) delete item.ask_id;
+ s.store.set("cp-operator-pending-sends",JSON.stringify(stored));
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
+ assert.deepEqual(s.control.pending?.map(item=>[item.state,item.ask_id]),[["queued",null],["failed",null]]);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Retry.*Discard/);
+ assert.equal(s.control.pending_error,undefined,"missing optional ask ids are valid recovery records");
+ assert.equal(s.posted.length,2,"remount never resends queued or failed records");
+});
+
+test("recovery keeps valid queued and failed sends in FIFO order among malformed stored entries, with a visible live warning",async t=>{
+ const failed=pending("failed",{state:"failed",reason:"original failure",body:{kind:"message",text:"retry this file",thread:"layout",images:["im-fixture.png"],files:["tx-fixture.md"]}});
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[null,pending("one",{ask_id:"ask-fixture"}),pending("bad-time",{at:"invalid"}),failed,pending("bad-attachment",{body:{kind:"message",text:"invalid",files:[42]}}),pending("two",{state:"held"}),pending("bad-reason",{reason:{message:"invalid"}}),pending("bad-ask",{ask_id:42})],dismissed:["dc-dismissed",42]})]]);
+ const s=await stage(t,store);
+ s.status({...status,sends:[{id:"dc-dismissed",at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:"already discarded"}}]});
+ await s.show();
+ assert.deepEqual(s.bubbleTexts(),["queued one","retry this file","queued two"]);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Retry.*Discard/);
+ assert.deepEqual(s.control.pending?.[1]?.body.files,["tx-fixture.md"]);
+ assert.equal(s.control.pending?.[0]?.ask_id,"ask-fixture","valid ask ids are retained");
+ const warning=s.root.querySelector(".session-warning[aria-live=polite]");
+ assert.match(warning?.textContent ?? "",/recovery incomplete.*invalid stored/i);
+ assert.equal(warning?.getAttribute("role"),"status");
+ assert.equal(s.posted.length,0,"recovery never automatically retries a failed send");
+ await s.click(".session-pending-actions button:last-child");
+ assert.deepEqual(s.bubbleTexts(),["queued one","queued two"]);
+ assert.ok(s.root.querySelector(".session-warning[aria-live=polite]"),"the warning survives pending-state updates");
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["queued one","queued two"],"valid recovered sends and dismissal ids persist after a successful write");
+});
+
+test("unreadable or missing browser storage visibly warns while journal sends still recover",async t=>{
+ for (const mode of ["invalid-json","read-denied","missing"] as const) await t.test(mode,async t=>{
+  const s=await stage(t,new Map([["cp-operator-pending-sends","{broken"]]));
+  const browser=s.root.ownerDocument.defaultView!;
+  if(mode !== "invalid-json") Object.defineProperty(browser,"localStorage",{configurable:true,value:mode === "missing" ? undefined : {getItem:()=>{throw new Error("access denied");},setItem:()=>{}}});
+  s.status({...status,sends:[{id:"dc-journal",at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:"from journal"}}]});
+  await s.show();
+  assert.deepEqual(s.bubbleTexts(),["from journal"]);
+  assert.match(s.root.querySelector(".session-warning[aria-live=polite]")?.textContent ?? "",/could not be recovered.*browser storage/i);
+  assert.equal(s.posted.length,0);
+ });
+});
+
+test("failed persistence visibly warns and keeps recovered failures and new sends in this view",async t=>{
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[pending("old",{state:"failed",reason:"keep this failure"})],dismissed:[]})]]);
+ const s=await stage(t,store);
+ Object.defineProperty(s.root.ownerDocument.defaultView!,"localStorage",{configurable:true,value:{getItem:(key:string)=>store.get(key) ?? null,setItem:()=>{throw new Error("quota exceeded");}}});
+ await s.show();
+ await act(()=>s.control.send({kind:"message",text:"new message"}));await s.flush();
+ assert.deepEqual(s.bubbleTexts(),["queued old","new message"]);
+ assert.match(s.root.querySelector(".session-warning[aria-live=polite]")?.textContent ?? "",/not persisted.*quota exceeded.*this view/i);
+ await s.reply({error:"send refused"},503);
+ assert.deepEqual(s.bubbleTexts(),["queued old","new message"]);
+ assert.equal(s.root.querySelectorAll(".session-pending-failed").length,2);
+ assert.match(s.root.querySelector(".session-warning[aria-live=polite]")?.textContent ?? "",/not persisted/);
+});
+
 test("send FIFO: quick sends remain visible, POSTs serialize, delivered status never leaves a gap before transcript promotion",async t=>{
  const s=await stage(t);await s.show([entry("response")]);
  await act(()=>{s.control.send({kind:"message",text:"first",thread:"layout",images:["im-fixture.png"],files:["tx-20261004-0123456789abcdef01234567.md"]});s.control.send({kind:"message",text:"second"});});await s.flush();
