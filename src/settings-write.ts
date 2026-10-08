@@ -337,7 +337,8 @@ export function planSettings(home: string, snapshot: SettingsSnapshot, request: 
 	}
 }
 
-function redact(text: string, home: string): string {
+/** The home path never leaves the owner process: every surfaced reason names `<home>` instead. */
+export function redact(text: string, home: string): string {
 	return text.split(home).join("<home>").slice(0, 1000);
 }
 

@@ -443,7 +443,7 @@ const specifiers = (text: string) => [...text.matchAll(/(?:from|import)\s*\(?\s*
 
 test("(l) import guard: only src/settings-control.ts and src/settings-write.ts import src/settings.ts; the contract imports only siblings", () => {
 	const target = join(REPO_ROOT, "src/settings.ts");
-	const allowlist: string[] = ["src/settings-write.ts"];
+	const allowlist: string[] = ["src/settings-control.ts", "src/settings-write.ts"];
 	const importers = [...sourceFiles("src"), ...sourceFiles("extensions")].filter((file) =>
 		specifiers(readFileSync(file, "utf8")).some((spec) => spec.startsWith(".") && resolve(dirname(file), spec) === target),
 	);

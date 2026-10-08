@@ -37,6 +37,7 @@ import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
+import { settingsPorts } from "../../src/settings-control.ts";
 import { startVersionLine, type VersionLine } from "./version-line.ts";
 
 import { atomicWriteJson } from "../../src/json-store.ts";
@@ -485,6 +486,7 @@ export default function (pi: ExtensionAPI): void {
 					hasPendingMessages: () => sessionCtx?.hasPendingMessages() ?? false,
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
 					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
+					...settingsPorts({ target: () => target }),
 				},
 			});
 			if (started.state === "listening") {
