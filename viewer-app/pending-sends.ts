@@ -17,9 +17,9 @@ export function readPending(): PendingState {
   let skipped = 0;
   const items = value.items.flatMap(item=>{
    try {
-    if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || (item.reason !== null && typeof item.reason !== "string") || (item.ask_id !== null && typeof item.ask_id !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || (item.body.deliver !== undefined && !["prompt","followUp","steer"].includes(item.body.deliver)) || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
+    if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || (item.reason !== null && typeof item.reason !== "string") || (item.ask_id !== undefined && item.ask_id !== null && typeof item.ask_id !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || (item.body.deliver !== undefined && !["prompt","followUp","steer"].includes(item.body.deliver)) || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
     for (const [field,ids] of Object.entries(item.body)) if ((field === "images" || field === "files") && (!Array.isArray(ids) || !ids.every(id=>typeof id === "string"))) throw new Error("invalid pending attachments");
-    return [item.state === "sending" ? {...item,state:"failed" as const,reason:"Send interrupted by reload; check the transcript before retrying"} : item];
+    return [{...item,ask_id:item.ask_id ?? null,...(item.state === "sending" ? {state:"failed" as const,reason:"Send interrupted by reload; check the transcript before retrying"} : {})}];
    } catch { skipped++; return []; }
   });
   const dismissed = Array.isArray(value.dismissed) ? value.dismissed.filter(id=>typeof id === "string") : [];

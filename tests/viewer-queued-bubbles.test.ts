@@ -67,15 +67,39 @@ async function stage(t:TestContext, store=new Map<string,string>()) {
   remount:async()=>{await act(()=>unmount(root));await show();}};
 }
 
+test("ordinary sends without an ask recover queued and failed records, including stored records with omitted ask_id",async t=>{
+ const s=await stage(t);await s.show();
+ await act(()=>{s.control.send({kind:"message",text:"ordinary queued"});s.control.send({kind:"message",text:"ordinary failed"});});await s.flush();
+ const id=(s.posted[0] as {client_id:string}).client_id;
+ await s.reply({id,state:"queued",deliver:"followUp"});
+ await s.reply({error:"connection refused"},503);
+ assert.ok(s.posted.every(body=>!Object.hasOwn(body as object,"ask_id")),"ordinary POSTs have no ask");
+ const stored=JSON.parse(s.store.get("cp-operator-pending-sends")!) as {items:Record<string,unknown>[];dismissed:string[]};
+ assert.deepEqual(stored.items.map(item=>item.ask_id),[null,null],"current enqueue persists null consistently");
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
+ assert.deepEqual(s.control.pending?.map(item=>item.state),["queued","failed"]);
+ // Recover older records that omitted the optional ask id, using actual enqueued sends rather than fixtures.
+ for(const item of stored.items) delete item.ask_id;
+ s.store.set("cp-operator-pending-sends",JSON.stringify(stored));
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
+ assert.deepEqual(s.control.pending?.map(item=>[item.state,item.ask_id]),[["queued",null],["failed",null]]);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Retry.*Discard/);
+ assert.equal(s.control.pending_error,undefined,"missing optional ask ids are valid recovery records");
+ assert.equal(s.posted.length,2,"remount never resends queued or failed records");
+});
+
 test("recovery keeps valid queued and failed sends in FIFO order among malformed stored entries, with a visible live warning",async t=>{
  const failed=pending("failed",{state:"failed",reason:"original failure",body:{kind:"message",text:"retry this file",thread:"layout",images:["im-fixture.png"],files:["tx-fixture.md"]}});
- const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[null,pending("one"),pending("bad-time",{at:"invalid"}),failed,pending("bad-attachment",{body:{kind:"message",text:"invalid",files:[42]}}),pending("two",{state:"held"}),pending("bad-reason",{reason:{message:"invalid"}})],dismissed:["dc-dismissed",42]})]]);
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[null,pending("one",{ask_id:"ask-fixture"}),pending("bad-time",{at:"invalid"}),failed,pending("bad-attachment",{body:{kind:"message",text:"invalid",files:[42]}}),pending("two",{state:"held"}),pending("bad-reason",{reason:{message:"invalid"}}),pending("bad-ask",{ask_id:42})],dismissed:["dc-dismissed",42]})]]);
  const s=await stage(t,store);
  s.status({...status,sends:[{id:"dc-dismissed",at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:"already discarded"}}]});
  await s.show();
  assert.deepEqual(s.bubbleTexts(),["queued one","retry this file","queued two"]);
  assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Retry.*Discard/);
  assert.deepEqual(s.control.pending?.[1]?.body.files,["tx-fixture.md"]);
+ assert.equal(s.control.pending?.[0]?.ask_id,"ask-fixture","valid ask ids are retained");
  const warning=s.root.querySelector(".session-warning[aria-live=polite]");
  assert.match(warning?.textContent ?? "",/recovery incomplete.*invalid stored/i);
  assert.equal(warning?.getAttribute("role"),"status");
