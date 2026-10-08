@@ -29,7 +29,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
  const status = control.status;
  const ready = controlReady(status);
  // Held while offline; disabled while a started session comes up or a restart runs, so nothing races its first live token.
- const sending = control.delivery?.state === "sending" || control.starting?.state === "starting" || restartInFlight(control.restarting);
+ const sending = (!control.pending && control.delivery?.state === "sending") || control.starting?.state === "starting" || restartInFlight(control.restarting);
  const busy = ready && status.running && status.busy === true;
  const upload = controlImages(status) || controlFiles(status) ? control.upload : undefined;
  const images = attachments.flatMap(a => a.state === "ready" && a.id && !a.text ? [a.id] : []);

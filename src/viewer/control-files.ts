@@ -366,7 +366,7 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[] }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; thread?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
 	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }

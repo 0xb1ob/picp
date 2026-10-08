@@ -250,8 +250,12 @@ test("text uploads: validate extensions/UTF-8/JSON/size, store metadata only, se
  assert.equal(got.headers["content-type"], "text/plain; charset=utf-8"); assert.equal(got.headers["x-content-type-options"], "nosniff"); assert.deepEqual(got.raw, html);
  assert.ok(String(got.headers["content-security-policy"]).includes("sandbox"));
  const png = await call(port, UPLOAD, image(csrf, syntheticPng()));
- const sent = await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "look", images: [png.body.id], files: [id], thread: "file-chat"}));
+ const client_id="dc-20261004140000-00000019";
+ const sent = await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "look", images: [png.body.id], files: [id], thread: "file-chat", client_id}));
  assert.equal(sent.status, 202, JSON.stringify(sent.body));
+ assert.equal(sent.body.id,client_id,"mixed uploads preserve the pre-acknowledgement correlation id");
+ const pending=(await call(port,"/api/operator/control")).body.sends as Array<{id:string;body:unknown}>;
+ assert.deepEqual(pending.find(send=>send.id === client_id)?.body,{kind:"message",text:"look",images:[png.body.id],files:[id],thread:"file-chat"},"reload projection retains both attachment kinds and the thread");
  assert.equal(injected[0]!.images!.length, 1); assert.ok(injected[0]!.text.includes("File: report_1_.HTML\n```text\n<script>UNIQUE_ATTACHMENT_CONTENT</script>\n```"));
  assert.match(injected[0]!.text, /; thread=file-chat; images=im-[^;]+; files=tx-[^\]]+\]$/);
  assert.equal((await call(port, "/api/operator/control")).body.files, true);

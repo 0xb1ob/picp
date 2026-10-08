@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Operator chat queued bubbles (cp-chat-queued-bubbles-xsa8)
+
+Every composer send stays visible in a FIFO bubble after the latest transcript entry, with text, attachment chips, send time and queue position. Delivered status waits for actual transcript arrival; matching dashboard ids promote without a gap or duplicate, including transcript arrival before the POST acknowledgement via the optional `client_id`. Reload reconstructs the queue from control/inbox journals and stored unseen sends; late failures and dropped holds stay visible with Retry/Discard. Thread selection and bottom-follow include pending bubbles, with accessible state announcements and light/dark phone/desktop styles. Migration: none; control status adds optional `sends`/`sends_error`, message bodies accept optional `client_id`, and request audit lines can record the existing thread tag.
+
 ### Chat text attachments (cp-chat-text-uploads-idox)
 
 The composer accepts `.txt`, `.md`, `.html` and `.json` alongside images through the picker, drop or paste. Text files have removable filename/size chips and sent chips open a plain-text view. The server checks extensions, strict UTF-8 without NUL, valid JSON and a 1 MiB file cap; all attachments share the existing message/directory caps and 7-day expiry. The main session receives fenced text within a 200 KiB total budget, with a stored path for truncated files. HTML always stays text. Migration: restart the operator session once to advertise `files`; `files=` is additive after the existing ask/thread/images marker fields.
