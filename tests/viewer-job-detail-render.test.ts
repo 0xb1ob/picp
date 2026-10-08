@@ -30,7 +30,7 @@ function job(over: Partial<ViewerJob>): ViewerJob {
 function detail(over: Partial<ViewerJob> = {}, extra: Partial<JobResponse> = {}): string {
  const data: JobResponse = {
   generated_at: "2026-09-27T00:00:00Z", awaiting_count: 0, job: job(over), timeline: [], timeline_truncated: false,
-  files_href: null, artifact_href: null, artifact_name: null, run_href: null, asks: [], questions: [], warnings: [], ...extra,
+  files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [], ...extra,
  };
  return screen(data);
 }

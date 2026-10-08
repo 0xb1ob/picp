@@ -171,3 +171,23 @@ test("structured routing and legacy text share the latest recorded selection, wi
  assert.equal(row.routing,"scope:S (explicit) · risk:low (defaulted) · fleet rule · fleet reason");
  assert.deepEqual(row.routing_facts,fallback,"live and finished jobs expose the same structured fields");
 });
+
+
+test("job detail links newest published revisions for every matching job set", t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const state={home:home.path,stateDir:join(home.path,LAYOUT.state)};
+ mkdirSync(join(home.path,".pi-command-post"),{recursive:true});
+ writeFileSync(join(home.path,".pi-command-post/jobs.json"),JSON.stringify({jobs:[{id:"cp-report",status:"closed",labels:["project:demo"]},{id:"cp-none",status:"open",labels:[]}]}));
+ const make=(slug:string,job_ids:string[],created_at:string)=>{
+  const dir=join(state.stateDir,"boards",slug); mkdirSync(join(dir,"site"),{recursive:true});
+  writeFileSync(join(dir,"board.json"),JSON.stringify({title:slug,job_ids,created_at}));
+ };
+ make("old",["cp-report"],"2026-09-01T00:00:00Z");
+ make("new",["cp-report"],"2026-09-02T00:00:00Z");
+ make("shared",["cp-report","cp-other"],"2026-09-03T00:00:00Z");
+ make("unrelated",["cp-report-extra"],"2026-09-04T00:00:00Z");
+ make("unassigned",[],"2026-09-05T00:00:00Z");
+ assert.deepEqual(jobView(state,"cp-report")?.reports.map(r=>[r.slug,r.href]),[["shared","/boards/shared/"],["new","/boards/new/"]]);
+ assert.deepEqual(jobView(state,"cp-none")?.reports,[]);
+ assert.equal(jobView(state,"cp-missing"),undefined);
+});

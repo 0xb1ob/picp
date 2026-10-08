@@ -40,6 +40,8 @@
 .job-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; order: 3; }
 .job-links > * { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; font-size: 13px; color: var(--secondary); text-align: center; }
 .job-links > span { color: var(--dim); }
+.job-report-links { grid-template-columns: minmax(0,1fr); order: 1; }
+.job-report-links > a { overflow-wrap: anywhere; min-width: 0; padding: 8px 12px; }
 .job-timeline { order: 4; min-width: 0; }
 .job-timeline h2 { margin-bottom: 8px; }
 .job-event { display: grid; grid-template-columns: 44px 16px minmax(0,1fr); gap: 10px; }

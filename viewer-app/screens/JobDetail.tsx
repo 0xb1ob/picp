@@ -65,6 +65,7 @@ export function JobDetail({data}: {data: JobResponse}) {
    {data.questions.map(q => <section class="job-question" key={q.id}><h2>{q.kind === "final_fix" ? "Final-fix approval open" : "Parent question open"}</h2><p><code>{q.id}</code> · {q.question}</p><p>Being handled by the operator session.</p></section>)}
    {data.asks.map(ask => <section class="job-question job-question-awaiting" key={ask.id}><h2>Awaiting you</h2><p>{ask.question}</p>{ask.options.map(option => <CopyReply key={option.label} reply={option.reply}/>)}</section>)}
    {job.summary && <p class="job-summary">{job.summary}</p>}{job.failure && <p class="job-failure">{job.failure}</p>}
+   {data.reports.length > 0 && <div class="job-links job-report-links">{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Open report · {report.title} ↗</a>)}</div>}
   </div><div class="job-detail-side"><dl class="job-facts">
    <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
    <div class="job-fact-cost"><dt>Cost</dt><dd>{job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>

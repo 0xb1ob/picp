@@ -13,6 +13,7 @@ import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, typ
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
 import { recordedReview } from "./overview-jobs.ts";
+import { reportsView } from "./reports-view.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -145,6 +146,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,
+  reports:reportsView(state,undefined,now).reports.filter(report=>report.job_ids.includes(id)),
   run_href:file ? `/api/job/${encodeURIComponent(id)}/events` : null,asks:base.awaiting.items.filter(a=>a.job_ids.includes(id) || decision.escalations.value.some(q=>q.id===a.source_escalation && strings(q.job_ids).includes(id))),questions:base.parent_questions.filter(q=>q.job_ids.includes(id)),
   warnings:[...data.warnings,...(malformed || events.availability==="unavailable" ? [{section:"timeline",message:"Some recorded events are unavailable or malformed."}] : [])]};
 }
