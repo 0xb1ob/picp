@@ -182,7 +182,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		rubric: { file_key: "rubric", type: "rubric", max_items: 64, default: [], label: "Worker models", help: "Model, fallbacks and thinking per rubric row; restore puts back the shipped rows." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
-		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Next parent start or rotation when cp_parent start names no model; beats CP_PARENT_MODEL and the saved control model. Empty unsets it; cp_parent model switches now." },
+		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Next parent start or rotation when cp_parent start names no model; beats CP_PARENT_MODEL and the saved control model. Empty unsets it; cp_parent model switches now and is kept at rotation." },
 	}),
 	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
 		operator: { file_key: "model", env: "CP_OPERATOR_MODEL", type: "model_ref", default: null, label: "Operator model", help: "Next fresh cp-operator launch; beats CP_OPERATOR_MODEL, never an explicit --model. A resumed or restarted session keeps its recorded model. Empty unsets it." },

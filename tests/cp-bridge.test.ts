@@ -558,6 +558,32 @@ test("rotate applies the configured parent model; a set_model rejection keeps th
 	assert.equal((await bridge.send("after a refused switch")).reply, "reply: after a refused switch");
 });
 
+test("rotate keeps an explicit start model and a live cp_parent model switch over data/parent.json; absent explicit, the file applies", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
+	const control = () => JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model;
+
+	const explicit = new CpBridge();
+	t.after(() => explicit.stop());
+	await explicit.start({ home: home.path, mode: "multi", model: "mock/explicit", modelExplicit: true, piBin: FAKE_PARENT });
+	assert.equal(explicit.status().model, "mock/explicit");
+	await explicit.rotate();
+	assert.equal(explicit.status().model, "mock/explicit", "an explicit start model survives rotation");
+	assert.equal(control(), "mock/explicit");
+	await explicit.stop();
+
+	const live = new CpBridge();
+	t.after(() => live.stop());
+	await live.start({ home: home.path, mode: "multi", model: "mock/env", piBin: FAKE_PARENT });
+	assert.equal(live.status().model, "mock/file", "no explicit model: the file wins at start");
+	await live.model("mock/live");
+	await live.rotate();
+	assert.equal(live.status().model, "mock/live", "a live cp_parent model switch survives rotation");
+	assert.equal(control(), "mock/live");
+});
+
 test("standing orders seed once, survive operator edits, and deliver beyond 8000 characters", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

@@ -76,6 +76,18 @@ test("start: a data/parent.json model avoids exit 78 with no env or saved model;
 	}
 });
 
+test("start: a parent already running is logged without a model, since it keeps whatever it runs", async () => {
+	const client = fakeClient(undefined);
+	client.request = async (op, ...args) => { client.requests.push([op, ...args]); return { pid: 200, already: true }; };
+	const p = ports({ attach: async () => client, configuredModel: () => "file/m" });
+	const run = supervise({ home: "/h", model: "env/m" }, p);
+	await new Promise((done) => setImmediate(done));
+	assert.ok(p.lines.includes("host pid 100: parent already running pid 200"), p.lines.join("\n"));
+	assert.ok(!p.lines.some((line) => line.includes("file/m") || line.includes("env/m")), "no model claimed for a running parent");
+	client.close();
+	assert.equal(await run, 1);
+});
+
 test("a live foreign lock is retried every 60 s and logged once; any other attach failure exits 1", async () => {
 	let tries = 0;
 	const p = ports({ attach: async () => { if (++tries < 3) throw new Error("a parent already holds /h/parent.lock (pid 9)"); const c = fakeClient(300); c.close(); return c; } });

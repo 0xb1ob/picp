@@ -1,5 +1,5 @@
 /** The parent model resolvers `cp_parent start` uses; moved out of cp-bridge.ts unchanged (size cap), re-exported there. */
-import { CpBridgeError } from "./cp-bridge.ts";
+import { CpBridgeError } from "./cp-bridge-error.ts";
 import type { ModelProbe } from "./routing.ts";
 
 /**

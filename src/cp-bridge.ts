@@ -18,6 +18,7 @@ import {
 	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
 import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
+import { CpBridgeError } from "./cp-bridge-error.ts";
 import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
@@ -48,7 +49,7 @@ export const DEFAULT_BRIDGE_SETTLE_MS = 120_000;
 /** Immediate deaths before the child is ready. Then stop, don't spin. */
 export const RELAUNCH_FAIL_CAP = 3;
 
-export class CpBridgeError extends Error {}
+export { CpBridgeError };
 
 export interface BridgeReceipt {
 	/** Highest level reached. Null if the message never entered the channel. */
@@ -81,7 +82,7 @@ export interface ParentStartOptions {
 	home: string;
 	mode: Mode;
 	model: string;
-	/** The caller named `model` (cp_parent start model): `data/parent.json` `model` is then skipped. */
+	/** The caller named `model` (cp_parent start model), or a live `cp_parent model` switched it: `data/parent.json` `model` is then skipped at start and at rotation. */
 	modelExplicit?: boolean;
 	thinking?: ThinkingLevel;
 	piBin?: string;
@@ -459,8 +460,9 @@ export class CpBridge {
 			if (!existsSync(old)) throw new CpBridgeError(`session file missing; cannot archive ${old}`);
 			renameSync(old, archivedFile);
 			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(this.#missionEnd ? { lastMissionEnd: this.#missionEnd } : {}) });
-			// dashboard Settings: a configured parent model applies at rotation; a refusal keeps the running one.
-			const configured = parentModelSetting(this.#home);
+			// dashboard Settings: a configured parent model applies at rotation, as at a start without an explicit model;
+			// an explicit start model or a live `cp_parent model` switch stays (modelExplicit). A refusal keeps the running one.
+			const configured = this.#options?.modelExplicit ? undefined : parentModelSetting(this.#home);
 			const kept = this.#model;
 			if (configured && configured !== kept) await this.#setModel(proc, configured).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept ${kept}: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
 			return { sessionFile: current, archivedFile };
@@ -473,6 +475,8 @@ export class CpBridge {
 		this.#controlBusy = true;
 		try {
 			await this.#setModel(proc, model);
+			// The operator's live choice: later rotations keep it over data/parent.json.
+			if (this.#options) this.#options.modelExplicit = true;
 			return { model };
 		} finally { this.#controlBusy = false; }
 	}

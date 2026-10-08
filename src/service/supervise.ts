@@ -92,7 +92,8 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 			return EXIT_NO_MODEL;
 		}
 		const started = await client.request("start", { home: options.home, mode: "multi", model, ...(options.piBin ? { piBin: options.piBin } : {}) }) as { pid?: number; already?: boolean };
-		ports.log(`host pid ${client.hostPid}: ${started.already ? "parent already running" : "started parent"} pid ${started.pid ?? "?"} (${configured ?? model})`);
+		// An already-running parent keeps whatever model it runs; only a fresh start names the model it was given.
+		ports.log(`host pid ${client.hostPid}: ${started.already ? `parent already running pid ${started.pid ?? "?"}` : `started parent pid ${started.pid ?? "?"} (${configured ?? model})`}`);
 	} else ports.log(`attached to host pid ${client.hostPid}, parent pid ${client.parentPid}`);
 	let gen = ports.current().gen;
 	for (;;) {
