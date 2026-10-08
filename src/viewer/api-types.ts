@@ -133,6 +133,8 @@ export interface JobResponse {
  generated_at: string; awaiting_count: number | null; job: ViewerJob;
  timeline: {at:string;label:string;meta:string;tone:string}[]; timeline_truncated: boolean;
  files_href: string | null; artifact_href: string | null; artifact_name: string | null; run_href: string | null;
+ /** Published reports, newest revision per job set, matching this job. */
+ reports: ReportItem[];
  asks: Ask[]; questions: Question[]; warnings: {section:string;message:string}[];
 }
 export interface BoardResponse extends JobsResponse {

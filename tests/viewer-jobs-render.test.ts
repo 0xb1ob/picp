@@ -19,7 +19,7 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  const job:ViewerJob={id:"cp-render",project:"demo",title:"<script>unsafe()</script>",phase:"failed",model:"recorded-model",script_path:null,elapsed_seconds:7200,limit_seconds:7200,head:"a".repeat(40),ci:"red",review:"revise",review_attempts:5,routing:"explicit",note:null,ledger_status:"in_progress",ledger_disagrees:true,mandate_id:"md-active",cost_usd:3,pr_url:null,pr_status:null,finished_at:list.generated_at,finished_today:true,merge_sha:null,failure:"wall clock limit",summary:null,blockers:[]};
  list.jobs=[job]; list.projects=[{name:"demo",paused:false}];
  assert.match(screen("Jobs",list),/ledger in_progress/); assert.match(screen("Jobs",list),/wall clock limit/);
- const detail:JobResponse={generated_at:list.generated_at,awaiting_count:1,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:"/api/job/cp-render/events",asks:[{id:"ask-a",project:"demo",question:"Continue?",created_at:list.generated_at,options:[{label:"Keep",consequence:"Paused",reply:"ask-a: Keep"}],recommendation:"Keep",source_escalation:null,job_ids:[job.id],context:null,evidence_paths:[]}],questions:[],warnings:[]};
+ const detail:JobResponse={generated_at:list.generated_at,awaiting_count:1,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:"/api/job/cp-render/events",reports:[],asks:[{id:"ask-a",project:"demo",question:"Continue?",created_at:list.generated_at,options:[{label:"Keep",consequence:"Paused",reply:"ask-a: Keep"}],recommendation:"Keep",source_escalation:null,job_ids:[job.id],context:null,evidence_paths:[]}],questions:[],warnings:[]};
  const html=screen("JobDetail",detail); assert.match(html,/Awaiting you/);assert.match(html,/ask-a: Keep/);assert.match(html,/No recorded events/);assert.match(html,/CI red/);assert.match(html,/&lt;script>/);assert.doesNotMatch(html,/<script>|style=|onclick=/i);
  const failureLink=[...parseHTML(html).document.querySelectorAll("a")].find(a=>a.textContent === "Ask about this failure");
  assert.ok(failureLink,"failed jobs offer an editable recovery question");
@@ -30,6 +30,15 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
   assert.doesNotMatch(screen("JobDetail",{...detail,job:{...job,phase}}),/Ask about this failure/,`${phase} has no failure action`);
  }
  assert.match(screen("JobDetail",{...detail,job:{...job,failure:null}}),/Ask about this failure/,"failed phase is sufficient without a failure headline");
+ assert.doesNotMatch(html,/Open report/);
+ detail.reports=["alpha","beta"].map(slug=>({slug,title:`${slug} <script> ${"Long report title".repeat(20)}`,description:"",created_at:list.generated_at,job_ids:[job.id],href:`/boards/${slug}/`}));
+ detail.files_href="/#files?root=project%3Ademo&path=";
+ const reportsHtml=screen("JobDetail",detail); const reportsDoc=parseHTML(reportsHtml).document;
+ const reportLinks=[...reportsDoc.querySelectorAll(".job-detail-main .job-report-links a")];
+ assert.deepEqual(reportLinks.map(a=>a.getAttribute("href")),["/boards/alpha/","/boards/beta/"]);
+ for(const a of reportLinks) { assert.match(a.textContent!,/^Open report ·/); assert.equal(a.getAttribute("target"),"_blank"); assert.equal(a.getAttribute("rel"),"noopener noreferrer"); }
+ assert.ok(reportsDoc.querySelector('.job-detail-side .job-links a[href="/#files?root=project%3Ademo&path="]'));
+ assert.doesNotMatch(reportsHtml,/<script>|style=|onclick=/i);
  board.jobs=[job,{...job,id:"cp-inactive",mandate_id:"md-paused"}];
  board.lanes=[{id:"md-active",status:"active",active:true,objective:"Active",expiry:null,ask_on:[],spend:null,cap:null,note:null},{id:"md-paused",status:"paused",active:false,objective:"Paused",expiry:null,ask_on:[],spend:null,cap:null,note:null}];
  assert.deepEqual(visibleBoard(board,"all").jobs.map((j:ViewerJob)=>j.id),["cp-render","cp-inactive"]);
@@ -97,7 +106,7 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  assert.equal(doneRows[3]!.querySelector(".job-note")?.textContent,"provider unavailable");
  assert.equal(doneDoc.querySelectorAll(".job-context, .ctx-chip, .job-ci, .job-review").length,0,"finished tables have no flight cells");
  assert.equal(doneDoc.querySelectorAll("a a").length,0,"the PR link is separate from the job link");
- const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job:{...job,summary:"Recorded summary"},timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,asks:[],questions:[],warnings:[]});
+ const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job:{...job,summary:"Recorded summary"},timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,reports:[],asks:[],questions:[],warnings:[]});
  assert.match(detail,/<div class="job-detail"><header class="job-detail-heading">/);
  const detailDoc=parseHTML(detail).document;
  assert.equal(detailDoc.querySelector(".job-detail-body > .job-detail-main > .job-summary")?.textContent,"Recorded summary");

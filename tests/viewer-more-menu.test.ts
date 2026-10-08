@@ -149,7 +149,7 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  // JobDetail: the job's title is the <h1>, its id follows muted; a long title is whole in the title attribute.
  const title = "A long job title ".repeat(12).trim();
  const jobView = {id:"cp-long",title,phase:"held",pr_url:null,pr_status:null,merge_sha:null,ci:null,review:null,review_attempts:0,head:null,summary:null,failure:null,model:null,script_path:null,context:null,routing:null,routing_facts:null,mandate_id:null,cost_usd:null,elapsed_seconds:null,limit_seconds:null};
- const detail = parseHTML(draw.job({job:jobView,questions:[],asks:[],timeline:[],timeline_truncated:false,artifact_href:null,artifact_name:null,files_href:null,run_href:null})).document;
+ const detail = parseHTML(draw.job({job:jobView,questions:[],asks:[],reports:[],timeline:[],timeline_truncated:false,artifact_href:null,artifact_name:null,files_href:null,run_href:null})).document;
  const h1s = [...detail.querySelectorAll("h1")];
  assert.equal(h1s.length,1);
  assert.equal(h1s[0]!.getAttribute("title"),title);
