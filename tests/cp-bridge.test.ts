@@ -1787,6 +1787,11 @@ test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an e
 	assert.match((await tool.execute("call", { action: "start", home: ctx.home, model: "mock/explicit" })).content[0]!.text, /started pid=/);
 	assert.equal(modelArg(), "mock/explicit", "explicit beats the file (no saved control model in the way)");
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
+	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
+	rmSync(join(ctx.home, LAYOUT.data, "parent.json"));
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
+	assert.equal(modelArg(), "mock/env", "no file: resolveParentModel (CP_PARENT_MODEL), as before");
+	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 });
 
 test("cp_parent start retires a dead saved target and attaches to the new live parent holding the lock", { timeout: 90_000 }, async (t) => {

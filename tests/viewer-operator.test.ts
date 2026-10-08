@@ -325,6 +325,10 @@ test("operatorModelArgs: the wrapper's CP_OPERATOR_MODEL becomes --model, never 
 	}
 	assert.deepEqual(operatorModelArgs(["-c"], {}), ["-c"]);
 	assert.deepEqual(operatorModelArgs([], { CP_OPERATOR_MODEL: " " }), [], "blank is unset");
+	// The data/operator.json model (dashboard Settings) beats the env pin, never an argv model or a resume.
+	assert.deepEqual(operatorModelArgs([], env, "file/m"), ["--model", "file/m"]);
+	assert.deepEqual(operatorModelArgs([], {}, "file/m"), ["--model", "file/m"]);
+	for (const argv of [["--model", "x"], ["--session", "s"], ["-c"]]) assert.deepEqual(operatorModelArgs(argv, env, "file/m"), argv, argv.join(" "));
 });
 
 test("runOperator: the data/operator.json model beats CP_OPERATOR_MODEL; an unreadable file is one stderr line and the env pin", async (t) => {

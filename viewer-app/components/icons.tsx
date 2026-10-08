@@ -14,6 +14,7 @@ export function Icon({name, size = 20}: {name:NavId | "awaiting" | "copy" | "che
   case "schedules": content = <><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2" stroke-linecap="round" stroke-linejoin="round"/></>; break;
   case "map": content = <><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="10" cy="18" r="2.5"/><path d="M8.4 6.4l7.2 1.2M6.9 8.4l2.2 7.2M16.4 10l-4.8 6" stroke-linecap="round"/></>; break;
   case "files": content = <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" stroke-linejoin="round"/>; break;
+  case "settings": content = <><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2L18 18M6 18l1.8-1.8M16.2 7.8L18 6" stroke-linecap="round"/></>; break;
   case "back": content = <path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/>; break;
   case "down": content = <path d="M12 5v14M6 13l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>; break;
   case "send": content = <path d="M12 19V5M6 11l6-6 6 6" stroke-linecap="round" stroke-linejoin="round"/>; break;
