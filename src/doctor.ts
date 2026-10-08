@@ -157,7 +157,7 @@ const REFUSAL_SUMMARY: Readonly<Record<RoutingRefusal, string>> = Object.freeze(
 
 function refusalFix(refusal: RoutingRefusal | undefined, who: string): string {
 	if (refusal === "allowlist") {
-		return `the row fired and its model is not in \`allow\`: add a pattern that covers it in ${LAYOUT.routingFile}, or point that row at an allowed model (nothing here is unauthenticated — the model was never tried)`;
+		return `the row fired and its model is not in \`allow\`, or \`deny_by_role.<role>\` matches it: add a pattern that covers it in ${LAYOUT.routingFile} (or narrow the deny pattern), or point that row at an allowed model (nothing here is unauthenticated — the model was never tried)`;
 	}
 	if (refusal === "effort") {
 		return `name an effort level this model serves (the row's \`thinking\`, or ${who}'s own in its profile), or route to a model that serves it; routing never substitutes a level`;

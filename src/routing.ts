@@ -388,6 +388,11 @@ export function isAllowed(config: RoutingConfig, model: string): boolean {
 	return config.allow.some((pattern) => matchesPattern(pattern, model));
 }
 
+/** The first `deny_by_role.<role>` pattern matching `model` (cp-7re9), or undefined when the role may use it. */
+export function deniedFor(config: RoutingConfig, role: Role, model: string): string | undefined {
+	return config.deny_by_role?.[role]?.find((pattern) => matchesPattern(pattern, model));
+}
+
 // ---------------------------------------------------------------------------
 // Availability probe
 // ---------------------------------------------------------------------------
@@ -542,7 +547,7 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 	if (request.override) {
 		// An override is one candidate, always: the caller named this model, so an
 		// unusable one is their decision to revisit, not routing's to route around.
-		requireAllowed(config, request.override, "override");
+		requireAllowed(config, request.override, "override", role);
 		// An override that names an effort keeps it; one that does not keeps today's
 		// behaviour exactly (the profile's level), which is the backwards-compatible
 		// half of cp-ot3b.
@@ -569,7 +574,7 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 		// A single-candidate row keeps the hard allowlist error it always had; a row
 		// with fallbacks defers to the walk, where a disallowed candidate is skipped
 		// with provenance (see `resolveModel`).
-		if (candidates.length === 1) requireAllowed(config, rule.model, `rubric ${rule.id}`, rule.id);
+		if (candidates.length === 1) requireAllowed(config, rule.model, `rubric ${rule.id}`, role, rule.id);
 		// A row that names no level leaves the profile's in force: routing narrows
 		// policy, it does not silently reset the parts it did not mention.
 		// A caller-named effort outranks the row's, the same way a caller-named
@@ -587,7 +592,7 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 
 	const profileModel = request.profile.frontmatter.model;
 	const profileCandidates = [profileModel, ...(request.profile.frontmatter.fallbacks ?? [])];
-	if (profileCandidates.length === 1) requireAllowed(config, profileModel, `profile ${request.profile.frontmatter.name}`);
+	if (profileCandidates.length === 1) requireAllowed(config, profileModel, `profile ${request.profile.frontmatter.name}`, role);
 	const profileThinking = request.thinking ?? request.profile.frontmatter.thinking;
 	return {
 		model: profileModel,
@@ -599,10 +604,17 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 	};
 }
 
-function requireAllowed(config: RoutingConfig, model: string, where: string, rule?: string): void {
-	if (isAllowed(config, model)) return;
+function requireAllowed(config: RoutingConfig, model: string, where: string, role: Role, rule?: string): void {
+	if (!isAllowed(config, model)) {
+		throw new RoutingError(
+			`${where} names ${model}, which the allowlist refuses (allow: ${config.allow.join(", ") || "(empty — nothing is allowed)"})`,
+			{ refusal: "allowlist", ...(rule ? { rule } : {}) },
+		);
+	}
+	const pattern = deniedFor(config, role, model);
+	if (pattern === undefined) return;
 	throw new RoutingError(
-		`${where} names ${model}, which the allowlist refuses (allow: ${config.allow.join(", ") || "(empty — nothing is allowed)"})`,
+		`settings: model ${model} is not allowed for role ${role} (${where}; ${LAYOUT.routingFile} deny_by_role.${role} matches ${pattern}); choose an allowed model`,
 		{ refusal: "allowlist", ...(rule ? { rule } : {}) },
 	);
 }
@@ -648,7 +660,7 @@ export async function resolveWithCapacity(
 }
 
 function candidateRefusal(model: string, request: RouteRequest, picked: Candidate, config: RoutingConfig, probe: ModelProbe): CandidateRefusal | undefined {
-	if (!isAllowed(config, model)) return "allowlist";
+	if (!isAllowed(config, model) || deniedFor(config, request.profile.frontmatter.role, model)) return "allowlist";
 	if (!probe.isAvailable(model)) {
 		if (picked.candidates.length === 1) throw unavailable(request, picked, model, probe);
 		return "availability";

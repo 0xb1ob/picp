@@ -624,6 +624,22 @@ for (const refusal of ["allowlist", "availability", "effort"] as const) {
 	});
 }
 
+test("role deny refuses a configured and an explicit cp_review model without fallback (cp-7re9)", async (t) => {
+	const b = await reviewBenchOf(t);
+	const jobId = "cp-diffpref-deny";
+	const chosen = b.script("review-deny-chosen", [verdictCall(jobId)]);
+	const spare = b.script("review-deny-spare", [verdictCall(jobId)]);
+	b.routing.rubric.push({ id: "available-spare", role: "gate-reviewer", model: spare, fallbacks: [spare] });
+	b.routing.deny_by_role = { "gate-reviewer": [chosen] };
+	b.pushJobBranch(jobId); await b.shipRecord(jobId);
+	await b.registry.setReviewerModel(PROJECT, chosen);
+	b.seal();
+	const spawns = captureSpawns(b.manager);
+	await assert.rejects(() => b.review.start({ jobId }), /not allowed for role gate-reviewer/);
+	await assert.rejects(() => b.review.start({ jobId, model: chosen }), /not allowed for role gate-reviewer/);
+	assert.equal(spawns.length, 0, "a denied reviewer model never spawns and never falls back to the spare");
+});
+
 // ---------------------------------------------------------------------------
 // cp-reviewer-routing: the reviewer inherits the ship job's own route
 // ---------------------------------------------------------------------------

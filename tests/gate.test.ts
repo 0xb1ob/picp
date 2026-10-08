@@ -872,6 +872,22 @@ for (const refusal of ["allowlist", "availability", "effort"] as const) {
 	});
 }
 
+test("role deny refuses a configured and an explicit gate model without fallback (cp-7re9)", async (t) => {
+	const b = await benchOf(t);
+	const jobId = "cp-pref-deny";
+	const chosen = b.script("gate-deny-chosen", [verdictCall(jobId)]);
+	const spare = b.script("gate-deny-spare", [verdictCall(jobId)]);
+	b.routing.rubric.push({ id: "available-spare", role: "gate-reviewer", model: spare, fallbacks: [spare] });
+	b.routing.deny_by_role = { "gate-reviewer": [chosen] };
+	b.writeArtifact(jobId); await b.subjectRecord(jobId);
+	await b.registry.setReviewerModel("demo", chosen);
+	b.seal();
+	const spawns = captureSpawns(b.manager);
+	await assert.rejects(() => b.gate.start({ jobId }), /not allowed for role gate-reviewer/);
+	await assert.rejects(() => b.gate.start({ jobId, model: chosen }), /not allowed for role gate-reviewer/);
+	assert.equal(spawns.length, 0, "a denied reviewer model never spawns and never falls back to the spare");
+});
+
 test("pass: a reviewer verdict becomes a recorded decision, and the artifact never leaves the store", { timeout: 120_000 }, async (t) => {
 	const b = await benchOf(t);
 	const jobId = "cp-gate-pass";

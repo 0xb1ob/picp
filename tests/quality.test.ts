@@ -200,7 +200,7 @@ interface Bench {
 	home: string;
 	artifacts: ArtifactStore;
 	manager: WorkerManager;
-	pass(model: string, options?: { voteTimeoutMs?: number; rubric?: RoutingConfig["rubric"] }): QualityPass;
+	pass(model: string, options?: { voteTimeoutMs?: number; rubric?: RoutingConfig["rubric"]; deny?: RoutingConfig["deny_by_role"] }): QualityPass;
 	script(name: string, steps: ScriptStep[]): string;
 	seal(): void;
 	sent: ReviewWakeup[];
@@ -272,6 +272,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }): Promis
 				routing: {
 					...DEFAULT_ROUTING_CONFIG,
 					rubric: options.rubric ?? [{ id: "voters", role: "gate-reviewer", model }],
+					...(options.deny ? { deny_by_role: options.deny } : {}),
 				},
 				probe: MOCK_ONLY,
 				reviews,
@@ -544,6 +545,40 @@ test(
 		assert.deepEqual(payload?.attempted, [{ model: "unauth/opus", refusal: "availability" }]);
 	},
 );
+
+test("cp-7re9: deny_by_role refuses a voter's config.model and its rubric candidates, with no override bypass and no spawn", { timeout: 60_000 }, async (t) => {
+	const b = await bench(t);
+	const jobId = "cp-q-deny";
+	writeArtifact(b, jobId);
+	const denied = b.script("q-denied", [verdictStep(jobId, "pass")]);
+	const spare = b.script("q-deny-spare", [verdictStep(jobId, "pass")]);
+	b.seal();
+	await b.subjectRecord(jobId);
+	const spawns = captureSpawns(b.manager);
+	const deny = { "gate-reviewer": [denied] };
+	// A configured voter model is an explicit override: denied hard, never routed around to the spare row.
+	await assert.rejects(
+		() => b.pass(spare, { deny }).runAndWait({ jobId, task: "t", config: { verify: true, voters: 1, model: denied } }),
+		/^Error: settings: model .* is not allowed for role gate-reviewer \(override;/,
+	);
+	// The voter rubric row's only candidate is denied the same way.
+	await assert.rejects(
+		() => b.pass(denied, { deny }).runAndWait({ jobId, task: "t", config: { verify: true, voters: 1 } }),
+		/not allowed for role gate-reviewer/,
+	);
+	// A row with fallbacks skips the denied member as allowlist and votes on the next one.
+	const rubric: RoutingConfig["rubric"] = [{ id: "voters", role: "gate-reviewer", model: denied, fallbacks: [spare] }];
+	assert.equal(spawns.length, 0, "a denied voter never spawns");
+	const report = await b.pass(spare, { rubric, deny }).runAndWait({ jobId, task: "t", config: { verify: true, voters: 1, threshold: 0.5 } });
+	assert.equal(report?.verify?.votes[0]?.model, spare);
+	assert.equal(argOf(spawns[0]?.args ?? [], "--model"), spare);
+	const payload = readFileSync(join(b.home, paths.qualityRunDir(jobId, "verify-1"), "events.jsonl"), "utf8")
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as { type: string; payload?: Record<string, unknown> })
+		.find((event) => event.type === "routing_resolved")?.payload;
+	assert.deepEqual(payload?.attempted, [{ model: denied, refusal: "allowlist" }]);
+});
 
 test("an orphaned panel writes no report and asks for the panel to run again", async (t) => {
 	const b = await bench(t);
