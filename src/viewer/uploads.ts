@@ -1,14 +1,10 @@
 /**
- * Dashboard image attachments (cp-br81 plan, PR1 core): the one place that knows the upload directory, its id
- * format, the magic-byte sniff and the limits. The viewer writes uploads (src/viewer/operator-upload-api.ts) and
- * serves them back to the composer; the operator session's bridge (src/dashboard-control.ts) reads them to inline
- * them as image parts. Both processes share `/tmp`, so the root is a fixed literal (docs/storage.md, Outside the
- * home), injectable for tests through an option or `CP_UPLOAD_ROOT`.
- *
- *   <root>/<yyyymmdd>/<24 hex>.<png|jpg|webp|gif>    root and day dirs 0700, files 0600 (O_EXCL|O_NOFOLLOW)
- *
- * A path is only ever rebuilt from an id's regex captures, never from request text. Files older than 7 days are
- * removed by the sweep that runs before every write, and treated as gone by every read.
+ * Dashboard attachments: shared upload ids, validation, limits and owner-only storage.
+ * The viewer writes/serves files; the operator bridge reads them. Both share /tmp
+ * (docs/storage.md), overridden only by an option or CP_UPLOAD_ROOT in tests.
+ * Paths come from id captures, never original filenames. Reads and writes preserve
+ * the image magic-byte checks; text is strict UTF-8 without NUL, and JSON must parse.
+ * Files expire after 7 days, swept before every write and treated as gone on read.
  */
 
 import { randomBytes } from "node:crypto";
@@ -30,16 +26,57 @@ export const IMAGE_MESSAGE_INLINE_BYTES = 2 * 1024 * 1024;
 export const IMAGE_PREP_MS = 15_000;
 export const UPLOAD_SEND_TIMEOUT_MS = 25_000;
 
-export const UPLOAD_ID_SOURCE = "im-\\d{8}-[0-9a-f]{24}\\.(?:png|jpg|webp|gif)";
+export const IMAGE_ID_SOURCE = "im-\\d{8}-[0-9a-f]{24}\\.(?:png|jpg|webp|gif)";
+export const TEXT_ID_SOURCE = "tx-\\d{8}-[0-9a-f]{24}\\.(?:txt|md|html|json)";
+export const UPLOAD_ID_SOURCE = `(?:${IMAGE_ID_SOURCE}|${TEXT_ID_SOURCE})`;
 export const UPLOAD_ID_RE = new RegExp(`^${UPLOAD_ID_SOURCE}$`);
-const ID_PARTS = /^im-(\d{8})-([0-9a-f]{24})\.(png|jpg|webp|gif)$/;
+const ID_PARTS = /^(?:im-(\d{8})-([0-9a-f]{24})\.(png|jpg|webp|gif)|tx-(\d{8})-([0-9a-f]{24})\.(txt|md|html|json))$/;
 const DAY_DIR = /^\d{8}$/;
-const FILE_NAME = /^[0-9a-f]{24}\.(?:png|jpg|webp|gif)$/;
+const FILE_NAME = /^[0-9a-f]{24}\.(?:png|jpg|webp|gif|txt|md|html|json)$/;
 export const isUploadId = (value: unknown): value is string => typeof value === "string" && UPLOAD_ID_RE.test(value);
-
+export const isImageUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${IMAGE_ID_SOURCE}$`).test(value);
+export const isTextUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${TEXT_ID_SOURCE}$`).test(value);
+export const TEXT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export const TEXT_MESSAGE_INLINE_BYTES = 200 * 1024;
+export type TextExt = "txt" | "md" | "html" | "json";
 export type ImageExt = "png" | "jpg" | "webp" | "gif";
-export const EXT_MIME: Record<ImageExt, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+export type UploadExt = ImageExt | TextExt;
+export const EXT_MIME: Record<UploadExt, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif", txt: "text/plain", md: "text/plain", html: "text/plain", json: "text/plain" };
+export const textExtension = (name: string): TextExt | undefined => /\.(txt|md|html|json)$/i.exec(name)?.[1]?.toLowerCase() as TextExt | undefined;
+/** Display metadata only: never a path or Markdown/marker syntax. */
+export const sanitizeUploadName = (name: string): string => name.replace(/\\/g, "/").split("/").pop()!.replace(/[^a-zA-Z0-9 ._-]/g, "_").slice(-120) || "attachment";
 
+export function validateText(bytes: Uint8Array, ext: TextExt): { text: string } | { refused: string } {
+	if (bytes.length > TEXT_UPLOAD_MAX_BYTES) return { refused: "text file is larger than 1 MiB" };
+	if (bytes.includes(0)) return { refused: "text file contains NUL (binary files are not supported)" };
+	let text: string;
+	try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+	catch { return { refused: "text file must be valid UTF-8" }; }
+	if (ext === "json") {
+		try { JSON.parse(text); } catch { return { refused: "JSON file must contain valid JSON" }; }
+	}
+	return { text };
+}
+
+/** Each file gets an even share, including names, fences and truncation notices. */
+export function inlineTextFiles(files: { name: string; path: string; bytes: Uint8Array }[]): string {
+	const budget = Math.floor(TEXT_MESSAGE_INLINE_BYTES / Math.max(1, files.length));
+	return files.map(({ name, path, bytes }) => {
+		let limit = Math.min(bytes.length, budget);
+		for (;;) {
+			const text = new TextDecoder().decode(bytes.subarray(0, limit), { stream: limit < bytes.length });
+			const runs = (char: string) => { let max = 2; for (const m of text.matchAll(new RegExp(`${char}+`, "g"))) max = Math.max(max, m[0].length); return max; };
+			const ticks = runs("`"), tildes = runs("~");
+			const fence = (ticks <= tildes ? "`" : "~").repeat(Math.min(ticks, tildes) + 1);
+			const notice = limit < bytes.length ? `\n[truncated — full file at ${path}]` : "";
+			const block = `File: ${sanitizeUploadName(name)}\n${fence}text\n${text}\n${fence}${notice}\n\n`;
+			const excess = Buffer.byteLength(block) - budget;
+			if (excess <= 0) return block;
+			if (limit === 0) throw new Error("file name/path exceeds the inline text budget");
+			limit = Math.max(0, limit - excess);
+		}
+	}).join("");
+}
 /** The upload root: an explicit option (tests), else `CP_UPLOAD_ROOT`, else the production literal. */
 export const uploadRoot = (option?: string): string => option ?? (process.env[UPLOAD_ROOT_ENV] ? resolve(process.env[UPLOAD_ROOT_ENV]) : UPLOAD_ROOT);
 
@@ -91,11 +128,11 @@ export function ensureUploadDir(path: string): void {
 /** `<root>/<yyyymmdd>/<hex>.<ext>` from the id's captures, or undefined for anything that is not an id. */
 export function uploadFile(root: string, id: string): string | undefined {
 	const match = ID_PARTS.exec(id);
-	return match ? join(root, match[1]!, `${match[2]}.${match[3]}`) : undefined;
+	return match ? join(root, (match[1] ?? match[4])!, `${match[2] ?? match[5]}.${match[3] ?? match[6]}`) : undefined;
 }
 
 const day = (now: Date) => now.toISOString().slice(0, 10).replace(/-/g, "");
-export const newUploadId = (ext: ImageExt, now: Date): string => `im-${day(now)}-${randomBytes(12).toString("hex")}.${ext}`;
+export const newUploadId = (ext: UploadExt, now: Date): string => `${EXT_MIME[ext].startsWith("image/") ? "im" : "tx"}-${day(now)}-${randomBytes(12).toString("hex")}.${ext}`;
 const expiresAt = (mtimeMs: number) => new Date(mtimeMs + UPLOAD_MAX_AGE_MS).toISOString();
 
 /** Remove files older than 7 days (then empty day dirs) and total the rest. Only id-shaped names are touched. */
@@ -164,13 +201,14 @@ function openUpload(root: string, id: string, now: Date): (UploadStat & { state:
 	const refuse = (reason: string) => { closeSync(fd); return { state: "invalid" as const, reason }; };
 	if (!stat.isFile()) return refuse("not a regular file");
 	if (typeof process.getuid === "function" && stat.uid !== process.getuid()) return refuse(`owned by uid ${stat.uid}`);
-	if (stat.size > UPLOAD_MAX_BYTES) return refuse(`larger than ${UPLOAD_MAX_BYTES} bytes`);
+	const max = isTextUploadId(id) ? TEXT_UPLOAD_MAX_BYTES : UPLOAD_MAX_BYTES;
+	if (stat.size > max) return refuse(`larger than ${max} bytes`);
 	if (now.getTime() - stat.mtimeMs > UPLOAD_MAX_AGE_MS) {
 		closeSync(fd);
 		unlinkSync(file);
 		return { state: "missing" };
 	}
-	const ext = id.slice(id.lastIndexOf(".") + 1) as ImageExt;
+	const ext = id.slice(id.lastIndexOf(".") + 1) as UploadExt;
 	return { state: "ok", fd, path: file, size: stat.size, mime: EXT_MIME[ext], expires_at: expiresAt(stat.mtimeMs) };
 }
 
@@ -200,7 +238,12 @@ export function readUpload(root: string, id: string, now: Date): (UploadStat & {
 	} finally {
 		closeSync(fd);
 	}
-	const sniffed = sniffImage(bytes);
-	if (!("mime" in sniffed) || sniffed.mime !== stat.mime) return { state: "invalid", reason: "its bytes do not match its extension" };
+	if (isTextUploadId(id)) {
+		const checked = validateText(bytes, textExtension(id)!);
+		if ("refused" in checked) return { state: "invalid", reason: checked.refused };
+	} else {
+		const sniffed = sniffImage(bytes);
+		if (!("mime" in sniffed) || sniffed.mime !== stat.mime) return { state: "invalid", reason: "its bytes do not match its extension" };
+	}
 	return { ...stat, bytes };
 }

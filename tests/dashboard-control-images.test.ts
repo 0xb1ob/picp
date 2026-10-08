@@ -4,15 +4,16 @@
  * wires both (real pi resizeImage). Every upload root is a mkdtemp dir; none is /tmp/cp-dashboard-uploads.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl, userMessageContent } from "../src/dashboard-control.ts";
 import { controlRequest } from "../src/viewer/control-api.ts";
+import { appendControlAudit } from "../src/viewer/control-audit.ts";
 import { controlJournalFile, parseDashboardText, readControlRecord } from "../src/viewer/control-files.ts";
-import { inlineBudget, newUploadId, uploadFile, writeUpload } from "../src/viewer/uploads.ts";
+import { inlineBudget, newUploadId, TEXT_MESSAGE_INLINE_BYTES, uploadFile, writeUpload } from "../src/viewer/uploads.ts";
 import bridgeExtension, { saveOperatorTarget } from "../extensions/cp-bridge/index.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { syntheticPng } from "./harness/images.ts";
@@ -174,4 +175,30 @@ test("cp-bridge wiring: index.ts sends userMessageContent; a send_images frame r
 	assert.equal(parts[1]!.type, "image");
 	assert.equal(parts[1]!.mimeType, "image/png");
 	assert.equal(Buffer.from(parts[1]!.data!, "base64").subarray(1, 4).toString("latin1"), "PNG", "a real PNG, base64");
+});
+
+
+test("send_files: text-only capability, bounded UTF-8 inline with paths, metadata and ids journaled without file contents; revalidation refuses mutation", async t => {
+ const {stateDir, uploadRoot} = scratch(t);
+ const {state, ports} = fakePorts(null);
+ const record = await listening(t, stateDir, ports, {uploadRoot});
+ const status = await controlRequest(record, "status", {}); assert.equal(status.ok && (status.result as {files?: boolean}).files, true);
+ const bytes = Buffer.from("UNIQUE_FILE_CONTENT\n```\n~~~~\n" + "é".repeat(400_000));
+ const ids = Array.from({length: 3}, () => newUploadId("md", new Date()));
+ for (const id of ids) {
+  writeUpload(uploadRoot, id, bytes);
+  assert.ok(appendControlAudit(stateDir, {type: "upload", by: "viewer", id, at: new Date().toISOString(), peer: null, mime: "text/plain", bytes: bytes.length, name: "original.md"}).ok);
+ }
+ const sent = await controlRequest(record, "send_files", {kind: "message", text: "", files: ids, thread: "notes"}); assert.ok(sent.ok, JSON.stringify(sent));
+ const text = state.injected[0]!.text, parsed = parseDashboardText(text)!;
+ assert.deepEqual(parsed.files, ids); assert.equal(parsed.thread, "notes"); assert.equal(state.injected[0]!.images, undefined);
+ assert.ok(Buffer.byteLength(parsed.body) <= TEXT_MESSAGE_INLINE_BYTES);
+ assert.doesNotMatch(parsed.body, /\uFFFD/);
+ for (const id of ids) { assert.ok(parsed.body.includes(`[truncated — full file at ${uploadFile(uploadRoot, id)}]`)); assert.deepEqual(readFileSync(uploadFile(uploadRoot, id)!), bytes); }
+ assert.equal((parsed.body.match(/File: original.md/g) ?? []).length, 3);
+ assert.deepEqual(journal(stateDir).find(row => row.type === "request")?.files, ids);
+ assert.equal(readFileSync(controlJournalFile(stateDir), "utf8").includes("UNIQUE_FILE_CONTENT"), false);
+ for (const files of [[], [ids[0], ids[0]], [newUploadId("png", new Date())]]) assert.equal((await controlRequest(record, "send_files", {kind: "message", text: "", files})).ok, false);
+ writeFileSync(uploadFile(uploadRoot, ids[0]!)!, Buffer.from([0xc3, 0x28]));
+ const invalid = await controlRequest(record, "send_files", {kind: "message", text: "", files: [ids[0]]}); assert.equal(invalid.ok ? null : invalid.status, 400); assert.equal(state.injected.length, 1);
 });

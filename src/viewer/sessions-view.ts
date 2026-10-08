@@ -2,7 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
-import { isAskId, parseDashboardText, readThreads } from "./control-files.ts";
+import { isAskId, parseDashboardText, readThreads, readUploadMetadata } from "./control-files.ts";
 import { assignThreads, INBOX_REPLAY_PREFIX } from "./thread-turns.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
@@ -136,6 +136,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
     const shown=!dashboard.images && Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
     const e=entry(base,at,"via","Operator (dashboard)",[dashboard.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;
     if (dashboard.images) e.images=dashboard.images;
+    if (dashboard.files) e.files=dashboard.files;
     if (dashboard.askId) e.ask_id=dashboard.askId;
     entries.push(e); continue;
    }
@@ -146,6 +147,8 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    e.send_id=ids.length === 1 ? ids[0]! : null; entries.push(e);
   }
  }
+ const uploadMetadata=readUploadMetadata(state.stateDir,entries.flatMap(e=>e.files ?? []));
+ for (const e of entries) if (e.files) e.file_metadata=Object.fromEntries(e.files.flatMap(id=>uploadMetadata.has(id) ? [[id,uploadMetadata.get(id)!]] : []));
  if (sides === SIDES.you) stampProjects(entries, projectNames(state));
  return {entries,truncated:start.offset>0};
 }

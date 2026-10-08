@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Chat text attachments (cp-chat-text-uploads-idox)
+
+The composer accepts `.txt`, `.md`, `.html` and `.json` alongside images through the picker, drop or paste. Text files have removable filename/size chips and sent chips open a plain-text view. The server checks extensions, strict UTF-8 without NUL, valid JSON and a 1 MiB file cap; all attachments share the existing message/directory caps and 7-day expiry. The main session receives fenced text within a 200 KiB total budget, with a stored path for truncated files. HTML always stays text. Migration: restart the operator session once to advertise `files`; `files=` is additive after the existing ask/thread/images marker fields.
+
 ### Empty thread hides shared entries (cp-threads-empty-view-m0xo)
 
 A selected operator thread shows a shared entry (bridge relay, system line, inbox replay) only between its first and last own entry. A new tag, or a thread with no own entries, shows no entries and keeps `No messages in <tag> yet`. **All** is unchanged. Migration: none.

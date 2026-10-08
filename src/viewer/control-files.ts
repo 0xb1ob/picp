@@ -20,7 +20,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pushDataDir, readPushConfig } from "./push-files.ts";
-import { UPLOAD_ID_SOURCE } from "./uploads.ts";
+import { IMAGE_ID_SOURCE, TEXT_ID_SOURCE, isUploadId, sanitizeUploadName } from "./uploads.ts";
+import { readLines } from "./tail.ts";
 import { isSafeId } from "./sessions.ts";
 
 export const CONTROL_PROTOCOL = 1;
@@ -343,18 +344,17 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The last line of every message the dashboard injects: an id, never an instruction; attached images list their upload ids. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}]`;
+/** The trailing marker keeps ask/thread/images ordering; files is an additive final field. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null, files?: readonly string[]): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}]`;
 }
 
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${UPLOAD_ID_SOURCE}(?:,${UPLOAD_ID_SOURCE}){0,7}))?\\]\\s*$`);
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?\\]\\s*$`);
 
-/** A dashboard-sent user message: its body without the marker, request id, clicked ask, optional thread and image ids. */
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[] } | undefined {
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[]; files?: string[] } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
-	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}) };
+	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}), ...(match[5] ? { files: match[5].split(",") } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
@@ -364,11 +364,36 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
 
 /**
  * One audit line. The bridge writes request/outcome; the viewer writes refused (after the --require-tailnet guard)
- * and one `upload` line per stored image. Image lines carry upload ids, mime types and byte counts, never bytes.
+ * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[] }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[] }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting"; reason: string | null }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string; thread?: string; thread_id?: string }
-	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string }
+	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
+
+/** Names/sizes have one durable source: upload audit lines, never attachment contents.
+ * ponytail: scans the journal in bounded chunks; index upload metadata if transcript polling becomes slow.
+ * A snapshot bounds the scan; torn lines wait for the next call.
+ */
+export function readUploadMetadata(stateDir: string, ids: readonly string[]): Map<string, { name: string; bytes: number }> {
+	const found = new Map<string, { name: string; bytes: number }>();
+	const wanted = new Set(ids);
+	if (!wanted.size) return found;
+	const file = controlJournalFile(stateDir);
+	let end: number;
+	try { end = statSync(file).size; } catch { return found; }
+	for (let offset = 0; offset < end;) {
+		const chunk = readLines(file, offset, Math.min(1024 * 1024, end - offset));
+		if (chunk.offset <= offset) break;
+		offset = chunk.offset;
+		for (const row of chunk.lines) {
+			let line;
+			try { line = JSON.parse(row.text); } catch { continue; }
+			if (line?.type !== "upload" || !isUploadId(line.id) || !wanted.has(line.id) || typeof line.name !== "string" || !Number.isSafeInteger(line.bytes) || line.bytes < 0) continue;
+			found.set(line.id, { name: sanitizeUploadName(line.name), bytes: line.bytes });
+		}
+	}
+	return found;
+}

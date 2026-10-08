@@ -169,6 +169,21 @@ test("sent images: a dashboard bubble shows its upload ids as thumbnails; a tap 
 	assert.match(css, /\.session-image-open \.session-image \{[^}]*max-width: 100%;/, "an opened image never passes the bubble");
 });
 
+
+test("text files: sent filename/size chips link to plain-text views; arbitrary fences remain code and HTML stays literal", () => {
+ const id = "tx-20261004-0123456789abcdef01234567.html", name = "a".repeat(100) + ".html";
+ const rendered = html(view([entry("f1", "via", {who: "Operator (dashboard)", files: [id], file_metadata: {[id]: {name, bytes: 1025}}, text: "File: report.html\n~~~~~text\n<script>alert(1)</script>\n```\n~~~~\n~~~~~"})]));
+ const {document} = parseHTML(`<div>${rendered}</div>`);
+ const link = document.querySelector(".session-file-link")!;
+ assert.equal(link.getAttribute("href"), `/api/operator/uploads/${id}`);
+ assert.equal(link.getAttribute("target"), "_blank"); assert.equal(link.getAttribute("rel"), "noopener noreferrer");
+ assert.equal(link.querySelector("span")!.textContent, name); assert.equal(link.querySelector("small")!.textContent, "2 KiB");
+ assert.equal(document.querySelector("pre code")!.textContent, "<script>alert(1)</script>\n```\n~~~~");
+ assert.equal(document.querySelector("script"), null);
+ const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
+ assert.match(css, /\.session-files \{[^}]*flex-wrap: wrap;/); assert.match(css, /\.session-file-link \{[^}]*min-height: 44px;[^}]*overflow-wrap: anywhere;/);
+});
+
 test("layout: bubbles cap at 85% on a phone and 75% on desktop; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");

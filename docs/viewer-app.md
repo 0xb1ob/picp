@@ -294,6 +294,12 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   bubble's width (at most 70vh tall), a second tap closes it. A file the route
   answers 404 for (the 7-day sweep, a cleaned `/tmp`) swaps its tile for the text
   "image expired". Styles: `.session-image*` in `screens/sessions.css`.
+- **Text attachments** (cp-chat-text-uploads-idox; docs/contracts.md §Image attachments): `.txt`, `.md`, `.html` and
+  `.json` join images in the native multiple-file picker when the running bridge advertises `files: true`; drop and
+  paste use the same upload flow. Text files show removable filename/size chips with 44 px targets. The server validates
+  strict UTF-8/no NUL, JSON syntax and a 1 MiB cap. `files: [id…]` sends alongside `images`, with 8 attachments total.
+  Sent chips (`components/TranscriptFiles.tsx`, `SessionEntry.files` and `file_metadata`) link to a plain-text view;
+  HTML is always literal text. Long chip names wrap within the composer/bubble at 390 px and 1440 px.
 - **Mobile layout** (below 900 px, every Sessions view): the global header and the
   bottom nav give way to one 48 px top bar — back to Overview, a menu of every
   session (Operator ↔ you, CP parent, each worker), the view's name, the live dot,

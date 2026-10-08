@@ -56,7 +56,7 @@ import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from ".
 import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
-import { isUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
+import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
 export const CONTROL_STATUS_PATH = "/api/operator/control";
 export const CONTROL_MESSAGE_PATH = "/api/operator/message";
@@ -254,12 +254,13 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			session_file: typeof status.session_file === "string" ? status.session_file : null, recent: Array.isArray(status.recent) ? status.recent : [],
 			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
 			...(status.images === true ? { images: true } : {}),
+			...(status.files === true ? { files: true } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; mime?: string; thread?: string; thread_id?: string };
-type Body = ({ kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[] } | { kind: "answer"; ask_id: string; label: string }) & { thread?: string } | { kind: "abort" };
+type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string };
+type Body = ({ kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[] } | { kind: "answer"; ask_id: string; label: string }) & { thread?: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
@@ -269,8 +270,9 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" ? value.kind : null;
 	const text = typeof value?.text === "string" ? value.text : kind === "answer" && typeof value?.label === "string" ? value.label : null;
 	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
-	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(typeof value?.thread === "string" ? { thread: value.thread.slice(0, 64) } : {}) };
-	const keys = { message: ["kind", "text", "deliver", "images", "thread"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
+	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
+	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(typeof value?.thread === "string" ? { thread: value.thread.slice(0, 64) } : {}) };
+	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
@@ -283,13 +285,15 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 		if (typeof value.label !== "string" || !value.label) return { ok: false, reason: "label must be one of the ask's options", parsed };
 		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label, ...tagged }, thread, parsed };
 	}
-	const ids = value.images;
-	if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > UPLOAD_MAX_PER_MESSAGE || new Set(ids).size !== ids.length || !ids.every(isUploadId))) return { ok: false, reason: `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`, parsed };
+	const ids = value.images, fileIds = value.files;
+	if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > UPLOAD_MAX_PER_MESSAGE || new Set(ids).size !== ids.length || !ids.every(isImageUploadId))) return { ok: false, reason: `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`, parsed };
+	if (fileIds !== undefined && (!Array.isArray(fileIds) || fileIds.length < 1 || fileIds.length > UPLOAD_MAX_PER_MESSAGE || new Set(fileIds).size !== fileIds.length || !fileIds.every(isTextUploadId))) return { ok: false, reason: `files must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct text upload ids`, parsed };
+	if ((images?.length ?? 0) + (files?.length ?? 0) > UPLOAD_MAX_PER_MESSAGE) return { ok: false, reason: `at most ${UPLOAD_MAX_PER_MESSAGE} attachments per message`, parsed };
 	const trimmed = typeof value.text === "string" ? value.text.trim() : "";
-	if (!trimmed && !ids) return { ok: false, reason: "text is empty", parsed };
+	if (!trimmed && !ids && !fileIds) return { ok: false, reason: "text is empty", parsed };
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...tagged }, thread, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...tagged }, thread, parsed };
 }
 
 /** The journals' timestamp form: ISO seconds, no milliseconds. */
@@ -316,7 +320,7 @@ const IMAGE_CONTENT_TYPE = /^image\/(png|jpeg|webp|gif)\s*(?:;|$)/i;
  * type, size. `{ image: max }` (POST /api/operator/upload) takes raw image bytes on its own limiter and hands
  * `next` the Buffer; otherwise the body is JSON within CONTROL_BODY_MAX_BYTES.
  */
-export async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>, mode: "json" | { image: number } = "json"): Promise<ControlRouteResult> {
+export async function guarded(req: IncomingMessage, options: ControlRouteOptions, now: Date, kind: Parsed["kind"], next: (json: unknown, gate: Gate) => Promise<ControlRouteResult>, mode: "json" | { image: number; text?: number } = "json"): Promise<ControlRouteResult> {
 	const peer = peerOf(req);
 	if (req.method !== "POST") {
 		log(options)(`viewer: dashboard control refused 405: ${req.method} (${peer ?? "unknown peer"})\n`);
@@ -356,10 +360,12 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		const type = req.headers["content-type"] ?? "";
 		if (image !== undefined) {
 			parsed = { ...parsed, mime: type.slice(0, 100) };
-			if (/^image\/hei[cf]\b/i.test(type)) return refuse(415, "HEIC/HEIF is not supported; share the photo as JPEG");
-			if (!IMAGE_CONTENT_TYPE.test(type)) return refuse(415, "Content-Type must be image/png, image/jpeg, image/webp or image/gif");
+			if (mode !== "json" && mode.text === undefined) {
+				if (/^image\/hei[cf]\b/i.test(type)) return refuse(415, "HEIC/HEIF is not supported; share the photo as JPEG");
+				if (!IMAGE_CONTENT_TYPE.test(type)) return refuse(415, "Content-Type must be image/png, image/jpeg, image/webp or image/gif");
+			}
 		} else if (!/^application\/json\s*(?:;|$)/i.test(type)) return refuse(415, "Content-Type must be application/json");
-		const max = image ?? CONTROL_BODY_MAX_BYTES;
+		const max = (mode === "json" ? undefined : mode.text) ?? image ?? CONTROL_BODY_MAX_BYTES;
 		const raw = await readBody(req, max);
 		if (raw === "too_large") {
 			parsed = { ...parsed, bytes: Number(req.headers["content-length"]) || max + 1 };
@@ -390,28 +396,31 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		const record = readControlRecord(options.stateDir);
 		const running = record.state === "ok" && operatorSession(options.stateDir).running;
 		const images = shape.body.kind === "message" ? shape.body.images : undefined;
-		if (images) {
+		const files = shape.body.kind === "message" ? shape.body.files : undefined;
+		const attachments = [...(images ?? []), ...(files ?? [])];
+		if (attachments.length) {
 			// Never held in the inbox: a later session could not be sure the uploads still exist.
-			if (!running) return refuse(409, "image attachments need a running operator session (they are never held in the inbox); start it, or send text only");
+			if (!running) return refuse(409, `${files ? "file" : "image"} attachments need a running operator session (they are never held in the inbox); start it, or send text only`);
 			const root = uploadRoot(options.uploadRoot);
 			let total = 0;
-			for (const image of images) {
+			for (const image of attachments) {
 				const stat = statUpload(root, image, now);
-				if (stat.state !== "ok") return refuse(410, `image ${image} expired or was never uploaded; attach it again`);
+				if (stat.state !== "ok") return refuse(410, `${isTextUploadId(image) ? "file" : "image"} ${image} expired or was never uploaded; attach it again`);
 				total += stat.size;
 			}
-			if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `images total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
+			if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `${files ? "attachments" : "images"} total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
 		}
 		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse, peer, shape.thread);
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
-		const reply = images
-			? await controlRequest(record.record, "send_images", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
+		const reply = files
+			? await controlRequest(record.record, "send_files", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
+			: images ? await controlRequest(record.record, "send_images", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
 			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", { ...shape.body, peer });
 		if (reply.ok) return { status: 202, body: threaded(options, reply.result as ControlSendResponse, shape.thread, peer, now) };
 		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
 		if (reply.status === 503 || (reply.status === 504 && reply.error.startsWith("session "))) return refuse(reply.status, reply.error);
 		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
-		if (images && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates image attachments; restart the session (⋮ → Restart session) and attach again");
+		if (attachments.length && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, `unsupported: this session's cp-bridge predates ${files ? "text" : "image"} attachments; restart the session (⋮ → Restart session) and attach again`);
 		return { status: reply.status, body: { error: reply.error } };
 	});
 }

@@ -8,7 +8,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symli
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ensureUploadDir, inlineBudget, newUploadId, readUpload, sniffImage, statUpload, sweepUploads, UPLOAD_ID_RE, UPLOAD_ROOT, uploadFile, uploadRoot, writeUpload } from "../src/viewer/uploads.ts";
+import { ensureUploadDir, inlineBudget, inlineTextFiles, isImageUploadId, isTextUploadId, newUploadId, readUpload, sanitizeUploadName, sniffImage, statUpload, sweepUploads, textExtension, TEXT_MESSAGE_INLINE_BYTES, TEXT_UPLOAD_MAX_BYTES, UPLOAD_ID_RE, UPLOAD_ROOT, uploadFile, uploadRoot, validateText, writeUpload } from "../src/viewer/uploads.ts";
 import { STUBS, syntheticPng } from "./harness/images.ts";
 
 function scratch(t: import("node:test").TestContext): string {
@@ -123,4 +123,44 @@ test("sweep: files past 7 days and then empty day dirs go; the rest is totalled;
 
 test("inline budget: 768 KiB for one image, an even share of 2 MiB beyond", () => {
 	assert.deepEqual([1, 4, 8].map(inlineBudget), [786432, 524288, 262144]);
+});
+
+
+test("text validation: UTF-8, no NUL, valid JSON, and 1 MiB; safe tx ids and revalidation on read", t => {
+ const root = scratch(t);
+ for (const ext of ["txt", "md", "html", "json"] as const) {
+  const bytes = Buffer.from(ext === "json" ? '{"ok":true}' : "<script>literal</script> café");
+  assert.ok("text" in validateText(bytes, ext));
+  const id = newUploadId(ext, NOW);
+  assert.ok(isTextUploadId(id)); assert.equal(isImageUploadId(id), false);
+  assert.match(id, UPLOAD_ID_RE); assert.equal(uploadFile(root, id), join(root, DAY, id.slice(12)));
+  writeUpload(root, id, bytes);
+  const read = readUpload(root, id, NOW);
+  assert.equal(read.state, "ok"); assert.equal(read.state === "ok" && read.mime, "text/plain");
+  writeFileSync(uploadFile(root, id)!, Buffer.from([0xc3, 0x28]));
+  assert.equal(readUpload(root, id, NOW).state, "invalid");
+ }
+ for (const [bytes, ext, reason] of [[Buffer.from([0]), "txt", /NUL/], [Buffer.from([0xc3, 0x28]), "md", /UTF-8/], [Buffer.from("{bad}"), "json", /valid JSON/], [Buffer.alloc(TEXT_UPLOAD_MAX_BYTES + 1, 97), "html", /1 MiB/]] as const) {
+  const result = validateText(bytes, ext); assert.ok("refused" in result); assert.match(result.refused, reason);
+ }
+ assert.ok("text" in validateText(Buffer.alloc(TEXT_UPLOAD_MAX_BYTES, 97), "txt"));
+ for (const id of ["tx-20261004-0123456789abcdef01234567.svg", "im-20261004-0123456789abcdef01234567.txt", "tx-20261004-0123456789abcdef01234567.png"]) assert.equal(uploadFile(root, id), undefined);
+ assert.equal(sanitizeUploadName("../folder\\evil\n[<name>].HTML"), "evil___name__.HTML");
+ assert.equal(textExtension("report.JSON"), "json"); assert.equal(textExtension("report.json.exe"), undefined);
+});
+
+test("text inline: bounded total including robust fences and paths, truncation keeps UTF-8 and full stored bytes", () => {
+ const hostile = "```\n~~~~\n<script>literal</script>\n";
+ const bytes = Buffer.from(hostile + "é".repeat(400_000));
+ const files = Array.from({length: 8}, (_, i) => ({name: `file-${i}.md`, path: `/tmp/store/file-${i}.md`, bytes}));
+ const inline = inlineTextFiles(files);
+ assert.ok(Buffer.byteLength(inline) <= TEXT_MESSAGE_INLINE_BYTES);
+ assert.doesNotMatch(inline, /\uFFFD/);
+ for (const file of files) assert.ok(inline.includes(`[truncated — full file at ${file.path}]`));
+ assert.equal((inline.match(/File: /g) ?? []).length, 8);
+ const short = inlineTextFiles([{name: "small.md", path: "/tmp/store/small.md", bytes: Buffer.from(hostile)}]);
+ assert.equal(short, `File: small.md\n\`\`\`\`text\n${hostile}\n\`\`\`\`\n\n`);
+ const pathological = inlineTextFiles([{name: "runs.txt", path: "/tmp/runs.txt", bytes: Buffer.from("`".repeat(100_000) + "~".repeat(100_000))}]);
+ assert.ok(Buffer.byteLength(pathological) <= TEXT_MESSAGE_INLINE_BYTES);
+ assert.equal(inlineTextFiles([]), "");
 });

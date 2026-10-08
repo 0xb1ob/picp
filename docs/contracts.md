@@ -5870,7 +5870,7 @@ still 405 (the image upload route below is the one addition). The Full transcrip
 
 **Audit journal** `state/operator/dashboard.jsonl` (0600, append-only, one `O_APPEND` write + `fsync` per line, two
 writers). The session appends a `request` line (`by:"bridge"`, `id`, `at`, `peer` — the client address — `kind`,
-`text`, `ask_id`, `deliver`, and `images` — upload ids, never bytes — for a message with image attachments) **before** anything happens — a request line that cannot be written refuses the request
+`text`, `ask_id`, `deliver`, and `images`/`files` — upload ids, never contents — for a message with attachments) **before** anything happens — a request line that cannot be written refuses the request
 (500) and nothing is injected — then `outcome` lines (`injected`, then `delivered` once the marker is seen in a
 `message_start` or `context` event, `queued` when it is not seen within 2 s, `failed` or `refused` with the reason).
 The viewer appends one `refused` line (`by:"viewer"`, `status`, `reason`, `peer`, and whatever `kind`/`text`/`ask_id`/`images`/`mime`
@@ -6036,6 +6036,37 @@ not be attached inline; file: <absolute path>]` instead, and the `injected` outc
 `dashboard`; the Full transcript shows the marker's ids as 96 px thumbnails in the operator's bubble (a tap opens one at
 the bubble's width), and an id the GET route answers 404 for reads **"image expired"** (`SessionEntry.images`,
 `viewer-app/components/TranscriptImages.tsx`). Image parts no marker names stay `[image]`.
+
+**Text attachments** (cp-chat-text-uploads-idox) extend these same routes and store. The picker, drop and paste accept
+`.txt`, `.md`, `.html` and `.json` as well as images. Text files appear as removable filename/size chips (44 px remove
+button, wrapping long names on phone and desktop); sent chips link to `/api/operator/uploads/<id>` in a new tab.
+The browser sends the URI-encoded original filename in `x-cp-upload-name` and raw text bytes with
+`Content-Type: application/octet-stream`; MIME is not trusted. The server requires an allowlisted extension,
+**strict UTF-8 without NUL**, and parseable JSON for `.json`. Empty text files are allowed, empty JSON is refused.
+Text bodies over **1 MiB** are 413; invalid encoding, binary/NUL, invalid JSON and unsupported extensions are 415
+with a specific reason. The same tailnet, Origin, CSRF, live-session, rate, safe-directory and journal-first guards apply.
+An absent filename on an image upload keeps the existing image protocol; text needs the filename header.
+
+Text ids are `tx-<yyyymmdd>-<24 hex>.<txt|md|html|json>` in the same day directories; original names **never** form paths.
+Only a sanitized basename (120 ASCII letters/digits/spaces/dots/underscores/hyphens) is display metadata: the `upload`
+audit line and 201 response gain optional `name`, alongside `mime` and `bytes`, never file contents. The bridge and
+transcript read this metadata from the upload journal, falling back to the id if unavailable. Reads revalidate the bytes.
+All text formats, including HTML and JSON, are served as **`text/plain; charset=utf-8` with `nosniff`** and the existing
+sandbox CSP. HTML is never rendered as HTML. The 7-day sweep and 256 MiB directory cap include text files.
+
+`POST /api/operator/message` gains `files: [tx-id…]`; `images` remains image ids only. Combined, at most **8** distinct
+attachments and **32 MiB** per message. A file-only message may have empty composer text. Files are never held offline.
+A message with files uses **`send_files`**, which also accepts images; the bridge checks ids, count and combined bytes,
+reads and validates every text file, and retains the existing image preparation behavior. An older bridge's unknown op
+becomes 409 with a restart hint; `GET /api/operator/control` advertises `files: true` separately from `images: true`.
+
+The main session receives each file inline as `File: <sanitized name>` followed by a fenced `text` block. The total
+**200 KiB** budget includes names, fences and notices, shared evenly across the files. UTF-8 prefixes end on code-point
+boundaries. Fences use backticks or tildes longer than any matching run in the included content, so arbitrary source
+text cannot close them. Over-budget files end with **`[truncated — full file at <absolute path>]`**; the stored file is
+complete and the session can use its read tool on that path. File contents are never added to the upload/request journal.
+The trailing marker adds `; files=<id>,…` **after** ask/thread/images, preserving their ordering and existing markers.
+`SessionEntry.files` carries those ids, and optional `file_metadata` carries names/sizes for the plain-text links.
 
 **Recovery.** `rm -rf /tmp/cp-dashboard-uploads` is safe at any time (a pending send then answers 410); the opt-out
 stops uploads with every other control. **Migration:** restart the operator session once (⋮ → Restart session) so its
