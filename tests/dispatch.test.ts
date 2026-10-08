@@ -940,22 +940,23 @@ test("a blocked or closed issue is never dispatched", { skip: SKIP, timeout: 180
 
 test("an unlabelled issue is not a job", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
-	// Ledger.update() refuses to strip a required label (requireJobLabels runs on
-	// every edit), so a job missing delivery: can only come from a raw import —
-	// which does not validate the dispatchability contract, only the JobSchema.
-	const at = "2026-09-04T10:00:00Z";
-	await b.ledger.importJobs([
-		{
-			id: "cp-unlabelled",
-			title: "unlabelled",
-			status: "open",
-			labels: ["project:demo"],
-			blocked_by: [],
-			comments: [],
-			created_at: at,
-			updated_at: at,
-		},
-	]);
+	const unlabelled = {
+		id: "cp-unlabelled",
+		title: "unlabelled",
+		status: "open" as const,
+		labels: ["project:demo"],
+		blocked_by: [],
+		comments: [],
+		created_at: "2026-09-04T10:00:00Z",
+		updated_at: "2026-09-04T10:00:00Z",
+	};
+	const before = readFileSync(b.ledger.file, "utf8");
+	await assert.rejects(b.ledger.importJobs([unlabelled]), /exactly one delivery:/);
+	assert.equal(readFileSync(b.ledger.file, "utf8"), before, "invalid imports persist nothing");
+	// Seed a historical record directly: every current write enforces required labels.
+	const doc = b.ledger.read();
+	doc.jobs.push(unlabelled);
+	writeFileSync(b.ledger.file, JSON.stringify(doc));
 
 	await assert.rejects(
 		() => b.dispatcher.dispatch({ jobId: "cp-unlabelled", task: "do it", model: b.model, fetch: false }),

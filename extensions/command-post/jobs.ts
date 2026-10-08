@@ -21,10 +21,10 @@ import { type Static, Type } from "typebox";
 import type { CommandPost } from "../../src/command-post.ts";
 import { operatorTextsFromEntries } from "../../src/decide.ts";
 import { addTaskAddendum } from "../../src/task-addenda.ts";
-import { DELIVERIES, JOB_KINDS, JOB_STATUSES, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime, type TrackerConnection } from "../../src/contracts.ts";
+import { DELIVERIES, JOB_KINDS, JOB_STATUSES, jobLabelErrors, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime, type TrackerConnection } from "../../src/contracts.ts";
 import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.ts";
 import { formatBeadsImport, importBeads } from "../../src/ledger-import.ts";
-import { type Ledger, assertScriptIntake, parseJobLabels } from "../../src/ledger.ts";
+import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { readSchedulesOrEmpty, scheduleLabelRefusal } from "../../src/schedule-expand.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
@@ -133,6 +133,8 @@ function pad(text: string, width: number): string {
 
 /** One line per job: id, status, project, delivery/kind, title. */
 export function formatJobLine(job: Job): string {
+	const errors = jobLabelErrors(job.labels);
+	if (errors.length > 0) return `${pad(job.id, 12)} ${pad(job.status, 12)} ${job.title} [label error: ${errors.join("; ")}]`;
 	const labels = parseJobLabels(job.labels);
 	const route = `${labels.delivery ?? "?"}${labels.kind ? `/${labels.kind}` : ""}${job.script ? " [script]" : ""}`;
 	return `${pad(job.id, 12)} ${pad(job.status, 12)} ${pad(labels.project ?? "?", 16)} ${pad(route, 10)} ${job.title}`.trimEnd();
@@ -201,11 +203,15 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const title = need(params, "title");
 			assertScriptIntake({ delivery, kind: params.kind, scriptPath: params.script_path });
 			const project = ports.resolveProject(params.project);
+			const labelErrors = jobLabelErrors([...formatJobLabels({ project, delivery, kind: params.kind, risk: params.risk }), ...(params.labels ?? [])]);
+			if (labelErrors.length > 0) throw new Error(`cp_job create refused: ${labelErrors.join("; ")}`);
 			// A `schedule:<id>` label is minted by a fire: only a parent-expanded schedule's open run may add jobs to it.
 			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home));
 			if (labelRefusal) throw new Error(`cp_job create refused: ${labelRefusal}`);
 			const existing = ledger.findDuplicate({ title, project, ...(params.external_ref !== undefined ? { externalRef: params.external_ref } : {}) });
 			if (existing) {
+				const errors = jobLabelErrors(existing.labels);
+				if (errors.length > 0) throw new Error(`${existing.id}: label error: ${errors.join("; ")}; repair with cp_job update add_labels/remove_labels`);
 				if (existing.script?.path !== params.script_path) throw new Error(`cp_job create refused: ${existing.id} has a different action (${existing.script ? `script:${existing.script.path}` : "model"})`);
 				const recordedRisk = parseJobLabels(existing.labels).risk;
 				if (params.risk !== undefined && recordedRisk !== params.risk) {

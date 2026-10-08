@@ -112,6 +112,47 @@ test("create -> show -> list -> ready -> claim -> comment -> close through the a
 	assert.equal(((await runJobAction({ action: "list", all: true }, p)).details.jobs as unknown[]).length, 1);
 });
 
+test("conflicting and duplicate reserved labels refuse with no write or receipt; normal intake still dedupes", async (t) => {
+	const { ports: base, scratch } = ports(t);
+	const receipts: string[] = [];
+	const p = { ...base, noteCreated: (id: string) => receipts.push(id) };
+	const input = { action: "create", title: "safe", project: "demo", delivery: "local", kind: "research", risk: "low" } as const;
+	for (const label of ["project:demo", "project:other", "delivery:local", "delivery:board", "kind:research", "kind:ship", "risk:low", "risk:high"]) {
+		const before = readFileSync(scratch.ledger.file, "utf8");
+		await assert.rejects(runJobAction({ ...input, labels: [label] }, p), /labels/);
+		assert.equal(readFileSync(scratch.ledger.file, "utf8"), before);
+	}
+	assert.deepEqual(receipts, []);
+	assert.deepEqual((await runJobAction({ action: "list" }, p)).details.jobs, []);
+	const created = await runJobAction({ ...input, labels: ["phase:7"] }, p);
+	const id = (created.details.job as { id: string }).id;
+	const before = readFileSync(scratch.ledger.file, "utf8");
+	await assert.rejects(runJobAction({ ...input, labels: ["delivery:board"] }, p), /labels/);
+	assert.equal(readFileSync(scratch.ledger.file, "utf8"), before, "idempotent intake also validates extras before any receipt");
+	assert.deepEqual(receipts, [id]);
+	assert.equal((await runJobAction(input, p)).details.existing, true);
+	assert.match((await runJobAction({ action: "list" }, p)).text, /safe/);
+});
+
+test("list marks legacy label faults and preserves search and narrow repair", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const good = await scratch.ledger.create({ title: "good", project: "demo", delivery: "local" });
+	const bad = { ...good, id: "cp-legacy", title: "legacy", external_ref: "br show old --json", labels: [...good.labels, "delivery:board"] };
+	const doc = scratch.document();
+	doc.jobs.unshift(bad);
+	writeFileSync(scratch.ledger.file, JSON.stringify(doc));
+	const before = readFileSync(scratch.ledger.file, "utf8");
+	const listed = await runJobAction({ action: "list", project: "demo" }, p);
+	assert.match(listed.text, /legacy \[label error:/);
+	assert.match(listed.text, /good/);
+	assert.equal(scratch.ledger.findDuplicate({ title: "good", project: "demo" })?.id, good.id);
+	assert.equal((await runJobAction({ action: "create", title: "good", project: "demo", delivery: "local" }, p)).details.existing, true);
+	assert.equal(readFileSync(scratch.ledger.file, "utf8"), before, "read and duplicate lookup never rewrite legacy labels");
+	await assert.rejects(runJobAction({ action: "create", title: "legacy", project: "demo", delivery: "local" }, p), /cp-legacy: label error/);
+	await runJobAction({ action: "update", job_id: bad.id, remove_labels: ["delivery:board"] }, p);
+	assert.doesNotMatch((await runJobAction({ action: "list" }, p)).text, /label error/);
+});
+
 test("riskkw-f10: cp_job create records risk as a label", async (t) => {
 	const { ports: p } = ports(t);
 	const input = { action: "create", title: "r", project: "demo", delivery: "pr", risk: "low" } as const;
