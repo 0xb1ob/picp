@@ -291,6 +291,11 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
  assert.deepEqual([full.entries[8].tag,full.entries[8].text,full.entries[8].dashboard_id,full.entries[8].images],["dashboard","look","dc-20260927082700-89abcdef",["im-20260927-0123456789abcdef01234567.png"]],"image parts follow the marker: still a dashboard message; the marker's ids are its thumbnails, never [image]");
  assert.equal(full.entries[7].images,undefined,"a text-only dashboard message carries no images");
  assert.equal(full.entries[9].text,"from the CLI\n[image]","a CLI message with an image is unchanged");
+ const fileId="tx-20260927-0123456789abcdef01234567.html";
+ appendFileSync(file,message({role:"user",content:`File: original.html\n\`\`\`text\n<script>literal</script>\n\`\`\`\n\n[cp-dashboard dc-20260927082800-0123abcd — from the dashboard; thread=notes; files=${fileId}]`})+"\n");
+ put(join(stateDir,"operator/dashboard.jsonl"),{type:"upload",id:fileId,mime:"text/plain",bytes:24,name:"original.html"}); appendFileSync(join(stateDir,"operator/dashboard.jsonl"),"\n");
+ const next=await (await fetch(`http://127.0.0.1:${options.port}/api/sessions?view=you&transcript=1`)).json();
+ const fileEntry=next.entries.at(-1); assert.equal(fileEntry.tag,"dashboard"); assert.deepEqual(fileEntry.files,[fileId]); assert.deepEqual(fileEntry.file_metadata,{[fileId]:{name:"original.html",bytes:24}}); assert.ok(fileEntry.text.includes("<script>literal</script>"));
 });
 
 test("operator Full transcript: the 300-entry window never drops an open decision card", async t => {

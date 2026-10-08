@@ -11,6 +11,7 @@ import { OperatorComposer } from "../components/OperatorComposer.tsx";
 import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
+import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
 import { ShellContext } from "../components/Shell.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
@@ -141,7 +142,7 @@ function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
 function Bubble({entry:e,first}: {entry:SessionEntry;first:boolean}) {
  return <article class={`session-message session-say session-bubble ${isOwn(e) ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
   {first && <div class="session-who"><span>{e.who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
-  <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
+  <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
  </article>;
 }
 function Entry({entry:e,first=true}: {entry:SessionEntry;first?:boolean}) {

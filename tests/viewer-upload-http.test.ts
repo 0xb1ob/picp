@@ -219,3 +219,46 @@ test("no HTTPS origin configured: a tailnet bind's own http:// origin uploads an
 	assert.equal(sent.status, 202, JSON.stringify(sent.body));
 	assert.deepEqual(Buffer.from(injected[0]!.images![0]!.data, "base64"), png);
 });
+
+
+test("text uploads: validate extensions/UTF-8/JSON/size, store metadata only, serve HTML as text/plain, and deliver files with images and a thread", async t => {
+ const {stateDir, uploadRoot, port} = await setup(t);
+ const {csrf, injected} = await bridge(t, stateDir, uploadRoot);
+ const text = (name: string, bytes: Buffer) => image(csrf, bytes, "application/octet-stream", {"x-cp-upload-name": encodeURIComponent(name)});
+ for (const [name, bytes, status, reason] of [
+  ["binary.txt", Buffer.from([1, 0, 2]), 415, /NUL/],
+  ["broken.md", Buffer.from([0xc3, 0x28]), 415, /UTF-8/],
+  ["broken.json", Buffer.from("{oops}"), 415, /valid JSON/],
+  ["big.txt", Buffer.alloc(1024 * 1024 + 1, 97), 413, /1048576/],
+  ["file.csv", Buffer.from("hello"), 415, /extension/],
+  ["file.svg", Buffer.from("<svg></svg>"), 415, /extension/],
+ ] as const) {
+  const reply = await call(port, UPLOAD, text(name, bytes)); assert.equal(reply.status, status, JSON.stringify(reply.body)); assert.match(String(reply.body.error), reason);
+ }
+ const html = Buffer.from("<script>UNIQUE_ATTACHMENT_CONTENT</script>");
+ const uploaded = await call(port, UPLOAD, text("../folder\\report[1].HTML", html));
+ assert.equal(uploaded.status, 201, JSON.stringify(uploaded.body));
+ assert.match(String(uploaded.body.id), /^tx-\d{8}-[0-9a-f]{24}\.html$/);
+ assert.equal(uploaded.body.name, "report_1_.HTML");
+ const id = String(uploaded.body.id);
+ assert.equal(uploadFile(uploadRoot, id)!.includes("report"), false);
+ assert.deepEqual(readFileSync(uploadFile(uploadRoot, id)!), html);
+ assert.equal(journalText(stateDir).includes("UNIQUE_ATTACHMENT_CONTENT"), false);
+ const audit = journal(stateDir).find(line => line.type === "upload" && line.id === id)!;
+ assert.deepEqual([audit.mime, audit.bytes, audit.name], ["text/plain", html.length, "report_1_.HTML"]);
+ const got = await call(port, String(uploaded.body.url));
+ assert.equal(got.headers["content-type"], "text/plain; charset=utf-8"); assert.equal(got.headers["x-content-type-options"], "nosniff"); assert.deepEqual(got.raw, html);
+ assert.ok(String(got.headers["content-security-policy"]).includes("sandbox"));
+ const png = await call(port, UPLOAD, image(csrf, syntheticPng()));
+ const sent = await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "look", images: [png.body.id], files: [id], thread: "file-chat"}));
+ assert.equal(sent.status, 202, JSON.stringify(sent.body));
+ assert.equal(injected[0]!.images!.length, 1); assert.ok(injected[0]!.text.includes("File: report_1_.HTML\n```text\n<script>UNIQUE_ATTACHMENT_CONTENT</script>\n```"));
+ assert.match(injected[0]!.text, /; thread=file-chat; images=im-[^;]+; files=tx-[^\]]+\]$/);
+ assert.equal((await call(port, "/api/operator/control")).body.files, true);
+ for (const body of [{files: [png.body.id]}, {images: [id]}, {files: [id, id]}, {files: []}, {files: "x"}, {files: [id], images: Array.from({length: 8}, () => newUploadId("png", new Date()))}]) assert.equal((await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "", ...body}))).status, 400);
+ const fileOnly = await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "", files: [id]})); assert.equal(fileOnly.status, 202); assert.equal(injected[1]!.images, undefined);
+ const gone = newUploadId("txt", new Date());
+ assert.equal((await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "", files: [gone]}))).status, 410);
+ assert.deepEqual((await call(port, `/api/operator/uploads/${gone}`)).body, {error: "file expired"});
+ for (const [name, bytes] of [["note.txt", "plain"], ["note.md", "# markdown"], ["note.json", '{"ok": true}']] as const) assert.equal((await call(port, UPLOAD, text(name, Buffer.from(bytes)))).status, 201);
+});

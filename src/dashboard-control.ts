@@ -28,11 +28,11 @@ import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
-	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord,
+	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord, readUploadMetadata,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
-import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, isUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, uploadFile, uploadRoot } from "./viewer/uploads.ts";
+import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, inlineTextFiles, isImageUploadId, isTextUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, uploadFile, uploadRoot } from "./viewer/uploads.ts";
 
 /** Linux `sun_path` is 108 bytes including the NUL. */
 const MAX_SOCKET_PATH = 107;
@@ -181,19 +181,20 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		}
 	};
 
-	const request = async (args: Record<string, unknown>, op: "send" | "abort", withImages = false): Promise<Reply> => {
+	const request = async (args: Record<string, unknown>, op: "send" | "abort", withImages = false, withFiles = false): Promise<Reply> => {
 		const kind: ControlKind = op === "abort" ? "abort" : args.kind === "answer" ? "answer" : "message";
 		const peer = typeof args.peer === "string" ? args.peer.slice(0, 100) : null;
 		const askId = kind === "answer" && isAskId(args.ask_id) ? args.ask_id : null;
 		const label = typeof args.label === "string" ? args.label : "";
 		const text = kind === "message" ? (typeof args.text === "string" ? args.text.trim() : "") : kind === "answer" ? `${askId ?? String(args.ask_id)}: ${label}` : null;
-		// `send_images` only: the ids as sent (clipped), journaled with the request; never bytes.
-		const images = withImages ? (Array.isArray(args.images) ? args.images.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((image) => String(image).slice(0, 64)) : []) : undefined;
+		// Attachment ids as sent (clipped), journaled with the request; never contents.
+		const images = withImages && (args.images !== undefined || !withFiles) ? (Array.isArray(args.images) ? args.images.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((image) => String(image).slice(0, 64)) : []) : undefined;
+		const files = withFiles ? (Array.isArray(args.files) ? args.files.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((file) => String(file).slice(0, 64)) : []) : undefined;
 		const idle = ports.isIdle();
 		const deliverAs = kind === "abort" || idle ? undefined : args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
 		const id = newControlId(now());
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}) });
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}), ...(files ? { files } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
@@ -209,9 +210,19 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		}
 		const thread = args.thread === undefined ? null : normalizeThreadTag(args.thread);
 		if (args.thread !== undefined && thread === null) return refuse(400, "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit");
-		if (images && (kind !== "message" || images.length < 1 || images.length > UPLOAD_MAX_PER_MESSAGE || new Set(images).size !== images.length || !images.every(isUploadId))) return refuse(400, `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`);
-		// With images the text may be empty: the marker alone carries them.
-		if (kind === "message" && ((!text && !images) || (text ?? "").length > CONTROL_TEXT_MAX)) return refuse(400, `text must be 1-${CONTROL_TEXT_MAX} characters`);
+		if (images && (kind !== "message" || images.length < 1 || images.length > UPLOAD_MAX_PER_MESSAGE || new Set(images).size !== images.length || !images.every(isImageUploadId))) return refuse(400, `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`);
+		if (files && (kind !== "message" || files.length < 1 || files.length > UPLOAD_MAX_PER_MESSAGE || new Set(files).size !== files.length || !files.every(isTextUploadId))) return refuse(400, `files must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct text upload ids`);
+		const attachments = [...(images ?? []), ...(files ?? [])];
+		if (attachments.length > UPLOAD_MAX_PER_MESSAGE) return refuse(400, `at most ${UPLOAD_MAX_PER_MESSAGE} attachments per message`);
+		if (images && !ports.prepareImage) return refuse(409, "image attachments unsupported; restart the operator session");
+		if (kind === "message" && ((!text && !attachments.length) || (text ?? "").length > CONTROL_TEXT_MAX)) return refuse(400, `text must be 1-${CONTROL_TEXT_MAX} characters`);
+		let total = 0;
+		for (const attachment of attachments) {
+			const stat = statUpload(root, attachment, now());
+			if (stat.state !== "ok") return refuse(stat.state === "missing" ? 410 : 400, `${isTextUploadId(attachment) ? "file" : "image"} ${attachment} expired or was never uploaded; attach it again`);
+			total += stat.size;
+		}
+		if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `attachments total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
 		if (kind === "answer") {
 			if (!askId) return refuse(400, "ask_id must be an ask id");
 			let ask;
@@ -224,6 +235,14 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			if (prior && now().getTime() - prior.at < duplicateMs) return refuse(409, `${askId} was already answered from the dashboard (${prior.id}); wait for the session to record it`);
 			clicks.set(askId, { at: now().getTime(), id });
 		}
+		const metadata = readUploadMetadata(stateDir, files ?? []);
+		const textFiles: { name: string; path: string; bytes: Uint8Array }[] = [];
+		for (const file of files ?? []) {
+			const read = readUpload(root, file, now());
+			if (read.state !== "ok") return refuse(read.state === "missing" ? 410 : 400, `file ${file} is not readable; attach it again`);
+			textFiles.push({ name: metadata.get(file)?.name ?? file, path: resolve(read.path), bytes: read.bytes });
+		}
+		const fileText = inlineTextFiles(textFiles);
 		let prepared: { inline: InlineImage[]; paths: string[] } = { inline: [], paths: [] };
 		if (images) {
 			const out = await prepareImages(images);
@@ -238,7 +257,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${dashboardMarker(id, askId, images, thread)}`, deliverAs, inline.length ? inline : undefined);
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${dashboardMarker(id, askId, images, thread, files)}`, deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
@@ -267,11 +286,12 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), ...(ports.prepareImage ? { images: true } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, ...(ports.prepareImage ? { images: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
 		if (frame.op === "send_images" && ports.prepareImage) return request(args, "send", true);
+		if (frame.op === "send_files") return request(args, "send", true, true);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		return { ok: false, status: 400, error: `unknown op ${String(frame.op)}` };
 	};

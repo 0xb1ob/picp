@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { SessionEntry } from "../src/viewer/api-types.ts";
-import { canStart, type ControlBody, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
+import { canStart, type ControlBody, controlFiles, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
 import { restartInFlight } from "./restart-control.ts";
 import { useRestart } from "./use-restart.ts";
 
@@ -60,7 +60,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
    else if (result.state === "already_running") setGeneration(value => value + 1);
   });
  };
- // Only while the running session's bridge takes images (status.images); never offline, images are never held.
- const upload = controlImages(status) && controlReady(status) ? (file: File) => uploadImage(fetcher, controlToken(status), file) : undefined;
+ // Only while the running bridge takes attachments; never held offline.
+ const upload = (controlImages(status) || controlFiles(status)) && controlReady(status) ? (file: File) => uploadImage(fetcher, controlToken(status), file) : undefined;
  return {status, delivery: shown, send, starting, start, restarting, restart, ...(upload ? {upload} : {})};
 }

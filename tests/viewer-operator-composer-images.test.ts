@@ -35,7 +35,7 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	let next = 0;
 	const upload = (file: File) => new Promise<OperatorUploadResponse | {error: string}>(done => {
 		uploads.push(file.name);
-		waiting.push(() => { const id = idFor(++next); done(file.name === "bad.png" ? {error: "not a PNG, JPEG, WebP or GIF image"} : {id, mime: "image/png", bytes: file.size, expires_at: "x", url: `/api/operator/uploads/${id}`}); });
+		waiting.push(() => { const id = /\.(txt|md|html|json)$/i.test(file.name) ? idFor(++next).replace(/^im-/, "tx-").replace(/\.png$/, ".md") : idFor(++next); done(file.name === "bad.png" ? {error: "not a PNG, JPEG, WebP or GIF image"} : {id, mime: id.startsWith("tx-") ? "text/plain" : "image/png", bytes: file.size, expires_at: "x", url: `/api/operator/uploads/${id}`}); });
 	});
 	const flush = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise(done => setImmediate(done)); });
 	const release = async () => { await act(() => waiting.shift()!()); await flush(); };
@@ -86,7 +86,7 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	assert.deepEqual(failed, [
 		"HEIC/HEIF is not supported; share the photo as JPEG",
 		"HEIC/HEIF is not supported; share the photo as JPEG",
-		"doc.pdf is not a PNG, JPEG, WebP or GIF image",
+		"doc.pdf is not a PNG, JPEG, WebP or GIF image or a .txt, .md, .html or .json file",
 		"huge.png is larger than 10 MiB",
 		"not a PNG, JPEG, WebP or GIF image",
 	]);
@@ -95,7 +95,7 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	assert.equal($(".operator-composer-attachments"), null);
 	await pick(Array.from({length: 9}, (_, i) => png(`p${i}.png`)));
 	assert.equal($$(".operator-composer-attachment-failed").length, 1);
-	assert.equal($(".operator-composer-attachment-failed")!.textContent, "At most 8 images per message");
+	assert.equal($(".operator-composer-attachment-failed")!.textContent, "At most 8 attachments per message");
 	for (let i = 0; i < 8; i++) await release();
 	for (const button of $$(".operator-composer-thumb-remove")) await click(button);
 
@@ -123,5 +123,25 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	await act(() => $("textarea")!.dispatchEvent(new window.Event("input",{bubbles:true})));
 	await click($(".operator-composer-send"));
 	assert.deepEqual(sends, [{kind: "message", text: "two pasted", images: [idFor(next - 1), idFor(next)]}]);
+	// Text files work with a browser-provided empty MIME, through picker/drop/paste.
+	await act(() => mount(root, control({...ready, images: true, files: true})));
+	assert.equal($("input[type=file]")!.getAttribute("accept"), "image/*,.txt,.md,.html,.json");
+	await pick([{name: "a".repeat(110) + ".md", type: "", size: 2048}]); await release();
+	assert.match($(".operator-composer-file-name")!.textContent!, /\.md2 KiB$/);
+	assert.equal($(".operator-composer-file-name img"), null);
+	assert.equal(sendDisabled(), false);
+	await click($(".operator-composer-thumb-remove"));
+	assert.equal($(".operator-composer-file-name"), null);
+	const drop = new window.Event("ondrop" in $(".operator-composer")! ? "drop" : "Drop", {bubbles: true, cancelable: true});
+	Object.defineProperty(drop, "dataTransfer", {value: {files: [{name: "dropped.md", type: "text/markdown", size: 40}], types: ["Files"]}});
+	await act(() => $(".operator-composer")!.dispatchEvent(drop)); await flush(); await release();
+	assert.equal(drop.defaultPrevented, true);
+	const pastedText = await paste([{name: "pasted.md", type: "", size: 100}], ["Files"]); await release();
+	assert.equal(pastedText.defaultPrevented, true);
+	await click($(".operator-composer-send"));
+	assert.deepEqual(sends.at(-1), {kind: "message", text: "", files: [idFor(next - 1).replace(/^im-/, "tx-").replace(/\.png$/, ".md"), idFor(next).replace(/^im-/, "tx-").replace(/\.png$/, ".md")]});
+	await pick([{name: "huge.json", type: "application/json", size: 1024 * 1024 + 1}]);
+	assert.match($(".operator-composer-attachment-failed")!.textContent!, /larger than 1 MiB/); assert.equal(sendDisabled(), true);
+	await click($(".operator-composer-thumb-remove"));
 	await act(() => unmount(root));
 });

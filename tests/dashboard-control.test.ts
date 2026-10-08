@@ -90,6 +90,12 @@ test("parsers: config defaults on and opts out with enabled:false; record and ma
 	assert.deepEqual(parseDashboardText(`hello\n\n[cp-dashboard ${id} — from the dashboard; thread=billing-bug]`), { body: "hello", id, askId: null, thread: "billing-bug" });
 	assert.deepEqual(parseDashboardText(`click\n\n[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}]`), { body: "click", id, askId: "ask-abcd", thread: "billing-bug", images: [one] });
 	for (const tag of ["-bad", "Bad", "bad tag", "x".repeat(33)]) assert.equal(parseDashboardText(`[cp-dashboard ${id} — from the dashboard; thread=${tag}]`), undefined);
+	const file = "tx-20261004-0123456789abcdef01234567.html";
+	const marker = dashboardMarker(id, "ask-abcd", [one], "billing-bug", [file]);
+	assert.equal(marker, `[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}; files=${file}]`);
+	assert.deepEqual(parseDashboardText(`files\n\n${marker}`), {body: "files", id, askId: "ask-abcd", thread: "billing-bug", images: [one], files: [file]});
+	assert.equal(parseDashboardText(marker.replace(`files=${file}`, `files=${one}`)), undefined);
+	assert.equal(parseDashboardText(marker.replace(`images=${one}`, `images=${file}`)), undefined);
 });
 
 test("lifecycle: {enabled:false} opens nothing; on (default) binds a 0600 socket and record; a bad socket token journals nothing; stop removes both", async (t) => {
@@ -150,7 +156,7 @@ test("delivery: a message is injected as a user message with the marker; idle is
 
 	const status = await controlRequest(record, "status", {});
 	assert.ok(status.ok);
-	assert.deepEqual({ ...(status.result as object), recent: undefined, restart: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined, restart: undefined });
+	assert.deepEqual({ ...(status.result as object), recent: undefined, restart: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined, restart: undefined, files: true });
 	assert.equal((status.result as { restart: { supported: boolean } }).restart.supported, false, "ports without the restart members: Restart session unsupported");
 	assert.equal(journal(stateDir).filter((l) => l.type === "request").length, 3, "status writes no journal line");
 

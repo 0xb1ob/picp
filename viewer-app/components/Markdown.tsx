@@ -11,7 +11,7 @@ export function InlineText({text,links}: {text:string;links?:Links}) {
 }
 
 export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[]} | {kind:"table";head:string[];rows:string[][]};
-const FENCE = /^\s*```/;
+const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
 const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const HEADING = /^#{1,6}\s+/;
 const ROW = /^\s*\|.*\|\s*$/;
@@ -28,9 +28,11 @@ export function blocks(text: string): Block[] {
  for (let i = 0; i < lines.length;) {
   const line = lines[i]!;
   if (!line.trim()) { i++; continue; }
-  if (FENCE.test(line)) {
+  const fence = FENCE.exec(line);
+  if (fence) {
+   const close = new RegExp(`^\\s*${fence[1]![0]}{${fence[1]!.length},}\\s*$`);
    const body: string[] = [];
-   for (i++; i < lines.length && !FENCE.test(lines[i]!); i++) body.push(lines[i]!);
+   for (i++; i < lines.length && !close.test(lines[i]!); i++) body.push(lines[i]!);
    i++; out.push({kind:"code",text:body.join("\n")}); continue;
   }
   if (isTable(lines,i)) {

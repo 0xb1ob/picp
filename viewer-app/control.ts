@@ -17,8 +17,11 @@ export const uploadUrl = (id: string): string => `/api/operator/uploads/${encode
 export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const UPLOAD_MAX_PER_MESSAGE = 8;
+export const TEXT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export const isTextFile = (file: {name: string}): boolean => /\.(txt|md|html|json)$/i.test(file.name);
+export const attachmentSize = (bytes: number): string => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 
-export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
+export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
@@ -62,12 +65,15 @@ export const controlToken = (status: ControlStatusResponse): string => status.to
 /** Attachments: a running session whose bridge takes images (`images: true`); never while offline, nothing is held. */
 export const controlImages = (status: ControlStatus | null | undefined): boolean =>
  controlReady(status) && status.running && !!status.token && status.images === true;
+export const controlFiles = (status: ControlStatus | null | undefined): boolean =>
+ controlReady(status) && status.running && !!status.token && status.files === true;
 
-/** Why `file` cannot be attached as the `count + 1`th image, or null. HEIC is named, since iPhones make it. */
+/** Why the next attachment is refused, or null. HEIC is named, since iPhones make it. */
 export function attachRefusal(file: {name: string; type: string; size: number}, count: number): string | null {
- if (count >= UPLOAD_MAX_PER_MESSAGE) return `At most ${UPLOAD_MAX_PER_MESSAGE} images per message`;
+ if (count >= UPLOAD_MAX_PER_MESSAGE) return `At most ${UPLOAD_MAX_PER_MESSAGE} attachments per message`;
+ if (isTextFile(file)) return file.size > TEXT_UPLOAD_MAX_BYTES ? `${file.name} is larger than 1 MiB` : null;
  if (/^image\/hei[cf]$/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return "HEIC/HEIF is not supported; share the photo as JPEG";
- if (!UPLOAD_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG, WebP or GIF image`;
+ if (!UPLOAD_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG, WebP or GIF image or a .txt, .md, .html or .json file`;
  if (file.size > UPLOAD_MAX_BYTES) return `${file.name || "This image"} is larger than 10 MiB`;
  return null;
 }
@@ -76,7 +82,7 @@ export function attachRefusal(file: {name: string; type: string; size: number}, 
 export async function uploadImage(fetch: Fetch, token: string, file: File): Promise<OperatorUploadResponse | {error: string}> {
  let response: Response;
  try {
-  response = await fetch(OPERATOR_UPLOAD_URL, {method: "POST", headers: {"content-type": file.type, "x-cp-control-token": token}, body: file});
+  response = await fetch(OPERATOR_UPLOAD_URL, {method: "POST", headers: {"content-type": isTextFile(file) ? "application/octet-stream" : file.type, "x-cp-control-token": token, "x-cp-upload-name": encodeURIComponent(file.name)}, body: file});
  } catch {
   return {error: "Could not reach this home"};
  }

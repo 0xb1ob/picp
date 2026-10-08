@@ -24,6 +24,9 @@ export interface SessionEntry {
  dashboard_id?: string; ask_id?: string; ask?: TranscriptAsk;
  /** Full transcript: the upload ids a dashboard message's marker names (`; images=`), shown as thumbnails from `/api/operator/uploads/<id>`. */
  images?: string[];
+ /** Text upload ids and display metadata from the upload journal; links serve text/plain only. */
+ files?: string[];
+ file_metadata?: Record<string, { name: string; bytes: number }>;
  /** A cp-bridge notice's own `paths:` block (src/cp-bridge.ts formatBridgeRelay), each already a viewer link. */
  paths?: { path: string; href: string | null; read: string | null }[];
  /** Each bare `.pi-command-post` path in `text` the viewer can open (src/viewer/linkify.ts), path → href. */
@@ -63,9 +66,11 @@ export interface ControlStatusResponse {
  session_started_at?: string | null;
  /** Running only: true when this session's cp-bridge takes image attachments (`send_images`); absent otherwise. */
  images?: boolean;
+ /** Running only: text attachments via send_files (also accepts images). */
+ files?: boolean;
 }
-/** `POST /api/operator/upload` stored one image: 201 with its upload id (the composer sends ids, never bytes). */
-export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string }
+/** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
+export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }
 /** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
 export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }
