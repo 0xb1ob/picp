@@ -24,6 +24,7 @@ import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { type BlockedJob, blockedJobs, raiseDroppedDependencies } from "./blocked-jobs.ts";
 import { type Job, type Ledger, parseJobLabels, wasDropped } from "./ledger.ts";
 import { covers, jobCapRefuses, mandateSpend, type MandateStore, type ScheduleScope, scheduleIdOf, scheduleScope } from "./mandate.ts";
+import { inFlightRecord, selectGrant } from "./mandate-permission.ts";
 import type { PipelineStore } from "./pipeline.ts";
 import { execRunner } from "./doctor.ts";
 import { homeCheckoutFinding, PACKAGE_ROOT } from "./home.ts";
@@ -149,11 +150,17 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, ready_beads: visibleBeads, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
 	const readyAll = await ports.ledger.ready(project ? { project } : {});
+	const selected = new Map(readyAll.map((job) => {
+		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
+		const record = inFlightRecord(subject, fleetJobs);
+		return [job.id, selectGrant(grants, "dispatch", { ...subject, startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now)] as const;
+	}));
+	const queued = new Set(ports.queued?.() ?? []);
 	const results: NextResult[] = [];
 	const expanded = readParentExpanded(ports.fleet.home);
 	for (const mandate of candidates) {
 		const ownBlocked = blocked.filter(({ job }) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) }));
-		const result = await nextForMandate(ports, mandate, readyAll, fleetJobs, scopeOf, expanded);
+		const result = await nextForMandate(ports, mandate, readyAll, fleetJobs, selected, queued, expanded);
 		if (result.action.kind === "wait" && result.ready.length === 0 && ownBlocked.length) result.action.reason = blockedReason(ownBlocked);
 		results.push({ ...result, blocked: ownBlocked });
 	}
@@ -168,7 +175,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
 		for (const result of results) {
 			if (result.action.kind !== "dispatch") continue;
-			result.action.reason = `spawn cap ${capacity.cap} full: ${capacity.active} live worker processes${held} — cp_dispatch queues it; ${result.action.job_id} starts when one frees`;
+			result.action.reason = `spawn cap ${capacity.cap} full: ${capacity.active} live worker processes${held} — cp_dispatch queues it; ${result.action.job_id} starts under ${result.mandate!.id} when one frees`;
 		}
 	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
@@ -178,14 +185,11 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}) };
 }
 
-async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], scopeOf: (job: Job) => ScheduleScope, expanded: ReadonlySet<string>): Promise<NextResult> {
-	const queued = new Set(ports.queued?.() ?? []);
+async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], selected: ReadonlyMap<string, ReturnType<typeof selectGrant>>, queued: ReadonlySet<string>, expanded: ReadonlySet<string>): Promise<NextResult> {
 	const covered = readyAll.filter((job) => {
-		const jobProj = jobProject(job);
-		// A runner-owned scheduled job (answer/board/local) is dispatched by the schedule runner in code, never offered here;
-		// a parent-expanded schedule's fan-out jobs (`expanded`) are the parent's, so they are offered.
-		// A schedule grant covers only its own schedule's jobs, so it never recommends unrelated work (and no other grant a scheduled job).
-		return jobProj !== undefined && !runnerOwns(job, expanded) && covers(mandate, { jobId: job.id, project: jobProj, jobKind: jobKind(job), ...scopeOf(job) });
+		const choice = selected.get(job.id);
+		// Runner-owned jobs stay with the runner; each parent candidate belongs to one selected active view.
+		return !runnerOwns(job, expanded) && choice?.grant.id === mandate.id && choice.at.standing === "permit" && choice.at.cause === "active";
 	});
 	// 4b-2: a queued job is already dispatched as far as the parent is concerned: never ready, and it holds a slot.
 	const ready = covered.filter((job) => !queued.has(job.id));
@@ -292,8 +296,8 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 		mandate: view,
 		ready,
 		action: pipeline
-			? { kind: "pipeline", job_id: target.id, reason: `start pipeline for ${target.id}` }
-			: { kind: "dispatch", job_id: target.id, reason: `dispatch ${target.id}` },
+			? { kind: "pipeline", job_id: target.id, reason: `start pipeline for ${target.id} under ${mandate.id}` }
+			: { kind: "dispatch", job_id: target.id, reason: `dispatch ${target.id} under ${mandate.id}` },
 	};
 }
 

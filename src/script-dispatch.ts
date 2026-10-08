@@ -31,6 +31,7 @@ export interface ScriptPreview {
 	preview: true;
 	executor: "script";
 	job_id: string;
+	mandate_id?: string;
 	project: string;
 	kind: "ship";
 	delivery: "local";
@@ -42,6 +43,7 @@ export interface ScriptPreview {
 
 export interface ScriptDispatchResult {
 	job_id: string;
+	mandate_id?: string;
 	executor: "script";
 	script_path: string;
 	worktree: string;
@@ -82,10 +84,12 @@ export class ScriptDispatcher {
 		const inputs = resolveRoutingInputs({ text, ...(request.scope ? { scope: request.scope } : {}), ...riskField(request.risk, issue, "") });
 		const job = { jobId: issue.id, project: labels.project, kind: "ship" as const, pathHints: [issue.script.path], script: true };
 		const blockers = await this.options.ledger.blockersOf(issue.id);
+		const selected = this.options.mandates?.selection("dispatch", job, this.options.fleet.read().jobs);
 		return {
 			preview: true,
 			executor: "script",
 			job_id: issue.id,
+			...(selected ? { mandate_id: selected.grant.id } : {}),
 			project: labels.project,
 			kind: "ship",
 			delivery: "local",
@@ -121,8 +125,10 @@ export class ScriptDispatcher {
 		const bounds = this.#bounds(request);
 		const pre = await preflight.check({ jobId: issue.id, project: labels.project, ...(request.base ? { base: request.base } : {}), ...(request.fetch === false ? { fetch: false } : {}) });
 		if (pre.status !== "ok" || !pre.clone || !pre.base) throw new DispatchError(`preflight refused ${issue.id}:\n${formatPreflight(pre)}`, pre);
+		let mandateId: string | undefined;
 		try {
-			await mandates?.assertDispatchAllowed({ jobId: issue.id, project: labels.project, kind: "ship", pathHints: [scriptPath], risk: inputs.risk, evidence: inputs.reasons, script: true }, fleet.read().jobs);
+			const permission = await mandates?.assertDispatchAllowed({ jobId: issue.id, project: labels.project, kind: "ship", pathHints: [scriptPath], risk: inputs.risk, evidence: inputs.reasons, script: true }, fleet.read().jobs);
+			mandateId = permission?.selected?.id;
 		} catch (error) {
 			throw new DispatchError(error instanceof Error ? error.message : String(error));
 		}
@@ -175,7 +181,7 @@ export class ScriptDispatcher {
 				try { recorder.cp("failure", { class: "spawn_failed", message: error instanceof Error ? error.message : String(error), at: isoTimestamp() }); }
 				catch { /* The durable result remains available for restart intake. */ }
 			});
-			return { job_id: issue.id, executor: "script", script_path: scriptPath, worktree: lease.path, branch: issue.id, state: "dispatched", receipt: "accepted", pid: process.child.pid };
+			return { job_id: issue.id, ...(mandateId ? { mandate_id: mandateId } : {}), executor: "script", script_path: scriptPath, worktree: lease.path, branch: issue.id, state: "dispatched", receipt: "accepted", pid: process.child.pid };
 		} catch (error) {
 			releaseReady?.();
 			if (process && !launched) try { await process.closed; } catch { /* Durable result remains for restart intake. */ }

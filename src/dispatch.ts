@@ -305,6 +305,7 @@ export interface DispatchRequest {
 }
 export interface DispatchResult {
 	job_id: string;
+	mandate_id?: string;
 	/** Session name of the worker; the job id is the alias, as on the branch. */
 	worker: string;
 	worktree: string;
@@ -329,18 +330,16 @@ export interface DispatchResult {
  * take, resolved by the same code a real dispatch runs and with **nothing
  * taken**.
  *
- * What it deliberately does not carry: any task-file or artifact body (bytes
- * and a path, never text — the same rule `cp_artifact` follows), any credential
- * value, and any claim to have reserved something. A preview holds no lease,
- * creates no branch or job, spawns nothing, writes no routing record and
- * refreshes no auth; dispatch recomputes the whole decision from the live
- * config when it runs, so a preview authorizes nothing and can never be the
+ * A preview carries task-file bytes and a path, never its body or credentials. It holds no lease,
+ * creates no branch or job, spawns nothing, writes no routing record and refreshes no auth.
+ * Dispatch recomputes from live config, so a preview authorizes nothing and can never be the
  * reason a later dispatch chose a model.
  */
 export interface DispatchPreview {
 	/** Always true: this record is a projection, never a dispatch receipt. */
 	preview: true;
 	job_id: string;
+	mandate_id?: string;
 	project: string;
 	kind: JobKind;
 	delivery: Delivery;
@@ -460,13 +459,13 @@ export class Dispatcher {
 			if (!(thrown instanceof RoutingError)) throw thrown;
 			error = thrown.message;
 		}
-		// The probe's own answer about the resolved model, reported the way routing
-		// reads it: an absent `supported_thinking` is "the probe cannot tell", never
-		// "this model serves nothing".
+		// Absent supported_thinking means the probe cannot tell, never "unsupported".
 		const supported = decision ? options.probe.supportedThinking?.(decision.model) : undefined;
+		const selected = options.mandates?.selection("dispatch", { jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference] }, options.fleet.read().jobs);
 		return {
 			preview: true,
 			job_id: issue.id,
+			...(selected ? { mandate_id: selected.grant.id } : {}),
 			project: labels.project,
 			kind,
 			delivery,
@@ -571,11 +570,13 @@ export class Dispatcher {
 		const base = pre.base as string;
 
 		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs);
+		let mandateId: string | undefined;
 		try {
-			await options.mandates?.assertDispatchAllowed(
+			const permission = await options.mandates?.assertDispatchAllowed(
 				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
 				options.fleet.read().jobs,
 			);
+			mandateId = permission?.selected?.id;
 		} catch (error) {
 			throw error instanceof MandateError && error.code ? error : new DispatchError((error as Error).message); // a coded refusal keeps its code (dispatch queue)
 		}
@@ -765,6 +766,7 @@ export class Dispatcher {
 			await options.ledger.claim(issue.id, issue.id).catch(async (error) => { await options.fleet.remove(issue.id); throw error; });
 			return {
 				job_id: issue.id,
+				...(mandateId ? { mandate_id: mandateId } : {}),
 				worker: issue.id,
 				worktree: lease.path,
 				branch: issue.id,

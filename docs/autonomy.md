@@ -35,9 +35,10 @@ through the mandate store (`src/mandate.ts`), never by free prose.
 `cp_decide` grants authorization only by citing the mandate clause it falls
 under, or an operator quote in the conversation. `cp_next` refuses to
 dispatch under a paused or revoked mandate but lets in-flight jobs finish.
-A spent USD/job cap pauses the mandate, refuses new dispatch, and raises
-one `budget_exhausted`/`spend_cap` escalation — never a second one for the
-same breach. A spent token cap (non-cached tokens: input + output +
+A spent USD cap pauses the mandate, refuses new dispatch under it, and raises one
+`budget_exhausted`/`spend_cap` escalation for the breach. A reached job cap limits fresh starts under the
+selected grant; it never pauses that grant or blocks review, repair and merge of already-counted jobs.
+Coverage-based counts and spend remain unchanged. A spent token cap (non-cached input + output +
 cache_write) pauses it too but asks no one: the parent raises it itself with
 `cp_mandate raise_tokens`, journaled with a reason, up to the home's
 `token_ceiling` (default 100M); only a token cap already at the ceiling is

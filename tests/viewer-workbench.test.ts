@@ -21,8 +21,25 @@ import { runGit } from "../src/viewer/git-read.ts";
 import { createViewer } from "../src/viewer/server.ts";
 import { createScratchHome, git, REPO_ROOT, readRunStatus, type ScratchHome } from "./harness/index.ts";
 import { withZombie } from "./harness/zombie.ts";
+import { grantFor } from "../src/viewer/overview-jobs.ts";
 
 const LATER = isoTimestamp(new Date(Date.now() + 86_400_000));
+test("tv8: viewer active grant choice uses named/earliest/id precedence and retains inactive fallback", () => {
+	const base = { projects: ["alpha"], status: "active", expiry: LATER, issued_at: "2026-09-01T00:00:00Z" };
+	const broad = { ...base, id: "md-000001", issued_at: "2026-08-01T00:00:00Z" };
+	const named = { ...base, id: "md-a994c5", job_ids: ["cp-target"] };
+	const tied = { ...named, id: "md-b994c5" };
+	const later = { ...named, id: "md-000000", issued_at: "2026-09-02T00:00:00Z" };
+	const job = { id: "cp-target", labels: ["project:alpha", "kind:ship"] };
+	for (const order of [[broad, named, tied, later], [later, tied, named, broad], [tied, broad, later, named]]) assert.equal(grantFor(job, order, Date.now())?.id, named.id);
+	assert.equal(grantFor(job, [broad, { ...named, job_ids: ["cp-other"] }], Date.now())?.id, broad.id);
+	assert.equal(grantFor(job, [broad, { ...named, exclusions: { job_kinds: ["ship"] } }], Date.now())?.id, broad.id);
+	for (const order of [[broad, named], [named, broad]]) {
+		const paused = order.map((m) => ({ ...m, status: "paused" }));
+		assert.equal(grantFor(job, paused, Date.now())?.id, paused.at(-1)?.id);
+	}
+});
+
 const usage = (cost_usd: number, total_tokens: number, cache_read = 0): Usage => ({ ...EMPTY_USAGE, cost_usd, total_tokens, cache_read });
 
 function record(job_id: string, over: Partial<FleetRecord> = {}): FleetRecord {
@@ -195,7 +212,8 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$/, `${name} imports ${match[2]}`);
+			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
 		}

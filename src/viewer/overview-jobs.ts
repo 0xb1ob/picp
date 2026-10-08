@@ -7,6 +7,7 @@ import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState
 import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
 import { routingText } from "./overview-health.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
+import { compareActiveGrants } from "../grant-order.ts";
 /** The job's recorded reviews: attempt count, and the latest untruncated verdict for `head` (or a patch-equivalent pass). */
 export function recordedReview(state: ViewerState, id: string, head: string | null): {review: Json | undefined; attempts: string[]} {
  let names: string[] = []; try { names = readdirSync(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
@@ -81,7 +82,8 @@ export function closedToday(state: ViewerState, jobs: Json[], ledger: Json[], no
 export function grantFor(job: Json, grants: Json[], now: number): Json | undefined {
  const labels = strings(job.labels); const project = labels.find(l => l.startsWith("project:"))?.slice(8) ?? ""; const kind = labels.find(l => l.startsWith("kind:"))?.slice(5);
  const matching = grants.filter(m => strings(m.projects).includes(project) && (!strings(m.job_ids).length || strings(m.job_ids).includes(String(job.id))) && (!kind || !strings(obj(m.exclusions)?.job_kinds).includes(kind)));
- return matching.findLast(m => m.status === "active" && Date.parse(String(m.expiry)) > now) ?? matching.at(-1);
+ const order = (m: Json) => ({id:String(m.id), issued_at:String(m.issued_at ?? ""), job_ids:strings(m.job_ids)});
+ return matching.filter(m => m.status === "active" && Date.parse(String(m.expiry)) > now).sort((a,b) => compareActiveGrants(order(a),order(b)))[0] ?? matching.at(-1);
 }
 export function blocked(ledger: Json[], grants: Json[], jobs: Json[], now: number, available: boolean) {
  const items: BlockedJob[] = [];

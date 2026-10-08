@@ -183,6 +183,23 @@ test("valid mandate basis decides a plan checkpoint and journals the clause", as
 	assert.match(mandates.show(grant.id), /cp-ship1/);
 });
 
+test("tv8: mandate basis must name the selected grant and cannot bypass its denial", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const { ship, mandates, bundle } = deps(home.path);
+	const base = { projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: [] };
+	const broad = mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
+	const selected = mandates.issue({ ...base, job_ids: ["cp-ship1"] });
+	ship.request({ jobId: "cp-ship1", question: "Authorize?" });
+	await assert.rejects(decide({ target: "cp-ship1", decision: "approve", basis: { mandate: broad.id, clause: "x" } }, bundle), /no active mandate covers/);
+	mandates.save({ ...selected, ask_on: ["plan_approval"] });
+	await assert.rejects(decide({ target: "cp-ship1", decision: "approve", basis: { mandate: broad.id, clause: "x" } }, bundle), new RegExp(`${selected.id}: ask_on includes plan_approval`));
+	assert.equal(ship.get("cp-ship1")?.decision, "pending");
+	mandates.save(selected);
+	const result = await decide({ target: "cp-ship1", decision: "approve", basis: { mandate: selected.id, clause: "x" } }, bundle);
+	assert.equal(result.decided_by, `mandate:${selected.id}`);
+	assert.equal(mandates.require(broad.id).decisions.length, 0);
+});
+
 test("without a mandate the same call is refused naming the project", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

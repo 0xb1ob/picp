@@ -42,7 +42,7 @@ import { atomicWriteJson } from "./json-store.ts";
 import { stripSendMarkers } from "./parent-outbox.ts";
 import { batchRefusal, capReached, covers, enrollCapacity, isActive, jobCapRefuses, MandateError, mandateSpend, matchingJobs, type MandateUsageJob, reviewerUsage, type ScheduleScope, scheduleIdOf, scheduleScope, supersedeReason, usageBaseline } from "./mandate-accounting.ts";
 import { readScheduleFile } from "./viewer/schedule-core.ts";
-import { assertGrantsPermit, type GrantPermission, type GrantUse, grantStanding, inFlightRecord, isInFlight } from "./mandate-permission.ts";
+import { assertGrantsPermit, type GrantPermission, type GrantUse, selectGrant, inFlightRecord, isInFlight } from "./mandate-permission.ts";
 import { formatMandate } from "./mandate-format.ts";
 import { preapprovedRow, riskPreapproval, withPreapproval } from "./risk-preapproval.ts";
 import { type Ledger, readJobsDocument } from "./ledger.ts";
@@ -255,35 +255,25 @@ function subsystemExcluded(mandate: Mandate, subsystem: string | undefined, text
  * `risk:high` and the objective names the job. Unknown risk is not high;
  * inferred high is high.
  *
- * Standing comes from `grantStanding` (src/mandate-permission.ts), as for every gate: any active grant decides;
- * otherwise the latest speaking grant does, which is how an in-flight job continues under an expired grant.
+ * Standing and singleton selection come from `selectGrant` (src/mandate-permission.ts), as for every gate.
+ * A selected denial is final; without an active permit the latest speaking grant decides.
  */
 export function evaluateAuthority(subject: MandateSubject, mandates: readonly Mandate[]): AuthorityDecision {
 	if (subject.kind === "final_fix") return { permitted: false, reason: "a final fix at the review cap requires operator text" };
 	const now = subject.now ?? isoTimestamp();
 	const jobs = subject.usageJobs ?? [];
 	const job = { ...subjectAsJob(subject), startedAt: inFlightRecord(subject, jobs)?.dispatched_at ?? subject.createdAt, inFlight: isInFlight(subject, jobs) };
-	const judged = mandates.map((grant) => ({ grant, at: grantStanding(grant, actionForKind(subject.kind) as GrantUse, job, now) }));
-	const blocked: string[] = [];
-	let active = false;
-	for (const { grant, at } of judged) {
-		if (at.standing === "none") continue;
-		if (at.cause === "active") {
-			active = true;
-			const verdict = judgeCovered(grant, subject, jobs);
-			if (verdict.permitted) return verdict;
-			blocked.push(verdict.reason);
-		} else if (at.standing === "refuse" && at.cause !== "revoked") {
-			blocked.push(at.cause === "expired" ? `${grant.id} has expired` : `${grant.id} is paused${grant.pause_reason ? ` (${grant.pause_reason})` : ""}`);
-		}
+	const selected = selectGrant(mandates, actionForKind(subject.kind) as GrantUse, job, now);
+	if (selected?.at.standing === "permit") {
+		const verdict = judgeCovered(selected.grant, subject, jobs);
+		return verdict.permitted && selected.at.cause === "expired"
+			? { ...verdict, clause: `${verdict.clause}; expired grant continues in-flight ${subject.jobId}`.slice(0, 400) }
+			: verdict;
 	}
-	const latest = active ? undefined : judged.filter(({ at }) => at.standing === "permit" || at.standing === "refuse").at(-1);
-	if (latest?.at.standing === "permit") {
-		const verdict = judgeCovered(latest.grant, subject, jobs);
-		if (verdict.permitted) return { ...verdict, clause: `${verdict.clause}; expired grant continues in-flight ${subject.jobId}`.slice(0, 400) };
-		blocked.unshift(verdict.reason);
+	if (selected?.at.standing === "refuse" && selected.at.cause !== "revoked") {
+		const { grant, at } = selected;
+		return { permitted: false, reason: at.cause === "expired" ? `${grant.id} has expired` : `${grant.id} is paused${grant.pause_reason ? ` (${grant.pause_reason})` : ""}` };
 	}
-	if (blocked.length > 0) return { permitted: false, reason: blocked[0] as string };
 	return { permitted: false, reason: `no active mandate covers ${subject.jobId}` };
 }
 
@@ -650,11 +640,11 @@ export class MandateStore {
 		promotion?: boolean;
 		/** A script dispatch: never covered by a risk pre-approval (its text is a path, so no hard stop can be read). */
 		script?: boolean;
-	}, jobs: readonly MandateUsageJob[] = []): Promise<void> {
-		// No active grant: the latest speaking one decides (src/mandate-permission.ts); an expired grant's continuation keeps its risk ask.
-		const { active, continuing } = this.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
-		const speaking = continuing ? [continuing] : active;
-		if (speaking.length === 0) return;
+	}, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
+		const permission = this.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
+		const { selected, cause } = permission;
+		if (!selected) return permission;
+		const speaking = [selected];
 
 		let preapproved: Mandate[] = [];
 		if (job.risk === "high" && speaking.some((mandate) => mandate.ask_on.includes("risk:high"))) {
@@ -679,8 +669,9 @@ export class MandateStore {
 			}
 		}
 
-		const counted = this.withReviewerSpend(jobs, active);
-		for (const mandate of active) {
+		if (cause === "active") {
+			const mandate = selected;
+			const counted = this.withReviewerSpend(jobs, speaking);
 			// The job cap limits fresh dispatches only: a job already counted (a promotion, a repair) never hits it.
 			if (!job.promotion && jobCapRefuses(mandate, job.jobId, counted)) {
 				throw new MandateError(
@@ -702,6 +693,7 @@ export class MandateStore {
 			const grant = this.require(id);
 			this.#write({ ...grant, risk_preapproved: [...(grant.risk_preapproved ?? []), preapprovedRow(grant, job.jobId, job.promotion ? "promote" : "dispatch", at, job.evidence)].slice(-500) });
 		}
+		return permission;
 	}
 
 	/** Record an operator risk:high pre-approval on a grant (`withPreapproval` checks it; audit rows stay). */
@@ -709,10 +701,16 @@ export class MandateStore {
 		return this.#write(withPreapproval(this.require(id), record));
 	}
 
-	/** `assertGrantsPermit` at this store's clock: the active grants covering the job, or the expired grant continuing it. */
+	/** `assertGrantsPermit` at this store's clock: one covering grant, revalidated by sweep. */
 	assertPermitted(use: GrantUse, job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] }, jobs: readonly MandateUsageJob[] = []): GrantPermission {
 		const startedAt = jobs.find((record) => record.job_id === job.jobId && record.project === job.project)?.dispatched_at ?? this.jobCreatedAt(job.jobId);
 		return assertGrantsPermit(this, use, { jobId: job.jobId, project: job.project, startedAt, ...(job.kind ? { jobKind: job.kind } : {}), ...(job.pathHints ? { pathHints: job.pathHints } : {}), ...this.scheduleOf(job.jobId) }, jobs, this.#stamp());
+	}
+
+	/** Read-only advice: no sweep, permission, reservation or usage write. */
+	selection(use: GrantUse, job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] }, jobs: readonly MandateUsageJob[] = []) {
+		const record = inFlightRecord({ ...job, jobKind: job.kind }, jobs);
+		return selectGrant(this.list(), use, { ...job, jobKind: job.kind, ...this.scheduleOf(job.jobId), startedAt: record?.dispatched_at ?? this.jobCreatedAt(job.jobId), inFlight: record !== undefined, failed: record?.phase === "failed" }, this.#stamp());
 	}
 
 	jobCreatedAt(jobId: string): string | undefined {
@@ -725,9 +723,8 @@ export class MandateStore {
 	 */
 	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean }, risk: Risk | undefined): boolean {
 		if (risk !== "high") return false;
-		const now = this.#stamp();
-		const scope = this.scheduleOf(job.jobId);
-		const asking = this.sweep(now).filter((mandate) => covers(mandate, { ...job, ...scope }) && isActive(mandate, now) && mandate.ask_on.includes("risk:high"));
+		const selected = this.selection("dispatch", job);
+		const asking = selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant] : [];
 		return asking.length > 0 && !riskPreapproval(asking, job, this.jobCreatedAt(job.jobId)).covered;
 	}
 

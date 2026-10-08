@@ -17,6 +17,7 @@
  */
 import type { JobKind, Mandate, MandateAction } from "./contracts.ts";
 import { capReached, covers, MandateError, type MandateUsageJob, type ScheduleScope } from "./mandate-accounting.ts";
+import { compareActiveGrants } from "./grant-order.ts";
 
 export const GRANT_USES = ["dispatch", "promote", "implement", "review", "repair", "merge"] as const;
 export type GrantUse = (typeof GRANT_USES)[number];
@@ -90,23 +91,27 @@ function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: 
 	return { standing: P, cause: "expired" };
 }
 
+/** Pure selection: standing first, deterministic active precedence, then the existing ordered fallback. */
+export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string) {
+	const judged = grants.map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
+		.filter((entry): entry is { grant: Mandate; at: Exclude<GrantStanding, { standing: "none" }> } => entry.at.standing !== "none");
+	return judged.filter(({ at }) => at.standing === P && at.cause === "active").sort((a, b) => compareActiveGrants(a.grant, b.grant))[0]
+		?? judged.filter(({ at }) => at.standing === P || at.standing === R).at(-1);
+}
+
 export interface GrantStore {
 	sweep(now: string, jobs: readonly MandateUsageJob[]): Mandate[];
 	withReviewerSpend(jobs: readonly MandateUsageJob[], grants?: readonly Mandate[]): MandateUsageJob[];
 	tokenCeiling(): number;
 }
 
-/** Who decided: the active covering grants (their own rules follow), or the expired grant continuing the job. */
+/** Who decided: one active covering grant, or the expired grant continuing the job. */
 export interface GrantPermission {
-	active: Mandate[];
-	continuing?: Mandate;
+	selected?: Mandate;
+	cause?: GrantCause;
 }
 
-/**
- * The gate over every grant covering `job`: any active grant decides; otherwise the most recently issued grant
- * that speaks decides — a refusal throws, an expired continuation passes only under its own USD and token caps
- * (the caller applies its risk:high ask). Nothing speaking passes.
- */
+/** A selected refusal throws; an expired continuation keeps its own caps. Nothing speaking passes. */
 export function assertGrantsPermit(
 	store: GrantStore,
 	use: GrantUse,
@@ -116,20 +121,18 @@ export function assertGrantsPermit(
 ): GrantPermission {
 	const record = inFlightRecord(job, jobs);
 	const target = { ...job, startedAt: record?.dispatched_at ?? job.startedAt, inFlight: record !== undefined, failed: record?.phase === "failed" };
-	const judged = store.sweep(now, jobs).map((grant) => ({ grant, at: grantStanding(grant, use, target, now) }));
-	const active = judged.filter((entry) => entry.at.standing === P && entry.at.cause === "active").map((entry) => entry.grant);
-	if (active.length > 0) return { active };
-	const latest = judged.filter((entry) => entry.at.standing === P || entry.at.standing === R).at(-1);
-	if (!latest || latest.at.standing === "none") return { active: [] };
-	const { grant, at } = latest;
+	const selected = selectGrant(store.sweep(now, jobs), use, target, now);
+	if (!selected) return {};
+	const { grant, at } = selected;
+	if (at.standing === P && at.cause === "active") return { selected: grant, cause: at.cause };
 	// A reviewer start (`cp_review`, the only `assertGrantsPermit("review")` caller) keeps its pre-rule path: an expired
 	// grant neither refuses it (no fleet record, review not allowed, cap reached) nor speaks for it. Paused and revoked
 	// still refuse. The expired row still binds a diff checkpoint, which `evaluateAuthority` reads through grantStanding.
-	if (use === "review" && at.cause === "expired") return { active: [] };
+	if (use === "review" && at.cause === "expired") return {};
 	if (at.standing === P) {
 		const cap = capReached(grant, store.withReviewerSpend(jobs, [grant]));
 		if (cap) throw new MandateError(`${job.jobId}: expired mandate ${grant.id} ${cap} cap reached \u2014 no ${use} under it`);
-		return { active: [], continuing: grant };
+		return { selected: grant, cause: at.cause };
 	}
 	throw new MandateError(`${job.jobId}: ${refusal(store, grant, use, at.cause, at.detail)}`);
 }

@@ -4035,16 +4035,21 @@ keep the existing fail-closed standing. Review, repair and merge share this
 rule; ignoring an old grant creates no new authority. A checkpoint with no
 covering grant stays pending and names the job in its no-active-mandate reason.
 
-**Combining grants** (`assertGrantsPermit`, and `evaluateAuthority` the same way): any active covering grant
-decides — for a dispatch or promotion its own rules follow (risk:high ask, job cap, parallelism), for a
-checkpoint its exclusions, allowed actions, `ask_on`, risk and caps (`judgeCovered`); otherwise the most recently
-issued grant that speaks (`permit` or `refuse`) decides. A refusal names the grant and the fix; an expired
-continuation still passes only under that grant's USD and token caps (for a checkpoint, every `judgeCovered` rule
-too) and its clause says the expired grant continues the in-flight job. Nothing speaking passes (a gate) or stays
-pending (a checkpoint). So a revoked grant keeps its `pause_reason` without ever refusing a dispatch (md-7852fe
-once refused `cp_pipeline start` / `cp_dispatch` although newer active grants covered the job); `cp_next` offers
-no fresh work under an expired grant and prefers the earliest-issued active grant over any paused one; a
-patch-equivalent review pass costs nothing and stays available; merge stays per head, CI- and review-governed.
+**Combining grants.** `selectGrant` is shared by permission, checkpoint authority and cp_next advice. Among
+active permitting covering grants it selects one: nonempty `job_ids` before project-wide scope, then earliest
+`issued_at`, then smallest mandate id. Coverage and standing are evaluated first; selection never ranks grants
+by cap headroom or weaker policy. A dispatch/promotion applies only the selected grant's applicable risk,
+job-cap and parallelism checks; a checkpoint applies that grant's exclusions, allowed actions, `ask_on`, risk
+and caps. A selected denial never tries another grant. Without an active permitting grant, the existing
+latest-speaking permit/refuse fallback remains unchanged. Nothing speaking passes a gate or leaves a checkpoint
+pending. Expiry continuation, its USD/token and risk checks, the expired reviewer-start exception,
+patch-equivalent review reuse and per-head CI/review/merge gates are unchanged.
+
+Grant selection does not change accounting: `mandateSpend`, job count, reviewer spend and live-worker counts
+still use existing coverage and issue-time baselines. A broad grant can include the same covered job/spend as
+a named grant. Its resulting cap cannot veto an operation whose selected grant is another eligible active
+grant. Dispatch results and previews may expose `mandate_id`; previews are advice and real dispatch
+revalidates. This response field is not persisted spend ownership.
 
 **Reviewer spend counts.** Every diff-review, gate and quality-panel reviewer records its own run under
 `state/runs/<job>/{review-<n>,gate-<n>,quality-<slot>}/status.json`. `MandateStore.withReviewerSpend` lays their
@@ -4232,11 +4237,13 @@ actions, echo the effective grant (fields and sources) in one line once issued.
 
 ### Continuation (`cp_next`, cur.4.1)
 
-[`src/next.ts`](../src/next.ts) is one read \u2014 no dispatch, no job created \u2014 that
-answers what a continuation loop needs after every wake-up: given the active
-mandate (the earliest-issued active mandate covering the project, else the earliest paused one; revoked and expired never count),
-the open unblocked jobs it covers (`cp_job ready`, filtered by `covers()`),
-how many of them are already working (`phase: waiting`) against `dispatch_parallelism` (the resolved
+[`src/next.ts`](../src/next.ts) selects each ready/queued job once with the dispatch selector and one swept
+snapshot, then offers it under at most one grant. Every active/paused grant retains its own status,
+coverage-based totals and mission-end result; revoked and expired grants still offer no fresh work. Only the
+selected view contains that job's dispatch/pipeline candidacy or queued advisory membership. Selected-grant
+cap or parallelism refusal names that ID and does not offer the same job under another grant. The action
+explanation names the selected grant; advice reserves no authority and queue replay revalidates dispatch gates.
+The view counts working jobs (`phase: waiting`) against `dispatch_parallelism` (the resolved
 default, 3 on a fresh home, 1 = serial; a grant without one is serial; a `held` delivery counts toward spend and jobs but not the slot). A slot is one *fresh*
 implementer at a time: `assertDispatchAllowed(..., { promotion: true })` — a `cp_send` promotion of an
 existing job's own worker — is still gated by risk and pauses but never by the slot, so repairing a held PR
@@ -4255,7 +4262,11 @@ recommendation:
 | a ready job has a `PipelineStore` record | `pipeline` \u2014 `cp_pipeline advance <id>` |
 | otherwise, the first ready job | `dispatch` \u2014 `cp_dispatch <id>` |
 
-When several grants cover the project, every other grant's result rides along in `others`; one the parent must act on (`dispatch`, `pipeline`, `mission_end`, an escalation id, a warning, or a blocked row with a `cp_decide` id) renders in full, and the rest is one line each (`<id>: <status> <live>/<parallelism>, jobs <used>/<cap> — <kind>: <reason>`), so the answer does not grow with the number of waiting grants.
+When several grants cover the project, results remain per grant but ready/queued recommendations are
+partitioned by selection. Every other grant's result rides along in `others`; one the parent must act on
+(`dispatch`, `pipeline`, `mission_end`, an escalation id, a warning, or a blocked row with a `cp_decide` id)
+renders in full, and the rest is one line each (`<id>: <status> <live>/<parallelism>, jobs <used>/<cap> —
+<kind>: <reason>`), so the answer does not grow with the number of waiting grants.
 
 `cp_next` also reads each registered project's `br ready --json` once per call
 (10-second command timeout, 4 MiB output bound), using the canonical clone's
