@@ -4,6 +4,7 @@ import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { PhaseDot, CiSignal, ModelName } from "../components/JobSignals.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
+import { composerHref } from "../routes.ts";
 import "./job-detail.css";
 
 function ModelFact({job}: {job: ViewerJob}) {
@@ -75,7 +76,7 @@ export function JobDetail({data}: {data: JobResponse}) {
    <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
    <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
    <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
-  </dl><div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}</div></div>
+  </dl><div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}{job.phase === "failed" && <a href={composerHref(`Explain why picp job ${job.id} failed and the available recovery options.`)}>Ask about this failure</a>}</div></div>
    <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/></div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>
   </div>
  </div>;
