@@ -21,6 +21,15 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  assert.match(screen("Jobs",list),/ledger in_progress/); assert.match(screen("Jobs",list),/wall clock limit/);
  const detail:JobResponse={generated_at:list.generated_at,awaiting_count:1,job,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:"/api/job/cp-render/events",asks:[{id:"ask-a",project:"demo",question:"Continue?",created_at:list.generated_at,options:[{label:"Keep",consequence:"Paused",reply:"ask-a: Keep"}],recommendation:"Keep",source_escalation:null,job_ids:[job.id],context:null,evidence_paths:[]}],questions:[],warnings:[]};
  const html=screen("JobDetail",detail); assert.match(html,/Awaiting you/);assert.match(html,/ask-a: Keep/);assert.match(html,/No recorded events/);assert.match(html,/CI red/);assert.match(html,/&lt;script>/);assert.doesNotMatch(html,/<script>|style=|onclick=/i);
+ const failureLink=[...parseHTML(html).document.querySelectorAll("a")].find(a=>a.textContent === "Ask about this failure");
+ assert.ok(failureLink,"failed jobs offer an editable recovery question");
+ const query=new URLSearchParams(failureLink.getAttribute("href")!.split("?")[1]);
+ assert.equal(query.get("view"),"you"); assert.equal(query.get("transcript"),"1");
+ assert.equal(query.get("draft"),"Explain why picp job cp-render failed and the available recovery options.");
+ for (const phase of ["working","held","done","waiting","idle"] as const) {
+  assert.doesNotMatch(screen("JobDetail",{...detail,job:{...job,phase}}),/Ask about this failure/,`${phase} has no failure action`);
+ }
+ assert.match(screen("JobDetail",{...detail,job:{...job,failure:null}}),/Ask about this failure/,"failed phase is sufficient without a failure headline");
  board.jobs=[job,{...job,id:"cp-inactive",mandate_id:"md-paused"}];
  board.lanes=[{id:"md-active",status:"active",active:true,objective:"Active",expiry:null,ask_on:[],spend:null,cap:null,note:null},{id:"md-paused",status:"paused",active:false,objective:"Paused",expiry:null,ask_on:[],spend:null,cap:null,note:null}];
  assert.deepEqual(visibleBoard(board,"all").jobs.map((j:ViewerJob)=>j.id),["cp-render","cp-inactive"]);

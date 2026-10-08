@@ -7,6 +7,7 @@ import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
 import type { ControlBody, ControlView } from "../viewer-app/control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import type { ThreadsView } from "../viewer-app/threads.ts";
+import { composerHref, route, screenDataUrl } from "../viewer-app/routes.ts";
 
 const result = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {OperatorComposer,COMPOSER_PLACEHOLDER} from "./viewer-app/components/OperatorComposer.tsx"; export {act,COMPOSER_PLACEHOLDER}; export const mount=(root,control,draft,thread)=>render(h(OperatorComposer,{control,draft,thread}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {act,mount,unmount,COMPOSER_PLACEHOLDER} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`) as {
@@ -111,6 +112,34 @@ test("composer: a draft (the Schedules page's Add schedule…) fills the textare
 	await act(() => mount(root, control, "x".repeat(16_500)));
 	assert.equal(root.querySelector("textarea")!.value.length, 16_000);
 	await act(() => unmount(root));
+});
+
+test("failure question draft stays editable and unsent in the selected thread, online or offline", async t => {
+ const {window,document}=parseHTML("<html><body><div id='root'></div></body></html>");
+ const original=Object.getOwnPropertyDescriptor(globalThis,"document");
+ Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+ const root=document.getElementById("root")!;
+ t.after(()=>{unmount(root);if(original) Object.defineProperty(globalThis,"document",original);else Reflect.deleteProperty(globalThis,"document");});
+ const draft="Explain why picp job cp-render failed and the available recovery options.";
+ const current=route(composerHref(draft));
+ assert.equal(current.screen,"sessions");
+ assert.equal(screenDataUrl(current),"/api/sessions?view=you&transcript=1","draft never reaches the read API");
+ const threads:ThreadsView={status:{generated_at:ready.generated_at,availability:"missing",enabled:true,reason:null,token:"fixture-only",threads:[],total:0,warning:null},selected:"recovery",select:()=>assert.fail("navigation must preserve the selected thread"),done:()=>{},sending:null,failed:null};
+ for(const offline of [false,true]) {
+  const sends:ControlBody[]=[];
+  const control:ControlView={status:{...ready,running:!offline,offline,token:offline ? null : ready.token,inbox_token:offline ? "i".repeat(64) : null},delivery:null,send:body=>{sends.push(body);}};
+  await act(()=>mount(root,control,new URLSearchParams(current.query).get("draft")!,threads));
+  const textarea=root.querySelector("textarea")!;
+  assert.equal(textarea.value,draft);assert.equal(textarea.disabled,false);
+  assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · recovery/);
+  assert.deepEqual(sends,[],"opening the link never sends");
+  textarea.value=`${draft} Include the recorded cause.`;
+  await act(()=>textarea.dispatchEvent(new window.Event("input",{bubbles:true})));
+  assert.deepEqual(sends,[],"editing never sends");
+  await act(()=>root.querySelector(".operator-composer-send")!.dispatchEvent(new window.Event("click",{bubbles:true})));
+  assert.deepEqual(sends,[{kind:"message",text:`${draft} Include the recorded cause.`,thread:"recovery"}]);
+  await act(()=>unmount(root));
+ }
 });
 
 test("composer: the filename and thread picker live in compact, closed message options", async t => {
