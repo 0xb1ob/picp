@@ -5855,7 +5855,7 @@ repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 **The viewer's routes** ([`src/viewer/control-api.ts`](../src/viewer/control-api.ts)). `GET
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the
 session's CSRF token, which the page fetches itself; it never writes. `POST /api/operator/message` takes
-`{kind:"message", text, deliver?, thread?}`, `{kind:"answer", ask_id, label, thread?}` or `{kind:"abort"}` and refuses,
+`{kind:"message", text, deliver?, thread?, images?, files?, client_id?}`, `{kind:"answer", ask_id, label, thread?}` or `{kind:"abort"}` and refuses,
 in order (`thread` — a normalized tag on messages and clicks, forwarded to the session's marker — is covered
 under Operator threads):
 
@@ -5879,9 +5879,13 @@ under Operator threads):
 still 405 (the image upload route below is the one addition). The Full transcript itself stays served only under
 `--require-tailnet`.
 
+A composer's optional `client_id` must match `dc-<14 digits>-<8 lowercase hex>` or the body is 400. The bridge uses it as the request/marker id (the offline inbox as its held id), so a transcript arriving before the HTTP reply already matches the pending bubble. Without it the server generates an id. Reusing an id still in the bridge's open/recent sets or the held inbox is 409; this is a correlation field, not an idempotency or authorization mechanism. Retries use a fresh id. An older running bridge may ignore it until restarted.
+
+The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text, attachment ids and thread tags. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, threading, scrolling and retry/discard.
+
 **Audit journal** `state/operator/dashboard.jsonl` (0600, append-only, one `O_APPEND` write + `fsync` per line, two
 writers). The session appends a `request` line (`by:"bridge"`, `id`, `at`, `peer` — the client address — `kind`,
-`text`, `ask_id`, `deliver`, and `images`/`files` — upload ids, never contents — for a message with attachments) **before** anything happens — a request line that cannot be written refuses the request
+`text`, `ask_id`, `deliver`, optional `thread`, and `images`/`files` — upload ids, never contents — for a message with attachments) **before** anything happens — a request line that cannot be written refuses the request
 (500) and nothing is injected — then `outcome` lines (`injected`, then `delivered` once the marker is seen in a
 `message_start` or `context` event, `queued` when it is not seen within 2 s, `failed` or `refused` with the reason).
 The viewer appends one `refused` line (`by:"viewer"`, `status`, `reason`, `peer`, and whatever `kind`/`text`/`ask_id`/`images`/`mime`

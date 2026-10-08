@@ -45,7 +45,7 @@ import type { IncomingMessage } from "node:http";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
-import type { AnswerAckResponse, AnswersControlStatusResponse, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
+import type { AnswerAckResponse, AnswersControlStatusResponse, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
 import { appendAnswerLine, appendControlAudit, appendInboxLine, appendScheduleControlLine, bindThread } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
@@ -56,6 +56,7 @@ import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from ".
 import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
+import { readPendingSends } from "./control-pending.ts";
 import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
 export const CONTROL_STATUS_PATH = "/api/operator/control";
@@ -235,7 +236,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	if (config.state !== "on") return { status: 200, body: { ...statusBase(now), reason: `Dashboard control is off: ${config.reason}` } };
 	const can = await launchers(options, now.getTime());
 	// Resume last session: the same launchers (tmux and herdr run the wrapper with the fixed `-c`).
-	const base = { ...statusBase(now), launchers: can, resume: { ...can } };
+	const base = { ...statusBase(now), launchers: can, resume: { ...can }, ...readPendingSends(options.stateDir) };
 	const record = readControlRecord(options.stateDir);
 	const session = operatorSession(options.stateDir);
 	if (record.state !== "ok" || !session.running) {
@@ -260,7 +261,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 }
 
 type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string };
-type Body = ({ kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[] } | { kind: "answer"; ask_id: string; label: string }) & { thread?: string } | { kind: "abort" };
+type Body = ControlMessageBody | { kind: "answer"; ask_id: string; label: string; thread?: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
@@ -272,7 +273,7 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
 	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
 	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(typeof value?.thread === "string" ? { thread: value.thread.slice(0, 64) } : {}) };
-	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
+	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
@@ -292,8 +293,9 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 	const trimmed = typeof value.text === "string" ? value.text.trim() : "";
 	if (!trimmed && !ids && !fileIds) return { ok: false, reason: "text is empty", parsed };
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
+	if (value.client_id !== undefined && (typeof value.client_id !== "string" || !DASHBOARD_ID_RE.test(value.client_id))) return { ok: false, reason: "client_id must be a dashboard id", parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...tagged }, thread, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}), ...tagged }, thread, parsed };
 }
 
 /** The journals' timestamp form: ISO seconds, no milliseconds. */
@@ -432,7 +434,8 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	const inbox = readInbox(options.stateDir);
 	if (inbox.error) return refuse(500, `inbox unreadable: ${inbox.error}`);
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
-	const id = heldId(now);
+	const id = body.kind === "message" && body.client_id ? body.client_id : heldId(now);
+	if (inbox.held.some(message=>message.id === id)) return refuse(409, "client_id was already used; check the transcript before retrying");
 	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(thread ? { thread } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
 	return { status: 202, body: threaded(options, { id, state: "held", deliver: "prompt" }, thread, peer, now) };

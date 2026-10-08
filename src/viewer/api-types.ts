@@ -47,11 +47,16 @@ export interface TranscriptAsk {
  id: string; question: string; options: {label: string; consequence: string; reply: string}[]; recommendation: string;
  state: "open" | "answered" | "withdrawn"; answer: string | null; answered_at: string | null; reason: string | null;
 }
+/** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
+export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string; client_id?: string};
+export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed"; reason: string | null; ask_id: string | null; body: ControlMessageBody }
 /** `GET /api/operator/control`: can this page steer the operator session, and the session's CSRF token when it can. */
 export interface ControlStatusResponse {
  generated_at: string; enabled: boolean; running: boolean; reason: string | null; token: string | null;
  busy: boolean | null; pending: boolean | null; session_file: string | null;
  recent: {id: string; kind: string; state: string; at: string; reason: string | null; ask_id: string | null}[];
+ /** Journal-backed sends for reload recovery; recent delivered rows update known bubbles until the transcript arrives. */
+ sends?: ControlPendingSend[]; sends_error?: string | null;
  /** cp-daemon P3: no operator session runs; a send is held (`held` waiting) with this viewer's `inbox_token`. */
  offline: boolean; held: number; inbox_token: string | null;
  /** Why Start session cannot work here (no tmux start from this viewer and no running herdr); null when it can. */

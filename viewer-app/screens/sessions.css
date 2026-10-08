@@ -92,6 +92,18 @@
 .session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .session-failed .session-bubble > .session-body { border-color: var(--border); }
 .session-bubble .session-send { margin-top: 4px; }
+/* Pending sends stay after the newest transcript entry, sharing the own bubble's responsive widths. */
+.session-pending > .session-body { background: var(--surface); border: 1px dashed var(--muted); color: var(--subtle); gap: 6px; }
+.session-pending-badge { align-self: flex-start; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
+.session-pending .session-pending-detail { margin: 0; font-size: 12px; color: var(--muted); }
+.session-pending-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.session-pending-attachments > li { max-width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.session-pending-failed > .session-body { border-color: var(--subtle); border-style: solid; }
+.session-pending-failed .session-pending-badge, .session-pending-failed .session-pending-detail { color: var(--text); }
+.session-pending-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-pending-actions > button { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.session-pending-actions > button:disabled { opacity: 0.5; cursor: default; }
+.session-pending-live { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Sent images (cp-br81 D9): 96 px tiles in the bubble, wrapping at 390 px; a tap opens one at the bubble's width; a file gone from the upload store reads "image expired". */
 .session-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; min-width: 0; }
 .session-images > li { display: flex; min-width: 0; max-width: 100%; }

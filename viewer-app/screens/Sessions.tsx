@@ -12,6 +12,8 @@ import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
+import { PendingBubble } from "../components/PendingBubble.tsx";
+import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
@@ -208,9 +210,12 @@ export function Sessions({data,control,draft,threads}: {data:SessionsResponse;co
  const [atBottom,setAtBottom]=useState(true);
  const [showTools,setShowTools]=useState(readToolCalls);
  const [openRuns,setOpenRuns]=useState<string[]>([]);
+ const pending = data.selected === "you" && data.transcript === true ? (control?.pending ?? []).filter(send=>!transcriptHasSend(data.entries,send.id) && (!threads?.selected || send.body.thread === threads.selected)) : [];
+ const queued = pending.filter(send=>send.state !== "failed" && send.state !== "delivered");
+ const pendingKey = pending.map(send=>`${send.key}:${send.state}`).join("|");
  const lastEntry=data.entries.at(-1)?.id;
  const scrollToEnd=()=>{const el=scroller.current; if(el) el.scrollTop=el.scrollHeight;};
- useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,showTools,openRuns,threads?.selected]);
+ useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns,threads?.selected]);
  const follow=useRef(true);
  // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
  // itself only when an ask id it has not shown before appears — never because the count alone changed.
@@ -271,8 +276,9 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
     {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
+   {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">

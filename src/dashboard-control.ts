@@ -28,7 +28,7 @@ import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
-	dashboardMarker, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord, readUploadMetadata,
+	dashboardMarker, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord, readUploadMetadata,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
@@ -193,14 +193,18 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const idle = ports.isIdle();
 		const deliverAs = kind === "abort" || idle ? undefined : args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
-		const id = newControlId(now());
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}), ...(files ? { files } : {}) });
+		const supplied = kind === "message" && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
+		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied));
+		const id = supplied && !duplicate ? supplied : newControlId(now());
+		const tag = normalizeThreadTag(args.thread);
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(tag ? { thread: tag } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
 			return { ok: false, status, error: reason };
 		};
 		const latest = readControlConfig(stateDir);
+		if (duplicate) return refuse(409, "client_id was already used; check the transcript before retrying");
 		if (latest.state !== "on") return refuse(403, `dashboard control is off (${latest.reason})`);
 		if (kind === "abort") {
 			if (idle) return refuse(409, "session is idle; nothing to abort");

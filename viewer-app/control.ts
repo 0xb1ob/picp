@@ -1,4 +1,4 @@
-import type { ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse } from "../src/viewer/api-types.ts";
+import type { ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse } from "../src/viewer/api-types.ts";
 import type { Restarting } from "./restart-control.ts";
 
 /** Dashboard control (cp-dashboard-operator-control): what the Full transcript's composer and decision cards can say and do. */
@@ -21,13 +21,14 @@ export const TEXT_UPLOAD_MAX_BYTES = 1024 * 1024;
 export const isTextFile = (file: {name: string}): boolean => /\.(txt|md|html|json)$/i.test(file.name);
 export const attachmentSize = (bytes: number): string => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 
-export type ControlBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string} | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
+export type ControlBody = ControlMessageBody | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
+export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody }
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
 /** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; retry?(key: string): void; discard?(key: string): void; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function failure(response: Response): Promise<string> {
@@ -51,7 +52,13 @@ export async function sendControl(fetch: Fetch, token: string, body: ControlBody
  } catch {
   return {error: "Could not reach this home", status: 0};
  }
- if (response.status === 202) return await response.json() as ControlSendResponse;
+ if (response.status === 202) {
+  try {
+   const result = await response.json() as ControlSendResponse;
+   if (result && typeof result.id === "string" && ["queued","delivered","held"].includes(result.state)) return result;
+  } catch { /* an invalid acknowledgement leaves the original message available for retry */ }
+  return {error: "The home returned an invalid send acknowledgement; check the transcript before retrying", status: 202};
+ }
  return {error: await failure(response), status: response.status};
 }
 

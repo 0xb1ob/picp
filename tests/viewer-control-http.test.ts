@@ -486,3 +486,45 @@ test("an unwritable journal never hides a refusal: the status stands and the bod
 	assert.equal(out.status, 403);
 	assert.match(String(out.body.audit), /^unwritten: /);
 });
+
+
+test("queued send status is journal-backed across reload/session restart, with text, attachments, tags, late failure and inbox drop", async t=>{
+ const {stateDir,port}=await setup(t);
+ const {csrf}=await bridge(t,stateDir);
+ const client_id="dc-20261004140000-00000009";
+ const accepted=await call(port,MESSAGE,json(csrf,{kind:"message",text:"keep the queued text",thread:"layout",client_id}));
+ assert.equal(accepted.body.id,client_id,"the transcript marker can match before the POST acknowledgement");
+ assert.equal((await call(port,MESSAGE,json(csrf,{kind:"message",text:"duplicate",client_id}))).status,409);
+ assert.equal((await call(port,MESSAGE,json(csrf,{kind:"message",text:"invalid",client_id:"not-an-id"}))).status,400);
+ const queued=(await call(port,"/api/operator/control")).body.sends as Array<Record<string,unknown>>;
+ assert.equal(queued.length,1);
+ assert.deepEqual(queued[0]!.body,{kind:"message",text:"keep the queued text",thread:"layout"});
+ assert.equal(queued[0]!.id,accepted.body.id);
+ const id="dc-20261004140000-00000001", image="im-20261004-0123456789abcdef01234567.png";
+ appendFileSync(controlJournalFile(stateDir),[
+  {type:"request",by:"bridge",id,at:"2026-10-04T14:00:00Z",kind:"message",text:"attached",images:[image],thread:"images",ask_id:null,deliver:"followUp",peer:null},
+  {type:"outcome",by:"bridge",id,at:"2026-10-04T14:00:01Z",state:"queued",reason:null},
+  {type:"outcome",by:"bridge",id,at:"2026-10-04T14:00:02Z",state:"failed",reason:"late rejection"},
+ ].map(line=>JSON.stringify(line)).join("\n")+"\n");
+ const heldId="dc-20261004140100-00000002";
+ put(controlInboxFile(stateDir),[
+  {type:"held",id:heldId,at:"2026-10-04T14:01:00Z",text:"while offline",ask_id:null,thread:"offline"},
+  {type:"dropped",id:heldId,at:"2026-10-05T14:02:00Z",reason:"held longer than 24 h"},
+ ].map(line=>JSON.stringify(line)).join("\n")+"\n");
+ // A restarted/offline session has no recent outcomes; the persisted queue and failure still reconstruct.
+ rmSync(controlRecordFile(stateDir));
+ const recovered=(await call(port,"/api/operator/control")).body;
+ assert.deepEqual(recovered.recent,[]);
+ const sends=recovered.sends as Array<Record<string,unknown>>;
+ const failed=sends.find(send=>send.id === id)!;
+ assert.deepEqual([failed.state,failed.reason],["failed","late rejection"]);
+ assert.deepEqual(failed.body,{kind:"message",text:"attached",deliver:"followUp",images:[image],thread:"images"});
+ assert.deepEqual(sends.find(send=>send.id === heldId)?.state,"failed","dropped held sends remain visible failures");
+ assert.equal(recovered.sends_error,null);
+ appendFileSync(controlJournalFile(stateDir),'{"torn":');
+ assert.equal((await call(port,"/api/operator/control")).body.sends_error,null,"torn final line waits for its newline");
+ appendFileSync(controlJournalFile(stateDir),"\n");
+ assert.match(String((await call(port,"/api/operator/control")).body.sends_error),/invalid journal line/);
+ const forbidden=await call((await setup(t,{requireTailnet:false})).port,"/api/operator/control");
+ assert.equal(forbidden.status,403);assert.equal(forbidden.body.sends,undefined,"text stays behind the same tailnet guard");
+});
