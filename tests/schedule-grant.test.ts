@@ -4,9 +4,10 @@
  * re-evaluated against the live home. Hard-coded: no opt-out, no reuse of a grant.
  */
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { LAYOUT } from "../src/contracts.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
@@ -82,6 +83,37 @@ test("A3: a skill schedule's template job cap is raised to its fan-out plus anch
 	const roomy = await scheduler.add({ name: "roomy", project: "demo", mandate_id: seed({ job_cap: 12 }).id, manual: true, skill: "cp-self-review", title: "Self-review 2", kind: "research", delivery: "local" });
 	assert.equal(roomy.grant_template?.job_cap, 12, "a cap already above the floor is kept");
 	assert.doesNotMatch((roomy.notes ?? []).join("; "), /job cap raised/);
+});
+
+test("cp-7re9: under scope_policy named_jobs_only a schedule seed is issued and Run now still mints a fire grant", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { mandates, ports, seed } = bench(home);
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), scope_policy: "named_jobs_only" }));
+	assert.throws(() => mandates.issue({ projects: ["demo"], objective: "wide", expiry: "2026-07-03T00:00:00Z", spend_cap: { usd: 1, tokens: 1_000 }, job_cap: 1, at: "2026-07-01T00:00:00Z" }), /named_jobs_only requires explicit job_ids/);
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "triage", project: "demo", mandate_id: seed().id, manual: true, ...job });
+	const fired = await scheduler.fireNow(schedule.id, quoteTrigger(1));
+	assert.equal(fired.outcome, "fired", fired.reason);
+	assert.equal(mandates.get(fired.mandate_id)?.schedule_grant, true);
+});
+
+test("cp-7re9: a fire in a denied project is skipped with the settings reason; no fire grant is minted", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { mandates, ports, seed } = bench(home);
+	const scheduler = new Scheduler(ports);
+	const s = seed();
+	const schedule = await scheduler.add({ name: "triage", project: "demo", mandate_id: s.id, manual: true, ...job });
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), deny_projects: ["demo"] }));
+	const before = mandates.list().length;
+	const skipped = await scheduler.fireNow(schedule.id, quoteTrigger(1));
+	assert.notEqual(skipped.outcome, "fired");
+	assert.match(skipped.reason, /no fire grant minted \(settings: project demo is denied/);
+	assert.equal(mandates.list().length, before, "nothing minted");
+	assert.equal(mandates.get(s.id)?.status, "active", "the seed is not revoked by a refused mint");
 });
 
 test("each Run now mints a fresh grant carrying the template's approval and the trigger, revokes the previous one, and the replayed quote mints nothing", async (t) => {

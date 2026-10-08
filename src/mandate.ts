@@ -46,7 +46,7 @@ import { assertGrantsPermit, type GrantPermission, type GrantUse, selectGrant, i
 import { formatMandate } from "./mandate-format.ts";
 import { preapprovedRow, riskPreapproval, withPreapproval } from "./risk-preapproval.ts";
 import { type Ledger, readJobsDocument } from "./ledger.ts";
-import { loadTokenCeiling } from "./mandate-defaults.ts";
+import { grantPolicyRefusal, loadTokenCeiling } from "./mandate-defaults.ts";
 import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "./verify-external-ref.ts";
 
 export * from "./mandate-accounting.ts";
@@ -494,6 +494,8 @@ export class MandateStore {
 		}
 		const projects = input.projects.map((name) => name.trim()).filter((name) => name.length > 0);
 		if (projects.length === 0) throw new MandateError("cp_mandate issue needs at least one project");
+		const policy = grantPolicyRefusal(this.home, { projects, named: (input.job_ids?.length ?? 0) > 0, schedule: input.schedule_grant === true || input.schedule_fire !== undefined });
+		if (policy) throw new MandateError(policy);
 		const id = input.id ?? this.mintId();
 		if (input.id !== undefined && (!isSafeMandateId(id) || existsSync(this.file(id)))) throw new MandateError(`refusing to issue ${id}: not a fresh mandate id`);
 		const mandate: Mandate = {

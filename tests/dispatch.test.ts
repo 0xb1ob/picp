@@ -658,6 +658,35 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 	assert.equal(result.state, "dispatched");
 });
 
+// cp-7re9: deny_projects refuses a model dispatch at preflight (project_denied), which runs
+// before the mandate's risk:high gate and before the lease (src/dispatch.ts: routing → bounds → preflight → assertDispatchAllowed → lease).
+test("cp-7re9: a denied project refuses a model dispatch with project_denied, before the risk:high gate and before any lease", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const file = join(b.home, LAYOUT.mandateDefaultsFile);
+	writeFileSync(file, JSON.stringify({ deny_projects: ["demo"] }));
+	const dispatcher = b.makeDispatcher({ mandates });
+	const job = await b.ledger.create({ title: "rotate prod creds", project: "demo", delivery: "local", kind: "ship", slug: "deny-prod-creds" });
+	const task = "Rotate the production database credentials.";
+	await assert.rejects(
+		() => dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false }),
+		(error: Error) => {
+			assert.ok(error instanceof DispatchError, String(error));
+			assert.deepEqual(error.result?.findings.map((finding) => finding.code), ["project_denied"]);
+			assert.match(error.message, /project demo is denied \(.*mandate-defaults\.json deny_projects\)/);
+			return true;
+		},
+	);
+	assert.deepEqual(b.fleet.read().jobs, [], "no record");
+	assert.equal(git(b.clone, "branch", "--list", job.id), "", "no orphan branch");
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")), "a denied project never takes a lease");
+	assert.deepEqual(new EscalationStore({ home: b.home }).open(), [], "no risk_high escalation");
+	// Control: with the deny removed, the same dispatch reaches the risk:high gate.
+	writeFileSync(file, JSON.stringify({}));
+	await assert.rejects(() => dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false }), /risk:high under ask_on/);
+});
+
 test("4B2-T1c: a real Dispatcher's parallelism_full refusal reaches the queue coded; the head stays byte-identical, and a freed slot starts it", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const mandates = new MandateStore(b.home);

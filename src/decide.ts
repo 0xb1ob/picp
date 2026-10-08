@@ -25,6 +25,7 @@ import {
 	type MandateSubject,
 	type MandateUsageJob,
 } from "./mandate.ts";
+import { projectDenial } from "./mandate-defaults.ts";
 import { operatorSendTexts, stripSendMarkers } from "./parent-outbox.ts";
 
 export class DecideError extends Error {}
@@ -202,6 +203,8 @@ function validateBasis(
 			.some((mandate) => mandate.id === basis.mandate && mandate.ask_on.includes("merge"));
 		if (askOnMerge) throw new DecideError("merge requires operator text");
 	}
+	const denied = projectDenial(deps.mandates.home, subject.project);
+	if (denied) throw new DecideError(denied);
 	const jobs = deps.mandates.withReviewerSpend(deps.usageJobs());
 	deps.mandates.sweep(subject.now, jobs);
 	const verdict = evaluateAuthority({ ...subject, createdAt: deps.mandates.jobCreatedAt(subject.jobId), usageJobs: jobs }, deps.mandates.list());

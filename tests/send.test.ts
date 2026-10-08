@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, SCHEMA_VERSION } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../src/contracts.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { copyOriginalTask, decideGate } from "../src/gate.ts";
@@ -729,6 +729,24 @@ test("a repair send is refused before delivery under an expired grant that was r
 	mandates.save({ ...mandates.require(capped.id), status: "paused", paused_at: past(30_000), pause_reason: "spend_cap", expiry: past(1_000) });
 	await assert.rejects(() => sender.send({ jobId: b.jobId, message: "CI is red; fix it", purpose: "repair" }), new RegExp(`mandate ${capped.id} is paused \\(spend_cap\\) .*no repair under it`));
 	assert.equal(readRunEvents(b.home, b.jobId).filter((event) => event.type === "prompt_sent").length, sentBefore, "nothing was delivered");
+});
+
+test("cp-7re9: every cp_send into a denied project is refused before delivery; the frozen task is untouched", { timeout: 120_000 }, async (t) => {
+	const b = await bench(t, [{ kind: "text", text: "ok" }]);
+	const originalTaskPath = join(b.home, paths.originalTaskFile(b.jobId));
+	writeFileSync(originalTaskPath, "Bump x to 2 in src/app.ts.");
+	atomicWriteJson(join(b.home, LAYOUT.mandateDefaultsFile), { deny_projects: ["send"] });
+	const sentBefore = readRunEvents(b.home, b.jobId).filter((event) => event.type === "prompt_sent").length;
+	for (const request of [
+		{ jobId: b.jobId, message: "steer", mode: "steer" as const },
+		{ jobId: b.jobId, message: "scope grew", task: "Bump x and update the README." },
+		{ jobId: b.jobId, message: "CI is red; fix it", purpose: "repair" as const },
+	]) {
+		await assert.rejects(() => b.sender.send(request), (error: Error) => error instanceof SendError && /settings: project send is denied/.test(error.message));
+	}
+	assert.equal(readRunEvents(b.home, b.jobId).filter((event) => event.type === "prompt_sent").length, sentBefore, "nothing was delivered");
+	assert.equal(readFileSync(originalTaskPath, "utf8"), "Bump x to 2 in src/app.ts.");
+	assert.equal(b.fleet.require(b.jobId).task_generations, undefined);
 });
 
 // H6: an inferred risk:high warns; an assessed risk:high gates \u2014 on promotion too.

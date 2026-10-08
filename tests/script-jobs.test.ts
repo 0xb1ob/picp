@@ -13,6 +13,7 @@ import type { IntakeResult } from "../src/intake.ts";
 import { ScheduleRunner } from "../src/schedule-runner.ts";
 import { type Schedule, Scheduler } from "../src/scheduler.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
+import { EscalationStore } from "../src/escalation.ts";
 
 test("script dispatch leases a branch, intakes once, and cannot replay", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 60_000 }, async (t) => {
  const home = createScratchHome();
@@ -159,6 +160,32 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  await assert.rejects(post.dispatch({ jobId: job.id }), /risk:high under ask_on/);
  assert.equal(post.fleet.get(job.id), undefined);
  assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "");
+});
+
+test("cp-7re9: a script job in a denied project is refused by preflight project_denied, before the risk:high gate and before any lease", async (t) => {
+ const home = createScratchHome();
+ const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
+ t.after(() => { home.cleanup(); repo.cleanup(); });
+ const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+ await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+ execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
+ createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+ // A grant that would gate risk:high exists; the deny list is added afterwards (it would refuse the issue itself).
+ post.mandates.issue({ projects: ["demo"], objective: "ship changes", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+ mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+ writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), deny_projects: ["demo"] }));
+ const job = await post.ledger().create({ title: "rotate production credentials", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
+ await assert.rejects(post.dispatch({ jobId: job.id }), (error: Error & { result?: { findings: Array<{ code: string }> } }) => {
+  assert.match(error.message, /project demo is denied/);
+  assert.deepEqual(error.result?.findings.map((finding) => finding.code), ["project_denied"]);
+  return true;
+ });
+ assert.equal(post.fleet.get(job.id), undefined, "no record");
+ assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "", "no branch, no lease");
+ assert.deepEqual(new EscalationStore({ home: home.path }).open(), [], "no risk_high escalation: the deny refuses before the mandate gate");
+ // Control: with the deny removed, the same job reaches the risk:high gate, so the order above is what saved the ask.
+ writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), deny_projects: [] }));
+ await assert.rejects(post.dispatch({ jobId: job.id }), /risk:high under ask_on/);
 });
 
 test("script cap: home worker-bounds.json reaches the runner and the record; override wins; malformed refuses before lease", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 30_000 }, async (t) => {

@@ -2,10 +2,12 @@
  * cp_decide: a decision cites a mandate (re-evaluated) or a verbatim operator quote.
  */
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromEscalations, type ResolvedAwaitingItem } from "../src/awaiting.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import { type DecisionBasis, type DelegationProvenance, WORKER_FORBIDDEN_TOOLS, isoTimestamp } from "../src/contracts.ts";
+import { type DecisionBasis, type DelegationProvenance, WORKER_FORBIDDEN_TOOLS, isoTimestamp, LAYOUT } from "../src/contracts.ts";
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
 import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
@@ -181,6 +183,25 @@ test("valid mandate basis decides a plan checkpoint and journals the clause", as
 	if ("mandate" in result.basis) assert.match(result.basis.clause, /implement for project demo/);
 	assert.deepEqual(ship.get("cp-ship1")?.basis, result.basis);
 	assert.match(mandates.show(grant.id), /cp-ship1/);
+});
+
+test("cp-7re9: a mandate-basis decision in a denied project throws; the same decision by operator quote succeeds", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { ship, mandates, bundle } = deps(home.path);
+	const grant = mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: later(), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 });
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ deny_projects: ["demo"] }));
+	ship.request({ jobId: "cp-denied", question: "Authorize implementation of cp-denied?" });
+	await assert.rejects(
+		decide({ target: "cp-denied", decision: "approve", basis: { mandate: grant.id, clause: "x" } }, bundle),
+		(error: Error) => error instanceof DecideError && /settings: project demo is denied/.test(error.message),
+	);
+	assert.equal(ship.get("cp-denied")?.decision, "pending");
+	assert.equal(mandates.require(grant.id).decisions.length, 0, "nothing journaled on the grant");
+	const result = await decide({ target: "cp-denied", decision: "approve", basis: { operator_quote: "Ship it today." } }, bundle);
+	assert.equal(result.decided_by, "operator-quote");
+	assert.equal(ship.get("cp-denied")?.decision, "approved");
 });
 
 test("tv8: mandate basis must name the selected grant and cannot bypass its denial", async (t) => {

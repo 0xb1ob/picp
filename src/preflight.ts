@@ -25,6 +25,7 @@ import { type FleetRecord, isScriptFleetRecord, type JobPhase } from "./contract
 import { resolveDefaultBase } from "./default-base.ts";
 import type { FleetStore } from "./fleet.ts";
 import { canonicalDir } from "./json-store.ts";
+import { projectDenial } from "./mandate-defaults.ts";
 import { ProjectError, type ProjectRegistry, sameRemote } from "./projects.ts";
 
 /** Job phases that still hold a worker and a lease. */
@@ -33,6 +34,7 @@ export const LIVE_PHASES: readonly JobPhase[] = Object.freeze(["waiting", "held"
 export const CHECK_CODES = [
 	"clone_not_canonical",
 	"project_archived",
+	"project_denied",
 	"origin_mismatch",
 	"fetch_failed",
 	"fetch_contention",
@@ -258,6 +260,16 @@ export class Preflight {
 					level: "fail",
 					message: `project ${request.project} is archived — no new dispatch`,
 					fix: `cp_project unarchive ${request.project} first`,
+				});
+				return finish(result);
+			}
+			const denied = projectDenial(this.#options.registry.home, request.project);
+			if (denied) {
+				findings.push({
+					code: "project_denied",
+					level: "fail",
+					message: denied,
+					fix: `the operator removes ${request.project} from deny_projects in data/mandate-defaults.json by hand (or fixes that file)`,
 				});
 				return finish(result);
 			}
