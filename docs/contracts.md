@@ -1223,6 +1223,8 @@ retain the parent's info/error level.
 { "compact_at_tokens": 150000 }
 ```
 
+**Parent and operator model (cp-settings-minimal).** An optional `data/parent.json` `model` (`provider/id`, set from dashboard Settings) picks the parent model on the next start or rotation; `cp_parent model` still switches now. At start (`src/cp-bridge.ts` `start`): without an explicit `cp_parent start model`, `parent.json` `model` wins, then the saved control model (`sessions/cp-parent-control.json`), then `CP_PARENT_MODEL`, then the session model; with an explicit model, a saved control model still beats it, as before. The file beats the env, so the supervisor's `CP_PARENT_MODEL` never overrides it. A rotation applies the configured model with `set_model` and records it in the control file; a refusal keeps the running model and relays one error. `data/operator.json` `model` likewise beats `CP_OPERATOR_MODEL` on a fresh `cp-operator` launch (an explicit `--model` still wins, a resume keeps its recorded model); an unreadable `operator.json` prints one stderr line and falls back to the env. Absent, both behave exactly as before.
+
 An existing `parent.json` with an invalid `compact_at_tokens` disables automatic compaction and `/doctor` warns; only an absent file takes the default. After each settled turn, and once at ready when a queued send waits, the bridge reads pi's context estimate and runs automatic control before it drains queued sends; the next send waits until control completes, and a send still queued in the bridge never blocks it. At or above this limit it compacts before the next turn. The limit is compared with **effective** tokens: when the last valid assistant message (error, aborted and zero-usage ones skipped, nothing before a compaction) stopped on `length`, its billed output is replaced by an estimate of what was stored (`ceil(chars/4)`), so a length stop's discarded output never triggers a compaction; the parent cancels pi's own `threshold` compaction by the same rule (`manual` and `overflow` untouched). On a headless parent, from the first `turn_end` or settle whose effective reading is at or above the limit, wake-ups (including `answered`, the send-first release and the stranded-notice nudge) are held, not sent as follow-ups, until the compaction lands; a failed manual compaction, no compaction start within 15 s, a 150 s cap from its start, or a settle reading below the limit releases them, `agent_start` never does, and three consecutive failures or expiries disable holding until the next compaction (`src/parent-compact-hold.ts`). Every outcome at or above the limit is one line in `state/daemon.log`: the bridge's `cp-parent-host[pid]: parent context compacted|refused <reason>|failed|timed_out|skipped_length_stop|rotated|rotate_failed`, the parent's `cp-parent[pid]: parent context hold …|threshold_compaction_cancelled`; `failed`, `timed_out` and `rotate_failed` also relay an operator error. Compaction instructions name the current open escalation ids, held PR jobs, active mandate ids and unsettled bridge sends from disk, preserving standing operator instructions and any caller-supplied focus. A `cp_next` mission-end recommendation rotates the session after settlement once no other active grant remains; a failed rotation is logged and falls through to the compaction check. The bridge archives the old transcript and persists the new path, last compact/rotate times, context tokens and last turn cost in `state/sessions/`; `/doctor`, `cp_parent status` and the read-only viewer report those facts. Unknown context estimates are not treated as over threshold.
 
 Parent-directed `cp-schedule` wakes share this same compaction hold: ordinary PR/pipeline fires, live parent-expanded skill fires (including local skill anchors), and startup recovery of unexpanded anchors. Release sends each offered wake once in offer order with its original content/details, `display: true`, `deliverAs: followUp` and `triggerTurn: true`. Anchor dedupe is recorded at offer time. Only transport waits: schedule/control polling, fire timing, job creation, quote verification/single-use recording, fresh-grant minting, open-fire guards and runner-owned answer/board/local dispatch/teardown retain their existing boundaries. Release never mints another grant. The queue is in memory; a new parent process recovers unexpanded anchors from the ledger. Operator steering and the existing schedule send-first/busy-gate behavior are unchanged.
@@ -8655,7 +8657,7 @@ reports `config.budget.<profile>`.
 ## Settings catalog
 
 `src/contracts/settings.ts` is the single list of the home's per-machine settings:
-`SETTING_KEYS` and `SETTING_FIELDS` (28 fields, frozen). Each field names its section,
+`SETTING_KEYS` and `SETTING_FIELDS` (31 fields, frozen). Each field names its section,
 its owner file (or env var), its type and range, its code default, when it applies,
 what the consumer does with an invalid value (`on_invalid`), whether a later writer may
 edit it, and a label and help line. `validateSettingValue(key, value)` checks one value
@@ -8684,6 +8686,15 @@ status `disabled`, because quota reads are off until `capacity.json` exists. The
 endpoint url/path and the gateway key never enter the snapshot. Env values are those
 the calling process sees. `CP_*` is stripped from the bridge-launched parent, so env
 provenance can differ by process.
+
+**Model keys (cp-settings-minimal).** `models.rubric` is `data/routing.json` `rubric`
+(the rows as loaded; the snapshot's `routing` owner row says `absent` when there is no file,
+and then workers use each profile's model). `models.parent` and `models.operator` are
+`data/parent.json` and `data/operator.json` `model` (a `provider/id` ref; absent means
+unset). Their source is `file` when the owner has a valid key, else `env` for a set
+`CP_PARENT_MODEL` / `CP_OPERATOR_MODEL`, else `code` with value null; an invalid key is
+`fallback` ("invalid model; ignored"). The file beats the env at launch, so `env` here
+reports only what this process sees. An unset `model` keeps today's behaviour exactly.
 
 ### Settings writes
 
@@ -8720,11 +8731,23 @@ refuse or disable on a present file without the key. `sessions.operator_compact_
 "cp-install"`) gets the installer seed (`enabled: true`, `interval_min: 15`). Any other home
 gets `enabled: false` and loses `interval_min`. An unreadable `daemon.json` is 409. Section
 and all restores skip non-editable fields. A restore never creates an absent owner file.
+`models.parent` and `models.operator` delete the key. `models.rubric` (`shipped_rubric`) puts
+back the shipped `defaults/routing.default.json` model, fallbacks and thinking on every row
+whose `id` the template has; a hand-added row and every other row field stay. An unreadable
+template is 409 and restores nothing.
+
+**Rubric writes.** A `models.rubric` set sends the snapshot's rows with only `model`,
+`fallbacks` and `thinking` edited; a changed id, role, project, scope, risk or note, or an
+added, removed or reordered row is 400. The rest of `routing.json` (`profiles`,
+`deny_by_role`, …) is kept as stored.
 
 **Absent-file bases.** A `set` on an absent owner builds on what that owner means when absent:
 the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,
 `{schema_version}` for `gate.json`, `{enabled: false}` for `update.json` (created 0600) and
 `{}` otherwise. `capacity.json` is never created here (409, use `cp-install --gateway-url`).
+An absent `parent.json` gets `{compact_at_tokens: 200000}` beside the new `model`, because
+a model-only file would read as invalid and turn compaction off. An absent `routing.json` is
+409 (workers use each profile's model; there is no rubric to edit).
 
 **Policy keys outside the catalog (cp-7re9).** `routing.json` `deny_by_role`,
 `worker-bounds.json` `allow_dispatch_override` and `mandate-defaults.json`
