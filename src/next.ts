@@ -153,7 +153,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
 		const record = inFlightRecord(subject, fleetJobs);
-		return [job.id, selectGrant(grants, "dispatch", { ...subject, startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now)] as const;
+		return [job.id, selectGrant(grants, "dispatch", { ...subject, startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now, fleetJobs)] as const;
 	}));
 	const queued = new Set(ports.queued?.() ?? []);
 	const results: NextResult[] = [];

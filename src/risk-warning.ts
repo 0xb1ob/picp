@@ -22,7 +22,7 @@
 
 import type { Job, JobKind, Risk, RoutingProvenance } from "./contracts.ts";
 import { parseJobLabels } from "./ledger.ts";
-import type { MandateStore } from "./mandate.ts";
+import type { MandateStore, MandateUsageJob } from "./mandate.ts";
 import { acceptedRiskMatches } from "./pipeline.ts";
 
 /** Where a recorded risk came from; the warning, escalation evidence and `routing_resolved` name it (riskkw-f10). */
@@ -136,6 +136,7 @@ export function recordedProvenance(from: RoutingProvenance | undefined): boolean
  */
 export function inferredRiskGate(input: {
 	mandates?: MandateStore;
+	jobs?: readonly MandateUsageJob[];
 	job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] };
 	routed: Risk;
 	routedFrom: RoutingProvenance;
@@ -150,7 +151,7 @@ export function inferredRiskGate(input: {
 	const keywords = riskKeywords(input.text, warningOnlyBenign);
 	// Every hit was a warning-only benign sense: the risk is low either way, so no wake line.
 	if (keywords.length === 0 && (routed !== "high" || riskKeywords(input.text).length > 0)) return { risk: "low" };
-	if (!input.mandates?.wouldAskRiskHigh(job, "high")) return { risk: "low" };
+	if (!input.mandates?.wouldAskRiskHigh(job, "high", input.jobs ?? [])) return { risk: "low" };
 	const words = keywords.length > 0 ? keywords.join(", ") : "matched at dispatch";
 	return {
 		risk: "low",

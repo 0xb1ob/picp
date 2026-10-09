@@ -487,7 +487,7 @@ export class Dispatcher {
 				...(request.taskFile === undefined ? {} : { path: request.taskFile }),
 			},
 			...(blockers.length > 0 ? { blockers } : {}),
-			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference] }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs).risk) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference] }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
 		};
 	}
 
@@ -569,7 +569,7 @@ export class Dispatcher {
 		const clone = pre.clone as string;
 		const base = pre.base as string;
 
-		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs);
+		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs);
 		let mandateId: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(

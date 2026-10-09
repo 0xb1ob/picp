@@ -164,6 +164,11 @@ export function jobCapRefuses(mandate: Mandate, jobId: string, jobs: readonly Ma
 	return mandateSpend(mandate, matched).jobs >= mandate.job_cap && !matched.some((job) => job.job_id === jobId);
 }
 
+/** Selection headroom excludes this job, so an already-counted continuation keeps its grant. */
+export function jobCapFullWithout(mandate: Mandate, jobId: string, jobs: readonly MandateUsageJob[]): boolean {
+	return mandateSpend(mandate, jobs.filter((job) => job.job_id !== jobId)).jobs >= mandate.job_cap;
+}
+
 /**
  * Warning for a fresh project-wide grant (no `job_ids`): `mandateSpend` counts every job in its projects dispatched
  * after issue, including jobs another active mandate covers, so those fill its job cap too. Undefined for a named or schedule grant.

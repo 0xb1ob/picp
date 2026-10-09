@@ -374,7 +374,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			}
 			if (params.action === "batch_risk_high") {
 				if (!params.job_ids) throw new EscalationError("cp_escalate batch_risk_high needs job_ids");
-				const { escalation, withdrawn } = await batchRiskHigh({ escalations: post.escalations, mandates: post.mandates, ledger: post.ledger() }, { jobIds: params.job_ids, ...(params.mandate_id ? { mandateId: params.mandate_id } : {}) });
+				const { escalation, withdrawn } = await batchRiskHigh({ escalations: post.escalations, mandates: post.mandates, ledger: post.ledger(), jobs: liveUsageJobs(post.fleet, post.runs) }, { jobIds: params.job_ids, ...(params.mandate_id ? { mandateId: params.mandate_id } : {}) });
 				refreshWidget(ctx);
 				return {
 					content: [{ type: "text", text: `${escalation.id} batch risk:high: ${escalation.job_ids.length} jobs (${escalation.job_ids.join(", ")}); withdrew ${withdrawn.length} per-job rows \u2014 cp_decide it with an operator quote` }],

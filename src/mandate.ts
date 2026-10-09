@@ -263,7 +263,7 @@ export function evaluateAuthority(subject: MandateSubject, mandates: readonly Ma
 	const now = subject.now ?? isoTimestamp();
 	const jobs = subject.usageJobs ?? [];
 	const job = { ...subjectAsJob(subject), startedAt: inFlightRecord(subject, jobs)?.dispatched_at ?? subject.createdAt, inFlight: isInFlight(subject, jobs) };
-	const selected = selectGrant(mandates, actionForKind(subject.kind) as GrantUse, job, now);
+	const selected = selectGrant(mandates, actionForKind(subject.kind) as GrantUse, job, now, jobs);
 	if (selected?.at.standing === "permit") {
 		const verdict = judgeCovered(selected.grant, subject, jobs);
 		return verdict.permitted && selected.at.cause === "expired"
@@ -712,7 +712,7 @@ export class MandateStore {
 	/** Read-only advice: no sweep, permission, reservation or usage write. */
 	selection(use: GrantUse, job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] }, jobs: readonly MandateUsageJob[] = []) {
 		const record = inFlightRecord({ ...job, jobKind: job.kind }, jobs);
-		return selectGrant(this.list(), use, { ...job, jobKind: job.kind, ...this.scheduleOf(job.jobId), startedAt: record?.dispatched_at ?? this.jobCreatedAt(job.jobId), inFlight: record !== undefined, failed: record?.phase === "failed" }, this.#stamp());
+		return selectGrant(this.list(), use, { ...job, jobKind: job.kind, ...this.scheduleOf(job.jobId), startedAt: record?.dispatched_at ?? this.jobCreatedAt(job.jobId), inFlight: record !== undefined, failed: record?.phase === "failed" }, this.#stamp(), jobs);
 	}
 
 	jobCreatedAt(jobId: string): string | undefined {
@@ -723,9 +723,9 @@ export class MandateStore {
 	 * A `dry_run` reads this instead of calling `assertDispatchAllowed`: the
 	 * same predicate, with no escalation raised and nothing taken.
 	 */
-	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean }, risk: Risk | undefined): boolean {
+	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean }, risk: Risk | undefined, jobs: readonly MandateUsageJob[] = []): boolean {
 		if (risk !== "high") return false;
-		const selected = this.selection("dispatch", job);
+		const selected = this.selection("dispatch", job, jobs);
 		const asking = selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant] : [];
 		return asking.length > 0 && !riskPreapproval(asking, job, this.jobCreatedAt(job.jobId)).covered;
 	}
