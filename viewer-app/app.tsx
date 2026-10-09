@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { DecisionsResponse, OverviewResponse, BoardResponse, JobResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse } from "../src/viewer/api-types.ts";
+import type { DecisionsResponse, OverviewResponse, BoardResponse, JobResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse, StatsResponse } from "../src/viewer/api-types.ts";
+import { Stats, statsApiUrl } from "./screens/Stats.tsx";
 import { type Route, decisionsFallback, screenDataUrl } from "./routes.ts";
 import { useControl } from "./use-control.ts";
 import { useScheduleControl } from "./use-schedule-control.ts";
@@ -50,6 +51,7 @@ export function App() {
  const current = useRoute();
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
  if (current.screen === "settings") return <SettingsPage current={current}/>;
+ if (current.screen === "stats") return <StatsPage current={current}/>;
  return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
@@ -73,6 +75,15 @@ function SettingsPage({current}: {current:Route}) {
  const view = useSettingsControl();
  const data = view.status && !("error" in view.status) ? view.status : null;
  return <Shell current={current} awaiting={null} status={!view.status ? "connecting" : data ? "stale" : "offline"} updatedAt={data?.generated_at ?? null}><Settings view={view}/></Shell>;
+}
+/** Stats: the hash carries the filters; the browser's IANA zone rides only on the API query (optional, never in the hash). */
+export function StatsPage({current}: {current:Route}) {
+ const query = new URLSearchParams(current.query);
+ // No key: filter edits change the URL, useScreenData refetches (dropping the old snapshot) and the filter row stays mounted.
+ const resource = useScreenData<StatsResponse>(statsApiUrl(query.toString(),Intl.DateTimeFormat().resolvedOptions().timeZone),"/api/stream?view=stats");
+ return <Shell current={current} awaiting={null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
+  <Stats data={resource.data} query={query.toString()} error={resource.error ? `${resource.error}${resource.data ? " · showing last recorded data" : ""}` : null} code={resource.code}/>
+ </Shell>;
 }
 function JobsRoute({current}:{current:Route}) {
  const url = current.screen === "job" ? `/api/job/${encodeURIComponent(current.jobId!)}` : `/api/${current.screen}`;

@@ -28,6 +28,19 @@ test("palette guard rejects short, alpha, uppercase and functional bypasses", ()
  assert.equal(violations("styles/tokens.css","color:#123456;").length,1);
  assert.equal(violations("routes.ts",'"#decided"').length,0);
 });
+
+/** Stats charts paint only with the four chart tokens, never amber/coral/hex, whether as fill or stroke. */
+test("Stats chart colours are only --blue, --green, --muted and --dim", () => {
+ const css = readFileSync(join(REPO_ROOT,"viewer-app/screens/stats.css"),"utf8").replace(/\/\*[\s\S]*?\*\//g,"");
+ const series = [...css.matchAll(/\.stats-(fill|stroke)-(\w+)\s*\{([^}]*)\}/g)];
+ assert.deepEqual(series.map(m => `${m[1]}-${m[2]}`).sort(),["fill-blue","fill-dim","fill-green","fill-muted","stroke-blue","stroke-dim","stroke-green","stroke-muted"]);
+ for (const [,kind,name,body] of series) assert.match(body!,new RegExp(`(?:^|[\\s;])${kind}: var\\(--${name}\\)`),`${kind}-${name}`);
+ const tokens = (css.match(/var\(--[\w-]+\)/g) ?? []).map(t => t.slice(6,-1));
+ assert.deepEqual([...new Set(tokens)].filter(t => !["blue","green","muted","dim","border","surface","text"].includes(t)),[],"stats.css uses only the card/chart tokens");
+ assert.doesNotMatch(css,/--(?:amber|coral|ask-|error-)/);
+ const tsx = readFileSync(join(REPO_ROOT,"viewer-app/screens/Stats.tsx"),"utf8");
+ assert.deepEqual([...new Set([...tsx.matchAll(/stats-(?:fill|stroke)-(\w+)/g)].map(m => m[1]))].filter(n => !["blue","green","muted","dim"].includes(n!)),[]);
+});
 /** Amber/coral (and the ask/error/stranded tokens that paint them) only on an open human decision or CI that is actually red. */
 const KEEP = [
  /^\.awaiting-(?:card|index|reason|origin)(?![\w-])/,

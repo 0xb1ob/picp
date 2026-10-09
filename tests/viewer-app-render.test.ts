@@ -49,7 +49,8 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  assert.match(empty, /operator<\/span><strong title="offline">offline</); assert.match(empty, /overview-dot-idle"><\/span>main CI<\/span><strong title="no red latch">no red latch</, "no latch is neutral, not a green dot"); assert.doesNotMatch(empty, /main CI<\/span><strong[^>]*>green/, "no latch is never claimed green");
  const more = screen(data,true); assert.doesNotMatch(more,/aria-disabled="true"|#mandates/);
  // Audit P4 #25: More holds Schedules, Files (and Reports, phone only) plus Notifications; Board and Map are Jobs views.
- for (const screen of ["reports","schedules","files"]) assert.ok(more.includes(`href="#${screen}"`),screen);
+ for (const screen of ["stats","reports","schedules","files"]) assert.ok(more.includes(`href="#${screen}"`),screen);
+ assert.match(more,/class="more-phone" href="#stats"|href="#stats" class="more-phone"/);
  for (const screen of ["awaiting","decided","board","map"]) assert.ok(!more.includes(`href="#${screen}"`),screen);
  assert.match(more,/class="more-phone" href="#reports"|href="#reports" class="more-phone"/);
  assert.match(more,/class="more-phone" href="#settings"|href="#settings" class="more-phone"/);

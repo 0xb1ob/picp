@@ -7,6 +7,7 @@ export const navigation = [
  {id:"decisions", label:"Decisions", href:"#decisions"},
  {id:"jobs", label:"Jobs", href:"#jobs"},
  {id:"sessions", label:"Sessions", href:"#sessions"},
+ {id:"stats", label:"Stats", href:"#stats"},
  {id:"reports", label:"Reports", href:"#reports"},
  {id:"more", label:"More", href:"#more"},
  {id:"board", label:"Board", href:"#board"},
@@ -17,18 +18,18 @@ export const navigation = [
 ] as const;
 export type NavId = typeof navigation[number]["id"];
 /** The sidebar (desktop) and the tab bar (phone); Reports sits under More on phone only. */
-export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","reports","settings","more"] : ["overview","decisions","jobs","sessions","more"];
+export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","stats","reports","settings","more"] : ["overview","decisions","jobs","sessions","more"];
 /** The top-level item a screen belongs to: Board and Map are Jobs views, Schedules and Files (and Reports on phone) are More. */
 export function navOwner(screen: Route["screen"], desktop: boolean): NavId {
  if (screen === "job" || screen === "board" || screen === "map") return "jobs";
- if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop)) return "more";
+ if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop) || (screen === "stats" && !desktop)) return "more";
  return screen;
 }
-export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "board" | "reports" | "schedules" | "settings"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}
+export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}
 export function route(hash: string): Route {
  const fallback: Route = {screen:"overview",section:null};
  let value: string; try { value = decodeURIComponent(hash.replace(/^#/,"")); } catch { return fallback; }
- if (/^(sessions|files)(?:\?|$)/.test(hash.replace(/^#/,""))) {
+ if (/^(sessions|files|stats)(?:\?|$)/.test(hash.replace(/^#/,""))) {
   const [screen,...query]=hash.replace(/^#/,"").split("?");
   const params=new URLSearchParams(query.join("?"));
   if (screen === "sessions" && !params.has("view")) params.set("view","you");
@@ -36,7 +37,7 @@ export function route(hash: string): Route {
   // app falls back to Decisions when the server refuses the transcript (`defaulted`, see decisionsFallback).
   const defaulted=screen === "sessions" && params.get("view") === "you" && !params.has("transcript");
   if (defaulted) params.set("transcript","1");
-  return {...fallback,screen:screen as "sessions" | "files",query:screen === "sessions" ? params.toString() : query.join("?"),...(defaulted ? {defaulted} : {})};
+  return {...fallback,screen:screen as "sessions" | "files" | "stats",query:screen === "sessions" ? params.toString() : query.join("?"),...(defaulted ? {defaulted} : {})};
  }
  if (value === "jobs" || value === "board" || value === "reports" || value === "schedules") return {...fallback,screen:value};
  if (/^job\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) return {...fallback,screen:"job",jobId:value.slice(4)};

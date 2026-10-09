@@ -10,6 +10,7 @@ export function Icon({name, size = 20}: {name:NavId | "awaiting" | "copy" | "che
   case "sessions": content = <path d="M4 5.5h16v11H9.5L4 20.5z" stroke-linejoin="round"/>; break;
   case "jobs": content = <><path d="M9 6.5h11M9 12h11M9 17.5h11" stroke-linecap="round"/><circle cx="4.5" cy="6.5" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></>; break;
   case "board": content = <><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></>; break;
+  case "stats": content = <path d="M5 20V12M10 20V6M15 20V10M20 20V4" stroke-linecap="round"/>; break;
   case "reports": content = <><rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8 8.5h8M8 12h8M8 15.5h5" stroke-linecap="round"/></>; break;
   case "schedules": content = <><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2" stroke-linecap="round" stroke-linejoin="round"/></>; break;
   case "map": content = <><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="10" cy="18" r="2.5"/><path d="M8.4 6.4l7.2 1.2M6.9 8.4l2.2 7.2M16.4 10l-4.8 6" stroke-linecap="round"/></>; break;
