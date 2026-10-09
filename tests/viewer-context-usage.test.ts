@@ -106,15 +106,15 @@ test("views: Sessions carries operator, parent and worker context; Jobs and Map 
 	const screens = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 	const html = screens.sessions(view);
 	assert.match(html, /class="ctx-chip ctx-warn/);
-	assert.match(html, /ctx 204K \/ 272K · 75%/);
-	assert.match(html, /ctx 136K \/ 272K · 50%/);
+	assert.match(html, /ctx (<\/span>)?204K \/ 272K · 75%/);
+	assert.match(html, /ctx (<\/span>)?136K \/ 272K · 50%/);
 	assert.match(html, /context n\/a/);
 	assert.doesNotMatch(html, /style=/);
 	const you = screens.sessions(sessionsView(state, "you", null)!);
 	assert.match(parseHTML(you).document.querySelector(".session-heading")!.innerHTML, /context n\/a<small> · no assistant reply yet<\/small>/, "the heading names the reason");
 	const jobsHtml = screens.jobs(jobsView(state));
 	assert.match(jobsHtml, /<span class="job-context"><span class="ctx-chip ctx-warn ctx-compact"/);
-	assert.match(jobsHtml, /ctx 204K \/ 272K · 75%/);
+	assert.match(jobsHtml, /ctx (<\/span>)?204K \/ 272K · 75%/);
 	assert.match(jobsHtml, /aria-label="Context window used" max="100" value="75\./);
 });
 
