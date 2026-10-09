@@ -6,6 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- P2a durable schedule run and policy stores: code lock `SCHEDULE_RUNS_ACTIVE=false`, every production write throws, and no production module calls the stores. No behaviour change, activation or migration; legacy fires still mint fresh grants. Rollback: revert; production wrote nothing.
 - P1 schedule policy contract only: pure saved-policy types, closed validation, legacy snapshots and live exclusion/token narrowing; no production caller, writer, activation or migration. Existing schedules and pipeline fires remain unchanged. Rollback: revert.
 - Schedules page groups run history by run (cp-lkuw P0): one fire or Run now with its fanned-out jobs is one run with one result link; Last fire shows the newest run (manual runs included), counts say "N recent runs · M jobs", result text follows the skill, and a done Run now reads "Run accepted". `/api/schedules` gains additive `runs`, `last_run`, `run_count`, `job_count`, `lands` and `history[].run_id`; the history window is 40. Display only; migration: none.
 - A named grant at or above its job cap no longer shadows an eligible active named supplement explicitly covering the same job. Selection counts jobs without the current job, preserving review, repair and merge continuations; project-wide fallback and policy mixing remain forbidden. Migration: none.
