@@ -187,6 +187,12 @@ export interface ReportsResponse {
 	generated_at: string;
 	reports: ReportItem[];
 }
+/** One run of a schedule: an anchor job (a fire or Run now) plus the jobs it fanned out to. */
+export interface ScheduleRunView {
+	run_id: string; anchor_id: string; via: "slot" | "dashboard" | "cp_schedule"; at: string; missed: boolean;
+	status: "open" | "closed"; jobs_open: number; jobs_total: number; job_ids: string[];
+	result: { kind: "board" | "pull_request" | "answer" | "report" | "branch" | "job"; job_id: string; href: string } | null;
+}
 /** One ledger job a schedule fired (labelled `schedule:<id>`), newest first. */
 export interface ScheduleHistoryJob {
 	id: string; title: string | null; status: string; close_reason: string | null; created_at: string | null; pr_url: string | null; board_href: string | null;
@@ -194,6 +200,8 @@ export interface ScheduleHistoryJob {
 	summary: string | null; reported_at: string | null;
 	/** `delivery:answer` only: the answer from `state/artifacts/<id>/`, capped at 8 KiB. */
 	answer: { text: string; bytes: number; truncated: boolean } | null;
+	/** The run (anchor id) this job belongs to; null when no run claims it. */
+	run_id: string | null;
 }
 /** A saved schedule as the Schedules page shows it; `next_at` is the next cron slot, or a watch's next check. */
 export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
@@ -208,6 +216,11 @@ export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	/** cp-org-pr-review only: the seed's standing operator risk:high pre-approval a Run now click carries — its quote's sha12, never the quote. */
 	run_now_clearance: { quote_sha: string; granted_at: string } | null;
 	history: ScheduleHistoryJob[];
+	/** The newest runs (at most 5), newest first; totals are over the whole ledger. */
+	runs: ScheduleRunView[];
+	last_run: { job_id: string; at: string; via: ScheduleRunView["via"]; missed: boolean } | null;
+	run_count: number; job_count: number;
+	lands: "board" | "report" | "branch" | "pull_request" | "plan" | "answer";
 };
 /** `/api/schedules`: `error` names an unreadable or invalid `state/schedules.json`; it is never silently empty. */
 export interface SchedulesResponse { generated_at: string; error: string | null; schedules: ScheduleItem[] }

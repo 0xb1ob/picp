@@ -436,3 +436,34 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.match(down, /<button type="button" disabled>Disable<\/button>/);
 	assert.doesNotMatch(down, /<button type="button">/, "every button disabled while the parent is down");
 });
+
+test("a manual skill schedule's dashboard run shows in Last fire; runs and jobs are counted apart; results link the board or the S1 job", async (t) => {
+	const manual = { id: "sch-cccccc", name: "self-review", project: "demo", mandate_id: "md-live1", trigger: { type: "manual" }, job: { title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review" }, enabled: true, created_at: "2026-09-01T00:00:00Z" };
+	const org = { ...manual, id: "sch-dddddd", name: "org review", job: { ...manual.job, skill: "cp-org-pr-review", description: "org: acme" } };
+	const options = fixture(t, file(manual, org));
+	const lab = (id: string) => [`schedule:${id}`];
+	const kids = (anchor: string, labels: string[]) => [1, 2, 3, 4, 5, 6].map((n) => ({ id: `${anchor}-l${n}`, title: `L${n} [${anchor}]`, status: "closed", labels, created_at: `2026-09-10T10:0${n}:00Z` }));
+	writeFileSync(join(options.home, ".pi-command-post", "jobs.json"), JSON.stringify({ jobs: [
+		{ id: "cp-ra", title: "Self-review", status: "closed", labels: lab(manual.id), created_at: "2026-09-10T10:00:00Z", notes: "run now from the dashboard (req-1) for sch-cccccc (self-review)" },
+		...kids("cp-ra", lab(manual.id)),
+		{ id: "cp-s1", title: "S1 synthesis", status: "closed", labels: lab(manual.id), created_at: "2026-09-10T11:00:00Z" },
+		{ id: "cp-oa", title: "Org review", status: "closed", labels: lab(org.id), created_at: "2026-09-10T10:00:00Z", notes: "run now from the dashboard (req-2) for sch-dddddd (org review)", comments: [{ at: "x", author: "p", text: "expanded: R1 cp-or1, S1 cp-os1" }] },
+		{ id: "cp-os1", title: "S1 [cp-oa]", status: "closed", labels: lab(org.id), created_at: "2026-09-10T11:00:00Z" },
+	] }));
+	const data = schedulesView(options, () => {}, NOW);
+	const [m, o] = data.schedules;
+	assert.deepEqual([m?.run_count, m?.job_count, m?.runs[0]?.jobs_total, m?.lands, m?.last_run?.via], [1, 8, 8, "board", "dashboard"]);
+	assert.deepEqual(o?.runs[0]?.result, { kind: "report", job_id: "cp-os1", href: "#job/cp-os1" });
+	assert.equal(m?.history.every((j) => j.run_id === "cp-ra"), true);
+	const built = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules} from "./viewer-app/screens/Schedules.tsx"; export const screen=d=>render(h(Schedules,{data:d}));', loader: "tsx", resolveDir: REPO_ROOT }, bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
+	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(d: SchedulesResponse): string };
+	const [card = "", orgCard = ""] = screen(data).split('<article class="schedule-card">').slice(1);
+	const { document } = parseHTML(`<div>${card}</div>`);
+	assert.match(document.querySelector(".schedule-facts")?.textContent ?? "", /Last fire.*cp-ra.*Run now \(dashboard\).*1 recent runs · 8 jobs/);
+	assert.match(document.querySelector(".schedule-result")?.textContent ?? "", /report board/);
+	assert.doesNotMatch(card, /pushed branch/);
+	assert.equal(document.querySelectorAll(".schedule-history > li").length, 1, "one run");
+	assert.equal(document.querySelectorAll(".schedule-run-jobs > li").length, 8);
+	assert.match(card, /run history · 1 runs/);
+	assert.match(orgCard, /href="#job\/cp-os1">Report<\/a>/);
+});

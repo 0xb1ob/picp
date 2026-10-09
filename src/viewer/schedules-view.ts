@@ -10,12 +10,13 @@ import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { nextCronSlot, operatorStop, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, parseCron, readScheduleFile, type Schedule } from "./schedule-core.ts";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "./api-types.ts";
+import { groupScheduleRuns, scheduleLands, type RunJobFacts } from "./schedule-run-groups.ts";
 import { listBoards, type BoardWarn } from "./boards.ts";
 import { PR_URL, readMandates } from "./fleet-view.ts";
 import { objectList, strings } from "./overview-read.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 
-export const SCHEDULE_HISTORY = 10;
+export const SCHEDULE_HISTORY = 40;
 
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
 	const trigger = schedule.trigger;
@@ -124,6 +125,38 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 	const grants = readMandates(state);
 	const ledger = objectList(join(runtimeRoot(state.home), "jobs.json"), "jobs", (j) => typeof j.id === "string" && isSafeId(j.id)).value;
 	const boards = listBoards(state, warn);
+	const factsOf = (id: string): RunJobFacts & { envelope: Json | undefined; record: Json | undefined } => {
+		const board = boards.find((b) => b.job_ids.includes(id));
+		const record = readObject(join(state.stateDir, "runs", id, "envelope.json"));
+		const envelope = obj(record?.envelope);
+		return { board_href: board ? `/boards/${board.slug}/` : null, pr_url: prUrl(state, id, envelope), envelope, record };
+	};
+	const schedulePage = (schedule: Schedule): Pick<ScheduleItem, "history" | "runs" | "last_run" | "run_count" | "job_count" | "lands"> => {
+		const jobs = ledger.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`));
+		const cache = new Map<string, ReturnType<typeof factsOf>>();
+		const facts = (id: string) => { let f = cache.get(id); if (!f) cache.set(id, f = factsOf(id)); return f; };
+		const groups = groupScheduleRuns(jobs, schedule, schedule.last_fire, facts);
+		const runOf = new Map(groups.runs.flatMap((r) => r.job_ids.map((id): [string, string] => [id, r.run_id])));
+		const windowIds = new Set([...runOf.keys(), ...groups.unattributed]);
+		return {
+			runs: groups.runs, last_run: groups.last_run, run_count: groups.run_count, job_count: groups.job_count, lands: scheduleLands(schedule.job),
+			history: jobs
+				.filter((j) => windowIds.has(String(j.id)))
+				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))
+				.slice(0, SCHEDULE_HISTORY)
+				.map((j) => {
+					const id = String(j.id);
+					const { board_href, pr_url, envelope, record } = facts(id);
+					return {
+						id, title: str(j.title) ?? null, status: str(j.status) ?? "unknown", close_reason: str(j.close_reason) ?? null,
+						created_at: str(j.created_at) ?? null, pr_url, board_href,
+						summary: str(envelope?.summary) ?? null, reported_at: envelope ? str(record?.received_at) ?? null : null,
+						answer: strings(j.labels).includes("delivery:answer") ? scheduleAnswer(state, id, str(envelope?.artifact_path)) : null,
+						run_id: runOf.get(id) ?? null,
+					};
+				}),
+		};
+	};
 	return {
 		generated_at, error: null,
 		schedules: schedules.map(({ last_output_sha: _sha, ...schedule }): ScheduleItem => ({
@@ -134,22 +167,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			grant_stopped: operatorStop(grants.find((g) => g.id === schedule.mandate_id)) !== undefined,
 			fan_out: fanOut(schedule),
 			run_now_clearance: runNowClearance(grants, schedule),
-			history: ledger
-				.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`))
-				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))
-				.slice(0, SCHEDULE_HISTORY)
-				.map((j) => {
-					const id = String(j.id);
-					const board = boards.find((b) => b.job_ids.includes(id));
-					const record = readObject(join(state.stateDir, "runs", id, "envelope.json"));
-					const envelope = obj(record?.envelope);
-					return {
-						id, title: str(j.title) ?? null, status: str(j.status) ?? "unknown", close_reason: str(j.close_reason) ?? null,
-						created_at: str(j.created_at) ?? null, pr_url: prUrl(state, id, envelope), board_href: board ? `/boards/${board.slug}/` : null,
-						summary: str(envelope?.summary) ?? null, reported_at: envelope ? str(record?.received_at) ?? null : null,
-						answer: strings(j.labels).includes("delivery:answer") ? scheduleAnswer(state, id, str(envelope?.artifact_path)) : null,
-					};
-				}),
+			...schedulePage(schedule),
 		})),
 	};
 }

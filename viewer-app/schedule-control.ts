@@ -69,7 +69,7 @@ export function requestLine(request: ScheduleControlRequestView): string {
  switch (request.state) {
   case "queued": return `Queued · ${op} · ${request.id} — the parent applies it within seconds`;
   case "applying": return `Applying · ${op} · ${request.id}`;
-  case "done": return `Done · ${op}${request.job_id ? ` → ${request.job_id}` : ""}`;
+  case "done": return request.op === "run_now" ? `Run accepted${request.job_id ? ` · ${request.job_id}` : ""}` : `Done · ${op}${request.job_id ? ` → ${request.job_id}` : ""}`;
   case "refused": return `Refused: ${request.reason ?? "unknown"}`;
   case "expired": return `Expired: ${request.reason ?? "not applied"}`;
   case "interrupted": return `Interrupted: ${request.reason ?? "check the schedule"}`;
