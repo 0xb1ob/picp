@@ -174,6 +174,30 @@ export interface BoardResponse extends JobsResponse {
  lanes: {id:string;status:string;active:boolean;objective:string;expiry:string | null;ask_on:string[];spend:number | null;cap:number | null;note:string | null}[];
  revoked_hidden: number; stranded_count: number | null;
 }
+/** `GET /api/stats` (docs/viewer-app.md, Stats definitions). Instants are UTC ISO; null is unknown, never 0. */
+export interface StatsBucket { start: string; end: string }
+export interface StatsMandateRow {
+ /** A grant id, or `unassigned` for finished jobs no grant covers. */
+ id: string; objective: string | null; status: string | null; jobs: number;
+ spend_usd: number | null; spend_cap_usd: number | null; tokens: number | null; token_cap: number | null; time_left_seconds: number | null;
+}
+export interface StatsResponse {
+ generated_at: string;
+ range: { from: string; to: string; key: "1h" | "24h" | "7d" | "custom"; bucket_seconds: number };
+ availability: SourceAvailability; warnings: {section:string;message:string}[];
+ filters: { projects: string[]; mandates: {id:string;objective:string}[]; project: string | null; mandate: string | null };
+ kpis: {
+  spend_usd: number | null; /** Whole percent vs the equal window ending at `from`; null when the prior is 0 or unknown. */ spend_delta_pct: number | null;
+  merge_rate: number | null; ci_green_first_try: number | null; median_queue_wait_seconds: number | null; median_wall_clock_seconds: number | null;
+  decisions: number | null; /** input + output. */ tokens: number | null; tokens_input: number | null; tokens_output: number | null;
+ };
+ jobs_finished: { merged: number | null; closed: number | null; buckets: (StatsBucket & { merged: number; closed: number })[] };
+ phases: { queued_seconds: number | null; working_seconds: number | null; held_seconds: number | null; review_seconds: number | null };
+ tokens_by_model: { models: string[]; buckets: (StatsBucket & { tokens: Record<string, number> })[] };
+ spend_by_model: { model: string; usd: number }[];
+ decisions: { for_you: number | null; by_you: number | null; worth: number | null };
+ mandates: StatsMandateRow[];
+}
 /** A published web board as the Reports page lists it (`href` is the served path, not an absolute URL). */
 export interface ReportItem {
 	slug: string;
