@@ -45,6 +45,7 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  for (const screen of ["reports","schedules","files"]) assert.ok(more.includes(`href="#${screen}"`),screen);
  for (const screen of ["awaiting","decided","board","map"]) assert.ok(!more.includes(`href="#${screen}"`),screen);
  assert.match(more,/class="more-phone" href="#reports"|href="#reports" class="more-phone"/);
+ assert.match(more,/class="more-phone" href="#settings"|href="#settings" class="more-phone"/);
  data.availability.asks = "unavailable"; data.awaiting.count = null;
  assert.doesNotMatch(screen(data),/Nothing needs you/); assert.match(screen(data),/Questions unavailable/);
  data.availability.asks = "ok"; data.awaiting.count = 4;

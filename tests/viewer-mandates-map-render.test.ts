@@ -256,14 +256,14 @@ test("More's views keep the phone sub-page header with search, the local clock a
  assert.doesNotMatch(job,/shell-live/);
  assert.equal(parseHTML(job).document.querySelectorAll("time.shell-clock").length,1,"job");
 });
-test("audit P4 #23 #25 #26: Map carries the List | Board | Map toggle; the sidebar has six items, the tab bar five, with Jobs lit on Map",async()=>{
+test("audit P4 #23 #25 #26: Map carries the List | Board | Map toggle; the sidebar has seven items, the tab bar five, with Jobs lit on Map",async()=>{
  const {screen,shell}=await renderer();
  const map=parseHTML(screen(mapQaFixture())).document;
  const views=map.querySelector('nav[aria-label="Jobs view"]')!;
  assert.deepEqual([...views.querySelectorAll("a")].map(a=>[a.getAttribute("href"),a.textContent,a.getAttribute("aria-current")]),[["#jobs","List",null],["#board","Board",null],["#map","Map","page"]]);
  const doc=parseHTML(shell("map")).document;
  const links=(label:string)=>[...doc.querySelectorAll(`nav[aria-label="${label}"] a`)];
- assert.deepEqual(links("Desktop primary").map(a=>a.getAttribute("href")),["#overview","#decisions","#jobs","#sessions","#reports","#more"]);
+ assert.deepEqual(links("Desktop primary").map(a=>a.getAttribute("href")),["#overview","#decisions","#jobs","#sessions","#reports","#settings","#more"]);
  assert.deepEqual(links("Primary").map(a=>a.getAttribute("href")),["#overview","#decisions","#jobs","#sessions","#more"]);
  for(const label of ["Desktop primary","Primary"]) assert.deepEqual(links(label).filter(a=>a.getAttribute("aria-current")==="page").map(a=>a.getAttribute("href")),["#jobs"],label);
 });

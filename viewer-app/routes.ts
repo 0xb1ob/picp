@@ -1,5 +1,5 @@
 /**
- * The route table (dashboard audit P4 §1): the six desktop items and five phone tabs (`primaryNav`), then the views
+ * The route table (dashboard audit P4 §1): the seven desktop items (eight after S8b) and five phone tabs (`primaryNav`), then the views
  * reached through them — Board and Map are Jobs views, Schedules, Files and Settings live under More. Search lists them all.
  */
 export const navigation = [
@@ -17,11 +17,11 @@ export const navigation = [
 ] as const;
 export type NavId = typeof navigation[number]["id"];
 /** The sidebar (desktop) and the tab bar (phone); Reports sits under More on phone only. */
-export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","reports","more"] : ["overview","decisions","jobs","sessions","more"];
+export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","reports","settings","more"] : ["overview","decisions","jobs","sessions","more"];
 /** The top-level item a screen belongs to: Board and Map are Jobs views, Schedules and Files (and Reports on phone) are More. */
 export function navOwner(screen: Route["screen"], desktop: boolean): NavId {
  if (screen === "job" || screen === "board" || screen === "map") return "jobs";
- if (screen === "schedules" || screen === "files" || screen === "settings" || (screen === "reports" && !desktop)) return "more";
+ if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop)) return "more";
  return screen;
 }
 export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "board" | "reports" | "schedules" | "settings"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}

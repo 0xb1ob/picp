@@ -10,13 +10,13 @@ import { buildViewer } from "../src/viewer/build.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
-test("build publishes only hashed JS CSS and fonts under the selected state directory", async t => {
+test("build publishes only hashed JS and CSS under the selected state directory", async t => {
  const home = createScratchHome(); t.after(() => home.cleanup());
  const stateDir = join(home.path, LAYOUT.state);
  const app = await buildViewer({stateDir, packageRoot: REPO_ROOT});
  assert.match(app.script, /^\/assets\/viewer\/main-[A-Z0-9]+\.js$/);
  assert.match(app.stylesheet, /\.css$/);
- assert.equal(Object.values(app.assets).filter(a => a.mime === "font/woff2").length, 8);
+ assert.equal(Object.values(app.assets).filter(a => a.mime === "font/woff2").length, 0);
  for (const [url, asset] of Object.entries(app.assets)) {
   assert.deepEqual(readFileSync(join(stateDir, "viewer-dist", url.split("/").at(-1)!)), Buffer.from(asset.bytes));
  }
@@ -49,7 +49,7 @@ test("the compilation deadline cancels and disposes without publishing a partial
 test("CLI catches a broken esbuild executable, keeps health available, and resolves inputs independently of cwd", async t => {
  const home = createScratchHome(); t.after(() => home.cleanup());
  const built = spawnSync(process.execPath,[join(REPO_ROOT,"scripts/build-viewer.ts"),"--home",home.path],{cwd:home.path,env:process.env,encoding:"utf8",timeout:45_000});
- assert.equal(built.status,0,built.stderr); assert.match(built.stdout,/10 assets/);
+ assert.equal(built.status,0,built.stderr); assert.match(built.stdout,/2 assets/);
  const broken = join(home.path,"broken-esbuild"); writeFileSync(broken,"#!/bin/sh\nexit 1\n"); chmodSync(broken,0o755);
  const reservation = createServer(); await new Promise<void>(resolve => reservation.listen(0,"127.0.0.1",resolve));
  const port = (reservation.address() as AddressInfo).port; await new Promise<void>(resolve => reservation.close(() => resolve()));

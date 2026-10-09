@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { test } from "node:test";
 import { REPO_ROOT } from "./harness/index.ts";
 // Evidenced in design screens 00, 03, 04, 05, 06, 07, 10, 11, 14, 16, plus awaiting trail (09/15), decided badge (01), and Sessions/Files (02/08/13).
-const palette = new Set("#0b0b0a #111110 #141413 #191917 #1f1f1d #22221f #2a2926 #2c2b27 #eceae4 #d6d4cd #c9c7bf #a3a198 #8a887f #55544e #7fd49b #f0b35a #1c1810 #4d3b1f #93b4f5 #f2917f #5a2f28 #ffffff #20201d #131613 #243027 #2f4a37 #17201a #b9b7b0 #e2e0d9 #262521 #1a1408 #161615 #34332f #3a3322 #3a3935 #1a1a18 #6b6a64 #151514 #1b1b19 #6f6e67 #8a6a33 #34425e".split(" "));
+const palette = new Set("#0b0b0a #111110 #141413 #191917 #1f1f1d #22221f #2a2926 #2c2b27 #eceae4 #d6d4cd #c9c7bf #a3a198 #8a887f #55544e #7fd49b #f0b35a #1c1810 #4d3b1f #93b4f5 #f2917f #5a2f28 #ffffff #20201d #131613 #243027 #2f4a37 #17201a #b9b7b0 #e2e0d9 #262521 #1a1408 #161615 #34332f #3a3322 #3a3935 #1a1a18 #6b6a64 #151514 #1b1b19 #6f6e67 #8a6a33 #34425e #ecebe6 #b5b3aa #8f8d84 #24241f #161614 #1c1c1a #7f9fd8 #5d5c56".split(" "));
 function violations(path: string, text: string): string[] {
  const out: string[] = [];
  for (const [i,line] of text.split("\n").entries()) {

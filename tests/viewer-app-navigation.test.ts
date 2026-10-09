@@ -37,7 +37,7 @@ test("hash routes normalize unknown input and migrate legacy deep links into the
  assert.equal(route("#reports").screen,"reports");
  assert.equal(navigation.find(n => n.id === "reports")?.href,"#reports");
 });
-test("audit P4: every pre-consolidation hash keeps resolving, and the nav shows six desktop items and five phone tabs", () => {
+test("audit P4: every pre-consolidation hash keeps resolving, and the nav shows seven desktop items and five phone tabs", () => {
  // The hashes the app answered before phase 4, each with the screen (and section) it lands on now.
  for (const [hash,screen,section] of [
   ["#overview","overview",null],["#more","more",null],["#awaiting","decisions","awaiting"],["#decided","decisions","decided"],
@@ -48,8 +48,8 @@ test("audit P4: every pre-consolidation hash keeps resolving, and the nav shows 
  }
  // Every entry in the route table routes to itself: nothing links to a hash that falls back to the Overview.
  for (const n of navigation) assert.equal(route(n.href).screen,n.id,n.href);
- assert.deepEqual(primaryNav(true),["overview","decisions","jobs","sessions","reports","more"]);
+ assert.deepEqual(primaryNav(true),["overview","decisions","jobs","sessions","reports","settings","more"]);
  assert.deepEqual(primaryNav(false),["overview","decisions","jobs","sessions","more"]);
  // Board and Map light Jobs; Schedules and Files light More (Reports too, on phone only).
- for (const [screen,desktop,owner] of [["board",true,"jobs"],["map",false,"jobs"],["job",true,"jobs"],["schedules",true,"more"],["files",false,"more"],["settings",true,"more"],["settings",false,"more"],["reports",true,"reports"],["reports",false,"more"],["decisions",false,"decisions"]] as const) assert.equal(navOwner(screen,desktop),owner,`${screen} ${desktop}`);
+ for (const [screen,desktop,owner] of [["board",true,"jobs"],["map",false,"jobs"],["job",true,"jobs"],["schedules",true,"more"],["files",false,"more"],["settings",true,"settings"],["settings",false,"more"],["reports",true,"reports"],["reports",false,"more"],["decisions",false,"decisions"]] as const) assert.equal(navOwner(screen,desktop),owner,`${screen} ${desktop}`);
 });

@@ -5,7 +5,7 @@ import { SearchDialog } from "./SearchDialog.tsx";
 import type { Route } from "../routes.ts";
 import { Icon } from "./icons.tsx";
 import { Navigation } from "./Navigation.tsx";
-import { stamp } from "../format.ts";
+import { stamp, time } from "../format.ts";
 import type { ControlView } from "../control.ts";
 import { useControl } from "../use-control.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
@@ -66,7 +66,8 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const subpage=["files","schedules","reports","settings"].includes(current.screen);
  const plain = !subpage && current.screen !== "job";
  const when = updatedAt ? <time class="shell-clock" dateTime={updatedAt}>{stamp(updatedAt)}</time> : null;
- const live = <span class={`shell-live shell-live-${status}`} role="status"><span/>{status}{plain && when && <> · {when}</>}</span>;
+ const clockNow = updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={stamp(updatedAt,true)}>{time(updatedAt)}</time> : null;
+ const live = <span class={`shell-live shell-live-${status}`} role="status"><span/>{status === "live" ? clockNow ?? status : <>{status}{clockNow && <> · {clockNow}</>}</>}</span>;
  return <div class="shell"><header class={`shell-header${current.screen === "files" ? " shell-files-header" : subpage ? " shell-header-subpage" : ""}`}>
   {subpage ? <><a href="#more" aria-label="Back to More" class="shell-back"><Icon name="back"/></a><Brand/></> : current.screen === "job" ? <><a class="shell-back" href="#jobs" aria-label="Back to jobs"><Icon name="back"/></a><code class="shell-detail-title">{current.jobId ?? "command-post"}</code></> : <Brand/>}
   <div class="shell-header-right">{plain ? live : when}<button type="button" aria-label="Search navigation and in-flight jobs" aria-haspopup="dialog" title="Search" onClick={openSearch} class="shell-search"><Icon name="search"/></button><MoreMenu control={control} version={version} updatedAt={updatedAt}/></div>

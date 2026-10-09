@@ -118,7 +118,7 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  assert.ok(fallback.querySelector(".page-header-end > .shell-live-live > span"),"the live dot stays");
  const clock = fallback.querySelector(".page-header-end time")!;
  assert.equal(clock.getAttribute("datetime"),"2026-10-06T08:30:00Z");
- assert.match(clock.textContent ?? "",/^Updated \d\d:\d\d$/,"no seconds, no zone");
+ assert.match(clock.textContent ?? "",/^updated \d\d:\d\d$/,"no seconds, no zone");
  assert.match(clock.getAttribute("title") ?? "",/^Updated \d\d:\d\d:\d\d/,"the full time is its title");
  assert.ok(fallback.querySelector(".page-header-end > .shell-more:last-child"),"⋮ is the row's last item");
  assert.equal(bare.querySelectorAll("h1").length,0);
@@ -201,12 +201,28 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  assert.match(phone,/\.page-header-back, \.page-header-detail, \.page-header-end, \.page-header-fallback \{ display: none; \}/);
  assert.doesNotMatch(phone,/\.shell-main:has\(> \.page-header-fallback\)/,"the fallback flex column is desktop-only");
  const row = /\n \.page-header \{([^}]*)\}/.exec(desktop)?.[1] ?? "";
- assert.match(row,/height: 56px/);
+ assert.match(row,/height: 48px/);
  assert.match(row,/border-bottom: 1px solid var\(--border\)/,"a hairline in the existing border token");
  assert.doesNotMatch(row,/background|position|z-index|margin/,"on the page surface, in flow");
- assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 19px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
- assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 40px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
+ assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 20px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
+ assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 32px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
  assert.match(desktop,/\.shell-main:has\(\.page-header:not\(\.page-header-fallback\)\) > \.page-header-fallback \{ display: none; \}/);
  assert.match(desktop,/--page-header-gap: 24px/);
  assert.match(desktop,/\.page-header-fallback \{ margin-bottom: var\(--page-header-gap\); \}/);
+});
+
+test("S1 shell: PageHeader context pill only when given, phone clock live/stale/offline, 208px rail", async () => {
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {PageHeader} from "./viewer-app/components/PageHeader.tsx"; export const page=context=>render(h(Shell,{current:{screen:"overview",section:null},awaiting:0,status:"live",updatedAt:"2026-10-06T08:30:00Z"},h(PageHeader,{title:"Overview",context}))); export const phone=status=>render(h(Shell,{current:{screen:"overview",section:null},awaiting:0,status,updatedAt:"2026-10-06T08:30:00Z"},h("div",{})));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const draw = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const withContext = parseHTML(draw.page("3 asks")).document;
+ assert.equal(withContext.querySelector(".page-header > h1 + .page-header-context")?.textContent,"3 asks");
+ assert.equal(parseHTML(draw.page(undefined)).document.querySelector(".page-header-context"),null,"no context, no pill");
+ const clock = (status: string) => parseHTML(draw.phone(status)).document.querySelector(".shell-header .shell-live")!;
+ assert.match(clock("live").textContent ?? "",/^\d\d:\d\d$/,"live: dot and HH:MM only");
+ assert.match(clock("stale").textContent ?? "",/^stale · \d\d:\d\d$/);
+ assert.match(clock("offline").textContent ?? "",/^offline · \d\d:\d\d$/);
+ assert.match(clock("live").querySelector("time")?.getAttribute("title") ?? "",/\d\d:\d\d:\d\d/,"the full stamp is the title");
+ const css = readFileSync(join(REPO_ROOT,"viewer-app/styles/shell.css"),"utf8");
+ assert.match(css.slice(css.indexOf("@media (min-width: 900px)")),/\.shell-sidebar \{[^}]*width: 208px;/);
+ assert.match(css,/\.page-header-context \{[^}]*height: 24px;[^}]*border-radius: 999px;/);
 });

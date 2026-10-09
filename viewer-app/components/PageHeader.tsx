@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useContext, useLayoutEffect, useRef } from "preact/hooks";
 import { stamp, time } from "../format.ts";
 import { navigation, type Route } from "../routes.ts";
@@ -16,7 +17,7 @@ export function routeTitle(route: Route): string {
  * Shell draws a `fallback` row (no <h1>) only while a screen has none of its own: loading,
  * unavailable, a job 404. A screen's own row claims HeaderSlot while it renders.
  */
-export function PageHeader({title, detail, back, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; fallback?: boolean}) {
+export function PageHeader({title, detail, back, context, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; context?: ComponentChildren; fallback?: boolean}) {
  const slot = useContext(HeaderSlot);
  const claimed = useRef(false);
  if (slot && !fallback && !claimed.current) { claimed.current = true; slot.claim(); }
@@ -29,9 +30,10 @@ export function PageHeader({title, detail, back, fallback = false}: {title: stri
  return <div class={fallback ? "page-header page-header-fallback" : "page-header"}>
   {back && <a class="page-header-back" href={back.href}>{back.label}</a>}
   <Title title={title}>{title}</Title>
+  {context && <span class="page-header-context">{context}</span>}
   {detail && <code class="page-header-detail" title={detail}>{detail}</code>}
   <div class="page-header-end">
-   <span class={`shell-live shell-live-${status}`}><span/>{updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={`Updated ${stamp(updatedAt, true)}`}>Updated {time(updatedAt)}</time> : status}</span>
+   <span class={`shell-live shell-live-${status}`}><span/>{updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={`Updated ${stamp(updatedAt, true)}`}>updated {time(updatedAt)}</time> : status}</span>
    <MoreMenu control={control} version={version} updatedAt={updatedAt}/>
   </div>
  </div>;

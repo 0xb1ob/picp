@@ -1,17 +1,17 @@
 :root {
  --page: #0b0b0a;
  --background: #111110;
- --nav: #141413;
- --surface: #191917;
+ --nav: #161614;
+ --surface: #161614;
  --divider: #1f1f1d;
- --nav-selected: #22221f;
+ --nav-selected: #24241f;
  --border: #2a2926;
  --toggle: #2c2b27;
- --text: #eceae4;
+ --text: #ecebe6;
  --secondary: #d6d4cd;
  --subtle: #c9c7bf;
- --muted: #a3a198;
- --dim: #8a887f;
+ --muted: #b5b3aa;
+ --dim: #8f8d84;
  --faint: #55544e;
  --green: #7fd49b;
  --amber: #f0b35a;
@@ -51,4 +51,10 @@
  --board-lane: #151514;
  --board-card: #1b1b19;
  --board-dim: #6b6a64;
+ /* Doc 00 / v5 frames: raised surface, focus ring, done grey, system font stacks. */
+ --raised: #1c1c1a;
+ --focus: #7f9fd8;
+ --done: #5d5c56;
+ --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+ --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
