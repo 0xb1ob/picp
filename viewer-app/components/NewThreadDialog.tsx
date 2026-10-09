@@ -29,12 +29,13 @@ export function NewThreadDialog({threads, control, onClose}: {threads: ThreadsVi
   <button type="button" class="new-thread-hit" tabIndex={-1} aria-label="Close" onClick={onClose}/>
   <div class="new-thread" role="dialog" aria-modal="true" aria-labelledby="new-thread-title">
    <header><h2 id="new-thread-title">New thread</h2><button type="button" class="new-thread-close" aria-label="Close" onClick={onClose}><Icon name="close" size={16}/></button></header>
+   <p>A thread is a filter of the operator conversation. Messages you send in it carry its tag; jobs the operator starts from them are filed in it.</p>
    <label>Name
-    <span class="new-thread-name"><span aria-hidden="true">#</span><input ref={field} type="text" maxLength={33} value={name} placeholder="billing-bug" onInput={e => setName(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); create(); } }}/></span>
+    <span class="new-thread-name"><span aria-hidden="true">#</span><input ref={field} type="text" maxLength={33} value={name} placeholder="design-review" onInput={e => setName(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); create(); } }}/></span>
    </label>
    <small role={name && !tag ? "alert" : undefined}>A thread tag is {THREAD_TAG_RULE}</small>
-   {canMessage && <label>First message (optional)<textarea rows={3} maxLength={CONTROL_TEXT_MAX} value={text} onInput={e => setText(e.currentTarget.value)}/></label>}
-   <footer><button type="button" class="new-thread-cancel" onClick={onClose}>Cancel</button><button type="button" class="new-thread-create" disabled={!tag} onClick={create}>Create</button></footer>
+   {canMessage && <label>First message (optional)<textarea rows={3} placeholder="Sent to the operator, tagged with this thread" maxLength={CONTROL_TEXT_MAX} value={text} onInput={e => setText(e.currentTarget.value)}/></label>}
+   <footer><small>The new thread opens filtered, ready to post.</small><button type="button" class="new-thread-cancel" onClick={onClose}>Cancel</button><button type="button" class="new-thread-create" disabled={!tag} onClick={create}>Create thread</button></footer>
   </div>
  </div>;
 }

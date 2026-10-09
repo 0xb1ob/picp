@@ -205,7 +205,7 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
 	const base = sessionsView({ home: scratch.path, stateDir: join(scratch.path, LAYOUT.state) }, "you", null, { transcript: true })!;
 	const html = screen({ ...base, entries: [] }, control, threads({ status: list({ threads: busy }) }));
-	assert.match(html, /<span class="session-thread-working"> · 2 working<\/span>/, "neutral N working badge");
+	assert.match(html, /<span class="session-thread-working">2 working<\/span>/, "neutral N working badge");
 	assert.equal((html.match(/session-thread-working/g) ?? []).length, 2, "one in the chips, one in the sidebar; 0 shows nothing");
 	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
 

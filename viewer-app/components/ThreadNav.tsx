@@ -4,8 +4,8 @@ import type { ControlView } from "../control.ts";
 import { doneRefusal, threadAria, threadBadge, type ThreadsView, threadsReady } from "../threads.ts";
 import { NewThreadDialog } from "./NewThreadDialog.tsx";
 
-/** The neutral ` · N working` badge: job refs of the thread that are live workers (null or 0 shows nothing). */
-const working = (t: ThreadView) => t.counts?.jobs_working ? <span class="session-thread-working"> · {t.counts.jobs_working} working</span> : null;
+/** The neutral ` · N working` badge: job refs of the thread that are live workers (null or 0 shows nothing); a chip prefixes the `·` in CSS. */
+const working = (t: ThreadView) => t.counts?.jobs_working ? <span class="session-thread-working">{t.counts.jobs_working} working</span> : null;
 /** `+` / `+ New`: opens the New thread dialog; nothing is requested until Create. */
 function NewThread({threads, control, class: cls, label}: {threads: ThreadsView; control?: ControlView; class: string; label: string}) {
  const [open, setOpen] = useState(false);

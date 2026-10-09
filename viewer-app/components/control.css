@@ -97,7 +97,9 @@
 .new-thread-hit { position: absolute; inset: 0; padding: 0; background: var(--page); opacity: 0.7; border: 0; cursor: default; }
 .new-thread { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; width: 100%; max-height: 90vh; padding: 16px; overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
 .new-thread > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.new-thread h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.new-thread > header > h2 { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.new-thread > p { margin: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
+.new-thread > footer > small { flex: 1; align-self: center; font-size: 12px; color: var(--muted); }
 .new-thread-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: none; color: var(--muted); border: 0; border-radius: 50%; cursor: pointer; }
 .new-thread label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
 .new-thread-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 12px; background: var(--background); border: 1px solid var(--border); border-radius: 10px; color: var(--dim); }

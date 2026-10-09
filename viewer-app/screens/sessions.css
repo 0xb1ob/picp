@@ -170,7 +170,8 @@
 .session-thread-done:disabled { opacity: 0.5; cursor: default; }
 .session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
 .session-thread-new { color: var(--muted); }
-.session-thread-working { color: var(--muted); font-weight: 400; }
+.session-thread-working { color: var(--muted); font-weight: 400; white-space: nowrap; }
+.session-thread-chip .session-thread-working::before { content: " · "; white-space: pre; }
 .session-edge { display: contents; }
 /* `Show N earlier / later`: collapsed separators around a thread's span. */
 .session-edge-toggle { align-self: center; min-height: 44px; margin: 4px 0; padding: 0 14px; background: none; border: 0; border-bottom: 1px dashed var(--border); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
@@ -203,6 +204,8 @@
  .session-thread-choice[aria-pressed=true] { background: var(--nav-selected); }
  .session-thread-choice strong { min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  .session-thread-row .session-thread-choice strong::before { content: "# "; color: var(--dim); }
+ .session-thread-choice { flex-wrap: wrap; }
+ .session-thread-choice .session-thread-working { flex-basis: 100%; font-size: 12px; }
  .session-thread-choice small { flex-shrink: 0; font-size: 12px; color: var(--muted); }
  .session-thread-row > .session-thread-done { flex-shrink: 0; min-height: 44px; padding: 0 10px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
  .session-thread-row > .session-thread-done:hover:not(:disabled) { color: var(--text); }
