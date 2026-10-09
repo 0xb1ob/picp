@@ -432,9 +432,9 @@ ellipsize in their chip at 390 px and in the 300 px sidebar at 1440 px.
 
 **Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
 `use-settings-control.ts`, `settings-control.ts`). `#settings`, under More, has exactly three sections, each with its own
-**Save** and **Restore defaults** (a `confirm()` first; `{n} unsaved change(s)` sits beside them): **Model routing** (one row per `data/routing.json` rubric entry,
-a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the id and `role · scope · risk:<level> · project` meta, a model select, fallbacks as mono chips with ×
-(`+ Add fallback`, up to 4) and a thinking select whose
+**Save** and **Restore defaults** (a `confirm()` first) in each rounded hairline card's footer (≤1000 px wide), with `{n} unsaved change(s)` beside them (for Model routing, changed rubric rows; an edited row gets an accent left bar and tint): **Model routing** (one row per `data/routing.json` rubric entry,
+a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mono id and `role · scope · risk:<level> · project` meta, a compact model select, fallbacks as inline mono chips with × that wrap only when needed, ending in a dashed `+ Add fallback` chip (still a native select; ×/chip hold the same 4-fallback cap),
+and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
 model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
 its source; empty unsets it) and **Grant defaults** (the `grants.*` fields from the catalog). It reads `GET /api/settings`

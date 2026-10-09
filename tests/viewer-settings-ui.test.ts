@@ -123,6 +123,8 @@ test("rubric edits post the whole row list; restore bodies per section; a 400 li
 	}
 	const thinking = [...first.querySelectorAll("label")].find((label) => label.textContent?.startsWith("Thinking"))!;
 	await ui.type(thinking.querySelector("select")!, "low", "change");
+	assert.equal(workers.querySelector(".settings-unsaved")?.textContent, "1 unsaved change", "counts changed rows, not edits");
+	assert.equal(workers.querySelectorAll("li.settings-rule-edited").length, 1);
 	await ui.click(workers, "Save");
 	const rows = posts[0]!.body.changes as { "models.rubric": Array<Record<string, unknown>> };
 	const shipped = snap.fields.find((field) => field.key === "models.rubric")!.value as Array<Record<string, unknown>>;
@@ -189,10 +191,10 @@ test("model dropdowns: grouped by provider; (unset) only for parent/operator; an
 	await ui.type(add()!, "anthropic/claude-opus-5-5", "change");
 	await ui.type(add()!, "custom", "change");
 	await ui.type(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, "my/fourth", "change");
-	assert.equal(first.querySelectorAll(".settings-fallback select").length, 4);
+	assert.equal(first.querySelectorAll(".settings-chip:not(.settings-add) select").length, 4);
 	assert.equal(add(), null, "no Add fallback past 4");
 	await ui.click(first, "×");
-	assert.equal(first.querySelectorAll(".settings-fallback select").length, 3, "× removed one fallback (the saved list below says which)");
+	assert.equal(first.querySelectorAll(".settings-chip:not(.settings-add) select").length, 3, "× removed one fallback (the saved list below says which)");
 	assert.ok(add(), "Add fallback is back under 4");
 	await ui.type(parent, "custom", "change");
 	await ui.type(parent.parentElement!.querySelector("input")!, "my/custom-model");
