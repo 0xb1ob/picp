@@ -183,7 +183,8 @@ export interface StatsMandateRow {
 }
 export interface StatsResponse {
  generated_at: string;
- range: { from: string; to: string; key: "1h" | "24h" | "7d" | "custom"; bucket_seconds: number };
+ /** `tz` is the IANA zone the day buckets follow ("UTC" when the request sent none); `bucket_seconds` is nominal for day buckets (DST days are 23h/25h; use start/end). */
+ range: { from: string; to: string; key: "1h" | "24h" | "7d" | "custom"; bucket_seconds: number; tz: string };
  availability: SourceAvailability; warnings: {section:string;message:string}[];
  filters: { projects: string[]; mandates: {id:string;objective:string}[]; project: string | null; mandate: string | null };
  kpis: {

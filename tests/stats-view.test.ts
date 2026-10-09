@@ -144,7 +144,7 @@ test("query validation: custom needs from < to and at most 31 days; unknown rang
  assert.ok("error" in q("range=30d"));
  assert.ok("error" in q("project=../x"));
  assert.ok("error" in q("mandate=nope"));
- assert.deepEqual(q("range=7d&project=&mandate="), { key: "7d", from: NOW - 7 * 86_400_000, to: NOW, project: null, mandate: null });
+ assert.deepEqual(q("range=7d&project=&mandate="), { key: "7d", from: NOW - 7 * 86_400_000, to: NOW, project: null, mandate: null, tz: "UTC" });
  assert.equal(bucketEdges(Date.parse("2026-10-08T10:30:00Z"), Date.parse("2026-10-08T12:30:00Z"), 3_600_000).length, 3);
  assert.equal(median([3, 1, 2]), 2); assert.equal(median([1, 2, 3, 4]), 2.5); assert.equal(median([]), null);
 });
@@ -164,4 +164,58 @@ test("GET /api/stats serves 200 and 400, /api/stream accepts stats, and nothing 
  assert.equal((await fetch(`${base}/api/stats`, { method: "POST" })).status, 405);
  assert.equal(await fetch(`${base}/api/stream?view=stats`).then(r => { r.body?.cancel(); return r.status; }), 200);
  assert.deepEqual(snapshot(home.path), before);
+});
+
+test("day buckets follow the requested IANA zone, including 23h/25h DST days; a bad zone is a 400 and UTC is echoed when none is sent", t => {
+ const h = 3_600_000; const P = Date.parse;
+ const berlin = bucketEdges(P("2026-03-27T12:00:00Z"), P("2026-03-31T12:00:00Z"), 24 * h, "Europe/Berlin");
+ assert.deepEqual(berlin.map(e => new Date(e.start).toISOString()), ["2026-03-26T23:00:00.000Z", "2026-03-27T23:00:00.000Z", "2026-03-28T23:00:00.000Z", "2026-03-29T22:00:00.000Z", "2026-03-30T22:00:00.000Z"]);
+ assert.deepEqual(berlin.map(e => (e.end - e.start) / h), [24, 24, 23, 24, 24], "spring forward: Mar 29 is 23h");
+ const fall = bucketEdges(P("2026-10-24T12:00:00Z"), P("2026-10-26T12:00:00Z"), 24 * h, "Europe/Berlin");
+ assert.deepEqual(fall.map(e => (e.end - e.start) / h), [24, 25, 24], "fall back: Oct 25 is 25h");
+ assert.equal(bucketEdges(P("2026-10-08T05:00:00Z"), P("2026-10-09T05:00:00Z"), 24 * h, "America/Los_Angeles")[0]!.start, P("2026-10-07T07:00:00Z"));
+ assert.deepEqual(bucketEdges(P("2026-10-08T05:00:00Z"), P("2026-10-10T05:00:00Z"), 24 * h).map(e => new Date(e.start).toISOString()), ["2026-10-08T00:00:00.000Z", "2026-10-09T00:00:00.000Z", "2026-10-10T00:00:00.000Z"]);
+ const { home, get, state } = fixture(); t.after(() => home.cleanup());
+ assert.equal(get("range=7d").range.tz, "UTC");
+ const berlin7 = get("range=7d&tz=Europe/Berlin");
+ assert.equal(berlin7.range.tz, "Europe/Berlin");
+ assert.ok(berlin7.jobs_finished.buckets.every(b => /T(22|23):00:00\.000Z$/.test(b.start)), "buckets start at Berlin midnight");
+ assert.equal(berlin7.jobs_finished.merged, 1, "same jobs, different bucket edges");
+ const bad = statsView(state, new URLSearchParams("tz=Mars/Base"), NOW); assert.equal(bad.status, 400);
+});
+
+test("every reviewer run directory prefix the layout writes (gate-, review-, quality-) counts toward spend and tokens", t => {
+ const { home, put, get } = fixture(); t.after(() => home.cleanup());
+ const u = (cost: number) => ({ cost_usd: cost, input: 1, output: 1, total_tokens: 2 });
+ for (const [dir, cost] of [["gate-2", 0.25], ["review-1", 0.5], ["quality-completeness", 1]] as const) put(join(LAYOUT.runs, "cp-c", dir, "status.json"), { model: "x/rev", usage: u(cost) });
+ put(join(LAYOUT.runs, "cp-c", "notes-1", "status.json"), { model: "x/rev", usage: u(100) });
+ const s = get();
+ assert.equal(s.kpis.spend_usd, 5 + 1.75, "a directory that is not a reviewer run is ignored");
+ assert.equal(s.kpis.tokens, 205 + 6);
+ assert.equal(s.spend_by_model.find(m => m.model === "rev")!.usd, 0.5 + 1.75);
+});
+
+test("scan bounds: an over-size or over-budget events file is left out of the log-derived figures and named in warnings; status-derived figures stay complete", t => {
+ const { home, state } = fixture(); t.after(() => home.cleanup());
+ const run = (limits: { file: number; budget: number }) => { const out = statsView(state, new URLSearchParams("range=24h"), NOW, limits); assert.equal(out.status, 200); return out.body as StatsResponse; };
+ const full = run({ file: 1 << 24, budget: 1 << 27 });
+ assert.equal(full.phases.queued_seconds, 450); assert.ok(!full.warnings.some(w => /exceed|not read/.test(w.message)));
+ const small = run({ file: 100, budget: 1 << 27 });
+ assert.ok(small.warnings.some(w => /2 run log\(s\) exceed 16 MiB/.test(w.message)), "cp-m and cp-c logs are over the per-file bound");
+ assert.equal(small.phases.queued_seconds, null); assert.equal(small.kpis.ci_green_first_try, null); assert.deepEqual(small.tokens_by_model.models, []);
+ const tight = run({ file: 1 << 24, budget: 50 });
+ assert.ok(tight.warnings.some(w => /not read \(128 MiB scan budget\)/.test(w.message)));
+ for (const s of [small, tight]) assert.deepEqual([s.kpis.spend_usd, s.kpis.tokens, s.kpis.median_wall_clock_seconds, s.jobs_finished.merged, s.jobs_finished.closed], [5, 205, 3600, 1, 2]);
+});
+
+test("jobs finished long before the window do not change any figure", t => {
+ const { home, put, get, state } = fixture(); t.after(() => home.cleanup());
+ const before = JSON.stringify({ ...get(), generated_at: 0 });
+ const path = join(home.path, ".pi-command-post/jobs.json"); const ledger = JSON.parse(readFileSync(path, "utf8")) as { jobs: unknown[] };
+ ledger.jobs.push({ id: "cp-ancient", title: "old", status: "closed", labels: ["project:demo"], created_at: "2025-01-01T00:00:00Z", closed_at: "2025-01-02T00:00:00Z" }); put(".pi-command-post/jobs.json", ledger);
+ const fleet = JSON.parse(readFileSync(join(home.path, LAYOUT.fleetFile), "utf8")) as { jobs: unknown[] };
+ fleet.jobs.push({ job_id: "cp-ancient", project: "demo", phase: "done", closed_at: "2025-01-02T00:00:00Z" }); put(LAYOUT.fleetFile, fleet);
+ put(join(LAYOUT.runs, "cp-ancient/status.json"), { model: "x/y", usage: { cost_usd: 999, input: 9, output: 9, total_tokens: 18 } });
+ assert.equal(JSON.stringify({ ...get(), generated_at: 0 }), before);
+ void state;
 });

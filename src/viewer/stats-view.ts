@@ -14,8 +14,9 @@ import { fleetJobs, isSafeId, num, obj, readObject, readStatus, runtimeRoot, str
 import { bucketEdges, bucketStep, classifyFinished, deltaPct, median, parseStatsQuery, walkEvents, type EventFacts } from "./stats-series.ts";
 
 const REVIEWER_RUN_DIR = /^(?:gate|review|quality)-[a-z0-9_-]+$/;
-const EVENTS_MAX = 16 * 1024 * 1024;
-const SCAN_BUDGET = 128 * 1024 * 1024;
+/** Per-file and per-request read bounds for events.jsonl; the parameter exists so tests can use small ones. */
+export interface ScanLimits { file: number; budget: number }
+const DEFAULT_LIMITS: ScanLimits = { file: 16 * 1024 * 1024, budget: 128 * 1024 * 1024 };
 const shortModel = (model: string): string => model.split("/").pop() || model;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -59,14 +60,14 @@ function factsFor(state: ViewerState, job: ViewerJob, created: Map<string, numbe
 }
 
 /** Bounded, uncached read of one events file; null (with a counted reason) when over the bounds. */
-function eventScanner() {
- let budget = SCAN_BUDGET; const counts = { oversize: 0, skipped: 0 };
+function eventScanner(limits: ScanLimits) {
+ let budget = limits.budget; const counts = { oversize: 0, skipped: 0 };
  const read = (file: string | undefined, inspect = false): string | undefined => {
   if (!file) return undefined;
   try {
    if (inspect && !lstatSync(file).isFile()) return undefined;
    const size = statSync(file).size;
-   if (size > EVENTS_MAX) { counts.oversize++; return undefined; }
+   if (size > limits.file) { counts.oversize++; return undefined; }
    if (size > budget) { counts.skipped++; return undefined; }
    budget -= size; return readFileSync(file, "utf8");
   } catch { return undefined; }
@@ -74,7 +75,7 @@ function eventScanner() {
  return { read, counts };
 }
 
-export function statsView(state: ViewerState, params: URLSearchParams, now: number): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {
+export function statsView(state: ViewerState, params: URLSearchParams, now: number, limits: ScanLimits = DEFAULT_LIMITS): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {
  const q = parseStatsQuery(params, now);
  if ("error" in q) return { status: 400, body: { error: q.error } };
  const warnings: StatsResponse["warnings"] = [];
@@ -92,16 +93,17 @@ export function statsView(state: ViewerState, params: URLSearchParams, now: numb
 
  const span = q.to - q.from;
  const matches = (j: ViewerJob) => (!q.project || j.project === q.project) && (!q.mandate || (j.mandate_id ?? "unassigned") === q.mandate);
- const finishedIn = (from: number, to: number): Facts[] => jobs.filter(matches).flatMap(j => { const f = factsFor(state, j, created, fleet); return f && f.finish >= from && f.finish < to ? [f] : []; });
+ // Filter on the cheap finished_at first; status and reviewer dirs are read only for jobs inside the window.
+ const finishedIn = (from: number, to: number): Facts[] => jobs.filter(matches).filter(j => { const t = at(j.finished_at); return t !== undefined && t >= from && t < to && classifyFinished(j) !== null; }).flatMap(j => { const f = factsFor(state, j, created, fleet); return f ? [f] : []; });
  const current = finishedIn(q.from, q.to);
  const prior = finishedIn(q.from - span, q.from);
 
  // Events: bucketed token series, phase endpoints and the first-try CI observation, current window only.
- const step = bucketStep(q); const edges = bucketEdges(q.from, q.to, step);
+ const step = bucketStep(q); const edges = bucketEdges(q.from, q.to, step, q.tz);
  const series = edges.map(e => ({ start: iso(e.start), end: iso(e.end), merged: 0, closed: 0, tokens: {} as Record<string, number> }));
- const slot = (t: number) => t >= q.from && t < q.to ? series[Math.floor((t - edges[0]!.start) / step)] : undefined;
+ const slot = (t: number) => { if (!(t >= q.from && t < q.to)) return undefined; const i = edges.findIndex(e => t >= e.start && t < e.end); return i < 0 ? undefined : series[i]; };
  for (const f of current) { const b = slot(f.finish); if (b) b[f.kind]++; }
- const scan = eventScanner();
+ const scan = eventScanner(limits);
  const queued: number[] = []; const working: number[] = []; const review: number[] = []; const held: number[] = []; const wall: number[] = [];
  const waits: number[] = []; let ciSeen = 0; let ciGreen = 0; let eventTokens = 0;
  const addUsage = (facts: EventFacts) => { for (const u of facts.usage) { eventTokens += u.tokens; const b = slot(u.at); if (b) { const m = shortModel(u.model); b.tokens[m] = (b.tokens[m] ?? 0) + u.tokens; } } };
@@ -162,7 +164,7 @@ export function statsView(state: ViewerState, params: URLSearchParams, now: numb
  const merged = current.filter(f => f.kind === "merged").length; const closed = current.length - merged;
  const unavailable = availability === "unavailable";
  const body: StatsResponse = {
-  generated_at: iso(now), range: { from: iso(q.from), to: iso(q.to), key: q.key, bucket_seconds: step / 1000 }, availability, warnings,
+  generated_at: iso(now), range: { from: iso(q.from), to: iso(q.to), key: q.key, bucket_seconds: step / 1000, tz: q.tz }, availability, warnings,
   filters: { projects: data.projects.map(p => p.name), mandates: grants.map(m => ({ id: String(m.id), objective: (str(m.objective) ?? "").slice(0, 200) })), project: q.project, mandate: q.mandate },
   kpis: { spend_usd: spend, spend_delta_pct: deltaPct(spend, sum(prior.map(f => f.cost))), merge_rate: current.length ? merged / current.length : null,
    ci_green_first_try: ciSeen ? ciGreen / ciSeen : null, median_queue_wait_seconds: median(waits), median_wall_clock_seconds: median(wall),

@@ -10,34 +10,54 @@ export const MAX_CUSTOM_SPAN_MS = 31 * DAY_MS;
 export type RangeKey = "1h" | "24h" | "7d" | "custom";
 const PRESET_MS: Record<string, number> = { "1h": 3_600_000, "24h": DAY_MS, "7d": 7 * DAY_MS };
 
-export interface StatsQuery { key: RangeKey; from: number; to: number; project: string | null; mandate: string | null }
+export interface StatsQuery { key: RangeKey; from: number; to: number; project: string | null; mandate: string | null; tz: string }
 
 /** `range=1h|24h|7d|custom` (default 24h, ending at `now`); custom needs UTC ISO `from` < `to`, span <= 31 days. */
 export function parseStatsQuery(params: URLSearchParams, now: number): StatsQuery | { error: string } {
  const key = params.get("range") || "24h";
  const project = params.get("project") || null; const mandate = params.get("mandate") || null;
+ // Day buckets follow the browser's IANA zone, sent as `tz`; absent means UTC and the response says so (`range.tz`).
+ const tz = params.get("tz") || "UTC";
+ try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { return { error: "tz must be an IANA time zone such as Europe/Berlin" }; }
  if (project !== null && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(project)) return { error: "invalid project filter" };
  if (mandate !== null && !/^(?:md-[A-Za-z0-9_-]+|unassigned)$/.test(mandate)) return { error: "invalid mandate filter" };
  if (key !== "custom") {
   const span = Object.hasOwn(PRESET_MS, key) ? PRESET_MS[key] : undefined;
-  return span === undefined ? { error: "range must be 1h, 24h, 7d or custom" } : { key: key as RangeKey, from: now - span, to: now, project, mandate };
+  return span === undefined ? { error: "range must be 1h, 24h, 7d or custom" } : { key: key as RangeKey, from: now - span, to: now, project, mandate, tz };
  }
  const from = params.get("from"); const to = params.get("to");
  if (!timestamp(from) || !timestamp(to)) return { error: "custom range needs from and to as UTC ISO instants (YYYY-MM-DDTHH:MM:SSZ)" };
  const a = Date.parse(from); const b = Date.parse(to);
  if (a >= b) return { error: "from must be before to" };
  if (b - a > MAX_CUSTOM_SPAN_MS) return { error: "custom range is limited to 31 days" };
- return { key: "custom", from: a, to: b, project, mandate };
+ return { key: "custom", from: a, to: b, project, mandate, tz };
 }
 
-/** 5 minutes for 1h, hours up to 48h, UTC days beyond. ponytail: UTC-aligned days, not browser-local ones; the API has no zone input. */
+/** 5 minutes for 1h, hours up to 48h (epoch-aligned), calendar days in `tz` beyond. */
 export function bucketStep(q: Pick<StatsQuery, "key" | "from" | "to">): number {
  return q.key === "1h" ? 300_000 : q.to - q.from <= 2 * DAY_MS ? 3_600_000 : DAY_MS;
 }
-/** Epoch-aligned edges covering [from, to). */
-export function bucketEdges(from: number, to: number, step: number): { start: number; end: number }[] {
+/** UTC offset (ms) of an IANA zone at an instant. */
+function zoneOffset(ms: number, tz: string): number {
+ const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).formatToParts(new Date(ms)).map(x => [x.type, Number(x.value)]));
+ return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - Math.floor(ms / 1000) * 1000;
+}
+/** The instant of local midnight on the zone's calendar day `dayOffset` days after the one containing `ms`. */
+function localMidnight(ms: number, tz: string, dayOffset: number): number {
+ const l = new Date(ms + zoneOffset(ms, tz));
+ const wall = Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate() + dayOffset);
+ return wall - zoneOffset(wall - zoneOffset(wall, tz), tz);
+}
+/** Edges covering [from, to): epoch-aligned for sub-day steps, local calendar days (23h/25h across DST) in `tz` for a day step. */
+export function bucketEdges(from: number, to: number, step: number, tz = "UTC"): { start: number; end: number }[] {
  const out: { start: number; end: number }[] = [];
- for (let start = Math.floor(from / step) * step; start < to; start += step) out.push({ start, end: start + step });
+ if (step !== DAY_MS) {
+  for (let start = Math.floor(from / step) * step; start < to; start += step) out.push({ start, end: start + step });
+  return out;
+ }
+ for (let d = 0, start = localMidnight(from, tz, 0); start < to; d++) {
+  const end = localMidnight(from, tz, d + 1); out.push({ start, end }); start = end;
+ }
  return out;
 }
 
