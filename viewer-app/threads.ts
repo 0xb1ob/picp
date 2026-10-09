@@ -40,9 +40,9 @@ export async function sendThreadDone(fetch: Fetch, token: string, id: string): P
  return {error: await failure(response), status: response.status};
 }
 
-/** The server's rule (src/viewer/control-files.ts normalizeThreadTag): trim, ASCII-lowercase, whitespace runs to `-`; null unless a tag. */
+/** The server's rule (src/viewer/control-files.ts normalizeThreadTag: trim, ASCII-lowercase, whitespace runs to `-`; null unless a tag), after the client alone strips one leading `#` (the dialog's adornment). The server still refuses `#x`; the client never sends it. */
 export function normalizeTag(raw: string): string | null {
- const tag = raw.trim().replace(/[A-Z]/g, char => char.toLowerCase()).replace(/\s+/g, "-");
+ const tag = raw.trim().replace(/^#/, "").replace(/[A-Z]/g, char => char.toLowerCase()).replace(/\s+/g, "-");
  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(tag) ? tag : null;
 }
 
@@ -64,6 +64,16 @@ export function visibleEntries(entries: SessionEntry[], filter: string | null): 
  const last = entries.findLastIndex(e => e.thread === filter);
  if (first < 0) return [];
  return entries.slice(first, last + 1).filter(e => e.shared || e.thread === filter);
+}
+
+/** The same selection split around its span: entries before the first and after the last own entry (for `Show N earlier / later`). All, `"none"` or a thread with no own entries has no bands. */
+export function threadBands(entries: SessionEntry[], filter: string | null): {before: SessionEntry[]; inside: SessionEntry[]; after: SessionEntry[]} {
+ const inside = visibleEntries(entries, filter);
+ if (filter === null || filter === "none") return {before: [], inside, after: []};
+ const first = entries.findIndex(e => e.thread === filter);
+ const last = entries.findLastIndex(e => e.thread === filter);
+ if (first < 0) return {before: [], inside, after: []};
+ return {before: entries.slice(0, first), inside, after: entries.slice(last + 1)};
 }
 
 const waitingCount = (view: ThreadView): number => view.waiting ? view.waiting.asks + view.waiting.answers : 0;

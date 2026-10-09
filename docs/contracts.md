@@ -6241,7 +6241,9 @@ answers unreadable `waiting` is null and a warning names the source.
 **Routes** ([`src/viewer/threads-api.ts`](../src/viewer/threads-api.ts)). `GET /api/threads` (403 `threads are served
 only under --require-tailnet` otherwise — tags can name private topics; never writes) returns `{generated_at,
 availability, enabled, reason, token, threads, total, warning}`: `threads` are `{id, tag, state, waiting, counts:
-{messages, asks, answers}, opened_at, last_at, done_at}`, waiting first, then open (newest `last_at`), then done (newest
+{messages, asks, answers, jobs_working}, opened_at, last_at, done_at}` (`jobs_working` = the thread's `job` refs that are live
+workers in `fleet.json` — run `starting`/`working`, phase not done/failed; `0` when the fleet file is missing, `null`
+when unreadable; display only, never waiting), waiting first, then open (newest `last_at`), then done (newest
 `done_at`), at most 100 with `total`; `token` is this viewer process's random thread token, only while control is on.
 `POST /api/threads/done` takes exactly `{"id": "th-<12 hex>"}` and refuses, in order:
 

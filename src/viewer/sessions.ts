@@ -118,6 +118,11 @@ export function readStatus(state: ViewerState, jobId: string): Json | undefined 
 	return readObject(join(state.stateDir, "runs", jobId, "status.json"));
 }
 
+/** A worker is live while its run is starting/working and its ledger phase is not done/failed. */
+export function isLiveWorker(runPhase: string | undefined, phase: string | undefined): boolean {
+	return (runPhase === "working" || runPhase === "starting") && phase !== "done" && phase !== "failed";
+}
+
 function workerRow(job: Json, status: Json | undefined): SessionRow | undefined {
 	const id = str(job.job_id);
 	if (!id || !isSafeId(id) || job.executor === "script") return undefined;
@@ -139,7 +144,7 @@ function workerRow(job: Json, status: Json | undefined): SessionRow | undefined 
 		run_phase: runPhase,
 		cost_usd: cost,
 		last_activity: lastActivity,
-		live: (runPhase === "working" || runPhase === "starting") && phase !== "done" && phase !== "failed",
+		live: isLiveWorker(runPhase, phase),
 	};
 	return row;
 }
