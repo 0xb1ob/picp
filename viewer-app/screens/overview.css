@@ -1,13 +1,13 @@
-.overview { display: flex; flex-direction: column; gap: 28px; }
+.overview { display: flex; flex-direction: column; gap: 12px; }
 .overview section { min-width: 0; }
 .overview-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .overview-heading > div { min-width: 0; }
-.overview-subtitle { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; margin-top: 8px; line-height: 1.5; }
-.overview-paused-pill { padding: 1px 9px; border: 1px solid var(--paused-border); border-radius: 999px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.overview-paused-pill { display: inline-block; margin-right: 6px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.overview-paused-pill:last-child { margin-right: 0; }
 .overview-status { display: flex; flex-direction: column; gap: 8px; }
 .overview-status .overview-services { margin: 0; }
 .overview-clear { border: 1px solid var(--empty-border); border-radius: 14px; background: var(--empty-background); }
-.overview-clear > a { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 16px; font-size: 12px; color: var(--muted); text-decoration: none; }
+.overview-clear > a { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 16px; font-size: 12px; color: var(--muted); text-decoration: none; }
 .overview-clear svg { flex-shrink: 0; color: var(--green); }
 .overview-clear a > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .overview-clear strong { font-size: 15px; color: var(--text); }
@@ -21,11 +21,13 @@ progress::-webkit-progress-bar { background: var(--border); }
 progress::-webkit-progress-value { background: var(--secondary); }
 progress::-moz-progress-bar { background: var(--secondary); }
 .overview-health { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
-.overview-chip { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; text-decoration: none; }
+.overview-chip { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; min-height: 48px; padding: 6px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; text-decoration: none; }
+.overview-chip-wide { grid-column: 1 / -1; }
 .overview-chip > .overview-meta { display: flex; align-items: center; gap: 6px; }
 .overview-chip strong { min-width: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .overview-block { display: flex; flex-direction: column; }
-.overview-block h2 { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.overview-block h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-bottom: 6px; }
+.overview-held-hint { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--dim); }
 .overview-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--divider); font-size: 13px; text-decoration: none; }
 .overview-line code { font-size: 12px; }
 .overview-line > a { color: var(--muted); text-decoration: none; overflow-wrap: anywhere; }
@@ -44,7 +46,7 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-dot-done { background: var(--faint); border: 0; }
 .overview-flight-columns { display: none; }
 .overview-flight, .overview-landed { display: grid; align-items: center; gap: 2px 14px; padding: 4px 0; color: var(--muted); }
-.overview-flight { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-areas: "job cost" "title title" "clock model" "review ci"; }
+.overview-flight { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-areas: "job cost" "title title" "clock context" "review ci" "model model"; }
 .overview-flight > *, .overview-landed > * { min-width: 0; }
 .overview-flight .overview-job-id, .overview-landed .overview-job-id { grid-area: job; min-height: 44px; }
 .overview-flight-title { grid-area: title; }
@@ -54,8 +56,11 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-flight-extra a { display: flex; align-items: center; min-height: 44px; color: var(--muted); text-decoration: none; }
 .overview-flight-extra:empty { display: none; }
 .overview-clock { grid-area: clock; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.overview-context { grid-area: context; font-size: 12px; }
+.overview-clock > progress, .overview-context .ctx-chip progress { height: 2px; }
 .overview-clock > progress::-webkit-progress-value { background: var(--dim); }
 .overview-clock > progress::-moz-progress-bar { background: var(--dim); }
+.overview-flight .overview-job-id code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .overview-review { grid-area: review; font-size: 12px; overflow-wrap: anywhere; }
 .overview-ci { grid-area: ci; font-size: 12px; }
 .overview-model { grid-area: model; align-self: start; overflow-wrap: anywhere; }
@@ -66,23 +71,28 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-landed-pr { grid-area: pr; display: flex; align-items: center; min-height: 44px; }
 .overview-merge { grid-area: merge; }
 @media (min-width: 900px) {
- /* The header row leads the page, above an alarm; paused pills read as content under it. */
+ /* The header row leads the page, above an alarm; paused pills sit in its context slot. */
+ .overview { gap: 28px; }
  .overview > .overview-heading { order: -1; display: block; }
- .overview-subtitle { margin-top: var(--page-header-gap); }
  .overview > .overview-heading { margin-bottom: calc(var(--page-header-gap) - 28px); }
- .overview-health { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); }
- .overview-chip { padding: 14px 16px; }
+ /* Health is one flat strip with the services line at its end. */
+ .overview-status { flex-direction: row; align-items: center; gap: 16px; }
+ .overview-health { display: flex; flex: 1 1 auto; min-width: 0; gap: 0; }
+ .overview-chip { flex: 1 1 0; min-height: 0; padding: 0 16px 0 0; background: transparent; border: 0; border-radius: 0; }
  .overview-chip strong { font-size: 14px; }
- .overview-clear > a { min-height: 48px; padding: 0 16px; }
+ .overview-status .overview-services { flex: 0 1 auto; max-width: 40%; }
+ .overview-clear > a { min-height: 44px; padding: 0 16px; }
  .overview-clear a > div { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
  .overview-line { flex-wrap: nowrap; }
- .overview-flight { grid-template-columns: 9rem minmax(0,1fr) 9rem; grid-template-areas: "job title cost" ". clock model" ". review ci"; }
+ .overview-flight { grid-template-columns: 9rem minmax(0,1fr) 9rem; grid-template-areas: "job title cost" ". clock context" ". review ci" ". model model"; }
  .overview-flight .overview-line-text { display: block; white-space: nowrap; }
  .overview-landed { grid-template-columns: 9rem minmax(0,1fr) 5rem 9rem 4rem; grid-template-areas: "job title pr merge cost"; padding: 0; }
 }
 @media (min-width: 1200px) {
- .overview-flight, .overview-flight-columns { grid-template-columns: 9rem minmax(0,2.8fr) minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1.2fr) 4rem; column-gap: 16px; }
- .overview-flight { grid-template-areas: "job title clock review ci model cost"; }
+ .overview-flight, .overview-flight-columns { grid-template-columns: 220px minmax(0,1fr) 9rem 11rem minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 4.5rem; column-gap: 16px; }
+ .overview-flight { grid-template-areas: "job title clock context review ci model cost"; }
+ .overview-landed { grid-template-columns: 220px minmax(0,1fr) 5rem 9rem 4.5rem; column-gap: 16px; }
+ .overview .ctx-prefix, .overview .overview-review-prefix { display: none; }
  .overview-flight-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
  .overview-flight-columns > :last-child { text-align: right; }
 }

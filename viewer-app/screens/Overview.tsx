@@ -8,9 +8,10 @@ import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
-function Chip({href,tone,label,value,title}: {href?:string;tone:string;label:string;value:string;title?:string | undefined}) {
+function Chip({href,tone,label,value,title,wide}: {href?:string;tone:string;label:string;value:string;title?:string | undefined;wide?:boolean}) {
  const body = <><span class="overview-meta"><span class={`overview-dot overview-dot-${tone}`}/>{label}</span><strong title={title ? `${value}\n${title}` : value}>{value}</strong></>;
- return href ? <a href={href} class="overview-chip">{body}</a> : <div class="overview-chip">{body}</div>;
+ const cls = wide ? "overview-chip overview-chip-wide" : "overview-chip";
+ return href ? <a href={href} class={cls}>{body}</a> : <div class={cls}>{body}</div>;
 }
 /** Audit P3 #18: amber once any parent question has waited this long. */
 const STUCK_SECONDS = 600;
@@ -37,7 +38,7 @@ function Health({data}: {data:OverviewResponse}) {
   <Chip href="#decided" tone={!operator.running ? "down" : stuck ? "tight" : "working"} label="operator" value={operatorValue}/>
   <Chip tone={red.length ? "ci-red" : main.availability === "unavailable" ? "tight" : "idle"} label="main CI" value={mainValue} title={main.red.map(r => `${r.project}: ${r.failing ?? r.workflow ?? "CI failed"} on ${r.red_since_sha}`).join("\n") || undefined}/>
   <Chip href="#jobs" tone={!fleet && (data.fleet.workers.live ?? 0) > 0 ? "working" : "idle"} label="workers" value={`${fleet ? "-" : count(data.fleet.workers.live)} live / ${count(slots)} slots`}/>
-  {data.quota && <Chip tone={tight.length ? "tight" : "working"} label="quota" value={tight.length ? `tight: ${tight.join(", ")}` : "ok"}/>}
+  {data.quota && <Chip wide tone={tight.length ? "tight" : "working"} label="quota" value={tight.length ? `tight: ${tight.join(", ")}` : "ok"}/>}
  </section>;
 }
 /** The watchdog's last run (cp-daemon P3), the one service fact no chip carries; Start session while the operator is offline. */
@@ -63,11 +64,13 @@ function heldFact(j: FlightJob): string {
 }
 const signal = (j: FlightJob): ViewerJob => j as unknown as ViewerJob;
 function FlightRow({j, manyProjects}: {j: FlightJob; manyProjects: boolean}) {
+ const review = reviewText(signal(j));
  return <article class="overview-line overview-flight" aria-label={j.id}>
   <a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class={`overview-dot overview-dot-${j.phase}`}/><code>{j.id}</code></a>
   <div class="overview-flight-title"><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><div class="overview-flight-extra">{manyProjects && <span class="overview-project" title={j.project}>{j.project}</span>}{j.phase === "held" && <span class="overview-meta">{heldFact(j)}</span>}{j.pr_url && <a href={j.pr_url} title={j.pr_url}>{prNumber(j.pr_url)}</a>}</div></div>
-  <div class="overview-clock"><span>{elapsed(j.elapsed_seconds)} / {elapsed(j.limit_seconds)}</span>{j.elapsed_seconds !== null && j.limit_seconds !== null && j.limit_seconds > 0 && <progress aria-label="Wall clock" max="100" value={percent(j.elapsed_seconds,j.limit_seconds)}/>}{j.context ? <ContextChip usage={j.context} compact/> : <span class="overview-meta">context n/a</span>}</div>
-  <span class="overview-review">{reviewText(signal(j))}</span><span class="overview-ci"><CiSignal job={signal(j)}/></span><span class="overview-model"><ModelName job={signal(j)}/></span><span class="overview-cost">{money(j.cost_usd ?? null)}</span>
+  <div class="overview-clock"><span>{elapsed(j.elapsed_seconds)} / {elapsed(j.limit_seconds)}</span>{j.elapsed_seconds !== null && j.limit_seconds !== null && j.limit_seconds > 0 && <progress aria-label="Wall clock" max="100" value={percent(j.elapsed_seconds,j.limit_seconds)}/>}</div>
+  <div class="overview-context">{j.context ? <ContextChip usage={j.context} compact/> : <span class="overview-meta">context n/a</span>}</div>
+  <span class="overview-review">{review.startsWith("review ") ? <><span class="overview-review-prefix">review </span>{review.slice(7)}</> : review}</span><span class="overview-ci"><CiSignal job={signal(j)}/></span><span class="overview-model"><ModelName job={signal(j)}/></span><span class="overview-cost">{money(j.cost_usd ?? null)}</span>
  </article>;
 }
 function decidedLine(data: OverviewResponse): string {
@@ -101,22 +104,23 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
  const blockerPhase = (id: string, phase: string | null) => { const live = data.in_flight.find(f => f.id === id)?.phase ?? phase; return live ? phaseText(live) : null; };
  const costs = data.shipped_today.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  const more = data.shipped_today.length - LANDED_ROWS;
- return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><PageHeader title="Overview"/>{paused.length > 0 && <p class="overview-subtitle">{paused.map(project => <span key={project} class="overview-paused-pill">{project} paused</span>)}</p>}</div></div>
+ const pills = paused.length > 0 ? paused.map(project => <span key={project} class="overview-paused-pill">{project} &middot; paused</span>) : undefined;
+ return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><PageHeader title="Overview" context={pills}/></div></div>
   {data.warnings.length > 0 && <div role="status" class="overview-error">{data.warnings.map(w => <p key={w.section}>{w.section}: {w.message}</p>)}</div>}
-  <div class="overview-status"><Health data={data}/><Services data={data} control={control}/></div>
   {data.availability.asks !== "unavailable" && !data.awaiting.items.length ? <section id="awaiting" tabIndex={-1} class="overview-clear" aria-label="Needs you"><a href="#decided"><Icon name="check" size={16}/><div><strong>Nothing needs you</strong><span>{decidedLine(data)} →</span></div></a></section> : <Block id="awaiting" title={<><span class={`overview-square${data.availability.asks !== "unavailable" && data.awaiting.items.length ? " overview-square-attention" : ""}`}/>Needs you &middot; {count(data.awaiting.count)}</>}>
    {data.availability.asks === "unavailable" ? <p class="overview-error">Questions unavailable</p> : data.awaiting.items.slice(0,3).map(ask => <a key={ask.id} href="#awaiting" class="overview-line"><code>{ask.id}</code><span class="overview-line-text" title={ask.question}>{ask.question}</span><span class="overview-meta">{ask.project}</span></a>)}
   </Block>}
+  <div class="overview-status"><Health data={data}/><Services data={data} control={control}/></div>
   {stuck > 0 && <Block title={<>Blocked &amp; failed &middot; {stuck}</>}>
    {data.failed.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta"><span class="overview-failed">failed</span>{j.failure && <> &middot; <span title={j.failure}>{j.failure}</span></>}</span></a>)}
    {data.blocked.items.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta">blocked by {j.blockers.map((b,i) => { const phase = blockerPhase(b.id, b.phase); return <span key={b.id}>{i > 0 && ", "}<code>{b.id}</code>{phase && ` (${phase})`}{b.stranded && <span class="overview-amber"> · {b.grant_status ?? "no active grant"}</span>}</span>; })}</span></a>)}
   </Block>}
-  <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}</>}>
-   {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["job","title","wall clock / context","review","CI","model","cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
+  <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}{data.in_flight.length > 0 && <span class="overview-held-hint">held = waiting on CI or review, normal for hours</span>}</>}>
+   {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["Job","Title","Wall clock","Context","Review","CI","Model","Cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
   </Block>
-  <Block title={<>Landed today &middot; {fleet ? "-" : data.shipped_today.length} merged{data.closed_today ? <> &middot; {data.closed_today} closed without PR</> : null}{costs.length > 0 && <> &middot; {money(costs.reduce((sum,c) => sum + c,0))}</>}</>}>
-   {data.shipped_today.slice(0,LANDED_ROWS).map(j => <article key={j.id} class="overview-line overview-landed" aria-label={j.id}><a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-done"/><code>{j.id}</code></a><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><a href={j.pr_url} class="overview-landed-pr">{prNumber(j.pr_url)} ↗</a><span class="overview-meta overview-merge" title={j.merge_sha}>merged <code>{shortSha(j.merge_sha)}</code></span><span class="overview-cost">{money(j.cost_usd)}</span></article>)}
-   {more > 0 && <a href="#jobs" class="overview-more">{more} more in Jobs &rarr;</a>}
+  <Block title={<>Landed today &middot; {fleet ? "-" : data.shipped_today.length} merged{data.closed_today ? <> &middot; {data.closed_today} closed without PR</> : null}{costs.length > 0 && <> &middot; <span title="merged jobs only, worker plus reviewer">{money(costs.reduce((sum,c) => sum + c,0))}</span></>}</>}>
+   {data.shipped_today.slice(0,LANDED_ROWS).map(j => <article key={j.id} class="overview-line overview-landed" aria-label={j.id}><a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-done"/><code>{j.id}</code></a><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><a href={j.pr_url} class="overview-landed-pr">{prNumber(j.pr_url)} ↗</a><span class="overview-meta overview-merge" title={j.merge_sha}><span class="overview-merge-word">merged </span><code>{shortSha(j.merge_sha)}</code></span><span class="overview-cost">{money(j.cost_usd)}</span></article>)}
+   {more > 0 && <a href="#jobs" class="overview-more">{more} more merged in Jobs &rarr;</a>}
   </Block>
  </div>;
 }

@@ -16,7 +16,7 @@ test("Overview CSS constrains long one-line cells", () => {
  // Audit P3: four health chips hold at 390px as a 2×2 grid and at 1440px as one row; long values ellipsize (above).
  const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");
  assert.match(phone ?? "", /\.overview-health \{ display: grid; grid-template-columns: repeat\(2,minmax\(0,1fr\)\);/);
- assert.match(desktop, /\.overview-health \{ grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax\(0,1fr\); \}/);
+ assert.match(desktop, /\.overview-health \{ display: flex; flex: 1 1 auto; min-width: 0; gap: 0; \}/);
 });
 
 test("times format in the browser's own zone, never a server zone", async t => {
@@ -63,9 +63,9 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  assert.match(html,/parent<\/span><strong title="alive">alive/); assert.match(html,/1 live \/ 3 slots/); assert.match(html,/tight: anthropic</);
  assert.match(html,/Blocked &amp; failed · 1/); assert.match(html,/href="#job\/cp-wait"/); assert.match(html,/Blocked title/); assert.match(html,/blocked by .*cp-render.*paused/);
  assert.match(html,/href="#job\/cp-render"/); assert.match(html,/href="https:\/\/github.com\/acme\/repo\/pull\/7"[^>]*>#7</); assert.ok(html.includes(`title="${data.in_flight[0]!.title}"`));
- assert.match(html,/Landed today · 1 merged · 4 closed without PR · \$1\.50/); assert.match(html,/#1 ↗<\/a><span class="overview-meta overview-merge" title="b{40}">merged <code>bbbbbbb<\/code>/);
+ assert.match(html,/Landed today · 1 merged · 4 closed without PR · <span title="merged jobs only, worker plus reviewer">\$1\.50/); assert.match(html,/#1 ↗<\/a><span class="overview-meta overview-merge" title="b{40}"><span class="overview-merge-word">merged <\/span><code>bbbbbbb<\/code>/);
  assert.match(html,/CI red</,"audit P3 #21: a held row says why it is held"); assert.doesNotMatch(html,/overview-project/,"one project: no tag");
- assert.match(html,/other paused/);
+ assert.match(html,/other · paused/);
  data.availability.fleet = "unavailable"; assert.match(screen(data),/Jobs unavailable/); assert.match(screen(data,true),/- live worktrees/);
  // A pid a crashed parent left behind is down, and the chip says when the lock went stale (cp-hvbj).
  data.fleet.parent.alive = false; data.fleet.parent.stale_since = "2026-09-26T05:41:07Z";
@@ -92,9 +92,9 @@ test("audit P3: Blocked & failed, the operator and main CI chips, project tags, 
  assert.match(html,/overview-dot-ci-red"><\/span>main CI<\/span><strong title="red since ccccccc [^\n"]+\ndemo: AssertionError: x on c{40}">red since ccccccc /);
  assert.equal((html.match(/class="overview-project"/g) ?? []).length,3,"two projects in flight: every row tagged");
  assert.match(html,/CI running</); assert.match(html,/review 1\/5 pass</); assert.match(html,/overview-dot-working/); assert.match(html,/0m \/ -</);
- assert.match(html,/Landed today · 7 merged · \$6\.00/,"total over every merged row with a known cost");
+ assert.match(html,/Landed today · 7 merged · <span title="[^"]+">\$6\.00/,"total over every merged row with a known cost");
  assert.equal((html.match(/↗/g) ?? []).length,5,"five landed rows");
- assert.match(html,/href="#jobs" class="overview-more">2 more in Jobs →</);
+ assert.match(html,/href="#jobs" class="overview-more">2 more merged in Jobs →</);
  data.main_ci = {availability:"ok",red:[...data.main_ci.red,{project:"beta",red_since_sha:"d".repeat(7),red_since_at:"2026-09-26T05:41:07Z",workflow:null,failing:null}]};
  assert.match(screen(data),/<strong title="demo red since ccccccc [^,]+, beta red since ddddddd /,"per project once more than one is red");
  data.main_ci = {availability:"unavailable",red:[]}; assert.match(screen(data),/main CI<\/span><strong title="unreadable">unreadable</);
@@ -121,8 +121,8 @@ test("audit P3 #20 #21 end to end: recorded ci-watch values reach the held fact,
  const {parseHTML} = await import("linkedom"); const document = parseHTML(html).document;
  for (const [ci, fact] of cases) assert.equal(document.querySelector(`[aria-label="cp-${ci.replace("_","-")}"] .overview-flight-extra .overview-meta`)?.textContent,fact,ci);
  assert.deepEqual(data.shipped_today.map(j => j.cost_usd), merged.map(() => 0.5), "all 12 merged rows keep their cost past FINISHED_SHOWN (10)");
- assert.match(html, /Landed today · 12 merged · \$6\.00/);
- assert.match(html, /#\d+ ↗.*merged <code>[0-9a-f]{7}/);
+ assert.match(html, /Landed today · 12 merged · <span title="[^"]+">\$6\.00/);
+ assert.match(html, /#\d+ ↗.*merged <\/span><code>[0-9a-f]{7}/);
 });
 
 test("stamp, shortSha, prNumber and phaseText", async t => {
@@ -158,13 +158,13 @@ test("S7 Overview has a calm empty strip, complete flight cells and five project
  assert.ok(clear,"available empty questions use a single calm strip");
  assert.match(clear.textContent!,/Nothing needs you.*5 decided today · 3 for you, 2 by you/);
  assert.equal(clear.querySelector("a")?.getAttribute("href"),"#decided"); assert.equal(clear.querySelector("h2"),null);
- assert.equal(document.querySelector(".overview-paused-pill")?.textContent,"fixture-paused paused");
+ assert.equal(document.querySelector(".overview-paused-pill")?.textContent,"fixture-paused · paused"); assert.ok(document.querySelector(".page-header-context .overview-paused-pill"),"paused pills live in the title row"); assert.equal(document.querySelector(".overview-subtitle"),null);
  assert.equal(document.querySelector(".overview-health")?.parentElement,document.querySelector(".overview-services")?.parentElement,"health and service line share compact spacing");
- assert.deepEqual([...document.querySelectorAll(".overview-flight-columns > span")].map(e=>e.textContent),["job","title","wall clock / context","review","CI","model","cost"]);
+ assert.deepEqual([...document.querySelectorAll(".overview-flight-columns > span")].map(e=>e.textContent),["Job","Title","Wall clock","Context","Review","CI","Model","Cost"]); assert.match(document.querySelector(".overview-held-hint")!.textContent!,/held = waiting on CI or review, normal for hours/);
  const rows = [...document.querySelectorAll(".overview-flight")]; assert.equal(rows.length,3);
- for (const row of rows) for (const cell of [".overview-job-id",".overview-flight-title",".overview-clock",".overview-review",".overview-ci",".overview-model",".overview-cost"]) assert.ok(row.querySelector(cell),cell);
+ for (const row of rows) for (const cell of [".overview-job-id",".overview-flight-title",".overview-clock",".overview-context",".overview-review",".overview-ci",".overview-model",".overview-cost"]) assert.ok(row.querySelector(cell),cell);
  assert.equal(rows[0]!.querySelector("progress")?.getAttribute("value"),"20");
- assert.match(rows[0]!.querySelector(".overview-clock")!.textContent!,/2m \/ 10m.*context n\/a/);
+ assert.match(rows[0]!.querySelector(".overview-clock")!.textContent!,/2m \/ 10m/); assert.match(rows[0]!.querySelector(".overview-context")!.textContent!,/context n\/a/); assert.equal(rows[1]!.querySelector(".overview-context .ctx-prefix")?.textContent,"ctx ");
  assert.equal(rows[0]!.querySelector(".overview-line-text")?.getAttribute("title"),flight.title);
  assert.match(rows[0]!.querySelector(".overview-review")!.textContent!,/review not started/); assert.match(rows[0]!.querySelector(".overview-ci")!.textContent!,/no CI yet/);
  assert.equal(rows[0]!.querySelector(".overview-model code")?.textContent,"recorded-model"); assert.equal(rows[0]!.querySelector(".overview-cost")?.textContent,"$0.25");
@@ -176,7 +176,7 @@ test("S7 Overview has a calm empty strip, complete flight cells and five project
  assert.deepEqual(landed.map(row=>row.querySelector(".overview-job-id code")?.textContent),data.shipped_today.slice(0,5).map(j=>j.id));
  for (const row of landed) { assert.ok(row.querySelector(".overview-dot-done")); assert.equal(row.querySelector(".overview-merge code")?.textContent,"bbbbbbb"); assert.equal(row.querySelector(".overview-merge")?.getAttribute("title"),"b".repeat(40)); assert.equal(row.querySelector(".overview-cost")?.textContent,"$0.50"); }
  assert.equal(landed[0]!.querySelector(".overview-landed-pr")?.getAttribute("href"),data.shipped_today[0]!.pr_url);
- assert.match(document.querySelector(".overview")!.textContent!,/Landed today · 7 merged · \$3\.50/); assert.match(document.querySelector(".overview")!.textContent!,/2 more in Jobs/);
+ assert.match(document.querySelector(".overview")!.textContent!,/Landed today · 7 merged · \$3\.50/); assert.match(document.querySelector(".overview")!.textContent!,/2 more merged in Jobs →/); assert.equal(document.querySelector(".overview-block h2 span[title]")?.getAttribute("title"),"merged jobs only, worker plus reviewer");
  data.availability.asks="unavailable";data.awaiting.count=null;document=doc();assert.equal(document.querySelector(".overview-clear"),null);assert.match(document.querySelector(".overview")!.textContent!,/Questions unavailable/);
  data.availability.asks="ok";data.awaiting.count=1;data.awaiting.items=[{id:"ask-ab",project:"picp",question:"Continue?",created_at:data.generated_at,options:[],recommendation:"Continue",source_escalation:null,job_ids:[],context:null,evidence_paths:[]}];
  document=doc();assert.equal(document.querySelector(".overview-clear"),null);assert.match(document.querySelector("#awaiting")!.textContent!,/Needs you · 1.*Continue\?/);assert.ok(document.querySelector(".overview-square-attention"));
