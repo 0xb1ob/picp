@@ -49,7 +49,7 @@
 .schedule-run-via { color: var(--dim); }
 .schedule-run-state, .schedule-run-id { display: inline-flex; align-items: center; gap: 8px; }
 .schedule-run-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.schedule-run-dot.schedule-run-open { background: transparent; border: 1px solid var(--text); }
+.schedule-run-dot.schedule-run-open { background: transparent; border: 1.5px solid var(--green); }
 .schedule-no-report { color: var(--dim); }
 .schedule-runs-blocks { display: none; list-style: none; margin: 0; padding: 0; flex-direction: column; gap: 10px; }
 .schedule-runs-blocks li { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--divider); min-width: 0; }
