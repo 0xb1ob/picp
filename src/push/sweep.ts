@@ -1,20 +1,17 @@
 /**
  * The Web Push sweep (Pier 1.1): push the operator only when they must act (`PUSH_RULE`) and only the operator can: never
  * for something the main session decides under delegation (mandate complete, risk:high, budget, merge refused, plans),
- * and never a direct merge ask or final_fix checkpoint. When one of those really needs the human, the main session opens a
- * real ask card:
- *  - an open operator ask (`state/operator/asks.jsonl`, the dashboard's Awaiting you card) is the only push of a decision,
- *  - the downtime exception: a `service_health` escalation (`PUSH_ESCALATION_KINDS`), when no session may be up to relay it.
+ * never an escalation directly (not even `service_health`, which the dashboard shows), and never a direct merge ask or
+ * final_fix checkpoint. When one of those really needs the human, the main session opens a real ask card: an open
+ * operator ask (`state/operator/asks.jsonl`, the dashboard's Awaiting you card) is the only thing that pushes.
  *
- * It reads the durable ask records the raise paths already write rather than hooking a raise path: the record is the
- * queue, so a crash between a raise and a push loses nothing, code raised through a fresh store is seen too, and the
- * fleet-critical raise paths stay untouched. The ledger (`./deliveries.ts`) makes it once per id; everything that fails
- * is recorded, logged in one line, and retried a bounded number of times. This function never throws for a push outage.
+ * It reads the durable ask records rather than hooking a raise path: the record is the queue, so a crash between a
+ * raise and a push loses nothing. The ledger (`./deliveries.ts`) makes it once per id; everything that fails is
+ * recorded, logged in one line, and retried a bounded number of times. This function never throws for a push outage.
  */
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Escalation, EscalationKind } from "../contracts.ts";
 import { isoTimestamp } from "../contracts.ts";
 import { type OperatorAsk, OperatorAsks } from "../operator-asks.ts";
 import { UNKNOWN_PROJECT } from "../project-report.ts";
@@ -23,11 +20,8 @@ import { PUSH_LAST_ERROR_MAX_CHARS, PUSH_MAX_ATTEMPTS, type PushLedger, PushDeli
 import { readVapidKeys, type VapidKeys } from "./keys.ts";
 import { deliver, encryptPayload, type PushFetch, type PushOutcome, vapidAuthorization } from "./webpush.ts";
 
-/** The only escalation kind pushed directly: a failing service is the downtime exception, when no session may be up to relay it. */
-export const PUSH_ESCALATION_KINDS: readonly EscalationKind[] = ["service_health"];
 /** The active rule, one line, for `/doctor` and `/api/push`. */
-export const PUSH_RULE =
-	"pushes only when you must act: open ask cards; downtime: service health; health (cp-health, once per failure/recovery)";
+export const PUSH_RULE = "pushes only when you must act: open ask cards (Awaiting you); nothing else, health and downtime stay on the dashboard";
 export const PUSH_MAX_RECORDS_PER_SWEEP = 10;
 export const PUSH_HEADLINE_MAX_CHARS = 100;
 const PUSH_PROJECT_MAX_CHARS = 80;
@@ -38,40 +32,19 @@ export interface PushCandidate {
 	kind: string;
 	text: string;
 	job_ids: string[];
-	mandate_id?: string;
 	/** An operator ask names its own project. */
 	project?: string;
-	/** An operator ask raised for this escalation. */
-	source_escalation?: string;
 }
 
 export interface PushCandidateInput {
-	/** Open escalations. */
-	escalations: readonly Escalation[];
-	asks?: readonly OperatorAsk[];
+	asks: readonly OperatorAsk[];
 }
 
+/** Only an open operator ask is a candidate: no escalation, health or downtime record pushes directly. */
 export function pushCandidates(input: PushCandidateInput): PushCandidate[] {
-	const out: PushCandidate[] = [];
-	const pushedEscalations = new Set<string>();
-	for (const item of input.escalations) {
-		if (item.status !== "open" || !PUSH_ESCALATION_KINDS.includes(item.kind)) continue;
-		pushedEscalations.add(item.id);
-		out.push({ id: item.id, source: "escalation", kind: item.kind, text: item.question, job_ids: item.job_ids, ...(item.mandate_id ? { mandate_id: item.mandate_id } : {}) });
-	}
-	for (const ask of input.asks ?? []) {
-		if (ask.state !== "open" || (ask.source_escalation && pushedEscalations.has(ask.source_escalation))) continue;
-		out.push({
-			id: ask.id,
-			source: "ask",
-			kind: "operator_ask",
-			text: ask.question,
-			job_ids: ask.job_ids ?? [],
-			project: ask.project,
-			...(ask.source_escalation ? { source_escalation: ask.source_escalation } : {}),
-		});
-	}
-	return out;
+	return input.asks
+		.filter((ask) => ask.state === "open")
+		.map((ask) => ({ id: ask.id, source: "ask", kind: "operator_ask", text: ask.question, job_ids: ask.job_ids ?? [], project: ask.project }));
 }
 
 const clip = (text: string, max: number): string => {
@@ -82,16 +55,13 @@ const clip = (text: string, max: number): string => {
 /** Exactly `{project, kind, headline}` — never ids, options, evidence, plans or artifact text. */
 export function pushPayload(candidate: PushCandidate, projects: readonly string[]): string {
 	const project = clip(projects.join(", "), PUSH_PROJECT_MAX_CHARS) || UNKNOWN_PROJECT;
-	const detail = candidate.source === "ask" ? "" : candidate.kind.replace(/_/g, " ");
-	const kind = detail ? `decision needed: ${detail}` : "decision needed";
-	return JSON.stringify({ project, kind, headline: clip(candidate.text, PUSH_HEADLINE_MAX_CHARS) });
+	return JSON.stringify({ project, kind: "decision needed", headline: clip(candidate.text, PUSH_HEADLINE_MAX_CHARS) });
 }
 
 export interface PushSweepPorts {
 	stateDir: string;
 	/** Default: the `data/` beside `stateDir`. */
 	dataDir?: string;
-	openEscalations(): readonly Escalation[];
 	/** Default: the open asks in `<stateDir>/operator/asks.jsonl`. */
 	openAsks?(): readonly OperatorAsk[];
 	projectsOf(candidate: PushCandidate): readonly string[];
@@ -128,10 +98,7 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 	if (!keys) return emptyReport(false);
 	let candidates: PushCandidate[];
 	try {
-		candidates = pushCandidates({
-			escalations: ports.openEscalations(),
-			asks: ports.openAsks ? ports.openAsks() : new OperatorAsks(join(ports.stateDir, "operator", "asks.jsonl")).open(),
-		});
+		candidates = pushCandidates({ asks: ports.openAsks ? ports.openAsks() : new OperatorAsks(join(ports.stateDir, "operator", "asks.jsonl")).open() });
 	} catch (error) {
 		const message = `push sweep cannot read the ask records: ${(error as Error).message}`;
 		log(message);
@@ -172,18 +139,13 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 		}
 		const subscriptions = listSubscriptions(dataDir).items;
 		const known = new Set(ledger.items.map(pushRecordKey));
-		const bySourceKey = new Map(ledger.items.map((item) => [pushRecordKey(item), item]));
 		// First sweep under the current rule: what its sources hold now was never promised a push (not replayed).
 		const ruleBaseline = !ledger.rule_baseline_at;
 		if (ruleBaseline) ledger.rule_baseline_at = at;
 		for (const candidate of candidates) {
 			if (known.has(pushRecordKey(candidate))) continue;
 			const record = fresh(candidate);
-			// Only a record of a kind still pushed directly stands for its ask; a legacy risk_high/budget/merge_refused one does not.
-			const sourced = candidate.source_escalation ? bySourceKey.get(pushRecordKey({ source: "escalation", id: candidate.source_escalation })) : undefined;
-			const covered = sourced && PUSH_ESCALATION_KINDS.includes(sourced.kind as EscalationKind) ? sourced : undefined;
 			if (ruleBaseline) skip(record, "open before the push rule changed");
-			else if (covered && (covered.status === "sent" || covered.status === "pending")) skip(record, "its escalation was already pushed");
 			else if (subscriptions.length === 0) skip(record, "no subscribed device");
 			else report.enqueued += 1;
 			ledger.items.push(record);

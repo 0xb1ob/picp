@@ -27,13 +27,7 @@ export function registerPushTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLoc
 			await runPushSweep({
 				stateDir: join(post.home, LAYOUT.state),
 				dataDir: join(post.home, LAYOUT.data),
-				openEscalations: () => post.escalations.open(),
-				projectsOf: (candidate) =>
-					escalationProjects(
-						{ job_ids: candidate.job_ids, ...(candidate.mandate_id ? { mandate_id: candidate.mandate_id } : {}) },
-						homeProjectResolver(post.home),
-						homeMandateProjects(post.home),
-					),
+				projectsOf: (candidate) => escalationProjects({ job_ids: candidate.job_ids }, homeProjectResolver(post.home), homeMandateProjects(post.home)),
 				log,
 			});
 		} catch (error) {

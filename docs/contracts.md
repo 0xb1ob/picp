@@ -4393,15 +4393,15 @@ It exposes evidence paths, never artifact bodies.
 | plan approval | `plan_approval` |
 | service health (cp-health failing / `rollback_failed`) | `service_health` |
 
-**Service health** (cp-6fyl PR2). cp-health only pushed, so a failing service could sit unseen for most of an hour. The
+**Service health** (cp-6fyl PR2). A cp-health failure once reached only a phone push, so a failing service could sit unseen for most of an hour. The
 parent (the single writer of `state/escalations.json`; `service-alert-tick`, every 60 s while it holds the lock) reads
 `state/health.json` and raises one `service_health` escalation per failing check
 ([`src/service-alerts.ts`](../src/service-alerts.ts)): `rollback_failed:*` at once, any other check after it has failed
 900 s (three watchdog runs). The synthetic anchor is `SERVICE_HEALTH_JOB_ID` (`cp-service-health`; the schema needs one
 job id), the question names the check, its `since` and its key and carries no live numbers, so identity dedupes every
 re-tick. A check that recovers or changes key withdraws its open record; an answered (`ack`) or withdrawn one is never
-raised again for the same failure. The kind is pushed (`PUSH_ESCALATION_KINDS`, project `command-post`), relayed to the
-operator session at age 0 (`dueEscalations`), and an unreadable `health.json` withdraws nothing. **Downgrade:** an older
+raised again for the same failure. The kind is never pushed (§Web Push: open ask cards only); it shows on the dashboard
+(project `command-post`), is relayed to the operator session at age 0 (`dueEscalations`), and an unreadable `health.json` withdraws nothing. **Downgrade:** an older
 binary's escalation schema rejects the unknown kind and so the whole file; roll back only after removing the
 `service_health` items from `state/escalations.json` (from a backup copy, with the parent stopped).
 
@@ -5702,35 +5702,28 @@ dashboard half (subscribe control, service worker, Home Screen manifest) is §We
 under delegation never pushes — not a mandate completing (`mission_end`), `risk_high_irreversible`, `budget_exhausted`,
 `merge_refused`, `plan_approval` or `conflicting_acceptance` — and neither does a merge ask (an Awaiting-you row) or a
 pending `final_fix` checkpoint directly: when any of them really needs the human, the main session opens an operator ask
-card for it and only that ask pushes. The sweep's pushes:
+card for it and only that ask pushes. The sweep's only push:
 
 - a new **open operator ask** in `state/operator/asks.jsonl` (`cp_parent ask`; the dashboard's Awaiting you card): the ask id is the key, the
-  ask's question the headline and its own `project` the project tag. An ask whose `source_escalation` is
-  pushed directly (an open `service_health` escalation, or a `sent`/`pending` ledger record of that kind) is not pushed again;
-  a legacy record of a kind no longer pushed (`risk_high_irreversible`, `budget_exhausted`, `merge_refused`) never stands for its ask;
-- the **downtime exception**, a new open **`service_health` escalation** — `PUSH_ESCALATION_KINDS` (cp-6fyl PR2; raised by the
-  parent from cp-health's record, withdrawn when the check recovers): a failing service may leave no session to open an ask.
+  ask's question the headline and its own `project` the project tag. An ask is pushed whatever its `source_escalation`;
+  no escalation record, legacy ledger record included, ever stands for it.
 
-Everything else never pushes: routine wakes, answer cards, CI wakes and checkpoints. A refreshed escalation (same id,
-fresher numbers) is not new. A ledger record for a `mandate`, `risk_high_irreversible`, `budget_exhausted`, `merge_refused`,
+Everything else never pushes: routine wakes, answer cards, CI wakes, checkpoints, and every escalation, `service_health`
+included. A ledger record for a `mandate`, `risk_high_irreversible`, `budget_exhausted`, `merge_refused`, `service_health`,
 `merge_ask` or `checkpoint` item written before this rule is no longer a candidate, so a still-pending one is `skipped`
 ("no longer open before delivery"), never sent. A ledger swept before the earlier rule change (no `rule_baseline_at`) is
 baselined as before: `skipped` ("open before the push rule changed").
 
-**Health, from the watchdog, not this sweep** (cp-daemon v1 P3; `PUSH_RULE` ends `; health (cp-health, once per
-failure/recovery)`). cp-health ([`src/service/health.ts`](../src/service/health.ts), run by cp-daemon every 5
-min) pushes `{project: "command-post", kind: "health: <parent down | viewer down | crash-looping |
-disk low | git credential | gh credential | update failed | relay unseen>", headline}` once when a check starts failing (parent and
-viewer only after 2 runs in a row, never while `state/update.json` `phase` is not idle unless it is a `held` rollback with no run in flight), nothing while it stays
-failed, once more for each distinct updater failure (keyed `result:to`, one `drain_timeout` episode keyed `result:since`: `failed`, `drain_timeout`, `rolled_back`,
-`rollback_failed`, `config_invalid`, `fetch_failed` three times), and `health: <name> recovered` once. It sends
-directly to the subscribed devices with the same RFC code; its only record is `state/health.json`. A failed push
-is retried on the next ≤ 3 runs, then logged and given up. It never writes `state/push-deliveries.json` and never
-deletes a subscription, even on 404/410. **Downtime exception (kept, not dropped):** this push has no Awaiting card; it stays
-because a failing service can leave no session up to raise an ask. The same failure is exposed on existing paths only: the
-Overview `health failing: <check>` line (`services.health.failing`, immediately) and, after 900 s, the `service_health`
-escalation above (pushed by the sweep, a "Being handled" question on Decisions, the Overview alarm banner). No Awaiting
-surface was added for it.
+**No health, downtime or recovery push** (cp-daemon v1 P3 pushed them; removed). cp-health
+([`src/service/health.ts`](../src/service/health.ts), run by cp-daemon every 5 min) only records each check in
+`state/health.json` (failing, its key, since when, recovered); it reads no push key or subscription and sends nothing,
+not when a check starts failing, not per updater failure, not on recovery. **Downtime exception: none.** There used to
+be one — the sweep pushed a `service_health` escalation and the watchdog pushed its own failures and recoveries, because
+a failing service could leave no session up to open an ask; both pushes are removed, the records stay. The same failure
+is on its dashboard paths: the Overview `health failing: <check>` line (`services.health.failing`, immediately), the
+Overview alarm banner, and after 900 s the `service_health` escalation above (a "Being handled" question on Decisions,
+relayed to the operator session). When it needs the human, the main session opens an ask card, which pushes like any
+other.
 
 **The `relay` check** (cp-6fyl PR2, the last line of defense for parent→operator delivery; independent of the parent and
 the operator session). It reads the host's `state/operator/relay-outbox.json`, the operator's
@@ -5741,7 +5734,7 @@ for (key `escalation:<es-id>`). The detail is `<n> relay(s) unseen by the main s
 no live ack-capable operator session (no `consumer` line newer than the relay, and no live consumer pid — an old bridge
 writes none) it adds `— no ack-capable operator session; relaunch it (dashboard: Restart session)`. A missing outbox is no
 signal (`skip`); an unreadable file fails with key `unreadable`, never reads as empty; an outbox above its cap fails as
-`over-cap`. It pushes once per key and once on recovery, like every check. `/api/overview` carries `delivery`
+`over-cap`. Like every check it records one key per failure and the recovery, and pushes nothing. `/api/overview` carries `delivery`
 (`availability`, `unseen`, `oldest_id`, `oldest_kind`, `oldest_age_seconds`, `consumer_seen_at`, `alarm`; counts are null when a
 file is unreadable, never 0) and `services.health.failing[].since`; the Overview renders a `role="alert"` banner above all
 other sections for an unseen relay of 600 s or more, or a health check failing 900 s or more — one line per cause. No new
@@ -5750,7 +5743,7 @@ endpoint; both fields extend the existing authenticated `/api/overview`.
 **A sweep of the durable records, not a hook in the raise path.** `runPushSweep` runs every
 `PUSH_TICK_MS` (15 s, plus one catch-up pass at `session_start`) only while this session holds the parent
 lock, never overlapping ([`extensions/command-post/push-tick.ts`](../extensions/command-post/push-tick.ts)).
-It reads `state/escalations.json` and `state/operator/asks.jsonl` fresh, so a raise through a fresh store, or a
+It reads `state/operator/asks.jsonl` fresh, so an ask opened through a fresh store, or a
 crash between a raise and its push, loses nothing — the record is the queue. `EscalationStore`,
 `AwaitingStore` and every raise path are untouched, and every error is caught into one stderr line: a push
 outage delays nothing in the fleet. Latency is at most one tick plus the push service.
@@ -5778,9 +5771,7 @@ endpoint, a key or a payload.
 
 **Payload** (`pushPayload`): exactly `{"project", "kind", "headline"}` — the project tag as the bridge
 computes it (≤ 80 chars, `project unknown` when none; an operator ask's own `project`), the kind —
-`decision needed` with the underlying kind as a suffix (`decision needed: service health`,
-a bare `decision needed` for an
-operator ask) — and the headline whitespace-collapsed and clipped to 100 characters. Never options,
+always `decision needed` — and the headline whitespace-collapsed and clipped to 100 characters. Never options,
 evidence paths, plans, ids or artifact text. It is encrypted per RFC 8291 (`aes128gcm`, one 4096-byte
 record) and signed per RFC 8292 (ES256 VAPID JWT for the push service's origin, 12 h) with `node:crypto`
 only ([`src/push/webpush.ts`](../src/push/webpush.ts)); no dependency.
@@ -5790,8 +5781,8 @@ only ([`src/push/webpush.ts`](../src/push/webpush.ts)); no dependency.
 | File | Written by | Read by |
 |---|---|---|
 | `data/push/config.json` | `npm run push:init` | the sweep, `/doctor`, the viewer: origin, subject, VAPID public key |
-| `data/push/vapid.key` (0600) | `npm run push:init`, once, never overwritten | the sweep and cp-health only; never printed, logged or quoted |
-| `data/push/subscriptions/<sha256(endpoint)[0:32]>.json` (0600) | the dashboard; the sweep deletes on 404/410 (cp-health never deletes) | the sweep, cp-health, `/doctor` |
+| `data/push/vapid.key` (0600) | `npm run push:init`, once, never overwritten | the sweep only; never printed, logged or quoted |
+| `data/push/subscriptions/<sha256(endpoint)[0:32]>.json` (0600) | the dashboard; the sweep deletes on 404/410 | the sweep, `/doctor` |
 | `state/push-deliveries.json` | the sweep (parent-lock holder) | `/doctor` |
 | `state/health.json` | cp-health (run by cp-daemon, its only writer) | `/doctor` `service.health`, the Overview status line and alarm banner, the parent's `service-alert-tick` |
 

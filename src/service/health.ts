@@ -1,6 +1,7 @@
 /**
- * cp-daemon's health job (a oneshot child, every 5 min; cp-daemon v1 P3): the watchdog. It pushes
- * once when a check breaks, once when it recovers, and once for every distinct updater failure — nothing else.
+ * cp-daemon's health job (a oneshot child, every 5 min; cp-daemon v1 P3): the watchdog. It records each check's
+ * state in `state/health.json` and pushes nothing: the dashboard (Overview `health failing`, and the parent's
+ * `service_health` escalation, src/service-alerts.ts) is where a failure or a recovery shows.
  *
  *   parent      no responsive host, `hello.parent` null, or the lock not held by a live pid (2 runs in a row;
  *               never while `state/update.json` `phase` is not idle, a `held` rollback excepted) → `health: parent down`
@@ -10,15 +11,13 @@
  *   git         `git ls-remote --exit-code origin HEAD` in the app fails (hourly) → `health: git credential`
  *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
  *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to` (`drain_timeout:since`, one
- *               push per episode), so a new failure pushes again              → `health: update failed`
+ *               key per episode), so a new failure is a new key                 → `health: update failed`
  *   relay       a parent→operator relay unacked 10 min (`state/operator/relay-outbox.json` vs `relay-acks.jsonl`), or an open
  *               escalation 20 min old no ack, discard or open ask accounts for; keyed `relay:<id>` / `escalation:<id>`
  *                                                                               → `health: relay unseen`
  *
- * Its record is `state/health.json` (this unit is its only writer). It reads `data/push/` (the VAPID key and the
- * subscriptions) and sends directly; it never writes `state/push-deliveries.json` (the parent sweep's ledger) and
- * never deletes a subscription, even on 404/410 (the sweep does that). A failed push is retried on the next ≤ 3
- * runs, then logged and given up. No authority: it reads, probes and pushes; it never starts or stops anything.
+ * Its record is `state/health.json` (this unit is its only writer). It never reads push keys or subscriptions and
+ * never sends a push. No authority: it reads and probes; it never starts or stops anything.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statfsSync } from "node:fs";
@@ -28,11 +27,8 @@ import { isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
 import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
-import { readVapidKeys } from "../push/keys.ts";
-import { deliver, encryptPayload, type PushFetch, vapidAuthorization } from "../push/webpush.ts";
 import { hostHeaderFor } from "../viewer/server.ts";
 import { viewerAddress } from "../viewer/cli.ts";
-import { listSubscriptions, pushServiceAllowed } from "../viewer/push-files.ts";
 import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
@@ -40,16 +36,13 @@ import { OperatorAsks } from "../operator-asks.ts";
 
 export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
-const KIND: Record<HealthCheck, string> = { parent: "parent down", viewer: "viewer down", supervisor: "crash-looping", disk: "disk low", git: "git credential", gh: "gh credential", update: "update failed", relay: "relay unseen" };
 /** cp-6fyl PR2: a relay the operator session has not acked this long, or an open escalation unseen this long (the 600 s backstop plus one alarm window). */
 export const RELAY_UNSEEN_SECONDS = 600;
 export const ESCALATION_UNSEEN_SECONDS = 1200;
 /** Runs in a row a failure must last before it counts (a restart blip is not an outage). */
 const CONSECUTIVE: Partial<Record<HealthCheck, number>> = { parent: 2, viewer: 2 };
-export const HEALTH_PUSH_RETRIES = 3;
 export const UPDATE_FAILURES = ["failed", "drain_timeout", "rolled_back", "rollback_failed", "config_invalid", "migration_required"];
 const DETAIL_MAX = 200;
-const HEADLINE_MAX = 100;
 
 /** One probe's answer: ok, failing (with its dedupe key), or no signal this run (the check keeps its state). */
 export type Observation = { ok: true } | { ok: false; key: string; detail: string } | { skip: string };
@@ -60,9 +53,6 @@ export interface CheckRecord {
 	since: string;
 	detail: string;
 	fails: number;
-	notified_key: string | null;
-	notified_state: "ok" | "fail";
-	push_attempts: number;
 	checked_at: string;
 }
 export interface HealthRecord { schema_version: 1; last_run_at: string; checks: Partial<Record<HealthCheck, CheckRecord>> }
@@ -87,35 +77,23 @@ const clip = (text: string, max: number) => {
 /** Fold one observation into a check's record (pure). */
 export function observe(name: HealthCheck, prior: CheckRecord | undefined, seen: Observation, at: string): CheckRecord | undefined {
 	if ("skip" in seen) return prior;
-	const base: CheckRecord = prior ?? { status: "ok", key: null, since: at, detail: "ok", fails: 0, notified_key: null, notified_state: "ok", push_attempts: 0, checked_at: at };
-	if (seen.ok) return { ...base, status: "ok", key: null, detail: "ok", fails: 0, since: base.status === "ok" ? base.since : at, checked_at: at, push_attempts: base.status === "ok" ? base.push_attempts : 0 };
+	const base: CheckRecord = prior ?? { status: "ok", key: null, since: at, detail: "ok", fails: 0, checked_at: at };
+	if (seen.ok) return { ...base, status: "ok", key: null, detail: "ok", fails: 0, since: base.status === "ok" ? base.since : at, checked_at: at };
 	const fails = base.fails + 1;
 	if (fails < (CONSECUTIVE[name] ?? 1)) return { ...base, fails, checked_at: at };
-	const same = base.status === "fail" && base.key === seen.key;
-	return { ...base, status: "fail", key: seen.key, detail: clip(seen.detail, DETAIL_MAX), fails, since: base.status === "fail" ? base.since : at, checked_at: at, push_attempts: same ? base.push_attempts : 0 };
-}
-
-/** The push a check owes, if any: a failure not yet notified under its key, or a recovery from a notified failure. */
-export function owed(name: HealthCheck, check: CheckRecord | undefined): { state: "fail" | "recovered"; payload: string } | undefined {
-	if (!check) return undefined;
-	const payload = (kind: string, headline: string) => JSON.stringify({ project: "command-post", kind, headline: clip(headline, HEADLINE_MAX) });
-	if (check.status === "fail" && (check.notified_state !== "fail" || check.notified_key !== check.key)) return { state: "fail", payload: payload(`health: ${KIND[name]}`, check.detail) };
-	if (check.status === "ok" && check.notified_state === "fail") return { state: "recovered", payload: payload(`health: ${name} recovered`, `${name} ok again`) };
-	return undefined;
+	return { ...base, status: "fail", key: seen.key, detail: clip(seen.detail, DETAIL_MAX), fails, since: base.status === "fail" ? base.since : at, checked_at: at };
 }
 
 export type HealthProbes = Record<HealthCheck, (prior: CheckRecord | undefined) => Promise<Observation> | Observation>;
-export type HealthPush = (payload: string) => Promise<{ ok: boolean; reason: string }>;
 
 export interface HealthRunOptions {
 	stateDir: string;
 	probes: HealthProbes;
-	push: HealthPush;
 	now?: () => Date;
 	log?: (line: string) => void;
 }
 
-/** One watchdog run: probe every check, write `state/health.json`, send what is owed, write again. */
+/** One watchdog run: probe every check and write `state/health.json`. Nothing is pushed. */
 export async function runHealth(options: HealthRunOptions): Promise<HealthRecord> {
 	const log = options.log ?? ((line: string) => console.error(`health: ${line}`));
 	const at = isoTimestamp((options.now ?? (() => new Date()))());
@@ -134,52 +112,7 @@ export async function runHealth(options: HealthRunOptions): Promise<HealthRecord
 		if (next) record.checks[name] = next;
 	}
 	atomicWriteJson(healthFile(options.stateDir), record);
-	let changed = false;
-	for (const name of HEALTH_CHECKS) {
-		const check = record.checks[name];
-		const due = owed(name, check);
-		if (!check || !due) continue;
-		changed = true;
-		const sent = await options.push(due.payload).catch((error: Error) => ({ ok: false, reason: error.message }));
-		const settle = () => {
-			check.notified_state = due.state === "fail" ? "fail" : "ok";
-			check.notified_key = due.state === "fail" ? check.key : null;
-			check.push_attempts = 0;
-		};
-		if (sent.ok) {
-			log(`${name}: pushed ${due.state} (${sent.reason})`);
-			settle();
-		} else if (check.push_attempts >= HEALTH_PUSH_RETRIES) {
-			log(`${name}: push ${due.state} given up after ${check.push_attempts + 1} attempts (${sent.reason})`);
-			settle();
-		} else {
-			check.push_attempts += 1;
-			log(`${name}: push ${due.state} not sent, retrying next run (${sent.reason})`);
-		}
-	}
-	if (changed) atomicWriteJson(healthFile(options.stateDir), record);
 	return record;
-}
-
-/** Send one payload to every subscribed device; never writes the push ledger, never deletes a subscription. */
-export function directPush(dataDir: string, fetch?: PushFetch): HealthPush {
-	return async (payload) => {
-		const keys = readVapidKeys(dataDir);
-		if (!keys) return { ok: false, reason: "push is not set up (no data/push/config.json)" };
-		const devices = listSubscriptions(dataDir).items.filter((item) => pushServiceAllowed(item.endpoint));
-		if (devices.length === 0) return { ok: false, reason: "no subscribed device" };
-		const now = new Date();
-		const outcomes = await Promise.all(devices.map(async (device) => {
-			try {
-				return await deliver({ endpoint: device.endpoint, body: encryptPayload(payload, device.keys), authorization: vapidAuthorization({ endpoint: device.endpoint, keys, now }), ...(fetch ? { fetch } : {}) });
-			} catch (error) {
-				return { kind: "rejected" as const, reason: (error as Error).message };
-			}
-		}));
-		const delivered = outcomes.filter((outcome) => outcome.kind === "delivered").length;
-		const reasons = outcomes.filter((outcome) => outcome.kind !== "delivered").map((outcome) => ("reason" in outcome ? outcome.reason : `HTTP ${outcome.status}`));
-		return { ok: delivered > 0, reason: `${delivered}/${devices.length} device(s)${reasons.length ? `; ${reasons.join("; ")}` : ""}` };
-	};
 }
 
 export interface HostProbeOptions {
@@ -341,7 +274,7 @@ if (import.meta.main) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);
-	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }), push: directPush(join(home, layout.data)) }).then(
+	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }) }).then(
 		(record) => {
 			const failing = HEALTH_CHECKS.filter((name) => record.checks[name]?.status === "fail");
 			console.error(`health: ${failing.length ? `failing: ${failing.join(", ")}` : "all ok"}`);

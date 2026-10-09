@@ -3,7 +3,7 @@
  * against a scratch home; no unit is started, nothing is installed.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
@@ -12,8 +12,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { OperatorAsks } from "../src/operator-asks.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { initPush } from "../src/push/keys.ts";
-import type { PushFetch } from "../src/push/webpush.ts";
-import { directPush, HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, hostProbes, type Observation, readHealth, runHealth } from "../src/service/health.ts";
+import { HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, hostProbes, type Observation, readHealth, runHealth } from "../src/service/health.ts";
 import { validateDoctorReport } from "../src/contracts.ts";
 import { legacyManagedHome } from "../src/home.ts";
 import { serviceFindings } from "../src/service/status.ts";
@@ -35,55 +34,46 @@ function bench(t: import("node:test").TestContext) {
 	mkdirSync(stateDir, { recursive: true });
 	let seen = allOk();
 	let clock = Date.parse("2026-09-28T10:00:00Z");
-	const pushed: Array<{ kind: string; headline: string }> = [];
-	let deliver = true;
 	const lines: string[] = [];
 	const probes = Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => seen[name]])) as unknown as HealthProbes;
 	const run = async (next: Partial<Record<HealthCheck, Observation>> = {}) => {
 		seen = { ...allOk(), ...next };
 		clock += 5 * 60_000;
-		return runHealth({ stateDir, probes, now: () => new Date(clock), log: (line) => lines.push(line), push: async (payload) => {
-			pushed.push(JSON.parse(payload));
-			return deliver ? { ok: true, reason: "1/1 device(s)" } : { ok: false, reason: "HTTP 503" };
-		} });
+		return runHealth({ stateDir, probes, now: () => new Date(clock), log: (line) => lines.push(line) });
 	};
-	return { home: home.path, stateDir, run, pushed, lines, failPushes: (value: boolean) => { deliver = !value; } };
+	/** One check's `status key` after each run, the dashboard's view of it. */
+	const states: string[] = [];
+	const track = async (name: HealthCheck, next: Partial<Record<HealthCheck, Observation>> = {}) => {
+		const check = (await run(next)).checks[name];
+		states.push(check ? `${check.status}${check.key ? ` ${check.key}` : ""}` : "none");
+	};
+	return { home: home.path, stateDir, run, track, states, lines };
 }
 
-test("one push per transition: ok→fail once, staying failed nothing, fail→ok once as recovered", async (t) => {
+test("a failure and its recovery are recorded in state/health.json for the dashboard; the record carries no push state", async (t) => {
 	const b = bench(t);
-	await b.run();
-	assert.equal(b.pushed.length, 0, "a healthy first run pushes nothing");
 	const low: Observation = { ok: false, key: "low", detail: "3.1 GiB free (4 %) under /h" };
-	await b.run({ disk: low });
-	assert.deepEqual(b.pushed, [{ project: "command-post", kind: "health: disk low", headline: "3.1 GiB free (4 %) under /h" }]);
-	await b.run({ disk: low });
-	await b.run({ disk: low });
-	assert.equal(b.pushed.length, 1, "still failing: nothing more");
-	await b.run();
-	assert.deepEqual(b.pushed.at(-1), { project: "command-post", kind: "health: disk recovered", headline: "disk ok again" });
-	await b.run();
-	assert.equal(b.pushed.length, 2);
+	for (const next of [{}, { disk: low }, { disk: low }, {}]) await b.track("disk", next);
+	assert.deepEqual(b.states, ["ok", "fail low", "fail low", "ok"]);
 	const record = readHealth(b.stateDir)!;
 	assert.equal(record.schema_version, 1);
-	assert.deepEqual({ status: record.checks.disk!.status, notified_state: record.checks.disk!.notified_state, notified_key: record.checks.disk!.notified_key }, { status: "ok", notified_state: "ok", notified_key: null });
+	assert.deepEqual(Object.keys(record.checks.disk!).sort(), ["checked_at", "detail", "fails", "key", "since", "status"]);
 });
 
 test("parent and viewer count only after 2 consecutive failures; a skipped run (mid-update) changes nothing", async (t) => {
 	const b = bench(t);
 	const down: Observation = { ok: false, key: "down", detail: "no parent host is running" };
-	await b.run({ parent: down });
-	assert.equal(b.pushed.length, 0, "one failed run is a blip");
-	assert.equal(readHealth(b.stateDir)!.checks.parent!.status, "ok");
-	await b.run({ parent: { skip: "update phase draining" } });
-	await b.run({ parent: down });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: parent down"], "the skip neither reset nor counted");
+	await b.track("parent", { parent: down });
+	await b.track("parent", { parent: { skip: "update phase draining" } });
+	await b.track("parent", { parent: down });
+	assert.deepEqual(b.states, ["ok", "ok", "fail down"], "one failed run is a blip; the skip neither reset nor counted");
 	await b.run({ viewer: { ok: false, key: "down", detail: "x" } });
-	await b.run();
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: parent down", "health: parent recovered"], "a viewer blip that recovered never pushed");
+	await b.track("parent");
+	assert.equal(b.states.at(-1), "ok");
+	assert.equal(readHealth(b.stateDir)!.checks.viewer!.status, "ok", "a viewer blip that recovered never counted as a failure");
 });
 
-test("hostProbes on a scratch home: no host is parent down; mid-update suppresses parent and viewer; each distinct update failure pushes once, recovered once", async (t) => {
+test("hostProbes on a scratch home: no host is parent down; mid-update suppresses parent and viewer; each distinct update failure is its own key", async (t) => {
 	const b = bench(t);
 	const probes = hostProbes({ home: b.home, run: () => ({ status: 0, stdout: "ActiveState=active\nResult=success\n" }), fetch: async () => { throw new Error("refused"); }, env: { CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: "9" } });
 	assert.deepEqual(await probes.parent(undefined), { ok: false, key: "down", detail: "no parent host is running" });
@@ -115,7 +105,7 @@ test("hostProbes on a scratch home: no host is parent down; mid-update suppresse
 
 	const update = async (value: Record<string, unknown>) => {
 		writeFileSync(updateFile, JSON.stringify({ phase: "idle", ...value }));
-		await b.run({ update: await probes.update(undefined) });
+		await b.track("update", { update: await probes.update(undefined) });
 	};
 	await update({ last_result: "failed", to: "aaaa" });
 	await update({ last_result: "failed", to: "aaaa" });
@@ -123,66 +113,58 @@ test("hostProbes on a scratch home: no host is parent down; mid-update suppresse
 	await update({ last_result: "rolled_back", to: "bbbb" });
 	await update({ last_result: "skipped_busy", to: "bbbb" });
 	await update({ last_result: "fetch_failed", fetch_failures: 2 });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: update failed", "health: update failed", "health: update failed"], "failed, drain_timeout, rolled_back: each once; a skip or two fetch failures add nothing");
 	await update({ last_result: "up_to_date" });
-	assert.equal(b.pushed.at(-1)!.kind, "health: update recovered");
 	await update({ last_result: "fetch_failed", fetch_failures: 3 });
-	assert.equal(b.pushed.at(-1)!.kind, "health: update failed", "the third fetch failure in a row pushes");
-	assert.equal(b.pushed.length, 5);
+	assert.deepEqual(b.states, ["fail failed:aaaa", "fail failed:aaaa", "fail drain_timeout:aaaa", "fail rolled_back:bbbb", "fail rolled_back:bbbb", "fail rolled_back:bbbb", "ok", "fail fetch_failed:"], "each distinct failure is its own key; a skip or two fetch failures change nothing; the third fetch failure fails");
 });
 
-test("N7: one drain_timeout episode pushes fail once even when origin/main moves; a new episode pushes again", async (t) => {
+test("N7: one drain_timeout episode keeps one key even when origin/main moves; a new episode is a new key", async (t) => {
 	const b = bench(t);
 	const probes = hostProbes({ home: b.home, run: () => ({ status: 0, stdout: "" }) });
 	const update = async (value: Record<string, unknown>) => {
 		writeFileSync(join(b.stateDir, "update.json"), JSON.stringify({ phase: "idle", ...value }));
-		await b.run({ update: await probes.update(undefined) });
+		await b.track("update", { update: await probes.update(undefined) });
 	};
 	await update({ last_result: "drain_timeout", to: "aaaa", since: "2026-10-06T12:26:40Z" });
 	await update({ last_result: "drain_timeout", to: "bbbb", since: "2026-10-06T12:26:40Z" });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: update failed"], "same since, new to: one episode, one push");
 	await update({ last_result: "up_to_date", since: "2026-10-06T14:16:43Z" });
 	await update({ last_result: "drain_timeout", to: "bbbb", since: "2026-10-06T15:00:00Z" });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: update failed", "health: update recovered", "health: update failed"]);
 	await update({ last_result: "failed", to: "cccc", since: "2026-10-06T16:00:00Z" });
 	await update({ last_result: "failed", to: "dddd", since: "2026-10-06T16:00:00Z" });
-	assert.equal(b.pushed.length, 5, "other failures stay keyed by to: a new sha pushes again");
+	assert.deepEqual(b.states, [
+		"fail drain_timeout:2026-10-06T12:26:40Z",
+		"fail drain_timeout:2026-10-06T12:26:40Z",
+		"ok",
+		"fail drain_timeout:2026-10-06T15:00:00Z",
+		"fail failed:cccc",
+		"fail failed:dddd",
+	], "same since, new to: one episode; other failures stay keyed by to");
 });
 
-test("a push that fails is retried on the next 3 runs, then logged and given up", async (t) => {
+test("cp-health never pushes a failure, a recovery or a downtime, even with push set up and a device subscribed; the record stays", async (t) => {
 	const b = bench(t);
-	b.failPushes(true);
-	const broken: Observation = { ok: false, key: "failed", detail: "gh auth status fails" };
-	for (let run = 0; run < 6; run++) await b.run({ gh: broken });
-	assert.equal(b.pushed.length, 4, "the first try and 3 retries");
-	assert.ok(b.lines.some((line) => /gh: push fail given up after 4 attempts/.test(line)), b.lines.join("\n"));
-	assert.equal(readHealth(b.stateDir)!.checks.gh!.notified_key, "failed");
-});
-
-test("directPush sends to subscribed devices and never writes the push ledger or deletes a subscription, even on 410", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const stateDir = join(home.path, LAYOUT.state);
-	const dataDir = join(home.path, LAYOUT.data);
-	mkdirSync(stateDir, { recursive: true });
-	assert.deepEqual(await directPush(dataDir)("{}"), { ok: false, reason: "push is not set up (no data/push/config.json)" });
+	const dataDir = join(b.home, LAYOUT.data);
 	initPush({ dataDir, origin: "https://cp.example.com" });
 	const endpoint = "https://fcm.googleapis.com/fcm/send/device-1";
-	const device = testDevice(endpoint);
 	const id = subscriptionId(endpoint);
 	mkdirSync(join(dataDir, "push", "subscriptions"), { recursive: true });
-	writeFileSync(subscriptionFile(dataDir, id), JSON.stringify({ schema_version: 1, id, endpoint, keys: device.keys, created_at: "2026-09-27T00:00:00Z" }));
-	let status = 201;
-	const bodies: Buffer[] = [];
-	const fetch: PushFetch = async (_url, init) => { bodies.push(Buffer.from(init.body)); return { status, text: async () => "" }; };
-	const payload = JSON.stringify({ project: "command-post", kind: "health: disk low", headline: "x" });
-	assert.equal((await directPush(dataDir, fetch)(payload)).ok, true);
-	assert.equal(device.decrypt(bodies[0]!), payload);
-	status = 410;
-	assert.equal((await directPush(dataDir, fetch)(payload)).ok, false);
-	assert.ok(existsSync(subscriptionFile(dataDir, id)), "a gone device is the sweep's to delete, never the watchdog's");
-	assert.equal(existsSync(pushDeliveriesFile(stateDir)), false, "the ledger is the parent sweep's alone");
-	assert.deepEqual(readdirSync(stateDir), [], "directPush writes nothing");
+	writeFileSync(subscriptionFile(dataDir, id), JSON.stringify({ schema_version: 1, id, endpoint, keys: testDevice(endpoint).keys, created_at: "2026-09-27T00:00:00Z" }));
+	const fetched: string[] = [];
+	const realFetch = globalThis.fetch;
+	globalThis.fetch = (async (url: string | URL | Request) => {
+		fetched.push(String(url));
+		return new Response(null, { status: 201 });
+	}) as typeof fetch;
+	t.after(() => {
+		globalThis.fetch = realFetch;
+	});
+	const down: Observation = { ok: false, key: "down", detail: "no parent host is running" };
+	for (const next of [{ parent: down }, { parent: down }, { parent: down, disk: { ok: false, key: "low", detail: "1 GiB free" } as Observation }, {}]) await b.track("parent", next);
+	assert.deepEqual(b.states, ["ok", "fail down", "fail down", "ok"], "the failure and the recovery are recorded");
+	assert.deepEqual(fetched, [], "nothing was sent to a push service");
+	assert.equal(existsSync(pushDeliveriesFile(b.stateDir)), false, "the push ledger is never written");
+	assert.ok(!b.lines.some((line) => /push/.test(line)), b.lines.join("\n"));
+	assert.doesNotMatch(readFileSync(new URL("../src/service/health.ts", import.meta.url), "utf8"), /from "\.\.\/push\/|push-files|directPush|deliver\(/, "the watchdog has no push path at all");
 });
 
 test("doctor: leftover legacy units warn (service.legacy_units, never an error); service.health reports the last run, what fails, and a stale watchdog", (t) => {
@@ -323,7 +305,7 @@ function relayBench(t: import("node:test").TestContext) {
 	return { ...b, T0, outboxFile, acks, relay, enqueue, probe };
 }
 
-test("relay: a relay unacked 599 s is ok, 600 s fails once under relay:<id>; acking it recovers with its own push", async (t) => {
+test("relay: a relay unacked 599 s is ok, 600 s fails under relay:<id>; acking it recovers", async (t) => {
 	const b = relayBench(t);
 	assert.deepEqual(await b.probe(0), { skip: "no relay outbox" }, "no outbox: no signal");
 	const id = b.enqueue(b.relay("[demo] cp-1: wake"));
@@ -331,12 +313,11 @@ test("relay: a relay unacked 599 s is ok, 600 s fails once under relay:<id>; ack
 	const failing = await b.probe(600) as { ok: false; key: string; detail: string };
 	assert.equal(failing.key, `relay:${id}`);
 	assert.match(failing.detail, new RegExp(`^1 relay\\(s\\) unseen by the main session, oldest ${id} 10 min \\(wake\\)`));
-	await b.run({ relay: failing });
-	await b.run({ relay: failing });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: relay unseen"], "pushed once per key");
+	await b.track("relay", { relay: failing });
+	await b.track("relay", { relay: failing });
 	b.acks.append([{ type: "ack", id, at: "2026-09-28T10:11:00Z" }]);
-	await b.run({ relay: await b.probe(660) });
-	assert.deepEqual(b.pushed.map((p) => p.kind), ["health: relay unseen", "health: relay recovered"]);
+	await b.track("relay", { relay: await b.probe(660) });
+	assert.deepEqual(b.states, [`fail relay:${id}`, `fail relay:${id}`, "ok"], "one key while unseen; acking it recovers");
 });
 
 test("relay: a discarded relay is closed; no consumer line names the relaunch, a newer one does not", async (t) => {

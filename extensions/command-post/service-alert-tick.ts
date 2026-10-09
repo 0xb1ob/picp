@@ -1,7 +1,7 @@
 /**
  * cp-6fyl PR2: while this session holds the parent lock, turn cp-health's record (`state/health.json`) into
  * `service_health` escalations every minute (src/service-alerts.ts). Same shape as push-tick: never overlapping,
- * never throws into the parent. The push itself is the push sweep's (the kind is in `PUSH_ESCALATION_KINDS`).
+ * never throws into the parent. Nothing here pushes: Web Push is for open ask cards only (`PUSH_RULE`).
  */
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

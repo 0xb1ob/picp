@@ -42,7 +42,7 @@ export function escalationProjects(
 	projectOf: ProjectOf,
 	mandateProjects?: MandateProjects,
 ): string[] {
-	// cp-6fyl PR2: a service-health alert names no real job; it belongs to the health push's own project.
+	// cp-6fyl PR2: a service-health alert names no real job; it belongs to the command post's own project.
 	if (escalation.job_ids.length > 0 && escalation.job_ids.every((id) => id === SERVICE_HEALTH_JOB_ID)) return ["command-post"];
 	const known = escalation.job_ids.map((id) => projectOf(id)).filter((project): project is string => project !== undefined);
 	if (known.length > 0) return [...new Set(known)];
