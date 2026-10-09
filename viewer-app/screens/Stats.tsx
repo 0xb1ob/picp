@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import type { StatsResponse } from "../../src/viewer/api-types.ts";
 import { amount, count, elapsed, money, percent } from "../format.ts";
@@ -105,11 +105,9 @@ function Bar({value, max}: {value:number; max:number}) {
  return <svg class="stats-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true"><rect class="stats-track" width="100" height="4"/><rect class="stats-fill-blue" width={percent(value,max)} height="4"/></svg>;
 }
 
-export function Stats({data, query}: {data:StatsResponse; query:string}) {
+/** Everything below the filter row; only rendered once data for the current range is in. */
+function StatsBody({data}: {data:StatsResponse}) {
  const [all,setAll] = useState(false);
- const q = new URLSearchParams(query);
- const range = q.get("range") ?? "24h";
- const custom = range === "custom";
  const k = data.kpis;
  const jf = data.jobs_finished;
  const day = data.range.bucket_seconds >= 86400;
@@ -129,20 +127,11 @@ export function Stats({data, query}: {data:StatsResponse; query:string}) {
   const url = URL.createObjectURL(new Blob([exportCsv(data.mandates)],{type:"text/csv"}));
   const a = document.createElement("a"); a.href = url; a.download = "stats-mandates.csv"; a.click(); URL.revokeObjectURL(url);
  };
- const when = (key: "from" | "to", value: string) => { const d = new Date(value); if (!Number.isNaN(+d)) setHash(new URLSearchParams(query),{[key]:d.toISOString()}); };
  const phases = [["Queued",data.phases.queued_seconds],["Working",data.phases.working_seconds],["Held · CI or review",data.phases.held_seconds],["Review",data.phases.review_seconds]] as const;
  const bucketNames = (starts: string[]) => starts.map(s => label(s));
  const warn = data.warnings.map(w => w.message).join(" · ");
  const rows = all ? data.mandates : data.mandates.slice(0,10);
- return <div class="stats">
-  <PageHeader title="Stats"/>
-  <div class="stats-filters">
-   <div class="stats-segments" role="group" aria-label="Range">{RANGES.map(([key,text]) => <button type="button" key={key} aria-pressed={range === key} onClick={() => setHash(new URLSearchParams(query),key === "custom" ? {range:key,from:q.get("from") ?? data.range.from,to:q.get("to") ?? data.range.to} : {range:key,from:null,to:null})}>{text}</button>)}</div>
-   {custom && <><label class="stats-field stats-from"><span>From</span><input type="datetime-local" value={local(q.get("from"))} onChange={e => when("from",e.currentTarget.value)}/></label><label class="stats-field stats-to"><span>To</span><input type="datetime-local" value={local(q.get("to"))} onChange={e => when("to",e.currentTarget.value)}/></label></>}
-   <label class="stats-pill"><span>Project</span><select value={q.get("project") ?? ""} onChange={e => setHash(new URLSearchParams(query),{project:e.currentTarget.value})}><option value="">All</option>{data.filters.projects.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
-   <label class="stats-pill"><span>Mandate</span><select value={q.get("mandate") ?? ""} onChange={e => setHash(new URLSearchParams(query),{mandate:e.currentTarget.value})}><option value="">All mandates</option>{data.filters.mandates.map(m => <option key={m.id} value={m.id}>{m.id} · {m.objective}</option>)}</select></label>
-   <p class="stats-caption">{rangeCaption(data.range)}</p>
-  </div>
+ return <>
   {warn && <p role="alert" class="stats-warn" title={warn}>{warn}</p>}
   {empty && <p class="stats-empty" role="status">Nothing finished in this range</p>}
   <div class="stats-kpis">{kpis.map(([name,value,sub,extra]) => <article class="stats-kpi" key={name}><h2>{name}</h2><strong>{value}</strong><p>{sub}</p>{extra && <p>{extra}</p>}</article>)}</div>
@@ -169,5 +158,37 @@ export function Stats({data, query}: {data:StatsResponse; query:string}) {
    {!data.mandates.length && <p class="stats-none">-</p>}
    {data.mandates.length > 10 && <button type="button" class="stats-link stats-more" aria-pressed={all} onClick={() => setAll(!all)}>{all ? "Show first 10" : `Show all ${data.mandates.length}`}</button>}
   </section>
+ </>;
+}
+
+const NO_FILTERS: StatsResponse["filters"] = {projects:[],mandates:[],project:null,mandate:null};
+const REFUSED = "This range was refused (400): Custom needs From before To, at most 31 days apart.";
+
+/**
+ * The filter row is driven by the hash alone and is always mounted: while data is loading, after a refused range (400),
+ * and across refetches, so the user can correct From/To in place and keep focus. `data` is null until the current URL has answered.
+ */
+export function Stats({data, query, error = null, code}: {data:StatsResponse | null; query:string; error?:string | null; code?:number | undefined}) {
+ const q = new URLSearchParams(query);
+ const range = q.get("range") ?? "24h";
+ const custom = range === "custom";
+ // The option lists survive a refetch (data is null in between); the selected value is always an option.
+ const last = useRef(NO_FILTERS);
+ if (data) last.current = data.filters;
+ const filters = data?.filters ?? last.current;
+ const project = q.get("project") ?? "", mandate = q.get("mandate") ?? "";
+ const when = (key: "from" | "to", value: string) => { const d = new Date(value); if (!Number.isNaN(+d)) setHash(new URLSearchParams(query),{[key]:d.toISOString()}); };
+ const bounds = () => ({from:q.get("from") ?? data?.range.from ?? new Date(Date.now() - 864e5).toISOString(),to:q.get("to") ?? data?.range.to ?? new Date().toISOString()});
+ return <div class="stats">
+  <PageHeader title="Stats"/>
+  <div class="stats-filters">
+   <div class="stats-segments" role="group" aria-label="Range">{RANGES.map(([key,text]) => <button type="button" key={key} aria-pressed={range === key} onClick={() => setHash(new URLSearchParams(query),key === "custom" ? {range:key,...bounds()} : {range:key,from:null,to:null})}>{text}</button>)}</div>
+   {custom && <><label class="stats-field stats-from"><span>From</span><input type="datetime-local" value={local(q.get("from"))} onChange={e => when("from",e.currentTarget.value)}/></label><label class="stats-field stats-to"><span>To</span><input type="datetime-local" value={local(q.get("to"))} onChange={e => when("to",e.currentTarget.value)}/></label></>}
+   <label class="stats-pill"><span>Project</span><select value={project} onChange={e => setHash(new URLSearchParams(query),{project:e.currentTarget.value})}><option value="">All</option>{project && !filters.projects.includes(project) && <option value={project}>{project}</option>}{filters.projects.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
+   <label class="stats-pill"><span>Mandate</span><select value={mandate} onChange={e => setHash(new URLSearchParams(query),{mandate:e.currentTarget.value})}><option value="">All mandates</option>{mandate && !filters.mandates.some(m => m.id === mandate) && <option value={mandate}>{mandate}</option>}{filters.mandates.map(m => <option key={m.id} value={m.id}>{m.id} · {m.objective}</option>)}</select></label>
+   {data && <p class="stats-caption">{rangeCaption(data.range)}</p>}
+  </div>
+  {error && <p role="alert" class="overview-error">{code === 400 && !data ? REFUSED : error}</p>}
+  {data ? <StatsBody data={data}/> : !error && <p role="status">Loading</p>}
  </div>;
 }

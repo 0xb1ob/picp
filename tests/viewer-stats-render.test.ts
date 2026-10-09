@@ -111,3 +111,52 @@ test("filter changes rewrite only the hash (no tz) and a new URL refetches /api/
  assert.equal((globalThis as {location:{hash:string}}).location.hash,"#stats?range=24h&project=demo");
  assert.doesNotMatch((globalThis as {location:{hash:string}}).location.hash,/tz=/);
 });
+
+test("Stats user flow: refused Custom range -> corrected in place -> data; filters stay mounted; stale response cannot win", async t => {
+ const {parseHTML} = await import("linkedom");
+ const built = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {StatsPage} from "./viewer-app/app.tsx"; export {act}; export const mount=(root,query)=>render(h(StatsPage,{current:{screen:"stats",section:null,query}}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const m = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {act:(f:()=>unknown)=>Promise<void>; mount:(r:unknown,q:string)=>void; unmount:(r:unknown)=>void};
+ const {window,document} = parseHTML("<html><body><div id='root'></div></body></html>");
+ const asked: {url:string; resolve:(r:Response)=>void}[] = [];
+ const saved = ["window","document","fetch","location","EventSource"].map(k => [k,Object.getOwnPropertyDescriptor(globalThis,k)] as const);
+ const set = (k: string, value: unknown) => Object.defineProperty(globalThis,k,{configurable:true,writable:true,value});
+ set("window",window); set("document",document); set("location",{hash:"#stats"});
+ set("EventSource",class { addEventListener() {} removeEventListener() {} close() {} });
+ set("fetch",(url: string, init?: {signal?:AbortSignal}) => !url.startsWith("/api/stats") ? new Promise<Response>(() => {}) : new Promise<Response>(resolve => { asked.push({url,resolve}); init?.signal?.addEventListener("abort",() => {}); }));
+ let focused: Element | null = document.body;
+ Object.defineProperty(document,"activeElement",{configurable:true,get:() => focused});
+ window.HTMLElement.prototype.focus = function() { focused = this; };
+ t.after(async () => { await m.act(() => m.unmount(document.getElementById("root"))); for (const [k,d] of saved) { if (d) Object.defineProperty(globalThis,k,d); else Reflect.deleteProperty(globalThis,k); } });
+ const root = document.getElementById("root")!;
+ const settle = () => m.act(async () => { await new Promise<void>(r => setImmediate(r)); });
+ const answer = async (i: number, r: Response) => { await m.act(async () => { asked[i]!.resolve(r); await new Promise<void>(res => setImmediate(res)); }); };
+ const kpis = () => root.querySelectorAll(".stats-kpi").length;
+ const alert = () => root.querySelector("[role=alert]")?.textContent ?? "";
+
+ // 1. Custom with no bounds: the API refuses it; the row stays editable beside the error.
+ await m.act(() => m.mount(root,"range=custom")); await settle();
+ assert.match(asked[0]!.url,/^\/api\/stats\?range=custom&tz=/);
+ await answer(0,new Response(JSON.stringify({error:"custom needs from and to"}),{status:400}));
+ assert.match(alert(),/refused \(400\)/); assert.equal(kpis(),0);
+ const from = root.querySelector(".stats-from input")!, to = root.querySelector(".stats-to input")!;
+ assert.ok(from && to && root.querySelector(".stats-pill select") && root.querySelector(".stats-segments"),"controls remain beside the error");
+ (from as HTMLElement).focus();
+
+ // 2. The user corrects From/To in place: same inputs, focus kept, a new request, then data and no error.
+ await m.act(() => m.mount(root,"range=custom&from=2026-01-01T00%3A00%3A00.000Z&to=2026-01-02T00%3A00%3A00.000Z")); await settle();
+ assert.equal(asked.length,2); assert.match(asked[1]!.url,/from=2026-01-01T00%3A00%3A00\.000Z&to=2026-01-02T00%3A00%3A00\.000Z&tz=/);
+ assert.equal(alert(),"","the refused snapshot is gone as soon as the new query is asked");
+ assert.equal(root.querySelector(".stats-from input"),from,"From input is the same node"); assert.equal(root.querySelector(".stats-to input"),to); assert.equal(focused,from,"focus survives the refetch");
+ await answer(1,Response.json(data({kpis:{...data().kpis,spend_usd:11}})));
+ assert.equal(kpis(),6); assert.match(root.textContent!,/\$11\.00/); assert.equal(alert(),"");
+ assert.equal(root.querySelector(".stats-from input"),from);
+
+ // 3. Two quick edits: the older request answers last and must not overwrite the newer query's data.
+ await m.act(() => m.mount(root,"range=custom&from=2026-01-01T00%3A00%3A00.000Z&to=2026-01-03T00%3A00%3A00.000Z")); await settle();
+ await m.act(() => m.mount(root,"range=custom&from=2026-01-01T00%3A00%3A00.000Z&to=2026-01-04T00%3A00%3A00.000Z")); await settle();
+ assert.equal(asked.length,4);
+ await answer(3,Response.json(data({kpis:{...data().kpis,spend_usd:33}})));
+ await answer(2,Response.json(data({kpis:{...data().kpis,spend_usd:22}})));
+ assert.match(root.textContent!,/\$33\.00/); assert.doesNotMatch(root.textContent!,/\$22\.00/);
+ assert.equal(root.querySelector(".stats-from input"),from);
+});

@@ -51,7 +51,7 @@ export function App() {
  const current = useRoute();
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
  if (current.screen === "settings") return <SettingsPage current={current}/>;
- if (current.screen === "stats") return <StatsPage key={current.query ?? ""} current={current}/>;
+ if (current.screen === "stats") return <StatsPage current={current}/>;
  return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
@@ -77,13 +77,12 @@ function SettingsPage({current}: {current:Route}) {
  return <Shell current={current} awaiting={null} status={!view.status ? "connecting" : data ? "stale" : "offline"} updatedAt={data?.generated_at ?? null}><Settings view={view}/></Shell>;
 }
 /** Stats: the hash carries the filters; the browser's IANA zone rides only on the API query (optional, never in the hash). */
-function StatsPage({current}: {current:Route}) {
+export function StatsPage({current}: {current:Route}) {
  const query = new URLSearchParams(current.query);
- // Keyed by the query (App): a filter change remounts, so the new range never shows the old range's data under an error.
+ // No key: filter edits change the URL, useScreenData refetches (dropping the old snapshot) and the filter row stays mounted.
  const resource = useScreenData<StatsResponse>(statsApiUrl(query.toString(),Intl.DateTimeFormat().resolvedOptions().timeZone),"/api/stream?view=stats");
  return <Shell current={current} awaiting={null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
-  {resource.error && <p role="alert" class="overview-error">{resource.error}{resource.data && " · showing last recorded data"}</p>}
-  {resource.data ? <Stats data={resource.data} query={query.toString()}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  <Stats data={resource.data} query={query.toString()} error={resource.error ? `${resource.error}${resource.data ? " · showing last recorded data" : ""}` : null} code={resource.code}/>
  </Shell>;
 }
 function JobsRoute({current}:{current:Route}) {
