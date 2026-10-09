@@ -26,7 +26,10 @@ const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
 test("Stats renders six KPIs, four chart tables, CSV, the spend note and no sample data", async () => {
  const {draw} = await load();
  const html = draw(data(),"range=24h");
- for (const kpi of ["Spend","Merge rate","CI green first try","Median wall clock","Decisions","Tokens"]) assert.match(html,new RegExp(`<h2>${kpi}</h2>`),kpi);
+ assert.deepEqual([...html.matchAll(/<article class="stats-kpi"[^>]*><h2>([^<]+)<\/h2>/g)].map(m => m[1]),["Jobs finished","Spend","Tokens","Merge rate","Median wall clock","Decisions"]);
+ assert.match(html,/CI green first try -/,"CI first try is the Merge rate subline, null is a dash");
+ assert.match(html,/Held is normal: waiting on CI or review/);
+ assert.match(html,/Unassigned|Backlog|=Ship/);
  assert.equal((html.match(/aria-pressed="false">Table</g) ?? []).length,4);
  assert.match(html,/Export CSV/); assert.match(html,/Spend includes reviewers/);
  assert.doesNotMatch(html,/Nothing finished/); assert.doesNotMatch(html,/sample|NaN|Infinity/i);
@@ -40,6 +43,14 @@ test("From/To appear only for Custom; an empty range says so", async () => {
  const custom = draw(data(),"range=custom&from=2026-01-01T00%3A00%3A00.000Z&to=2026-01-02T00%3A00%3A00.000Z");
  assert.equal((custom.match(/type="datetime-local"/g) ?? []).length,2);
  assert.match(draw(data({jobs_finished:{merged:0,closed:0,buckets:[]}}),"range=7d"),/Nothing finished in this range/);
+});
+
+test("the range caption shows two distinct instants and the prior window", async () => {
+ const {draw} = await load();
+ const html = draw(data({range:{from:"2026-01-01T00:00:00.000Z",to:"2026-01-02T00:00:00.000Z",key:"24h",bucket_seconds:3600,tz:"UTC"}}),"range=24h");
+ const cap = /class="stats-caption">([^<]+)</.exec(html)![1]!.replace(/&#x2F;|&amp;/g,"");
+ const [from,rest] = cap.split(" – "); assert.ok(from && rest && !rest.startsWith(from), cap);
+ assert.match(cap,/ · compared with the 24h before$/);
 });
 
 test("CSV export escapes quotes and formula starts and leaves missing values empty", async () => {
