@@ -34,6 +34,8 @@ import { formatReadyBeads, readReadyBeads, type ReadyBeads } from "./ready-beads
 import { readDrain } from "./drain.ts";
 import { runnerOwns } from "./schedule-runner.ts";
 import { readParentExpanded } from "./schedule-expand.ts";
+import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedule-authority.ts";
+import { runSpend } from "./schedule-runs.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -85,6 +87,7 @@ export interface NextResult {
 	fleet_live_workers?: number;
 	ready_beads?: ReadyBeads[];
 	mandate?: NextMandateView;
+	run?: { id: string; schedule_id: string; spend_usd: number; tokens: number; live_workers: number; parallelism: number };
 	/** Open, unblocked jobs this mandate covers — the parent's dispatch candidates without reading files. */
 	ready: Job[];
 	/** Dependency facts only; these jobs are never dispatch candidates. */
@@ -146,17 +149,43 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		.filter((mandate) => !project || mandate.projects.includes(project))
 		// An active grant always wins over a paused one, whatever their issue order.
 		.sort((a, b) => Number(b.status === "active") - Number(a.status === "active"));
-	if (candidates.length === 0) {
+	const readyJobs = await ports.ledger.ready(project ? { project } : {});
+	const runResults: NextResult[] = [];
+	const readyAll: Job[] = [];
+	const ctx = ports.mandates.runContext();
+	for (const job of readyJobs) {
+		try {
+			const authority = runAuthority(ctx, job.id);
+			if (authority.source === "mandate") { readyAll.push(job); continue; }
+			const run = authority.run;
+			let result = runResults.find((row) => row.run?.id === run.id);
+			if (!result) {
+				const spend = runSpend(run, withRunReviewerSpend(ctx.home, fleetJobs, run));
+				result = { run: { id: run.id, schedule_id: run.schedule_id, spend_usd: spend.usd, tokens: spend.tokens, live_workers: spend.inFlight, parallelism: run.policy.limits.parallelism }, ready: [], action: { kind: "wait", reason: `run ${run.id}: no ready admission` } };
+				runResults.push(result);
+			}
+			if (runnerOwns(job, readParentExpanded(ctx.home)) || ports.queued?.().includes(job.id)) continue;
+			result.ready.push(job);
+			if (result.run!.live_workers + run.members.filter((member) => ports.queued?.().includes(member.job_id)).length >= run.policy.limits.parallelism) {
+				result.action.reason = `run ${run.id}: parallelism is full (queued admission counts)`;
+				continue;
+			}
+			try {
+				scheduleRunVerdict(ctx, "dispatch", { jobId: job.id, project: jobProject(job) ?? "", kind: jobKind(job), risk: parseJobLabels(job.labels).risk, advice: true }, fleetJobs, now);
+				result.action = { kind: "dispatch", job_id: result.action.job_id ?? job.id, reason: `dispatch under run ${run.id}` };
+			} catch (error) { if (result.action.kind !== "dispatch") result.action.reason = (error as Error).message; }
+		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
+	}
+	if (candidates.length === 0 && runResults.length === 0) {
 		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, ready_beads: visibleBeads, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
-	const readyAll = await ports.ledger.ready(project ? { project } : {});
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
 		const record = inFlightRecord(subject, fleetJobs);
 		return [job.id, selectGrant(grants, "dispatch", { ...subject, startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now, fleetJobs)] as const;
 	}));
 	const queued = new Set(ports.queued?.() ?? []);
-	const results: NextResult[] = [];
+	const results: NextResult[] = [...runResults];
 	const expanded = readParentExpanded(ports.fleet.home);
 	for (const mandate of candidates) {
 		const ownBlocked = blocked.filter(({ job }) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) }));
@@ -175,7 +204,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		const held = capacity.held.length ? ` (held: ${capacity.held.slice(0, 3).join(", ")}${capacity.held.length > 3 ? `, +${capacity.held.length - 3} more` : ""})` : "";
 		for (const result of results) {
 			if (result.action.kind !== "dispatch") continue;
-			result.action.reason = `spawn cap ${capacity.cap} full: ${capacity.active} live worker processes${held} — cp_dispatch queues it; ${result.action.job_id} starts under ${result.mandate!.id} when one frees`;
+			result.action.reason = `spawn cap ${capacity.cap} full: ${capacity.active} live worker processes${held} — cp_dispatch queues it; ${result.action.job_id} starts under ${result.run ? `run ${result.run.id}` : result.mandate!.id} when one frees`;
 		}
 	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
@@ -309,6 +338,9 @@ export function formatNext(result: NextResult): string {
 		const m = result.mandate;
 		lines.push(`${m.id}: ${m.status}, ${m.live_workers}/${m.parallelism} workers working under this mandate`);
 		lines.push(`  spend: $${m.spend_usd.toFixed(2)} / $${m.spend_cap_usd.toFixed(2)}; ${m.tokens} / ${m.token_cap} tokens; jobs ${m.jobs_used} / ${m.job_cap}`);
+	} else if (result.run) {
+		const r = result.run;
+		lines.push(`run ${r.id}: ${r.live_workers}/${r.parallelism} workers; spend $${r.spend_usd.toFixed(2)}; ${r.tokens} tokens`);
 	} else {
 		lines.push("no active mandate");
 	}
@@ -333,7 +365,7 @@ function needsAction(result: NextResult): boolean {
 
 function compactOther(result: NextResult): string {
 	const m = result.mandate;
-	const head = m ? `${m.id}: ${m.status} ${m.live_workers}/${m.parallelism}, jobs ${m.jobs_used}/${m.job_cap}` : "no active mandate";
+	const head = result.run ? `run ${result.run.id}: ${result.run.live_workers}/${result.run.parallelism}` : m ? `${m.id}: ${m.status} ${m.live_workers}/${m.parallelism}, jobs ${m.jobs_used}/${m.job_cap}` : "no active mandate";
 	return `${head} \u2014 ${result.action.kind}: ${result.action.reason}`;
 }
 

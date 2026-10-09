@@ -281,12 +281,12 @@ export interface Ask {
 export interface Question { id: string; question: string; kind: string; created_at: string; job_ids: string[]; age_seconds: number }
 export interface Decision { id: string; question: string; answer: string; answered_at: string; job_ids: string[] }
 export interface DecisionDetail extends Decision {
- source: "operator-delegated" | "you"; project: string | null; source_escalation: string | null;
+ source: "operator-delegated" | "you" | "schedule-run"; project: string | null; source_escalation: string | null;
  quote: string | null; rule: string | null; worth: ("risk" | "scope" | "override" | "judgement")[]; today: boolean;
  /** The escalation kind behind it (`mission_end`, `scope_expansion`, …); null when none is recorded. */
  kind: string | null;
  /** How the delegation was authorized, from the recorded rule only. */
- basis?: {kind:"words"|"standing"|"judgement"; ref:string|null};
+ basis?: {kind:"words"|"standing"|"judgement"|"run"; ref:string|null};
 }
 export interface AwaitingDetail extends Ask {
  reason: string | null; source_created_at: string | null; mandate_id: string | null;

@@ -29,6 +29,8 @@ import { parsePrUrl } from "./ci-watch.ts";
 import { verifiedRunNowClick } from "./schedule-control.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
+import type { ScheduleRunStore } from "./schedule-runs.ts";
+import { startRun } from "./schedule-run-fire.ts";
 
 export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
@@ -67,6 +69,7 @@ export interface SchedulerPorts {
 	home: string;
 	ledger: () => Ledger;
 	mandates: MandateStore;
+	runs?: ScheduleRunStore;
 	/** The fleet, for the mandate sweep (caps, expiry) before a fire. */
 	usageJobs: () => readonly MandateUsageJob[];
 	/** The project's canonical clone: where a watch script runs. */
@@ -117,6 +120,7 @@ export interface ScheduleEvent {
 	outcome: "fired" | "skipped";
 	reason: string;
 	job_id?: string;
+	run_id?: string;
 	/** The fired job's delivery: answer/board/local fires are the schedule runner's to dispatch. */
 	delivery?: Delivery;
 	missed_at?: string;
@@ -512,8 +516,8 @@ export class Scheduler {
 	}
 
 	/**
-	 * The one fire path, every trigger: always mints a fresh grant from the schedule's template (`#mint`) and files the
-	 * job under it; there is no other branch. A schedule with no template throws. `manual`: a run now's trigger — its
+	 * The one fire path: an active store plus activated policy starts a run; otherwise a fresh grant is minted.
+	 * A schedule with no template throws. `manual`: a run now's trigger — its
 	 * refusals are always reported and never recorded, and it writes no last_fire.
 	 */
 	async #fireOnce(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
@@ -542,6 +546,20 @@ export class Scheduler {
 		// A fire mints nothing it would not use: single use and the open-fire guard come first.
 		const early = await ledgerRefusal();
 		if (early) return refuse(early);
+		const runs = this.#ports.runs;
+		const policy = runs?.active && schedule.job.delivery !== "pipeline" ? runs.activePolicy(schedule.id) : undefined;
+		if (runs && policy) {
+			const latest = this.list().find((entry) => entry.id === schedule.id);
+			if (!latest?.enabled) return refuse(`schedule ${schedule.id} was removed or disabled before this fire ran`);
+			let context: MintContext | Refusal;
+			try { context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "this host does not wire live policy bounds" }; }
+			catch (error) { return refuse(`live policy bounds unreadable (${(error as Error).message})`); }
+			if (refused(context)) return refuse(context.refusal);
+			const started = await startRun({ runs, ledger, schedule: latest, policy, context, title, now, slot, missed, missedAt, manual, controlPid: this.#ports.controlPid });
+			if (refused(started)) return refuse(started.refusal);
+			if (!manual) await this.#patch(schedule.id, { last_fire: { at, slot: slot.toISOString(), job_id: started.job_id, missed } });
+			return { ...base, ...started, outcome: "fired", delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...manualFields };
+		}
 		const fire = await this.#mint(schedule, now, stamp, slot, missed, manual);
 		if (refused(fire)) return refuse(fire.refusal);
 		const mandateId = base.mandate_id = fire.grant.id;

@@ -25,6 +25,8 @@ import type { Job, Ledger } from "./ledger.ts";
 import { parseJobLabels } from "./ledger.ts";
 import { nextCronSlot, parseCron, type Schedule } from "./viewer/schedule-core.ts";
 import { parentExpandedIds } from "./schedule-expand.ts";
+import { runIsSettled } from "./schedule-runs.ts";
+import { wasDropped } from "./ledger.ts";
 
 export const RUNNER_DELIVERIES: readonly string[] = ["answer", "board", "local"];
 const SCHEDULE_LABEL = "schedule:";
@@ -52,6 +54,7 @@ export interface RunnerPorts {
 	schedules: () => readonly Schedule[];
 	now: () => Date;
 	log: (line: string) => void;
+	runs?: import("./schedule-runs.ts").ScheduleRunStore;
 }
 
 /** A teardown-shaped outcome on a runner-owned job; anything else (hold, escalate, an escalation raised) is the parent's. */
@@ -103,8 +106,17 @@ export class ScheduleRunner {
 				this.#ports.log(`schedule runner: could not drop ${job.id}: ${(error as Error).message}`);
 			}
 		}
+		await this.#closeSettledRuns();
 	}
 
+	async #closeSettledRuns(): Promise<void> {
+		const runs = this.#ports.runs;
+		if (!runs?.active) return;
+		const jobs = this.#ports.ledger().read().jobs;
+		for (const run of runs.runs().filter((row) => row.phase !== "closed")) {
+			if (runIsSettled(run, jobs)) await runs.closeRun(run.id, jobs.some((job) => run.members.some((member) => member.job_id === job.id) && wasDropped(job)) ? "partial" : "completed", this.#ports.now().toISOString().replace(/\.\d{3}Z$/, "Z"));
+		}
+	}
 	/** Whether a fresh envelope is the runner's to tear down (the rest wake the parent as before). */
 	claims(result: IntakeResult): boolean {
 		return !result.already && teardownShaped(result) && this.#owns(result.job_id);
@@ -119,7 +131,7 @@ export class ScheduleRunner {
 		this.#handled.add(result.job_id);
 		try {
 			const outcome = await this.#ports.tearDown(result.job_id);
-			if (outcome.torn_down) return true;
+			if (outcome.torn_down) { await this.#closeSettledRuns(); return true; }
 			this.#ports.log(`schedule runner: teardown of ${result.job_id} refused: ${outcome.failure?.message ?? "not torn down"}; waking the parent`);
 		} catch (error) {
 			this.#ports.log(`schedule runner: teardown of ${result.job_id} failed: ${(error as Error).message}; waking the parent`);

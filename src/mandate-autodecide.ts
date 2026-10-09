@@ -4,8 +4,9 @@
  */
 import type { CheckpointStore } from "./checkpoint.ts";
 import { type Checkpoint, checkpointAwaitingId, isoTimestamp } from "./contracts.ts";
-import { evaluateAuthority, type MandateStore, type MandateSubject } from "./mandate.ts";
+import { type MandateStore, type MandateSubject } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
+import { checkpointAuthority, runAuthority } from "./schedule-authority.ts";
 
 export function autoDecideCheckpoint(
 	store: CheckpointStore,
@@ -16,19 +17,20 @@ export function autoDecideCheckpoint(
 	if (checkpoint.decision !== "pending") return checkpoint;
 	if (projectDenial(mandates.home, subject.project)) return checkpoint;
 	const now = subject.now ?? isoTimestamp();
-	const jobs = mandates.withReviewerSpend(subject.usageJobs ?? []);
-	mandates.sweep(now, jobs);
+	const source = runAuthority(mandates.runContext(), subject.jobId).source;
+	const jobs = source === "schedule-run" ? [...(subject.usageJobs ?? [])] : mandates.withReviewerSpend(subject.usageJobs ?? []);
+	if (source === "mandate") mandates.sweep(now, jobs);
 	const scope = subject.scheduleId ? {} : mandates.scheduleOf(subject.jobId);
-	const verdict = evaluateAuthority({ ...subject, ...scope, createdAt: subject.createdAt ?? mandates.jobCreatedAt(subject.jobId), now, usageJobs: jobs }, mandates.list());
+	const verdict = checkpointAuthority(mandates.runContext(), { ...subject, ...scope, createdAt: subject.createdAt ?? mandates.jobCreatedAt(subject.jobId), now, usageJobs: jobs }, mandates.list());
 	if (!verdict.permitted) return checkpoint;
 	const decided = store.decide(checkpoint.job_id, true, {
-		by: `mandate:${verdict.mandateId}`,
+		by: verdict.runId ? `schedule-run:${verdict.runId}` : `mandate:${verdict.mandateId}`,
 		note: verdict.clause,
 		at: now,
-		basis: { mandate: verdict.mandateId, clause: verdict.clause },
+		basis: verdict.runId !== undefined ? { run: verdict.runId, clause: verdict.clause } : { mandate: verdict.mandateId, clause: verdict.clause },
 		...(checkpoint.scope ? { scope: checkpoint.scope } : {}),
 	});
-	mandates.journal(verdict.mandateId, {
+	if (verdict.mandateId) mandates.journal(verdict.mandateId, {
 		at: decided.decided_at ?? now,
 		job_id: checkpoint.job_id,
 		kind: store.kind,

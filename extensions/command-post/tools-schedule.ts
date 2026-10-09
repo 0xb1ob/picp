@@ -45,7 +45,7 @@ export function registerScheduleTools(
 	const build = (): Scheduler => {
 		const post = deps.commandPost();
 		return new Scheduler({
-			home: post.home, ledger: () => post.ledger(), mandates: post.mandates,
+			home: post.home, ledger: () => post.ledger(), mandates: post.mandates, runs: post.mandates.scheduleRuns,
 			usageJobs: () => post.fleet.read().jobs, cloneOf: (project) => post.registry.pathOf(project), startedAt,
 			archivedProjects: () => post.registry.archivedNames(),
 			// Every fire re-reads these: an unregistered project or an unreadable defaults file refuses it.
@@ -64,6 +64,7 @@ export function registerScheduleTools(
 		return new ScheduleRunner({
 			dispatch: (request) => post.dispatch(request), tearDown: (jobId) => post.tearDown(jobId), ledger: () => post.ledger(),
 			recorded: (jobId) => post.intake.intake(jobId), wake: wakeEnvelope,
+			runs: post.mandates.scheduleRuns,
 			fleetJobs: () => post.fleet.read().jobs, schedules: () => (scheduler ??= build()).list(), now: () => new Date(), log,
 		});
 	};

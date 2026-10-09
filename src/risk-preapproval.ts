@@ -29,11 +29,17 @@ export function hardStops(text: string): string[] {
 
 /** Does `mandate`'s pre-approval name this job? `createdAt` is the ledger job's `created_at` (`MandateStore.jobCreatedAt`). */
 export function preapprovalCovers(mandate: Mandate, job: { jobId: string; project: string }, createdAt: string | undefined): boolean {
-	const pre = mandate.risk_preapproval;
-	if (!pre) return false;
-	if (pre.scope === "named_jobs") return pre.job_ids?.includes(job.jobId) === true;
-	if (mandate.job_ids?.includes(job.jobId)) return true;
-	return !mandate.job_ids?.length && mandate.projects.includes(job.project) && createdAt !== undefined && Date.parse(createdAt) >= Date.parse(mandate.issued_at);
+	return preapprovalRecordCovers(mandate.risk_preapproval, mandate.risk_preapproval?.scope === "named_jobs" || !mandate.job_ids?.length ? undefined : mandate.job_ids,
+		{ ...job, projects: mandate.projects, issuedAt: mandate.issued_at }, createdAt);
+}
+
+/** A saved approval names only the supplied members; absent member ids retains the legacy project/time scope. */
+export function preapprovalRecordCovers(record: RiskPreapproval | undefined, memberIds: readonly string[] | undefined,
+	job: { jobId: string; project: string; projects?: readonly string[]; issuedAt?: string }, createdAt: string | undefined): boolean {
+	if (!record || (memberIds !== undefined && !memberIds.includes(job.jobId))) return false;
+	if (record.scope === "named_jobs") return record.job_ids?.includes(job.jobId) === true;
+	if (memberIds?.includes(job.jobId)) return true;
+	return !memberIds?.length && job.projects?.includes(job.project) === true && createdAt !== undefined && Date.parse(createdAt) >= Date.parse(job.issuedAt ?? record.granted_at);
 }
 
 /**

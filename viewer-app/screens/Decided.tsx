@@ -14,6 +14,7 @@ const WORTH_EMPTY = "Answers given on the operator\u2019s own judgement appear h
 type Who = "for" | "you";
 function basisView(row:DecisionDetail): {label:string; ref:string | null; standing:boolean} {
  if (row.source === "you") return {label:"your reply", ref:row.basis?.ref ?? row.id, standing:false};
+ if (row.basis?.kind === "run") return {label:`run ${row.basis.ref}`, ref:null, standing:false};
  if (row.basis?.kind === "words") return {label:"your words", ref:row.basis.ref, standing:false};
  if (row.basis?.kind === "standing") return {label:"standing order", ref:row.basis.ref, standing:true};
  if (row.basis?.kind === "judgement") return {label:"operator's own judgement", ref:row.basis.ref, standing:false};

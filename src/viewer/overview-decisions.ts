@@ -83,12 +83,13 @@ export function decisions(state: ViewerState, now: number) {
   return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId)};
  }).sort((a,b) => b.answered_at.localeCompare(a.answered_at));
  const standing = standingText(state);
- const decision_items: DecisionDetail[] = escalations.value.filter(e => e.status === "answered" && e.answered_by === "operator-delegated").map(e => {
+ const decision_items: DecisionDetail[] = escalations.value.filter(e => e.status === "answered" && (e.answered_by === "operator-delegated" || (text(obj(e.basis)?.run) && e.answered_by === `schedule-run:${obj(e.basis)?.run}`))).map(e => {
   const option = (Array.isArray(e.options) ? e.options : []).map(obj).find(o => o?.id === e.answer || o?.label === e.answer);
   const quote = obj(e.basis)?.operator_quote;
   const rule = text(e.delegation_rule) ? e.delegation_rule : null;
-  const basis = basisFor(rule, standing);
-  return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), quote:text(quote) ? quote : null, answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId), source:"operator-delegated" as const, project:null, source_escalation:String(e.id), rule, worth:worthFor(basis), today:today(e.answered_at,now), kind:text(e.kind) ? e.kind : null, basis};
+  const run = obj(e.basis)?.run;
+  const basis: NonNullable<DecisionDetail["basis"]> = text(run) ? {kind:"run", ref:run} : basisFor(rule, standing);
+  return {id:String(e.id), question:String(e.question), answer:typeof option?.label === "string" ? option.label : String(e.answer), quote:text(quote) ? quote : null, answered_at:String(e.answered_at), job_ids:strings(e.job_ids).filter(isSafeId), source:basis.kind === "run" ? "schedule-run" as const : "operator-delegated" as const, project:null, source_escalation:String(e.id), rule, worth:basis.kind === "run" ? [] : worthFor(basis), today:today(e.answered_at,now), kind:text(e.kind) ? e.kind : null, basis};
  });
  for (const record of askHistory.value) {
   if (!record.answer || !record.answered_at) continue;

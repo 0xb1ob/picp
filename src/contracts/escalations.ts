@@ -5,6 +5,7 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { DecisionSummarySchema, PlanSummarySchema } from "./envelope.ts";
 import type { Narrow, Replace } from "./internal.ts";
+import { SCHEDULE_RUN_ID } from "../viewer/schedule-run-core.ts";
 const JOB_ID_RE = new RegExp(JOB_ID_PATTERN);
 
 export const CHECKPOINT_DECISIONS = ["pending", "approved", "declined"] as const;
@@ -76,6 +77,10 @@ export const DecisionBasisSchema = Type.Union([
 		{
 			operator_quote: Type.String({ minLength: 1, maxLength: 4000 }),
 		},
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{ run: Type.String({ pattern: SCHEDULE_RUN_ID.source }), clause: Type.String({ minLength: 1, maxLength: 400 }) },
 		{ additionalProperties: false },
 	),
 ]);

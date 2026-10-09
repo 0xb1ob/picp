@@ -4039,6 +4039,7 @@ keep the existing fail-closed standing. Review, repair and merge share this
 rule; ignoring an old grant creates no new authority. A checkpoint with no
 covering grant stays pending and names the job in its no-active-mandate reason.
 
+A run member is never judged by a grant (see *Scheduled runs*).
 **Combining grants.** `selectGrant` is shared by permission, checkpoint authority and cp_next advice. Among
 active permitting covering grants it selects one: nonempty `job_ids` before project-wide scope, then earliest
 `issued_at`, then smallest mandate id. Coverage and standing are evaluated first. There is one narrow exception:
@@ -7693,7 +7694,15 @@ kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewer
 `cp-org-pr-review` as invalid (fail closed): `cp_schedule remove` it first; a fire grant carrying `risk_preapproval`
 validates on older binaries (the field is already in `MandateSchema`). No data migration.
 
-**Fresh grant per fire.** Every fire of every schedule — a cron slot, a watch fire, the page's Run now and
+**Scheduled runs (P2b/A1, dormant).** A schedule with an activated policy starts a run instead of minting a grant. This build ships no way to activate or save a policy revision, and A1 keeps the production code lock `SCHEDULE_RUNS_ACTIVE=false`: every production store write still throws. Tests inject an active store to exercise the cutover. Pipeline schedules remain on the legacy grant path.
+
+Run authority intercepts dispatch, promotion, implementation, reviewer start, repair, merge and checkpoint auto-decision before grant selection. The saved policy snapshot binds actions, exclusions, risk, USD/token caps, child admission and parallelism. A post-activation scheduled job without membership fails closed (`not_member`); legacy jobs created before activation continue under mandates. Missing/corrupt policies fail closed. Other named refusals are `run_closed`, `run_usd_cap`, `run_token_cap`, `child_cap`, `parallelism_full`, `deadline_passed`, `action_not_allowed`, `kind_excluded`, `path_excluded`, `subsystem_excluded`, `risk_high` and `hard_stop`. Only same-kind continuation is permitted after the deadline, and caps still bind it.
+
+A run checkpoint cites the closed basis `{run, clause}`, with clause `schedule-run <run-id> (policy rev N)` and attribution `schedule-run:<run-id>`. No synthetic mandate is created. Permits/refusals journal only to the run's `authority_log`; risk pre-approval covers run members only, never scripts, and hard stops still ask. Advice reads write nothing. Worker and reviewer non-cached usage count together; 80%/cap notices say no new admission, in-flight work continues, and the run closes partial, with no raise advice.
+
+**Downgrade:** once a later build enables adoption, disable adopted schedules and drain every open run before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize their open members. P2b/A1 itself writes no production runs or policies, so rollback is a revert.
+
+**Fresh grant per fire.** Every fire of a schedule without an activated policy — a cron slot, a watch fire, the page's Run now and
 `cp_schedule run_now` — files its job under a grant minted for that fire alone, from the schedule's saved
 `grant_template`. This is hard-coded: there is no flag, parameter, config, environment variable, mandate default or
 standing order that turns it off, and the S3 opt-in is gone — `cp_schedule add` with `refire` or `approval_quote` is

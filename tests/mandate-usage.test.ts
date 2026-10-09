@@ -244,7 +244,8 @@ test("cp_mandate and cp_decide read the live view, so the baseline and every cap
 test("every CommandPost spawn path (dispatch, revive, bounded recovery) shares one observer set", () => {
 	const source = readFileSync(join(REPO_ROOT, "src/command-post.ts"), "utf8");
 	assert.equal(source.match(/\.\.\.this\.#observers\(\)/g)?.length, 3);
-	assert.match(source, /onUsage: \(jobId: string, previous: Usage, current: Usage\) => observeMandateUsage\(usage, jobId, previous, current\)/);
+	assert.match(source, /onUsage: \(jobId: string, previous: Usage, current: Usage\) => runAuthority\(this\.mandates\.runContext\(\), jobId\)\.source === "schedule-run" \? observeRunUsage\(/);
+	assert.match(source, /: observeMandateUsage\(usage, jobId, previous, current\)/);
 	for (const file of ["src/dispatch.ts", "src/revive.ts", "src/recovery.ts"]) {
 		assert.match(readFileSync(join(REPO_ROOT, file), "utf8"), /onUsage: this\.#options\.onUsage|onUsage: options\.onUsage/, `${file} forwards onUsage`);
 	}
