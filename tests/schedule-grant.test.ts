@@ -198,6 +198,7 @@ test("invariant: every trigger mints a fresh grant on every fire, never the prev
 
 	// A4: the manual schedule now names a live grant it already used. Without a template the fire path throws, never reuses it.
 	const used = scheduler.list().find((entry) => entry.id === manual.id)!.mandate_id;
+	assert.ok(used, "legacy schedule retains its pointer");
 	assert.equal(mandates.get(used)?.status, "active");
 	const count = mandates.list().length;
 	edit(scheduler, manual.id, (schedule) => delete schedule.grant_template);
@@ -288,6 +289,7 @@ test("A1: an expired or cap-exhausted pointer never stops the next cron fire or 
 	assert.equal(fireGrants.length, 6);
 	assert.deepEqual(fireGrants.flatMap((grant) => grant.escalations.filter((entry) => entry.kind === "budget_exhausted" || entry.kind.endsWith("_cap")).map((entry) => `${grant.id}: ${entry.kind}`)), [], "no budget_exhausted or cap entry on any fire grant (the pointer included)");
 
+	assert.ok(c3.mandate_id); assert.ok(r3.mandate_id);
 	mandates.pause(c3.mandate_id);
 	mandates.pause(r3.mandate_id);
 	assert.match((await cronFire("2026-07-10T01:00:30Z"))?.reason ?? "", /paused \(operator\); a schedule never re-mints past an operator pause/);
@@ -324,6 +326,7 @@ test("A1: a pointer revoked by the parent or the system (revoked_by) never stops
 	const c1 = (await cronFire("2026-07-01T07:00:30Z"))!;
 	const r1 = await runNow(1);
 	// The parent revokes one live pointer, the system the other: each recorded in revoked_by.
+	assert.ok(c1.mandate_id); assert.ok(r1.mandate_id);
 	assert.deepEqual(mandates.revoke(c1.mandate_id, { by: "parent" }).revoked_by, { by: "parent" });
 	assert.deepEqual(mandates.revoke(r1.mandate_id, { by: "system" }).revoked_by, { by: "system" });
 	const c2 = (await cronFire("2026-07-01T08:00:30Z"))!;
@@ -334,6 +337,7 @@ test("A1: a pointer revoked by the parent or the system (revoked_by) never stops
 	assert.equal((await scheduler.setEnabled(hourly.id, true)).enabled, true, "enable is not refused by a parent revoke either");
 
 	// The operator's revoke (cp_mandate revoke with a verified operator_quote) is recorded, and it stops the schedule.
+	assert.ok(c2.mandate_id); assert.ok(r2.mandate_id);
 	const revoked = mandates.revoke(c2.mandate_id, { by: "operator", operator_quote: "stop the hourly schedule", decided_by: "operator-quote" }).revoked_by;
 	assert.equal(revoked?.by === "operator" ? revoked.operator_quote : undefined, "stop the hourly schedule");
 	assert.match((await cronFire("2026-07-01T09:00:30Z"))?.reason ?? "", /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
@@ -351,6 +355,7 @@ test("move retargets a stopped schedule to a fresh seed: same id, template from 
 	const schedule = await scheduler.add({ name: "triage", project: "demo", mandate_id: seed().id, manual: true, ...job });
 	const first = await scheduler.fireNow(schedule.id, "req-1");
 	await ledger.close(first.job_id!, "done");
+	assert.ok(first.mandate_id);
 	mandates.pause(first.mandate_id);
 	assert.match((await scheduler.fireNow(schedule.id, "req-2")).reason, /paused \(operator\)/);
 	const next = seed({ job_cap: 5, objective: "triage again" });
@@ -365,6 +370,7 @@ test("move retargets a stopped schedule to a fresh seed: same id, template from 
 	assert.equal(mandates.get(next.id)?.status, "revoked", "the new seed retires at the first fire, like any seed");
 
 	const other = await scheduler.add({ name: "other", project: "demo", mandate_id: seed().id, manual: true, ...job });
+	assert.ok(other.mandate_id);
 	await assert.rejects(scheduler.move(schedule.id, other.mandate_id), /already the grant of schedule/);
 	await assert.rejects(scheduler.move("sch-ffffff", next.id), /no schedule sch-ffffff/);
 });

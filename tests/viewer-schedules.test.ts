@@ -128,7 +128,7 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.deepEqual([...SCHEDULE_JOB_KINDS], [...JOB_KINDS]);
 	assert.deepEqual([...SCHEDULE_DELIVERIES], [...DELIVERIES]);
 	assert.equal(SCHEDULE_MANDATE_ID.source, MANDATE_ID_PATTERN);
-	assert.equal(SCHEDULE_SCHEMA_VERSION, SCHEMA_VERSION);
+	assert.equal(SCHEDULE_SCHEMA_VERSION, 2, "schedules v2 evolves independently of mandate schemas");
 	assert.deepEqual([...GRANT_TEMPLATE_ASK_ON], [...MANDATE_ASK_ON]);
 	assert.deepEqual([...GRANT_TEMPLATE_ACTIONS], MANDATE_ACTIONS.filter((action) => action !== "merge"), "a fire grant template never carries merge");
 	assert.deepEqual([...MANDATE_CHANNEL_VALUES], [...MANDATE_CHANNELS]);
@@ -141,7 +141,8 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.match(bad({ trigger: { ...watch.trigger, every_seconds: 10 } }).join(), /every_seconds/);
 	assert.match(bad({ trigger: { type: "cron", cron: "* * * * *" } }).join(), /trigger\/tz: is required/);
 	assert.match(bad({ last_fire: { at: "x", slot: "x", job_id: "x" } }).join(), /last_fire\/missed: is required/);
-	assert.match(scheduleFileErrors({ schema_version: 2, schedules: [] }).join(), /schema_version/);
+	assert.deepEqual(scheduleFileErrors({ schema_version: 2, schedules: [] }), []);
+	assert.match(scheduleFileErrors({ schema_version: 3, schedules: [] }).join(), /schema_version/);
 	assert.match(scheduleFileErrors({ schema_version: SCHEMA_VERSION, schedules: {} }).join(), /schedules: must be an array/);
 });
 

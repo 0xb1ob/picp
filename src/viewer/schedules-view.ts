@@ -35,14 +35,14 @@ function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "
 }
 
 /** A revoke without the operator's quote (the system's or the parent's) is no stop (`operatorStop`): shown as active. */
-function mandateStatus(grants: Json[], id: string, now: number): ScheduleItem["mandate_status"] {
+function mandateStatus(grants: Json[], id: string | undefined, now: number): ScheduleItem["mandate_status"] {
 	const m = grants.find((g) => g.id === id);
 	if (!m) return "missing";
 	if (m.status === "active" || (m.status === "revoked" && !operatorStop(m))) return Date.parse(String(m.expiry)) <= now ? "expired" : "active";
 	return m.status === "paused" || m.status === "revoked" || m.status === "expired" ? m.status : "missing";
 }
 
-function pauseReason(grants: Json[], id: string): string | null {
+function pauseReason(grants: Json[], id: string | undefined): string | null {
 	const m = grants.find((g) => g.id === id);
 	return m?.status === "paused" ? str(m.pause_reason) ?? "operator" : null;
 }

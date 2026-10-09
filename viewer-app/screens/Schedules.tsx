@@ -87,12 +87,12 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
  return <article class="schedule-card">
   <div class="schedule-card-heading"><h2>{s.name}</h2><span class={`schedule-pill${s.enabled ? " schedule-pill-on" : ""}`}>{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
-  <p class="schedule-identity">{s.job.title} · {s.trigger.type} · <code>{s.mandate_id}</code></p>
+  <p class="schedule-identity">{s.job.title} · {s.trigger.type} · {s.policy ? `policy revision ${s.policy.active_revision}` : <code>{s.mandate_id ?? "needs setup"}</code>}</p>
   <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS_TEXT[s.lands]}.</p>
   <dl class="schedule-facts">
    <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
    <dt>Recipe</dt><dd>{s.job.skill ? <><code>{s.job.skill}</code> skill</> : "Saved job"}</dd>
-   <dt>Mandate</dt><dd><code>{s.mandate_id}</code> · {s.mandate_status}{s.grant_stopped ? " · stopped" : !s.grant_template ? " · no grant template" : ""}</dd>
+   <dt>{s.policy ? "Policy" : "Mandate"}</dt><dd>{s.policy ? <>revision {s.policy.active_revision} · saved run authority</> : <><code>{s.mandate_id ?? "none"}</code> · {s.mandate_status}{s.grant_stopped ? " · stopped" : !s.grant_template ? " · no grant template" : ""}</>}</dd>
    <dt>Last fire</dt><dd>{s.last_run ? <><a href={jobHref(s.last_run.job_id)}><code>{s.last_run.job_id}</code></a> at {observedTime(s.last_run.at)} · {TRIGGER_TEXT[s.last_run.via]}{s.last_run.missed && " (missed)"}</> : s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {plural(s.run_count, "recent run")} · {plural(s.job_count, "job")}</dd>
   </dl>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
@@ -103,10 +103,10 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
    {s.grant_template ? <>
     <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
     <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
-   </> : <p class="job-meta">Grant <code>{s.mandate_id}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason.includes("has no grant template") ? s.last_skip.reason : "move it to a schedule grant to resume"}</strong></p>}
+   </> : s.policy ? <p class="job-meta">Policy revision {s.policy.active_revision}: each fire starts a run; no grant minted.</p> : <p class="job-meta">Grant <code>{s.mandate_id ?? "none"}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason ?? "open the editor to set up this schedule"}</strong></p>}
    {s.trigger.type === "manual" && <p class="job-meta">{next}</p>}
    <p class="job-meta"><code>{triggerText(s)}</code> · <code>{s.job.kind}</code>/<code>{s.job.delivery}</code></p>
-   {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under that fire's own grant.</p>}
+   {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under {s.policy ? "that run's saved policy" : "that fire's own grant"}.</p>}
    {s.last_fire && <p class="job-meta">Last fire slot: {observedTime(s.last_fire.slot)}</p>}
    {s.history.length ? <RunHistory s={s}/> : <p class="jobs-empty">No job fired yet</p>}
   </details>

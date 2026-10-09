@@ -18,13 +18,14 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isoTimestamp, isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
+import { isoTimestamp, isSafeScriptPath, LAYOUT, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
 import { carriedPreapproval, liveFireBounds, mintFireGrant, type MintContext, parallelismNote, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, orgReviewConfig, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, orgReviewConfig, parseCron, readScheduleFile, type Schedule, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { parsePrUrl } from "./ci-watch.ts";
 import { verifiedRunNowClick } from "./schedule-control.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
@@ -34,6 +35,7 @@ import { changePolicy, policySchedule, startRun, type PolicyAction } from "./sch
 import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
 
+import { policyImportBackups } from "./schedule-migrations.ts";
 export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
 export const SCHEDULER_TICK_MS = 30_000;
@@ -118,7 +120,7 @@ export interface ScheduleEvent {
 	schedule_id: string;
 	name: string;
 	project: string;
-	mandate_id: string;
+	mandate_id?: string;
 	outcome: "fired" | "skipped";
 	reason: string;
 	job_id?: string;
@@ -209,9 +211,10 @@ export class Scheduler {
 
 	#mutate<T>(fn: (schedules: Schedule[]) => T): Promise<T> {
 		return queued(this.file, async () => {
+			if (existsSync(this.file) && JSON.parse(readFileSync(this.file, "utf8")).schema_version === 1) policyImportBackups(this.#ports.home, this.#ports.mandates, this.#now());
 			const schedules = readScheduleFile(this.file);
 			const out = fn(schedules);
-			const doc = { schema_version: SCHEMA_VERSION, schedules };
+			const doc = { schema_version: SCHEDULE_SCHEMA_VERSION, schedules };
 			const errors = scheduleFileErrors(doc);
 			if (errors.length) throw new SchedulerError(`refusing to write an invalid schedule:\n  ${errors.join("\n  ")}`);
 			atomicWriteJson(this.file, doc);
@@ -291,7 +294,7 @@ export class Scheduler {
 	}
 
 	async #removeOnce(id: string): Promise<{ schedule: Schedule; note: string }> {
-		let named: string[] = [];
+		let named: (string | undefined)[] = [];
 		const schedule = await this.#mutate((schedules) => {
 			const index = schedules.findIndex((entry) => entry.id === id);
 			if (index < 0) throw new SchedulerError(`no schedule ${id}`);
@@ -304,7 +307,8 @@ export class Scheduler {
 	}
 
 	/** Revokes a schedule's former pointer when it is active or paused and no schedule (`named`) still names it. */
-	#retire(id: string, named: readonly string[]): string {
+	#retire(id: string | undefined, named: readonly (string | undefined)[]): string {
+		if (!id) return "";
 		if (named.includes(id)) return `; its grant ${id} is still named by another schedule, not revoked`;
 		const grant = this.#ports.mandates.list().find((entry) => entry.id === id);
 		if (grant?.status !== "active" && grant?.status !== "paused") return `; its grant ${id} is ${grant?.status ?? "missing"}, nothing to revoke`;
@@ -355,7 +359,7 @@ export class Scheduler {
 			const seeded = templateFromSeed(mandate as Mandate, synthesizedApproval(mandate as Mandate, "cp_schedule move"), stamp, found.job);
 			if (refused(seeded)) throw new SchedulerError(`cp_schedule move refused: ${seeded.refusal}`);
 			const floored = withSkillJobFloor(seeded.template, found.job);
-			let named: string[] = [];
+			let named: (string | undefined)[] = [];
 			const schedule = await this.#mutate((schedules) => {
 				const entry = schedules.find((candidate) => candidate.id === id);
 				if (!entry) throw new SchedulerError(`no schedule ${id}`);
@@ -559,7 +563,6 @@ export class Scheduler {
 		const currentPolicy = this.#ports.runs?.activePolicy(schedule.id);
 		if (manual && ((currentPolicy && manual.revision === undefined) || (manual.revision !== undefined && manual.revision !== (currentPolicy?.revision ?? 0)))) throw new SchedulerError("Schedule changed; review updated settings");
 		schedule = policySchedule(latestSchedule, currentPolicy);
-		const template = this.#template(schedule);
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
 		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };
@@ -598,6 +601,7 @@ export class Scheduler {
 			if (!manual) await this.#patch(schedule.id, { last_fire: { at, slot: slot.toISOString(), job_id: started.job_id, missed } });
 			return { ...base, ...started, outcome: "fired", delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...manualFields };
 		}
+		const template = this.#template(schedule);
 		const fire = await this.#mint(schedule, now, stamp, slot, missed, manual);
 		if (refused(fire)) return refuse(fire.refusal);
 		const mandateId = base.mandate_id = fire.grant.id;
@@ -694,7 +698,7 @@ export class Scheduler {
 		try {
 			fire = await mintFireGrant({
 				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template,
-				previousId: schedule.mandate_id, bounds: carry && "record" in carry ? { ...bounds.input, risk_preapproval: carry.record } : bounds.input, trigger, at: stamp,
+				previousId: schedule.mandate_id ?? template.seed_mandate_id, bounds: carry && "record" in carry ? { ...bounds.input, risk_preapproval: carry.record } : bounds.input, trigger, at: stamp,
 				movePointer: async (id) => void (await this.#patch(schedule.id, { mandate_id: id }, true)),
 				named: (id) => this.list().some((entry) => entry.id !== schedule.id && entry.mandate_id === id),
 			});
@@ -735,7 +739,7 @@ export function formatSchedules(schedules: readonly Schedule[]): string {
 			: s.trigger.type === "manual" ? `manual (fires only on Run now)${s.job.skill ? ` → expanded by skill ${s.job.skill}` : ""}`
 			: `watch ${s.trigger.script_path} every ${s.trigger.every_seconds}s on ${s.trigger.on}`;
 		return [
-			`${s.id} ${s.name} [${s.project}] ${s.enabled ? "enabled" : "disabled"}: ${trigger} → ${s.job.kind}/${s.job.delivery} "${s.job.title}" under ${s.mandate_id}`,
+			`${s.id} ${s.name} [${s.project}] ${s.enabled ? "enabled" : "disabled"}: ${trigger} → ${s.job.kind}/${s.job.delivery} "${s.job.title}" under ${s.mandate_id ?? "saved policy (or needs setup)"}`,
 			...(s.grant_template ? [formatTemplate(s.grant_template, s.mandate_id)] : []),
 			...(s.last_fire ? [`  last fire: ${s.last_fire.at} → ${s.last_fire.job_id}${s.last_fire.missed ? " (missed slot)" : ""}`] : []),
 			...(s.last_skip ? [`  last skip: ${s.last_skip.at} — ${s.last_skip.reason}`] : []),
@@ -743,7 +747,7 @@ export function formatSchedules(schedules: readonly Schedule[]): string {
 	}).join("\n");
 }
 
-function formatTemplate(t: GrantTemplate, current: string): string {
+function formatTemplate(t: GrantTemplate, current: string | undefined): string {
 	const exclusions = [...(t.exclusions?.paths ?? []), ...(t.exclusions?.subsystems ?? []), ...(t.exclusions?.job_kinds ?? [])];
 	return `  fire grant template: each fire mints a fresh grant from the template of ${t.seed_mandate_id} (${t.expiry_hours} h, $${t.spend_usd}, ${t.spend_tokens} tokens, job cap ${t.job_cap}` +
 		`${t.dispatch_parallelism ? `, parallelism ${t.dispatch_parallelism}` : ""}; allowed ${t.allowed_actions.join(", ")}; ask_on ${t.ask_on.join(", ")}${exclusions.length ? `; excludes ${exclusions.join(", ")}` : ""})` +

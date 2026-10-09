@@ -57,6 +57,7 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  const latest = record?.revisions.at(-1);
  if (schedule.job.delivery === "pipeline") throw new Error("pipeline schedules remain on per-fire grants");
  if (input.op !== "deactivate" && input.base !== (latest?.revision ?? 0)) throw new Error("Schedule changed; review updated settings");
+ if (input.op === "deactivate" && !schedule.grant_template) throw new Error("v2 schedule has no legacy template; after drain, restore the P4 backup to return to per-fire grants");
  if (input.op === "deactivate" && runs.openRun(schedule.id)) throw new Error(`schedule ${schedule.id} has an open run; deactivate once it closes`);
  if ((input.op === "adopt" || (input.op === "save" && record?.active_revision == null)) && (runs.openRun(schedule.id) || (await input.ledger.list({labels:[`schedule:${schedule.id}`]})).length)) throw new Error(`schedule ${schedule.id} has an open legacy/run job; adopt once every job closes`);
  const used = action.provenance.quote_sha;

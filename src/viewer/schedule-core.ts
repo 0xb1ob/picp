@@ -20,7 +20,7 @@ export const SCHEDULE_JOB_KINDS = ["ship", "research"] as const;
 export const SCHEDULE_DELIVERIES = ["pr", "local", "pipeline", "answer", "board"] as const;
 export const SCHEDULE_MANDATE_ID = /^md-[a-z0-9]{4,16}$/;
 export const SCHEDULE_ID = /^sch-[0-9a-f]{6}$/;
-export const SCHEDULE_SCHEMA_VERSION = 1;
+export const SCHEDULE_SCHEMA_VERSION = 2;
 /**
  * Skills a manual schedule may name (the expander registry): its fire records a deferred anchor and wakes the parent to
  * expand it with `skills/<name>/SKILL.md`. Each is also a `PARENT_SKILLS` entry (src/cp-bridge.ts); tests pin the two.
@@ -154,7 +154,7 @@ export interface Schedule {
 	name: string;
 	project: string;
 	/** The schedule's current grant: its seed until the first fire, then the fire grant each fire mints, in the fire lane. */
-	mandate_id: string;
+	mandate_id?: string;
 	/** `manual`: no tick ever fires it; only Run now does. */
 	trigger: { type: "cron"; cron: string; tz: string } | { type: "watch"; script_path: string; every_seconds: number; on: "exit0" | "changed" } | { type: "manual" };
 	job: { title: string; kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number]; description?: string; script_path?: string; skill?: (typeof SCHEDULE_SKILLS)[number] };
@@ -227,8 +227,8 @@ const grantTemplate = object({
 		"delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/),
 	}),
 });
-const schedule = object({
-	id: pattern(SCHEDULE_ID), name: line(80), project: line(64), mandate_id: pattern(SCHEDULE_MANDATE_ID),
+const schedule = (version: number) => object({
+	id: pattern(SCHEDULE_ID), name: line(80), project: line(64), [version === 1 ? "mandate_id" : "mandate_id?"]: pattern(SCHEDULE_MANDATE_ID),
 	trigger: (v, path, errors) => (isObject(v) && v.type === "watch" ? watchTrigger : isObject(v) && v.type === "manual" ? manualTrigger : cronTrigger)(v, path, errors),
 	job: object({
 		title: line(200), kind: oneOf(SCHEDULE_JOB_KINDS), delivery: oneOf(SCHEDULE_DELIVERIES),
@@ -240,11 +240,10 @@ const schedule = object({
 	"last_fire?": object({ at: string, slot: string, job_id: string, missed: boolean }),
 	"last_skip?": object({ at: string, reason: string }),
 });
-const scheduleFile = object({
-	schema_version: oneOf([SCHEDULE_SCHEMA_VERSION]),
-	schedules: (v, path, errors) => { if (!Array.isArray(v)) errors.push(`${path}: must be an array`); else v.forEach((item, i) => schedule(item, `${path}/${i}`, errors)); },
-});
-
+const scheduleFile: Check = (value, path, errors) => object({
+	schema_version: oneOf([1, SCHEDULE_SCHEMA_VERSION]),
+	schedules: (v, p, e) => { if (!Array.isArray(v)) e.push(`${p}: must be an array`); else v.forEach((item, i) => schedule(isObject(value) && value.schema_version === 1 ? 1 : 2)(item, `${p}/${i}`, e)); },
+})(value, path, errors);
 /** The schedule file contract: its errors (at most 10), or none when `value` is a valid file. */
 export function scheduleFileErrors(value: unknown): string[] {
 	const errors: string[] = [];
