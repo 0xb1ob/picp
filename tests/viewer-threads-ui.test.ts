@@ -73,7 +73,7 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 
 	const html = screen(full, control, threads()), all = parseHTML(`<body>${html}</body>`).document;
 	const chips = [...all.querySelectorAll("nav.session-threads[aria-label=Threads] button")].map(b => [b.textContent, b.getAttribute("aria-pressed")]);
-	assert.deepEqual(chips, [["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"], ["+ New", null]], "All first and pressed; done threads are not chips; + New opens the dialog");
+	assert.deepEqual(chips, [["+ New", null], ["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "+ New first, All pressed; done threads are not chips; + New opens the dialog");
 	assert.equal(all.querySelector('nav.session-threads button[aria-pressed="false"]')?.getAttribute("aria-label"), "billing-bug: waiting, 1 open ask(s), 1 unacknowledged answer(s)");
 	const nav = all.querySelector("nav.session-threads")!;
 	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
@@ -173,8 +173,10 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 	assert.ok(root.querySelector('[role="dialog"][aria-modal="true"]'));
 	await typeInto(name(), "-x");
 	assert.equal(create().hasAttribute("disabled"), true);
-	assert.match(root.querySelector('.new-thread [role="alert"]')?.textContent ?? "", /1-32 of a-z 0-9 -, starting with a letter or digit/);
+	assert.match(root.querySelector('.new-thread [role="alert"]')?.textContent ?? "", /1–32 characters: a-z, 0-9 and - only/);
 	await typeInto(name(), "#Design Review");
+	assert.match(root.querySelector(".new-thread-help")?.textContent ?? "", /Lowercase words and hyphens\. Shown as # design-review on messages and jobs\./);
+	assert.match(root.querySelector(".new-thread-chip")?.textContent ?? "", /# design-review/, "live tag chip");
 	assert.equal(create().hasAttribute("disabled"), false, "a leading # is the adornment, stripped");
 	await fire(create(), "click");
 	assert.deepEqual([picked, sends], [["design-review"], []], "Create without text selects only: no send");
@@ -211,10 +213,10 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 
 	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
 	const sep = screen(full, control, threads({ selected: "billing-bug" }));
-	assert.match(sep, /Show 2 earlier/); assert.match(sep, /Show 1 later/);
+	assert.match(sep, /2 earlier messages in other threads · show/); assert.match(sep, /1 later message in other threads · show/);
 	assert.doesNotMatch(sep, /text a-before|text a-after/, "collapsed until asked");
 	assert.match(sep, /text own/);
-	assert.doesNotMatch(screen(full, control, threads()), /Show \d+ (earlier|later)/, "All has no separators");
+	assert.doesNotMatch(screen(full, control, threads()), /in other threads · show/, "All has no separators");
 });
 
 test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine shows an unrecorded thread; CSS rules", async () => {

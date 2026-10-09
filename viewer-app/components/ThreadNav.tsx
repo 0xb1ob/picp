@@ -32,10 +32,10 @@ export function ThreadChips({threads, control}: {threads: ThreadsView; control?:
  const current = selectedView(threads, status);
  const extra = threads.selected && !live.some(t => t.tag === threads.selected) ? threads.selected : null;
  return <nav class="session-threads" aria-label="Threads">
+  <NewThread threads={threads} control={control} class="session-thread-chip session-thread-new" label="+ New"/>
   <button type="button" class="session-thread-chip" aria-pressed={!threads.selected} onClick={() => threads.select(null)}>All messages</button>
   {live.map(t => <button type="button" key={t.id} class="session-thread-chip" aria-pressed={threads.selected === t.tag} aria-label={threadAria(t)} onClick={() => threads.select(t.tag)}>{t.tag}{threadBadge(t)}{working(t)}</button>)}
   {extra && <button type="button" class="session-thread-chip" aria-pressed="true">{extra}</button>}
-  <NewThread threads={threads} control={control} class="session-thread-chip session-thread-new" label="+ New"/>
   {current && <MarkDone threads={threads} status={status} view={current} class="session-thread-chip session-thread-done"/>}
   <Failed threads={threads}/>
  </nav>;

@@ -174,7 +174,8 @@
 .session-thread-chip .session-thread-working::before { content: " · "; white-space: pre; }
 .session-edge { display: contents; }
 /* `Show N earlier / later`: collapsed separators around a thread's span. */
-.session-edge-toggle { align-self: center; min-height: 44px; margin: 4px 0; padding: 0 14px; background: none; border: 0; border-bottom: 1px dashed var(--border); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.session-edge-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; margin: 4px 0; padding: 0; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.session-edge-toggle::before, .session-edge-toggle::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 @media (min-width: 900px) {
  .session-bar { display: none; }
  /* Frames 06/16: the list is a full-height column flush to the rail with a hairline; the transcript fills the rest edge to edge. */
@@ -204,8 +205,14 @@
  .session-thread-choice[aria-pressed=true] { background: var(--nav-selected); }
  .session-thread-choice strong { min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  .session-thread-row .session-thread-choice strong::before { content: "# "; color: var(--dim); }
- .session-thread-choice { flex-wrap: wrap; }
- .session-thread-choice .session-thread-working { flex-basis: 100%; font-size: 12px; }
+ .session-thread-choice strong { flex: 1; }
+ .session-thread-choice .session-thread-working { flex: none; padding: 1px 7px; font-size: 11px; line-height: 16px; background: var(--surface-2, var(--nav-selected)); border-radius: 999px; }
+ .session-thread-row { border-radius: 8px; }
+ .session-thread-row .session-thread-choice small { display: none; }
+ .session-thread-row:has(.session-thread-choice[aria-pressed=true]) { background: var(--nav-selected); }
+ .session-thread-row .session-thread-choice[aria-pressed=true] { background: none; }
+ .session-thread-row > .session-thread-done { display: none; }
+ .session-thread-row:hover > .session-thread-done, .session-thread-row:focus-within > .session-thread-done, .session-thread-row:has(.session-thread-choice[aria-pressed=true]) > .session-thread-done { display: block; }
  .session-thread-choice small { flex-shrink: 0; font-size: 12px; color: var(--muted); }
  .session-thread-row > .session-thread-done { flex-shrink: 0; min-height: 44px; padding: 0 10px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
  .session-thread-row > .session-thread-done:hover:not(:disabled) { color: var(--text); }

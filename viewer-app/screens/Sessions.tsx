@@ -265,7 +265,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
  const rowList=rows(shown), starts=groupStarts(rowList);
  const renderRows=(list:SessionEntry[])=>{const rl=rows(list), st=groupStarts(rl); return rl.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment>);};
- const edge=(side:"before"|"after",list:SessionEntry[],word:string)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}>Show {list.length} {word}</button>);
+ const edge=(side:"before"|"after",list:SessionEntry[],word:string)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
