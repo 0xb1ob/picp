@@ -30,6 +30,7 @@ const view = (entries: SessionEntry[]): SessionsResponse => ({ generated_at: "",
 test("markdown blocks: paragraphs keep their line breaks; lists, code, tables, quotes and headings are blocks; nothing is HTML", () => {
 	assert.deepEqual(blocks("one\ntwo\n\nthree"), [{ kind: "p", text: "one\ntwo" }, { kind: "p", text: "three" }]);
 	assert.deepEqual(blocks("Summary:\n- a\n- **b**\n  more of b\n1. first"), [{ kind: "p", text: "Summary:" }, { kind: "list", ordered: false, items: ["a", "**b**\nmore of b"] }, { kind: "list", ordered: true, items: ["first"] }]);
+	assert.deepEqual(blocks("- a\n  - a1\n  - a2\n- b\n  1. b1"), [{ kind: "list", ordered: false, items: ["a", "b"], sub: { 0: { kind: "list", ordered: false, items: ["a1", "a2"] }, 1: { kind: "list", ordered: true, items: ["b1"] } } }], "indented items nest under the item above");
 	assert.deepEqual(blocks("```ts\nconst x = 1;\n  indented\n```\nafter"), [{ kind: "code", text: "const x = 1;\n  indented" }, { kind: "p", text: "after" }]);
 	assert.deepEqual(blocks("| a | b |\n| --- | :-: |\n| 1 | `2` |"), [{ kind: "table", head: ["a", "b"], rows: [["1", "`2`"]] }]);
 	assert.deepEqual(blocks("## Title\n> quoted\n> twice"), [{ kind: "heading", text: "Title" }, { kind: "quote", text: "quoted\ntwice" }]);
@@ -184,14 +185,14 @@ test("text files: sent filename/size chips link to plain-text views; arbitrary f
  assert.match(css, /\.session-files \{[^}]*flex-wrap: wrap;/); assert.match(css, /\.session-file-link \{[^}]*min-height: 44px;[^}]*overflow-wrap: anywhere;/);
 });
 
-test("layout: bubbles cap at 85% on a phone and 75% on desktop; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
+test("layout: bubbles are full width on a phone and min(760px, 100%) on desktop; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");
-	assert.match(phone!, /\.session-bubble > \.session-body \{[^}]*max-width: 85%;[^}]*overflow-wrap: anywhere;/);
+	assert.match(phone!, /\.session-bubble > \.session-body \{[^}]*max-width: 100%;[^}]*overflow-wrap: anywhere;/);
 	assert.match(phone!, /\.md \.md-code \{[^}]*max-width: 100%;[^}]*overflow-x: auto;[^}]*white-space: pre;/, "a long code line scrolls inside the bubble");
 	assert.match(phone!, /\.md-table \{ max-width: 100%; overflow-x: auto;/, "a wide table scrolls inside the bubble");
 	assert.match(phone!, /\.session-message\.session-system \{ display: flex;[^}]*background: none; border: 0;/, "system rows are never cards");
-	assert.match(desktop, /\.session-bubble > \.session-who, \.session-bubble > \.session-body \{ max-width: 75%; \}/);
+	assert.match(desktop, /\.session-bubble > \.session-who, \.session-bubble > \.session-body \{ max-width: min\(760px, 100%\); \}/);
 	assert.match(phone!, /\.session-transcript \{ flex: 1; min-height: 0; overflow-y: auto;/, "the transcript is the one scroller");
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*flex-shrink: 0; \}/, "the composer keeps its height at the bottom of the panel");
 });

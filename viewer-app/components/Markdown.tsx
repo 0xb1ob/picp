@@ -10,7 +10,7 @@ export function InlineText({text,links}: {text:string;links?:Links}) {
  return <>{text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part,i)=>i % 2 === 1 && part.startsWith("`") ? <code key={i}><Linked text={part.slice(1,-1)} links={links}/></code> : i % 2 === 1 ? <strong key={i}>{part.slice(2,-2)}</strong> : <Linked key={i} text={part} links={links}/>)}</>;
 }
 
-export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[]} | {kind:"table";head:string[];rows:string[][]};
+export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[];sub?:Record<number,Extract<Block,{kind:"list"}>>} | {kind:"table";head:string[];rows:string[][]};
 const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
 const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const HEADING = /^#{1,6}\s+/;
@@ -19,6 +19,21 @@ const RULE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
 const cells = (line: string) => line.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
 const isTable = (lines: string[], i: number) => ROW.test(lines[i]!) && RULE.test(lines[i+1] ?? "");
 
+const indentOf = (l: string) => /^\s*/.exec(l)![0].length;
+/** One list from its raw lines: an item indented deeper than the first becomes a nested list under the item above it (`sub`, by item index). */
+function buildList(raw: string[]): Extract<Block,{kind:"list"}> {
+ const base = indentOf(raw[0]!), items: string[] = [], deeper: Record<number,string[]> = {};
+ for (const l of raw) {
+  const last = items.length - 1, nested = last >= 0 && indentOf(l) > base;
+  if (nested && (ITEM.test(l) || deeper[last])) (deeper[last] ??= []).push(l);
+  else if (ITEM.test(l)) items.push(l.replace(ITEM,""));
+  else items[last] += `\n${l.trim()}`;
+ }
+ const list: Extract<Block,{kind:"list"}> = {kind:"list",ordered:/^\s*\d/.test(raw[0]!),items};
+ const keys = Object.keys(deeper);
+ if (keys.length) list.sub = Object.fromEntries(keys.map(k => [k,buildList(deeper[+k]!)]));
+ return list;
+}
 /**
  * The chat subset of markdown a transcript message uses: paragraphs (their line breaks kept), fenced code,
  * lists, pipe tables, headings and quotes. Anything else is a paragraph; nothing is ever HTML.
@@ -41,14 +56,14 @@ export function blocks(text: string): Block[] {
    out.push({kind:"table",head,rows}); continue;
   }
   if (ITEM.test(line)) {
-   const items: string[] = [], ordered = /^\s*\d/.test(line);
+   const raw: string[] = [], ordered = /^\s*\d/.test(line);
    for (; i < lines.length && lines[i]!.trim(); i++) {
     const l = lines[i]!;
-    if (ITEM.test(l) && (/^\s/.test(l) || /^\d/.test(l) === ordered)) items.push(l.replace(ITEM,""));
-    else if (/^\s/.test(l)) items[items.length-1] += `\n${l.trim()}`;
+    if (ITEM.test(l) && (/^\s/.test(l) || /^\d/.test(l) === ordered)) raw.push(l);
+    else if (/^\s/.test(l)) raw.push(l);
     else break;
    }
-   out.push({kind:"list",ordered,items}); continue;
+   out.push(buildList(raw)); continue;
   }
   if (HEADING.test(line)) { out.push({kind:"heading",text:line.replace(HEADING,"")}); i++; continue; }
   if (line.startsWith(">")) {
@@ -63,12 +78,16 @@ export function blocks(text: string): Block[] {
  return out;
 }
 
+function MdList({list,links}: {list:Extract<Block,{kind:"list"}>;links?:Links}) {
+ const items = list.items.map((item,j)=><li key={j}><InlineText text={item} links={links}/>{list.sub?.[j] && <MdList list={list.sub[j]!} links={links}/>}</li>);
+ return list.ordered ? <ol>{items}</ol> : <ul>{items}</ul>;
+}
 /** A message body: code blocks and tables scroll sideways inside their own box, never the bubble. */
 export function Markdown({text,links}: {text:string;links?:Links}) {
  return <div class="md">{blocks(text).map((b,i)=>{
   if (b.kind === "code") return <pre key={i} class="md-code"><code>{b.text}</code></pre>;
   if (b.kind === "table") return <div key={i} class="md-table"><table><thead><tr>{b.head.map((c,j)=><th key={j}><InlineText text={c} links={links}/></th>)}</tr></thead><tbody>{b.rows.map((row,k)=><tr key={k}>{row.map((c,j)=><td key={j}><InlineText text={c} links={links}/></td>)}</tr>)}</tbody></table></div>;
-  if (b.kind === "list") { const items = b.items.map((item,j)=><li key={j}><InlineText text={item} links={links}/></li>); return b.ordered ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>; }
+  if (b.kind === "list") return <MdList key={i} list={b} links={links}/>;
   if (b.kind === "quote") return <blockquote key={i}><p><InlineText text={b.text} links={links}/></p></blockquote>;
   if (b.kind === "heading") return <p key={i} class="md-heading"><strong><InlineText text={b.text} links={links}/></strong></p>;
   return <p key={i}><InlineText text={b.text} links={links}/></p>;

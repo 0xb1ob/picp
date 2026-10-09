@@ -81,7 +81,7 @@ test("QA: the operator tier has no Decisions | Full transcript toggle; system en
  assert.match(rendered,/>cp-bridge<\/span><span>bridge<\/span>/);
  assert.match(rendered,/>compaction<\/span>/);
  assert.match(rendered,/Context compacted \(260000 tokens before\)/);
- assert.match(rendered,/Show tool calls \(1\)/,"the transcript header offers the hidden count");
+ assert.match(rendered,/Tools 1/,"the transcript header offers the hidden count");
  assert.match(rendered,/>· 1 tool call ·</,"the long tool call collapses to its one-line run");
  assert.doesNotMatch(rendered,/show all|-TAIL-MARKER/,"its text and its show-all link both stay hidden until shown");
 });

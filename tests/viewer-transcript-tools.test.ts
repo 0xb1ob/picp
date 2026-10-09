@@ -74,7 +74,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	// Hidden by default: no tool entry renders, each run is one faint line with its count.
 	assert.deepEqual(tools(), [], "no tool call renders before the toggle");
 	assert.deepEqual(lines(), ["· 3 tool calls ·", "· 1 tool call ·"], "consecutive calls collapse into one line carrying the hidden count");
-	assert.equal(toggle().textContent, "Show tool calls (4)", "the toggle counts everything the transcript hides");
+	assert.equal(toggle().textContent, "Tools 4", "the toggle counts everything the transcript hides");
 	assert.equal(toggle().getAttribute("aria-pressed"), "false");
 
 	// Messages, notices and cards are never hidden.
@@ -85,7 +85,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools().map(text => /TOOL-\w+/.exec(text)?.[0]), ["TOOL-ONE", "TOOL-TWO", "TOOL-THREE"], "only the clicked run expands");
 	assert.deepEqual(lines(), ["· 3 tool calls ·", "· 1 tool call ·"], "the line stays as that run's collapse handle, and the other run is untouched");
-	assert.equal(toggle().textContent, "Show tool calls (1)");
+	assert.equal(toggle().textContent, "Tools 4", "the count is every tool call, open or not");
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools(), [], "clicking the line again collapses that run");
 
@@ -93,7 +93,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	await click(toggle());
 	assert.equal(tools().length, 4, "every tool call renders once the toggle is on");
 	assert.deepEqual(lines(), [], "no collapse lines while tool calls are shown");
-	assert.equal(toggle().textContent, "Hide tool calls");
+	assert.equal(toggle().textContent, "Tools 4");
 	assert.equal(store.get(KEY), "1", "one key is written when the operator toggles");
 	await act(() => unmount(root));
 	await act(() => mount(root, data));
@@ -102,7 +102,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	// Off again is remembered too.
 	await click(toggle());
 	assert.deepEqual(tools(), []);
-	assert.equal(toggle().textContent, "Show tool calls (4)");
+	assert.equal(toggle().textContent, "Tools 4");
 	assert.equal(store.get(KEY), "0");
 	await act(() => unmount(root));
 	await act(() => mount(root, data));
@@ -116,7 +116,7 @@ test("a long tool call keeps its head and show-all once shown", async (t) => {
 
 	await act(() => mount(root, data));
 	assert.deepEqual(tools(), [], "the long tool call is hidden like any other");
-	assert.equal(toggle().textContent, "Show tool calls (1)");
+	assert.equal(toggle().textContent, "Tools 1");
 
 	await click(toggle());
 	assert.equal(tools().length, 1, "the toggle shows it");
@@ -164,7 +164,7 @@ test("mobile top bar: the ⋯ sheet's tool toggle is the same remembered choice;
 	await click(sheetToggle());
 	assert.equal(tools().length, 1, "the sheet's toggle shows tool calls");
 	assert.equal(store.get(KEY), "1", "and remembers it like the heading toggle");
-	assert.equal(root.querySelector(".session-tools-toggle")!.textContent, "Hide tool calls", "one state behind both toggles");
+	assert.equal(root.querySelector(".session-tools-toggle")!.textContent, "Tools 1", "one state behind both toggles");
 
 	const pinned = () => root.querySelector(".session-pinned")!;
 	const bar = () => root.querySelector(".session-pinned h2 button")!;

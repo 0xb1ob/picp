@@ -267,14 +267,15 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
    {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
    <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context,true)}</section>
-   <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${workerPhase(w)} · ${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${workerPhase(w)} · ${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
+   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
    <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<ContextChip usage={context}/></div>
     {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
-    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
+    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
@@ -286,7 +287,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
-   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} thread={threads}/>}
   </div>
  </div>;

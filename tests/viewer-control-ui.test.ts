@@ -244,7 +244,7 @@ test("layout: the pinned decision block and its cards hold at 390px and 1440px",
 	assert.match(desktop, /\.session-pinned \{ padding: 0 40px; \}/, "the wide layout keeps its 40px inset around a one-line bar");
 	assert.match(phone ?? "", /\.decision-card \{ display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-wrap: anywhere; \}/, "long text wraps inside the card at 390px");
 	assert.match(phone ?? "", /\.decision-card-options \{ display: grid; grid-template-columns: minmax\(0,1fr\);[^}]*\}/, "one option per row at 390px");
-	assert.match(desktop, /\.session-pinned > \* \{ max-width: 780px; \}/, "and the transcript's 780px column at 1440px");
+	assert.match(desktop, /\.session-pinned > \* \{ max-width: min\(760px, 100%\); \}/, "and the transcript's min(760px, 100%) column at 1440px");
 	assert.match(desktop, /\.decision-card-options \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); \}/, "two options per row from 900px up");
 	assert.match(phone ?? "", /\.start-session \{ display: flex; flex-wrap: wrap;[^}]*min-width: 0; \}/, "Start session wraps at 390px");
 	assert.match(phone ?? "", /\.start-session-line \{ flex: 1 1 220px; min-width: 0;[^}]*overflow-wrap: anywhere; \}/, "a long reason wraps instead of widening the page, and sits beside the button at 1440px");

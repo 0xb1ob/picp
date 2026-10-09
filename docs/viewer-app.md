@@ -97,12 +97,11 @@ Decisions page; `transcript=0` still renders the recorded asks, answers, delegat
 and where the transcript is refused with 403 the app falls back to it silently. The Full transcript is
 the operator session's own pi JSONL, entry for entry, as the CLI
 shows it (user and assistant messages, collapsed thinking, tool calls hidden by default behind
-one header toggle — *Show tool calls (N)*, the number still hidden, flipping to *Hide tool
-calls*; the choice is remembered in `localStorage` under one key shared by every view, and a
+one header toggle — *Tools N*, N the tool calls in view (its label names Show/Hide); the choice is remembered in `localStorage` under one key shared by every view, and a
 run of consecutive calls collapses to one faint *· N tool calls ·* line that opens that run
 alone. Messages, notices, system entries and ask cards are never hidden. A
 result truncated behind one *show all*, `cp-bridge` messages marked `bridge`,
-compaction markers, timestamps). A bridge notice is one line, `bridge <verb> <job> · <receipt>` (`wake` reads `woke`; underscores in a receipt become spaces), and a body of more than one line stays in a collapsed disclosure. A say line in this transcript that starts `[<project>] ` drops that prefix when `<project>` is a directory under `projects/`; the name shows as a chip, and any other bracket stays in the text. The session file picker labels each file with its date and time, marks the newest `current`, and puts the file id on the option title. The desktop heading is padded evenly; the tool-call toggle stays in that row and is not clipped. The cp-bridge appends each `PI_SESSION_FILE` it
+compaction markers, timestamps). A bridge notice is one line, `bridge <verb> <job> · <receipt>` (`wake` reads `woke`; underscores in a receipt become spaces), and a body of more than one line stays in a collapsed disclosure. A say line in this transcript that starts `[<project>] ` drops that prefix when `<project>` is a directory under `projects/`; the name shows as a chip, and any other bracket stays in the text. The session file picker labels each file with its date and time, marks the newest `current`, and puts the file id on the option title. The desktop heading is one 48px row (name, ctx percent, session picker, *Tools N*), not sticky, and the sidebar's worker section is *Fleet*; the first message keeps scroll padding so its header is never clipped. The cp-bridge appends each `PI_SESSION_FILE` it
 runs under to `state/sessions/operator-sessions.jsonl` on `cp_parent start`,
 `cp_parent send` and (with dashboard control on) `session_start`, so a relaunch is a new file and the older ones stay
 selectable, newest first. Read-only: a recorded file that is missing or is not a
@@ -267,7 +266,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 
 - **Composer** (`components/OperatorComposer.tsx`): one row — an auto-growing textarea
   (16,000 characters; one line, up to about five before it scrolls; the placeholder
-  carries the hint) and a round send button that does what Enter does. While the
+  carries the hint, `Message #tag (Enter to send)` with a thread selected; the paperclip sits inside the field and a status line reads `Posting to #tag` / `Posting to no thread`) and a round send button that does what Enter does. While the
   session is busy a ⋯ menu beside it holds `Steer now` and `Abort turn` (abort
   needs a second, confirming tap). Enter sends — after this turn while the session
   is busy, a plain send while it is idle — and Shift+Enter starts a new line
@@ -281,7 +280,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   Accepted queued/injected sends settle as `dropped` when their target operator session ends, its recorded transcript file is missing, or their age exceeds the inbox's 24-hour TTL (exactly 24 hours remains queued). New requests record the session start and transcript path; older requests use the serving session's start time. These checks read metadata only. The bridge journals unseen sends as dropped on shutdown; the read-only projection also settles abandoned history after a crash. Dropped dashboard sends remove both journal-recovered and browser-stored bubbles without failure, retry or delivery; genuine failures and inbox drop outcomes retain their existing semantics.
   Browser recovery validates each stored send and dismissal id individually: malformed entries are skipped with a visible warning while valid queued/failed sends and dismissal ids are retained. Unreadable JSON, denied/missing storage and failed writes also show a neutral `role=status`, `aria-live=polite` warning above the transcript. A write failure keeps sends and failures in this view and explicitly warns that browser persistence is unavailable. Recovery warnings remain visible through subsequent sends, retries, discards and transcript/status reconciliation for this view; they do not trigger automatic replay.
   Composer POSTs carry an optional shape-checked `client_id` (`dc-<timestamp>-<8 hex>`), chosen before the request. The current bridge/inbox uses it as the dashboard id so even a transcript that beats the HTTP acknowledgement replaces the sending bubble directly. Retry chooses a fresh id. It is correlation, not automatic retry or an authorization field; old clients without it still receive a server id. A running older bridge may ignore it until the session restarts.
-  Shared attachment interface: `ControlMessageBody` in `src/viewer/api-types.ts` is the message arm of the server's body and viewer `ControlBody`; `PendingSend.body` retains that entire body for retry. Chips, browser persistence and journal projection preserve both `images` and `files` id lists, including mixed sends from the text attachment flow below. Queued bubbles add no upload or file-delivery capability. The pending styles inherit the existing light/dark tokens and 85% phone / 75% desktop bubble widths; controls stay 44 px and long text and ids wrap at 390 px and 1440 px.
+  Shared attachment interface: `ControlMessageBody` in `src/viewer/api-types.ts` is the message arm of the server's body and viewer `ControlBody`; `PendingSend.body` retains that entire body for retry. Chips, browser persistence and journal projection preserve both `images` and `files` id lists, including mixed sends from the text attachment flow below. Queued bubbles add no upload or file-delivery capability. The pending styles inherit the existing light/dark tokens and the bubble widths (100% on a phone, `min(760px, 100%)` from 900 px); controls stay 44 px and long text and ids wrap at 390 px and 1440 px.
 - **Image attachments** (cp-br81; docs/contracts.md §Image attachments): a 44 px
   paperclip before the textarea (only when the status says `images: true`, i.e. the
   session's bridge takes them) opens a hidden `<input type=file multiple
@@ -376,7 +375,7 @@ imported only by `control-api.ts`, the image upload route `operator-upload-api.t
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
-390 px and keeps the composer at the transcript's 780 px column at 1440 px.
+390 px and keeps the composer at the transcript's `min(760px, 100%)` column at 1440 px.
 
 **Schedule controls** (cp-hhuf P6, docs/contracts.md §Schedule controls). The Schedules page reads
 `GET /api/schedules/control` (`use-schedule-control.ts`, on mount, on every refresh and after each send) and shows
@@ -403,14 +402,14 @@ page column at 1440 px.
 **Threads** (cp-xmw2, docs/contracts.md §Operator threads). In Sessions → Operator ↔ you → **Full transcript** the operator
 sorts the one chat into threads: views of one session, never separate contexts, and no model call. `use-threads.ts` reads
 `GET /api/threads` (`threads.ts`) on mount, on every refresh and after each Mark done. One selection, a thread **tag**,
-is kept in `localStorage` `cp-thread` (absent is **All**; a storage that refuses the write warns and the choice holds for
-the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread, plus a `shared` one — a bridge relay, a system entry, the inbox replay — only between that thread's first and last own entry; **All** shows everything), the chips, the
+is kept in `localStorage` `cp-thread` (absent is **All messages**; a storage that refuses the write warns and the choice holds for
+the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread, plus a `shared` one — a bridge relay, a system entry, the inbox replay — only between that thread's first and last own entry; **All messages** shows everything), the chips, the
 sidebar and the composer picker. A tag with no thread yet shows no entries and `No messages in <tag> yet`; its first send creates it. A thread with no own entries shows none either. The pinned "N decisions waiting" section is never filtered. Below 900 px a `<nav
-class="session-threads" aria-label="Threads">` chip row sits right above the composer: **All**, then each thread not
+class="session-threads" aria-label="Threads">` filter line sits directly under the top bar: **All messages**, then each thread not
 done, its label the tag plus a waiting badge (`· 2`, open asks plus unacknowledged answers, spelled out in its
-`aria-label`), `aria-pressed` on the selected one, then **Mark done** for it; 44 px chips, the row scrolls sideways and
+`aria-label`), `aria-pressed` on the selected one, then **Mark done** for it (on the phone it ends the filter line; on desktop it is quiet text on the selected row); 44 px chips, the row scrolls sideways and
 is `display: none` at 900 px and up. There the sidebar gets a **Threads** section under Operator ↔ you (only in the Full
-transcript): **All** first, a row per open or waiting thread, done threads in a collapsed `Done (n)`. **Mark done** (`POST
+transcript): **All messages** first, a row per open or waiting thread, done threads in a collapsed `Done (n)`. **Mark done** (`POST
 /api/threads/done {id}` with the thread token, `x-cp-control-token`) is disabled, with the reason as its title, while the
 thread waits, while control is off and while asks or answers are unreadable; a refusal is an alert (`Not done: …`), a
 success goes back to **All** (a later send or bind reopens the thread). The composer's **Thread** select (`ThreadPicker`
