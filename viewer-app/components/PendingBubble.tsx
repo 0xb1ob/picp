@@ -19,7 +19,7 @@ export function PendingBubble({send,position,total,control}: {send:PendingSend;p
  const save = () => { if (draft === null || busy || (!draft.trim() && !attachments.length)) return; setBusy(true); void control.edit!(send.key,draft).then(settle); };
  const close = () => { setDraft(null); setNote(null); };
  const remove = () => { if (busy) return; setBusy(true); void control.cancel!(send.key).then(settle); };
- return <article class={`session-message session-say session-bubble session-own session-pending${failed ? " session-pending-failed" : ""}`}>
+ return <article class={`session-message session-say session-bubble session-own session-pending${failed ? " session-pending-failed" : ""}${draft === null ? "" : " session-pending-editing"}`}>
   <div class="session-who"><span>You</span>{send.body.thread && <span class="session-project">{send.body.thread}</span>}<time class="session-time" dateTime={send.at}>{time(send.at)}</time></div>
   <div class="session-body">
    <span class="session-pending-badge">{state}</span>
