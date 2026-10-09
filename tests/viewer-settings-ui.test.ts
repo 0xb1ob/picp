@@ -90,7 +90,8 @@ test("three sections exactly; Save posts If-Match, the control token and only th
 	assert.equal(ui.section("Worker models").querySelectorAll("li.settings-rule").length, 6, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
-	await ui.type(parent, "anthropic/claude-opus-5-5");
+	await ui.type(parent, "custom", "change");
+	await ui.type(parent.parentElement!.querySelector("input")!, "anthropic/claude-opus-5-5");
 	await ui.click(people, "Save");
 	assert.equal(posts.length, 1);
 	assert.equal(posts[0]!.url, "/api/settings/apply");
@@ -99,7 +100,7 @@ test("three sections exactly; Save posts If-Match, the control token and only th
 	assert.deepEqual(posts[0]!.body.changes, { "models.parent": "anthropic/claude-opus-5-5" });
 	assert.match(String(posts[0]!.body.request_id), /^[A-Za-z0-9_-]{16}$/);
 	assert.match(ui.root.querySelector(".settings-stale")?.textContent ?? "", /Changed on disk/);
-	assert.equal((people.querySelector("#setting-models-parent") as HTMLInputElement).value, "anthropic/claude-opus-5-5", "the draft survives a 412");
+	assert.equal((people.querySelector("#setting-models-parent")!.parentElement!.querySelector("input") as HTMLInputElement).value, "anthropic/claude-opus-5-5", "the draft survives a 412");
 	await ui.click(people, "Save");
 	assert.equal(posts[1]!.headers["if-match"], `"${"b".repeat(64)}"`, "the retry carries the fresh revision");
 	assert.deepEqual(posts[1]!.body.changes, { "models.parent": "anthropic/claude-opus-5-5" });
@@ -112,10 +113,15 @@ test("rubric edits post the whole row list; restore bodies per section; a 400 li
 	const ui = await page(t, fetcher);
 	const workers = ui.section("Worker models");
 	const first = workers.querySelector("li.settings-rule")!;
-	const [model, fallbacks] = [...first.querySelectorAll("input")];
-	await ui.type(model!, "openai/gpt-6.1-sol");
-	await ui.type(fallbacks!, "a/b, c/d", "change");
-	await ui.type(first.querySelector("select")!, "low", "change");
+	await ui.type(first.querySelector("select")!, "custom", "change");
+	await ui.type(first.querySelector("input")!, "openai/gpt-6.1-sol");
+	await ui.click(first, "×");
+	for (const added of ["a/b", "c/d"]) {
+		await ui.type(first.querySelector("select[aria-label='Add a fallback to risky-any']")!, "custom", "change");
+		await ui.type(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, added, "change");
+	}
+	const thinking = [...first.querySelectorAll("label")].find((label) => label.textContent?.startsWith("Thinking"))!;
+	await ui.type(thinking.querySelector("select")!, "low", "change");
 	await ui.click(workers, "Save");
 	const rows = posts[0]!.body.changes as { "models.rubric": Array<Record<string, unknown>> };
 	const shipped = snap.fields.find((field) => field.key === "models.rubric")!.value as Array<Record<string, unknown>>;
@@ -143,47 +149,94 @@ test("read-only when the session is not writable; an absent routing.json shows o
 	assert.equal(posts.length, 0);
 });
 
-test("model pickers: one datalist of pi's models on every model field; an unlisted value warns but saves; a listed fallback is added", async (t) => {
+const optionTexts = (select: Element) => [...select.querySelectorAll("option")].map((option) => option.textContent);
+
+test("model dropdowns: grouped by provider; (unset) only for parent/operator; an unlisted value is kept; Custom… reveals the input; fallbacks add, remove, cap at 4 and save", async (t) => {
 	const snap = snapshot(true);
-	const { fetcher, posts } = server(() => settings(snap, { available_models: ["anthropic/claude-opus-5-5", "openai/gpt-5"], models_error: null }), () => [200, { status: 200, state: "applied", changes: [] }]);
+	const { fetcher, posts } = server(() => settings(snap, { available_models: ["openai/gpt-5", "anthropic/claude-opus-5-5", "anthropic/claude-haiku-5"], models_error: null }), () => [200, { status: 200, state: "applied", changes: [] }]);
 	const ui = await page(t, fetcher);
-	assert.deepEqual([...ui.root.querySelectorAll("datalist#settings-models option")].map((option) => option.getAttribute("value")), ["anthropic/claude-opus-5-5", "openai/gpt-5"]);
+	assert.equal(ui.root.querySelector("datalist"), null, "no datalist any more");
+	const people = ui.section("Parent and operator models");
+	const parent = people.querySelector("#setting-models-parent")!;
+	assert.equal(parent.tagName, "SELECT");
+	assert.deepEqual([...parent.querySelectorAll("optgroup")].map((group) => [group.getAttribute("label"), [...group.querySelectorAll("option")].map((option) => option.getAttribute("value"))]), [
+		["anthropic", ["anthropic/claude-haiku-5", "anthropic/claude-opus-5-5"]],
+		["openai", ["openai/gpt-5"]],
+	], "providers alphabetical, models alphabetical within each");
+	assert.deepEqual(optionTexts(parent), ["(unset)", "anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "openai/gpt-5", "Custom…"]);
+	assert.ok(people.querySelector("#setting-models-operator"), "the operator model is a dropdown too");
 	const workers = ui.section("Worker models");
 	const first = workers.querySelector("li.settings-rule")!;
-	const [model, , add] = [...first.querySelectorAll("input")];
-	assert.equal(ui.root.querySelectorAll("input[list='settings-models']").length, 6 * 2 + 2, "model + add-fallback per row, parent and operator");
+	const model = first.querySelector("select")!;
+	assert.equal(optionTexts(model)[0], "anthropic/claude-haiku-5", "a rubric model has no (unset)");
+	const fallback = first.querySelector("select[aria-label='Fallback 1 of risky-any']")!;
+	assert.equal(optionTexts(fallback)[0], "openai/gpt-6.1-sol (not in pi's list)", "the unlisted current value stays selectable");
 	const warns = (scope: Element) => [...scope.querySelectorAll(".settings-warn")].map((warn) => warn.textContent);
-	assert.deepEqual(warns(first), ["Not in pi's model list: openai/gpt-6.1-sol. It can still be saved."], "the shipped fallback this machine lacks warns, its value stays shown; the listed model does not");
-	await ui.type(model!, "my/other");
-	assert.equal(warns(first).length, 2, "an unlisted model warns too");
-	await ui.type(model!, "openai/gpt-5");
+	assert.deepEqual(warns(first), ["Not in pi's model list: openai/gpt-6.1-sol. It can still be saved."]);
+	assert.equal(first.querySelector("input"), null, "no text input until Custom…");
+	await ui.type(model, "custom", "change");
+	const custom = first.querySelector("input[aria-label='Model of risky-any: custom id']") as HTMLInputElement;
+	assert.equal(custom.value, "anthropic/claude-opus-5-5", "Custom… opens on the current value");
+	await ui.type(custom, "my/other");
+	assert.equal(warns(first).length, 2, "an unlisted custom model warns too");
+	await ui.type(model, "openai/gpt-5", "change");
+	assert.equal(first.querySelector("input[aria-label='Model of risky-any: custom id']"), null, "picking a listed model closes the custom input");
 	assert.equal(warns(first).length, 1, "a listed value does not warn");
-	await ui.type(add!, "anthropic/claude-opus-5-5", "change");
-	await ui.type(ui.section("Parent and operator models").querySelector("#setting-models-parent")!, "my/custom-model");
-	assert.match(ui.section("Parent and operator models").querySelector(".settings-warn")?.textContent ?? "", /my\/custom-model/);
+	const add = () => first.querySelector("select[aria-label='Add a fallback to risky-any']");
+	assert.equal(optionTexts(add()!)[0], "Add fallback…");
+	await ui.type(add()!, "anthropic/claude-haiku-5", "change");
+	await ui.type(add()!, "anthropic/claude-opus-5-5", "change");
+	await ui.type(add()!, "custom", "change");
+	await ui.type(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, "my/fourth", "change");
+	assert.equal(first.querySelectorAll(".settings-fallback select").length, 4);
+	assert.equal(add(), null, "no Add fallback past 4");
+	await ui.click(first, "×");
+	assert.equal(first.querySelectorAll(".settings-fallback select").length, 3, "× removed one fallback (the saved list below says which)");
+	assert.ok(add(), "Add fallback is back under 4");
+	await ui.type(parent, "custom", "change");
+	await ui.type(parent.parentElement!.querySelector("input")!, "my/custom-model");
+	assert.match(people.querySelector(".settings-warn")?.textContent ?? "", /my\/custom-model/);
 	await ui.click(workers, "Save");
 	const rows = posts[0]!.body.changes as { "models.rubric": Array<{ model: string; fallbacks?: string[] }> };
-	assert.deepEqual([rows["models.rubric"][0]!.model, rows["models.rubric"][0]!.fallbacks?.at(-1)], ["openai/gpt-5", "anthropic/claude-opus-5-5"]);
+	assert.deepEqual([rows["models.rubric"][0]!.model, rows["models.rubric"][0]!.fallbacks], ["openai/gpt-5", ["anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "my/fourth"]]);
+	await ui.click(people, "Save");
+	assert.deepEqual(posts[1]!.body.changes, { "models.parent": "my/custom-model" });
 });
 
-test("model pickers: while the server's first listing runs the page says so, offers free text, and asks again", async (t) => {
+test("model dropdowns: (unset) saves null", async (t) => {
+	const snap = snapshot(true);
+	const { fetcher, posts } = server(() => settings(snap, { available_models: ["openai/gpt-5"], models_error: null }), () => [200, { status: 200, state: "applied", changes: [] }]);
+	const ui = await page(t, fetcher);
+	const people = ui.section("Parent and operator models");
+	await ui.type(people.querySelector("#setting-models-operator")!, "openai/gpt-5", "change");
+	await ui.type(people.querySelector("#setting-models-operator")!, "", "change");
+	await ui.type(people.querySelector("#setting-models-parent")!, "openai/gpt-5", "change");
+	await ui.click(people, "Save");
+	assert.deepEqual(posts[0]!.body.changes, { "models.operator": null, "models.parent": "openai/gpt-5" });
+});
+
+test("model dropdowns: while the server's first listing runs, the current value and Custom… only, then the list after a retry", async (t) => {
 	const snap = snapshot(true);
 	let reads = 0;
 	const { fetcher } = server(() => { reads++; return reads === 1 ? settings(snap, { available_models: null, models_error: null, models_loading: true }) : settings(snap, { available_models: ["openai/gpt-5"], models_error: null }); }, () => [500, {}]);
 	const ui = await page(t, fetcher);
 	assert.equal(ui.section("Worker models").querySelector("p[role=status]")?.textContent, "Loading the model list…");
-	assert.equal(ui.root.querySelector("datalist"), null);
-	for (let i = 0; i < 40 && !ui.root.querySelector("datalist"); i++) await new Promise((done) => setTimeout(done, 100));
-	assert.deepEqual([...ui.root.querySelectorAll("datalist#settings-models option")].map((option) => option.getAttribute("value")), ["openai/gpt-5"], "the retry picked the list up");
+	assert.deepEqual(optionTexts(ui.section("Worker models").querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
+	assert.deepEqual(optionTexts(ui.root.querySelector("#setting-models-parent")!), ["(unset)", "Custom…"]);
+	for (let i = 0; i < 40 && !ui.root.querySelector("optgroup"); i++) await new Promise((done) => setTimeout(done, 100));
+	assert.deepEqual(optionTexts(ui.root.querySelector("#setting-models-parent")!), ["(unset)", "openai/gpt-5", "Custom…"], "the retry picked the list up");
 	assert.equal(ui.section("Worker models").querySelector("p[role=status]"), null);
 });
 
-test("model pickers: an unavailable list leaves free-text inputs and one note", async (t) => {
+test("model dropdowns: an unavailable list keeps each current value plus Custom…, and one note", async (t) => {
 	const snap = snapshot(true);
 	const { fetcher } = server(() => settings(snap, { available_models: null, models_error: "model list unavailable" }), () => [500, {}]);
 	const ui = await page(t, fetcher);
-	assert.equal(ui.root.querySelector("datalist"), null);
-	assert.equal(ui.root.querySelectorAll("input[list]").length, 6 + 2, "the model inputs still offer nothing but text; no add-fallback inputs");
+	assert.equal(ui.root.querySelector("optgroup"), null);
+	const first = ui.section("Worker models").querySelector("li.settings-rule")!;
+	assert.deepEqual(optionTexts(first.querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
+	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!), ["openai/gpt-6.1-sol", "Custom…"]);
+	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Add a fallback to risky-any']")!), ["Add fallback…", "Custom…"]);
 	assert.equal(ui.root.querySelectorAll(".settings-warn").length, 0);
 	assert.match(ui.section("Worker models").querySelector("p[role=status]")?.textContent ?? "", /^Model list unavailable \(model list unavailable\): type a provider\/model\.$/);
 });

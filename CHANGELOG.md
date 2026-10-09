@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Settings: model fields are dropdowns (cp-lol1)
+
+Every model field on `#settings` (rubric row model, each fallback, parent and operator) is now a `<select>` instead of a text input with a `<datalist>`: options grouped by provider from `available_models`, "(unset)" first for parent and operator, an unlisted current value kept as "<id> (not in pi's list)" with its warning, and "Custom…" revealing the text input. Fallbacks are one dropdown each with a ×, plus an "Add fallback…" dropdown (up to 4). No API change. Migration: none. Rollback: revert.
+
 ### Settings: pick models from the ones pi can use (cp-qfe0)
 
 `GET /api/settings` now also returns `available_models` (`provider/id`, from `pi --no-extensions --list-models` through cp-install's parser, cached 5 minutes in the viewer; a failure is cached 30 seconds; the read never waits for pi, it serves the cached list or `models_loading: true` while one background run fills it) or `null` with `models_error`. Every model field on `#settings` offers them in a `<datalist>`, each rubric row has an "add a listed fallback" input, and a value that is not listed shows an inline warning but still saves. With no list the page says so and stays free text. Write-time validation is unchanged. Migration: none. Rollback: revert.
