@@ -73,7 +73,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 
 	// Hidden by default: no tool entry renders, each run is one faint line with its count.
 	assert.deepEqual(tools(), [], "no tool call renders before the toggle");
-	assert.deepEqual(lines(), ["· 3 tool calls ·", "· 1 tool call ·"], "consecutive calls collapse into one line carrying the hidden count");
+	assert.deepEqual(lines(), ["▸ 3 tool calls · Read 42 lines", "▸ 1 tool call · Read 2 lines"], "consecutive calls collapse into one line carrying the hidden count");
 	assert.equal(toggle().textContent, "Tools 4", "the toggle counts everything the transcript hides");
 	assert.equal(toggle().getAttribute("aria-pressed"), "false");
 
@@ -84,7 +84,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	// One run opens alone; the toggle keeps counting what is still hidden.
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools().map(text => /TOOL-\w+/.exec(text)?.[0]), ["TOOL-ONE", "TOOL-TWO", "TOOL-THREE"], "only the clicked run expands");
-	assert.deepEqual(lines(), ["· 3 tool calls ·", "· 1 tool call ·"], "the line stays as that run's collapse handle, and the other run is untouched");
+	assert.deepEqual(lines(), ["▾ 3 tool calls · Read 42 lines", "▸ 1 tool call · Read 2 lines"], "the line stays as that run's collapse handle, and the other run is untouched");
 	assert.equal(toggle().textContent, "Tools 4", "the count is every tool call, open or not");
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools(), [], "clicking the line again collapses that run");

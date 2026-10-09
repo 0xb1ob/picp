@@ -36,8 +36,10 @@
 .session-heading span { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
-.session-tools { display: flex; align-items: center; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--dim); cursor: pointer; }
-.session-tools:hover { color: var(--muted); }
+/* A collapsed run of tool calls: one dashed, bordered row "▸ N tool calls · first summary" (frames 06/16). */
+.session-tools { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; min-height: 40px; margin: 4px 0; padding: 0 12px; background: none; border: 1px dashed var(--border); border-radius: 8px; font: inherit; font-size: 12px; text-align: left; color: var(--muted); cursor: pointer; }
+.session-tools > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; color: var(--dim); }
+.session-tools:hover { color: var(--text); }
 .session-heading > p { display: none; }
 .session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 8px 16px 16px; scroll-padding-top: 16px; }
 .session-entries { max-width: min(760px, 100%); }
@@ -86,9 +88,13 @@
 .session-other { align-items: flex-start; }
 .session-bubble > .session-who { justify-content: flex-start; align-items: baseline; gap: 6px; max-width: 100%; padding: 0 6px; font-size: 12px; color: var(--muted); }
 .session-bubble > .session-body { max-width: 100%; gap: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 18px; overflow-wrap: anywhere; }
-.session-other > .session-body { background: var(--surface); border-top-left-radius: 6px; }
+/* The session's messages are plain text under "Name · HH:MM"; only the prompting side is a bubble (frames 06/16). */
+.session-other > .session-body { padding: 2px 0 0; border: 0; border-radius: 0; background: none; }
+.session-other > .session-who { padding: 0; }
 .session-own > .session-body { background: var(--bubble-own); border-color: var(--bubble-own); border-top-right-radius: 6px; }
-.session-grouped.session-other > .session-body { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.session-own > .session-who { justify-content: flex-end; }
+.session-who > time.session-time::before { content: "· "; }
+.session-avatar { display: none; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; font-size: 9px; color: var(--muted); }
 .session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .session-failed .session-bubble > .session-body { border-color: var(--border); }
 .session-bubble .session-send { margin-top: 4px; }
@@ -164,37 +170,51 @@
 .session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
- .sessions { display: grid; grid-template-columns: 248px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); column-gap: 20px; row-gap: var(--page-header-gap); padding: 0 40px 40px; }
- .sessions > .page-header { display: flex; grid-column: 1 / -1; }
- .session-panel { min-height: 0; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
- .session-sidebar { min-height: 0; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
- .session-sidebar h2 { margin: 0 0 6px; padding: 0 10px; font-size: 12px; color: var(--dim); }
+ /* Frames 06/16: the list is a full-height column flush to the rail with a hairline; the transcript fills the rest edge to edge. */
+ .sessions { position: relative; display: grid; grid-template-columns: 248px minmax(0,1fr); grid-template-rows: 48px minmax(0,1fr); gap: 0; padding: 0; }
+ .sessions > .page-header { display: contents; }
+ .shell .sessions > .page-header > h1 { grid-column: 1; grid-row: 1; display: flex; align-items: center; height: 48px; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--divider); border-right: 1px solid var(--divider); font-size: 14px; font-weight: 500; line-height: 20px; }
+ .sessions > .page-header > .page-header-end { position: absolute; top: 0; right: 8px; z-index: 2; height: 48px; }
+ .sessions .page-header-end .shell-clock { display: none; }
+ .session-panel { grid-column: 2; grid-row: 1 / -1; min-height: 0; border: 0; border-radius: 0; overflow: hidden; }
+ .session-sidebar { grid-column: 1; grid-row: 2; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 8px 0 12px; border-right: 1px solid var(--divider); overflow-y: auto; }
+ .session-sidebar h2 { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 500; color: var(--dim); }
+ .session-sidebar section:first-child > h2 { display: none; }
+ .session-sidebar section:last-child > h2 { text-transform: uppercase; }
  .session-sidebar p { font-size: 12px; color: var(--muted); padding: 10px; }
- .session-choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 10px; text-decoration: none; min-height: 44px; }
+ .session-choice { display: flex; flex-direction: column; gap: 2px; margin: 0 8px; padding: 7px 12px; border-radius: 8px; text-decoration: none; }
  .session-choice[aria-current=page] { background: var(--nav-selected); }
- .session-choice > .session-dot { margin-top: 5px; }
- .session-choice > span:last-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
- .session-choice strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .session-choice-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+ .session-choice strong { min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .session-choice-head > .session-ctx { margin-left: auto; font-size: 12px; color: var(--muted); }
  .session-choice small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  .session-threads { display: none; }
- .session-thread-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
- .session-thread-choice { flex: 1; width: 100%; min-width: 0; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px; background: none; color: var(--text); border: 0; border-radius: 10px; font: inherit; text-align: left; cursor: pointer; }
+ .session-thread-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 8px 0 20px; }
+ .session-thread-choice { flex: 1; width: 100%; min-width: 0; min-height: 32px; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: none; color: var(--text); border: 0; border-radius: 8px; font: inherit; text-align: left; cursor: pointer; }
+ .session-sidebar section[aria-label=Threads] > .session-thread-choice { width: calc(100% - 28px); margin: 0 8px 0 20px; }
  .session-thread-choice[aria-pressed=true] { background: var(--nav-selected); }
- .session-thread-choice strong { max-width: 100%; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- .session-thread-choice small { font-size: 12px; color: var(--muted); }
+ .session-thread-choice strong { min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .session-thread-row .session-thread-choice strong::before { content: "# "; color: var(--dim); }
+ .session-thread-choice small { flex-shrink: 0; font-size: 12px; color: var(--muted); }
  .session-thread-row > .session-thread-done { flex-shrink: 0; min-height: 44px; padding: 0 10px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
  .session-thread-row > .session-thread-done:hover:not(:disabled) { color: var(--text); }
  .session-sidebar details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
  .session-sidebar .session-thread-failed { display: block; padding: 0 10px; white-space: normal; overflow-wrap: anywhere; }
  /* One 48px row: name, ctx percent, session picker, Tools N. Not sticky. */
- .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 48px; padding: 0 16px; flex-shrink: 0; }
- .session-heading > div { flex: 1 1 140px; flex-direction: row; align-items: center; gap: 10px; }
- .session-heading strong { font-size: 15px; }
- .session-heading .session-file-picker { flex: 0 1 auto; max-width: 100%; }
- .session-heading select { max-width: 220px; min-height: 32px; }
- .session-heading > button { min-height: 32px; padding: 0 10px; }
+ /* One 48px row: name, muted ctx %, session picker, quiet Tools N; the shell's status dot and ⋮ sit at its right end. No bar, no boxed button. */
+ .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 48px; padding: 0 84px 0 16px; flex-shrink: 0; }
+ .session-heading > div { flex: 1 1 140px; flex-direction: row; align-items: baseline; gap: 10px; }
+ .session-heading strong { font-size: 15px; font-weight: 500; }
+ .session-heading .session-ctx { font-size: 12px; color: var(--muted); }
+ .session-heading .session-file-picker { flex: 0 1 auto; max-width: 100%; font-size: 0; }
+ .session-heading select { max-width: 160px; min-height: 32px; padding: 0 6px; background: none; border: 0; color: var(--muted); font-size: 12px; }
+ .session-heading > button { min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--muted); }
+ .session-heading > button[aria-pressed=true] { background: none; color: var(--text); }
  .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
- .session-transcript { padding: 16px 24px 24px; }
+ .session-transcript { padding: 12px 24px 16px; }
+ .session-entries { max-width: none; }
+ .session-message.session-other { position: relative; padding-left: 36px; }
+ .session-other > .session-who > .session-avatar { display: flex; position: absolute; left: 0; top: -2px; }
  /* Chat in the 760px column: bubbles at most min(760px,100%) wide; system rows share the tool calls' 56px time column. */
  .session-bubble > .session-who, .session-bubble > .session-body { max-width: min(760px, 100%); }
  .session-message.session-system { gap: 12px; }

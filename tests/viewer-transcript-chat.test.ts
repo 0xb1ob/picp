@@ -61,7 +61,7 @@ test("bubbles: own on the right, the session on the left, grouped under one head
 		"session-message session-say session-bubble session-own",
 	], "a hidden tool run never splits a group; a 27-minute gap and a change of author do");
 	const hm = (at: string) => time(`2026-10-04T${at}:00Z`);
-	assert.deepEqual(bubbles.map(b => b.querySelector(".session-who")?.textContent ?? null), [`Operator${hm("14:00")}`, null, `Assistant${hm("14:02")}`, null, `Assistant${hm("14:30")}`, `Operator (dashboard)dashboard${hm("14:00")}`], "one header per group, its time once");
+	assert.deepEqual(bubbles.map(b => b.querySelector(".session-who")?.textContent ?? null), [`You${hm("14:00")}`, null, `OPOperator${hm("14:02")}`, null, `OPOperator${hm("14:30")}`, `Youdashboard${hm("14:00")}`], "one header per group, its time once; the person is You, the session Operator with its initials");
 	const md = bubbles[2]!;
 	assert.equal(md.querySelectorAll("ul > li").length, 2);
 	assert.equal(md.querySelector("li strong")?.textContent, "one");
