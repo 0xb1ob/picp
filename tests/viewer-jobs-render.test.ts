@@ -198,6 +198,9 @@ test("Board shares status columns and mandate filters, complete flight facts, an
  assert.doesNotMatch(root.querySelector('[role="listbox"]')!.textContent ?? "",/md-gone/);
  await click(root.querySelector('[role="switch"]')!);
  assert.match(root.querySelector('[role="listbox"]')!.textContent ?? "",/md-gone/);
+ await click(root.querySelector("#board-opt-md-gone")!);
+ assert.match(root.textContent ?? "",/Nothing here/,"a revoked mandate has no live lane, so selecting it shows no jobs");
+ await click(root.querySelector(".board-trigger")!);
  const filter=root.querySelector('input[aria-label="Filter mandates"]') as HTMLInputElement;
  filter.value="paused";
  await act(()=>filter.dispatchEvent(new window.Event("input",{bubbles:true})));

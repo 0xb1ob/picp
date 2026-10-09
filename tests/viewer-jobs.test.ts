@@ -96,6 +96,10 @@ test("audit P2 #10/#11: a held job's stale failure is not shown, and a lane whos
  const board=boardView(state,now);
  assert.deepEqual(board.lanes.map(l=>[l.id,l.status,l.active]),[["md-open","active",true],["md-done","closed",false]],"the Map's completion rule: closed, sorted below active");
  assert.equal(board.jobs.find(j=>j.id==="cp-shut")?.board_lane_id,"md-done","a closed lane keeps its landed job");
+ put(join(LAYOUT.mandates,"md-gone.json"),{id:"md-gone",status:"revoked",issued_at:at,revoked_at:"2026-09-20T12:00:00Z",expiry:"2099-01-01T00:00:00Z",projects:["demo"],objective:"Old work",spend_cap:{usd:1}});
+ const withGone=boardView(state,now);
+ assert.deepEqual(withGone.hidden_mandates,[{id:"md-gone",status:"revoked",objective:"Old work"}],"a revoked non-lane is offered; the lanes md-open and md-done are not");
+ assert.equal(withGone.revoked_hidden,1);
  put(LAYOUT.fleetFile,{jobs:[{job_id:"cp-held",project:"demo",kind:"ship",phase:"failed",dispatched_at:at,failure}]});
  assert.equal(jobsView(state,now).jobs.find(j=>j.id==="cp-held")?.failure,"503 upstream","a failed job still shows its failure");
 });
