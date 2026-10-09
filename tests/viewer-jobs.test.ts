@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { createViewer } from "../src/viewer/server.ts";
 import { jobsView, jobView, boardView, jobEvents } from "../src/viewer/jobs-view.ts";
-import type { JobsResponse, JobResponse, BoardResponse } from "../src/viewer/api-types.ts";
+import type { JobsResponse, JobResponse, BoardResponse, JobTranscriptResponse } from "../src/viewer/api-types.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
@@ -190,4 +190,57 @@ test("job detail links newest published revisions for every matching job set", t
  assert.deepEqual(jobView(state,"cp-report")?.reports.map(r=>[r.slug,r.href]),[["shared","/boards/shared/"],["new","/boards/new/"]]);
  assert.deepEqual(jobView(state,"cp-none")?.reports,[]);
  assert.equal(jobView(state,"cp-missing"),undefined);
+});
+
+test("GET /api/job/:id/transcript reads a torn-down job's worker session read-only; no session is a 200 warning; unknown id is 404", async t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,typeof value==="string"?value:JSON.stringify(value));};
+ const at="2026-09-26T12:00:00Z";
+ const line=(role:string,content:unknown,i:number)=>JSON.stringify({type:"message",timestamp:new Date(Date.parse(at)+i*1000).toISOString(),message:{role,content}});
+ const session=(join(home.path,LAYOUT.state,"sessions","cp-done.jsonl"));
+ const lines=[line("user","The brief",0),...Array.from({length:400},(_,i)=>line("assistant",[{type:"text",text:`step ${i}`}],i+1))];
+ put(join(LAYOUT.state,"sessions","cp-done.jsonl"),lines.join("\n")+"\n");
+ put(join(LAYOUT.state,"sessions","cp-small.jsonl"),[line("user","Small brief",0),line("assistant",[{type:"text",text:"hello"}],1)].join("\n")+"\n");
+ const ids=["cp-done","cp-small","cp-gone","cp-outside","cp-script"];
+ put(".pi-command-post/jobs.json",{jobs:[...ids,"cp-ledger-only"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"],...(id==="cp-done"?{description:"Why this  job exists\nSecond line"}:{})}))});
+ put(LAYOUT.fleetFile,{jobs:ids.map(job_id=>({job_id,project:"demo",kind:"ship",phase:"done",dispatched_at:at,closed_at:at,...(job_id==="cp-script"?{executor:"script"}:{})}))});
+ put(join(LAYOUT.runs,"cp-done/status.json"),{session_file:session});
+ put(join(LAYOUT.runs,"cp-small/status.json"),{session_file:join(home.path,LAYOUT.state,"sessions","cp-small.jsonl")});
+ put(join(LAYOUT.runs,"cp-gone/status.json"),{session_file:join(home.path,LAYOUT.state,"sessions","missing.jsonl")});
+ put("outside.jsonl",line("user","secret",0)+"\n");
+ put(join(LAYOUT.runs,"cp-outside/status.json"),{session_file:join(home.path,"outside.jsonl")});
+ put(join(LAYOUT.mandates,"md-a.json"),{id:"md-a",status:"active",issued_at:at,expiry:"2099-01-01T00:00:00Z",projects:["demo"],objective:"Goal  A\nline two",job_ids:["cp-done"],spend_cap:{usd:20,tokens:10000}});
+ const options={home:home.path,stateDir:join(home.path,LAYOUT.state),host:"127.0.0.1",port:0};
+ const server=createViewer(options); await new Promise<void>(r=>server.listen(0,options.host,r)); options.port=(server.address() as AddressInfo).port; t.after(()=>server.close());
+ const get=(path:string)=>fetch(`http://127.0.0.1:${options.port}${path}`);
+ const body=async (id:string)=>{const r=await get(`/api/job/${id}/transcript`);assert.equal(r.status,200,id);return await r.json() as JobTranscriptResponse;};
+ const small=await body("cp-small");
+ assert.deepEqual(small.entries.map(e=>[e.who,e.text]),[["Parent","Small brief"],["Worker","hello"]]);
+ assert.equal(small.warning,null);assert.equal(small.truncated,false);assert.equal(small.from,small.entries[0]!.at);assert.equal(small.to,small.entries[1]!.at);
+ const big=await body("cp-done");
+ assert.equal(big.entries.length,301,"window 300 plus the brief the window cut");
+ assert.deepEqual([big.entries[0]!.who,big.entries[0]!.text],["Parent","The brief"]);assert.equal(big.entries.at(-1)!.text,"step 399");assert.equal(big.truncated,true);
+ for(const id of ["cp-gone","cp-outside","cp-script","cp-ledger-only"]){const r=await body(id);assert.deepEqual([r.entries,r.warning],[[],"No worker session recorded"],id);}
+ assert.doesNotMatch(JSON.stringify(await body("cp-outside")),/secret/,"a session file outside state/sessions is never read");
+ assert.equal((await get("/api/job/cp-missing/transcript")).status,404);
+ assert.equal((await get("/api/job/%2e%2e%2fsecret/transcript")).status,404);
+ assert.equal((await fetch(`http://127.0.0.1:${options.port}/api/job/cp-done/transcript`,{method:"POST"})).status,405);
+ const detail=await (await get("/api/job/cp-done")).json() as JobResponse;
+ assert.equal(detail.description,"Why this  job exists\nSecond line","stored spaces and line breaks reach the API untouched");
+ assert.deepEqual(detail.mandate,{id:"md-a",status:"active",objective:"Goal  A\nline two",spend_usd:detail.mandate!.spend_usd,cap_usd:20,jobs:detail.mandate!.jobs});
+ assert.equal((await (await get("/api/job/cp-small")).json() as JobResponse).mandate,null);
+});
+
+test("detail summary is the envelope headline cut at 600 chars; the list keeps 80", t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const state={home:home.path,stateDir:join(home.path,LAYOUT.state)}, at="2026-09-26T12:00:00Z";
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};
+ put(".pi-command-post/jobs.json",{jobs:["cp-long","cp-fit"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo"]}))});
+ put(LAYOUT.fleetFile,{jobs:["cp-long","cp-fit"].map(job_id=>({job_id,project:"demo",phase:"done",dispatched_at:at,closed_at:at}))});
+ put(join(LAYOUT.runs,"cp-long/envelope.json"),{envelope:{summary:`\n${"y".repeat(700)}\nsecond`}});
+ put(join(LAYOUT.runs,"cp-fit/envelope.json"),{envelope:{summary:"z".repeat(600)}});
+ const long=jobView(state,"cp-long",Date.parse(at))!.job.summary!;
+ assert.equal(long.length,600); assert.equal(long,`${"y".repeat(599)}…`);
+ assert.equal(jobView(state,"cp-fit",Date.parse(at))!.job.summary,"z".repeat(600),"exactly 600 is not cut");
+ assert.equal(jobsView(state,Date.parse(at)).jobs.find(j=>j.id==="cp-long")!.summary,`${"y".repeat(79)}…`);
 });

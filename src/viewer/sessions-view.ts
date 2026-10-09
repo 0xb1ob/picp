@@ -1,6 +1,6 @@
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
+import type { JobTranscriptResponse, SessionEntry, SessionsResponse, SessionTier, TranscriptAsk } from "./api-types.ts";
 import { listBoards } from "./boards.ts";
 import { isAskId, parseDashboardText, readThreads, readUploadMetadata } from "./control-files.ts";
 import { assignThreads, INBOX_REPLAY_PREFIX } from "./thread-turns.ts";
@@ -217,6 +217,22 @@ function transcript(state: ViewerState, id: string) {
  const window = windowed(result.value.entries);
  attachNoticePaths(state,window.entries);
  return {entries:window.entries,truncated:result.value.truncated || window.cut,warning:result.availability === "ok" ? null : "Transcript unavailable"};
+}
+
+/**
+ * A job's worker transcript for the job page: the same safe session resolution as the Sessions tier, but keyed by job id
+ * alone, so a done or torn-down job still reads. No recorded session (script job, no file, path outside the roots) is a
+ * 200 with a warning, never an error. When the 300-entry window cut the brief, the first Parent message is kept in front.
+ */
+export function readWorkerTranscript(state: ViewerState, id: string): JobTranscriptResponse {
+ const file = resolveSessionFile(state,id);
+ if (!file) return {entries:[],truncated:false,warning:"No worker session recorded",from:null,to:null};
+ const result = source(() => parseTranscript(state,file,SIDES.workers),{entries:[] as SessionEntry[],truncated:false});
+ const all = result.value.entries, window = windowed(all);
+ const brief = window.cut && !window.entries.includes(all[0]!) ? all.find(e => e.kind === "say" && e.who === SIDES.workers.user) : undefined;
+ const entries = brief && !window.entries.includes(brief) ? [brief,...window.entries] : window.entries;
+ attachNoticePaths(state,entries);
+ return {entries,truncated:result.value.truncated || window.cut,warning:result.availability === "ok" ? null : "Transcript unavailable",from:entries[0]?.at || null,to:entries.at(-1)?.at || null};
 }
 
 export interface SessionsOptions {
