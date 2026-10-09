@@ -83,11 +83,10 @@ There is no catch-all SPA route across APIs, published boards or files. The
 Mandates page is removed: Map lanes carry every grant, and `#mandates` and
 `#overview/mandates` fall back to Overview like any unknown fragment.
 
-Navigation (dashboard audit P4): the desktop sidebar has six items — Overview, Decisions (with the
-awaiting badge), Jobs, Sessions, Reports, More — and the phone tab bar five: Overview, Decisions, Jobs,
+Navigation (dashboard audit P4): the desktop sidebar has seven items — Overview, Decisions (with the
+awaiting badge), Jobs, Sessions, Reports, Settings, More — and the phone tab bar five: Overview, Decisions, Jobs,
 Sessions, More, with Reports under More on phone only. Jobs carries a List | Board | Map toggle on all
-three views, and Board and Map light the Jobs item. More holds Schedules, Files, Settings and Notifications on
-both layouts. Decisions is one page (`/api/decisions`, the Awaiting asks as `items` plus the Decided log
+three views, and Board and Map light the Jobs item. More holds Schedules, Files and Notifications on both layouts, and Reports and Settings on phone only. Decisions is one page (`/api/decisions`, the Awaiting asks as `items` plus the Decided log
 as `decided`): the one-click Awaiting you cards on top, then "Being handled · N (oldest Xm)" — the
 parent's questions the operator session is still handling, collapsed, amber past 10 minutes, and
 hidden when there are none — then the Decided log, two tabs (Decided for you / Answered by you) with counts for the Today/All range. Worth a look filters only the for-you tab, and only rows whose recorded basis is the operator's own judgement. `/api/awaiting` and `/api/decided` stay.
@@ -129,7 +128,7 @@ than importing `src/main-ci.ts`; workers live / slots summed from active grants'
 watchdog's last run (Start session beside it while the operator is offline, Restart session while it runs), Needs you (count plus
 at most three lines, or one Nothing needs you line), Blocked & failed (dependency blocks plus every
 `failed` fleet job with its failure headline in 80 chars; hidden when empty), In flight (one line
-per job: elapsed/limit, context, review and CI, the short model, and cost when recorded; a held row leads with the one fact that matters — CI red, CI running, review N/5, or CI green — and a project tag once more than one project has work). A blocker names that job's in-flight phase, or "no run status" instead of waiting. Needs you, when empty, links N decided today · X for you, Y by you. Landed today rows read `#<n> ↗ merged <sha7>` plus the cost (N merged · M closed without PR, the same total as the Board's Landed today column; the heading carries the merged jobs' total cost — worker plus reviewer — capped at five rows with "N more in Jobs →"). Jobs filters are All / In flight / Done today, one line. Done today is newest first, grouped by project in the order of each project's newest job (`<project> · N merged · M closed without PR · $cost`, five rows, then "Show N more from <project>"). Projects with nothing done today share one line. Finished rows have no context chip. The shell shows one time, the data's `generated_at` in the browser's own zone: on a phone, `live · HH:MM <zone>` inside the header on main screens and `HH:MM <zone>` on a subpage or job page; on a desktop, an in-flow bar at the top of the page reads `updated HH:MM:SS <zone>` beside ⋮. There is no second clock and no fixed overlay.
+per job: elapsed/limit, context, review and CI, the short model, and cost when recorded; a held row leads with the one fact that matters — CI red, CI running, review N/5, or CI green — and a project tag once more than one project has work). A blocker names that job's in-flight phase, or "no run status" instead of waiting. Needs you, when empty, links N decided today · X for you, Y by you. Landed today rows read `#<n> ↗ merged <sha7>` plus the cost (N merged · M closed without PR, the same total as the Board's Landed today column; the heading carries the merged jobs' total cost — worker plus reviewer — capped at five rows with "N more in Jobs →"). Jobs filters are All / In flight / Done today, one line. Done today is newest first, grouped by project in the order of each project's newest job (`<project> · N merged · M closed without PR · $cost`, five rows, then "Show N more from <project>"). Projects with nothing done today share one line. Finished rows have no context chip. The shell shows one time, the data's `generated_at` in the browser's own zone: on a phone, a dot + `HH:MM` inside the header on main screens (`stale · HH:MM` / `offline · HH:MM` otherwise; the full time with zone is its title) and `HH:MM <zone>` on a subpage or job page; on a desktop, the 48px header row reads `updated HH:MM` beside ⋮. There is no second clock and no fixed overlay.
 
 
 **Job page** (`#job/<id>`). The phone header already has back and the id. At 900px and up, a breadcrumb `← Jobs` / the id sits above the title. Facts do not use a dash: the head is a 7-character sha with a copy button, or "no commits yet"; the PR is `#<n> ↗ <status>` (merged adds `as <sha7>` and a copy of the merge sha), or "none yet"; CI is `<state> on <sha7>` (from the CI watch, or from the last recorded CI event for this head once the watch has dropped a merged job), or "not run yet" when neither exists; review is `N / 5 · verdict`, or "not started · 0 / 5"; the model is the short name plus its provider; context is the chip, including the last compaction time, or "none"; the mandate links to `#map`, or "none"; cost is the recorded amount, or "not recorded". Fact text is 13px. The title is 17px below 900px and 22px from there up.
@@ -477,7 +476,7 @@ Playwright entirely. Search now uses those same icons; no icon package was added
 Palette literals live only in `styles/tokens.css`; `tests/viewer-palette.test.ts`
 has an independently evidenced fixed palette and rejects functional-color and
 inline-style bypasses. All type sizes are fixed; letter spacing is zero.
-Phone is below 900px; desktop has a 232px sidebar. Dense job tracks scroll inside
+Phone is below 900px; desktop has a 208px sidebar. Dense job tracks scroll inside
 the table, not the page. More remains a centered max-width 390px column. At
 900px and up Jobs is a column table (job, title, phase, model, CI, cost, time;
 model and time fold into the detail line below 1200px), Job detail splits into
@@ -485,13 +484,7 @@ summary + timeline and a facts column, Reports is a card grid, and Files takes
 the listing into a right column; the phone layout is unchanged. Native
 progress values replace inline percentage styles under the strict CSP.
 
-All eight unmodified WOFF2 subset binaries come from screen 00. `fonts.css`
-preserves the export's unicode ranges, Instrument Sans weights 400/500/600 and
-JetBrains Mono weights 400/500, with font-display swap. Matching notices are
-included beside the font files, with original copyright lines:
-
-- Instrument Sans: https://raw.githubusercontent.com/google/fonts/main/ofl/instrumentsans/OFL.txt
-- JetBrains Mono: https://raw.githubusercontent.com/google/fonts/main/ofl/jetbrainsmono/OFL.txt
+Type uses the system font stacks from doc 00 (`--font-sans`, `--font-mono` in `tokens.css`); no font files ship.
 
 ## Conventions For Following Beads
 

@@ -1,22 +1,22 @@
 * { box-sizing: border-box; letter-spacing: 0; }
-body { margin: 0; color-scheme: dark; scrollbar-color: var(--faint) var(--background); background: var(--page); font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+body { margin: 0; color-scheme: dark; scrollbar-color: var(--faint) var(--background); background: var(--page); font-family: var(--font-sans); color: var(--text); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
 /* No zooming (operator 2026-09-27): no double-tap zoom anywhere in the app. */
 html, body { touch-action: manipulation; }
 a { color: inherit; }
 a:hover { color: var(--hover); }
-code, pre { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+code, pre { font-family: var(--font-mono); }
 button { font: inherit; color: inherit; }
 button, a, [role=link] { -webkit-tap-highlight-color: transparent; }
 button:not([aria-disabled=true]):not(:disabled), a { cursor: pointer; }
 [aria-disabled=true] { opacity: 0.6; cursor: default; }
-:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 svg { flex-shrink: 0; }
 h1, h2, h3, p { margin: 0; }
-h1 { font-size: 28px; font-weight: 600; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; }
 h2 { font-size: 13px; font-weight: 600; color: var(--muted); }
 h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: var(--background); overflow: hidden; }
-.shell-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 56px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; }
+.shell-header { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 48px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; }
 .shell-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .shell-brand code { font-size: 13px; font-weight: 500; }
 .shell-header .shell-brand { min-width: 0; flex-shrink: 1; }
@@ -28,10 +28,12 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-live-live > span { background: var(--green); }
 .shell-live-stale > span, .shell-live-offline > span { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .shell-search, .shell-back { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 10px; }
-.shell-clock { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.shell-clock { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
 /* The main content's one header row (PageHeader), desktop only: below 900 px it is transparent and only its <h1> shows, in the screen's own flow. */
 .page-header { display: contents; }
 .page-header-back, .page-header-detail, .page-header-end, .page-header-fallback { display: none; }
+/* The context pill beside the title (S2/S9 fill it); shown on phone too. */
+.page-header-context { display: inline-flex; align-items: center; flex-shrink: 0; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 /* The ⋮ menu (Restart session): a 44px button, and a popover that never outgrows the viewport. */
 .shell-more { position: relative; flex-shrink: 0; }
 .shell-more > summary { width: 44px; height: 44px; position: relative; display: flex; align-items: center; justify-content: center; list-style: none; cursor: pointer; border-radius: 10px; color: var(--muted); }
@@ -42,7 +44,9 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 .shell-more-row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 14px; text-align: left; text-decoration: none; overflow-wrap: anywhere; }
 .shell-more-row > svg { color: var(--muted); }
 .shell-more-row > span { flex: 1; min-width: 0; }
-.shell-more-row > small { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--dim); }
+.shell-more-row > small { font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
+.shell-more-restart { border-top: 1px solid var(--divider); margin-top: 6px; padding-top: 6px; }
+.shell-more-panel .operator-restart-button { border: 0; background: transparent; color: var(--muted); min-height: 44px; }
 .shell-more-footer { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 6px; }
 .shell-more-scrim { display: none; }
 .shell-more-status { min-height: 0; margin: 0; padding: 0 10px; font-size: 12px; color: var(--muted); }
@@ -66,7 +70,7 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 /* iOS zooms into any focused field under 16px; every field on mobile stays at 16px or more. */
 @media (max-width: 899px) {
  input, textarea, select { font-size: 16px !important; }
- .shell-more-scrim { display: block; position: fixed; inset: 56px 0 0; z-index: 4; background: var(--page); opacity: 0.8; }
+ .shell-more-scrim { display: block; position: fixed; inset: 48px 0 0; z-index: 4; background: var(--page); opacity: 0.8; }
 }
 /* The session screen owns its own compact top bar and composer on mobile: no global header, no bottom nav. */
 .shell:has(> .shell-main > .sessions) > .shell-header, .shell:has(> .shell-main > .sessions) > .shell-tabs { display: none; }
@@ -94,20 +98,20 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
 @media (min-width: 900px) {
  .shell { flex-direction: row; }
  .shell-header, .shell-tabs { display: none; }
- .shell-sidebar { display: flex; flex-direction: column; gap: 20px; padding: 20px 12px; width: 232px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
+ .shell-sidebar { display: flex; flex-direction: column; gap: 20px; padding: 16px 10px; width: 208px; flex-shrink: 0; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
  .shell-sidebar .shell-brand { padding: 0 8px; height: 23px; }
  .shell-desktop-search { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; }
- .shell-desktop-search kbd { margin-left: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--dim); }
+ .shell-desktop-search kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
  .shell-sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
- .shell-sidebar-nav > a, .shell-sidebar-nav > span { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 10px; border-radius: 10px; text-decoration: none; font-size: 14px; color: var(--muted); }
+ .shell-sidebar-nav > a, .shell-sidebar-nav > span { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 0 10px; border-radius: 8px; text-decoration: none; font-size: 14px; color: var(--muted); }
  .shell-sidebar-nav [aria-current=page] { background: var(--nav-selected); color: var(--text); }
  .shell-sidebar-nav .shell-nav-icon { padding: 0; }
- .shell-sidebar-nav .shell-count { left: 130px; right: auto; }
+ .shell-sidebar-nav .shell-count { left: 106px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
- .shell-main { min-width: 0; padding: 0 40px 48px; }
+ .shell-main { min-width: 0; padding: 0 32px 48px; }
  /* One compact row on the page surface: title left, status and ⋮ right, a hairline under it. */
- .page-header { display: flex; align-items: center; gap: 10px; height: 56px; min-width: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
- .shell .page-header > :is(h1, p) { order: 0; min-width: 0; margin: 0; font-size: 19px; font-weight: 600; line-height: 1.3; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ .page-header { display: flex; align-items: center; gap: 10px; height: 48px; min-width: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+ .shell .page-header > :is(h1, p) { order: 0; min-width: 0; margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
  .page-header-back { display: flex; align-items: center; gap: 10px; min-height: 44px; flex-shrink: 0; font-size: 19px; font-weight: 600; color: var(--muted); text-decoration: none; }
  .page-header-back::after { content: "/"; font-weight: 400; color: var(--faint); }
  .page-header-detail { display: block; flex-shrink: 0; max-width: 40%; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

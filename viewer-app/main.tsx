@@ -1,7 +1,6 @@
 import { render } from "preact";
 import { App } from "./app.tsx";
 import "./styles/tokens.css";
-import "./styles/fonts.css";
 import "./styles/shell.css";
 import "./components/search.css";
 import "./components/context.css";

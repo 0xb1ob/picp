@@ -118,7 +118,7 @@ test("desktop page header: one row per page with a short updated time, the ⋮ m
  assert.ok(fallback.querySelector(".page-header-end > .shell-live-live > span"),"the live dot stays");
  const clock = fallback.querySelector(".page-header-end time")!;
  assert.equal(clock.getAttribute("datetime"),"2026-10-06T08:30:00Z");
- assert.match(clock.textContent ?? "",/^Updated \d\d:\d\d$/,"no seconds, no zone");
+ assert.match(clock.textContent ?? "",/^updated \d\d:\d\d$/,"no seconds, no zone");
  assert.match(clock.getAttribute("title") ?? "",/^Updated \d\d:\d\d:\d\d/,"the full time is its title");
  assert.ok(fallback.querySelector(".page-header-end > .shell-more:last-child"),"⋮ is the row's last item");
  assert.equal(bare.querySelectorAll("h1").length,0);
@@ -201,11 +201,11 @@ test("desktop page header CSS: a compact hairline row, transparent below 900 px,
  assert.match(phone,/\.page-header-back, \.page-header-detail, \.page-header-end, \.page-header-fallback \{ display: none; \}/);
  assert.doesNotMatch(phone,/\.shell-main:has\(> \.page-header-fallback\)/,"the fallback flex column is desktop-only");
  const row = /\n \.page-header \{([^}]*)\}/.exec(desktop)?.[1] ?? "";
- assert.match(row,/height: 56px/);
+ assert.match(row,/height: 48px/);
  assert.match(row,/border-bottom: 1px solid var\(--border\)/,"a hairline in the existing border token");
  assert.doesNotMatch(row,/background|position|z-index|margin/,"on the page surface, in flow");
- assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 19px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
- assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 40px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
+ assert.match(desktop,/\.shell \.page-header > :is\(h1, p\) \{[^}]*font-size: 20px; font-weight: 600;[^}]*text-overflow: ellipsis;/);
+ assert.match(desktop,/\.shell-main \{ min-width: 0; padding: 0 32px 48px; \}/,"the row sits at the top, in the content's horizontal padding");
  assert.match(desktop,/\.shell-main:has\(\.page-header:not\(\.page-header-fallback\)\) > \.page-header-fallback \{ display: none; \}/);
  assert.match(desktop,/--page-header-gap: 24px/);
  assert.match(desktop,/\.page-header-fallback \{ margin-bottom: var\(--page-header-gap\); \}/);

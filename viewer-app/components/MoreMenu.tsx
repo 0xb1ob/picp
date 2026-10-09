@@ -42,8 +42,8 @@ export function MoreMenu({control, version = {view:null, error:null}, updatedAt 
    <button type="button" class="shell-more-row" onClick={copy}><Icon name="copy" size={18}/><span>Copy link to this view</span></button>
    <p class="shell-more-status" role="status">{copied ?? ""}</p>
    <a class="shell-more-row" href="#more"><Icon name="notifications" size={18}/><span>Notifications</span><small>{push ? pushShort(push.phase) : "Checking"}</small></a>
-   <div class="shell-more-footer"><div class="shell-more-version"><span>Viewer</span><VersionBadge state={version} labelled/></div>
-   {control && restartShown(control) && <RestartSession control={control}/>}</div>
+   <div class="shell-more-footer"><div class="shell-more-version"><span>Viewer</span><VersionBadge state={version} labelled/></div></div>
+   {control && restartShown(control) && <div class="shell-more-restart"><RestartSession control={control}/></div>}
   </div>}
  </details></>;
 }
