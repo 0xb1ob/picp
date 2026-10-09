@@ -2,7 +2,7 @@ import type { Question, SourceAvailability } from "../../src/viewer/api-types.ts
 import { elapsed } from "../format.ts";
 import { jobHref } from "../routes.ts";
 export function DecisionKinds() {
- return <section class="decision-kinds"><h2>What comes here</h2><ul>{["Irreversible actions","Raising a USD spending cap","Real scope changes","Work on paused projects","Unclear product questions"].map(kind => <li key={kind}>{kind}</li>)}</ul><p>Everything else falls under your standing delegation and shows up in <a href="#decided">Decided</a>.</p></section>;
+ return <section class="decision-kinds"><h2>What comes to you</h2><ul>{["Irreversible actions","Raising a USD spending cap","Real scope changes","Work on paused projects","Unclear product questions"].map(kind => <li key={kind}>{kind}</li>)}</ul><p>Everything else falls under your standing delegation and shows up in <a href="#decided">Decided</a>.</p></section>;
 }
 export function WorthExplanation() {
  return <section class="decision-worth-note" aria-label="About Worth a look"><h2><span class="decision-diamond"/>Worth a look</h2><p>Answers given on the operator&rsquo;s own judgement, rather than your words or a standing order. It is a reading filter, not a request for approval.</p><p>The basis beside each answer shows what it rests on.</p></section>;
