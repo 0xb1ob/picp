@@ -192,6 +192,7 @@
  .session-heading strong { font-size: 15px; }
  .session-heading .session-file-picker { flex: 0 1 auto; max-width: 100%; }
  .session-heading select { max-width: 220px; min-height: 32px; }
+ .session-heading > button { min-height: 32px; padding: 0 10px; }
  .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
  .session-transcript { padding: 16px 24px 24px; }
  /* Chat in the 760px column: bubbles at most min(760px,100%) wide; system rows share the tool calls' 56px time column. */
