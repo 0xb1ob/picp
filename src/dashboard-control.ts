@@ -255,10 +255,10 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			clicks.set(askId, { at: now().getTime(), id });
 		}
 		// cp-y43c: busy, or behind an earlier queued message: the dashboard holds it (journaled) until the session settles.
-		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0)) {
-			const held = outcome(id, kind, null, peer, "queued", null, false);
+		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0 || inboxAt !== null)) {
+			const held = outcome(id, kind, askId, peer, "queued", null, false);
 			if (!held.ok) return refuse(500, `failed: audit journal unwritable (${held.error})`);
-			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", ...(images ? { images } : {}), ...(files ? { files } : {}), ...(thread ? { thread } : {}) });
+			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(thread ? { thread } : {}) });
 			settle(false);
 			return { ok: true, result: { id, state: "queued", deliver, editable: true } };
 		}
@@ -293,6 +293,12 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (queued && stopped) return { ok: false, status: 503, error: "dashboard control stopped before the handoff" };
 		const claimed = outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : null);
 		if (!claimed.ok && queued) return { ok: false, status: 500, error: `failed: audit journal unwritable (${claimed.error})` };
+		if (queued) {
+			// Claimed: from here an edit or cancel is refused as already sent, with the text pi is given.
+			preparing.delete(id);
+			handed.set(id, text ?? "");
+			if (handed.size > OPEN_KEEP) handed.delete(handed.keys().next().value!);
+		}
 		const seen = new Promise<"delivered">((resolve) => open.set(id, { kind, askId, peer, seen: () => resolve("delivered") }));
 		if (open.size > OPEN_KEEP) open.delete(open.keys().next().value!);
 		let result: Promise<unknown> | void;
@@ -330,15 +336,24 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 
 	/**
 	 * cp-y43c, the dashboard queue: messages sent while the session was busy, oldest first, never yet given to pi.
-	 * `settle` hands over at most one, only while the session is idle and no earlier handoff is still unseen; the
-	 * shift that claims it is synchronous, so an edit or cancel either lands before it or is refused as already sent.
+	 * `settle` hands over at most one per settled turn, only while the session is idle and no earlier handoff is still
+	 * unseen. The shift is synchronous: an edit or cancel lands before it; between it and the `injected` claim (image
+	 * preparation) it is refused 503 "being handed over"; after the claim, 409 already sent.
+	 * FIFO across a restart: the offline inbox turn (messages typed while no session ran) takes its place by time —
+	 * every held message older than its oldest line goes first (addendum 2 review).
 	 */
-	type Held = { id: string; at: string; peer: string | null; text: string; images?: string[]; files?: string[]; thread?: string };
+	type Held = { id: string; at: string; peer: string | null; text: string; askId: string | null; images?: string[]; files?: string[]; thread?: string };
 	const queue: Held[] = [];
-	/** The id last handed over, until it fails or a turn settles: one handoff per settled turn. */
+	/** The id last handed over (or INBOX), until it fails or a turn settles: one handoff per settled turn. */
 	let handing: string | null = null;
-	/** Text each recent handoff carried: what "already sent" shows. */
+	const INBOX = "inbox";
+	/** Text each recent claimed handoff carried: what "already sent" shows. */
 	const handed = new Map<string, string>();
+	/** Shifted off the queue, not yet claimed: neither editable nor sent. */
+	const preparing = new Set<string>();
+	/** The offline inbox, once per session start, at the time of its oldest held line (none: no inbox turn). */
+	const inbox = readInbox(stateDir);
+	let inboxAt: number | null = inbox.held.length ? Math.min(...inbox.held.map((message) => Date.parse(message.at))) : null;
 	const handoffEnded = (id: string) => {
 		if (handing !== id) return;
 		handing = null;
@@ -346,22 +361,27 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	};
 	function settle(turnEnded: boolean): void {
 		if (turnEnded) handing = null;
-		while (!stopped && handing === null && queue.length && ports.isIdle()) {
+		while (!stopped && handing === null && (queue.length || inboxAt !== null) && ports.isIdle()) {
 			if (readControlConfig(stateDir).state !== "on") return;
+			if (inboxAt !== null && !(queue.length && Date.parse(queue[0]!.at) < inboxAt)) {
+				inboxAt = null;
+				handing = INBOX;
+				if (!deliverInbox(stateDir, ports, now(), log, () => handoffEnded(INBOX)).delivered) handing = null;
+				continue;
+			}
 			const entry = queue.shift()!;
 			if (!(now().getTime() - Date.parse(entry.at) <= INBOX_MAX_AGE_MS)) {
-				outcome(entry.id, "message", null, entry.peer, "dropped", "queued longer than 24 h");
+				outcome(entry.id, "message", entry.askId, entry.peer, "dropped", "queued longer than 24 h");
 				continue;
 			}
 			handing = entry.id;
-			handed.set(entry.id, entry.text);
-			if (handed.size > OPEN_KEEP) handed.delete(handed.keys().next().value!);
-			const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", null, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
-			void handOver({ ...entry, kind: "message", askId: null, thread: entry.thread ?? null }, undefined, "prompt", refuse, true).then((reply) => {
+			preparing.add(entry.id);
+			const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", entry.askId, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
+			void handOver({ ...entry, kind: "message", thread: entry.thread ?? null }, undefined, "prompt", refuse, true).then((reply) => {
+				preparing.delete(entry.id);
 				if (reply.ok || stopped) return;
 				if (reply.status === 500) {
 					// The handoff line never reached the journal: pi was not called, so the message is still the dashboard's.
-					handed.delete(entry.id);
 					queue.unshift(entry);
 					log(`cp-bridge: dashboard queue ${entry.id} kept queued: ${reply.error}\n`);
 					if (handing === entry.id) handing = null;
@@ -379,6 +399,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (!id) return { ok: false, status: 400, error: "id must be a dashboard id" };
 		const index = queue.findIndex((entry) => entry.id === id);
 		if (index < 0) {
+			if (preparing.has(id)) return { ok: false, status: 503, error: `${id} is being handed to the session; try again in a moment`, result: { id, state: "handing" } };
 			const sent = handed.get(id);
 			if (sent !== undefined) return { ok: false, status: 409, error: `already sent: ${id} was handed to the session`, result: { id, state: "sent", text: sent } };
 			const journal = readQueueJournal(stateDir);
@@ -390,7 +411,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		}
 		const entry = queue[index]!;
 		if (op === "queue_cancel") {
-			const written = outcome(id, "message", null, peer, "cancelled", "cancelled from the dashboard");
+			const written = outcome(id, "message", entry.askId, peer, "cancelled", "cancelled from the dashboard");
 			if (!written.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${written.error})` };
 			queue.splice(index, 1);
 			return { ok: true, result: { id, state: "cancelled" } };
@@ -482,7 +503,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const journal = readQueueJournal(stateDir);
 	if (journal.error) log(`cp-bridge: dashboard queue unreadable, nothing reloaded: ${journal.error}\n`);
 	for (const message of journal.messages.values()) {
-		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.thread ? { thread: message.thread } : {}) });
+		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, askId: message.ask_id, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.thread ? { thread: message.thread } : {}) });
 	}
 	try {
 		await listen();
@@ -509,8 +530,9 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		return { state: "refused", reason: `cannot write ${recordFile}: ${(error as Error).message}` };
 	}
 
-	// The inbox turn settles first; with no inbox, an idle session takes the oldest reloaded message now.
-	if (!deliverInbox(stateDir, ports, now(), log).delivered) settle(false);
+	// Oldest first across the restart: reloaded held messages older than the offline inbox, then the inbox turn, then the rest.
+	if (inbox.error) log(`cp-bridge: dashboard inbox unreadable, nothing delivered: ${inbox.error}\n`);
+	settle(false);
 	return {
 		state: "listening",
 		socket: socketPath,
@@ -549,7 +571,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
  * never injected; an answer whose ask is no longer open says so. Each id gets its `delivered` line once the
  * injection is accepted, so a refused injection leaves them held for the next session.
  */
-export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject" | "isIdle">, at: Date, log: (line: string) => void): { delivered: number; dropped: number } {
+export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject" | "isIdle">, at: Date, log: (line: string) => void, onFailed?: () => void): { delivered: number; dropped: number } {
 	const { held, error } = readInbox(stateDir);
 	if (error) log(`cp-bridge: dashboard inbox unreadable, nothing delivered: ${error}\n`);
 	if (held.length === 0) return { delivered: 0, dropped: 0 };
@@ -576,9 +598,13 @@ export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject
 	const text = [`[cp-dashboard inbox — ${fresh.length} message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]`, ...lines, ...dropped].join("\n");
 	const delivered = () => { for (const message of fresh) mark({ type: "delivered", id: message.id, at: at.toISOString() }); };
 	try {
-		void Promise.resolve(ports.inject(text, ports.isIdle() ? undefined : "followUp")).then(delivered, (failure: unknown) => log(`cp-bridge: dashboard inbox not delivered (kept for the next session): ${failure instanceof Error ? failure.message : String(failure)}\n`));
+		void Promise.resolve(ports.inject(text, ports.isIdle() ? undefined : "followUp")).then(delivered, (failure: unknown) => {
+			log(`cp-bridge: dashboard inbox not delivered (kept for the next session): ${failure instanceof Error ? failure.message : String(failure)}\n`);
+			onFailed?.();
+		});
 	} catch (failure) {
 		log(`cp-bridge: dashboard inbox not delivered (kept for the next session): ${(failure as Error).message}\n`);
+		return { delivered: 0, dropped: stale.length };
 	}
 	return { delivered: fresh.length, dropped: stale.length };
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readPendingSends } from "../src/viewer/control-pending.ts";
+import { LOST_SEND_VISIBLE_MS, readPendingSends } from "../src/viewer/control-pending.ts";
 import { INBOX_MAX_AGE_MS, controlJournalFile } from "../src/viewer/control-files.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -75,4 +75,33 @@ test("cp-y43c: a dashboard-held message is editable with its saved text, outlive
  assert.deepEqual([sends.get(id(2))?.state,sends.get(id(2))?.body.text,sends.get(id(2))?.editable],["failed","saved 2",undefined],"handed over, session ended unseen: a visible failure with the text pi got, never resent");
  assert.match(sends.get(id(2))!.reason!,/^Not confirmed: /);
  assert.deepEqual([sends.get(id(3))?.state,sends.get(id(3))?.reason,sends.get(id(3))?.editable],["dropped","Cancelled from the dashboard",undefined]);
+});
+
+test("cp-y43c review 1: a lost send is a visible failure for LOST_SEND_VISIBLE_MS (7 days) after it was sent, then history; the 24 h expiry stays visible", t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const stateDir = join(home.path, LAYOUT.state);
+ mkdirSync(join(stateDir,"operator"),{recursive:true});
+ const now = new Date("2026-10-20T12:00:00Z");
+ const session = {running:true,pid:process.pid,since:"2026-10-20T11:00:00Z",reason:"running"};
+ const ago = (ms:number) => new Date(now.getTime() - ms).toISOString();
+ const day = 24 * 60 * 60 * 1000;
+ const rows: object[] = [];
+ const lostSend = (n:number, at:string, how:"expired" | "ended" | "dropped") => {
+  const id = `dc-20261020120000-${n.toString(16).padStart(8,"0")}`;
+  rows.push({type:"request",by:"bridge",id,at,kind:"message",text:`lost ${n}`,ask_id:null,peer:null,deliver:"followUp",session_started_at:"2026-10-01T00:00:00Z"});
+  rows.push({type:"outcome",by:"bridge",id,at,state:"queued",reason:null});
+  if (how !== "expired") rows.push({type:"outcome",by:"bridge",id,at,state:"injected",reason:null});
+  if (how === "dropped") rows.push({type:"outcome",by:"bridge",id,at,state:"dropped",reason:"target operator session ended"});
+  return id;
+ };
+ const recentExpired = lostSend(1, ago(6 * day), "expired");
+ const boundaryEnded = lostSend(2, ago(LOST_SEND_VISIBLE_MS), "ended");
+ const oldDropped = lostSend(3, ago(LOST_SEND_VISIBLE_MS + 1), "dropped");
+ const oldExpired = lostSend(4, ago(30 * day), "expired");
+ writeFileSync(controlJournalFile(stateDir), rows.map(row=>JSON.stringify(row)).join("\n")+"\n");
+ const sends = new Map(readPendingSends(stateDir,now,session).sends.map(send=>[send.id,send]));
+ assert.deepEqual([recentExpired,boundaryEnded,oldDropped,oldExpired].map(id=>sends.get(id)?.state),["failed","failed","dropped","dropped"]);
+ assert.match(sends.get(recentExpired)!.reason!,/^Not sent: queued longer than 24 h\./);
+ assert.match(sends.get(boundaryEnded)!.reason!,/^Not confirmed: target operator session ended\./);
+ assert.equal(LOST_SEND_VISIBLE_MS, 7 * day);
 });

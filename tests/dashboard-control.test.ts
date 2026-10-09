@@ -509,3 +509,71 @@ test("queue restart: a stopped bridge's held messages reload in order with their
 	assert.equal(third.state.injected.length, 0, "a third start has nothing to resend");
 	assert.deepEqual([b, c].map((id) => states(stateDir, id).filter((s) => s === "injected").length), [1, 1]);
 });
+
+test("queue restart, FIFO across the offline inbox (review 1): an older held message goes before the inbox turn, a newer one after; one handoff per settled turn", async (t) => {
+	for (const order of ["held-first", "inbox-first"] as const) await t.test(order, async (t) => {
+		const { stateDir } = scratch(t);
+		const at = new Date("2026-10-09T12:00:00Z");
+		const minutes = (m: number) => new Date(at.getTime() + m * 60_000).toISOString();
+		const [heldAt, inboxAt] = order === "held-first" ? [minutes(-20), minutes(-10)] : [minutes(-10), minutes(-20)];
+		put(controlJournalFile(stateDir), [
+			{ type: "request", by: "bridge", id: "dc-20261009114000-0000a001", at: heldAt, kind: "message", text: "held in the queue", ask_id: null, deliver: "followUp", peer: null },
+			{ type: "outcome", by: "bridge", id: "dc-20261009114000-0000a001", at: heldAt, peer: null, state: "queued", reason: null },
+		].map((line) => JSON.stringify(line)).join("\n") + "\n");
+		put(controlInboxFile(stateDir), JSON.stringify({ type: "held", id: "dc-20261009115000-0000b001", at: inboxAt, text: "typed offline", ask_id: null }) + "\n");
+		const fake = fakePorts();
+		const { control, record } = await listening(t, stateDir, fake.ports, { now: () => at });
+		const first = order === "held-first" ? /^held in the queue\n\n/ : /^\[cp-dashboard inbox — 1 message/;
+		const second = order === "held-first" ? /^\[cp-dashboard inbox — 1 message/ : /^held in the queue\n\n/;
+		assert.equal(fake.state.injected.length, 1, "one handoff at start");
+		assert.match(fake.state.injected[0]![0], first, "the older one first");
+		const later = await controlRequest(record, "send", { kind: "message", text: "typed after the start" });
+		assert.equal(later.ok && (later.result as { state: string }).state, "queued", "an idle send waits behind both");
+		control.settled();
+		assert.equal(fake.state.injected.length, 2);
+		assert.match(fake.state.injected[1]![0], second);
+		control.settled();
+		assert.deepEqual(head(fake.state.injected).slice(2), ["typed after the start"]);
+		control.settled();
+		assert.equal(fake.state.injected.length, 3, "each once");
+	});
+});
+
+test("queue keeps ask ids (review 1): a held message's ask id survives reload into the handoff marker; a card's free-text reply keeps its ask prefix; a click answer never queues", async (t) => {
+	const { stateDir } = scratch(t);
+	put(join(stateDir, "operator", "asks.jsonl"), ASKS.map((a) => JSON.stringify(a)).join("\n") + "\n");
+	const id = "dc-20261009114000-0000a5c1";
+	const at = new Date().toISOString();
+	put(controlJournalFile(stateDir), [
+		{ type: "request", by: "bridge", id, at, kind: "message", text: "linked to a card", ask_id: "ask-abcd", deliver: "followUp", peer: null },
+		{ type: "outcome", by: "bridge", id, at, peer: null, state: "queued", reason: null },
+	].map((line) => JSON.stringify(line)).join("\n") + "\n");
+	const fake = fakePorts();
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const reply = await queued(record, "ask-abcd: keep it, but ask me tomorrow");
+	const click = await controlRequest(record, "send", { kind: "answer", ask_id: "ask-abcd", label: "Keep" });
+	assert.ok(click.ok);
+	assert.equal(fake.state.injected.length, 1, "the click is not queued behind the held messages");
+	assert.match(fake.state.injected[0]![0], /^ask-abcd: Keep\n\n\[cp-dashboard dc-\S+ — from the dashboard; ask=ask-abcd\]$/);
+	assert.equal(fake.state.injected[0]![1], "followUp");
+	fake.state.idle = true;
+	control.settled();
+	assert.match(fake.state.injected[1]![0], new RegExp(`^linked to a card\\n\\n\\[cp-dashboard ${id} — from the dashboard; ask=ask-abcd\\]$`), "reloaded with its ask id");
+	control.settled();
+	assert.match(fake.state.injected[2]![0], /^ask-abcd: keep it, but ask me tomorrow\n\n\[cp-dashboard dc-\S+ — from the dashboard\]$/);
+	assert.equal(journal(stateDir).find((line) => line.id === reply && line.type === "request")!.ask_id, null);
+});
+
+test("queue edit whitespace matches the composer (review 1): ends trimmed, inner spaces and blank lines kept", async (t) => {
+	const { stateDir } = scratch(t);
+	const fake = fakePorts();
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const id = await queued(record, "  first draft  ");
+	const edited = await controlRequest(record, "queue_edit", { id, text: "\n  line one\n\n    indented  two  \n" });
+	assert.equal(edited.ok && (edited.result as { text: string }).text, "line one\n\n    indented  two");
+	fake.state.idle = true;
+	control.settled();
+	assert.equal(fake.state.injected[0]![0].split("\n\n[cp-dashboard")[0], "line one\n\n    indented  two");
+});

@@ -3,6 +3,14 @@ import type { ControlPendingSend } from "./api-types.ts";
 import { controlInboxFile, controlJournalFile, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, readThreads } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
 
+/**
+ * cp-y43c review 1: how long a lost send (session ended unseen, crash window, 24 h queue expiry) stays a visible failed
+ * bubble, from the time it was sent. Older losses stay `dropped` history, so an upgrade or a fresh browser does not
+ * resurface every old loss in the journal. Seven days covers the 24 h expiry plus six days to notice it, and matches
+ * the upload sweep: after it, Send again could not reattach the files anyway.
+ */
+export const LOST_SEND_VISIBLE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** Read-only reload projection. Abandoned accepted sends settle without delivery or retry bubbles. */
 export function readPendingSends(stateDir: string, now = new Date(), session = operatorSession(stateDir)): {sends: ControlPendingSend[]; sends_error: string | null} {
  const sends = new Map<string, ControlPendingSend>();
@@ -62,7 +70,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
     lost.add(send.id);
    } else if (held) send.editable = true;
   }
-  if (send.state === "dropped" && lost.has(send.id)) {
+  if (send.state === "dropped" && lost.has(send.id) && now.getTime() - Date.parse(send.at) <= LOST_SEND_VISIBLE_MS) {
    // cp-y43c addendum 2: no silent loss. The text stays in a failed bubble; only the operator's Send again sends it, as a new message.
    send.state = "failed";
    send.reason = `${injected.has(send.id) ? "Not confirmed" : "Not sent"}: ${send.reason}. ${injected.has(send.id) ? "It was handed to the session but never seen in its transcript; check the transcript before sending it again." : "It was never given to the session."}`;

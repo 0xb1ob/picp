@@ -5,6 +5,8 @@ import { parseHTML } from "linkedom";
 import type { ControlStatusResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
 import type { ControlView } from "../viewer-app/control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const bundle = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {useControl} from "./viewer-app/use-control.ts"; export {act}; export const html=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); function Stage({data,fetcher,onControl}) { const control=useControl(true,data.generated_at,data.entries,fetcher,true); onControl(control); return h(Sessions,{data,control}); } export const mount=(root,data,fetcher,onControl)=>render(h(Stage,{data,fetcher,onControl}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {html,act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`);
@@ -325,4 +327,23 @@ test("cp-y43c: a held queued message edits inline (Enter saves, Esc keeps it), c
  assert.deepEqual(s.bubbleTexts(),["draft two"]);
  await s.remount();
  assert.deepEqual(s.bubbleTexts(),["draft two"],"a cancelled message stays gone");
+});
+
+test("cp-y43c review 1: Edit, Cancel send, Save, Cancel and Send again are 44 px targets at 390 and 430 (the phone stylesheet, nothing overrides it)",async t=>{
+ const s=await stage(t);
+ const held=(id:string,text:string,extra:object={})=>({id,at,state:"queued" as const,reason:null,ask_id:null,editable:true,body:{kind:"message" as const,text},...extra});
+ s.status({...status,sends:[held("dc-20261004140000-0000000a","held"),held("dc-20261004140000-0000000b","lost",{editable:undefined,state:"failed",reason:"Not sent: queued longer than 24 h. It was never given to the session."})]});
+ await s.show();
+ const win=s.root.ownerDocument.defaultView!;
+ await act(()=>s.root.querySelector(".session-pending-edit")!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ await s.show();
+ const labels=[...s.root.querySelectorAll(".session-pending button")].map(button=>[button.textContent,button.parentElement?.className]);
+ assert.deepEqual(labels,[["Save","session-pending-actions"],["Cancel","session-pending-actions"],["Send again","session-pending-actions"],["Discard","session-pending-actions"]],"the editor's Save/Cancel and the failure's Send again/Discard");
+ await act(()=>s.root.querySelector(".session-pending-close")!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ assert.deepEqual([...s.root.querySelectorAll(".session-pending-actions > button")].slice(0,2).map(button=>button.textContent),["Edit","Cancel send"]);
+ const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/sessions.css"),"utf8");
+ const phone=css.slice(0,css.indexOf("@media"));
+ assert.match(phone,/\.session-pending-actions > button \{[^}]*min-height: 44px;/,"base (phone) rule: every width below 900 px, so 390 and 430");
+ assert.doesNotMatch(css.slice(css.indexOf("@media")),/session-pending/,"no media block resizes them");
+ for (const sheet of ["styles/shell.css","components/control.css","styles/tokens.css"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT,"viewer-app",sheet),"utf8"),/session-pending/,sheet);
 });

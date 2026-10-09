@@ -16,6 +16,8 @@ export interface QueuedMessage {
 	at: string;
 	peer: string | null;
 	text: string;
+	/** The request's ask id, carried to the handoff marker (`; ask=`) when a held message names one. */
+	ask_id: string | null;
 	deliver: string;
 	images?: string[];
 	files?: string[];
@@ -53,7 +55,7 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 			if (line.kind !== "message" || messages.has(line.id) || typeof line.at !== "string") continue;
 			const images = strings(line.images), files = strings(line.files);
 			messages.set(line.id, {
-				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "",
+				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "", ask_id: typeof line.ask_id === "string" ? line.ask_id : null,
 				deliver: typeof line.deliver === "string" ? line.deliver : "prompt", ...(images ? { images } : {}), ...(files ? { files } : {}),
 				...(typeof line.thread === "string" ? { thread: line.thread } : {}), state: "requested", injected: false, edits: 0,
 			});
