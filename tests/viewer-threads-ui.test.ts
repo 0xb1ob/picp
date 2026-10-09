@@ -209,6 +209,10 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 	const html = screen({ ...base, entries: [] }, control, threads({ status: list({ threads: busy }) }));
 	assert.match(html, /<span class="session-thread-working">2 working<\/span>/, "neutral N working badge");
 	assert.equal((html.match(/session-thread-working/g) ?? []).length, 2, "one in the chips, one in the sidebar; 0 shows nothing");
+	const css = readFileSync(new URL("../viewer-app/screens/sessions.css", import.meta.url), "utf8");
+	assert.match(css, /\.session-thread-row:hover > \.session-thread-done, \.session-thread-row:focus-within > \.session-thread-done \{ display: block/, "Mark done only on hover or focus");
+	assert.doesNotMatch(css, /aria-pressed=true\]\) > \.session-thread-done/, "selected alone never shows Mark done");
+	assert.match(css, /\.session-thread-row:hover \.session-thread-working[^{]*\{ visibility: hidden/, "Mark done replaces the badge");
 	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
 
 	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
