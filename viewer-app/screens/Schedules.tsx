@@ -46,6 +46,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
  return <article class="schedule-card">
   <div class="schedule-card-heading"><h2>{s.name}</h2><span class={`schedule-pill${s.enabled ? " schedule-pill-on" : ""}`}>{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
+  <p class="schedule-identity">{s.job.title} · {s.trigger.type} · <code>{s.mandate_id}</code></p>
   <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS_TEXT[s.lands]}.</p>
   <dl class="schedule-facts">
    <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
@@ -100,7 +101,7 @@ function FanOut({s, fan}: {s:ScheduleItem; fan:NonNullable<ScheduleItem["fan_out
 
 export function Schedules({data, control}: {data:SchedulesResponse; control?:ScheduleControlView}) {
  return <div class="jobs-screen schedule-screen">
-  <header class="schedule-heading"><PageHeader title="Schedules"/><p>Saved triggers and the jobs they fired.</p></header>
+  <header class="schedule-heading"><PageHeader title="Schedules"/><a class="schedule-add-phone" href={composerHref(ADD_SCHEDULE_DRAFT)}>+ Add</a></header>
   <div class="schedule-toolbar">
    <nav class="board-view" aria-label="Schedules and files">{navigation.filter(n => n.id === "schedules" || n.id === "files").map(n => <a key={n.id} href={n.href} aria-current={n.id === "schedules" ? "page" : undefined}>{n.label}</a>)}</nav>
    {control && <p role="status" class="job-meta schedule-status"><span class="schedule-status-dot" aria-hidden="true"/>{scheduleControlLine(control.status)}</p>}
