@@ -203,7 +203,8 @@ test("server: /api/dashboard and /api/awaiting are JSON under a deny-all CSP; ev
 });
 
 const VIEWER = join(REPO_ROOT, "src", "viewer");
-const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts");
+// operator.ts, doctor-check.ts and model-list.ts (the cp-install `pi --list-models` parser, reused rather than copied) may import outside the viewer.
+const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts" && name !== "model-list.ts");
 
 test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines", () => {
 	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts"]);
@@ -229,7 +230,7 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 	}
 	// cp-7bsr PR2: the Settings routes are covered by the loop above (dependency-free, write-free, no audit writer); pin that they are in it.
 	assert.ok(standalone().includes("settings-api.ts"), "settings-api.ts is a standalone viewer module");
-	assert.doesNotMatch(readFileSync(join(VIEWER, "settings-api.ts"), "utf8"), /from "\.\/(?!control-api|control-files|control-inbox|api-types)[^"]*"/, "settings-api.ts imports only the control modules and api-types");
+	assert.doesNotMatch(readFileSync(join(VIEWER, "settings-api.ts"), "utf8"), /from "\.\/(?!control-api|control-files|control-inbox|api-types|model-list)[^"]*"/, "settings-api.ts imports only the control modules, api-types and the model list");
 	assert.doesNotMatch(readFileSync(join(VIEWER, "push-subscriptions.ts"), "utf8"), /appendFileSync|createWriteStream|unlinkSync|\bappendFile\s*\(/);
 	const audit = readFileSync(join(VIEWER, "control-audit.ts"), "utf8");
 	assert.doesNotMatch(audit, /writeFileSync|renameSync|rmSync|unlinkSync|truncate/, "the audit writer only appends");
