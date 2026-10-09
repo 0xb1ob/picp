@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { JobTranscriptResponse, ReportItem, SessionEntry } from "../../src/viewer/api-types.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { time } from "../format.ts";
@@ -48,10 +48,14 @@ export function JobTranscript({jobId, generatedAt, model, reports}: {jobId: stri
  const [data, setData] = useState<JobTranscriptResponse | null>(null);
  const [failed, setFailed] = useState(false);
  const [fullBrief, setFullBrief] = useState(false);
+ const live = useRef<AbortController | null>(null);
+ useEffect(() => () => { live.current?.abort(); live.current = null; }, [jobId]);
+ // One request at a time: the page refreshes every second or so, and a big session parses slower than that, so aborting on each
+ // generated_at change would never let a transcript land. A change while one is in flight is picked up by the next change.
  useEffect(() => {
-  const abort = new AbortController();
-  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); });
-  return () => abort.abort();
+  if (live.current) return;
+  const abort = live.current = new AbortController();
+  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (live.current === abort) live.current = null; });
  }, [jobId, generatedAt]);
  if (failed && !data) return <p class="jobs-empty" role="status">Transcript unavailable</p>;
  if (!data) return <p role="status">Loading</p>;

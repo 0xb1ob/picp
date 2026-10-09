@@ -113,7 +113,7 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  const detail=screen("JobDetail",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,job:{...job,summary:"Recorded summary"},description:null,mandate:null,timeline:[],timeline_truncated:false,files_href:null,artifact_href:null,artifact_name:null,run_href:null,reports:[],asks:[],questions:[],warnings:[]});
  assert.match(detail,/<div class="job-detail" data-tab="transcript"><header class="job-detail-heading">/);
  const detailDoc=parseHTML(detail).document;
- assert.equal(detailDoc.querySelector(".job-detail-top > .job-summary")?.textContent,"Recorded summary");
+ assert.equal(detailDoc.querySelector(".job-detail-top > .job-summary-row > .job-summary")?.textContent,"Recorded summary");
  assert.ok(detailDoc.querySelector(".job-detail-body > .job-detail-side > .job-facts"));
  assert.equal(detailDoc.querySelector(".job-detail-side .job-summary"),null,"summary stays separate from facts");
  assert.match(detail,/<\/div><div class="job-detail-side"><dl class="job-facts">.*<dt>CI<\/dt>.*<dt>Review<\/dt>.*<\/dl><div class="job-links">.*<\/div><\/div><\/div><\/div>/);

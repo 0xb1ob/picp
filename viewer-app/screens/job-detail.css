@@ -7,20 +7,24 @@
 .job-detail-top { display: flex; flex-direction: column; gap: 12px; order: 2; }
 .job-detail-top > * { order: 0; }
 .job-summary-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
-.job-summary-more { min-height: 44px; padding: 0 8px; background: none; border: 0; color: var(--muted); font-size: 13px; }
+.job-summary-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.job-summary-row > p { flex: 1 1 auto; min-width: 0; }
+.job-summary-more { flex: 0 0 auto; min-height: 44px; padding: 0 8px; background: none; border: 0; color: var(--muted); font-size: 13px; }
 .job-tabs { display: flex; gap: 2px; padding: 2px; order: 3; background: var(--nav-selected); border-radius: 10px; }
 .job-tab { flex: 1; min-height: 44px; padding: 0 16px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; }
 .job-tab-on { background: var(--surface); color: var(--text); }
 .job-card, .job-mandate-snippet { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; font-size: 13px; color: var(--muted); }
 .job-card h2, .job-mandate-snippet h2 { font-size: 12px; color: var(--dim); }
-.job-mandate-objective { overflow-wrap: anywhere; }
+.job-mandate-objective { overflow-wrap: anywhere; max-height: 6.5em; overflow: hidden; }
 .job-transcript { display: flex; flex-direction: column; gap: 12px; min-width: 0; font-size: 14px; line-height: 1.5; }
 .jt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
 .jt-chip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .jt-jump { display: flex; flex-wrap: wrap; gap: 8px; }
 .jt-jump button, .jt-brief > button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; }
-.jt-brief { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
-.jt-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; }
+.jt-brief { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.jt-brief > div { min-width: 0; max-width: 100%; }
+.jt-brief > button { align-self: flex-start; }
+.jt-clamp { max-height: 6.5em; overflow: hidden; overflow-wrap: anywhere; }
 .jt-say { overflow-wrap: anywhere; min-width: 0; }
 .jt-note { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
 .jt-tools, .jt-review, .jt-trailing { font-size: 13px; color: var(--muted); min-width: 0; }
