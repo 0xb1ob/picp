@@ -68,9 +68,9 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  assert.equal(requests.length,1);
  await answer(Response.json(data));
  // Audit P4 #28: the route table is 11 entries (Settings joined More), plus the one in-flight job.
- assert.equal(results().length,14);
+ assert.equal(results().length,15);
  assert.deepEqual([...root.querySelectorAll("dialog h2")].map(node => node.textContent), ["Go to", "In flight", "Recently landed"]);
- assert.deepEqual([...root.querySelectorAll('.search-shortcuts .search-items a')].map(node => node.getAttribute('href')), ["#overview","#decisions","#jobs","#board","#map","#sessions","#reports","#schedules","#files","#settings","#more"], "design shortcut order retains every destination, including More");
+ assert.deepEqual([...root.querySelectorAll('.search-shortcuts .search-items a')].map(node => node.getAttribute('href')), ["#overview","#decisions","#jobs","#board","#map","#sessions","#stats","#reports","#schedules","#files","#settings","#more"], "design shortcut order retains every destination, including More");
  assert.equal(root.querySelector('dialog input')!.getAttribute('placeholder'), "Job ID, title or page");
  assert.equal(root.querySelector('dialog input')!.getAttribute('aria-label'), "Search job IDs, titles and pages");
  for (const [id,phase] of [["cp-search","held"],["cp-wait","waiting"],["cp-landed","done"]]) {
@@ -124,12 +124,12 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  await click(trigger);
  await answer(new Response("failure",{status:503}));
  assert.match(root.querySelector("dialog")!.textContent!,/In-flight jobs unavailable/);
- assert.equal(results().length,11,"navigation remains usable on job fetch failure");
+ assert.equal(results().length,12,"navigation remains usable on job fetch failure");
  await close();
  await click(trigger);
  await act(async () => { old.resolve(Response.json(data)); await new Promise<void>(resolve => setImmediate(resolve)); });
  assert.match(root.querySelector("dialog")!.textContent!,/Loading/);
- assert.equal(results().length,11,"late data from a closed dialog cannot appear in a new search");
+ assert.equal(results().length,12,"late data from a closed dialog cannot appear in a new search");
  data.availability.fleet = "unavailable"; data.in_flight = [];
  await answer(Response.json(data));
  assert.match(root.querySelector("dialog")!.textContent!,/In-flight jobs unavailable/);

@@ -63,7 +63,7 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  },[searchOpen]);
  const openSearch = (event: {currentTarget:HTMLButtonElement}) => { event.currentTarget.focus(); setSearchOpen(true); };
  // The phone header (hidden on desktop) backs out of a More view to More; Board and Map are Jobs views with the plain header (audit P4).
- const subpage=["files","schedules","reports","settings"].includes(current.screen);
+ const subpage=["files","schedules","reports","settings","stats"].includes(current.screen);
  const plain = !subpage && current.screen !== "job";
  const when = updatedAt ? <time class="shell-clock" dateTime={updatedAt}>{stamp(updatedAt)}</time> : null;
  const clockNow = updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={stamp(updatedAt,true)}>{time(updatedAt)}</time> : null;
