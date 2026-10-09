@@ -20,7 +20,7 @@ import type { Ledger } from "../src/ledger.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 
 const T0 = new Date("2026-11-02T08:00:00Z");
-const job = { title: "triage", kind: "research", delivery: "answer" };
+const job = { title: "triage", kind: "research", delivery: "answer" } as const;
 
 test("migration derives a template from a revoked, expired or pre-approved seed; a missing or unparseable seed skips with last_skip; the marker makes a re-run a no-op", async (t) => {
 	const home = createScratchHome();
@@ -160,14 +160,15 @@ test("P4 v1→v2: backup every rewritten store before policy activation/retireme
 	// Include an existing inactive policy store so its rewrite must be backed up too.
 	await b.runs.savePolicyRevision(policyFromLegacy(schedule, schedule.grant_template!));
 	const original = b.v1(), originalPolicy = readFileSync(b.runs.policiesFile), originalGrant = readFileSync(b.mandates.file(schedule.mandate_id!));
-	const save = b.runs.savePolicyRevision.bind(b.runs);
-	b.runs.savePolicyRevision = async (...args) => {
-		const rows = policyImportBackups(b.home.path, b.mandates, T0);
+	const activate = b.runs.activatePolicy.bind(b.runs);
+	b.runs.activatePolicy = async (...args) => {
+		const manifest = join(b.home.path, ".pi-command-post", "state", ".migrations", "2026-12-schedule-policy-v2.backup.json");
+		assert.ok(existsSync(manifest), "backups are published before activation");
+		const rows = JSON.parse(readFileSync(manifest, "utf8")) as Array<{ source: string; backup: string }>;
 		for (const [source, bytes] of [[b.scheduler.file, original], [b.runs.policiesFile, originalPolicy], [b.mandates.file(schedule.mandate_id!), originalGrant]] as const) {
-			const backup = rows.find(r => r.source === source)!;
-			assert.deepEqual(readFileSync(backup.backup!), bytes, "snapshot verified before first policy write");
+			assert.deepEqual(readFileSync(rows.find(r => r.source === source)!.backup), bytes, "snapshot verified before activation");
 		}
-		return save(...args);
+		return activate(...args);
 	};
 	const report = await b.sweep();
 	assert.deepEqual(report.migrated, [schedule.id]);
@@ -194,7 +195,7 @@ test("P4 v1→v2: backup every rewritten store before policy activation/retireme
 	rmSync(report.marker);
 	assert.deepEqual(readFileSync(b.scheduler.file), original); assert.deepEqual(readFileSync(b.runs.policiesFile), originalPolicy);
 	assert.deepEqual(readFileSync(b.mandates.file(schedule.mandate_id!)), originalGrant);
-	assert.deepEqual(b.scheduler.list()[0], schedule);
+	assert.deepEqual(b.scheduler.list(), JSON.parse(original.toString()).schedules, "rollback restores the persisted store, including every saved field");
 });
 
 test("P4 mixed schedules: pipeline legacy, missing template needs setup, operator revoke/pause preserved, open jobs defer and retry", async (t) => {

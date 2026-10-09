@@ -5,15 +5,15 @@
  * `state/schedules.json` schema and reader, and the cron engine. It lives under
  * `src/viewer/` because viewer modules may import only `node:` and `./` (see
  * tests/viewer-workbench.test.ts); nothing here writes, spawns or touches typebox.
- * JOB_KINDS, DELIVERIES, MANDATE_ID_PATTERN and SCHEMA_VERSION are mirrored from
- * src/contracts; tests/viewer-schedules.test.ts pins the mirror to them.
+ * JOB_KINDS, DELIVERIES and MANDATE_ID_PATTERN are mirrored from src/contracts;
+ * schedules have their own v2 file version (tests/viewer-schedules.test.ts).
  */
 import { existsSync, readFileSync } from "node:fs";
 
 export class SchedulerError extends Error {}
 
 // ---------------------------------------------------------------------------
-// Schema: `{schema_version: 1, schedules: Schedule[]}`, no extra keys anywhere.
+// Schema: `{schema_version: 1|2, schedules: Schedule[]}`, no extra keys anywhere.
 // ---------------------------------------------------------------------------
 
 export const SCHEDULE_JOB_KINDS = ["ship", "research"] as const;
