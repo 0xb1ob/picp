@@ -41,7 +41,7 @@ function EditorDraft({s, policy, control, onClose, reload}: EditorProps & {reloa
  const [opened] = useState(() => ({base: policy.policy ?? policy.legacy, revision: policy.policy?.revision ?? 0}));
  const base = opened.base;
  const stale = (policy.policy?.revision ?? 0) !== opened.revision;
- const failedAt = useRef<{reason: string; values: string} | null>(null);
+ const failedAt = useRef<{refusal: object; values: string} | null>(null); // each refusal (the hook makes a new object per failure) is bound to the draft it answered
  const [limits, setLimits] = useState<Record<LimitKey, string>>(() => Object.fromEntries(LIMITS.map(([key]) => [key, String(base?.limits[key] ?? "")])) as Record<LimitKey, string>);
  const [mode, setMode] = useState<"routing-default" | "pinned">(base?.model_policy.mode ?? "routing-default");
  const [pins, setPins] = useState<Record<(typeof ROLES)[number], string>>(() => ({implementer: "", planner: "", reviewer: "", ...(base?.model_policy.mode === "pinned" ? base.model_policy.by_role : {})}));
@@ -52,7 +52,7 @@ function EditorDraft({s, policy, control, onClose, reload}: EditorProps & {reloa
  // A server refusal belongs to the values it was shown against; once a field changes, it no longer blocks Save.
  const values = JSON.stringify([limits, mode, pins]);
  const reason = control.failed?.schedule_id === s.id ? control.failed.reason : null;
- if (reason && failedAt.current?.reason !== reason) failedAt.current = {reason, values};
+ if (control.failed && failedAt.current?.refusal !== control.failed) failedAt.current = {refusal: control.failed, values};
  const failed = reason && failedAt.current?.values === values ? serverPolicyErrors(reason) : [];
  const errors = byPath([...own, ...failed]);
  const general = [...errors].filter(([path]) => !path.startsWith("/limits/") && !path.startsWith("/model_policy")).flatMap(([path, list]) => list.map(text => `${path}: ${text}`));

@@ -66,6 +66,24 @@ test("editor: a server refusal lands under the field it names", async t => {
 	await mod.act(() => mod.unmount(root));
 });
 
+test("editor: a second refusal with the same reason binds to the newly submitted values", async t => {
+	const { window, root } = dom(t);
+	const refusal = () => ({ schedule_id: "sch-aaaaaa", reason: "invalid schedule policy: /limits/usd: must be above 0" });
+	const props = { s: sched as unknown as ScheduleItem, policy: response, onClose: () => {} };
+	const control = (failed: ScheduleControlView["failed"]): ScheduleControlView => ({ status: ready, sending: null, failed, request: () => {} });
+	const save = () => [...root.querySelectorAll("button")].find(b => b.textContent === "Save settings")!;
+	await mod.act(() => mod.editor(root, { ...props, control: control(refusal()) }));
+	await mod.act(() => type(window, input(root, /USD/), "9"));
+	assert.equal(save().hasAttribute("disabled"), false, "first correction clears the first refusal");
+	await mod.act(() => mod.editor(root, { ...props, control: control(null) }));
+	await mod.act(() => mod.editor(root, { ...props, control: control(refusal()) }));
+	assert.match(input(root, /USD/).closest("label")?.textContent ?? "", /must be above 0/, "same reason on the new draft is shown");
+	assert.equal(save().hasAttribute("disabled"), true);
+	await mod.act(() => type(window, input(root, /USD/), "10"));
+	assert.equal(save().hasAttribute("disabled"), false, "correcting again re-enables Save");
+	await mod.act(() => mod.unmount(root));
+});
+
 test("editor: correcting a field clears its server refusal so Save works again", async t => {
 	const { window, root } = dom(t);
 	const sent: unknown[] = [];
