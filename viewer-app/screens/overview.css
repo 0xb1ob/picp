@@ -89,10 +89,11 @@ progress::-moz-progress-bar { background: var(--secondary); }
  .overview-flight .overview-line-text { display: block; white-space: nowrap; }
  .overview-landed { grid-template-columns: 9rem minmax(0,1fr) 5rem 9rem 4rem; grid-template-areas: "job title pr merge cost"; padding: 0; }
 }
-@media (min-width: 1200px) {
- .overview-flight, .overview-flight-columns { grid-template-columns: 220px minmax(0,1fr) 104px 140px 104px 92px 148px 56px; column-gap: 16px; }
+/* 8 fixed-ish columns need room: 764px of tracks + 84px of gaps leave Title (the one 1fr) wider than Job from 1360px; narrower desktops keep the stacked layout above. */
+@media (min-width: 1360px) {
+ .overview-flight, .overview-flight-columns { grid-template-columns: 176px minmax(0,1fr) 96px 128px 92px 96px 128px 48px; column-gap: 12px; }
  .overview-flight { grid-template-areas: "job title clock context review ci model cost"; }
- .overview-landed, .overview-landed-columns { grid-template-columns: 220px minmax(0,1fr) 80px 96px 56px; column-gap: 16px; }
+ .overview-landed, .overview-landed-columns { grid-template-columns: 176px minmax(0,1fr) 80px 96px 56px; column-gap: 12px; }
  .overview-merge-word { display: none; }
  .overview .ctx-prefix, .overview .overview-review-prefix { display: none; }
  .overview-flight-columns, .overview-landed-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }

@@ -17,6 +17,12 @@ test("Overview CSS constrains long one-line cells", () => {
  const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");
  assert.match(phone ?? "", /\.overview-health \{ display: grid; grid-template-columns: repeat\(2,minmax\(0,1fr\)\);/);
  assert.match(desktop, /\.overview-health \{ display: flex; flex: 1 1 auto; min-width: 0; gap: 0; \}/);
+ // Measured 1200/1280/1366/1440: the 8-track grid left Title 0/32/118/192px, narrower than Job. At the breakpoint (208px rail + 64px gutters) Title must still be the widest track.
+ const wide = css.match(/@media \(min-width: (\d+)px\) \{\s*\.overview-flight, \.overview-flight-columns \{ grid-template-columns: ([^;]+); column-gap: (\d+)px/);
+ assert.ok(wide, "wide flight grid");
+ const tracks = wide[2]!.trim().split(" "); const fixed = [...wide[2]!.matchAll(/(\d+)px/g)].map(m => +m[1]!);
+ const title = +wide[1]! - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!;
+ assert.ok(tracks.length === 8 && title > fixed[0]!, `Title ${title}px must exceed Job ${fixed[0]}px at ${wide[1]}px`);
 });
 
 test("times format in the browser's own zone, never a server zone", async t => {
