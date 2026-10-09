@@ -4041,13 +4041,26 @@ covering grant stays pending and names the job in its no-active-mandate reason.
 
 **Combining grants.** `selectGrant` is shared by permission, checkpoint authority and cp_next advice. Among
 active permitting covering grants it selects one: nonempty `job_ids` before project-wide scope, then earliest
-`issued_at`, then smallest mandate id. Coverage and standing are evaluated first; selection never ranks grants
-by cap headroom or weaker policy. A dispatch/promotion applies only the selected grant's applicable risk,
-job-cap and parallelism checks; a checkpoint applies that grant's exclusions, allowed actions, `ask_on`, risk
-and caps. A selected denial never tries another grant. Without an active permitting grant, the existing
-latest-speaking permit/refuse fallback remains unchanged. Nothing speaking passes a gate or leaves a checkpoint
-pending. Expiry continuation, its USD/token and risk checks, the expired reviewer-start exception,
-patch-equivalent review reuse and per-head CI/review/merge gates are unchanged.
+`issued_at`, then smallest mandate id. Coverage and standing are evaluated first. There is one narrow exception:
+when the first permit is a non-schedule named grant whose counted jobs **without this job** already meet or exceed
+its job cap, select the first later active permitting non-schedule named grant covering this job with room without
+it. Project-wide grants never substitute; neither do schedule grants, kind-excluded supplements, or supplements
+that are cap-paused, operator-paused, revoked or expired. If no eligible supplement exists, keep the original
+selection and its refusal.
+
+A dispatch/promotion applies only the selected grant's applicable risk, job-cap and parallelism checks; a checkpoint
+applies that grant's exclusions, allowed actions, `ask_on`, risk and caps. A selected denial never tries another
+grant: risk:high, pre-approval and hard stops, path/subsystem exclusions, actions, spend and parallelism remain
+final. Without an active permitting grant, the existing latest-speaking permit/refuse fallback remains unchanged.
+Nothing speaking passes a gate or leaves a checkpoint pending. Expiry continuation, its USD/token and risk checks,
+the expired reviewer-start exception, patch-equivalent review reuse and per-head CI/review/merge gates are unchanged.
+
+Excluding the current job keeps selection stable across review, repair, promotion and merge: a job dispatched under
+a supplement keeps it because the original remains full without that job; a job dispatched while the original had
+room keeps the original. Re-dispatch timestamps never affect this rule. Residual edge: if the operator later raises
+the earlier grant's job cap enough to leave room without this job, selection returns to it. This is deterministic
+and operator-caused. No per-job grant binding or migration is introduced; callers omitting fleet jobs retain the
+previous selection order.
 
 Grant selection does not change accounting: `mandateSpend`, job count, reviewer spend and live-worker counts
 still use existing coverage and issue-time baselines. A broad grant can include the same covered job/spend as

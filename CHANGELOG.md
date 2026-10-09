@@ -6,6 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- A named grant at or above its job cap no longer shadows an eligible active named supplement explicitly covering the same job. Selection counts jobs without the current job, preserving review, repair and merge continuations; project-wide fallback and policy mixing remain forbidden. Migration: none.
 - The operator composer's text-attachment cap is now 4 MiB (was 1 MiB); the 200 KiB inline budget and the 10 MiB image cap are unchanged. Larger text files are still sent by stored path.
 - Web Push is decisions only (cp-q035): the sweep pushes open operator ask cards and nothing else. A `service_health` escalation is no longer pushed (`PUSH_ESCALATION_KINDS` is gone), and cp-health no longer pushes a failure, an updater failure or a recovery (`directPush` removed; it reads no push key). Both stay on the dashboard: the Overview `health failing` line and alarm banner, and the `service_health` question on Decisions. `PUSH_RULE` (the `/doctor` `[push]` line) says so. Migration: none; a pending legacy `service_health` ledger record settles `skipped`, and old `state/health.json` push fields are ignored.
 
