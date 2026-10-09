@@ -431,8 +431,9 @@ ellipsize in their chip at 390 px and in the 300 px sidebar at 1440 px.
 
 **Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
 `use-settings-control.ts`, `settings-control.ts`). `#settings`, under More, has exactly three sections, each with its own
-**Save** and **Restore defaults** (a `confirm()` first): **Worker models** (one row per `data/routing.json` rubric entry:
-the id and `role · scope · risk · project` chips, a model input, comma-separated fallbacks and a thinking select whose
+**Save** and **Restore defaults** (a `confirm()` first; `{n} unsaved change(s)` sits beside them): **Model routing** (one row per `data/routing.json` rubric entry,
+a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the id and `role · scope · risk:<level> · project` meta, a model select, fallbacks as mono chips with ×
+(`+ Add fallback`, up to 4) and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
 model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
 its source; empty unsets it) and **Grant defaults** (the `grants.*` fields from the catalog). It reads `GET /api/settings`

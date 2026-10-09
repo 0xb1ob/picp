@@ -86,12 +86,13 @@ test("three sections exactly; Save posts If-Match, the control token and only th
 		return [200, { status: 200, state: "applied", changes: [{ key: "models.parent" }] }];
 	});
 	const ui = await page(t, fetcher);
-	assert.deepEqual([...ui.root.querySelectorAll("section > h2")].map((h) => h.textContent), ["Worker models", "Parent and operator models", "Grant defaults"]);
-	assert.equal(ui.section("Worker models").querySelectorAll("li.settings-rule").length, 6, "one row per shipped rubric entry");
+	assert.deepEqual([...ui.root.querySelectorAll("section > h2")].map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults"]);
+	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 6, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
 	await ui.type(parent, "custom", "change");
 	await ui.type(parent.parentElement!.querySelector("input")!, "anthropic/claude-opus-5-5");
+	assert.equal(people.querySelector(".settings-unsaved")?.textContent, "1 unsaved change");
 	await ui.click(people, "Save");
 	assert.equal(posts.length, 1);
 	assert.equal(posts[0]!.url, "/api/settings/apply");
@@ -111,7 +112,7 @@ test("rubric edits post the whole row list; restore bodies per section; a 400 li
 	const snap = snapshot(true);
 	const { fetcher, posts } = server(() => settings(snap), (url) => url.endsWith("/apply") ? [400, { status: 400, state: "refused", error: "invalid settings", errors: ["row risky-any: only model, fallbacks and thinking may change"] }] : [200, { status: 200, state: "applied", changes: [] }]);
 	const ui = await page(t, fetcher);
-	const workers = ui.section("Worker models");
+	const workers = ui.section("Model routing");
 	const first = workers.querySelector("li.settings-rule")!;
 	await ui.type(first.querySelector("select")!, "custom", "change");
 	await ui.type(first.querySelector("input")!, "openai/gpt-6.1-sol");
@@ -143,7 +144,7 @@ test("read-only when the session is not writable; an absent routing.json shows o
 	const ui = await page(t, fetcher);
 	assert.match(ui.root.querySelector(".settings-readonly")?.textContent ?? "", /^Read only: Operator session offline/);
 	assert.ok([...ui.root.querySelectorAll("input, select, textarea, button")].every((element) => element.hasAttribute("disabled") || element.closest("fieldset[disabled]")), "every control is disabled (a checkbox by its disabled fieldset)");
-	const workers = ui.section("Worker models");
+	const workers = ui.section("Model routing");
 	assert.equal(workers.querySelector(".settings-readonly")?.textContent, "No data/routing.json: workers use each profile's own model.");
 	assert.equal(workers.querySelectorAll("input, button").length, 0);
 	assert.equal(posts.length, 0);
@@ -165,7 +166,7 @@ test("model dropdowns: grouped by provider; (unset) only for parent/operator; an
 	], "providers alphabetical, models alphabetical within each");
 	assert.deepEqual(optionTexts(parent), ["(unset)", "anthropic/claude-haiku-5", "anthropic/claude-opus-5-5", "openai/gpt-5", "Custom…"]);
 	assert.ok(people.querySelector("#setting-models-operator"), "the operator model is a dropdown too");
-	const workers = ui.section("Worker models");
+	const workers = ui.section("Model routing");
 	const first = workers.querySelector("li.settings-rule")!;
 	const model = first.querySelector("select")!;
 	assert.equal(optionTexts(model)[0], "anthropic/claude-haiku-5", "a rubric model has no (unset)");
@@ -220,12 +221,12 @@ test("model dropdowns: while the server's first listing runs, the current value 
 	let reads = 0;
 	const { fetcher } = server(() => { reads++; return reads === 1 ? settings(snap, { available_models: null, models_error: null, models_loading: true }) : settings(snap, { available_models: ["openai/gpt-5"], models_error: null }); }, () => [500, {}]);
 	const ui = await page(t, fetcher);
-	assert.equal(ui.section("Worker models").querySelector("p[role=status]")?.textContent, "Loading the model list…");
-	assert.deepEqual(optionTexts(ui.section("Worker models").querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
+	assert.equal(ui.section("Model routing").querySelector("p[role=status]")?.textContent, "Loading the model list…");
+	assert.deepEqual(optionTexts(ui.section("Model routing").querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
 	assert.deepEqual(optionTexts(ui.root.querySelector("#setting-models-parent")!), ["(unset)", "Custom…"]);
 	for (let i = 0; i < 40 && !ui.root.querySelector("optgroup"); i++) await new Promise((done) => setTimeout(done, 100));
 	assert.deepEqual(optionTexts(ui.root.querySelector("#setting-models-parent")!), ["(unset)", "openai/gpt-5", "Custom…"], "the retry picked the list up");
-	assert.equal(ui.section("Worker models").querySelector("p[role=status]"), null);
+	assert.equal(ui.section("Model routing").querySelector("p[role=status]"), null);
 });
 
 test("model dropdowns: an unavailable list keeps each current value plus Custom…, and one note", async (t) => {
@@ -233,12 +234,12 @@ test("model dropdowns: an unavailable list keeps each current value plus Custom�
 	const { fetcher } = server(() => settings(snap, { available_models: null, models_error: "model list unavailable" }), () => [500, {}]);
 	const ui = await page(t, fetcher);
 	assert.equal(ui.root.querySelector("optgroup"), null);
-	const first = ui.section("Worker models").querySelector("li.settings-rule")!;
+	const first = ui.section("Model routing").querySelector("li.settings-rule")!;
 	assert.deepEqual(optionTexts(first.querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
 	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!), ["openai/gpt-6.1-sol", "Custom…"]);
 	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Add a fallback to risky-any']")!), ["Add fallback…", "Custom…"]);
 	assert.equal(ui.root.querySelectorAll(".settings-warn").length, 0);
-	assert.match(ui.section("Worker models").querySelector("p[role=status]")?.textContent ?? "", /^Model list unavailable \(model list unavailable\): type a provider\/model\.$/);
+	assert.match(ui.section("Model routing").querySelector("p[role=status]")?.textContent ?? "", /^Model list unavailable \(model list unavailable\): type a provider\/model\.$/);
 });
 
 test("writeSettings: the exact restore request; a refusal without a transaction body is an error", async () => {
