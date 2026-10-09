@@ -50,9 +50,9 @@ export function ThreadSidebar({threads, control}: {threads: ThreadsView; control
  const live = status.threads.filter(t => t.state !== "done"), done = status.threads.filter(t => t.state === "done");
  const row = (t: ThreadView) => <div key={t.id} class="session-thread-row">
   <button type="button" class="session-thread-choice" aria-pressed={threads.selected === t.tag} aria-label={threadAria(t)} onClick={() => threads.select(t.tag)}><strong>{t.tag}{threadBadge(t)}</strong><small>{t.state}</small>{working(t)}</button>
-  {threads.selected === t.tag && <MarkDone threads={threads} status={status} view={t} class="session-thread-done"/>}
+  <MarkDone threads={threads} status={status} view={t} class="session-thread-done"/>
  </div>;
- return <section aria-label="Threads"><h2>Threads<NewThread threads={threads} control={control} class="session-thread-new" label="+"/></h2>
+ return <section aria-label="Threads"><h2>Threads</h2><NewThread threads={threads} control={control} class="session-thread-new" label="+"/>
   <button type="button" class="session-thread-choice" aria-pressed={!threads.selected} onClick={() => threads.select(null)}><strong>All messages</strong></button>
   {live.map(row)}
   {done.length > 0 && <details><summary>Done ({done.length})</summary>{done.map(row)}</details>}

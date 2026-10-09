@@ -80,7 +80,8 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 	const sidebar = all.querySelector('.session-sidebar section[aria-label="Threads"]');
 	assert.ok(sidebar, "a Threads section in the sidebar");
 	assert.equal(sidebar!.previousElementSibling?.querySelector("h2")?.textContent, "Operator ↔ you");
-	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["All messages", "billing-bug · 2waiting", "opsopen"]);
+	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["+", "All messages", "billing-bug · 2waiting", "Mark done", "opsopen", "Mark done"], "+ New is a sibling of the heading, not inside the h2; Mark done on every open row");
+	assert.equal(sidebar!.querySelector("h2")?.textContent, "Threads", "the dialog trigger and dialog stay out of the heading");
 	assert.match(sidebar!.querySelector("details > summary")?.textContent ?? "", /^Done \(1\)$/);
 	assert.match(html, /about billing/); assert.match(html, /about ops/);
 	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|<h2>Threads/, "Decisions view: no threads");
@@ -102,15 +103,14 @@ test("Mark done is disabled while waiting, with the reason as its title; enabled
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const full = { ...sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!, entries: [] };
 	const doneButtons = (view: ThreadsView) => [...parseHTML(`<body>${screen(full, undefined, view)}</body>`).document.querySelectorAll("button.session-thread-done")];
-	const waiting = doneButtons(threads({ selected: "billing-bug" }));
-	assert.equal(waiting.length, 2, "one on the chip row, one in the sidebar");
-	for (const button of waiting) {
-		assert.equal(button.hasAttribute("disabled"), true);
-		assert.equal(button.getAttribute("title"), "Answer or acknowledge first: 1 open ask(s), 1 unacknowledged answer(s)");
-	}
-	for (const button of doneButtons(threads({ selected: "ops" }))) assert.equal(button.hasAttribute("disabled"), false);
+	const disabled = (view: ThreadsView) => doneButtons(view).map(b => b.hasAttribute("disabled"));
+	const refusal = "Answer or acknowledge first: 1 open ask(s), 1 unacknowledged answer(s)";
+	// The sidebar renders Mark done on every open row (CSS shows it on hover or focus only); the chip row only on the selected thread.
+	assert.deepEqual(disabled(threads({ selected: "billing-bug" })), [true, false, true], "sidebar billing-bug refused while waiting, sidebar ops enabled, then the chip row (billing-bug)");
+	assert.deepEqual(doneButtons(threads({ selected: "billing-bug" })).filter(b => b.hasAttribute("disabled")).map(b => b.getAttribute("title")), [refusal, refusal]);
+	assert.deepEqual(disabled(threads({ selected: "ops" })), [true, false, false]);
 	for (const button of doneButtons(threads({ selected: "ops", status: list({ enabled: false, token: null, reason: "Dashboard control is off: opt-out" }) }))) assert.equal(button.getAttribute("title"), "Dashboard control is off: opt-out");
-	assert.equal(doneButtons(threads()).length, 0, "nothing selected, no Mark done");
+	assert.equal(doneButtons(threads()).length, 2, "nothing selected: no chip button, one per open sidebar row");
 	assert.match(screen(full, undefined, threads({ selected: "ops", failed: { id: O, reason: "answer or acknowledge first" } })), /role="alert">Not done: answer or acknowledge first/);
 });
 
@@ -212,7 +212,7 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 	const css = readFileSync(new URL("../viewer-app/screens/sessions.css", import.meta.url), "utf8");
 	assert.match(css, /\.session-thread-row:hover > \.session-thread-done, \.session-thread-row:focus-within > \.session-thread-done \{ display: block/, "Mark done only on hover or focus");
 	assert.doesNotMatch(css, /aria-pressed=true\]\) > \.session-thread-done/, "selected alone never shows Mark done");
-	assert.match(css, /\.session-thread-row:hover \.session-thread-working[^{]*\{ visibility: hidden/, "Mark done replaces the badge");
+	assert.match(css, /\.session-thread-row:hover:has\(> \.session-thread-done\) \.session-thread-working[^{]*\{ visibility: hidden/, "the badge is hidden only on a row that has the action");
 	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
 
 	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
@@ -286,4 +286,26 @@ test("bound job notices and main replies obey #155's span filter; empty threads 
 	assert.doesNotMatch(owned, /notice before|notice after/);
 	assert.doesNotMatch(screen(full, undefined, threads({ selected: "ops" })), /notice owned|long reply|Context compacted/);
 	assert.match(screen(full, undefined, threads({ selected: "brand-new" })), /No messages in brand-new yet/);
+});
+
+test("sidebar rail: a 12-character thread name is full text and not ellipsised in a real browser layout (skipped without playwright)", async t => {
+	const long = "billing-bugs";
+	const busy = [thread(B, long, "open"), thread(O, "ops", "open")]; busy[0]!.counts.jobs_working = 2;
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const base = sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!;
+	const html = screen({ ...base, entries: [] }, undefined, threads({ status: list({ threads: busy }), selected: long }));
+	const names = [...parseHTML(`<body>${html}</body>`).document.querySelectorAll(".session-thread-row strong")].map(e => e.textContent);
+	assert.ok(names.includes(long), "the full name is the text content (CSS never truncates the string)");
+	let pw: { chromium: { launch(o: object): Promise<any> } };
+	try { pw = await import(process.env.CP_PLAYWRIGHT ?? "playwright"); } catch { t.skip("playwright not installed; set CP_PLAYWRIGHT to run the layout assertion"); return; }
+	const css = ["../viewer-app/screens/sessions.css", "../viewer-app/components/control.css"].map(f => readFileSync(new URL(f, import.meta.url), "utf8")).join("\n");
+	const browser = await pw.chromium.launch({ args: ["--no-sandbox"] }); t.after(() => browser.close());
+	const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+	await page.setContent(`<style>body{margin:0}${css}</style><body>${html}</body>`);
+	for (const hover of [false, true]) {
+		if (hover) await page.locator(".session-thread-row").first().hover();
+		const m = await page.evaluate((name: string) => { const e = [...document.querySelectorAll(".session-thread-row strong")].find(x => x.textContent === name) as HTMLElement; return { scroll: e.scrollWidth, client: e.clientWidth, text: e.textContent }; }, long);
+		assert.ok(m.scroll <= m.client, `name not ellipsised (hover ${hover}): scrollWidth ${m.scroll} <= clientWidth ${m.client}`);
+		assert.equal(m.text, long);
+	}
 });
