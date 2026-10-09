@@ -202,14 +202,14 @@ test("GET /api/job/:id/transcript reads a torn-down job's worker session read-on
  put(join(LAYOUT.state,"sessions","cp-done.jsonl"),lines.join("\n")+"\n");
  put(join(LAYOUT.state,"sessions","cp-small.jsonl"),[line("user","Small brief",0),line("assistant",[{type:"text",text:"hello"}],1)].join("\n")+"\n");
  const ids=["cp-done","cp-small","cp-gone","cp-outside","cp-script"];
- put(".pi-command-post/jobs.json",{jobs:[...ids,"cp-ledger-only"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"],...(id==="cp-done"?{description:"Why this job exists"}:{})}))});
+ put(".pi-command-post/jobs.json",{jobs:[...ids,"cp-ledger-only"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"],...(id==="cp-done"?{description:"Why this  job exists\nSecond line"}:{})}))});
  put(LAYOUT.fleetFile,{jobs:ids.map(job_id=>({job_id,project:"demo",kind:"ship",phase:"done",dispatched_at:at,closed_at:at,...(job_id==="cp-script"?{executor:"script"}:{})}))});
  put(join(LAYOUT.runs,"cp-done/status.json"),{session_file:session});
  put(join(LAYOUT.runs,"cp-small/status.json"),{session_file:join(home.path,LAYOUT.state,"sessions","cp-small.jsonl")});
  put(join(LAYOUT.runs,"cp-gone/status.json"),{session_file:join(home.path,LAYOUT.state,"sessions","missing.jsonl")});
  put("outside.jsonl",line("user","secret",0)+"\n");
  put(join(LAYOUT.runs,"cp-outside/status.json"),{session_file:join(home.path,"outside.jsonl")});
- put(join(LAYOUT.mandates,"md-a.json"),{id:"md-a",status:"active",issued_at:at,expiry:"2099-01-01T00:00:00Z",projects:["demo"],objective:"Goal A",job_ids:["cp-done"],spend_cap:{usd:20,tokens:10000}});
+ put(join(LAYOUT.mandates,"md-a.json"),{id:"md-a",status:"active",issued_at:at,expiry:"2099-01-01T00:00:00Z",projects:["demo"],objective:"Goal  A\nline two",job_ids:["cp-done"],spend_cap:{usd:20,tokens:10000}});
  const options={home:home.path,stateDir:join(home.path,LAYOUT.state),host:"127.0.0.1",port:0};
  const server=createViewer(options); await new Promise<void>(r=>server.listen(0,options.host,r)); options.port=(server.address() as AddressInfo).port; t.after(()=>server.close());
  const get=(path:string)=>fetch(`http://127.0.0.1:${options.port}${path}`);
@@ -226,7 +226,7 @@ test("GET /api/job/:id/transcript reads a torn-down job's worker session read-on
  assert.equal((await get("/api/job/%2e%2e%2fsecret/transcript")).status,404);
  assert.equal((await fetch(`http://127.0.0.1:${options.port}/api/job/cp-done/transcript`,{method:"POST"})).status,405);
  const detail=await (await get("/api/job/cp-done")).json() as JobResponse;
- assert.equal(detail.description,"Why this job exists");
- assert.deepEqual(detail.mandate,{id:"md-a",status:"active",objective:"Goal A",spend_usd:detail.mandate!.spend_usd,cap_usd:20,jobs:detail.mandate!.jobs});
+ assert.equal(detail.description,"Why this  job exists\nSecond line","stored spaces and line breaks reach the API untouched");
+ assert.deepEqual(detail.mandate,{id:"md-a",status:"active",objective:"Goal  A\nline two",spend_usd:detail.mandate!.spend_usd,cap_usd:20,jobs:detail.mandate!.jobs});
  assert.equal((await (await get("/api/job/cp-small")).json() as JobResponse).mandate,null);
 });

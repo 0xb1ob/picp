@@ -150,3 +150,10 @@ test("asks, the failure action, the description and the mandate snippet render o
  assert.match(document.querySelector(".job-mandate-snippet")!.textContent!, /md-a.*active.*Ship it.*\$1\.50 \/ \$20\.00.*3 jobs/);
  assert.equal(parseHTML(detail()).document.querySelector(".job-card, .job-mandate-snippet"), null, "omitted when null");
 });
+
+test("description and mandate goal keep their stored spaces and line breaks; header chips sit on the same row", () => {
+ const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/job-detail.css"),"utf8");
+ assert.match(css,/\.job-card p, \.job-mandate-objective \{ white-space: pre-wrap; \}/);
+ assert.match(css,/\.jt-jump \{[^}]*margin-left: auto/);
+ assert.match(css,/@media \(max-width: 899px\) \{\s*\.jt-tools > summary[^}]*min-height: 44px/,"44px summary targets are phone-only");
+});

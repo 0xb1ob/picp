@@ -15,7 +15,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function ToolRun({run}: {run: SessionEntry[]}) {
  const count = (...names: string[]) => run.filter(e => names.includes(e.name ?? "")).length;
  const reads = count("read"), edits = count("edit", "write"), commands = count("bash");
- return <details class="jt-tools"><summary>{plural(run.length, "tool call")}{reads > 0 && ` · read ${plural(reads, "file")}`}{edits > 0 && ` · edited ${edits}`}{commands > 0 && ` · ran ${plural(commands, "command")}`}</summary>
+ return <details class="jt-tools"><summary><span class="jt-caret" aria-hidden="true">▸</span>{plural(run.length, "tool call")}{reads > 0 && ` · read ${plural(reads, "file")}`}{edits > 0 && ` · edited ${edits}`}{commands > 0 && ` · ran ${plural(commands, "command")}`}</summary>
   {run.map(e => {
    const {args, result} = parts(e);
    const command = e.name === "bash" && typeof args.command === "string" ? args.command : null;
@@ -67,16 +67,16 @@ export function JobTranscript({jobId, generatedAt, model, reports}: {jobId: stri
  const jump = (id: string) => () => document.getElementById(id)?.scrollIntoView({block: "start"});
  const render = (b: Block, i: number) => b.kind === "tools" ? <ToolRun key={i} run={b.run}/> : isReport(b.entry)
   ? <div class="jt-report" id="jt-report" key={b.entry.id}><strong>Report filed</strong><span>{time(b.entry.at)}</span>{reports[0] && <a href={reports[0].href} target="_blank" rel="noopener noreferrer">Open report ↗</a>}</div>
-  : isReview(b.entry) ? <details class="jt-review" id={i === rest.findIndex(x => x.kind === "entry" && isReview(x.entry)) ? "jt-reviews" : undefined} key={b.entry.id}><summary>{b.entry.bridge?.kind} · {time(b.entry.at)}</summary><Markdown text={b.entry.text} links={b.entry.links}/></details>
-  : isWorker(b.entry) ? <div class="jt-say" key={b.entry.id}><Markdown text={b.entry.text} links={b.entry.links}/></div>
+  : isReview(b.entry) ? <details class="jt-review" id={i === rest.findIndex(x => x.kind === "entry" && isReview(x.entry)) ? "jt-reviews" : undefined} key={b.entry.id}><summary><span class="jt-caret" aria-hidden="true">▸</span>{b.entry.bridge?.kind} · {time(b.entry.at)}</summary><Markdown text={b.entry.text} links={b.entry.links}/></details>
+  : isWorker(b.entry) ? <div class="jt-say" key={b.entry.id}><div class="jt-label">Worker · {time(b.entry.at)}</div><Markdown text={b.entry.text} links={b.entry.links}/></div>
   : <div class="jt-note" key={b.entry.id}><span>{b.entry.who}</span> {b.entry.text.split("\n")[0]?.slice(0, 200)}</div>;
  return <section class="job-transcript" aria-label="Worker transcript">
-  <div class="jt-head"><span class="jt-chip">read-only</span><span class="jt-session">{model ?? "model not recorded"}{data.from && data.to && ` · ${time(data.from)}–${time(data.to)}`}</span></div>
-  {(brief || hasReport || hasReviews) && <div class="jt-jump">{brief && <button type="button" onClick={jump("jt-brief")}>Brief</button>}{hasReport && <button type="button" onClick={jump("jt-report")}>Report</button>}{hasReviews && <button type="button" onClick={jump("jt-reviews")}>Reviews</button>}</div>}
+  <div class="jt-head"><span class="jt-chip">read-only</span><span class="jt-session">Worker session · {model ?? "model not recorded"}{data.from && data.to && ` · ${time(data.from)}–${time(data.to)}`}</span>
+   {(brief || hasReport || hasReviews) && <span class="jt-jump">{brief && <button type="button" onClick={jump("jt-brief")}>Jump to Brief</button>}{hasReport && <button type="button" onClick={jump("jt-report")}>Report</button>}{hasReviews && <button type="button" onClick={jump("jt-reviews")}>Reviews</button>}</span>}</div>
   {data.warning && <p class="jobs-empty" role="status">{data.warning}</p>}
   {data.truncated && <p class="job-meta">Recent events shown; the session is longer.</p>}
-  {brief && <div class="jt-brief" id="jt-brief"><div class={fullBrief ? "" : "jt-clamp"}><Markdown text={brief.text} links={brief.links}/></div><button type="button" onClick={() => setFullBrief(!fullBrief)}>{fullBrief ? "Show less" : "Show full brief"}</button></div>}
+  {brief && <div class="jt-brief" id="jt-brief"><div class="jt-label">Parent · {time(brief.at)}</div><div class={fullBrief ? "" : "jt-clamp"}><Markdown text={brief.text} links={brief.links}/></div><button type="button" onClick={() => setFullBrief(!fullBrief)}>{fullBrief ? "Show less" : "Show full brief"}</button></div>}
   {shown.map(render)}
-  {trailing.length > 0 && <details class="jt-trailing"><summary>{plural(trailing.reduce((n, b) => n + (b.kind === "tools" ? b.run.length : 1), 0), "more event")}</summary>{trailing.map((b, i) => render(b, shown.length + i))}</details>}
+  {trailing.length > 0 && <details class="jt-trailing"><summary><span class="jt-caret" aria-hidden="true">▸</span>{plural(trailing.reduce((n, b) => n + (b.kind === "tools" ? b.run.length : 1), 0), "more event")}</summary>{trailing.map((b, i) => render(b, shown.length + i))}</details>}
  </section>;
 }

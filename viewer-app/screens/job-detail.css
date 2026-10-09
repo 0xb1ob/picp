@@ -1,42 +1,47 @@
-.job-detail { gap: 24px; }
-.job-detail-body { display: flex; flex-direction: column; gap: 24px; order: 4; min-width: 0; }
+.job-detail { gap: 16px; }
+.job-detail-body { display: flex; flex-direction: column; gap: 16px; order: 4; min-width: 0; }
 .job-detail-main, .job-detail-side { min-width: 0; }
 .job-detail-side { display: none; flex-direction: column; gap: 12px; }
 .job-detail[data-tab="details"] .job-detail-side { display: flex; }
 .job-detail-side > * { order: 0; }
-.job-detail-top { display: flex; flex-direction: column; gap: 12px; order: 2; }
+.job-detail-top { display: flex; flex-direction: column; gap: 8px; order: 2; }
 .job-detail-top > * { order: 0; }
-.job-summary-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
-.job-summary-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.job-summary-row > p { flex: 1 1 auto; min-width: 0; }
-.job-summary-more { flex: 0 0 auto; min-height: 44px; padding: 0 8px; background: none; border: 0; color: var(--muted); font-size: 13px; }
+.job-summary-clamp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-summary-row { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.job-summary-row > p { flex: 0 1 auto; min-width: 0; order: 0; }
+.job-summary-more { flex: 0 0 auto; min-height: 44px; padding: 0 4px; background: none; border: 0; color: var(--muted); font-size: 13px; cursor: pointer; }
 .job-tabs { display: flex; gap: 2px; padding: 2px; order: 3; background: var(--nav-selected); border-radius: 10px; }
 .job-tab { flex: 1; min-height: 44px; padding: 0 16px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; }
 .job-tab-on { background: var(--surface); color: var(--text); }
 .job-card, .job-mandate-snippet { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; font-size: 13px; color: var(--muted); }
 .job-card h2, .job-mandate-snippet h2 { font-size: 12px; color: var(--dim); }
 .job-mandate-objective { overflow-wrap: anywhere; max-height: 6.5em; overflow: hidden; }
-.job-transcript { display: flex; flex-direction: column; gap: 12px; min-width: 0; font-size: 14px; line-height: 1.5; }
-.jt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
+.job-transcript { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.5; }
+.jt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--dim); }
 .jt-chip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
-.jt-jump { display: flex; flex-wrap: wrap; gap: 8px; }
-.jt-jump button, .jt-brief > button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; }
+.jt-jump { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.jt-jump button, .jt-brief > button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
 .jt-brief { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .jt-brief > div { min-width: 0; max-width: 100%; }
 .jt-brief > button { align-self: flex-start; }
 .jt-clamp { max-height: 6.5em; overflow: hidden; overflow-wrap: anywhere; }
 .jt-say { overflow-wrap: anywhere; min-width: 0; }
 .jt-note { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
-.jt-tools, .jt-review, .jt-trailing { font-size: 13px; color: var(--muted); min-width: 0; }
-.jt-tools > summary, .jt-review > summary, .jt-trailing > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; overflow-wrap: anywhere; }
-.jt-tool { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; min-width: 0; }
+.jt-tools, .jt-review, .jt-trailing { font-size: 13px; color: var(--muted); min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
+.jt-caret { display: inline-block; margin-right: 8px; color: var(--dim); }
+details[open] > summary > .jt-caret { transform: rotate(90deg); }
+.jt-label { font-size: 12px; color: var(--dim); }
+.job-card p, .job-mandate-objective { white-space: pre-wrap; }
+.jt-tools > summary, .jt-review > summary, .jt-trailing > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
+.jt-tools > summary::-webkit-details-marker, .jt-review > summary::-webkit-details-marker, .jt-trailing > summary::-webkit-details-marker { display: none; }
+.jt-tool { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; min-width: 0; }
 .jt-tool-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 .jt-failed { color: var(--text); font-weight: 600; text-decoration: underline; }
 .jt-command, .jt-result { margin: 0; padding: 8px 10px; background: var(--nav); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
 .jt-report { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .jt-report span { color: var(--dim); font-size: 12px; }
 .job-detail h1 { font-size: 22px; line-height: 28px; order: 2; }
-.job-detail-heading { display: flex; flex-direction: column; gap: 12px; }
+.job-detail-heading { display: flex; flex-direction: column; gap: 8px; }
 .job-detail-heading > p { font-size: 13px; color: var(--dim); order: 3; }
 .job-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; order: 1; }
 .job-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--subtle); border: 1px solid var(--tag-border); border-radius: 999px; padding: 3px 10px; }
@@ -95,7 +100,11 @@
 .job-event-pending .job-event-stem > span { border-style: dashed; }
 .shell-back { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; }
 .shell-detail-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+ @media (max-width: 899px) {
+ .jt-tools > summary, .jt-review > summary, .jt-trailing > summary { min-height: 44px; }
+}
 @media (min-width: 900px) {
+ .jt-jump button, .jt-brief > button, .job-summary-more { min-height: 24px; }
  .job-detail-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(18rem,25rem); grid-template-rows: auto 1fr; gap: 24px 40px; align-items: start; }
  .job-detail-main { grid-column: 1; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
  .job-detail-main:empty { display: none; }
