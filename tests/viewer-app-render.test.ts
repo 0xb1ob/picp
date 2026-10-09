@@ -22,8 +22,8 @@ test("Overview CSS constrains long one-line cells", () => {
  assert.ok(wide, "wide flight grid");
  const tracks = wide[2]!.trim().split(" "); const fixed = [...wide[2]!.matchAll(/(\d+)px/g)].map(m => +m[1]!);
  const title = +wide[1]! - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!;
- assert.ok(tracks.length === 8 && title > fixed[0]!, `Title ${title}px must exceed Job ${fixed[0]}px at ${wide[1]}px`);
- const title1440 = 1440 - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!; assert.ok(title1440 >= 45 * 7, `Title ${title1440}px at 1440 must fit 45 characters`); assert.ok(+wide[1]! <= 1280, "8 columns from 1280px at the latest");
+ assert.ok(tracks.length === 8 && title >= 240 && title >= 1.5 * fixed[0]!, `Title ${title}px must be >= 240px and clearly wider than Job ${fixed[0]}px at ${wide[1]}px`);
+ const title1440 = 1440 - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!; assert.ok(title1440 >= 45 * 7, `Title ${title1440}px at 1440 must fit 45 characters`); assert.ok(+wide[1]! <= 1200, "the 1200px required check shows the 8 columns and headers");
 });
 
 test("times format in the browser's own zone, never a server zone", async t => {
