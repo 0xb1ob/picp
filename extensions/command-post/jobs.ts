@@ -26,7 +26,7 @@ import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.
 import { formatBeadsImport, importBeads } from "../../src/ledger-import.ts";
 import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
-import { readSchedulesOrEmpty, scheduleLabelRefusal } from "../../src/schedule-expand.ts";
+import { readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { autoLink } from "../../src/trackers/link.ts";
 import { BR_SHOW_RE, describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
@@ -314,7 +314,14 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			return { text: `claimed ${job.id}`, details: { job } };
 		}
 		case "update": {
-			const labelRefusal = scheduleLabelRefusal(params.add_labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home));
+			// The org run cap reads the labels the job would carry after this update: a risk:high it keeps or gains counts.
+			const jobs = ledger.read().jobs;
+			const schedules = readSchedulesOrEmpty(ledger.home);
+			const target = params.job_id === undefined ? undefined : jobs.find((job) => job.id === params.job_id);
+			const after = [...(target?.labels ?? []).filter((label) => !(params.remove_labels ?? []).includes(label)), ...(params.add_labels ?? [])];
+			const labelRefusal =
+				scheduleLabelRefusal(params.add_labels ?? [], jobs, schedules, { ...(target ? { reuseId: target.id } : {}), ...(after.includes("risk:high") ? { risk: "high" } : {}) }) ??
+				(target ? scheduleRiskRefusal(target.id, params.add_labels ?? [], jobs, schedules) : undefined);
 			if (labelRefusal) throw new Error(`cp_job update refused: ${labelRefusal}`);
 			const job = await ledger.update(need(params, "job_id"), {
 				...(params.status ? { status: params.status as JobStatus } : {}),

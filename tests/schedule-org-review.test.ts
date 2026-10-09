@@ -156,6 +156,21 @@ test("a verified dashboard Run now click carries the seed's pre-approval to that
 	assert.match(JSON.stringify(forged), /is not a verified dashboard click: 0 request lines/);
 });
 
+test("U6: an operator-delegated seed pre-approval carries on a verified click as well, with its send id kept", async (t) => {
+	const { ledger, mandates, scheduler, pre, grant, request, control } = bench(t);
+	const sendId = "ps-20260701070000-0123abcd";
+	const seed = grant({ risk_preapproval: pre({ decided_by: "operator-delegated", delegation_rule: "main session gates org reviews", send_id: sendId }) });
+	const schedule = await scheduler.add({ ...org, name: "org", mandate_id: seed.id, description: CONFIG });
+	const id = request(schedule.id);
+	const [fired] = await control().pass();
+	assert.equal(fired?.outcome, "fired");
+	const fire = mandates.require(fired?.mandate_id as string);
+	assert.deepEqual([fire.risk_preapproval?.operator_quote, fire.risk_preapproval?.decided_by, fire.risk_preapproval?.send_id], [QUOTE, "operator-delegated", sendId]);
+	assert.match(fire.risk_preapproval?.delegation_rule ?? "", new RegExp(`^run_now ${id} \\(peer 100\\.64\\.0\\.9\\): seed ${seed.id} pre-approval`));
+	const reviewer = await ledger.create({ title: `Org PR review R1/1 [${fired?.job_id}]`, project: "demo", kind: "research", delivery: "local", labels: [`schedule:${schedule.id}`, "risk:high"] });
+	assert.equal(mandates.wouldAskRiskHigh({ jobId: reviewer.id, project: "demo", kind: "research" }, "high"), false);
+});
+
 test("a seed with no pre-approval, and another skill, carry nothing", async (t) => {
 	const { mandates, scheduler, grant, request, control } = bench(t);
 	const schedule = await scheduler.add({ ...org, name: "org", mandate_id: grant().id, description: CONFIG });

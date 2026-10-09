@@ -7641,8 +7641,10 @@ pre-filters it (holds, own and bot authors, drafts, `CHANGES_REQUESTED`, unresol
 green by `--checks success`), deals the passing PRs round-robin into k = min(N, max_reviewers) disjoint sets, comments
 the frozen assignment on the anchor, then creates R1…Rk (research/local, `risk: high`) and one report-only research/local
 synthesis S1 depending on them; N = 0 creates no job and closes the anchor with the filtered/held report. **Run cap:**
-`scheduleLabelRefusal` refuses a `schedule:<id>` job past max_reviewers + 1 beside the open anchor (jobs created since
-it), and a `risk:high` one past max_reviewers; an idempotent re-create of a run job is never refused. **Floor:**
+`scheduleLabelRefusal` refuses a `schedule:<id>` job past max_reviewers + 1 beside the open anchor (jobs not created
+before it; an unreadable `created_at` counts), and a `risk:high` one — from the `risk` parameter or a raw `risk:high`
+label — past max_reviewers; `scheduleRiskRefusal` holds `cp_job update add_labels: [risk:high]` on a run job to the same
+reviewer cap. An idempotent re-create (`findDuplicate` first) never counts its job twice. **Floor:**
 max_reviewers + 2 (5 by default); `dispatch_parallelism` is the seed's, never raised by code — add, move and update name
 it when it is below max_reviewers. **Brief-level gates** (the reviewers run with this home's `gh` credentials, as
 cp-pr-review's): a reviewer's one GitHub write is `gh pr review <url> --approve`, no body, on the head SHA it reviewed,

@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, type Job } from "../src/contracts.ts";
-import { formatExpansionWake, parentExpandedIds, pendingExpansions, readParentExpanded, readSchedulesOrEmpty, scheduleLabelRefusal } from "../src/schedule-expand.ts";
+import { formatExpansionWake, parentExpandedIds, pendingExpansions, readParentExpanded, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../src/schedule-expand.ts";
 import type { Schedule } from "../src/viewer/schedule-core.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -70,6 +70,19 @@ test("scheduleLabelRefusal: a cp-org-pr-review run holds at most max_reviewers r
 	assert.equal(scheduleLabelRefusal([label], [anchor, r1, r2, s1], [org], { reuseId: "cp-s001" }), undefined, "an idempotent re-create");
 	// Another skill's run has no cap.
 	assert.equal(scheduleLabelRefusal(["schedule:sch-abc123"], [job({}), ...Array.from({ length: 9 }, (_, i) => job({ id: `cp-x00${i}`, status: "open", labels: ["schedule:sch-abc123", "risk:high"] }))], [expanded], { risk: "high" }), undefined);
+	// risk:high counts from the label alone, without the risk parameter.
+	assert.match(scheduleLabelRefusal([label, "risk:high"], [anchor, r1, r2], [org]) ?? "", /already has 2 reviewer job\(s\)/);
+	// Fail closed: a run job whose created_at does not read counts toward the run.
+	const unreadable = job({ id: "cp-r003", status: "open", labels: [label, "risk:high"], created_at: "not a time" });
+	assert.match(scheduleLabelRefusal([label], [anchor, r1, unreadable], [org], { risk: "high" }) ?? "", /already has 2 reviewer job\(s\)/);
+	// A re-create of a reviewer already in the run passes; a re-create never counts the job twice.
+	assert.equal(scheduleLabelRefusal([label], [anchor, r1, r2, s1], [org], { reuseId: "cp-r002", risk: "high" }), undefined);
+	// Raising a run job to risk:high (cp_job update add_labels) is held to the reviewer cap.
+	assert.match(scheduleRiskRefusal("cp-s001", ["risk:high"], [anchor, r1, r2, s1], [org]) ?? "", /already has 2 reviewer job\(s\)/);
+	assert.equal(scheduleRiskRefusal("cp-s001", ["risk:high"], [anchor, r1, s1], [org]), undefined);
+	assert.equal(scheduleRiskRefusal("cp-r001", ["risk:high"], [anchor, r1, r2, s1], [org]), undefined, "already risk:high");
+	assert.equal(scheduleRiskRefusal("cp-s001", ["note"], [anchor, r1, r2, s1], [org]), undefined);
+	assert.equal(scheduleRiskRefusal("cp-old1", ["risk:high"], [anchor, r1, r2, { ...old, labels: [label] }], [org]), undefined, "an earlier run's job");
 });
 
 test("the cp-self-review skill documents the recipe the plan fixes", () => {

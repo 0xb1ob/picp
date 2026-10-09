@@ -42,13 +42,36 @@ export function formatExpansionWake(anchor: Job, schedule: Schedule): string {
 		`Never dispatch ${anchor.id}; close it after the synthesis job is torn down.`;
 }
 
+const RISK_HIGH = "risk:high";
+const isHigh = (job: Job): boolean => job.labels.includes(RISK_HIGH);
+
+/** A cp-org-pr-review open run's jobs beside its anchor; a created_at that does not read as before the anchor counts (fail closed). */
+const orgRun = (jobs: readonly Job[], anchor: Job, label: string): Job[] =>
+	jobs.filter((job) => job.id !== anchor.id && job.labels.includes(label) && !(Date.parse(job.created_at) < Date.parse(anchor.created_at)));
+
+/**
+ * The org run cap for one job (`jobId`, when it already exists) joining or staying in `anchor`'s run: at most
+ * max_reviewers + one synthesis beside the anchor (a job already in the run never counts twice), and at most
+ * max_reviewers risk:high reviewers when the job is (or becomes) risk:high.
+ */
+function orgRunRefusal(schedule: Schedule, anchor: Job, jobs: readonly Job[], label: string, jobId: string | undefined, high: boolean): string | undefined {
+	const max = orgReviewMaxReviewers(schedule.job.description);
+	const run = orgRun(jobs, anchor, label);
+	const others = run.filter((job) => job.id !== jobId);
+	if (others.length === run.length && run.length >= max + 1) return `cp-org-pr-review run ${anchor.id} already has ${run.length} job(s) (max_reviewers ${max} plus one synthesis); a fire never fans out wider`;
+	const reviewers = others.filter(isHigh).length;
+	if (high && reviewers >= max) return `cp-org-pr-review run ${anchor.id} already has ${reviewers} reviewer job(s) (max_reviewers ${max}); a fire never fans out wider`;
+	return undefined;
+}
+
 /**
  * Why `labels` may not be added to a job, or undefined: a `schedule:` label is minted by a fire, never by hand. A
- * cp-org-pr-review run also caps its jobs: at most max_reviewers + one synthesis beside the anchor, at most
- * max_reviewers of them risk:high reviewers (`options.risk` is the new job's). `options.reuseId`: an idempotent
- * re-create of a job already in the run is never refused by the cap.
+ * cp-org-pr-review run also caps its jobs (`orgRunRefusal`). The job is risk:high when `labels` carry `risk:high` or
+ * `options.risk` is high (the create parameter, or the label set an update leaves). `options.reuseId`: the job's id
+ * when it already exists (an idempotent re-create, an update), so a job already in the run is never counted twice.
  */
 export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[], options: { reuseId?: string; risk?: string } = {}): string | undefined {
+	const high = options.risk === "high" || labels.includes(RISK_HIGH);
 	for (const label of labels) {
 		if (!label.startsWith(SCHEDULE_LABEL)) continue;
 		const id = label.slice(SCHEDULE_LABEL.length);
@@ -58,12 +81,29 @@ export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly J
 		if (!anchor) return `no open run of schedule ${id} (Run now first)`;
 		const schedule = schedules.find((entry) => entry.id === id);
 		if (schedule?.job.skill !== "cp-org-pr-review") continue;
-		const run = jobs.filter((job) => job.id !== anchor.id && job.labels.includes(label) && Date.parse(job.created_at) >= Date.parse(anchor.created_at));
-		if (options.reuseId !== undefined && run.some((job) => job.id === options.reuseId)) continue;
-		const max = orgReviewMaxReviewers(schedule.job.description);
-		if (run.length >= max + 1) return `cp-org-pr-review run ${anchor.id} already has ${run.length} job(s) (max_reviewers ${max} plus one synthesis); a fire never fans out wider`;
-		const reviewers = run.filter((job) => job.labels.includes("risk:high")).length;
-		if (options.risk === "high" && reviewers >= max) return `cp-org-pr-review run ${anchor.id} already has ${reviewers} reviewer job(s) (max_reviewers ${max}); a fire never fans out wider`;
+		const refusal = orgRunRefusal(schedule, anchor, jobs, label, options.reuseId, high);
+		if (refusal) return refusal;
+	}
+	return undefined;
+}
+
+/**
+ * Why `addLabels` may not raise an existing job to risk:high, or undefined: a job already in an open cp-org-pr-review
+ * run counts against its max_reviewers reviewer cap once it carries `risk:high` (`cp_job update add_labels`). A job
+ * outside an open org run, or one already risk:high, is never refused here.
+ */
+export function scheduleRiskRefusal(jobId: string, addLabels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[]): string | undefined {
+	if (!addLabels.includes(RISK_HIGH)) return undefined;
+	const job = jobs.find((entry) => entry.id === jobId);
+	if (!job || isHigh(job)) return undefined;
+	for (const label of job.labels) {
+		if (!label.startsWith(SCHEDULE_LABEL)) continue;
+		const id = label.slice(SCHEDULE_LABEL.length);
+		const schedule = schedules.find((entry) => entry.id === id);
+		const anchor = jobs.find((entry) => anchorOpen(entry, id));
+		if (schedule?.job.skill !== "cp-org-pr-review" || !anchor || !orgRun(jobs, anchor, label).some((entry) => entry.id === job.id)) continue;
+		const refusal = orgRunRefusal(schedule, anchor, jobs, label, job.id, true);
+		if (refusal) return refusal;
 	}
 	return undefined;
 }
