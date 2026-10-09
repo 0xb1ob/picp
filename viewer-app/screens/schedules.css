@@ -41,12 +41,12 @@
 .schedule-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .schedule-status-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
 .schedule-how p { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.schedule-identity, .schedule-how-phone { display: none; }
+.schedule-how-phone { display: none; }
 @media (max-width: 899px) {
  .schedule-toolbar > p { flex-basis: 100%; order: 1; }
  .schedule-add { margin-left: auto; }
- .schedule-add-long, .schedule-toolbar .board-view, .schedule-facts, .schedule-result, .schedule-how { display: none; }
- .schedule-identity { display: block; margin: 0; color: var(--muted); font-size: 13px; }
+ .schedule-add-long, .schedule-how { display: none; }
+ .schedule-facts dd { text-align: right; }
  .schedule-how-phone { display: block; }
  .schedule-how-phone summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 13px; color: var(--muted); }
  .schedule-how-phone p { color: var(--muted); font-size: 13px; line-height: 1.6; }
