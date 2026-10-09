@@ -10,6 +10,7 @@ import { authorizationVerdict, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import {
 	checkpointAwaitingId,
+	DecisionBasisSchema, validate,
 	type Checkpoint,
 	type CheckpointKind,
 	type DecisionBasis,
@@ -20,13 +21,13 @@ import {
 } from "./contracts.ts";
 import { missionEndCloses } from "./escalation.ts";
 import {
-	evaluateAuthority,
 	type MandateStore,
 	type MandateSubject,
 	type MandateUsageJob,
 } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
 import { operatorSendTexts, stripSendMarkers } from "./parent-outbox.ts";
+import { checkpointAuthority, runAuthority } from "./schedule-authority.ts";
 
 export class DecideError extends Error {}
 
@@ -198,26 +199,28 @@ function validateBasis(
 	}
 	if (checkpointKind === "final_fix") throw new DecideError("a final fix at the review cap requires operator text");
 	if (checkpointKind === "merge") {
-		const askOnMerge = deps.mandates
+		const askOnMerge = "mandate" in basis && deps.mandates
 			.list()
 			.some((mandate) => mandate.id === basis.mandate && mandate.ask_on.includes("merge"));
 		if (askOnMerge) throw new DecideError("merge requires operator text");
 	}
 	const denied = projectDenial(deps.mandates.home, subject.project);
 	if (denied) throw new DecideError(denied);
-	const jobs = deps.mandates.withReviewerSpend(deps.usageJobs());
-	deps.mandates.sweep(subject.now, jobs);
-	const verdict = evaluateAuthority({ ...subject, createdAt: deps.mandates.jobCreatedAt(subject.jobId), usageJobs: jobs }, deps.mandates.list());
+	const authority = runAuthority(deps.mandates.runContext(), subject.jobId);
+	if ("run" in basis && (authority.source !== "schedule-run" || authority.run.id !== basis.run)) throw new DecideError("run basis does not name this job's authority");
+	if ("mandate" in basis && authority.source === "schedule-run") throw new DecideError("run members require a run basis");
+	const jobs = authority.source === "schedule-run" ? [...deps.usageJobs()] : deps.mandates.withReviewerSpend(deps.usageJobs());
+	if (runAuthority(deps.mandates.runContext(), subject.jobId).source === "mandate") deps.mandates.sweep(subject.now, jobs);
+	const verdict = checkpointAuthority(deps.mandates.runContext(), { ...subject, createdAt: deps.mandates.jobCreatedAt(subject.jobId), usageJobs: jobs }, deps.mandates.list());
 	if (!verdict.permitted) {
 		throw new DecideError(refusalFor(verdict.reason, subject.project));
 	}
-	if (verdict.mandateId !== basis.mandate) {
-		throw new DecideError(`no active mandate covers project ${subject.project}`);
+	if ("run" in basis) {
+		if (verdict.runId !== basis.run) throw new DecideError("run basis does not name this job's authority");
+		return { decidedBy: `schedule-run:${verdict.runId}`, stored: { run: verdict.runId, clause: verdict.clause } };
 	}
-	return {
-		decidedBy: `mandate:${verdict.mandateId}`,
-		stored: { mandate: verdict.mandateId, clause: verdict.clause },
-	};
+	if (verdict.mandateId !== basis.mandate) throw new DecideError(`no active mandate covers project ${subject.project}`);
+	return { decidedBy: `mandate:${verdict.mandateId}`, stored: { mandate: verdict.mandateId, clause: verdict.clause } };
 }
 
 function subjectFor(jobId: string, checkpointKind: CheckpointKind, deps: DecideDeps): MandateSubject {
@@ -275,6 +278,10 @@ async function decideEscalation(id: string, input: DecideInput, deps: DecideDeps
 }
 
 export async function decide(input: DecideInput, deps: DecideDeps): Promise<DecideResult> {
+	if ("run" in input.basis) {
+		const parsedBasis = validate<DecisionBasis>(DecisionBasisSchema, input.basis);
+		if (!parsedBasis.ok) throw new DecideError(`invalid decision basis: ${parsedBasis.errors.join("; ")}`);
+	}
 	// An escalation that is no longer open is not an Awaiting row, but it is still that escalation: its store
 	// refuses it (withdrawn, superseded, a different answer) or, for the same answer, retries what followed.
 	const target = input.target.trim();
@@ -300,10 +307,10 @@ export async function decide(input: DecideInput, deps: DecideDeps): Promise<Deci
 						project: deps.lookupJob(resolved.jobId)?.project ?? "unknown",
 				  }
 				: subjectFor(resolved.jobId, resolved.checkpointKind, deps);
-		if (subject.risk === "high" && "mandate" in input.basis) {
+		if (subject.risk === "high" && "mandate" in input.basis && runAuthority(deps.mandates.runContext(), subject.jobId).source === "mandate") {
 			const jobs = deps.mandates.withReviewerSpend(deps.usageJobs());
 			deps.mandates.sweep(subject.now, jobs);
-			const authority = evaluateAuthority({ ...subject, createdAt: deps.mandates.jobCreatedAt(subject.jobId), usageJobs: jobs }, deps.mandates.list());
+			const authority = checkpointAuthority(deps.mandates.runContext(), { ...subject, createdAt: deps.mandates.jobCreatedAt(subject.jobId), usageJobs: jobs }, deps.mandates.list());
 			if (!authority.permitted) throw new DecideError("risk:high requires operator text");
 		}
 		const validated = validateBasis(input.basis, subject, deps, resolved.checkpointKind);

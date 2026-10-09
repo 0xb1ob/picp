@@ -31,6 +31,8 @@ import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../
 import { thresholdCancel } from "../../src/parent-compact-hold.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { formatScheduleMigration, sweepScheduleGrantTemplates } from "../../src/schedule-migrations.ts";
+import { reconcileRun } from "../../src/schedule-runs.ts";
+import { readSchedulesOrEmpty } from "../../src/schedule-expand.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
 import { formatSweep, sweepJobIdRename } from "../../src/state-migrations.ts";
 import { type WakeupCarrier } from "../../src/wakeups.ts";
@@ -360,6 +362,20 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			// widget tick instead — delivered mid-turn like any other, never racing
 			// the first prompt for who starts the turn.
 			s.reconcileInProgress = true;
+			const post = commandPost(), runs = post.mandates.scheduleRuns;
+			if (runs.active) {
+				const jobs = post.ledger().read().jobs;
+				for (const run of runs.runs().filter((row) => row.phase !== "closed")) {
+					const healed = reconcileRun(run, jobs);
+					if (JSON.stringify(healed) !== JSON.stringify(run)) runs.editRun(run.id, (row) => Object.assign(row, healed));
+				}
+				const schedules = readSchedulesOrEmpty(home);
+				for (const schedule of schedules) {
+					if (!runs.activePolicy(schedule.id) || schedules.some((other) => other.id !== schedule.id && other.mandate_id === schedule.mandate_id)) continue;
+					const grant = post.mandates.get(schedule.mandate_id);
+					if (grant && grant.status !== "revoked") post.mandates.revoke(grant.id, { by: "system" });
+				}
+			}
 			const { report, intake } = await commandPost().reconcile();
 			// jje.2: startup reconciliation resumes every held PR in its project's lane; outcomes are durable notices.
 			void commandPost().continuation.resume();

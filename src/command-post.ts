@@ -10,6 +10,7 @@ import { AnswerCardOutbox, type AnswerCardDueOptions, type AnswerCardSink } from
 import { AnsweredOutbox, isSelfAnswered } from "./answered.ts";
 import { boundedCauseId, boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
 import { observeMandateUsage } from "./mandate-usage.ts";
+import { observeRunUsage, runAuthority } from "./schedule-authority.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { ghCiConfigured } from "./ci-configured.ts";
@@ -1134,7 +1135,7 @@ export class CommandPost {
 	/** One observer set for every spawn path (dispatch, revive, bounded recovery), so wiring cannot diverge. */
 	#observers() {
 		const usage = { fleet: this.fleet, runs: this.runs, mandates: this.mandates, journal: (input: DurableWakeupInput) => this.#journalDurable(input) };
-		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => observeMandateUsage(usage, jobId, previous, current), makeRoom: (id: string, role: Role) => this.heldRelease.makeRoom(id, role), released: (id: string) => this.heldRelease.wasReleased(id) };
+		return { intake: this.intake, settle: this.settle, failures: this.failures, bounds: this.bounds, onUsage: (jobId: string, previous: Usage, current: Usage) => runAuthority(this.mandates.runContext(), jobId).source === "schedule-run" ? observeRunUsage({ ...this.mandates.runContext(), jobs: () => this.fleet.read().jobs, journal: usage.journal }, jobId, previous, current) : observeMandateUsage(usage, jobId, previous, current), makeRoom: (id: string, role: Role) => this.heldRelease.makeRoom(id, role), released: (id: string) => this.heldRelease.wasReleased(id) };
 	}
 
 	async dispatch(request: DispatchRequest & { task: string }): Promise<DispatchResult>;

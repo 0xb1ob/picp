@@ -7,6 +7,8 @@
 import { join } from "node:path";
 import { LAYOUT, type Job } from "./contracts.ts";
 import { orgReviewMaxReviewers, readScheduleFile, type Schedule } from "./viewer/schedule-core.ts";
+import type { ScheduleRunStore } from "./schedule-runs.ts";
+import { parseJobLabels } from "./ledger.ts";
 
 export const EXPANDED_MARKER = "expanded:";
 const SCHEDULE_LABEL = "schedule:";
@@ -70,13 +72,18 @@ function orgRunRefusal(schedule: Schedule, anchor: Job, jobs: readonly Job[], la
  * `options.risk` is high (the create parameter, or the label set an update leaves). `options.reuseId`: the job's id
  * when it already exists (an idempotent re-create, an update), so a job already in the run is never counted twice.
  */
-export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[], options: { reuseId?: string; risk?: string } = {}): string | undefined {
+export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[], options: { reuseId?: string; risk?: string; runs?: ScheduleRunStore } = {}): string | undefined {
 	const high = options.risk === "high" || labels.includes(RISK_HIGH);
 	for (const label of labels) {
 		if (!label.startsWith(SCHEDULE_LABEL)) continue;
 		const id = label.slice(SCHEDULE_LABEL.length);
 		if (!ID_PATTERN.test(id)) return `${label} is not a schedule label (schedule:sch-xxxxxx)`;
 		if (!parentExpandedIds(schedules).has(id)) return `${label} is minted by a fire; only a parent-expanded schedule's open run may add jobs to it`;
+		if (options.runs?.active && options.runs.activePolicy(id)) {
+			const run = options.runs.openRun(id);
+			if (!run) return `schedule ${id} needs an open run (Run now first)`;
+			if (!run.members.some((member) => member.job_id === options.reuseId) && run.members.length >= run.policy.limits.child_jobs) return `${run.id}: child cap reached (anchor included)`;
+		}
 		const anchor = jobs.find((job) => anchorOpen(job, id));
 		if (!anchor) return `no open run of schedule ${id} (Run now first)`;
 		const schedule = schedules.find((entry) => entry.id === id);
@@ -85,6 +92,21 @@ export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly J
 		if (refusal) return refusal;
 	}
 	return undefined;
+}
+
+/** Admission follows the ledger write; an idempotent create heals an interrupted admission. */
+export async function admitScheduledMember(runs: ScheduleRunStore, job: Job): Promise<void> {
+	if (!runs.active) return;
+	for (const label of job.labels.filter((entry) => entry.startsWith(SCHEDULE_LABEL))) {
+		const id = label.slice(SCHEDULE_LABEL.length);
+		if (!runs.activePolicy(id)) continue;
+		const run = runs.openRun(id);
+		if (!run) throw new Error(`schedule ${id} needs an open run`);
+		if (parseJobLabels(job.labels).project !== run.policy.project) throw new Error(`${job.id}: project is outside run ${run.id}`);
+		const existing = runs.runOfJob(job.id);
+		if (existing && existing.id !== run.id) throw new Error(`${job.id} already belongs to ${existing.id}`);
+		await runs.admitMember(run.id, { job_id: job.id, role: null, admitted_at: job.created_at });
+	}
 }
 
 /**

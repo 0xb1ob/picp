@@ -36,7 +36,7 @@ function deps(home: string, over: Partial<Parameters<typeof decide>[1]> = {}) {
 			ship,
 			diff,
 			merge,
-			answerDeclared: (item: ResolvedAwaitingItem, answer: string, by: string, basis: { mandate: string; clause: string } | { operator_quote: string }) =>
+			answerDeclared: (item: ResolvedAwaitingItem, answer: string, by: string, basis: DecisionBasis) =>
 				awaiting.answerResolved(item, { answer, by, basis }),
 			mandates,
 			lookupJob: (jobId: string) => ({ project: "demo", jobKind: "ship" as const, jobId }),

@@ -38,6 +38,7 @@ test("S1: every production write throws before touching either file; absent read
 		() => store.createRun(run()), () => store.attachAnchor("missing", member("cp-a")), () => store.admitMember("missing", member("cp-b")),
 		() => store.setPhase("missing", "running"), () => store.closeRun("missing", "completed", at),
 		() => store.appendAuthority("missing", { at, use: "dispatch", job_id: "cp-a", decision: "allowed" }), () => store.noteCap("missing", "usd"),
+		() => store.editRun("missing", () => {}),
 		() => store.savePolicyRevision(policy()), () => store.activatePolicy("sch-123456", 1, at, { channel: "dashboard", request_id: "sc-1" }), () => store.deactivatePolicy("sch-123456"),
 	];
 	for (const write of writes) assert.throws(write, (e) => e instanceof ScheduleRunsInactiveError && /SCHEDULE_RUNS_ACTIVE=false/.test(e.message));
@@ -171,14 +172,12 @@ test("S1: full legacy Scheduler fire mints normally and leaves both new files ab
 	assert.equal(existsSync(store.policiesFile), false); assert.deepEqual(store.runs(), []);
 });
 
-test("P2a has no production imports or callers outside the two new modules", () => {
+test("P2b: production has no policy activation or revision-save caller", () => {
 	function scan(dir: string): void {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
 			const file = join(dir, entry.name);
 			if (entry.isDirectory()) scan(file);
-			else if (/\.[cm]?tsx?$/.test(file) && !["src/schedule-runs.ts", "src/viewer/schedule-run-core.ts"].includes(file)) {
-				assert.doesNotMatch(readFileSync(file, "utf8"), /(?:from\s*|import\s*\()["'][^"']*schedule-(?:runs|run-core)\.ts["']/, file);
-			}
+			else if (/\.[cm]?tsx?$/.test(file) && file !== "src/schedule-runs.ts") assert.doesNotMatch(readFileSync(file, "utf8"), /\.(?:activatePolicy|savePolicyRevision)\s*\(/, file);
 		}
 	}
 	scan("src"); scan("extensions");

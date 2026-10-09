@@ -20,6 +20,7 @@ export class ScheduleRunStore {
 		this.policiesFile = join(home, LAYOUT.state, SCHEDULE_POLICIES_FILE);
 		this.#active = options.active ?? SCHEDULE_RUNS_ACTIVE;
 	}
+	get active(): boolean { return this.#active; }
 	runs(): ScheduleRun[] { return readScheduleRuns(this.runsFile); }
 	run(id: string): ScheduleRun | undefined { return this.runs().find((run) => run.id === id); }
 	runOfJob(jobId: string): ScheduleRun | undefined { return this.runs().find((run) => run.members.some((m) => m.job_id === jobId)); }
@@ -91,6 +92,20 @@ export class ScheduleRunStore {
 			run.phase = "closed"; run.outcome = outcome; run.closed_at = at;
 		});
 	}
+	/** Synchronous authority consumers must persist their decision before returning. The entire read/validate/write
+	 * step has no await, as do queued mutations above, so no in-process writer can interleave it. */
+	editRun(id: string, fn: (run: ScheduleRun) => void): ScheduleRun {
+		this.#assertActive();
+		const rows = this.runs();
+		const run = rows.find((r) => r.id === id);
+		if (!run) throw new ScheduleRunError(`unknown run ${id}`);
+		fn(run);
+		const doc = { schema_version: 1, runs: rows };
+		const errors = scheduleRunsFileErrors(doc);
+		if (errors.length) throw new ScheduleRunError(`refusing to write ${this.runsFile}: ${errors.join("; ")}`);
+		atomicWriteJson(this.runsFile, doc);
+		return structuredClone(run);
+	}
 	appendAuthority(id: string, row: ScheduleRun["authority_log"][number]): Promise<ScheduleRun> {
 		return this.#update(id, (run) => { run.authority_log = [...run.authority_log, structuredClone(row)].slice(-200); });
 	}
@@ -138,12 +153,14 @@ export function runSpend(run: ScheduleRun, usageJobs: readonly MandateUsageJob[]
 type RunLedgerJob = { id: string; status: string; notes?: string; created_at?: string };
 export function reconcileRun(run: ScheduleRun, ledgerJobs: readonly RunLedgerJob[]): ScheduleRun {
 	const result = structuredClone(run);
-	if (result.anchor_job_id !== null) return result;
-	const anchor = ledgerJobs.find((job) => new RegExp(`under run ${run.id}(?![A-Za-z0-9_-])`).test(job.notes ?? ""));
-	if (anchor) {
-		result.anchor_job_id = anchor.id;
-		if (!result.members.some((m) => m.job_id === anchor.id)) result.members.push({ job_id: anchor.id, role: null, admitted_at: anchor.created_at ?? run.started_at });
+	if (result.anchor_job_id === null) {
+		const anchor = ledgerJobs.find((job) => new RegExp(`under run ${run.id}(?![A-Za-z0-9_-])`).test(job.notes ?? ""));
+		if (anchor) {
+			result.anchor_job_id = anchor.id;
+			if (!result.members.some((m) => m.job_id === anchor.id)) result.members.push({ job_id: anchor.id, role: null, admitted_at: anchor.created_at ?? run.started_at });
+		}
 	}
+	if (result.anchor_job_id !== null && result.phase === "accepted") result.phase = "running";
 	return result;
 }
 export function runIsSettled(run: ScheduleRun, ledgerJobs: readonly RunLedgerJob[]): boolean {

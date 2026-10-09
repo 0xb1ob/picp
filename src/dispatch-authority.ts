@@ -5,12 +5,20 @@ import { jobCapRefuses, MandateError, mandateSpend, type MandateUsageJob } from 
 import type { GrantPermission } from "./mandate-permission.ts";
 import type { MandateStore } from "./mandate.ts";
 import { riskPreapproval } from "./risk-preapproval.ts";
+import { scheduleRunVerdict, ScheduleAuthorityError } from "./schedule-authority.ts";
 
 export interface DispatchAuthorityJob {
 	jobId: string; project: string; kind?: "ship" | "research"; pathHints?: string[]; risk?: Risk;
 	evidence?: readonly string[]; promotion?: boolean; script?: boolean;
 }
 export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
+	try {
+		const verdict = scheduleRunVerdict(store.runContext(), job.promotion ? "promote" : "dispatch", job, jobs, store.authorityNow());
+		if (verdict.source === "schedule-run") return { run: { id: verdict.run.id, schedule_id: verdict.run.schedule_id } };
+	} catch (error) {
+		if (error instanceof ScheduleAuthorityError && error.escalation) await error.escalation;
+		throw error;
+	}
 	const permission = store.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
 	const { selected, cause } = permission;
 	if (!selected) return permission;

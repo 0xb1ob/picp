@@ -26,7 +26,8 @@ import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.
 import { formatBeadsImport, importBeads } from "../../src/ledger-import.ts";
 import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
-import { readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
+import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
+import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { autoLink } from "../../src/trackers/link.ts";
 import { BR_SHOW_RE, describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
@@ -90,6 +91,7 @@ export type JobActionInput = Static<typeof JobActionSchema>;
 
 export interface JobPorts {
 	ledger: Ledger;
+	runs?: ScheduleRunStore;
 	/** amend: user messages from this session, never worker/tool text. */
 	operatorTexts?: readonly string[];
 	/** True when fleet.json has a record for the job in phase `waiting` or `held`. */
@@ -189,6 +191,7 @@ async function linkCreated(ledger: Ledger, job: Job, ports: JobPorts): Promise<{
 /** The policy behind `cp_job`. Pure over its ports; the tool and the tests call this. */
 export async function runJobAction(params: JobActionInput, ports: JobPorts): Promise<JobActionResult> {
 	const { ledger } = ports;
+	const runs = ports.runs ?? openScheduleRunStore(ledger.home);
 	if (params.script_path !== undefined && params.action !== "create") throw new Error("script_path is create only");
 	if (params.risk !== undefined && params.action !== "create") throw new Error("risk is create only; change a recorded risk with cp_job update add_labels/remove_labels (risk:<low|high>)");
 	switch (params.action) {
@@ -207,7 +210,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			if (labelErrors.length > 0) throw new Error(`cp_job create refused: ${labelErrors.join("; ")}`);
 			const existing = ledger.findDuplicate({ title, project, ...(params.external_ref !== undefined ? { externalRef: params.external_ref } : {}) });
 			// A `schedule:<id>` label is minted by a fire: only a parent-expanded schedule's open run may add jobs to it.
-			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home), { ...(existing ? { reuseId: existing.id } : {}), ...(params.risk ? { risk: params.risk } : {}) });
+			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home), { runs, ...(existing ? { reuseId: existing.id } : {}), ...(params.risk ? { risk: params.risk } : {}) });
 			if (labelRefusal) throw new Error(`cp_job create refused: ${labelRefusal}`);
 			if (existing) {
 				const errors = jobLabelErrors(existing.labels);
@@ -217,6 +220,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				if (params.risk !== undefined && recordedRisk !== params.risk) {
 					throw new Error(`cp_job create refused: ${existing.id} records ${recordedRisk ? `risk:${recordedRisk}` : "no risk"}; change it with cp_job update add_labels/remove_labels`);
 				}
+				await admitScheduledMember(runs, existing);
 				ports.noteCreated?.(existing.id);
 				const linked = await linkCreated(ledger, existing, ports);
 				return { text: `created ${existing.id}: ${formatJobLine(existing)}${linked.text}`, details: { job: linked.job, existing: true, ...linked.details } };
@@ -268,6 +272,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				...(params.labels ? { labels: params.labels } : {}),
 			});
 			const job = refNote ? await ledger.update(created.id, { notes: refNote }) : created;
+			await admitScheduledMember(runs, job);
 			ports.noteCreated?.(job.id);
 			const linked = await linkCreated(ledger, job, ports);
 			const riskLine = params.risk ? `\n  risk: ${params.risk} recorded on the job (the risk:high gate reads it; routing does not lower on it)` : "";
@@ -320,7 +325,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const target = params.job_id === undefined ? undefined : jobs.find((job) => job.id === params.job_id);
 			const after = [...(target?.labels ?? []).filter((label) => !(params.remove_labels ?? []).includes(label)), ...(params.add_labels ?? [])];
 			const labelRefusal =
-				scheduleLabelRefusal(params.add_labels ?? [], jobs, schedules, { ...(target ? { reuseId: target.id } : {}), ...(after.includes("risk:high") ? { risk: "high" } : {}) }) ??
+				scheduleLabelRefusal([...(params.add_labels ?? []), ...after.filter((label) => label.startsWith("schedule:") && runs.active && runs.activePolicy(label.slice("schedule:".length)))], jobs, schedules, { runs, ...(target ? { reuseId: target.id } : {}), ...(after.includes("risk:high") ? { risk: "high" } : {}) }) ??
 				(target ? scheduleRiskRefusal(target.id, params.add_labels ?? [], jobs, schedules) : undefined);
 			if (labelRefusal) throw new Error(`cp_job update refused: ${labelRefusal}`);
 			const job = await ledger.update(need(params, "job_id"), {
@@ -329,6 +334,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				...(params.add_labels ? { addLabels: params.add_labels } : {}),
 				...(params.remove_labels ? { removeLabels: params.remove_labels } : {}),
 			});
+			await admitScheduledMember(runs, job);
 			return { text: `updated ${job.id}: ${formatJobLine(job)}`, details: { job } };
 		}
 		case "comment": {

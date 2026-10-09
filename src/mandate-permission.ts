@@ -116,6 +116,7 @@ export interface GrantStore {
 export interface GrantPermission {
 	selected?: Mandate;
 	cause?: GrantCause;
+	run?: { id: string; schedule_id: string };
 }
 
 /** A selected refusal throws; an expired continuation keeps its own caps. Nothing speaking passes. */
