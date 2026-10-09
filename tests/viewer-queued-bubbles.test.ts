@@ -267,3 +267,43 @@ test("dropped sends disappear on fresh load and stored reload without failures o
  store.clear();await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"],"fresh browser cannot recover a dropped bubble");
  assert.equal(s.posted.length,0);
 });
+
+test("cp-y43c: a held queued message edits inline (Enter saves, Esc keeps it), cancels, and a save that lost the race shows the sent text with no Edit",async t=>{
+ const s=await stage(t);
+ const held=(id:string,text:string)=>({id,at,state:"queued" as const,reason:null,ask_id:null,editable:true,body:{kind:"message" as const,text}});
+ s.status({...status,sends:[held("dc-20261004140000-0000000a","draft one"),held("dc-20261004140000-0000000b","draft two")]});
+ await s.show();
+ const win=s.root.ownerDocument.defaultView!;
+ const key=async (k:string)=>{const e=new win.Event("keydown",{bubbles:true,cancelable:true});Object.defineProperty(e,"key",{value:k});await act(()=>s.root.querySelector("[aria-label='Edit queued message']")!.dispatchEvent(e));await s.flush();};
+ const type=async (text:string)=>{const area=s.root.querySelector("[aria-label='Edit queued message']") as unknown as {value:string;dispatchEvent(e:Event):boolean};area.value=text;await act(()=>area.dispatchEvent(new win.Event("input",{bubbles:true})));};
+ assert.equal(s.root.querySelectorAll(".session-pending-edit").length,2,"Edit and Cancel send on each held message");
+ await s.click(".session-pending-edit");
+ assert.equal((s.root.querySelector("[aria-label='Edit queued message']") as unknown as {value:string}).value,"draft one","prefilled with the exact text");
+ await type("thrown away");await key("Escape");
+ assert.ok(!s.root.querySelector("[aria-label='Edit queued message']"));
+ assert.deepEqual(s.bubbleTexts(),["draft one","draft two"],"Esc keeps the original");
+ assert.equal(s.posted.length,0);
+
+ await s.click(".session-pending-edit");await type("draft one, revised");await key("Enter");
+ assert.deepEqual(s.posted[0],{op:"edit",id:"dc-20261004140000-0000000a",text:"draft one, revised"});
+ await s.reply({id:"dc-20261004140000-0000000a",state:"queued",text:"draft one, revised",editable:true},200);
+ assert.deepEqual(s.bubbleTexts(),["draft one, revised","draft two"]);
+ await s.show();
+ assert.deepEqual(s.bubbleTexts(),["draft one, revised","draft two"],"a status read before the save cannot revert it");
+
+ await act(()=>s.root.querySelectorAll(".session-pending-edit")[1]!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ await type("draft two, revised");await s.click(".session-pending-save");
+ await s.reply({error:"already sent: dc-20261004140000-0000000b was handed to the session",state:"sent",text:"draft two"},409);
+ const raced=[...s.root.querySelectorAll(".session-pending")][1]!;
+ assert.equal(raced.querySelector(".md")?.textContent,"draft two","the authoritative delivered text");
+ assert.match(raced.textContent!,/Already sent.*not applied/);
+ assert.ok(!raced.querySelector(".session-pending-edit"),"no Edit once sent, even while the status read still says editable");
+ assert.ok(!raced.querySelector("[aria-label='Edit queued message']"));
+
+ await s.click(".session-pending-cancel");
+ assert.deepEqual(s.posted[2],{op:"cancel",id:"dc-20261004140000-0000000a"});
+ await s.reply({id:"dc-20261004140000-0000000a",state:"cancelled"},200);
+ assert.deepEqual(s.bubbleTexts(),["draft two"]);
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["draft two"],"a cancelled message stays gone");
+});

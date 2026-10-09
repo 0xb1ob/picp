@@ -12,6 +12,9 @@
  *  - `send_images` → a composer message with image attachments (src/viewer/uploads.ts ids): each upload is read,
  *    resized by `prepareImage` and injected as image parts (`userMessageContent`); only a bridge with `prepareImage`
  *    knows the op, so an older one answers `unknown op` and the viewer asks for a restart instead of dropping images;
+ *  - cp-y43c: a composer message (not a steer) while the session is busy, or behind one, is **queued by the dashboard**,
+ *    not given to pi: `outcome queued`, then each settled turn (`settled()`) hands over the oldest one
+ *    (`injected` journaled first). `queue_edit` / `queue_cancel` change it until then (control-queue.ts);
  *  - `abort` → abort the running turn;
  *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
  *  - `settings_get` / `settings_apply` → Settings (src/settings-control.ts), only with the `settings` port; they write
@@ -33,6 +36,7 @@ import {
 	dashboardMarker, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord, readUploadMetadata,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
+import { dashboardHeld, readQueueJournal } from "./viewer/control-queue.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
 import { IMAGE_LONG_EDGE, IMAGE_PREP_MS, inlineBudget, inlineTextFiles, isImageUploadId, isTextUploadId, readUpload, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, uploadFile, uploadRoot } from "./viewer/uploads.ts";
 
@@ -79,6 +83,8 @@ export interface DashboardControl {
 	socket: string;
 	/** Feed every message the session starts or sends to the model; a dashboard marker marks its request delivered. */
 	observe(message: unknown): void;
+	/** cp-y43c: the session's turn settled; hand the oldest dashboard-queued message over (at most one per turn). */
+	settled(): void;
 	stop(): void;
 }
 
@@ -96,7 +102,7 @@ export interface StartOptions {
 	imagePrepMs?: number;
 }
 
-type Reply = { ok: true; result: unknown } | { ok: false; status: number; error: string };
+type Reply = { ok: true; result: unknown } | { ok: false; status: number; error: string; result?: unknown };
 
 const stamp = (date: Date) => date.toISOString().replace(/[-:T]/g, "").slice(0, 14);
 export const newControlId = (now: Date): string => `dc-${stamp(now)}-${randomBytes(4).toString("hex")}`;
@@ -141,16 +147,19 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	/** Clicks by ask id, for the duplicate-click window. */
 	const clicks = new Map<string, { at: number; id: string }>();
 
-	const outcome = (id: string, kind: ControlKind, askId: string | null, peer: string | null, state: ControlOutcome["state"], reason: string | null) => {
+	/** One `outcome` line; `track: false` keeps it out of the status op's recent rows (a dashboard-queued message). */
+	const outcome = (id: string, kind: ControlKind, askId: string | null, peer: string | null, state: ControlOutcome["state"], reason: string | null, track = true) => {
 		const at = now().toISOString();
 		const written = append({ type: "outcome", by: "bridge", id, at, peer, state: state as never, reason });
 		if (!written.ok) log(`cp-bridge: dashboard control outcome ${id} ${state} not journaled: ${written.error}\n`);
+		if (!track) return written;
 		const row = { id, kind, state, at, reason, ask_id: askId };
 		const index = recent.findIndex((r) => r.id === id);
 		if (index >= 0) recent.splice(index, 1);
 		recent.push(row);
 		if (recent.length > RECENT_KEEP) recent.shift();
 		if (state === "failed" && askId && clicks.get(askId)?.id === id) clicks.delete(askId);
+		return written;
 	};
 
 	const root = uploadRoot(options.uploadRoot);
@@ -199,7 +208,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const deliverAs = kind === "abort" || idle ? undefined : args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
 		const supplied = kind === "message" && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
-		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied));
+		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied) || queue.some((entry) => entry.id === supplied) || handed.has(supplied));
 		const id = supplied && !duplicate ? supplied : newControlId(now());
 		const tag = normalizeThreadTag(args.thread);
 		const sessionFile = ports.sessionFile();
@@ -245,6 +254,26 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			if (prior && now().getTime() - prior.at < duplicateMs) return refuse(409, `${askId} was already answered from the dashboard (${prior.id}); wait for the session to record it`);
 			clicks.set(askId, { at: now().getTime(), id });
 		}
+		// cp-y43c: busy, or behind an earlier queued message: the dashboard holds it (journaled) until the session settles.
+		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0)) {
+			const held = outcome(id, kind, null, peer, "queued", null, false);
+			if (!held.ok) return refuse(500, `failed: audit journal unwritable (${held.error})`);
+			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", ...(images ? { images } : {}), ...(files ? { files } : {}), ...(thread ? { thread } : {}) });
+			settle(false);
+			return { ok: true, result: { id, state: "queued", deliver, editable: true } };
+		}
+		return handOver({ id, kind, askId, peer, text, images, files, thread }, deliverAs, deliver, refuse, false);
+	};
+
+	/**
+	 * Give one message to pi: the attachments are read and prepared, the `injected` line is journaled, then pi gets the
+	 * text. From the queue (`queued`) the line must be on disk before pi is called, or the message goes back to the head:
+	 * a restarted bridge reloads only ids with no `injected` line, so it never hands one over twice. A direct send waits
+	 * up to `waitMs` for the sighting to answer delivered or queued, as before.
+	 */
+	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; thread: string | null };
+	const handOver = async (entry: Handing, deliverAs: "steer" | "followUp" | undefined, deliver: ControlDeliver, refuse: (status: number, reason: string) => Reply, queued: boolean): Promise<Reply> => {
+		const { id, kind, askId, peer, text, images, files, thread } = entry;
 		const metadata = readUploadMetadata(stateDir, files ?? []);
 		const textFiles: { name: string; path: string; bytes: Uint8Array }[] = [];
 		for (const file of files ?? []) {
@@ -260,6 +289,10 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			prepared = out;
 		}
 		const { inline, paths } = prepared;
+		// Stopped while preparing: no `injected` line, never given to pi; the next bridge reloads it as queued.
+		if (queued && stopped) return { ok: false, status: 503, error: "dashboard control stopped before the handoff" };
+		const claimed = outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : null);
+		if (!claimed.ok && queued) return { ok: false, status: 500, error: `failed: audit journal unwritable (${claimed.error})` };
 		const seen = new Promise<"delivered">((resolve) => open.set(id, { kind, askId, peer, seen: () => resolve("delivered") }));
 		if (open.size > OPEN_KEEP) open.delete(open.keys().next().value!);
 		let result: Promise<unknown> | void;
@@ -267,14 +300,18 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${dashboardMarker(id, askId, images, thread, files)}`, deliverAs, inline.length ? inline : undefined);
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${dashboardMarker(id, askId, images, thread, files)}`, queued ? (ports.isIdle() ? undefined : "followUp") : deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
 			return { ok: false, status: 502, error: `failed: ${(error as Error).message}` };
 		}
-		outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : null);
 		const failed = Promise.resolve(result).then(() => new Promise<never>(() => {}), (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+		if (queued) {
+			// Nobody waits on a handoff: a later rejection names itself, a sighting is journaled by observe().
+			void failed.then((late) => { if (open.delete(id)) outcome(id, kind, askId, peer, "failed", late.error); handoffEnded(id); });
+			return { ok: true, result: { id, state: "injected", deliver } };
+		}
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const settled = await Promise.race([seen, failed, new Promise<"queued">((resolve) => { timer = setTimeout(() => resolve("queued"), waitMs); })]);
 		clearTimeout(timer);
@@ -291,6 +328,81 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		return { ok: true, result: { id, state: settled, deliver } };
 	};
 
+	/**
+	 * cp-y43c, the dashboard queue: messages sent while the session was busy, oldest first, never yet given to pi.
+	 * `settle` hands over at most one, only while the session is idle and no earlier handoff is still unseen; the
+	 * shift that claims it is synchronous, so an edit or cancel either lands before it or is refused as already sent.
+	 */
+	type Held = { id: string; at: string; peer: string | null; text: string; images?: string[]; files?: string[]; thread?: string };
+	const queue: Held[] = [];
+	/** The id last handed over, until it fails or a turn settles: one handoff per settled turn. */
+	let handing: string | null = null;
+	/** Text each recent handoff carried: what "already sent" shows. */
+	const handed = new Map<string, string>();
+	const handoffEnded = (id: string) => {
+		if (handing !== id) return;
+		handing = null;
+		settle(false); // no turn ran: the next one may go
+	};
+	function settle(turnEnded: boolean): void {
+		if (turnEnded) handing = null;
+		while (!stopped && handing === null && queue.length && ports.isIdle()) {
+			if (readControlConfig(stateDir).state !== "on") return;
+			const entry = queue.shift()!;
+			if (!(now().getTime() - Date.parse(entry.at) <= INBOX_MAX_AGE_MS)) {
+				outcome(entry.id, "message", null, entry.peer, "dropped", "queued longer than 24 h");
+				continue;
+			}
+			handing = entry.id;
+			handed.set(entry.id, entry.text);
+			if (handed.size > OPEN_KEEP) handed.delete(handed.keys().next().value!);
+			const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", null, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
+			void handOver({ ...entry, kind: "message", askId: null, thread: entry.thread ?? null }, undefined, "prompt", refuse, true).then((reply) => {
+				if (reply.ok || stopped) return;
+				if (reply.status === 500) {
+					// The handoff line never reached the journal: pi was not called, so the message is still the dashboard's.
+					handed.delete(entry.id);
+					queue.unshift(entry);
+					log(`cp-bridge: dashboard queue ${entry.id} kept queued: ${reply.error}\n`);
+					if (handing === entry.id) handing = null;
+					return;
+				}
+				handoffEnded(entry.id);
+			});
+		}
+	}
+
+	/** `queue_edit` / `queue_cancel`: only a message the dashboard still holds; 404 an id the journal never named. */
+	const queueRequest = (args: Record<string, unknown>, op: "queue_edit" | "queue_cancel"): Reply => {
+		const id = typeof args.id === "string" && DASHBOARD_ID_RE.test(args.id) ? args.id : null;
+		const peer = typeof args.peer === "string" ? args.peer.slice(0, 100) : null;
+		if (!id) return { ok: false, status: 400, error: "id must be a dashboard id" };
+		const index = queue.findIndex((entry) => entry.id === id);
+		if (index < 0) {
+			const sent = handed.get(id);
+			if (sent !== undefined) return { ok: false, status: 409, error: `already sent: ${id} was handed to the session`, result: { id, state: "sent", text: sent } };
+			const journal = readQueueJournal(stateDir);
+			if (journal.error) return { ok: false, status: 500, error: `dashboard journal unreadable: ${journal.error}` };
+			const known = journal.messages.get(id);
+			if (!known) return { ok: false, status: 404, error: `no queued message ${id}` };
+			if (known.injected) return { ok: false, status: 409, error: `already sent: ${id} was handed to the session`, result: { id, state: "sent", text: known.text } };
+			return { ok: false, status: 409, error: `${id} is ${known.state}; only a queued message can be ${op === "queue_edit" ? "edited" : "cancelled"}`, result: { id, state: known.state, text: known.text } };
+		}
+		const entry = queue[index]!;
+		if (op === "queue_cancel") {
+			const written = outcome(id, "message", null, peer, "cancelled", "cancelled from the dashboard");
+			if (!written.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${written.error})` };
+			queue.splice(index, 1);
+			return { ok: true, result: { id, state: "cancelled" } };
+		}
+		const text = typeof args.text === "string" ? args.text.trim() : "";
+		if ((!text && !entry.images?.length && !entry.files?.length) || text.length > CONTROL_TEXT_MAX) return { ok: false, status: 400, error: `text must be 1-${CONTROL_TEXT_MAX} characters` };
+		const written = append({ type: "edited", by: "bridge", id, at: now().toISOString(), peer, text });
+		if (!written.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${written.error})` };
+		entry.text = text;
+		return { ok: true, result: { id, state: "queued", text, editable: true } };
+	};
+
 	const handle = async (frame: Record<string, unknown>): Promise<Reply & { after?: () => void }> => {
 		const args = frame.args !== null && typeof frame.args === "object" && !Array.isArray(frame.args) ? (frame.args as Record<string, unknown>) : {};
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
@@ -302,6 +414,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
 		if (frame.op === "send_images" && ports.prepareImage) return request(args, "send", true);
 		if (frame.op === "send_files") return request(args, "send", true, true);
+		if (frame.op === "queue_edit" || frame.op === "queue_cancel") return queueRequest(args, frame.op);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		if (frame.op === "settings_get" && ports.settings) return { ok: true, result: ports.settings.get() };
 		if (frame.op === "settings_apply" && ports.settings) return { ok: true, result: ports.settings.apply(args) };
@@ -364,6 +477,13 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			process.umask(umask);
 		}
 	});
+	let stopped = false;
+	// cp-y43c: what the dashboard held when the last bridge stopped is still its own: reloaded before any frame is read.
+	const journal = readQueueJournal(stateDir);
+	if (journal.error) log(`cp-bridge: dashboard queue unreadable, nothing reloaded: ${journal.error}\n`);
+	for (const message of journal.messages.values()) {
+		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.thread ? { thread: message.thread } : {}) });
+	}
 	try {
 		await listen();
 	} catch (error) {
@@ -389,8 +509,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		return { state: "refused", reason: `cannot write ${recordFile}: ${(error as Error).message}` };
 	}
 
-	deliverInbox(stateDir, ports, now(), log);
-	let stopped = false;
+	// The inbox turn settles first; with no inbox, an idle session takes the oldest reloaded message now.
+	if (!deliverInbox(stateDir, ports, now(), log).delivered) settle(false);
 	return {
 		state: "listening",
 		socket: socketPath,
@@ -404,11 +524,16 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 				entry.seen?.();
 			}
 		},
+		settled() {
+			settle(true);
+		},
 		stop() {
 			if (stopped) return;
 			stopped = true;
 			for (const [id, entry] of open) if (entry.kind === "message") outcome(id, entry.kind, entry.askId, entry.peer, "dropped", "target operator session ended");
 			open.clear();
+			// Still queued in the journal: the next bridge reloads them; none was handed over, so none is lost or sent twice.
+			queue.length = 0;
 			server.close();
 			for (const socket of connections) socket.destroy();
 			rmSync(socketPath, { force: true });

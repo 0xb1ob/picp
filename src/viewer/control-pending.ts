@@ -7,6 +7,7 @@ import { operatorSession } from "./control-inbox.ts";
 export function readPendingSends(stateDir: string, now = new Date(), session = operatorSession(stateDir)): {sends: ControlPendingSend[]; sends_error: string | null} {
  const sends = new Map<string, ControlPendingSend>();
  const accepted = new Set<string>();
+ const injected = new Set<string>();
  const targets = new Map<string, {since?: string; file?: string}>();
  const errors: string[] = [];
  for (const file of [controlJournalFile(stateDir), controlInboxFile(stateDir)]) {
@@ -33,7 +34,11 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
     const send = sends.get(line.id);
     if (!send) continue;
     if (line.state === "queued" || line.state === "injected") accepted.add(line.id);
+    if (line.state === "injected") injected.add(line.id);
     if (send.state === "dropped") continue;
+    // cp-y43c: an edit applies only while the dashboard still holds the message (control-queue.ts).
+    if (line.type === "edited") { if (typeof line.text === "string" && !injected.has(line.id)) send.body = {...send.body,text:line.text}; continue; }
+    if (line.type === "outcome" && line.state === "cancelled") { send.state = "dropped"; send.reason = "Cancelled from the dashboard"; continue; }
     if (line.type === "outcome" && line.state === "dropped") { send.state = "dropped"; send.reason = typeof line.reason === "string" ? line.reason : "Abandoned operator send"; continue; }
     if (line.state === "delivered" || line.type === "delivered") send.state = "delivered";
     else if (line.state === "failed" || line.state === "refused" || line.type === "dropped") { send.state = "failed"; send.reason = typeof line.reason === "string" ? line.reason : "Delivery failed"; }
@@ -46,12 +51,13 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
   if (send.state === "queued" && accepted.has(send.id)) {
    const target = targets.get(send.id);
    let missing = false;
-   if (target?.file) { try { missing = !statSync(target.file).isFile(); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") missing = true; else errors.push(`${target.file}: ${(error as Error).message}`); } }
-   const ended = (!session.running && (session.reason === "no dashboard control record" || session.reason.includes("is not running"))) || (session.running && (target?.since ? target.since !== session.since : !!session.since && Date.parse(send.at) < Date.parse(session.since)));
+   const held = !injected.has(send.id); // cp-y43c: the dashboard's own queue outlives the session; the next one takes it
+   if (!held && target?.file) { try { missing = !statSync(target.file).isFile(); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") missing = true; else errors.push(`${target.file}: ${(error as Error).message}`); } }
+   const ended = !held && ((!session.running && (session.reason === "no dashboard control record" || session.reason.includes("is not running"))) || (session.running && (target?.since ? target.since !== session.since : !!session.since && Date.parse(send.at) < Date.parse(session.since))));
    if (missing || ended || now.getTime() - Date.parse(send.at) > INBOX_MAX_AGE_MS) {
     send.state = "dropped";
     send.reason = missing ? "target operator session missing" : ended ? "target operator session ended" : "queued longer than 24 h";
-   }
+   } else if (held) send.editable = true;
   }
   const id = threads.refs.get(`dashboard:${send.id}`);
   const tag = threads.threads.find(thread=>thread.id === id)?.tag;

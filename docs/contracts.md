@@ -5859,7 +5859,7 @@ so there is no login, identity or device allowlist (operator addendum, 2026-09-2
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text
 is literal (`expandPromptTemplates` is never set, so no slash command, template or skill), idle is a new prompt,
-busy is `deliverAs: "followUp"` (Send after this turn) or `"steer"` (Steer now), and Abort turn calls
+busy is the dashboard queue below (Send after this turn) or `deliverAs: "steer"` (Steer now), and Abort turn calls
 `ctx.abort()`. A click on option *Keep* of open ask `ask-abcd` sends `ask-abcd: Keep` (the reply the Awaiting
 screen copies). Every injected message ends with one marker line, `[cp-dashboard dc-… — from the dashboard]`
 (a click adds `; ask=<id>`; a send with a thread adds `; thread=<tag>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
@@ -5868,6 +5868,19 @@ an authorization**: it never calls `cp_decide`, a `cp_parent` action or the pare
 `cp_parent` guideline, and the card stays open until the ask journal says otherwise. Refused: a label that is not
 an option (400), an answered or withdrawn ask (409), a second click on one ask within 10 minutes unless the
 first failed (409).
+
+**The dashboard queue (cp-y43c).** A composer message sent while the session is busy, or while an earlier one waits,
+is held by the bridge, not handed to pi's `followUp` queue: `outcome queued` is journaled and the reply carries
+`editable: true`. Each `agent_settled` (`settled()`) hands over the oldest one — at most one per settled turn, FIFO —
+as a prompt (a `followUp` if pi is busy again at that instant), journaling `injected` **before** pi is called. Until
+that line, `POST /api/operator/queue` `{"op":"edit","id","text"}` / `{"op":"cancel","id"}` (session CSRF token,
+409 offline) changes it, journaling `edited` / `outcome cancelled`; after it, 409 `{state:"sent", text}` names the
+text pi was given. The bridge reloads held ids (no `injected` line) at `session_start`, after the offline inbox
+turn; >24 h is `dropped`. Steers and decision answers never queue and may pass held messages.
+**Guarantee: at most once, not exactly once.** The journal append and pi's acceptance cannot be one atomic step, so
+the claim is written first: a crash between them, or a session ending before the transcript shows the message, leaves
+it `dropped`/`failed`, visible, and never resent. `injected` means handed to pi, not applied; only the transcript
+sighting (`delivered`) says it arrived.
 
 **Transport** ([`src/dashboard-control.ts`](../src/dashboard-control.ts), loaded by the cp-bridge extension): at
 `session_start` the operator session binds `state/operator/dashboard.sock` (umask 077, then 0600; ≤ 107 bytes; a

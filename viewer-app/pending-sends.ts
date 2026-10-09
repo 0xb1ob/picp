@@ -56,7 +56,12 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
    if (send.state === "dropped") { if (index >= 0) items.splice(index,1); dismissed.push(send.id); continue; }
    // Delivered journal history is not a new pending send. Known sends stay visible through the read/stream race.
    if (index < 0) { if (send.state !== "delivered" && !items.some(item=>item.state === "sending")) items.push({...send,state:send.state,key:send.id}); }
-   else items[index] = {...items[index]!,state:send.state,reason:send.reason ?? items[index]!.reason};
+   else {
+    // cp-y43c: the journal's text wins once it shows the saved edit; until then a status read before the save cannot revert it.
+    const {edited,editable:_was,...local} = items[index]!;
+    const confirmed = edited === undefined || edited === send.body.text;
+    items[index] = {...local,state:send.state,reason:send.reason ?? local.reason,...(send.editable === true && !local.sent ? {editable:true} : {}),body:confirmed ? {...local.body,text:send.body.text} : local.body,...(confirmed ? {} : {edited})};
+   }
   }
   for (const item of items) {
    const recent = status.recent.find(row=>row.id === item.id);

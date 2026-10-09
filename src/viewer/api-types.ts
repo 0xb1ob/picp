@@ -52,7 +52,9 @@ export interface TranscriptAsk {
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
 export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string; client_id?: string};
-export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody }
+export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean }
+/** `POST /api/operator/queue` (cp-y43c): 200 with the queued message's committed text, or `cancelled`. A refusal for a message already handed over carries `state: "sent"` and the `text` the session was given. */
+export type OperatorQueueResponse = { id: string; state: "queued"; text: string; editable: true } | { id: string; state: "cancelled" };
 /** `GET /api/operator/control`: can this page steer the operator session, and the session's CSRF token when it can. */
 export interface ControlStatusResponse {
  generated_at: string; enabled: boolean; running: boolean; reason: string | null; token: string | null;
@@ -116,6 +118,8 @@ export interface SettingsWriteResponse {
 /** `POST /api/operator/message` accepted: 202 (`held` while the operator session is offline). */
 export interface ControlSendResponse {
 	id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort";
+	/** cp-y43c: the session was busy, so the dashboard queued it (editable until the session settles and takes it). */
+	editable?: true;
 	/** cp-xmw2: present when the send named a `thread`; `error` says why the dc- id was not filed (the send still stands). */
 	thread?: { tag: string; id: string | null; error: string | null };
 }
