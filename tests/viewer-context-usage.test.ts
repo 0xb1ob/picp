@@ -105,13 +105,13 @@ test("views: Sessions carries operator, parent and worker context; Jobs and Map 
 	const result = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Jobs} from "./viewer-app/screens/Jobs.tsx"; export const sessions=(data)=>render(h(Sessions,{data})); export const jobs=(data)=>render(h(Jobs,{data}));', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
 	const screens = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 	const html = screens.sessions(view);
-	assert.match(html, /class="ctx-chip ctx-warn/);
+	assert.match(html, /class="session-ctx ctx-warn"/);
 	assert.match(html, /ctx (<\/span>)?204K \/ 272K · 75%/);
 	assert.match(html, /ctx (<\/span>)?136K \/ 272K · 50%/);
 	assert.match(html, /context n\/a/);
 	assert.doesNotMatch(html, /style=/);
 	const you = screens.sessions(sessionsView(state, "you", null)!);
-	assert.match(parseHTML(you).document.querySelector(".session-heading")!.innerHTML, /context n\/a<small> · no assistant reply yet<\/small>/, "the heading names the reason");
+	assert.match(parseHTML(you).document.querySelector(".session-heading")!.innerHTML, /class="session-ctx ctx-unknown" title="context n\/a">ctx n\/a<\/span>/, "the heading shows ctx n/a, never 0");
 	const jobsHtml = screens.jobs(jobsView(state));
 	assert.match(jobsHtml, /<span class="job-context"><span class="ctx-chip ctx-warn ctx-compact"/);
 	assert.match(jobsHtml, /ctx (<\/span>)?204K \/ 272K · 75%/);
@@ -149,7 +149,7 @@ test("model and thinking: latest model_change and thinking_level_change; last as
 	assert.deepEqual([view.parent.context!.model, view.parent.context!.thinking], ["openai/gpt-x", null]);
 	let html = screens.sessions(view);
 	assert.match(html, /<small class="session-model">claude-x · high<\/small>/);
-	assert.match(html, /<small class="session-model">gpt-x<\/small>/, "no thinking, no separator");
+	assert.match(html, /<small class="session-model">gpt-x · (?:idle|active)<\/small>/, "no thinking, no separator");
 
 	// Parent with thinking, operator with nothing recorded: the model is explicitly unknown.
 	const parentFile = join(sessions, "cp-parent.jsonl");
@@ -159,7 +159,7 @@ test("model and thinking: latest model_change and thinking_level_change; last as
 	assert.deepEqual([next.parent.context!.model, next.parent.context!.thinking], ["anthropic/claude-x", "high"]);
 	assert.deepEqual([next.operator_context!.model, next.operator_context!.thinking], [null, null]);
 	html = screens.sessions(next);
-	assert.match(html, /<small class="session-model">claude-x · high<\/small>/);
+	assert.match(html, /<small class="session-model">claude-x · high · (?:idle|active)<\/small>/);
 	assert.match(html, /<small class="session-model">model unknown<\/small>/);
 });
 
@@ -182,14 +182,14 @@ test("workers: model · thinking from the session, else routing (fleet record, s
 	const result = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; export const sessions=(data)=>render(h(Sessions,{data}));', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
 	const screens = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 	const html: string = screens.sessions(sessionsView(state, "workers", "cp-a")!);
-	for (const meta of ["gpt-x · medium", "gpt-x · high", "gpt-x · minimal", "gpt-x"]) assert.match(html, new RegExp(`<small>no run status · ${meta}</small>`));
+	for (const meta of ["gpt-x · medium", "gpt-x · high", "gpt-x · minimal", "gpt-x"]) assert.match(html, new RegExp(`<small class="session-model">${meta} · no run status</small>`));
 
 	// A model switched inside the session after dispatch wins over the dispatch model; the row and the subtitle agree.
 	put(join(stateDir, "fleet.json"), { jobs: [job("cp-e", {}, file("e", line({ type: "model_change", provider: "anthropic", modelId: "claude-x" }) + line({ type: "thinking_level_change", thinkingLevel: "high" })))] });
 	const switched = sessionsView(state, "workers", "cp-e")!;
 	assert.equal(switched.subtitle, "claude-x · high");
 	const switchedHtml: string = screens.sessions(switched);
-	assert.match(switchedHtml, /<small>no run status · claude-x · high<\/small>/);
+	assert.match(switchedHtml, /<small class="session-model">claude-x · high · no run status<\/small>/);
 	assert.doesNotMatch(switchedHtml, /<small>[^<]*gpt-x/);
 });
 

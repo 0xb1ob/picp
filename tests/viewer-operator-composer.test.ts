@@ -159,10 +159,13 @@ test("composer: the filename and thread picker live in compact, closed message o
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,threads));
  const picker = root.querySelector('select[aria-label="Thread"]');
  assert.ok(picker?.closest("details.operator-composer-options"),"the empty picker stays reachable inside message options");
+ assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to no thread");
  assert.match(picker?.textContent ?? "",/No thread.*New thread…/);
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,{...threads,selected:"new-fixture-thread"}));
  assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · new-fixture-thread/);
  assert.equal(root.querySelector(".operator-composer-options > summary")?.getAttribute("aria-label"),"Thread · new-fixture-thread","the selected thread stays accessible on mobile");
+ assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to #new-fixture-thread");
+ assert.equal(root.querySelector("textarea")?.getAttribute("placeholder"),"Message #new-fixture-thread (Enter to send)");
  await act(() => unmount(root));
  await act(() => mount(root,{status:{...ready,enabled:false,reason:"Dashboard control is off"},delivery:null,send:()=>{}}));
  assert.equal(root.querySelector(".operator-composer-options"),null);
