@@ -185,12 +185,16 @@ test("Board shares status columns and mandate filters, complete flight facts, an
  await click(trigger);
  assert.equal(trigger.getAttribute("aria-expanded"),"true");
  const list=root.querySelector('[role="listbox"]')!;
- assert.match(list.textContent ?? "",/All mandates · 8 jobs.*Active · 1.*Other.*md-paused.*Paused work.*paused/);
+ assert.match(list.textContent ?? "",/All mandates8 jobs.*Active · 1.*Other.*md-paused.*Paused work · paused/);
+ assert.equal(list.querySelector('[aria-selected="true"] .board-check')?.textContent,"✓","the selected row, All mandates here, carries the check");
+ assert.equal(root.querySelector("#board-opt-md-paused .board-option-count")?.textContent,"1 working");
+ assert.match(root.querySelector(".board-status")?.textContent ?? "",/stranded dependencies/);
  assert.ok(root.querySelector('input[aria-label="Filter mandates"]'));
  assert.equal(root.querySelector('[role="switch"]'),null,"no revoked mandates, no switch");
  data.hidden_mandates=[{id:"md-gone",status:"revoked",objective:"Gone"}];
  await act(()=>mount(root,data));
- assert.equal(root.querySelector('[role="switch"]')?.parentElement?.textContent,"Include 1 revoked mandates");
+ assert.equal(root.querySelector('[role="switch"]')?.textContent,"Include 1 revoked mandates");
+ assert.equal(root.querySelector('[role="switch"]')?.getAttribute("aria-checked"),"false");
  assert.doesNotMatch(root.querySelector('[role="listbox"]')!.textContent ?? "",/md-gone/);
  await click(root.querySelector('[role="switch"]')!);
  assert.match(root.querySelector('[role="listbox"]')!.textContent ?? "",/md-gone/);
