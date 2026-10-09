@@ -433,6 +433,12 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.ok(document.querySelector(".schedule-card-heading .schedule-pill"), "enabled state is a pill");
 	assert.ok(document.querySelector(".schedule-how-phone"), "phone gets a closed how-schedules-run disclosure");
 	assert.equal(document.querySelector(".schedule-how-phone")?.hasAttribute("open"), false);
+	assert.equal(document.querySelector(".schedule-heading .schedule-add-phone")?.textContent, "+ Add", "phone + Add sits in the title row");
+	assert.equal(document.querySelector(".schedule-heading")?.textContent?.includes("Saved triggers and the jobs they fired."), false, "the old tagline is gone");
+	assert.match(document.querySelector(".schedule-card .schedule-policy-line")?.textContent ?? "", /^1 at a time, plus an answer; \$10\/run; model routing default\.$/, "never more concurrency than exists");
+	assert.equal(document.querySelectorAll(".schedule-card").length, 2);
+	assert.equal(document.querySelector(".schedule-last-runs h3")?.textContent, "Last 3 runs");
+	assert.equal(document.querySelectorAll("form, [style]").length, 0, "no form, no inline style");
 	assert.ok(document.querySelector(".schedule-layout > aside"), "explanation beside the schedule list");
 	for (const card of document.querySelectorAll(".schedule-card")) {
 		assert.deepEqual([...card.querySelectorAll(".schedule-facts > dt")].map(e => e.textContent), ["Trigger", "Recipe", "Mandate", "Last fire"]);
@@ -513,6 +519,12 @@ test("a manual skill schedule's dashboard run shows in Last fire; runs and jobs 
 	assert.equal(document.querySelectorAll(".schedule-run-jobs > li").length, 8);
 	assert.match(card, /run history · 1 run</);
 	assert.match(orgCard, /1 recent run · 2 jobs/);
+	assert.deepEqual([...document.querySelectorAll(".schedule-runs-table th")].map(e => e.textContent), ["Started", "Job", "Status", "Transcript", "Report"]);
+	assert.equal(document.querySelector(".schedule-last-runs header h3")?.textContent, "Last 3 runs");
+	assert.equal(document.querySelector(".schedule-all-runs")?.textContent, "All 1 run →");
+	assert.match(document.querySelector(".schedule-runs-table tbody")?.textContent ?? "", /cp-ra.*closed · 8 jobs.*Transcript.*Web report ↗/);
+	assert.equal(document.querySelectorAll(".schedule-runs-blocks li .schedule-run-buttons a").length, 2, "phone blocks: Transcript and Web report buttons");
+	assert.match(orgCard, /schedule-no-report|Web report ↗/);
 	assert.match(screen({ ...data, schedules: [{ ...m!, run_count: 0, job_count: 0, runs: [], history: [] }] }), /0 recent runs · 0 jobs.*run history · 0 runs</s);
 	assert.match(orgCard, /href="#job\/cp-os1">Report<\/a>/);
 });
