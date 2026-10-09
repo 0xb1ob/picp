@@ -22,6 +22,13 @@ export function rangeCaption(range: StatsResponse["range"]): string {
  return `${dayTime(range.from)} – ${dayTime(range.to)} · compared with the ${before} before`;
 }
 
+/** The API URL for a hash query: the browser's IANA zone is added when the hash has none, and never written back to the hash. */
+export function statsApiUrl(hashQuery: string, tz: string | undefined): string {
+ const api = new URLSearchParams(hashQuery);
+ if (tz && !api.has("tz")) api.set("tz",tz);
+ return `/api/stats?${api}`;
+}
+
 /** The hash is the one home for filters; a change rewrites it and the route's own hashchange reloads the data. */
 function setHash(query: URLSearchParams, change: Record<string,string | null>) {
  for (const [k,v] of Object.entries(change)) { if (v === null || v === "") query.delete(k); else query.set(k,v); }

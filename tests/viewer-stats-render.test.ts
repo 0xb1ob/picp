@@ -7,8 +7,8 @@ import { REPO_ROOT } from "./harness/index.ts";
 import type { StatsResponse } from "../src/viewer/api-types.ts";
 
 async function load() {
- const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
- return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string};
+ const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv, statsApiUrl} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv, statsApiUrl};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string; statsApiUrl:(q:string,tz:string|undefined)=>string};
 }
 const at = "2026-01-02T00:00:00.000Z";
 const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
@@ -19,7 +19,7 @@ const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
  phases: {queued_seconds:10,working_seconds:null,held_seconds:5,review_seconds:3},
  tokens_by_model: {models:["a"],buckets:[{start:"2026-01-01T00:00:00.000Z",end:"2026-01-01T01:00:00.000Z",tokens:{a:5}}]},
  spend_by_model: [{model:"a",usd:1.5}], decisions: {for_you:1,by_you:2,worth:0},
- mandates: [{id:"m1",objective:'=Ship, "it"',status:"active",jobs:2,spend_usd:null,spend_cap_usd:5,tokens:null,token_cap:null,time_left_seconds:null}],
+ mandates: [{id:"unassigned",objective:null,status:null,jobs:1,spend_usd:null,spend_cap_usd:null,tokens:null,token_cap:null,time_left_seconds:null},{id:"m1",objective:'=Ship, "it"',status:"active",jobs:2,spend_usd:null,spend_cap_usd:5,tokens:null,token_cap:null,time_left_seconds:null}],
  ...over,
 });
 
@@ -29,7 +29,7 @@ test("Stats renders six KPIs, four chart tables, CSV, the spend note and no samp
  assert.deepEqual([...html.matchAll(/<article class="stats-kpi"[^>]*><h2>([^<]+)<\/h2>/g)].map(m => m[1]),["Jobs finished","Spend","Tokens","Merge rate","Median wall clock","Decisions"]);
  assert.match(html,/CI green first try -/,"CI first try is the Merge rate subline, null is a dash");
  assert.match(html,/Held is normal: waiting on CI or review/);
- assert.match(html,/Unassigned|Backlog|=Ship/);
+ assert.match(html,/<code>Unassigned<\/code>/); assert.match(html,/No covering live grant/);
  assert.equal((html.match(/aria-pressed="false">Table</g) ?? []).length,4);
  assert.match(html,/Export CSV/); assert.match(html,/Spend includes reviewers/);
  assert.doesNotMatch(html,/Nothing finished/); assert.doesNotMatch(html,/sample|NaN|Infinity/i);
@@ -66,11 +66,48 @@ test("Jobs finished is a dash when either side is unknown, never missing-as-zero
 test("CSV export escapes quotes and formula starts and leaves missing values empty", async () => {
  const {exportCsv} = await load();
  const lines = exportCsv(data().mandates).split("\n");
- assert.equal(lines[1],`m1,"'=Ship, ""it""",active,2,,5,,,`);
+ assert.equal(lines[2],`m1,"'=Ship, ""it""",active,2,,5,,,`);
 });
 
 test("Stats CSS paints charts with tokens only and sets no font", () => {
  const css = readFileSync(join(REPO_ROOT,"viewer-app/screens/stats.css"),"utf8"); const tsx = readFileSync(join(REPO_ROOT,"viewer-app/screens/Stats.tsx"),"utf8");
  assert.doesNotMatch(css,/font-family|--amber|--coral|#[\da-f]{3,8}\b/i); assert.doesNotMatch(tsx,/--amber|--coral|#[\da-f]{6}\b|style=/i);
  for (const t of ["blue","green","muted","dim"]) assert.match(css,new RegExp(`\\.stats-fill-${t} \\{ fill: var\\(--${t}\\)`));
+});
+
+test("statsApiUrl adds the browser zone to the API query only and keeps an explicit tz", async () => {
+ const {statsApiUrl} = await load();
+ assert.equal(statsApiUrl("range=7d&project=demo","Asia/Ho_Chi_Minh"),"/api/stats?range=7d&project=demo&tz=Asia%2FHo_Chi_Minh");
+ assert.equal(statsApiUrl("range=7d&tz=UTC","Asia/Ho_Chi_Minh"),"/api/stats?range=7d&tz=UTC");
+ assert.equal(statsApiUrl("","").toString(),"/api/stats?");
+});
+
+test("filter changes rewrite only the hash (no tz) and a new URL refetches /api/stats", async t => {
+ const {parseHTML} = await import("linkedom");
+ const {draw: _d, ...api} = await load();
+ const built = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {Stats} from "./viewer-app/screens/Stats.tsx"; import {useScreenData} from "./viewer-app/use-screen-data.ts"; export {act}; const Probe=({url})=>{useScreenData(url,"/api/stream?view=stats"); return null;}; export const mountStats=(root,data,query)=>render(h(Stats,{data,query}),root); export const mountProbe=(root,url)=>render(h(Probe,{url}),root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ const m = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {act:(f:()=>unknown)=>Promise<void>; mountStats:(r:unknown,d:StatsResponse,q:string)=>void; mountProbe:(r:unknown,u:string)=>void};
+ void api;
+ const {window,document} = parseHTML("<html><body><div id='root'></div></body></html>");
+ const fetched: string[] = [];
+ const saved = ["window","document","fetch","location","EventSource"].map(k => [k,Object.getOwnPropertyDescriptor(globalThis,k)] as const);
+ const set = (k: string, value: unknown) => Object.defineProperty(globalThis,k,{configurable:true,writable:true,value});
+ set("window",window); set("document",document); set("location",{hash:""});
+ set("EventSource",class { addEventListener() {} removeEventListener() {} close() {} });
+ set("fetch",(url: string) => { fetched.push(url); return new Promise<Response>(() => {}); });
+ t.after(() => { for (const [k,d] of saved) { if (d) Object.defineProperty(globalThis,k,d); else Reflect.deleteProperty(globalThis,k); } });
+ const root = document.getElementById("root")!;
+ // The hook keys its resource on the URL: a changed filter URL fetches the new query.
+ await m.act(() => m.mountProbe(root,"/api/stats?range=24h&tz=UTC"));
+ await m.act(() => m.mountProbe(root,"/api/stats?range=7d&tz=UTC"));
+ assert.deepEqual(fetched,["/api/stats?range=24h&tz=UTC","/api/stats?range=7d&tz=UTC"]);
+ // The screen's controls write the hash with the filter and never a tz.
+ await m.act(() => m.mountStats(root,data(),"range=24h"));
+ const click = (el: Element) => m.act(() => { el.dispatchEvent(new window.Event("click",{bubbles:true})); });
+ await click([...root.querySelectorAll(".stats-segments button")].find(b => b.textContent === "7d")!);
+ assert.equal((globalThis as {location:{hash:string}}).location.hash,"#stats?range=7d");
+ const select = root.querySelector(".stats-pill select")! as HTMLSelectElement;
+ await m.act(() => { for (const o of select.querySelectorAll("option")) { if (o.getAttribute("value") === "demo") o.setAttribute("selected",""); else o.removeAttribute("selected"); } select.dispatchEvent(new window.Event("change",{bubbles:true})); });
+ assert.equal((globalThis as {location:{hash:string}}).location.hash,"#stats?range=24h&project=demo");
+ assert.doesNotMatch((globalThis as {location:{hash:string}}).location.hash,/tz=/);
 });
