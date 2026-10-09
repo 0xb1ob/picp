@@ -1,0 +1,6 @@
+.session-tool-run { display: flex; flex-direction: column; }
+.session-tools { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; min-height: 40px; margin: 4px 0; padding: 0 12px; background: none; border: 1px dashed var(--border); border-radius: 8px; font: inherit; font-size: 12px; text-align: left; color: var(--muted); cursor: pointer; }
+.session-tools > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; color: var(--dim); }
+.session-tools:hover { color: var(--text); }
+.tool-run-solid > .session-tools { margin: 0; min-height: 32px; border-style: solid; border-radius: 10px; font-size: 13px; }
+@media (max-width: 899px) { .tool-run-solid > .session-tools { min-height: 44px; } }

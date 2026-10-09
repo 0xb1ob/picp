@@ -21,7 +21,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/sessions.css"),"utf8"); const desktop=css.indexOf("@media (min-width: 900px)");
  assert.ok(desktop>0); assert.equal(css.includes("136px"),false,"the corner clock is gone, so the heading no longer dodges it");
  assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
- assert.match(css.slice(desktop),/\.session-heading \{[^}]*padding: 10px 16px;/);
+ assert.match(css.slice(desktop),/\.session-heading \{[^}]*min-height: 48px;[^}]*padding: 0 84px 0 16px;/);
  assert.doesNotMatch(css,/\.session-tools-toggle[^{]*\{[^}]*display:\s*none/,"the tool-call toggle is never display:none, including at 1440");
  const stamped="2026-09-27T08:24:05Z", olderAt="2026-09-26T18:00:00Z";
  const when=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
@@ -43,7 +43,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  const workers=[{id:"cp-run",kind:"worker",job_id:"cp-run",phase:"waiting",run_phase:"working",model:"m",live:true},{id:"cp-idle",kind:"worker",job_id:"cp-idle",phase:"held",run_phase:"idle",model:"m",live:false},{id:"cp-gone",kind:"worker",job_id:"cp-gone",phase:"done",run_phase:"exited",model:"m",live:false}];
  const listed=screen({...sessions,workers});
  // S8 keeps the short model while making the observed run phase readable in both switcher and sidebar.
- assert.match(listed,/Workers · 2 live/); assert.match(listed,/session-dot-working/); assert.match(listed,/session-dot-held/); assert.doesNotMatch(listed,/waiting · m|session-dot-waiting/); assert.match(listed,/<small>working · m<\/small>/);
+ assert.match(listed,/Fleet · 2 live/); assert.match(listed,/session-dot-working/); assert.match(listed,/session-dot-held/); assert.doesNotMatch(listed,/waiting · m|session-dot-waiting/); assert.match(listed,/<small class="session-model">m · working<\/small>/);
  const switcher=parseHTML(`<body>${listed}</body>`).document.querySelector('.session-bar-views nav')!;
  assert.deepEqual([...switcher.querySelectorAll('.session-bar-worker small')].map(e=>e.textContent),["working","idle","exited"]);
  const unknown=screen({...sessions,workers:[{...workers[0],run_phase:null}]});

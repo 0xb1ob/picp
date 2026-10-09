@@ -1,7 +1,8 @@
+import { ToolRunRow } from "../components/ToolRunRow.tsx";
 import { Fragment, type ComponentChild } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
-import { ContextChip, contextText } from "../components/ContextChip.tsx";
+import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
 import { time } from "../format.ts";
 import { sessionHref } from "../routes.ts";
@@ -28,6 +29,12 @@ const TOOL_TEXT_MAX = 1200;
 type Worker = SessionsResponse["workers"][number];
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
+/** The context percent alone (`16%`, or `ctx 16%` with `label`): the full figures sit in its title. */
+function CtxPct({usage,label=false}: {usage:ContextUsage | null | undefined;label?:boolean}) {
+ if (!usage) return null;
+ const text = usage.percent === null ? "ctx n/a" : `${label ? "ctx " : ""}${Math.round(usage.percent)}%`;
+ return <span class={`session-ctx ctx-${usage.level ?? "unknown"}`} title={contextText(usage)}>{text}</span>;
+}
 const workerPhase = (w: Worker): string => w.run_phase ?? "no run status";
 function readStored(key: string): string | null {
  if (typeof window === "undefined") return null;
@@ -84,10 +91,7 @@ function groupStarts(rowList: Row[]): Set<string> {
 }
 /** A hidden run of tool calls: one faint line between messages, and clicking it opens that run alone. */
 function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;onToggle:()=>void}) {
- return <div class="session-tool-run">
-  <button type="button" class="session-tools" aria-expanded={open} onClick={onToggle}>· {entries.length} tool call{entries.length === 1 ? "" : "s"} ·</button>
-  {open && entries.map(e=><Entry key={e.id} entry={e}/>)}
- </div>;
+ return <ToolRunRow count={entries.length} detail={entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}>{entries.map(e=><Entry key={e.id} entry={e}/>)}</ToolRunRow>;
 }
 /**
  * A cp-bridge wake or escalation, or any other system entry (compaction, custom messages): one muted line, the rest and a
@@ -141,20 +145,23 @@ function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
  </article>;
 }
 /** A message bubble: the prompting side on the right in the accent colour, the session on the left; a group's first bubble carries who and when. */
-function Bubble({entry:e,first}: {entry:SessionEntry;first:boolean}) {
+const initials = (who: string) => who.replace(/[^A-Za-z]/g,"").slice(0,2).toUpperCase();
+function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boolean}) {
+ // In the operator transcript the person is "You" and the session they talk to is "Operator" (frame 06); other views keep the recorded name.
+ const own = isOwn(e), who = you ? (own ? "You" : e.who === "Assistant" ? "Operator" : e.who) : e.who;
  return <article class={`session-message session-say session-bubble ${isOwn(e) ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
-  {first && <div class="session-who"><span>{e.who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
+  {first && <div class="session-who">{!own && <span class="session-avatar" aria-hidden="true">{initials(who)}</span>}<span>{who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
   <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
  </article>;
 }
-function Entry({entry:e,first=true}: {entry:SessionEntry;first?:boolean}) {
+function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolean;you?:boolean}) {
  const trace=e.trace.filter(step=>step.at);
  const clock=<code class="session-time">{e.at ? time(e.at) : "-"}</code>;
  const head=e.kind === "tool" && e.text.length > TOOL_TEXT_MAX ? e.text.slice(0,TOOL_TEXT_MAX) : e.text;
  return <div class={e.failed ? "session-entry session-failed" : "session-entry"}>
   {e.kind === "tool" ? <details class="session-tool"><summary>{clock}<code>{e.name}</code><span>{e.summary}</span></summary><pre><Linked text={head} links={e.links}/></pre>{head !== e.text && <details class="session-tool-all"><summary>show all</summary><pre><Linked text={e.text.slice(TOOL_TEXT_MAX)} links={e.links}/></pre></details>}</details> :
    e.kind === "system" || e.tag === "bridge" ? (e.bridge ? <BridgeNotice entry={e} clock={clock}/> : <Notice entry={e} clock={clock}/>) :
-   isBubble(e) ? <Bubble entry={e} first={first}/> :
+   isBubble(e) ? <Bubble entry={e} first={first} you={you}/> :
    // Ask and decision cards keep their card look.
    <article class="session-message session-notice">
     {clock}<div class={`session-body ${e.tag === "awaiting you" ? "session-awaiting" : ""}`}><div class="session-who"><span>{e.who}</span>{e.tag && <span>{e.tag}</span>}</div><p class={e.ask?.state === "open" ? "session-oneline" : undefined}><InlineText text={e.text} links={e.links}/></p>{e.ask && <TranscriptAsk ask={e.ask}/>}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
@@ -258,35 +265,34 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
- const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null,showModel=false)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class={`session-dot session-dot-${phase}`}/><span><strong>{label}</strong><small>{meta}</small>{showModel && context && <small class="session-model">{modelText(context)}</small>}<ContextChip usage={context} compact/></span></a>;
+ const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class="session-choice-head"><strong>{label}</strong><span class={`session-dot session-dot-${phase}`}/><CtxPct usage={context}/></span><small class="session-model">{meta}</small></a>;
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
  return <div class="sessions">
   <PageHeader title="Sessions"/>
   <aside class="session-sidebar" aria-label="Session streams">
-   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",data.selected === "you" && data.transcript ? "Transcript" : "Recorded decisions and questions",data.selected === "you","unknown",data.operator_context,true)}</section>
+   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",modelText(data.operator_context ?? {}),data.selected === "you","unknown",data.operator_context)}</section>
    {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
-   <section><h2>CP parent</h2>{row(sessionHref("parent"),"CP parent",data.parent.live ? "recent activity" : "idle",data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context,true)}</section>
-   <section><h2>Workers · {data.workers.filter(countedLive).length} live</h2>{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${workerPhase(w)} · ${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "active" : "idle"}`,data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context)}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
-   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<ContextChip usage={context}/></div>
+   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
+   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<CtxPct usage={context} label/></div>
     {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
-    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} onClick={toggleTools}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
+    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!}/>)}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">
     <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
-   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} thread={threads}/>}
   </div>
  </div>;

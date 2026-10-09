@@ -6,7 +6,7 @@ import { Icon } from "./icons.tsx";
 import { PhaseDot } from "./JobSignals.tsx";
 
 type Entry = {id:string; label:string; href:string; icon:typeof navigation[number]["id"]; meta:string; phase?:string};
-const shortcutOrder: typeof navigation[number]["id"][] = ["overview","decisions","jobs","board","map","sessions","reports","schedules","files","settings","more"];
+const shortcutOrder: typeof navigation[number]["id"][] = ["overview","decisions","jobs","board","map","sessions","stats","reports","schedules","files","settings","more"];
 export function SearchDialog({jobs,landed,error,onClose}: {jobs:FlightJob[] | null; landed:ShippedJob[] | null; error:string | null; onClose:() => void}) {
  const dialog = useRef<HTMLDialogElement>(null);
  const input = useRef<HTMLInputElement>(null);

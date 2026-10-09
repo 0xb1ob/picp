@@ -1,4 +1,6 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JobResponse, ViewerJob } from "../../src/viewer/api-types.ts";
+import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, prNumber, shortSha, time } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
@@ -53,32 +55,82 @@ function TimelineMeta({meta}: {meta: string}) {
  return <div class="job-event-meta">{meta.split(/(\b[a-f0-9]{40}\b)/gi).map((part,index) => /^[a-f0-9]{40}$/i.test(part) ? <ShaCopy key={index} sha={part}/> : part)}</div>;
 }
 
-export function JobDetail({data}: {data: JobResponse}) {
+/** True when a clipped element hides part of its text (one line, ellipsis): the only case `more` has anything to show. */
+export function overflows(el: {scrollWidth: number; clientWidth: number}): boolean { return el.scrollWidth > el.clientWidth; }
+
+function Summary({text}: {text: string}) {
+ const ref = useRef<HTMLParagraphElement>(null);
+ const [more, setMore] = useState(false);
+ const [clipped, setClipped] = useState(false);
+ // Measured, never assumed: re-checked on a text change and on resize, only while collapsed (expanded text wraps and never overflows).
+ useLayoutEffect(() => {
+  const el = ref.current;
+  if (!el || more) return;
+  const measure = () => setClipped(overflows(el));
+  measure();
+  if (typeof ResizeObserver !== "function") return;
+  const watch = new ResizeObserver(measure);
+  watch.observe(el);
+  return () => watch.disconnect();
+ }, [text, more]);
+ return <div class="job-summary-row"><p ref={ref} class={more ? "job-summary" : "job-summary job-summary-clamp"}>{text}</p>{(clipped || more) && <button type="button" class="job-summary-more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>;
+}
+
+type Tab = "details" | "transcript" | "timeline";
+const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width: 900px)").matches : true;
+
+function MandateSnippet({mandate}: {mandate: NonNullable<JobResponse["mandate"]>}) {
+ const spend = mandate.spend_usd === null ? "not recorded" : mandate.cap_usd === null ? money(mandate.spend_usd) : `${money(mandate.spend_usd)} / ${money(mandate.cap_usd)}`;
+ return <section class="job-mandate-snippet"><h2>Mandate</h2><p><a href="#map"><code>{mandate.id}</code> →</a> <span class="job-provider">{mandate.status}</span></p><p class="job-mandate-objective">{mandate.objective}</p><p class="job-provider">{spend} · {mandate.jobs} {mandate.jobs === 1 ? "job" : "jobs"}</p></section>;
+}
+
+export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: boolean; initial?: Tab}) {
  const job = data.job;
- return <div class="job-detail">
+ const [isWide, setWide] = useState(wide ?? nowWide());
+ const [tab, setTab] = useState<Tab>(initial ?? (isWide ? "transcript" : "details"));
+ useEffect(() => {
+  if (wide !== undefined || typeof matchMedia !== "function") return;
+  const query = matchMedia("(min-width: 900px)"), change = () => setWide(query.matches);
+  query.addEventListener("change", change);
+  return () => query.removeEventListener("change", change);
+ }, [wide]);
+ const active: Tab = isWide && tab === "details" ? "transcript" : tab;
+ const tabs: Tab[] = isWide ? ["transcript", "timeline"] : ["details", "transcript", "timeline"];
+ return <div class="job-detail" data-tab={active}>
   <header class="job-detail-heading">
-   <PageHeader back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
+   <PageHeader stack back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
    <div class="job-badges"><span class={`job-badge job-badge-${job.phase}`}><PhaseDot phase={job.phase}/>{job.phase}</span>{job.pr_url && <a class="job-badge job-badge-pr" href={job.pr_url}>{prNumber(job.pr_url)}{job.pr_status && ` ${job.pr_status}`} ↗</a>}<CiSignal job={job} badge/><span class="job-badge job-badge-review">review {reviewFact(job)}</span></div>
    {job.phase === "held" && <p>held = waiting on CI or review, normal for hours</p>}
   </header>
-  <div class="job-detail-body"><div class="job-detail-main">
+  <div class="job-detail-top">
    {data.questions.map(q => <section class="job-question" key={q.id}><h2>{q.kind === "final_fix" ? "Final-fix approval open" : "Parent question open"}</h2><p><code>{q.id}</code> · {q.question}</p><p>Being handled by the operator session.</p></section>)}
    {data.asks.map(ask => <section class="job-question job-question-awaiting" key={ask.id}><h2>Awaiting you</h2><p>{ask.question}</p>{ask.options.map(option => <CopyReply key={option.label} reply={option.reply}/>)}</section>)}
-   {job.summary && <p class="job-summary">{job.summary}</p>}{job.failure && <p class="job-failure">{job.failure}</p>}
-   {data.reports.length > 0 && <div class="job-links job-report-links">{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Open report · {report.title} ↗</a>)}</div>}
-  </div><div class="job-detail-side"><dl class="job-facts">
-   <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
-   <div class="job-fact-cost"><dt>Cost</dt><dd>{job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
-   <div class="job-fact-model"><dt>Model</dt><dd><ModelFact job={job}/></dd></div>
-   <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>
-   <div class="job-fact-wide job-fact-context"><dt>Context</dt><dd>{job.context ? <ContextChip usage={job.context}/> : "none"}</dd></div>
-   <div class="job-fact-wide job-fact-routing"><dt>Routing</dt><dd><RoutingFact job={job}/></dd></div>
-   <div class="job-fact-mandate"><dt>Mandate</dt><dd>{job.mandate_id ? <a href="#map"><code>{job.mandate_id}</code> →</a> : "none"}</dd></div>
-   <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
-   <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
-   <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
-  </dl><div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}{job.phase === "failed" && <a href={composerHref(`Explain why picp job ${job.id} failed and the available recovery options.`)}>Ask about this failure</a>}</div></div>
-   <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/></div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>
+   {job.summary && <Summary key={job.id} text={job.summary}/>}{job.failure && <p class="job-failure">{job.failure}</p>}
+   {data.reports.length > 0 && <div class="job-links job-report-links">{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Web report · {report.title} ↗</a>)}</div>}
+  </div>
+  <div class="job-tabs" role="tablist">{tabs.map(name => <button type="button" role="tab" key={name} aria-selected={active === name} class={active === name ? "job-tab job-tab-on" : "job-tab"} onClick={() => setTab(name)}>{name === "details" ? "Details" : name === "transcript" ? "Transcript" : "Timeline"}</button>)}</div>
+  <div class="job-detail-body">
+   <div class="job-detail-main">
+    {active === "transcript" && <JobTranscript key={job.id} jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports} finished={job.phase === "done" || job.phase === "failed"}/>}
+    {active === "timeline" && <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/></div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>}
+   </div>
+   <div class="job-detail-side">
+    {data.description && <section class="job-card"><h2>Job</h2><p class="jt-clamp">{data.description}</p></section>}
+    {data.mandate && <MandateSnippet mandate={data.mandate}/>}
+    <dl class="job-facts">
+     <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
+     <div class="job-fact-cost"><dt>Cost</dt><dd>{job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
+     <div class="job-fact-model"><dt>Model</dt><dd><ModelFact job={job}/></dd></div>
+     <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>
+     <div class="job-fact-wide job-fact-context"><dt>Context</dt><dd>{job.context ? <ContextChip usage={job.context}/> : "none"}</dd></div>
+     <div class="job-fact-wide job-fact-routing"><dt>Routing</dt><dd><RoutingFact job={job}/></dd></div>
+     <div class="job-fact-mandate"><dt>Mandate</dt><dd>{job.mandate_id ? <a href="#map"><code>{job.mandate_id}</code> →</a> : "none"}</dd></div>
+     <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
+     <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
+     <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
+    </dl>
+    <div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}{job.phase === "failed" && <a href={composerHref(`Explain why picp job ${job.id} failed and the available recovery options.`)}>Ask about this failure</a>}</div>
+   </div>
   </div>
  </div>;
 }

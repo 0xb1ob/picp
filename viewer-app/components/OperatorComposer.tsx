@@ -8,6 +8,8 @@ import { ThreadPicker } from "./ThreadNav.tsx";
 
 /** The composer's placeholder: short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message (Enter to send)";
+/** With a thread selected the placeholder names it: `Message #tag (Enter to send)`. */
+export const composerPlaceholder = (tag?: string | null) => tag ? `Message #${tag} (Enter to send)` : COMPOSER_PLACEHOLDER;
 /** Uploads finish sequentially; failed/unfinished attachments must be removed or resolved before send. */
 type Attachment = {key: number; name: string; bytes: number; text: boolean; state: "uploading" | "ready" | "failed"; id?: string; reason?: string};
 type Picked = {name: string; type: string; size: number};
@@ -101,10 +103,11 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    </li>)}
   </ul>}
   {ready && <div class="operator-composer-row">
+   <div class="operator-composer-field">
    {upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title="Attach files or images (or paste/drop)" disabled={sending} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
    <textarea ref={field} aria-label="Message to the operator session" maxLength={CONTROL_TEXT_MAX} rows={1} value={text} disabled={sending}
-    placeholder={COMPOSER_PLACEHOLDER} title="Enter sends · Shift+Enter for a new line"
+    placeholder={composerPlaceholder(thread?.selected)} title="Enter sends · Shift+Enter for a new line"
     onPaste={e => {
      // File pastes attach; text in a mixed paste keeps the browser's default.
      const files = [...(e.clipboardData?.files ?? [])];
@@ -113,6 +116,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
      attach(files);
     }}
     onInput={e => setText(e.currentTarget.value)} onKeyDown={e => { if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return; e.preventDefault(); send(busy ? "followUp" : undefined); }}/>
+   </div>
    {busy && <details class="operator-composer-more" ref={menu} onToggle={() => setConfirmAbort(false)}>
     <summary aria-label="Steer or abort" title="Steer or abort"><Icon name="more"/></summary>
     <div class="operator-composer-menu">
@@ -122,6 +126,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    </details>}
    <button type="button" class="operator-composer-send" aria-label={sendLabel} title={sendLabel} disabled={!canSend} onClick={() => send(busy ? "followUp" : undefined)}><Icon name="send"/></button>
   </div>}
+  {ready && threadsReady(thread?.status) && <p class="operator-composer-posting">{thread?.selected ? `Posting to #${thread.selected}` : "Posting to no thread"}</p>}
   {/* A failure, or a delivered send with a reason (its thread not recorded), is an alert the phone shows too. */}
   {line && <p role={flagged ? "alert" : "status"} class={flagged ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}
  </section>;
