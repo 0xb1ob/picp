@@ -27,7 +27,7 @@ import { statsView } from "./stats-view.ts";
 import { reportsView } from "./reports-view.ts";
 import { schedulesView } from "./schedules-view.ts";
 import { overview } from "./overview-view.ts";
-import { sessionsView } from "./sessions-view.ts";
+import { sessionsView, readWorkerTranscript } from "./sessions-view.ts";
 import { filesView } from "./files-view.ts";
 import { dependencyMap } from "./mandates-map-view.ts";
 import { APP_CSP, appPage, type ViewerApp } from "./app-page.ts";
@@ -329,9 +329,10 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		}
 		default:
 			if (url.pathname.startsWith("/api/job/")) {
-				const match = /^\/api\/job\/([^/]+)(\/events)?$/.exec(url.pathname);
+				const match = /^\/api\/job\/([^/]+)(\/events|\/transcript)?$/.exec(url.pathname);
 				let id = ""; try { id = decodeURIComponent(match?.[1] ?? ""); } catch { /* Invalid encoding is not a job id. */ }
 				const job = jobView(options, id);
+				if (job && match?.[2] === "/transcript") { sendJson(res, 200, readWorkerTranscript(options, id)); return; }
 				if (job && match?.[2]) {
 					const log = jobEvents(options, id);
 					send(res, log === undefined ? 404 : 200, "text/plain; charset=utf-8", log ?? "Run log unavailable (missing or exceeds 16 MiB).\n", { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" });

@@ -168,7 +168,15 @@ export interface JobResponse {
  /** Published reports, newest revision per job set, matching this job. */
  reports: ReportItem[];
  asks: Ask[]; questions: Question[]; warnings: {section:string;message:string}[];
+ /** The ledger job's description; null when the ledger has none. */
+ description: string | null;
+ /** The mandate this job runs under; null when none is recorded or readable. */
+ mandate: JobMandateSnippet | null;
 }
+/** The mandate a job runs under, as the job page shows it. */
+export interface JobMandateSnippet {id: string; status: string; objective: string; spend_usd: number | null; cap_usd: number | null; jobs: number}
+/** `GET /api/job/:id/transcript`: the worker's session, read-only; `warning` names why `entries` is empty. */
+export interface JobTranscriptResponse {entries: SessionEntry[]; truncated: boolean; warning: string | null; from: string | null; to: string | null}
 export interface BoardResponse extends JobsResponse {
  columns: {key:JobPhase;name:string;hint:string}[];
  lanes: {id:string;status:string;active:boolean;objective:string;expiry:string | null;ask_on:string[];spend:number | null;cap:number | null;note:string | null}[];

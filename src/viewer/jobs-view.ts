@@ -142,8 +142,14 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  if(job.merge_sha && job.finished_at) timeline.push({at:job.finished_at,label:"Merge",meta:job.merge_sha,tone:"green"});
  timeline.sort((a,b)=>a.at.localeCompare(b.at));
  const root=jobRoot(state,id); const artifact=jobArtifact(state,id);
+ const ledger=records(state).ledger; const grant=job.mandate_id ? readMandates(state).find(m=>m.id===job.mandate_id) : undefined;
+ const spend=grant ? dashboard(state,now).mandates.find(a=>a.id===grant.id)?.spend : undefined;
+ const mandate:JobResponse["mandate"]=grant ? {id:String(grant.id),status:mandateDisplay(grant,ledger,mandateEscalations(state).value,now).status,objective:str(grant.objective) ?? "",spend_usd:spend?.usd ?? null,cap_usd:typeof obj(grant.spend_cap)?.usd==="number" ? obj(grant.spend_cap)!.usd as number : null,jobs:spend?.jobs ?? 0} : null;
  const base=overview(state,now); const decision=decisions(state,now);
- return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,
+ // The detail page shows the envelope headline uncut (≤600); the list keeps 80.
+ const full=str(obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope)?.summary)?.split("\n").find(l=>l.trim())?.trim();
+ if(full) job.summary=full.length>600 ? `${full.slice(0,599)}…` : full;
+ return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,
   reports:reportsView(state,undefined,now).reports.filter(report=>report.job_ids.includes(id)),

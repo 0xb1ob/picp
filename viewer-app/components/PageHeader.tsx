@@ -16,8 +16,9 @@ export function routeTitle(route: Route): string {
  * screen always had it — except the worker 404, which keeps its id and the way back to Sessions.
  * Shell draws a `fallback` row (no <h1>) only while a screen has none of its own: loading,
  * unavailable, a job 404. A screen's own row claims HeaderSlot while it renders.
+ * `stack` (job page) puts the back link, id and status on row 1 and the <h1> alone on row 2 (desktop only).
  */
-export function PageHeader({title, detail, back, context, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; context?: ComponentChildren; fallback?: boolean}) {
+export function PageHeader({title, detail, back, context, stack = false, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; context?: ComponentChildren; stack?: boolean; fallback?: boolean}) {
  const slot = useContext(HeaderSlot);
  const claimed = useRef(false);
  if (slot && !fallback && !claimed.current) { claimed.current = true; slot.claim(); }
@@ -27,7 +28,7 @@ export function PageHeader({title, detail, back, context, fallback = false}: {ti
  }, [slot, fallback]);
  const {status, updatedAt = null, control, version} = useContext(ShellContext);
  const Title = fallback ? "p" : "h1";
- return <div class={fallback ? "page-header page-header-fallback" : "page-header"}>
+ return <div class={fallback ? "page-header page-header-fallback" : stack ? "page-header page-header-stack" : "page-header"}>
   {back && <a class="page-header-back" href={back.href}>{back.label}</a>}
   <Title title={title}>{title}</Title>
   {context && <span class="page-header-context">{context}</span>}

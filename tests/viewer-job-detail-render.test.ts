@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 const buildResult = await build({
  stdin: {
-  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {JobDetail} from "./viewer-app/screens/JobDetail.tsx"; export const screen=(data)=>render(h(JobDetail,{data}));',
+  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {JobDetail} from "./viewer-app/screens/JobDetail.tsx"; export const screen=(data,props={})=>render(h(JobDetail,{data,...props}));',
   loader: "tsx",
   resolveDir: REPO_ROOT,
  },
@@ -27,12 +27,12 @@ function job(over: Partial<ViewerJob>): ViewerJob {
  };
 }
 
-function detail(over: Partial<ViewerJob> = {}, extra: Partial<JobResponse> = {}): string {
+function detail(over: Partial<ViewerJob> = {}, extra: Partial<JobResponse> = {}, props: {wide?: boolean; initial?: string} = {wide: true}): string {
  const data: JobResponse = {
-  generated_at: "2026-09-27T00:00:00Z", awaiting_count: 0, job: job(over), timeline: [], timeline_truncated: false,
+  generated_at: "2026-09-27T00:00:00Z", awaiting_count: 0, job: job(over), description: null, mandate: null, timeline: [], timeline_truncated: false,
   files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [], ...extra,
  };
- return screen(data);
+ return screen(data, props);
 }
 
 test("queued job uses words instead of a dash", () => {
@@ -76,11 +76,11 @@ test("hero spans the body and contains title then phase, PR, CI and review badge
  const {document} = parseHTML(html);
  const hero = document.querySelector(".job-detail > .job-detail-heading")!;
  assert.ok(hero, "hero must sit above both body columns");
- assert.deepEqual([...hero.children].map(e=>e.className || e.tagName), ["page-header","job-badges","P"]);
+ assert.deepEqual([...hero.children].map(e=>e.className || e.tagName), ["page-header page-header-stack","job-badges","P"]);
  const badges = hero.querySelector(".job-badges")!;
  assert.deepEqual([...badges.children].map(e=>e.textContent), ["held","#12 open ↗","CI green aaaaaaa","review 1 / 5 · pass"]);
  assert.equal(badges.querySelector("a")?.getAttribute("href"), "https://github.com/acme/widgets/pull/12");
- assert.deepEqual([...document.querySelector(".job-detail-body")!.children].map(e=>e.className), ["job-detail-main","job-detail-side","job-timeline"], "phone focus order follows facts before timeline");
+ assert.deepEqual([...document.querySelector(".job-detail-body")!.children].map(e=>e.className), ["job-detail-main","job-detail-side"], "the tab content and the facts rail");
  const labels = [...document.querySelectorAll(".job-facts dt")].map(e=>e.textContent);
  assert.deepEqual(labels, ["Wall clock","Cost","Model","Head","Context","Routing","Mandate","PR","CI","Review"]);
  const model = document.querySelector(".job-fact-model dd");
@@ -106,7 +106,7 @@ test("routing pills retain recorded provenance once and show one explanation", (
 
 test("timeline abbreviates SHA40 but preserves full accessible and copyable values", () => {
  const head = "A".repeat(40), merge = "b".repeat(40);
- const html = detail({phase:"done"}, {run_href:"/api/job/cp-queued/events", timeline:[{at:"2026-09-27T00:00:00Z",label:"CI green",meta:`on ${head} · as ${merge}`,tone:"green"}]});
+ const html = detail({phase:"done"}, {run_href:"/api/job/cp-queued/events", timeline:[{at:"2026-09-27T00:00:00Z",label:"CI green",meta:`on ${head} · as ${merge}`,tone:"green"}]}, {wide:true, initial:"timeline"});
  const {document} = parseHTML(html);
  const shas = [...document.querySelectorAll(".job-timeline .job-sha > code")];
  assert.deepEqual(shas.map(e=>e.textContent), [head.slice(0,7),merge.slice(0,7)]);
@@ -127,4 +127,26 @@ test("finished research has no speculative pending stages; an equivalent pass is
 test("SHA copy target stays 44px with invisible padding around the 14px icon", () => {
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/job-detail.css"),"utf8");
  assert.match(css,/\.job-sha \.overview-reply button \{[^}]*min-width: 44px;[^}]*min-height: 44px;[^}]*padding: 15px;[^}]*border: 0;[^}]*background: transparent/);
+});
+
+test("desktop opens on Transcript beside the facts rail; phone opens on Details with three tabs", () => {
+ const tabs = (html: string) => [...parseHTML(html).document.querySelectorAll('[role="tab"]')].map(e => [e.textContent, e.getAttribute("aria-selected")]);
+ const desktop = detail({phase:"done"}, {}, {wide:true});
+ assert.deepEqual(tabs(desktop), [["Transcript","true"],["Timeline","false"]]);
+ assert.ok(parseHTML(desktop).document.querySelector(".job-detail-side .job-facts"), "facts stay on the rail");
+ assert.doesNotMatch(desktop, /class="job-timeline"/, "Timeline is its own tab");
+ const phone = detail({phase:"done"}, {}, {wide:false});
+ assert.deepEqual(tabs(phone), [["Details","true"],["Transcript","false"],["Timeline","false"]]);
+ assert.match(phone, /data-tab="details"/);
+});
+
+test("asks, the failure action, the description and the mandate snippet render outside the tabs", () => {
+ const mandate = {id:"md-a", status:"active", objective:"Ship it", spend_usd:1.5, cap_usd:20, jobs:3};
+ const html = detail({phase:"failed", failure:"Boom"}, {description:"Why this job exists", mandate, asks:[{id:"ask-a", question:"Keep?", options:[{label:"Keep", consequence:"c", reply:"keep"}]}] as never});
+ const {document} = parseHTML(html);
+ assert.match(document.querySelector(".job-detail-top")!.textContent!, /Awaiting you.*Keep\?.*Boom/);
+ assert.match(html, /Ask about this failure/);
+ assert.equal(document.querySelector(".job-card p")?.textContent, "Why this job exists");
+ assert.match(document.querySelector(".job-mandate-snippet")!.textContent!, /md-a.*active.*Ship it.*\$1\.50 \/ \$20\.00.*3 jobs/);
+ assert.equal(parseHTML(detail()).document.querySelector(".job-card, .job-mandate-snippet"), null, "omitted when null");
 });
