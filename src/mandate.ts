@@ -363,7 +363,8 @@ export class MandateStore {
 		return join(this.home, paths.mandateFile(id));
 	}
 
-	get(id: string): Mandate | undefined {
+	get(id: string | undefined): Mandate | undefined {
+		if (id === undefined) return undefined;
 		const file = this.file(id);
 		if (!existsSync(file)) return undefined;
 		const parsed = validate<Mandate>(MandateSchema, JSON.parse(readFileSync(file, "utf8")));
@@ -423,7 +424,7 @@ export class MandateStore {
 	/** Schedule id -> the mandate it names, from state/schedules.json. Unreadable is empty: no schedule grant covers anything, and every other grant still excludes a scheduled job. */
 	scheduleMandates(): Map<string, string> {
 		try {
-			return new Map(readScheduleFile(join(this.home, LAYOUT.state, "schedules.json")).map((schedule) => [schedule.id, schedule.mandate_id]));
+			return new Map(readScheduleFile(join(this.home, LAYOUT.state, "schedules.json")).flatMap((schedule) => schedule.mandate_id ? [[schedule.id, schedule.mandate_id] as const] : []));
 		} catch {
 			return new Map(); // fail closed, never open: see above
 		}

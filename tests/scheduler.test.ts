@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,6 +17,8 @@ import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { cpNext } from "../src/next.ts";
 import { formatScheduleEvent, formatSchedules, latestCronSlot, parseCron, runWatchScript, Scheduler, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
+import { ScheduleRunStore } from "../src/schedule-runs.ts";
+import { sweepSchedulePolicyImport } from "../src/schedule-migrations.ts";
 import { createScratchHome, createScratchLedger, type ScratchHome } from "./harness/index.ts";
 
 const T0 = new Date("2026-07-01T06:00:00Z");
@@ -596,4 +598,25 @@ test("runWatchScript runs only a tracked script, with the script runner's bare e
 	assert.equal(result.code, 0);
 	assert.equal(result.stdout, repo);
 	await assert.rejects(runWatchScript(repo, "untracked.sh", 4_000), /not tracked/);
+});
+
+
+test("P4 scheduler reads policy-only v2, starts under run authority without a legacy template and keeps writers on v2", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const runs = new ScheduleRunStore({ home: home.path });
+	const { ports, mandates, grant, ledger } = bench(home, { runs });
+	const scheduler = new Scheduler(ports), seed = grant();
+	const schedule = await scheduler.add({ name: "v2 policy", project: "demo", mandate_id: seed.id, manual: true, ...job });
+	await sweepSchedulePolicyImport({ home: home.path, mandates, runs, now: T0 });
+	const stored = JSON.parse(readFileSync(scheduler.file, "utf8"));
+	assert.equal(stored.schema_version, 2); assert.equal(stored.schedules[0].grant_template, undefined); assert.equal(stored.schedules[0].mandate_id, undefined);
+	const before = JSON.stringify(mandates.list());
+	const event = await scheduler.fireNow(schedule.id, { via: "dashboard", request_id: "sc-v2-test", peer: null, revision: 1 });
+	assert.equal(event.outcome, "fired", event.reason); assert.ok(event.run_id); assert.equal(event.mandate_id, undefined);
+	assert.equal(runs.runOfJob(event.job_id!)?.id, event.run_id); assert.equal(JSON.stringify(mandates.list()), before, "policy-only fire mints no grant");
+	await assert.rejects(scheduler.deactivatePolicy(schedule.id, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tc-v2", quote_sha: "abcdef012345" } }), /restore the P4 backup/);
+	assert.ok(runs.activePolicy(schedule.id), "no deactivation into missing legacy bounds");
+	await scheduler.setEnabled(schedule.id, false); await scheduler.setEnabled(schedule.id, true);
+	assert.equal(JSON.parse(readFileSync(scheduler.file, "utf8")).schema_version, 2);
+	assert.equal((await ledger.show(event.job_id!)).notes?.includes(`under run ${event.run_id}`), true);
 });

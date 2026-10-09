@@ -128,7 +128,7 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.deepEqual([...SCHEDULE_JOB_KINDS], [...JOB_KINDS]);
 	assert.deepEqual([...SCHEDULE_DELIVERIES], [...DELIVERIES]);
 	assert.equal(SCHEDULE_MANDATE_ID.source, MANDATE_ID_PATTERN);
-	assert.equal(SCHEDULE_SCHEMA_VERSION, SCHEMA_VERSION);
+	assert.equal(SCHEDULE_SCHEMA_VERSION, 2, "schedules v2 evolves independently of mandate schemas");
 	assert.deepEqual([...GRANT_TEMPLATE_ASK_ON], [...MANDATE_ASK_ON]);
 	assert.deepEqual([...GRANT_TEMPLATE_ACTIONS], MANDATE_ACTIONS.filter((action) => action !== "merge"), "a fire grant template never carries merge");
 	assert.deepEqual([...MANDATE_CHANNEL_VALUES], [...MANDATE_CHANNELS]);
@@ -141,7 +141,8 @@ test("the dependency-free schedule schema mirrors the contracts and refuses what
 	assert.match(bad({ trigger: { ...watch.trigger, every_seconds: 10 } }).join(), /every_seconds/);
 	assert.match(bad({ trigger: { type: "cron", cron: "* * * * *" } }).join(), /trigger\/tz: is required/);
 	assert.match(bad({ last_fire: { at: "x", slot: "x", job_id: "x" } }).join(), /last_fire\/missed: is required/);
-	assert.match(scheduleFileErrors({ schema_version: 2, schedules: [] }).join(), /schema_version/);
+	assert.deepEqual(scheduleFileErrors({ schema_version: 2, schedules: [] }), []);
+	assert.match(scheduleFileErrors({ schema_version: 3, schedules: [] }).join(), /schema_version/);
 	assert.match(scheduleFileErrors({ schema_version: SCHEMA_VERSION, schedules: {} }).join(), /schedules: must be an array/);
 });
 
@@ -527,4 +528,29 @@ test("a manual skill schedule's dashboard run shows in Last fire; runs and jobs 
 	assert.match(orgCard, /schedule-no-report|Web report ↗/);
 	assert.match(screen({ ...data, schedules: [{ ...m!, run_count: 0, job_count: 0, runs: [], history: [] }] }), /0 recent runs · 0 jobs.*run history · 0 runs</s);
 	assert.match(orgCard, /href="#job\/cp-os1">Report<\/a>/);
+});
+
+
+test("P4 viewer renders policy-only v2 with long text and retains legacy v2 projection (SSR and responsive wrap contract)", async (t) => {
+	const options = fixture(t, file(cron, watch)), schedulesFile = join(options.stateDir, "schedules.json");
+	const saved = readScheduleFile(schedulesFile)[0]!, runs = openScheduleRunStore(options.home);
+	const policy = policyFromLegacy(saved, saved.grant_template!);
+	await runs.savePolicyRevision(policy, { at: "2026-09-28T01:00:00Z", provenance: { channel: "migration", legacy_seed: policy.provenance.legacy_seed } });
+	const { mandate_id: _pointer, grant_template: _template, ...v2 } = saved;
+	v2.name = "long-schedule-name-".repeat(4);
+	writeFileSync(schedulesFile, JSON.stringify({ schema_version: 2, schedules: [v2, watch] }));
+	const data = schedulesView(options, () => {}, NOW);
+	assert.equal(data.error, null); assert.equal(data.schedules[0]?.mandate_id, undefined); assert.equal(data.schedules[0]?.policy?.active_revision, 1);
+	assert.equal(data.schedules[1]?.mandate_id, watch.mandate_id); assert.equal(data.schedules[1]?.policy, null);
+	const built = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules} from "./viewer-app/screens/Schedules.tsx"; export const screen=d=>render(h(Schedules,{data:d}));', loader: "tsx", resolveDir: REPO_ROOT }, bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
+	const { screen } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
+	const { document } = parseHTML(screen(data)), card = document.querySelector(".schedule-card")!;
+	assert.match(card.querySelector(".schedule-identity")?.textContent ?? "", /policy revision 1/);
+	assert.match(card.querySelector(".schedule-facts")?.textContent ?? "", /Policyrevision 1 · saved run authority/);
+	assert.match(card.querySelector(".schedule-details")?.textContent ?? "", /each fire starts a run; no grant minted/);
+	assert.doesNotMatch(card.textContent ?? "", /no grant template|every fire is refused|undefined/);
+	assert.match(card.querySelector(".schedule-policy-line")?.textContent ?? "", /\$10\/run/);
+	assert.equal(card.querySelectorAll("[style], form").length, 0);
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/schedules.css"), "utf8");
+	assert.match(css, /overflow-wrap: anywhere/); // Existing responsive wrap remains; no CSS/layout change in P4.
 });

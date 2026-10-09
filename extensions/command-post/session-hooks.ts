@@ -30,7 +30,7 @@ import { computeRoutingNudge } from "../../src/routing.ts";
 import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../src/parent-context.ts";
 import { thresholdCancel } from "../../src/parent-compact-hold.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
-import { formatScheduleMigration, sweepScheduleGrantTemplates } from "../../src/schedule-migrations.ts";
+import { formatScheduleMigration, formatSchedulePolicyImport, sweepScheduleGrantTemplates, sweepSchedulePolicyImport } from "../../src/schedule-migrations.ts";
 import { reconcileRun } from "../../src/schedule-runs.ts";
 import { readSchedulesOrEmpty } from "../../src/schedule-expand.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
@@ -235,6 +235,20 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			const message = `pi-command-post: schedule migration failed for ${home}: ${(error as Error).message}`;
 			if (ctx.hasUI) ctx.ui.notify(message, "error");
 			else process.stderr.write(`${message}\n`);
+			return; // No ticks after a failed backup/template migration.
+		}
+		try {
+			const post = commandPost();
+			const text = formatSchedulePolicyImport(await sweepSchedulePolicyImport({ home, mandates: post.mandates, runs: post.mandates.scheduleRuns }));
+			if (text) {
+				if (ctx.hasUI) ctx.ui.notify(text, "info");
+				else process.stderr.write(`${text}\n`);
+			}
+		} catch (error) {
+			const message = `pi-command-post: schedule policy import failed for ${home}: ${(error as Error).message}`;
+			if (ctx.hasUI) ctx.ui.notify(message, "error");
+			else process.stderr.write(`${message}\n`);
+			return; // Fail closed: do not start ticks or heal pointers after an unverified import.
 		}
 
 		// Not reset here: the Shipped memory is keyed by session id and persisted, so
@@ -371,7 +385,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 				}
 				const schedules = readSchedulesOrEmpty(home);
 				for (const schedule of schedules) {
-					if (!runs.activePolicy(schedule.id) || schedules.some((other) => other.id !== schedule.id && other.mandate_id === schedule.mandate_id)) continue;
+					if (!schedule.mandate_id || !runs.activePolicy(schedule.id) || schedules.some((other) => other.id !== schedule.id && other.mandate_id === schedule.mandate_id)) continue;
 					const grant = post.mandates.get(schedule.mandate_id);
 					if (grant && grant.status !== "revoked") post.mandates.revoke(grant.id, { by: "system" });
 				}

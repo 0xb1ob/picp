@@ -7855,6 +7855,43 @@ reads a fire grant whose `schedule_fire.trigger` is `cron` or `watch` as invalid
 `cp_schedule remove` every schedule, strip `schedule_fire` from its (revoked) fire grants and `revoked_by` from every
 `state/mandates/md-*.json`, then re-add the schedules under the older binary.
 
+**Upgrade (P4 policy import and schedules v2).** After the template sweep, before ticks, startup calls
+`sweepSchedulePolicyImport` (`src/schedule-migrations.ts`). Each importable schedule gets a lossless
+`policyFromLegacy` revision with migration provenance and `legacy_seed`, then activation and pointer retirement.
+Budgets, child/fan-out caps, parallelism, exclusions, risk asks, model rules and review/merge gates remain binding;
+live ceilings still only narrow at fire time. Org-review clearance is imported only for the qualifying seed
+(`runNowClearance` conditions) and only the dashboard approval channel. Existing active policies are preserved.
+
+Pipelines stay on per-fire grants. An open labelled legacy job defers import and prevents the completion marker,
+so the next session start retries. A missing template records `needs setup: no template to import; open the editor`.
+An operator-stopped pointer imports a revision without activation, preserves `enabled`, and records
+`operator stop on <grant> preserved; adopt to resume`. Successful imports drop the legacy pointer/template;
+non-migrated schedules retain them. No run store is rewritten or deleted by the sweep.
+
+The reader accepts `{schema_version: 1|2, schedules}`. V1 still requires `mandate_id`; v2 makes
+`mandate_id` and `grant_template` optional. Reads are pure and writers write v2. A v1-only binary rejects v2
+with its named `SchedulerError` (`violates the schedule contract`), rather than guessing at authority.
+The legacy mint branch remains for schedules carrying a template; policy-only schedules start durable runs.
+
+Before any rewrite/retirement, the importer snapshots `state/schedules.json`, existing
+`state/schedule-policies.json` and each pointer's `state/mandates/<id>.json` into
+`state/.migrations/backups/`. The schedules snapshot is `schedules.v1.<iso>.json` (or v2 if already upgraded);
+policy and mandate snapshots use their basename and the same ISO timestamp. Snapshots are 0600, fsynced,
+and verified by SHA-256 readback. The 0600 `2026-12-schedule-policy-v2.backup.json` manifest records each
+source, backup and hash, including absent stores. Retries verify original snapshots instead of overwriting them
+with partial imports. Backup failure stops startup before ticks or pointer healing. The completion marker
+`state/.migrations/2026-12-schedule-policy-v2.done` is written last, only with no deferred schedules.
+A crash after revision save or activation retries without duplicate revisions and heals pointer retirement.
+
+**P4 rollback (S4→S3):** disable schedules, drain every open schedule run and its jobs, then stop the parent.
+Restore the original `schedules.v1.<iso>.json` over `state/schedules.json`, remove the P4 completion marker,
+and downgrade to P3. Policy-only v2 schedules cannot deactivate into missing legacy bounds: restore the
+backup after drain to return to per-fire grants. To reverse the import's authority changes too, restore the
+manifest's policy and mandate snapshots (restore recorded absence for files created by the import), retaining
+run history as audit. Disable restored schedules until the operator deliberately resumes them. Schedules and
+settings added after the snapshot must be re-added. Never downgrade below P2b with open run members:
+older authority code cannot safely judge them. Preserve the backups/manifest through rollback.
+
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,
 `validateTrackersFile`, `src/trackers/config.ts`), managed only by `cp_tracker

@@ -111,7 +111,7 @@ function usageJobs(state: ViewerState): UsageJob[] {
 /** Schedule id -> the mandate it names; unreadable is empty, as `MandateStore.scheduleMandates`. */
 function scheduleMandates(state: ViewerState): Map<string, string> {
 	try {
-		return new Map(readScheduleFile(join(state.stateDir, "schedules.json")).map((s) => [s.id, s.mandate_id]));
+		return new Map(readScheduleFile(join(state.stateDir, "schedules.json")).flatMap((s) => s.mandate_id ? [[s.id, s.mandate_id] as const] : []));
 	} catch {
 		return new Map();
 	}
