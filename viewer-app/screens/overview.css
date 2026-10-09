@@ -44,7 +44,7 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-dot-tight { background: var(--text); border-color: var(--text); }
 .overview-dot-ci-red { background: var(--coral); border-color: var(--coral); }
 .overview-dot-done { background: var(--faint); border: 0; }
-.overview-flight-columns { display: none; }
+.overview-flight-columns, .overview-landed-columns { display: none; }
 .overview-flight, .overview-landed { display: grid; align-items: center; gap: 2px 14px; padding: 4px 0; color: var(--muted); }
 .overview-flight { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-areas: "job cost" "title title" "clock context" "review ci" "model model"; }
 .overview-flight > *, .overview-landed > * { min-width: 0; }
@@ -63,8 +63,8 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-flight .overview-job-id code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .overview-review { grid-area: review; font-size: 12px; overflow-wrap: anywhere; }
 .overview-ci { grid-area: ci; font-size: 12px; }
-.overview-model { grid-area: model; align-self: start; overflow-wrap: anywhere; }
-.overview-model code { font-size: 11px; }
+.overview-model { grid-area: model; align-self: start; min-width: 0; overflow: hidden; }
+.overview-model code { display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .overview-cost { grid-area: cost; justify-self: end; font-size: 12px; white-space: nowrap; }
 .overview-landed { grid-template-columns: auto minmax(0,1fr) auto; grid-template-areas: "job job cost" "title title title" "pr merge merge"; }
 .overview-landed > .overview-line-text { grid-area: title; }
@@ -75,12 +75,13 @@ progress::-moz-progress-bar { background: var(--secondary); }
  .overview { gap: 28px; }
  .overview > .overview-heading { order: -1; display: block; }
  .overview > .overview-heading { margin-bottom: calc(var(--page-header-gap) - 28px); }
- /* Health is one flat strip with the services line at its end. */
- .overview-status { flex-direction: row; align-items: center; gap: 16px; }
+ /* Health is one bordered single-line strip: inline label + value, separators, services line at its end. */
+ .overview-status { flex-direction: row; align-items: center; gap: 16px; min-height: 38px; padding: 0 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
  .overview-health { display: flex; flex: 1 1 auto; min-width: 0; gap: 0; }
- .overview-chip { flex: 1 1 0; min-height: 0; padding: 0 16px 0 0; background: transparent; border: 0; border-radius: 0; }
- .overview-chip strong { font-size: 14px; }
- .overview-status .overview-services { flex: 0 1 auto; max-width: 40%; }
+ .overview-chip { flex: 0 1 auto; flex-direction: row; align-items: center; gap: 8px; min-height: 36px; padding: 0 16px; background: transparent; border: 0; border-left: 1px solid var(--divider); border-radius: 0; }
+ .overview-chip:first-child { padding-left: 0; border-left: 0; }
+ .overview-chip strong { font-size: 13px; }
+ .overview-status .overview-services { flex: 0 1 auto; max-width: 40%; margin-left: auto; }
  .overview-clear > a { min-height: 44px; padding: 0 16px; }
  .overview-clear a > div { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
  .overview-line { flex-wrap: nowrap; }
@@ -89,10 +90,11 @@ progress::-moz-progress-bar { background: var(--secondary); }
  .overview-landed { grid-template-columns: 9rem minmax(0,1fr) 5rem 9rem 4rem; grid-template-areas: "job title pr merge cost"; padding: 0; }
 }
 @media (min-width: 1200px) {
- .overview-flight, .overview-flight-columns { grid-template-columns: 220px minmax(0,1fr) 9rem 11rem minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 4.5rem; column-gap: 16px; }
+ .overview-flight, .overview-flight-columns { grid-template-columns: 220px minmax(0,1fr) 104px 140px 104px 92px 148px 56px; column-gap: 16px; }
  .overview-flight { grid-template-areas: "job title clock context review ci model cost"; }
- .overview-landed { grid-template-columns: 220px minmax(0,1fr) 5rem 9rem 4.5rem; column-gap: 16px; }
+ .overview-landed, .overview-landed-columns { grid-template-columns: 220px minmax(0,1fr) 80px 96px 56px; column-gap: 16px; }
+ .overview-merge-word { display: none; }
  .overview .ctx-prefix, .overview .overview-review-prefix { display: none; }
- .overview-flight-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
- .overview-flight-columns > :last-child { text-align: right; }
+ .overview-flight-columns, .overview-landed-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
+ .overview-flight-columns > :last-child, .overview-landed-columns > :last-child { text-align: right; }
 }

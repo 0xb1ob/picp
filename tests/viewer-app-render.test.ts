@@ -161,6 +161,7 @@ test("S7 Overview has a calm empty strip, complete flight cells and five project
  assert.equal(document.querySelector(".overview-paused-pill")?.textContent,"fixture-paused · paused"); assert.ok(document.querySelector(".page-header-context .overview-paused-pill"),"paused pills live in the title row"); assert.equal(document.querySelector(".overview-subtitle"),null);
  assert.equal(document.querySelector(".overview-health")?.parentElement,document.querySelector(".overview-services")?.parentElement,"health and service line share compact spacing");
  assert.deepEqual([...document.querySelectorAll(".overview-flight-columns > span")].map(e=>e.textContent),["Job","Title","Wall clock","Context","Review","CI","Model","Cost"]); assert.match(document.querySelector(".overview-held-hint")!.textContent!,/held = waiting on CI or review, normal for hours/);
+ assert.deepEqual([...document.querySelectorAll(".overview-landed-columns > span")].map(e=>e.textContent),["Job","Title","PR","Commit","Cost"]);
  const rows = [...document.querySelectorAll(".overview-flight")]; assert.equal(rows.length,3);
  for (const row of rows) for (const cell of [".overview-job-id",".overview-flight-title",".overview-clock",".overview-context",".overview-review",".overview-ci",".overview-model",".overview-cost"]) assert.ok(row.querySelector(cell),cell);
  assert.equal(rows[0]!.querySelector("progress")?.getAttribute("value"),"20");
