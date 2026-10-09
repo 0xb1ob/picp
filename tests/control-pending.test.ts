@@ -37,19 +37,21 @@ test("accepted sends settle by target metadata and 24h TTL, preserving live FIFO
  const result = readPendingSends(stateDir,now,session);
  assert.equal(result.sends_error,null);
  const states = new Map(result.sends.map(send=>[send.id,send.state]));
- assert.deepEqual([boundary,expired,missing,ended,live,delivered,failed,legacy].map(id=>states.get(id)),["queued","dropped","dropped","dropped","queued","delivered","failed","dropped"]);
+ assert.deepEqual([boundary,expired,missing,ended,live,delivered,failed,legacy].map(id=>states.get(id)),["queued","failed","failed","failed","queued","delivered","failed","failed"],"cp-y43c addendum 2: a loss is a visible failure, never a silent drop");
+ assert.match(result.sends.find(send=>send.id === ended)!.reason!,/^Not confirmed: target operator session ended\. .*check the transcript/);
+ assert.equal(result.sends.find(send=>send.id === ended)!.body.text,"send 4","the original text stays with the failure");
  assert.deepEqual(result.sends.filter(send=>send.state === "queued").map(send=>send.id),[boundary,live]);
  assert.deepEqual(readPendingSends(stateDir,now,session),result,"repeat reads are idempotent");
  assert.equal(readFileSync(file,"utf8"),before,"projection never rewrites or appends");
  const offline = readPendingSends(stateDir,now,{running:false,pid:null,since:null,reason:"no dashboard control record"});
- assert.equal(offline.sends.find(send=>send.id === live)?.state,"dropped");
+ assert.equal(offline.sends.find(send=>send.id === live)?.state,"failed");
  const dead = readPendingSends(stateDir,now,{running:false,pid:42,since:null,reason:"the recorded session pid 42 is not running"});
- assert.equal(dead.sends.find(send=>send.id === live)?.state,"dropped");
+ assert.equal(dead.sends.find(send=>send.id === live)?.state,"failed");
  const invalid = readPendingSends(stateDir,now,{running:false,pid:null,since:null,reason:"unreadable record"});
  assert.equal(invalid.sends.find(send=>send.id === live)?.state,"queued","uncertain metadata is not proof of abandonment");
  appendFileSync(file,JSON.stringify({type:"outcome",by:"viewer",id:live,at:now.toISOString(),peer:null,state:"dropped",reason:"operator discarded abandoned send"})+"\n");
  appendFileSync(file,JSON.stringify({type:"outcome",by:"bridge",id:live,at:now.toISOString(),peer:null,state:"queued",reason:null})+"\n");
- assert.equal(readPendingSends(stateDir,now,session).sends.find(send=>send.id === live)?.state,"dropped","late acceptance cannot resurrect terminal drops");
+ assert.equal(readPendingSends(stateDir,now,session).sends.find(send=>send.id === live)?.state,"dropped","an operator discard stays terminal: late acceptance cannot resurrect it");
 });
 
 test("cp-y43c: a dashboard-held message is editable with its saved text, outlives its session, and loses Edit once handed over or cancelled", t => {
@@ -70,6 +72,7 @@ test("cp-y43c: a dashboard-held message is editable with its saved text, outlive
  ].map(row=>JSON.stringify(row)).join("\n")+"\n");
  const sends = new Map(readPendingSends(stateDir,now,session).sends.map(send=>[send.id,send]));
  assert.deepEqual([sends.get(id(1))?.state,sends.get(id(1))?.body.text,sends.get(id(1))?.editable],["queued","saved 1",true],"held across a session restart, with its edit");
- assert.deepEqual([sends.get(id(2))?.state,sends.get(id(2))?.body.text,sends.get(id(2))?.editable],["dropped","saved 2",undefined],"handed over: the text pi got; its session ended, so dropped, never resent");
+ assert.deepEqual([sends.get(id(2))?.state,sends.get(id(2))?.body.text,sends.get(id(2))?.editable],["failed","saved 2",undefined],"handed over, session ended unseen: a visible failure with the text pi got, never resent");
+ assert.match(sends.get(id(2))!.reason!,/^Not confirmed: /);
  assert.deepEqual([sends.get(id(3))?.state,sends.get(id(3))?.reason,sends.get(id(3))?.editable],["dropped","Cancelled from the dashboard",undefined]);
 });

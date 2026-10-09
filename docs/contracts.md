@@ -5880,7 +5880,11 @@ turn; >24 h is `dropped`. Steers and decision answers never queue and may pass h
 **Guarantee: at most once, not exactly once.** The journal append and pi's acceptance cannot be one atomic step, so
 the claim is written first: a crash between them, or a session ending before the transcript shows the message, leaves
 it `dropped`/`failed`, visible, and never resent. `injected` means handed to pi, not applied; only the transcript
-sighting (`delivered`) says it arrived.
+sighting (`delivered`) says it arrived. **No silent loss, no automatic double send** (addendum 2): the status
+projection turns every such loss — the crash window, a session ended unseen, a held message past 24 h — into a
+`failed` send carrying its original text (`Not confirmed: …` once `injected`, else `Not sent: …`); the dashboard
+shows it with **Send again**, which queues a new message (fresh id) only on the operator's click. Only the operator's
+own cancel removes a message without a failure.
 
 **Transport** ([`src/dashboard-control.ts`](../src/dashboard-control.ts), loaded by the cp-bridge extension): at
 `session_start` the operator session binds `state/operator/dashboard.sock` (umask 077, then 0600; ≤ 107 bytes; a

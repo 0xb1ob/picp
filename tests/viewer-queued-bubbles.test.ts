@@ -27,7 +27,7 @@ test("queued bubbles: FIFO after newest transcript, state and time, attachment c
  assert.match(bubbles[1]!.textContent!,/Queued · 2 of 2/);
  assert.equal(bubbles[0]!.querySelector("time")?.getAttribute("datetime"),at);
  assert.deepEqual([...bubbles[0]!.querySelectorAll(".session-pending-attachments li")].map(el=>el.textContent),["Image · im-fixture.png","File · future-file.json"]);
- assert.match(bubbles[2]!.textContent!,/Failed: connection refused.*Retry.*Discard/);
+ assert.match(bubbles[2]!.textContent!,/Failed: connection refused.*Send again.*Discard/);
  assert.ok(bubbles[2]!.classList.contains("session-pending-failed"));
  assert.ok(document.querySelector("[aria-live=polite]"));
  assert.equal(document.querySelector(".session-entries")?.lastElementChild,bubbles[2]);
@@ -85,7 +85,7 @@ test("ordinary sends without an ask recover queued and failed records, including
  await s.remount();
  assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
  assert.deepEqual(s.control.pending?.map(item=>[item.state,item.ask_id]),[["queued",null],["failed",null]]);
- assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Retry.*Discard/);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Send again.*Discard/);
  assert.equal(s.control.pending_error,undefined,"missing optional ask ids are valid recovery records");
  assert.equal(s.posted.length,2,"remount never resends queued or failed records");
 });
@@ -97,7 +97,7 @@ test("recovery keeps valid queued and failed sends in FIFO order among malformed
  s.status({...status,sends:[{id:"dc-dismissed",at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:"already discarded"}}]});
  await s.show();
  assert.deepEqual(s.bubbleTexts(),["queued one","retry this file","queued two"]);
- assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Retry.*Discard/);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Send again.*Discard/);
  assert.deepEqual(s.control.pending?.[1]?.body.files,["tx-fixture.md"]);
  assert.equal(s.control.pending?.[0]?.ask_id,"ask-fixture","valid ask ids are retained");
  const warning=s.root.querySelector(".session-warning[aria-live=polite]");
@@ -254,18 +254,37 @@ test("text-capable composer uploads into the FIFO, keeps chips through failure/r
  await s.reply({id,state:"delivered",deliver:"prompt"});assert.deepEqual(s.bubbleTexts(),[]);
 });
 
-test("dropped sends disappear on fresh load and stored reload without failures or delivery",async t=>{
- const ids=["dc-20261008035752-31390177","dc-20261008035836-576ebc32"];
- const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[...ids.map(id=>pending(id,{id})),pending("live")],dismissed:[]})]]);
+test("cp-y43c addendum 2: a lost send (unconfirmed after restart, expired) is a failed bubble with its text; only Send again sends it, as a new message; a cancelled one stays gone",async t=>{
+ const lost="dc-20261008035752-31390177", expired="dc-20261008035836-576ebc32", cancelled="dc-20261008035900-0000cafe";
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[pending(lost,{id:lost,body:{kind:"message",text:"claimed, never seen",thread:"layout"}}),pending(cancelled,{id:cancelled}),pending("live")],dismissed:[]})]]);
  const s=await stage(t,store);
- const sends=[...ids.map(id=>({id,at,state:"dropped" as const,reason:"target operator session ended",ask_id:null,body:{kind:"message" as const,text:"unwanted text"}})),{id:"dc-live",at,state:"queued" as const,reason:null,ask_id:null,body:{kind:"message" as const,text:"queued live"}}];
+ const sends=[
+  {id:lost,at,state:"failed" as const,reason:"Not confirmed: target operator session ended. It was handed to the session but never seen in its transcript; check the transcript before sending it again.",ask_id:null,body:{kind:"message" as const,text:"claimed, never seen",deliver:"followUp" as const,thread:"layout"}},
+  {id:expired,at:"2026-10-04T14:00:01Z",state:"failed" as const,reason:"Not sent: queued longer than 24 h. It was never given to the session.",ask_id:null,body:{kind:"message" as const,text:"held too long"}},
+  {id:cancelled,at,state:"dropped" as const,reason:"Cancelled from the dashboard",ask_id:null,body:{kind:"message" as const,text:"cancelled text"}},
+  {id:"dc-live",at:"2026-10-04T14:00:02Z",state:"queued" as const,reason:null,ask_id:null,body:{kind:"message" as const,text:"queued live"}},
+ ];
  s.status({...status,sends});await s.show();
- assert.deepEqual(s.bubbleTexts(),["queued live"]);
- assert.equal(s.root.querySelectorAll(".session-pending-failed").length,0);
- assert.equal(s.posted.length,0,"settlement never delivers or retries text");
- await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"]);
- store.clear();await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"],"fresh browser cannot recover a dropped bubble");
+ assert.deepEqual(s.bubbleTexts(),["claimed, never seen","queued live","held too long"],"the original text stays visible; a cancelled send does not come back");
+ const failed=[...s.root.querySelectorAll(".session-pending-failed")];
+ assert.equal(failed.length,2);
+ assert.match(failed[0]!.textContent!,/Failed: Not confirmed: target operator session ended.*Send again.*Discard/);
+ assert.match(failed[1]!.textContent!,/Failed: Not sent: queued longer than 24 h.*Send again.*Discard/);
+ assert.equal(s.posted.length,0,"a loss is never resent on its own");
+ await s.remount();store.clear();await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["claimed, never seen","held too long","queued live"],"a fresh browser still shows the failures from the journal (journal times)");
  assert.equal(s.posted.length,0);
+
+ await s.click(".session-pending-again");
+ assert.equal(s.posted.length,1,"one click, one new message");
+ const {client_id,...body}=s.posted[0] as Record<string,unknown>;
+ assert.deepEqual(body,{kind:"message",text:"claimed, never seen",deliver:"followUp",thread:"layout"});
+ assert.notEqual(client_id,lost,"a new message, not the lost one");
+ await s.reply({id:client_id,state:"queued",deliver:"followUp",editable:true});
+ assert.deepEqual(s.bubbleTexts(),["held too long","queued live","claimed, never seen"],"the lost bubble gives way to the new queued send");
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["held too long","queued live","claimed, never seen"],"the lost id stays dismissed; it is never sent twice");
+ assert.equal(s.posted.length,1);
 });
 
 test("cp-y43c: a held queued message edits inline (Enter saves, Esc keeps it), cancels, and a save that lost the race shows the sent text with no Edit",async t=>{

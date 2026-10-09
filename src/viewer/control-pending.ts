@@ -8,6 +8,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
  const sends = new Map<string, ControlPendingSend>();
  const accepted = new Set<string>();
  const injected = new Set<string>();
+ const lost = new Set<string>();
  const targets = new Map<string, {since?: string; file?: string}>();
  const errors: string[] = [];
  for (const file of [controlJournalFile(stateDir), controlInboxFile(stateDir)]) {
@@ -39,7 +40,8 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
     // cp-y43c: an edit applies only while the dashboard still holds the message (control-queue.ts).
     if (line.type === "edited") { if (typeof line.text === "string" && !injected.has(line.id)) send.body = {...send.body,text:line.text}; continue; }
     if (line.type === "outcome" && line.state === "cancelled") { send.state = "dropped"; send.reason = "Cancelled from the dashboard"; continue; }
-    if (line.type === "outcome" && line.state === "dropped") { send.state = "dropped"; send.reason = typeof line.reason === "string" ? line.reason : "Abandoned operator send"; continue; }
+    // A bridge drop is a loss the operator did not ask for (cp-y43c addendum 2): visible as failed below, never resent.
+    if (line.type === "outcome" && line.state === "dropped") { send.state = "dropped"; send.reason = typeof line.reason === "string" ? line.reason : "Abandoned operator send"; if (line.by === "bridge") lost.add(line.id); continue; }
     if (line.state === "delivered" || line.type === "delivered") send.state = "delivered";
     else if (line.state === "failed" || line.state === "refused" || line.type === "dropped") { send.state = "failed"; send.reason = typeof line.reason === "string" ? line.reason : "Delivery failed"; }
    }
@@ -57,7 +59,13 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
    if (missing || ended || now.getTime() - Date.parse(send.at) > INBOX_MAX_AGE_MS) {
     send.state = "dropped";
     send.reason = missing ? "target operator session missing" : ended ? "target operator session ended" : "queued longer than 24 h";
+    lost.add(send.id);
    } else if (held) send.editable = true;
+  }
+  if (send.state === "dropped" && lost.has(send.id)) {
+   // cp-y43c addendum 2: no silent loss. The text stays in a failed bubble; only the operator's Send again sends it, as a new message.
+   send.state = "failed";
+   send.reason = `${injected.has(send.id) ? "Not confirmed" : "Not sent"}: ${send.reason}. ${injected.has(send.id) ? "It was handed to the session but never seen in its transcript; check the transcript before sending it again." : "It was never given to the session."}`;
   }
   const id = threads.refs.get(`dashboard:${send.id}`);
   const tag = threads.threads.find(thread=>thread.id === id)?.tag;

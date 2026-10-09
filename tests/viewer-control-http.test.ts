@@ -567,3 +567,39 @@ test("queued-message edit (cp-y43c): busy sends are held editable; edit and canc
 	assert.equal(refused.length, 5, "each refusal journaled once by the viewer");
 	assert.deepEqual(journal(stateDir).filter((line) => line.id === id).map((line) => line.type === "outcome" ? line.state : line.type), ["request", "queued", "edited", "injected"]);
 });
+
+test("cp-y43c addendum 2: a claimed-but-unconfirmed message after a restart or crash, and a held one past 24 h, are failed with their text; nothing is resent", async (t) => {
+	const { stateDir, port } = await setup(t);
+	let busy = true;
+	const first = await bridge(t, stateDir, () => !busy);
+	const claimed = await call(port, MESSAGE, json(first.csrf, { kind: "message", text: "claimed, never seen" }));
+	busy = false;
+	first.control.settled();
+	assert.equal(first.injected.length, 1, "handed to pi; the transcript never shows it");
+	first.control.stop();
+
+	// A crash after the claim: request, queued, injected, and no line after it.
+	const crashed = "dc-20261009120000-0000c0de", stale = "dc-20261009120000-00005a1e";
+	const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+	appendFileSync(controlJournalFile(stateDir), [
+		{ type: "request", by: "bridge", id: crashed, at: hoursAgo(1), kind: "message", text: "crash window", ask_id: null, deliver: "followUp", peer: null, session_started_at: hoursAgo(2), session_file: join(stateDir, "operator-session.jsonl") },
+		{ type: "outcome", by: "bridge", id: crashed, at: hoursAgo(1), peer: null, state: "queued", reason: null },
+		{ type: "outcome", by: "bridge", id: crashed, at: hoursAgo(1), peer: null, state: "injected", reason: null },
+		{ type: "request", by: "bridge", id: stale, at: hoursAgo(25), kind: "message", text: "held too long", ask_id: null, deliver: "followUp", peer: null },
+		{ type: "outcome", by: "bridge", id: stale, at: hoursAgo(25), peer: null, state: "queued", reason: null },
+	].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+	const second = await bridge(t, stateDir);
+	assert.equal(second.injected.length, 0, "the restarted bridge resends nothing: not the claimed one, not the crashed one, not the expired one");
+	const sends = (await call(port, "/api/operator/control")).body.sends as Array<{ id: string; state: string; reason: string; body: { text: string }; editable?: boolean }>;
+	const row = (id: unknown) => sends.find((send) => send.id === id)!;
+	assert.deepEqual([row(claimed.body.id).state, row(claimed.body.id).body.text], ["failed", "claimed, never seen"]);
+	assert.match(row(claimed.body.id).reason, /^Not confirmed: target operator session ended\./);
+	assert.deepEqual([row(crashed).state, row(crashed).body.text], ["failed", "crash window"]);
+	assert.match(row(crashed).reason, /^Not confirmed: /);
+	assert.deepEqual([row(stale).state, row(stale).body.text], ["failed", "held too long"]);
+	assert.match(row(stale).reason, /^Not sent: queued longer than 24 h\. It was never given to the session\.$/);
+	assert.ok(sends.every((send) => !send.editable), "a failure is never editable");
+	await second.control.stop();
+	assert.equal(journal(stateDir).filter((line) => line.type === "outcome" && line.state === "injected").length, 2, "one claim each for the two that ever reached pi; the expired one never did");
+});
