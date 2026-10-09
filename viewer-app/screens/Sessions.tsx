@@ -1,3 +1,4 @@
+import { ToolRunRow } from "../components/ToolRunRow.tsx";
 import { Fragment, type ComponentChild } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
@@ -90,10 +91,7 @@ function groupStarts(rowList: Row[]): Set<string> {
 }
 /** A hidden run of tool calls: one faint line between messages, and clicking it opens that run alone. */
 function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;onToggle:()=>void}) {
- return <div class="session-tool-run">
-  <button type="button" class="session-tools" aria-expanded={open} onClick={onToggle}><span aria-hidden="true">{open ? "▾" : "▸"}</span> {entries.length} tool call{entries.length === 1 ? "" : "s"}{entries.find(e=>e.summary)?.summary && <small> · {entries.find(e=>e.summary)!.summary}</small>}</button>
-  {open && entries.map(e=><Entry key={e.id} entry={e}/>)}
- </div>;
+ return <ToolRunRow count={entries.length} detail={entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}>{entries.map(e=><Entry key={e.id} entry={e}/>)}</ToolRunRow>;
 }
 /**
  * A cp-bridge wake or escalation, or any other system entry (compaction, custom messages): one muted line, the rest and a

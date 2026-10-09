@@ -155,7 +155,8 @@ test("description and mandate goal keep their stored spaces and line breaks; hea
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/job-detail.css"),"utf8");
  assert.match(css,/\.job-card p, \.job-mandate-objective \{ white-space: pre-wrap; \}/);
  assert.match(css,/\.jt-jump \{[^}]*margin-left: auto/);
- assert.match(css,/@media \(max-width: 899px\) \{\s*\.jt-tools > summary[^}]*min-height: 44px/,"44px summary targets are phone-only");
+ assert.match(css,/@media \(max-width: 899px\) \{\s*\.jt-review > summary[^}]*min-height: 44px/,"44px summary targets are phone-only");
+ assert.match(readFileSync(join(REPO_ROOT,"viewer-app/components/tool-run.css"),"utf8"),/max-width: 899px\) \{ \.tool-run-solid > \.session-tools \{ min-height: 44px/,"shared tool row: 44px on phone only");
 });
 
 test("summary renders collapsed with no `more` before a client measurement says it overflows", () => {

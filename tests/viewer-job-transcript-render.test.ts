@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseHTML } from "linkedom";
 import type { JobTranscriptResponse, ReportItem, SessionEntry } from "../src/viewer/api-types.ts";
 import { REPO_ROOT } from "./harness/index.ts";
@@ -8,12 +10,12 @@ import { REPO_ROOT } from "./harness/index.ts";
 process.env.TZ = "UTC";
 const built = await build({
  stdin: {
-  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {TranscriptDocument} from "./viewer-app/screens/JobTranscript.tsx"; import {shouldFetch,POLL_MS} from "./viewer-app/screens/JobTranscript.tsx"; export {shouldFetch,POLL_MS}; import {overflows} from "./viewer-app/screens/JobDetail.tsx"; export {overflows}; export const screen=(data,reports=[])=>render(h(TranscriptDocument,{data,model:"anthropic/m",reports}));',
+  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {TranscriptDocument} from "./viewer-app/screens/JobTranscript.tsx"; import {ToolRunRow} from "./viewer-app/components/ToolRunRow.tsx"; export {ToolRunRow}; import {ToolRun} from "./viewer-app/screens/JobTranscript.tsx"; export const row=(solid,o)=>render(h(ToolRunRow,{count:2,detail:"d",open:o,onToggle(){},solid},"kids")); export const open=(run)=>render(h(ToolRun,{run,open:true})); import {shouldFetch,POLL_MS} from "./viewer-app/screens/JobTranscript.tsx"; export {shouldFetch,POLL_MS}; import {overflows} from "./viewer-app/screens/JobDetail.tsx"; export {overflows}; export const screen=(data,reports=[])=>render(h(TranscriptDocument,{data,model:"anthropic/m",reports}));',
   loader: "tsx", resolveDir: REPO_ROOT,
  },
  bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: {".css": "empty"},
 });
-const {screen, overflows, shouldFetch, POLL_MS} = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
+const {screen, open, row, overflows, shouldFetch, POLL_MS} = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
 
 const e = (id: string, at: string, kind: SessionEntry["kind"], who: string, text: string, over: Partial<SessionEntry> = {}): SessionEntry =>
  ({id, at, kind, who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over});
@@ -34,12 +36,17 @@ test("transcript renders Worker/Parent time labels, counted tool groups, report 
  const {document} = parseHTML(html);
  assert.match(document.querySelector(".jt-head")!.textContent!, /read-only.*Worker session · anthropic\/m · 12:00–12:10.*Jump to Brief.*Report.*Reviews/s);
  assert.deepEqual([...document.querySelectorAll(".jt-label")].map(n => n.textContent), ["Parent · 12:00", "Worker · 12:05"]);
- const group = document.querySelector("details.jt-tools")!;
- assert.equal(group.querySelector("summary")!.textContent, "▸3 tool calls · read 2 files · ran 1 command");
- assert.equal(group.querySelectorAll(".jt-tool").length, 3);
- assert.equal(group.querySelector(".jt-tool-failed .jt-failed")?.textContent, "failed");
- assert.equal(group.querySelector(".jt-command")?.textContent, "npm test");
- assert.equal(group.querySelector(".jt-result")?.textContent, "boom");
+ const group = document.querySelector(".tool-run-solid")!;
+ assert.equal(group.querySelector("button")!.textContent, "▸ 3 tool calls · read 2 files · ran 1 command");
+ assert.equal(group.querySelector("button")!.getAttribute("aria-expanded"), "false");
+ assert.equal(group.querySelectorAll(".jt-tool").length, 0, "collapsed: rows are not rendered");
+ const rows = parseHTML(open(entries.slice(1, 4))).document;
+ assert.equal(rows.querySelector("button")!.getAttribute("aria-expanded"), "true");
+ assert.match(rows.querySelector("button")!.textContent!, /^▾ 3 tool calls/);
+ assert.equal(rows.querySelectorAll(".jt-tool").length, 3);
+ assert.equal(rows.querySelector(".jt-tool-failed .jt-failed")?.textContent, "failed");
+ assert.equal(rows.querySelector(".jt-command")?.textContent, "npm test");
+ assert.equal(rows.querySelector(".jt-result")?.textContent, "boom");
  const done = document.querySelector(".jt-report")!;
  assert.match(done.textContent!, /Report filed.*12:01.*Open report/);
  assert.equal(done.querySelector("a")?.getAttribute("href"), "/boards/s/");
@@ -91,4 +98,15 @@ test("a loaded live job that finishes gets one final fetch, then no finished pol
  fetches = []; loaded = false; loadedLive = false; last = -Infinity;
  for (const t of [0, 1000, 60_000]) tick(t, true);
  assert.deepEqual(fetches, ["0:final"]);
+});
+
+test("Sessions and Job detail render the one shared tool-run row; solid is the only difference", () => {
+ const dashed = row(false, false), solid = row(true, false);
+ assert.equal(dashed, '<div class="session-tool-run"><button type="button" class="session-tools" aria-expanded="false"><span aria-hidden="true">▸</span> 2 tool calls<small> · d</small></button></div>');
+ assert.equal(solid, dashed.replace('"session-tool-run"', '"session-tool-run tool-run-solid"'));
+ assert.match(row(false, true), /aria-expanded="true"><span aria-hidden="true">▾<\/span>.*<\/button>kids<\/div>/);
+ const src = (f: string) => readFileSync(join(REPO_ROOT, f), "utf8");
+ assert.match(src("viewer-app/screens/Sessions.tsx"), /<ToolRunRow /);
+ assert.match(src("viewer-app/screens/JobTranscript.tsx"), /<ToolRunRow solid /);
+ assert.doesNotMatch(src("viewer-app/screens/Sessions.tsx") + src("viewer-app/screens/JobTranscript.tsx"), /class="session-tools"|class="jt-tools"/, "no private look-alike row");
 });

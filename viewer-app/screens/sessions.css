@@ -37,9 +37,6 @@
 .session-tools-toggle { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
 /* A collapsed run of tool calls: one dashed, bordered row "▸ N tool calls · first summary" (frames 06/16). */
-.session-tools { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; min-height: 40px; margin: 4px 0; padding: 0 12px; background: none; border: 1px dashed var(--border); border-radius: 8px; font: inherit; font-size: 12px; text-align: left; color: var(--muted); cursor: pointer; }
-.session-tools > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; color: var(--dim); }
-.session-tools:hover { color: var(--text); }
 .session-heading > p { display: none; }
 .session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 8px 16px 16px; scroll-padding-top: 16px; }
 .session-entries { max-width: min(760px, 100%); }
@@ -148,7 +145,6 @@
 .session-message.session-system .session-body > p { flex: 1 1 160px; min-width: 0; padding: 12px 0; }
 .session-notice-rest { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 0 0 8px; }
 .session-notice-more { align-self: flex-start; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--blue); cursor: pointer; }
-.session-tool-run { display: flex; flex-direction: column; }
 /* The "Jump to latest" pill rides the transcript's bottom edge, whatever sits below it (composer, pinned decisions). */
 .session-new-wrap { position: sticky; bottom: 8px; height: 0; display: flex; justify-content: center; }
 .session-new { display: flex; align-items: center; gap: 6px; transform: translateY(-100%); min-height: 40px; padding: 0 14px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 4px 16px var(--page); }

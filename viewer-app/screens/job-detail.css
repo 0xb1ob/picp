@@ -27,13 +27,13 @@
 .jt-clamp { max-height: 6.5em; overflow: hidden; overflow-wrap: anywhere; }
 .jt-say { overflow-wrap: anywhere; min-width: 0; }
 .jt-note { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
-.jt-tools, .jt-review, .jt-trailing { font-size: 13px; color: var(--muted); min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
+.jt-review, .jt-trailing { font-size: 13px; color: var(--muted); min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
 .jt-caret { display: inline-block; margin-right: 8px; color: var(--dim); }
 details[open] > summary > .jt-caret { transform: rotate(90deg); }
 .jt-label { font-size: 12px; color: var(--dim); }
 .job-card p, .job-mandate-objective { white-space: pre-wrap; }
-.jt-tools > summary, .jt-review > summary, .jt-trailing > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
-.jt-tools > summary::-webkit-details-marker, .jt-review > summary::-webkit-details-marker, .jt-trailing > summary::-webkit-details-marker { display: none; }
+.jt-review > summary, .jt-trailing > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
+.jt-review > summary::-webkit-details-marker, .jt-trailing > summary::-webkit-details-marker { display: none; }
 .jt-tool { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; min-width: 0; }
 .jt-tool-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 .jt-failed { color: var(--text); font-weight: 600; text-decoration: underline; }
@@ -101,7 +101,7 @@ details[open] > summary > .jt-caret { transform: rotate(90deg); }
 .shell-back { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; }
 .shell-detail-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
  @media (max-width: 899px) {
- .jt-tools > summary, .jt-review > summary, .jt-trailing > summary { min-height: 44px; }
+ .jt-review > summary, .jt-trailing > summary { min-height: 44px; }
 }
 @media (min-width: 900px) {
  .jt-jump button, .jt-brief > button, .job-summary-more { min-height: 24px; }

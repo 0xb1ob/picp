@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { JobTranscriptResponse, ReportItem, SessionEntry } from "../../src/viewer/api-types.ts";
+import { ToolRunRow } from "../components/ToolRunRow.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { time } from "../format.ts";
 
@@ -12,10 +13,13 @@ function parts(entry: SessionEntry): {args: Record<string, unknown>; result: str
 }
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-function ToolRun({run}: {run: SessionEntry[]}) {
+/** A run of tool calls as the shared collapsible row; `open` is only the initial state. */
+export function ToolRun({run, open: initial = false}: {run: SessionEntry[]; open?: boolean}) {
+ const [open, setOpen] = useState(initial);
  const count = (...names: string[]) => run.filter(e => names.includes(e.name ?? "")).length;
  const reads = count("read"), edits = count("edit", "write"), commands = count("bash");
- return <details class="jt-tools"><summary><span class="jt-caret" aria-hidden="true">▸</span>{plural(run.length, "tool call")}{reads > 0 && ` · read ${plural(reads, "file")}`}{edits > 0 && ` · edited ${edits}`}{commands > 0 && ` · ran ${plural(commands, "command")}`}</summary>
+ const detail = [reads > 0 && `read ${plural(reads, "file")}`, edits > 0 && `edited ${edits}`, commands > 0 && `ran ${plural(commands, "command")}`].filter(Boolean).join(" · ");
+ return <ToolRunRow solid count={run.length} detail={detail} open={open} onToggle={() => setOpen(!open)}>
   {run.map(e => {
    const {args, result} = parts(e);
    const command = e.name === "bash" && typeof args.command === "string" ? args.command : null;
@@ -26,7 +30,7 @@ function ToolRun({run}: {run: SessionEntry[]}) {
     {(command || e.failed) && result ? <pre class="jt-result">{result.slice(0, 2000)}</pre> : null}
    </div>;
   })}
- </details>;
+ </ToolRunRow>;
 }
 
 type Block = {kind: "tools"; run: SessionEntry[]} | {kind: "entry"; entry: SessionEntry};
