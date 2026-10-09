@@ -3,7 +3,8 @@
 .stats-heading p, .stats-kpi p, .stats-sub, .stats-legend, .stats-none { font-size: 12px; color: var(--dim); }
 .stats-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .stats-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-.stats-filters select, .stats-filters input { min-height: 44px; max-width: 100%; padding: 0 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.stats-filters select, .stats-filters input { min-height: 44px; max-width: min(100%,420px); padding: 0 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.stats-more { min-height: 44px; margin-top: 8px; padding: 0 12px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
 .stats-kpis { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .stats-kpi, .stats-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
 .stats-kpi h2 { font-size: 12px; font-weight: 400; color: var(--muted); }
@@ -23,6 +24,8 @@
 .stats-scroll { max-width: 100%; overflow-x: auto; }
 .stats-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .stats-table th, .stats-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); font-weight: 400; color: var(--muted); }
+.stats-table td { white-space: nowrap; overflow-wrap: normal; }
+.stats-table tbody th { min-width: 240px; }
 .stats-table tbody th { color: var(--text); }
 .stats-sub { display: block; }
 .stats-empty { padding: 12px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); }
@@ -30,7 +33,7 @@
  .stats-stack thead { display: none; }
  .stats-stack, .stats-stack tbody, .stats-stack tr, .stats-stack td, .stats-stack th { display: block; }
  .stats-stack tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
- .stats-stack td, .stats-stack th { border: 0; padding: 4px 0; min-height: 44px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+ .stats-stack td, .stats-stack th { border: 0; padding: 4px 0; min-height: 44px; min-width: 0 !important; white-space: normal; overflow-wrap: anywhere; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
  .stats-stack th { display: block; min-height: 0; }
  .stats-stack td::before { content: attr(data-label); color: var(--dim); }
 }

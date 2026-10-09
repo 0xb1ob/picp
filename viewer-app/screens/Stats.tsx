@@ -38,6 +38,7 @@ function Chart({title, labels, series, format}: {title:string; labels:string[]; 
 }
 
 export function Stats({data, query}: {data:StatsResponse; query:string}) {
+ const [all,setAll] = useState(false);
  const q = new URLSearchParams(query);
  const range = q.get("range") ?? "24h";
  const custom = range === "custom";
@@ -79,8 +80,9 @@ export function Stats({data, query}: {data:StatsResponse; query:string}) {
   <section class="stats-panel" aria-label="Mandates">
    <header><h2>Mandates</h2><button type="button" onClick={download}>Export CSV</button></header>
    <div class="stats-scroll"><table class="stats-table stats-stack"><thead><tr>{["Mandate","Status","Jobs","Spend","Tokens","Time left"].map(h => <th scope="col" key={h}>{h}</th>)}</tr></thead>
-   <tbody>{data.mandates.map(m => <tr key={m.id}><th scope="row">{m.id}{m.objective && <span class="stats-sub">{m.objective}</span>}</th><td data-label="Status">{m.status ?? "-"}</td><td data-label="Jobs">{m.jobs}</td><td data-label="Spend">{money(m.spend_usd)}{m.spend_cap_usd !== null && ` / ${money(m.spend_cap_usd)}`}</td><td data-label="Tokens">{amount(m.tokens)}{m.token_cap !== null && ` / ${amount(m.token_cap)}`}</td><td data-label="Time left">{elapsed(m.time_left_seconds)}</td></tr>)}</tbody></table></div>
+   <tbody>{(all ? data.mandates : data.mandates.slice(0,10)).map(m => <tr key={m.id}><th scope="row">{m.id}{m.objective && <span class="stats-sub">{m.objective}</span>}</th><td data-label="Status">{m.status ?? "-"}</td><td data-label="Jobs">{m.jobs}</td><td data-label="Spend">{money(m.spend_usd)}{m.spend_cap_usd !== null && ` / ${money(m.spend_cap_usd)}`}</td><td data-label="Tokens">{amount(m.tokens)}{m.token_cap !== null && ` / ${amount(m.token_cap)}`}</td><td data-label="Time left">{elapsed(m.time_left_seconds)}</td></tr>)}</tbody></table></div>
    {!data.mandates.length && <p class="stats-none">-</p>}
+   {data.mandates.length > 10 && <button type="button" class="stats-more" aria-pressed={all} onClick={() => setAll(!all)}>{all ? "Show first 10" : `Show all ${data.mandates.length}`}</button>}
   </section>
  </div>;
 }
