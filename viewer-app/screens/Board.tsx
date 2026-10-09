@@ -52,7 +52,7 @@ export function Board({data}:{data:BoardResponse}) {
  const hidden=data.hidden_mandates;
  const q=query.trim().toLowerCase();
  const fits=(o:Opt)=>!q || `${o.id} ${o.sub} ${o.status}`.toLowerCase().includes(q);
- const count=(id:string)=>{const mine=data.jobs.filter(j=>laneId(j)===id);const w=mine.filter(j=>j.phase==="working").length,d=mine.filter(j=>j.phase==="done").length;return w ? `${w} working` : d ? `${d} landed` : `${mine.length} jobs`;};
+ const count=(id:string)=>{const mine=data.jobs.filter(j=>laneId(j)===id);const w=mine.filter(j=>j.phase==="working").length,d=mine.filter(j=>j.phase==="done").length;return w ? `${w} working` : d ? `${d} landed` : `${mine.length} ${mine.length===1 ? "job" : "jobs"}`;};
  const lane=(l:BoardResponse["lanes"][number]):Opt=>({id:l.id,sub:l.objective,status:l.status,count:count(l.id)});
  const activeOpts=data.lanes.filter(l=>l.active && l.id!=="unassigned").map(lane).filter(fits);
  const otherOpts=[...data.lanes.filter(l=>!l.active || l.id==="unassigned").map(lane),...(revoked ? hidden.map(m=>({id:m.id,sub:m.objective,status:m.status,count:count(m.id)})) : [])].filter(fits);
