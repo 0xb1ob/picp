@@ -3563,6 +3563,7 @@ move is the right one.
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
 | `ci_checks_read` | parent bash `gh [flags] pr checks`, or a `gh` `--json`/`gh api` argument naming `statusCheckRollup` (the checks API is refused in this home; prose mentioning it is allowed) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
+| `schedule_control_write` | parent `write`/`edit` of a `schedule-control.jsonl` path, or a bash statement naming it with a stage that is not a plain reader (`cat`, `head`, `tail`, `less`, `more`, `grep`, `rg`, `jq`, `wc`, `ls`, `stat`), an output redirect or a substitution | the operator clicks Run now, or `cp_schedule run_now` with their verbatim sentence (*Run now clearance*) |
 
 The bash rule is an allowlist, because that is the only shape that fails
 closed: a command that mentions an artifact path is refused unless it is a
@@ -7673,9 +7674,11 @@ checkpoint or a script. `cp_schedule run_now` (a chat quote), cron, watch, a str
 record, a seed without a `mandate_jobs` pre-approval, and every other skill stay gated exactly as before; a gated fire
 still fires, its notes saying `no risk:high pre-approval carried (<why>)`. The Schedules page shows the fan-out and the
 pre-approval's sha12 and grant time, never the quote. **Residual (U1):** the journal is 0600 under the home's uid, so
-the check binds a carry to the authenticated POST path, not against a same-uid writer: any process running as the
-home's uid (the parent's own tools included) could append a well-formed request line, and a claim of it would then be
-genuine; an HMAC would not help under the same uid. **External operator runbook:** `cp_schedule update id:<sch-id> skill:cp-org-pr-review
+the check binds a carry to the authenticated POST path, not against a same-uid writer. The parent's own `write`, `edit`
+and bash tools are refused on that file (`schedule_control_write`, *The guards*), but that guard is a name match (a
+glob or a variable that hides the name passes) and any other process running as the home's uid could still append a
+well-formed request line, which a claim would then treat as genuine; an HMAC would not help under the same uid.
+**External operator runbook:** `cp_schedule update id:<sch-id> skill:cp-org-pr-review
 kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewers: 3"`; then, for click clearance,
 `cp_mandate issue … schedule_grant:true risk_preapproval:{operator_quote:"<their words>"}` (no `job_ids`) and
 `cp_schedule move id:<sch-id> mandate_id:<that seed>`. **Downgrade:** an older binary reads a `schedules.json` naming

@@ -321,6 +321,29 @@ test("parent reads of the checks API are refused and point at cp_integrate", (t)
 	assert.equal(b.bash("gh api repos/acme/demo/issues/1/comments --field=body=hello"), undefined);
 });
 
+test("the parent's write, edit and bash cannot append to the Schedules page's request journal; reads stay allowed", (t) => {
+	const b = bench(t);
+	for (const tool of ["write", "edit"]) {
+		const decision = b.tool(tool, "state/schedule-control.jsonl");
+		assert.equal(decision?.code, "schedule_control_write", `${tool} was allowed`);
+		assert.match(decision.reason, /Run now/);
+	}
+	for (const command of [
+		`echo '{"type":"request","by":"viewer"}' >> state/schedule-control.jsonl`,
+		"printf x > .pi-command-post/state/schedule-control.jsonl",
+		"tee -a state/schedule-control.jsonl < line.json",
+		"cp forged.jsonl state/schedule-control.jsonl",
+		"cat forged.jsonl >> state/schedule-control.jsonl",
+		`python3 -c "open('state/schedule-control.jsonl','a').write('x')"`,
+		"cd state && node -e 'x' schedule-control.jsonl",
+		"sed -i s/a/b/ state/schedule-control.jsonl",
+	]) assert.equal(b.bash(command)?.code, "schedule_control_write", `${command} was allowed`);
+	assert.equal(b.tool("read", "state/schedule-control.jsonl"), undefined);
+	for (const command of ["tail -n 5 state/schedule-control.jsonl", "wc -l state/schedule-control.jsonl", "grep run_now state/schedule-control.jsonl | jq .id"]) {
+		assert.equal(b.bash(command), undefined, `${command} was refused`);
+	}
+});
+
 // -- diff-review bodies ------------------------------------------------------
 
 test("read/grep of a diff-review body is blocked with the sanctioned alternative", (t) => {

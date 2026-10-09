@@ -44,6 +44,8 @@ export const GUARD_CODES = [
 	"diff_body_read",
 	/** A parent read of the checks API (`gh pr checks`, `statusCheckRollup`), refused in this home. */
 	"ci_checks_read",
+	/** A parent write to the Schedules page's request journal, the evidence a Run now clearance reads. */
+	"schedule_control_write",
 ] as const;
 export type GuardCode = (typeof GUARD_CODES)[number];
 
@@ -222,6 +224,24 @@ const CI_CHECKS_READ_REASON =
 	"blocked: the checks API and Actions run reads (gh run list/view) are refused in this home; CI is read by " +
 	"cp_integrate and the cp-ci wake-up — call cp_integrate <job-id>";
 
+/** `state/schedule-control.jsonl` (src/viewer/control-files.ts): only the viewer and the parent's ScheduleControl append to it. */
+const SCHEDULE_CONTROL_JOURNAL = "schedule-control.jsonl";
+/** Programs that only read or describe a file; any other stage naming the journal, or any output redirect, may write it. */
+const JOURNAL_READERS = new Set(["cat", "head", "tail", "less", "more", "grep", "rg", "jq", "wc", "ls", "stat"]);
+const SCHEDULE_CONTROL_REASON =
+	"blocked: state/schedule-control.jsonl is the Schedules page's request journal, written only by the viewer and the " +
+	"parent's schedule control; a request line is the evidence a dashboard Run now clearance reads. Ask the operator to click " +
+	"Run now, or use cp_schedule run_now with their verbatim sentence";
+
+/**
+ * A bash statement that names the journal and could write it: a stage that is not a plain reader, an output
+ * redirect or a substitution. ponytail: a name match, so a glob or variable that hides the name passes (docs U1).
+ */
+function writesScheduleControl(statement: string, stages: readonly string[]): boolean {
+	if (!statement.includes(SCHEDULE_CONTROL_JOURNAL)) return false;
+	return stages.some((stage) => !JOURNAL_READERS.has(basename(stripEnvAssignments(tokenize(stage))[0] ?? "")) || hasDangerousRedirect(stage) || hasSubstitution(stage));
+}
+
 export class ContextGuard {
 	readonly #home: string;
 	readonly #canonicalHome: string;
@@ -250,6 +270,9 @@ export class ContextGuard {
 
 		const path = firstString(input.path, input.file_path);
 		if (path === undefined) return undefined;
+		if (WRITING_TOOLS.has(request.toolName) && basename(path.trim()) === SCHEDULE_CONTROL_JOURNAL) {
+			return { code: "schedule_control_write", subject: path, reason: SCHEDULE_CONTROL_REASON };
+		}
 		if (READING_TOOLS.has(request.toolName) && isQuestionJournal(path)) {
 			return { code: "question_journal_read", subject: path, reason: questionJournalReason(path) };
 		}
@@ -283,6 +306,7 @@ export class ContextGuard {
 		let uncertainCwd = false;
 		for (const statement of splitStatements(command)) {
 			const stages = splitStages(statement);
+			if (writesScheduleControl(statement, stages)) return { code: "schedule_control_write", subject: statement.trim(), reason: SCHEDULE_CONTROL_REASON };
 			for (const stage of stages) {
 				const argv = stripEnvAssignments(tokenize(stage));
 				const program = basename(argv[0] ?? "");
