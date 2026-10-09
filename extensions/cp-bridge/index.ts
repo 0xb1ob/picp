@@ -343,6 +343,9 @@ export default function (pi: ExtensionAPI): void {
 		sessionCtx = ctx ?? sessionCtx;
 		askGuard.runEnded(); // pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
 		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
+		// cp-y43c: one dashboard-queued message per settled turn, after a compaction this settle started (a manual /compact
+		// has no extension hook at its end: a message held through it waits for the next turn or dashboard send).
+		compaction.whenIdle(() => control?.settled());
 	});
 
 	pi.on("message_start", async (event) => {

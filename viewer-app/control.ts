@@ -24,11 +24,14 @@ export const attachmentSize = (bytes: number): string => bytes < 1024 ? `${bytes
 export type ControlBody = ControlMessageBody | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
-export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody }
+/** cp-y43c — `editable`: the dashboard still holds it; `edited`: a saved text the status has not confirmed yet; `sent`: the bridge said it was handed over, so no status read makes it editable again. */
+export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody; editable?: boolean; edited?: string; sent?: true }
+/** cp-y43c Edit/Cancel outcome: saved, already sent (the text the session got), or refused. */
+export type QueueOutcome = { state: "queued" | "cancelled" } | { state: "sent"; text: string } | { error: string };
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
 /** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; edit?(key: string, text: string): Promise<QueueOutcome>; cancel?(key: string): Promise<QueueOutcome>; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function failure(response: Response): Promise<string> {
@@ -60,6 +63,23 @@ export async function sendControl(fetch: Fetch, token: string, body: ControlBody
   return {error: "The home returned an invalid send acknowledgement; check the transcript before retrying", status: 202};
  }
  return {error: await failure(response), status: response.status};
+}
+
+/** What a queued bubble says once an edit lost the race to the handoff (cp-y43c). */
+export const ALREADY_SENT = "Already sent — your change was not applied; this is the text the session received";
+export const OPERATOR_QUEUE_URL = "/api/operator/queue";
+/** `POST /api/operator/queue` (cp-y43c): edit or cancel a dashboard-queued message with the session's token. */
+export async function queueControl(fetch: Fetch, token: string, body: {op: "edit"; id: string; text: string} | {op: "cancel"; id: string}): Promise<QueueOutcome> {
+ let response: Response;
+ try {
+  response = await fetch(OPERATOR_QUEUE_URL, {method: "POST", headers: {"content-type": "application/json", "x-cp-control-token": token}, body: JSON.stringify(body)});
+ } catch {
+  return {error: "Could not reach this home"};
+ }
+ const reply = await response.json().catch(() => null) as {state?: unknown; text?: unknown; error?: unknown} | null;
+ if (reply?.state === "sent" && typeof reply.text === "string") return {state: "sent", text: reply.text};
+ if (response.ok && (reply?.state === "queued" || reply?.state === "cancelled")) return {state: reply.state};
+ return {error: typeof reply?.error === "string" ? reply.error : `HTTP ${response.status}`};
 }
 
 /** The page may send: control on, and either a session serving it (its token) or none (held, the inbox token). */

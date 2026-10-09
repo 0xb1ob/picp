@@ -41,6 +41,7 @@ import { handlePushSubscription, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, pushS
 import { ANSWER_ACK_PATH, ANSWERS_CONTROL_PATH, CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleAnswerAck, handleAnswersControlStatus, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
 import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
+import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
 import { handleThreadDone, handleThreadsStatus, THREAD_DONE_PATH, THREADS_PATH } from "./threads-api.ts";
 import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, serveOperatorUpload } from "./operator-upload-api.ts";
@@ -152,8 +153,8 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		return;
 	}
 	const requestPath = (req.url ?? "/").split("?")[0];
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === THREAD_DONE_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === THREAD_DONE_PATH ? handleThreadDone(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === THREAD_DONE_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === THREAD_DONE_PATH ? handleThreadDone(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
 			.then((out) => sendJson(res, out.status, out.body, out.headers))
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });

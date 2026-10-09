@@ -132,7 +132,7 @@ test("lifecycle: {enabled:false} opens nothing; on (default) binds a 0600 socket
 	assert.equal(existsSync(controlRecordFile(stateDir)), false);
 });
 
-test("delivery: a message is injected as a user message with the marker; idle is a prompt, busy defaults to followUp, steer on request; never expandPromptTemplates", async (t) => {
+test("delivery: a message is injected as a user message with the marker; idle is a prompt, busy is held by the dashboard until a settled turn, steer on request; never expandPromptTemplates", async (t) => {
 	const { stateDir } = scratch(t);
 	const fake = fakePorts();
 	const { control, record } = await listening(t, stateDir, fake.ports);
@@ -148,11 +148,12 @@ test("delivery: a message is injected as a user message with the marker; idle is
 
 	fake.state.echo = true;
 	fake.state.idle = false;
-	const delivered = await controlRequest(record, "send", { kind: "message", text: "next", peer: "100.64.0.9" });
-	assert.equal(delivered.ok && (delivered.result as { state: string }).state, "delivered", "seen in a message_start/context: delivered");
-	assert.equal(fake.state.injected[1]![1], "followUp");
+	const held = await controlRequest(record, "send", { kind: "message", text: "next", peer: "100.64.0.9" });
+	assert.ok(held.ok);
+	assert.deepEqual({ ...(held.result as object), id: undefined }, { id: undefined, state: "queued", deliver: "followUp", editable: true }, "busy: the dashboard holds it");
+	assert.equal(fake.state.injected.length, 1, "cp-y43c: a busy session is not given the message (no pi followUp)");
 	await controlRequest(record, "send", { kind: "message", text: "now", deliver: "steer", peer: "100.64.0.9" });
-	assert.equal(fake.state.injected[2]![1], "steer");
+	assert.equal(fake.state.injected[1]![1], "steer", "a steer is never queued");
 
 	const status = await controlRequest(record, "status", {});
 	assert.ok(status.ok);
@@ -160,12 +161,18 @@ test("delivery: a message is injected as a user message with the marker; idle is
 	assert.equal((status.result as { restart: { supported: boolean } }).restart.supported, false, "ports without the restart members: Restart session unsupported");
 	assert.equal(journal(stateDir).filter((l) => l.type === "request").length, 3, "status writes no journal line");
 
+	fake.state.idle = true;
+	control.settled();
+	await new Promise((done) => setImmediate(done));
+	assert.equal(fake.state.injected.length, 3, "the settled turn hands the queued one over");
+	assert.deepEqual([fake.state.injected[2]![0].split("\n\n")[0], fake.state.injected[2]![1]], ["next", undefined], "as a prompt: the session is idle");
+
 	const lines = journal(stateDir);
 	const first = lines[0]!;
 	assert.deepEqual({ ...first, id: undefined, at: undefined, session_started_at: undefined, session_file: undefined }, { type: "request", by: "bridge", id: undefined, at: undefined, session_started_at: undefined, session_file: undefined, peer: "100.64.0.9", kind: "message", text: "hello there", ask_id: null, deliver: "prompt" });
 	assert.deepEqual(lines.filter((l) => l.id === first.id).map((l) => l.type === "outcome" ? l.state : l.type), ["request", "injected", "queued"]);
 	const second = lines.find((l) => l.type === "request" && l.text === "next")!;
-	assert.deepEqual(lines.filter((l) => l.id === second.id).map((l) => l.type === "outcome" ? l.state : l.type), ["request", "injected", "delivered"]);
+	assert.deepEqual(lines.filter((l) => l.id === second.id).map((l) => l.type === "outcome" ? l.state : l.type), ["request", "queued", "injected", "delivered"]);
 
 	control.observe({ role: "user", content: text });
 	assert.equal(journal(stateDir).filter((l) => l.id === first.id && l.state === "delivered").length, 1, "a later sighting marks the queued one delivered, once");
@@ -174,7 +181,10 @@ test("delivery: a message is injected as a user message with the marker; idle is
 	assert.equal(typeof first.session_started_at, "string");
 	assert.equal(first.session_file, "/tmp/operator-session.jsonl");
 	fake.state.echo = false;
+	control.settled(); // the handed-over "next" ran its turn; until then an idle send would queue behind it (review 3)
 	const pending = await controlRequest(record, "send", {kind:"message",text:"abandoned"});
+	assert.equal(pending.ok && (pending.result as {state:string}).state, "queued", "idle, nothing in flight: injected directly, unseen within the wait");
+	assert.equal(fake.state.injected.at(-1)![0].split("\n\n")[0], "abandoned");
 	const pendingId = pending.ok && (pending.result as {id:string}).id;
 	control.stop(); control.stop();
 	assert.equal(journal(stateDir).filter(row=>row.id === pendingId && row.state === "dropped").length,1,"shutdown settles unseen accepted messages exactly once");
@@ -398,4 +408,175 @@ test("held thread tags survive replay without changing untagged messages or shar
 	const fake = fakePorts();
 	await listening(t, stateDir, fake.ports, { now: () => new Date("2026-10-06T08:01:00Z") });
 	assert.equal(fake.state.injected[0]![0], "[cp-dashboard inbox — 1 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]\n- 2026-10-06T08:00:00Z (dc-20261006080000-89abcdef): later\n[cp-dashboard dc-20261006080000-89abcdef — from the dashboard; thread=billing-bug]");
+});
+
+// cp-y43c: the dashboard holds busy messages; one handoff per settled turn, FIFO; edit/cancel until the handoff.
+const head = (injected: Array<[string, string | undefined]>) => injected.map(([text]) => text.split("\n\n")[0]);
+const states = (stateDir: string, id: string) => journal(stateDir).filter((l) => l.id === id).map((l) => l.type === "outcome" ? l.state : l.type);
+const tick = () => new Promise((done) => setImmediate(done));
+async function queued(record: Parameters<typeof controlRequest>[0], text: string): Promise<string> {
+	const reply = await controlRequest(record, "send", { kind: "message", text });
+	assert.ok(reply.ok && (reply.result as { state: string }).state === "queued", `${text} is held`);
+	return (reply.result as { id: string }).id;
+}
+
+test("queue: busy messages wait in the dashboard, one per settled turn, oldest first; edit and cancel apply before the handoff", async (t) => {
+	const { stateDir } = scratch(t);
+	const fake = fakePorts();
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const [a, b, c] = [await queued(record, "alpha"), await queued(record, "bravo"), await queued(record, "charlie")];
+	assert.equal(fake.state.injected.length, 0, "nothing reaches pi while it is busy");
+	const edited = await controlRequest(record, "queue_edit", { id: a, text: "  alpha, edited  " });
+	assert.deepEqual(edited.ok && edited.result, { id: a, state: "queued", text: "alpha, edited", editable: true });
+	const cancelled = await controlRequest(record, "queue_cancel", { id: b });
+	assert.deepEqual(cancelled.ok && cancelled.result, { id: b, state: "cancelled" });
+	assert.equal((await controlRequest(record, "queue_edit", { id: a, text: "   " })).ok, false, "an empty edit is refused");
+	assert.equal((await controlRequest(record, "queue_edit", { id: "dc-20261006080000-00000000", text: "x" }) as { status?: number }).status, 404);
+
+	control.settled();
+	assert.equal(fake.state.injected.length, 0, "still busy: nothing handed over");
+	fake.state.idle = true;
+	control.settled();
+	await tick();
+	assert.deepEqual(head(fake.state.injected), ["alpha, edited"], "the saved text, as one prompt");
+	control.settled();
+	await tick();
+	assert.deepEqual(head(fake.state.injected), ["alpha, edited", "charlie"], "next turn, next message; the cancelled one is skipped, never delivered");
+	assert.deepEqual(states(stateDir, a), ["request", "queued", "edited", "injected"]);
+	assert.deepEqual(states(stateDir, b), ["request", "queued", "cancelled"]);
+	assert.deepEqual(states(stateDir, c), ["request", "queued", "injected"]);
+
+	const late = await controlRequest(record, "queue_edit", { id: a, text: "too late" });
+	assert.equal(late.ok, false);
+	assert.deepEqual((late as { status: number; result?: unknown }).status, 409);
+	assert.deepEqual((late as { result?: unknown }).result, { id: a, state: "sent", text: "alpha, edited" }, "already sent names the text the session got");
+	const gone = await controlRequest(record, "queue_cancel", { id: b });
+	assert.equal((gone as { status?: number }).status, 409, "a cancelled message cannot be cancelled or sent again");
+});
+
+test("queue race: edit or cancel while the handoff is in flight never sends twice or loses the message; a late failure frees the next turn", async (t) => {
+	const { stateDir } = scratch(t);
+	let release: (() => void) | undefined;
+	let reject: ((error: Error) => void) | undefined;
+	const fake = fakePorts({ inject: (text, deliverAs) => { fake.state.injected.push([text, deliverAs]); return new Promise<void>((resolve, fail) => { release = resolve; reject = fail; }); } });
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const [a, b] = [await queued(record, "first"), await queued(record, "second")];
+	fake.state.idle = true;
+	control.settled();
+	assert.deepEqual(head(fake.state.injected), ["first"], "handed over synchronously with the claim");
+	const [edit, cancel] = await Promise.all([controlRequest(record, "queue_edit", { id: a, text: "changed" }), controlRequest(record, "queue_cancel", { id: a })]);
+	for (const reply of [edit, cancel]) assert.deepEqual([reply.ok, (reply as { status?: number }).status, (reply as { result?: unknown }).result], [false, 409, { id: a, state: "sent", text: "first" }]);
+	reject!(new Error("pi refused"));
+	await tick();
+	await tick();
+	assert.deepEqual(states(stateDir, a), ["request", "queued", "injected", "failed"], "the refusal is journaled; nothing pretends it was applied");
+	assert.deepEqual(head(fake.state.injected), ["first", "second"], "a failed handoff frees the next one without a turn");
+	const edited = await controlRequest(record, "queue_edit", { id: b, text: "second, changed" });
+	assert.equal((edited as { status?: number }).status, 409, "second is in flight: too late");
+	release!();
+	await tick();
+	assert.deepEqual(head(fake.state.injected), ["first", "second"], "each message given to pi exactly once");
+	assert.deepEqual(states(stateDir, b), ["request", "queued", "injected"]);
+});
+
+test("queue restart: a stopped bridge's held messages reload in order with their edits; a handed-over one is never resent", async (t) => {
+	const { stateDir } = scratch(t);
+	const first = fakePorts();
+	first.state.idle = false;
+	const one = await listening(t, stateDir, first.ports);
+	const [a, b, c, d] = [await queued(one.record, "one"), await queued(one.record, "two"), await queued(one.record, "three"), await queued(one.record, "four")];
+	await controlRequest(one.record, "queue_edit", { id: c, text: "three, edited" });
+	await controlRequest(one.record, "queue_cancel", { id: d });
+	first.state.idle = true;
+	one.control.settled();
+	await tick();
+	assert.deepEqual(head(first.state.injected), ["one"]);
+	one.control.stop();
+	assert.deepEqual(states(stateDir, a), ["request", "queued", "injected", "dropped"], "unseen at stop: dropped, never resent (at most once)");
+
+	const second = fakePorts();
+	const two = await listening(t, stateDir, second.ports);
+	assert.deepEqual(head(second.state.injected), ["two"], "idle at start: the oldest held message, once");
+	two.control.settled();
+	await tick();
+	assert.deepEqual(head(second.state.injected), ["two", "three, edited"]);
+	two.control.settled();
+	await tick();
+	assert.equal(second.state.injected.length, 2, "the cancelled one and the handed-over one stay gone");
+	two.control.stop();
+
+	const third = fakePorts();
+	await listening(t, stateDir, third.ports).then(({ control }) => control.stop());
+	assert.equal(third.state.injected.length, 0, "a third start has nothing to resend");
+	assert.deepEqual([b, c].map((id) => states(stateDir, id).filter((s) => s === "injected").length), [1, 1]);
+});
+
+test("queue restart, FIFO across the offline inbox (review 1): an older held message goes before the inbox turn, a newer one after; one handoff per settled turn", async (t) => {
+	for (const order of ["held-first", "inbox-first"] as const) await t.test(order, async (t) => {
+		const { stateDir } = scratch(t);
+		const at = new Date("2026-10-09T12:00:00Z");
+		const minutes = (m: number) => new Date(at.getTime() + m * 60_000).toISOString();
+		const [heldAt, inboxAt] = order === "held-first" ? [minutes(-20), minutes(-10)] : [minutes(-10), minutes(-20)];
+		put(controlJournalFile(stateDir), [
+			{ type: "request", by: "bridge", id: "dc-20261009114000-0000a001", at: heldAt, kind: "message", text: "held in the queue", ask_id: null, deliver: "followUp", peer: null },
+			{ type: "outcome", by: "bridge", id: "dc-20261009114000-0000a001", at: heldAt, peer: null, state: "queued", reason: null },
+		].map((line) => JSON.stringify(line)).join("\n") + "\n");
+		put(controlInboxFile(stateDir), JSON.stringify({ type: "held", id: "dc-20261009115000-0000b001", at: inboxAt, text: "typed offline", ask_id: null }) + "\n");
+		const fake = fakePorts();
+		const { control, record } = await listening(t, stateDir, fake.ports, { now: () => at });
+		const first = order === "held-first" ? /^held in the queue\n\n/ : /^\[cp-dashboard inbox — 1 message/;
+		const second = order === "held-first" ? /^\[cp-dashboard inbox — 1 message/ : /^held in the queue\n\n/;
+		assert.equal(fake.state.injected.length, 1, "one handoff at start");
+		assert.match(fake.state.injected[0]![0], first, "the older one first");
+		const later = await controlRequest(record, "send", { kind: "message", text: "typed after the start" });
+		assert.equal(later.ok && (later.result as { state: string }).state, "queued", "an idle send waits behind both");
+		control.settled();
+		assert.equal(fake.state.injected.length, 2);
+		assert.match(fake.state.injected[1]![0], second);
+		control.settled();
+		assert.deepEqual(head(fake.state.injected).slice(2), ["typed after the start"]);
+		control.settled();
+		assert.equal(fake.state.injected.length, 3, "each once");
+	});
+});
+
+test("queue keeps ask ids (review 1): a held message's ask id survives reload into the handoff marker; a card's free-text reply keeps its ask prefix; a click answer never queues", async (t) => {
+	const { stateDir } = scratch(t);
+	put(join(stateDir, "operator", "asks.jsonl"), ASKS.map((a) => JSON.stringify(a)).join("\n") + "\n");
+	const id = "dc-20261009114000-0000a5c1";
+	const at = new Date().toISOString();
+	put(controlJournalFile(stateDir), [
+		{ type: "request", by: "bridge", id, at, kind: "message", text: "linked to a card", ask_id: "ask-abcd", deliver: "followUp", peer: null },
+		{ type: "outcome", by: "bridge", id, at, peer: null, state: "queued", reason: null },
+	].map((line) => JSON.stringify(line)).join("\n") + "\n");
+	const fake = fakePorts();
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const reply = await queued(record, "ask-abcd: keep it, but ask me tomorrow");
+	const click = await controlRequest(record, "send", { kind: "answer", ask_id: "ask-abcd", label: "Keep" });
+	assert.ok(click.ok);
+	assert.equal(fake.state.injected.length, 1, "the click is not queued behind the held messages");
+	assert.match(fake.state.injected[0]![0], /^ask-abcd: Keep\n\n\[cp-dashboard dc-\S+ — from the dashboard; ask=ask-abcd\]$/);
+	assert.equal(fake.state.injected[0]![1], "followUp");
+	fake.state.idle = true;
+	control.settled();
+	assert.match(fake.state.injected[1]![0], new RegExp(`^linked to a card\\n\\n\\[cp-dashboard ${id} — from the dashboard; ask=ask-abcd\\]$`), "reloaded with its ask id");
+	control.settled();
+	assert.match(fake.state.injected[2]![0], /^ask-abcd: keep it, but ask me tomorrow\n\n\[cp-dashboard dc-\S+ — from the dashboard\]$/);
+	assert.equal(journal(stateDir).find((line) => line.id === reply && line.type === "request")!.ask_id, null);
+});
+
+test("queue edit whitespace matches the composer (review 1): ends trimmed, inner spaces and blank lines kept", async (t) => {
+	const { stateDir } = scratch(t);
+	const fake = fakePorts();
+	fake.state.idle = false;
+	const { control, record } = await listening(t, stateDir, fake.ports);
+	const id = await queued(record, "  first draft  ");
+	const edited = await controlRequest(record, "queue_edit", { id, text: "\n  line one\n\n    indented  two  \n" });
+	assert.equal(edited.ok && (edited.result as { text: string }).text, "line one\n\n    indented  two");
+	fake.state.idle = true;
+	control.settled();
+	assert.equal(fake.state.injected[0]![0].split("\n\n[cp-dashboard")[0], "line one\n\n    indented  two");
 });

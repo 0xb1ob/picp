@@ -5,6 +5,8 @@ import { parseHTML } from "linkedom";
 import type { ControlStatusResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
 import type { ControlView } from "../viewer-app/control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const bundle = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {useControl} from "./viewer-app/use-control.ts"; export {act}; export const html=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); function Stage({data,fetcher,onControl}) { const control=useControl(true,data.generated_at,data.entries,fetcher,true); onControl(control); return h(Sessions,{data,control}); } export const mount=(root,data,fetcher,onControl)=>render(h(Stage,{data,fetcher,onControl}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {html,act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`);
@@ -27,7 +29,7 @@ test("queued bubbles: FIFO after newest transcript, state and time, attachment c
  assert.match(bubbles[1]!.textContent!,/Queued · 2 of 2/);
  assert.equal(bubbles[0]!.querySelector("time")?.getAttribute("datetime"),at);
  assert.deepEqual([...bubbles[0]!.querySelectorAll(".session-pending-attachments li")].map(el=>el.textContent),["Image · im-fixture.png","File · future-file.json"]);
- assert.match(bubbles[2]!.textContent!,/Failed: connection refused.*Retry.*Discard/);
+ assert.match(bubbles[2]!.textContent!,/Failed: connection refused.*Send again.*Discard/);
  assert.ok(bubbles[2]!.classList.contains("session-pending-failed"));
  assert.ok(document.querySelector("[aria-live=polite]"));
  assert.equal(document.querySelector(".session-entries")?.lastElementChild,bubbles[2]);
@@ -85,7 +87,7 @@ test("ordinary sends without an ask recover queued and failed records, including
  await s.remount();
  assert.deepEqual(s.bubbleTexts(),["ordinary queued","ordinary failed"]);
  assert.deepEqual(s.control.pending?.map(item=>[item.state,item.ask_id]),[["queued",null],["failed",null]]);
- assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Retry.*Discard/);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/connection refused.*Send again.*Discard/);
  assert.equal(s.control.pending_error,undefined,"missing optional ask ids are valid recovery records");
  assert.equal(s.posted.length,2,"remount never resends queued or failed records");
 });
@@ -97,7 +99,7 @@ test("recovery keeps valid queued and failed sends in FIFO order among malformed
  s.status({...status,sends:[{id:"dc-dismissed",at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:"already discarded"}}]});
  await s.show();
  assert.deepEqual(s.bubbleTexts(),["queued one","retry this file","queued two"]);
- assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Retry.*Discard/);
+ assert.match(s.root.querySelector(".session-pending-failed")!.textContent!,/original failure.*Send again.*Discard/);
  assert.deepEqual(s.control.pending?.[1]?.body.files,["tx-fixture.md"]);
  assert.equal(s.control.pending?.[0]?.ask_id,"ask-fixture","valid ask ids are retained");
  const warning=s.root.querySelector(".session-warning[aria-live=polite]");
@@ -254,16 +256,94 @@ test("text-capable composer uploads into the FIFO, keeps chips through failure/r
  await s.reply({id,state:"delivered",deliver:"prompt"});assert.deepEqual(s.bubbleTexts(),[]);
 });
 
-test("dropped sends disappear on fresh load and stored reload without failures or delivery",async t=>{
- const ids=["dc-20261008035752-31390177","dc-20261008035836-576ebc32"];
- const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[...ids.map(id=>pending(id,{id})),pending("live")],dismissed:[]})]]);
+test("cp-y43c addendum 2: a lost send (unconfirmed after restart, expired) is a failed bubble with its text; only Send again sends it, as a new message; a cancelled one stays gone",async t=>{
+ const lost="dc-20261008035752-31390177", expired="dc-20261008035836-576ebc32", cancelled="dc-20261008035900-0000cafe";
+ const store=new Map([["cp-operator-pending-sends",JSON.stringify({items:[pending(lost,{id:lost,body:{kind:"message",text:"claimed, never seen",thread:"layout"}}),pending(cancelled,{id:cancelled}),pending("live")],dismissed:[]})]]);
  const s=await stage(t,store);
- const sends=[...ids.map(id=>({id,at,state:"dropped" as const,reason:"target operator session ended",ask_id:null,body:{kind:"message" as const,text:"unwanted text"}})),{id:"dc-live",at,state:"queued" as const,reason:null,ask_id:null,body:{kind:"message" as const,text:"queued live"}}];
+ const sends=[
+  {id:lost,at,state:"failed" as const,reason:"Not confirmed: target operator session ended. It was handed to the session but never seen in its transcript; check the transcript before sending it again.",ask_id:null,body:{kind:"message" as const,text:"claimed, never seen",deliver:"followUp" as const,thread:"layout"}},
+  {id:expired,at:"2026-10-04T14:00:01Z",state:"failed" as const,reason:"Not sent: queued longer than 24 h. It was never given to the session.",ask_id:null,body:{kind:"message" as const,text:"held too long"}},
+  {id:cancelled,at,state:"dropped" as const,reason:"Cancelled from the dashboard",ask_id:null,body:{kind:"message" as const,text:"cancelled text"}},
+  {id:"dc-live",at:"2026-10-04T14:00:02Z",state:"queued" as const,reason:null,ask_id:null,body:{kind:"message" as const,text:"queued live"}},
+ ];
  s.status({...status,sends});await s.show();
- assert.deepEqual(s.bubbleTexts(),["queued live"]);
- assert.equal(s.root.querySelectorAll(".session-pending-failed").length,0);
- assert.equal(s.posted.length,0,"settlement never delivers or retries text");
- await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"]);
- store.clear();await s.remount();assert.deepEqual(s.bubbleTexts(),["queued live"],"fresh browser cannot recover a dropped bubble");
+ assert.deepEqual(s.bubbleTexts(),["claimed, never seen","queued live","held too long"],"the original text stays visible; a cancelled send does not come back");
+ const failed=[...s.root.querySelectorAll(".session-pending-failed")];
+ assert.equal(failed.length,2);
+ assert.match(failed[0]!.textContent!,/Failed: Not confirmed: target operator session ended.*Send again.*Discard/);
+ assert.match(failed[1]!.textContent!,/Failed: Not sent: queued longer than 24 h.*Send again.*Discard/);
+ assert.equal(s.posted.length,0,"a loss is never resent on its own");
+ await s.remount();store.clear();await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["claimed, never seen","held too long","queued live"],"a fresh browser still shows the failures from the journal (journal times)");
  assert.equal(s.posted.length,0);
+
+ await s.click(".session-pending-again");
+ assert.equal(s.posted.length,1,"one click, one new message");
+ const {client_id,...body}=s.posted[0] as Record<string,unknown>;
+ assert.deepEqual(body,{kind:"message",text:"claimed, never seen",deliver:"followUp",thread:"layout"});
+ assert.notEqual(client_id,lost,"a new message, not the lost one");
+ await s.reply({id:client_id,state:"queued",deliver:"followUp",editable:true});
+ assert.deepEqual(s.bubbleTexts(),["held too long","queued live","claimed, never seen"],"the lost bubble gives way to the new queued send");
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["held too long","queued live","claimed, never seen"],"the lost id stays dismissed; it is never sent twice");
+ assert.equal(s.posted.length,1);
+});
+
+test("cp-y43c: a held queued message edits inline (Enter saves, Esc keeps it), cancels, and a save that lost the race shows the sent text with no Edit",async t=>{
+ const s=await stage(t);
+ const held=(id:string,text:string)=>({id,at,state:"queued" as const,reason:null,ask_id:null,editable:true,body:{kind:"message" as const,text}});
+ s.status({...status,sends:[held("dc-20261004140000-0000000a","draft one"),held("dc-20261004140000-0000000b","draft two")]});
+ await s.show();
+ const win=s.root.ownerDocument.defaultView!;
+ const key=async (k:string)=>{const e=new win.Event("keydown",{bubbles:true,cancelable:true});Object.defineProperty(e,"key",{value:k});await act(()=>s.root.querySelector("[aria-label='Edit queued message']")!.dispatchEvent(e));await s.flush();};
+ const type=async (text:string)=>{const area=s.root.querySelector("[aria-label='Edit queued message']") as unknown as {value:string;dispatchEvent(e:Event):boolean};area.value=text;await act(()=>area.dispatchEvent(new win.Event("input",{bubbles:true})));};
+ assert.equal(s.root.querySelectorAll(".session-pending-edit").length,2,"Edit and Cancel send on each held message");
+ await s.click(".session-pending-edit");
+ assert.equal((s.root.querySelector("[aria-label='Edit queued message']") as unknown as {value:string}).value,"draft one","prefilled with the exact text");
+ await type("thrown away");await key("Escape");
+ assert.ok(!s.root.querySelector("[aria-label='Edit queued message']"));
+ assert.deepEqual(s.bubbleTexts(),["draft one","draft two"],"Esc keeps the original");
+ assert.equal(s.posted.length,0);
+
+ await s.click(".session-pending-edit");await type("draft one, revised");await key("Enter");
+ assert.deepEqual(s.posted[0],{op:"edit",id:"dc-20261004140000-0000000a",text:"draft one, revised"});
+ await s.reply({id:"dc-20261004140000-0000000a",state:"queued",text:"draft one, revised",editable:true},200);
+ assert.deepEqual(s.bubbleTexts(),["draft one, revised","draft two"]);
+ await s.show();
+ assert.deepEqual(s.bubbleTexts(),["draft one, revised","draft two"],"a status read before the save cannot revert it");
+
+ await act(()=>s.root.querySelectorAll(".session-pending-edit")[1]!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ await type("draft two, revised");await s.click(".session-pending-save");
+ await s.reply({error:"already sent: dc-20261004140000-0000000b was handed to the session",state:"sent",text:"draft two"},409);
+ const raced=[...s.root.querySelectorAll(".session-pending")][1]!;
+ assert.equal(raced.querySelector(".md")?.textContent,"draft two","the authoritative delivered text");
+ assert.match(raced.textContent!,/Already sent.*not applied/);
+ assert.ok(!raced.querySelector(".session-pending-edit"),"no Edit once sent, even while the status read still says editable");
+ assert.ok(!raced.querySelector("[aria-label='Edit queued message']"));
+
+ await s.click(".session-pending-cancel");
+ assert.deepEqual(s.posted[2],{op:"cancel",id:"dc-20261004140000-0000000a"});
+ await s.reply({id:"dc-20261004140000-0000000a",state:"cancelled"},200);
+ assert.deepEqual(s.bubbleTexts(),["draft two"]);
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["draft two"],"a cancelled message stays gone");
+});
+
+test("cp-y43c review 1: Edit, Cancel send, Save, Cancel and Send again are 44 px targets at 390 and 430 (the phone stylesheet, nothing overrides it)",async t=>{
+ const s=await stage(t);
+ const held=(id:string,text:string,extra:object={})=>({id,at,state:"queued" as const,reason:null,ask_id:null,editable:true,body:{kind:"message" as const,text},...extra});
+ s.status({...status,sends:[held("dc-20261004140000-0000000a","held"),held("dc-20261004140000-0000000b","lost",{editable:undefined,state:"failed",reason:"Not sent: queued longer than 24 h. It was never given to the session."})]});
+ await s.show();
+ const win=s.root.ownerDocument.defaultView!;
+ await act(()=>s.root.querySelector(".session-pending-edit")!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ await s.show();
+ const labels=[...s.root.querySelectorAll(".session-pending button")].map(button=>[button.textContent,button.parentElement?.className]);
+ assert.deepEqual(labels,[["Save","session-pending-actions"],["Cancel","session-pending-actions"],["Send again","session-pending-actions"],["Discard","session-pending-actions"]],"the editor's Save/Cancel and the failure's Send again/Discard");
+ await act(()=>s.root.querySelector(".session-pending-close")!.dispatchEvent(new win.Event("click",{bubbles:true})));await s.flush();
+ assert.deepEqual([...s.root.querySelectorAll(".session-pending-actions > button")].slice(0,2).map(button=>button.textContent),["Edit","Cancel send"]);
+ const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/sessions.css"),"utf8");
+ const phone=css.slice(0,css.indexOf("@media"));
+ assert.match(phone,/\.session-pending-actions > button \{[^}]*min-height: 44px;/,"base (phone) rule: every width below 900 px, so 390 and 430");
+ assert.doesNotMatch(css.slice(css.indexOf("@media")),/session-pending/,"no media block resizes them");
+ for (const sheet of ["styles/shell.css","components/control.css","styles/tokens.css"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT,"viewer-app",sheet),"utf8"),/session-pending/,sheet);
 });

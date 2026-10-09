@@ -151,7 +151,7 @@ export class ControlLimiter {
 	}
 }
 
-type BridgeReply = { ok: true; result: unknown } | { ok: false; status: number; error: string };
+type BridgeReply = { ok: true; result: unknown } | { ok: false; status: number; error: string; result?: unknown };
 
 /** One NDJSON frame to the operator session's socket, one reply back. */
 export function controlRequest(record: ControlRecord, op: string, args: Record<string, unknown>, timeoutMs = 5000): Promise<BridgeReply> {
@@ -176,7 +176,7 @@ export function controlRequest(record: ControlRecord, op: string, args: Record<s
 			try {
 				const reply = JSON.parse(buffer.slice(0, index)) as { ok?: unknown; result?: unknown; status?: unknown; error?: unknown };
 				if (reply.ok === true) finish({ ok: true, result: reply.result });
-				else finish({ ok: false, status: typeof reply.status === "number" ? reply.status : 502, error: typeof reply.error === "string" ? reply.error : "the session refused the request" });
+				else finish({ ok: false, status: typeof reply.status === "number" ? reply.status : 502, error: typeof reply.error === "string" ? reply.error : "the session refused the request", ...(reply.result !== undefined ? { result: reply.result } : {}) });
 			} catch {
 				finish({ ok: false, status: 502, error: "the session answered with a frame that is not JSON" });
 			}
@@ -270,7 +270,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string };
+type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string; queue_id?: string };
 type Body = ControlMessageBody | { kind: "answer"; ask_id: string; label: string; thread?: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }

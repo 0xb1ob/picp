@@ -5859,7 +5859,7 @@ so there is no login, identity or device allowlist (operator addendum, 2026-09-2
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text
 is literal (`expandPromptTemplates` is never set, so no slash command, template or skill), idle is a new prompt,
-busy is `deliverAs: "followUp"` (Send after this turn) or `"steer"` (Steer now), and Abort turn calls
+busy is the dashboard queue below (Send after this turn) or `deliverAs: "steer"` (Steer now), and Abort turn calls
 `ctx.abort()`. A click on option *Keep* of open ask `ask-abcd` sends `ask-abcd: Keep` (the reply the Awaiting
 screen copies). Every injected message ends with one marker line, `[cp-dashboard dc-… — from the dashboard]`
 (a click adds `; ask=<id>`; a send with a thread adds `; thread=<tag>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
@@ -5868,6 +5868,31 @@ an authorization**: it never calls `cp_decide`, a `cp_parent` action or the pare
 `cp_parent` guideline, and the card stays open until the ask journal says otherwise. Refused: a label that is not
 an option (400), an answered or withdrawn ask (409), a second click on one ask within 10 minutes unless the
 first failed (409).
+
+**The dashboard queue (cp-y43c).** A composer message sent while the session is busy, or while an earlier one waits,
+is held by the bridge, not handed to pi's `followUp` queue: `outcome queued` is journaled and the reply carries
+`editable: true`. Each `agent_settled` (`settled()`) hands over the oldest one — at most one per settled turn, FIFO —
+as a prompt (a `followUp` if pi is busy again at that instant), journaling `injected` **before** pi is called. Until
+that line, `POST /api/operator/queue` `{"op":"edit","id","text"}` / `{"op":"cancel","id"}` (session CSRF token,
+409 offline) changes it, journaling `edited` / `outcome cancelled`; an edit's text is treated like a composer send
+(ends trimmed, inner spaces and newlines kept). While a shifted message's images are prepared, before its claim, the
+answer is 503 `{state:"handing"}` (try again); after the claim, 409 `{state:"sent", text}` names the text pi was given.
+A held message keeps its request's `ask_id` through reload into the marker. The bridge reloads held ids (no
+`injected` line) at `session_start`. **FIFO across the restart:** the offline inbox turn takes its place by the time of
+its oldest line: older held messages go first, the inbox turn next, then newer ones, one per settled turn, and an idle
+send waits behind them, as does any send while a handoff is unfinished (from the shift through image/file
+preparation until that turn settles or fails). >24 h is `dropped`. Steers and decision-card clicks (`kind: answer`) never queue and may pass
+held messages; a card's free-text reply is a message and queues with its `ask-…:` prefix.
+**Guarantee: at most once, not exactly once.** The journal append and pi's acceptance cannot be one atomic step, so
+the claim is written first: a crash between them, or a session ending before the transcript shows the message, leaves
+it `dropped`/`failed`, visible, and never resent. `injected` means handed to pi, not applied; only the transcript
+sighting (`delivered`) says it arrived. **No silent loss, no automatic double send** (addendum 2): the status
+projection turns every such loss — the crash window, a session ended unseen, a held message past 24 h — into a
+`failed` send carrying its original text (`Not confirmed: …` once `injected`, else `Not sent: …`); the dashboard
+shows it with **Send again**, which queues a new message (fresh id) only on the operator's click. Only the operator's
+own cancel removes a message without a failure. **Retention:** a lost send stays a visible failure for
+`LOST_SEND_VISIBLE_MS` (7 days) after it was sent, which covers the 24 h expiry plus six days and matches the upload
+sweep. Older losses stay `dropped` history, so an upgrade or a fresh browser does not resurface every past loss.
 
 **Transport** ([`src/dashboard-control.ts`](../src/dashboard-control.ts), loaded by the cp-bridge extension): at
 `session_start` the operator session binds `state/operator/dashboard.sock` (umask 077, then 0600; ≤ 107 bytes; a
@@ -5946,7 +5971,7 @@ runs the same chain up to the record step, then, instead of 503: the inbox token
 stale`), `abort` is 409 (`nothing to abort; the operator session is offline`), at most 20 waiting (409), and one
 `held` line `{type, id: dc-…, at, text, ask_id, thread?}` appended to `state/operator/inbox.jsonl` (0600, one `O_APPEND`
 write, like the journal) → 202 `{id, state: "held"}`. A click holds as `<ask>: <label>` with its `ask_id`. At the
-next `session_start`, once dashboard control listens, the session injects every held message younger than 24 h as
+next `session_start`, once dashboard control listens (after any older dashboard-queued messages, one per settled turn: §The dashboard queue), the session injects every held message younger than 24 h as
 **one** user message, oldest first, headed `[cp-dashboard inbox — N message(s) typed while this session was
 offline; each line keeps its time; re-check state before acting on them]`, each line with its time and id and an
 ask no longer open marked so, then appends one `delivered` line per id; an older one gets a `dropped` line and is

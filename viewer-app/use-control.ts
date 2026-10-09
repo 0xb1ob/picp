@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SessionEntry } from "../src/viewer/api-types.ts";
-import { canStart, type ControlBody, controlFiles, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
+import { ALREADY_SENT, canStart, type ControlBody, controlFiles, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, queueControl, type QueueOutcome, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
 import { restartInFlight } from "./restart-control.ts";
 import { useRestart } from "./use-restart.ts";
 import { emptyPending, readPending, reconcilePending, rememberPending, type PendingState } from "./pending-sends.ts";
@@ -64,7 +64,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   // The server takes one POST at a time per address. Keep requests FIFO even when the operator sends quickly.
   requests.current = requests.current.then(async ()=>{
    const result = await sendControl(fetcher,controlToken(status),{...body,client_id:key}).catch((error: unknown)=>({error:error instanceof Error ? error.message : "Send failed",status:0}));
-   updatePending(value=>({...value,items:value.items.map(item=>item.key !== key ? item : {...item,...("error" in result ? {state:"failed" as const,reason:result.error} : {id:result.id,state:result.state,reason:result.thread?.error ? `thread not recorded: ${result.thread.error}` : null})})}));
+   updatePending(value=>({...value,items:value.items.map(item=>item.key !== key ? item : {...item,...("error" in result ? {state:"failed" as const,reason:result.error} : {id:result.id,state:result.state,reason:result.thread?.error ? `thread not recorded: ${result.thread.error}` : null,...(result.editable === true ? {editable:true} : {})})})}));
    setGeneration(value=>value+1);
   });
  };
@@ -94,6 +94,29 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const visible = composer ? reconcilePending(pending,status,entries).items : undefined;
  const retry = (key: string) => { const item=pending.items.find(item=>item.key === key && item.state === "failed"); if(item) enqueue(item.body,item.ask_id ?? undefined,key); };
  const discard = (key: string) => updatePending(value=>{const found=value.items.find(item=>item.key === key && item.state === "failed"); return found ? {...value,items:value.items.filter(item=>item !== found),dismissed:found.id ? [...value.dismissed,found.id] : value.dismissed} : value;});
+ // cp-y43c: Edit/Cancel a dashboard-queued message; serialized with sends (one POST at a time per address).
+ const queueOp = (key: string, text?: string): Promise<QueueOutcome> => {
+  const item = visible?.find(item=>item.key === key);
+  // Not gated on `editable`: a status read just before the handoff is stale, so the bridge decides and names the sent text.
+  if (!item?.id || !controlReady(status) || !status.running || !status.token) return Promise.resolve({error:"This message can no longer be changed here"});
+  const id = item.id, token = status.token, saved = text?.trim();
+  const result = requests.current.then(()=>queueControl(fetcher,token,saved === undefined ? {op:"cancel",id} : {op:"edit",id,text:saved}));
+  requests.current = result;
+  return result.then(outcome=>{
+   if (!("error" in outcome)) updatePending(value=>{
+    if (outcome.state === "cancelled") return {...value,items:value.items.filter(row=>row.key !== key),dismissed:[...value.dismissed,id]};
+    return {...value,items:value.items.map(row=>{
+     if (row.key !== key) return row;
+     const {edited:_old,editable:_was,...rest} = row;
+     return outcome.state === "sent" ? {...rest,body:{...rest.body,text:outcome.text},reason:ALREADY_SENT,sent:true} : {...rest,editable:true,body:{...rest.body,text:saved ?? rest.body.text},edited:saved ?? rest.body.text};
+    })};
+   });
+   setGeneration(value=>value+1);
+   return outcome;
+  });
+ };
+ const edit = (key: string, text: string) => queueOp(key,text);
+ const cancel = (key: string) => queueOp(key);
  const cardDelivery = visible?.findLast(item=>item.ask_id !== null);
- return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {})};
+ return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard,edit,cancel} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {})};
 }
