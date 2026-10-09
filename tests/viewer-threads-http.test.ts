@@ -141,6 +141,17 @@ test("counts.jobs_working counts job refs that are live workers; missing fleet i
 	assert.equal(await working(), null);
 });
 
+test("counts.jobs_working skips missing and unsafe fleet job ids: no status read outside runs/<id>", async (t) => {
+	const { stateDir, port } = await setup(t);
+	fixture(stateDir);
+	// state/evil/status.json is what runs/../evil/status.json would read.
+	put(join(stateDir, "evil", "status.json"), JSON.stringify({ phase: "working" }));
+	put(join(stateDir, "fleet.json"), JSON.stringify({ jobs: [{ phase: "working" }, { job_id: "", phase: "working" }, { job_id: "../evil", phase: "working" }, { job_id: "a/b", phase: "working" }] }));
+	for (const id of ["../evil", "a/b"]) appendThreadLine(stateDir, bind(EPS, "job", id, "2026-10-06T08:00:08Z"));
+	const eps = ((await call(port, LIST)).body.threads as Array<{ tag: string; counts: { jobs_working: number | null } }>).find((th) => th.tag === "eps")!;
+	assert.equal(eps.counts.jobs_working, 0);
+});
+
 test("every done refusal, in order, is one viewer line of kind thread_done and never a done line; then 202 with its done line", async (t) => {
 	const { stateDir, options, port } = await setup(t);
 	fixture(stateDir);

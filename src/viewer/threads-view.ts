@@ -7,7 +7,7 @@
 import type { SourceAvailability, ThreadView } from "./api-types.ts";
 import { readAnswers, readThreads, threadRefKey, THREADS_LIST_MAX } from "./control-files.ts";
 import { asks } from "./overview-decisions.ts";
-import { isLiveWorker, readStatus, str, type ViewerState } from "./sessions.ts";
+import { isLiveWorker, isSafeId, readStatus, str, type ViewerState } from "./sessions.ts";
 import { objectList } from "./overview-read.ts";
 import { join } from "node:path";
 
@@ -43,7 +43,11 @@ export function threadsView(state: ViewerState): ThreadsView {
 	const unacked = new Set(answers.answers.filter((answer) => answer.acked_at === null).map((answer) => answer.id));
 	// Live workers by job id; `null` counts while fleet.json is unreadable (a missing file is no live worker).
 	const fleet = objectList(join(state.stateDir, "fleet.json"), "jobs", () => true);
-	const live = new Set(fleet.value.filter((job) => job.executor !== "script" && isLiveWorker(str(readStatus(state, str(job.job_id) ?? "")?.phase), str(job.phase))).map((job) => str(job.job_id)));
+	const live = new Set(fleet.value.flatMap((job) => {
+		const id = str(job.job_id);
+		// Same guard as workerRow: no unsafe id ever reaches a runs/<id>/status.json read.
+		return id && isSafeId(id) && job.executor !== "script" && isLiveWorker(str(readStatus(state, id)?.phase), str(job.phase)) ? [id] : [];
+	}));
 	const all = journal.threads.map((thread): ThreadView => {
 		const refs = thread.refs.filter((item) => journal.refs.get(threadRefKey(item.ref)) === thread.id).map((item) => item.ref);
 		const count = (kind: string) => refs.filter((ref) => ref.kind === kind).length;

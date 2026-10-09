@@ -34,6 +34,7 @@ test("normalizeThreadTag: trim, ASCII-lowercase, whitespace runs to '-'; anythin
 	assert.equal(normalizeThreadTag("Billing Bug"), "billing-bug");
 	assert.equal(normalizeThreadTag("  Q3   plan\tB "), "q3-plan-b");
 	assert.equal(normalizeThreadTag("x".repeat(32)), "x".repeat(32));
+	assert.equal(normalizeThreadTag("#design-review"), null, "the server never strips #; only the client does");
 	for (const bad of ["-x", "x".repeat(33), "", "   ", "bad tag!", "café", "a_b", null, 7, undefined]) assert.equal(normalizeThreadTag(bad), null, String(bad));
 });
 

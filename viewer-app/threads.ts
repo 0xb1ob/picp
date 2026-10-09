@@ -40,7 +40,7 @@ export async function sendThreadDone(fetch: Fetch, token: string, id: string): P
  return {error: await failure(response), status: response.status};
 }
 
-/** The server's rule (src/viewer/control-files.ts normalizeThreadTag): trim, ASCII-lowercase, whitespace runs to `-`; null unless a tag. */
+/** The server's rule (src/viewer/control-files.ts normalizeThreadTag: trim, ASCII-lowercase, whitespace runs to `-`; null unless a tag), after the client alone strips one leading `#` (the dialog's adornment). The server still refuses `#x`; the client never sends it. */
 export function normalizeTag(raw: string): string | null {
  const tag = raw.trim().replace(/^#/, "").replace(/[A-Z]/g, char => char.toLowerCase()).replace(/\s+/g, "-");
  return /^[a-z0-9][a-z0-9-]{0,31}$/.test(tag) ? tag : null;
