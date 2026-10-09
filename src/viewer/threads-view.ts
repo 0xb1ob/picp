@@ -7,7 +7,9 @@
 import type { SourceAvailability, ThreadView } from "./api-types.ts";
 import { readAnswers, readThreads, threadRefKey, THREADS_LIST_MAX } from "./control-files.ts";
 import { asks } from "./overview-decisions.ts";
-import type { ViewerState } from "./sessions.ts";
+import { isLiveWorker, readStatus, str, type ViewerState } from "./sessions.ts";
+import { objectList } from "./overview-read.ts";
+import { join } from "node:path";
 
 export interface ThreadsView {
 	availability: SourceAvailability;
@@ -39,13 +41,17 @@ export function threadsView(state: ViewerState): ThreadsView {
 	];
 	const openAsks = new Set(askSource.value.filter((record) => record.state === "open").map((record) => record.ask.id));
 	const unacked = new Set(answers.answers.filter((answer) => answer.acked_at === null).map((answer) => answer.id));
+	// Live workers by job id; `null` counts while fleet.json is unreadable (a missing file is no live worker).
+	const fleet = objectList(join(state.stateDir, "fleet.json"), "jobs", () => true);
+	const live = new Set(fleet.value.filter((job) => job.executor !== "script" && isLiveWorker(str(readStatus(state, str(job.job_id) ?? "")?.phase), str(job.phase))).map((job) => str(job.job_id)));
 	const all = journal.threads.map((thread): ThreadView => {
 		const refs = thread.refs.filter((item) => journal.refs.get(threadRefKey(item.ref)) === thread.id).map((item) => item.ref);
 		const count = (kind: string) => refs.filter((ref) => ref.kind === kind).length;
 		const waiting = blind ? null : { asks: refs.filter((ref) => ref.kind === "ask" && openAsks.has(ref.id)).length, answers: refs.filter((ref) => ref.kind === "answer" && unacked.has(ref.id)).length };
 		const done = thread.done_line !== null && (thread.last_bind_line === null || thread.done_line > thread.last_bind_line);
 		const state = waiting && waiting.asks + waiting.answers > 0 ? "waiting" : done ? "done" : "open";
-		return { id: thread.id, tag: thread.tag, state, waiting, counts: { messages: count("dashboard"), asks: count("ask"), answers: count("answer") }, opened_at: thread.opened_at, last_at: thread.last_at, done_at: state === "done" ? thread.done_at : null };
+		const jobsWorking = fleet.availability === "unavailable" ? null : new Set(refs.filter((ref) => ref.kind === "job" && live.has(ref.id)).map((ref) => ref.id)).size;
+		return { id: thread.id, tag: thread.tag, state, waiting, counts: { messages: count("dashboard"), asks: count("ask"), answers: count("answer"), jobs_working: jobsWorking }, opened_at: thread.opened_at, last_at: thread.last_at, done_at: state === "done" ? thread.done_at : null };
 	});
 	all.sort((a, b) => RANK[a.state] - RANK[b.state] || (a.state === "done" ? String(b.done_at).localeCompare(String(a.done_at)) : b.last_at.localeCompare(a.last_at)));
 	return { availability: "ok", threads: all.slice(0, THREADS_LIST_MAX), total: all.length, warning: warnings.length ? warnings.join("; ") : null, error: null, blind, byId: new Map(all.map((view) => [view.id, view])) };

@@ -10,7 +10,7 @@ import { sessionsView } from "../src/viewer/sessions-view.ts";
 import { assignThreads } from "../src/viewer/thread-turns.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { type ControlBody, type ControlView, deliveryLine } from "../viewer-app/control.ts";
-import { normalizeTag, readThreads, sendThreadDone, threadFilter, type ThreadsView, visibleEntries } from "../viewer-app/threads.ts";
+import { normalizeTag, readThreads, sendThreadDone, threadBands, threadFilter, type ThreadsView, visibleEntries } from "../viewer-app/threads.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {OperatorComposer} from "./viewer-app/components/OperatorComposer.tsx"; export {act}; export const screen=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); export const mount=(root,control,thread)=>render(h(OperatorComposer,{control,thread}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
@@ -20,7 +20,7 @@ const { act, screen, mount, unmount } = await import(`data:text/javascript;base6
 };
 
 const B = "th-0123456789ab", O = "th-aaaaaaaaaaaa", D = "th-dddddddddddd";
-const thread = (id: string, tag: string, state: ThreadView["state"], waiting: ThreadView["waiting"] = { asks: 0, answers: 0 }): ThreadView => ({ id, tag, state, waiting, counts: { messages: 1, asks: 0, answers: 0 }, opened_at: "2026-10-06T08:00:00Z", last_at: "2026-10-06T08:00:00Z", done_at: state === "done" ? "2026-10-06T09:00:00Z" : null });
+const thread = (id: string, tag: string, state: ThreadView["state"], waiting: ThreadView["waiting"] = { asks: 0, answers: 0 }): ThreadView => ({ id, tag, state, waiting, counts: { messages: 1, asks: 0, answers: 0, jobs_working: 0 }, opened_at: "2026-10-06T08:00:00Z", last_at: "2026-10-06T08:00:00Z", done_at: state === "done" ? "2026-10-06T09:00:00Z" : null });
 const list = (over: Partial<ThreadsResponse> = {}): ThreadsResponse => ({ generated_at: "2026-10-06T09:00:00Z", availability: "ok", enabled: true, reason: null, token: "k".repeat(64), threads: [thread(B, "billing-bug", "waiting", { asks: 1, answers: 1 }), thread(O, "ops", "open"), thread(D, "old", "done")], total: 3, warning: null, ...over });
 const threads = (over: Partial<ThreadsView> = {}): ThreadsView => ({ status: list(), selected: null, select: () => {}, done: () => {}, sending: null, failed: null, ...over });
 const entry = (id: string, extra: Partial<SessionEntry> = {}): SessionEntry => ({ id, at: "2026-10-06T08:00:00Z", kind: "say", who: "Assistant", text: `text ${id}`, name: null, send_id: null, tag: null, failed: false, trace: [], ...extra });
@@ -54,6 +54,14 @@ test("visibleEntries: All is unchanged; shared entries only inside the thread's 
 	assert.equal(normalizeTag("  Billing   Bug "), "billing-bug");
 	assert.equal(normalizeTag("-x"), null);
 	assert.equal(normalizeTag("a".repeat(33)), null);
+	assert.equal(normalizeTag("#Design-Review"), "design-review", "one leading # is stripped");
+	assert.equal(normalizeTag("##x"), null);
+	const bands = entries.map(e => e.id);
+	const split = threadBands(entries, B);
+	assert.deepEqual([split.before.map(e => e.id), split.inside.map(e => e.id), split.after.map(e => e.id)], [bands.slice(0, 2), ["own-first", "shared-inside", "own-last"], ["shared-after"]]);
+	assert.deepEqual(threadBands(entries, null), { before: [], inside: entries, after: [] });
+	assert.deepEqual(threadBands(entries, "none"), { before: [], inside: [], after: [] });
+	assert.deepEqual(threadBands(entries, "th-0123456789ac"), { before: [], inside: [], after: [] });
 });
 
 test("Sessions: chips with aria-pressed and All by default, the sidebar section, the filter, and every open ask still pinned", async t => {

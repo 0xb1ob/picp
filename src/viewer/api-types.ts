@@ -281,7 +281,8 @@ export interface AnswerAckResponse { id: string; state: "acked"; acked_at: strin
 export interface ThreadView {
  id: string; tag: string; state: "open" | "waiting" | "done";
  waiting: { asks: number; answers: number } | null;
- counts: { messages: number; asks: number; answers: number };
+ /** `jobs_working`: job refs that are live workers; null while fleet.json is unreadable. */
+ counts: { messages: number; asks: number; answers: number; jobs_working: number | null };
  opened_at: string; last_at: string; done_at: string | null;
 }
 /** `GET /api/threads` (--require-tailnet only): the list, and the done CSRF token only while control is on. */

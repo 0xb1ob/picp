@@ -102,8 +102,8 @@ test("the list: states, reasons and counts, order, the token only while control 
 	const by = Object.fromEntries(threads.map((th) => [th.tag, th]));
 	assert.deepEqual(by.alpha!.waiting, { asks: 1, answers: 0 });
 	assert.deepEqual(by.beta!.waiting, { asks: 0, answers: 1 });
-	assert.deepEqual(by.beta!.counts, { messages: 1, asks: 0, answers: 1 });
-	assert.deepEqual(by.gamma!.counts, { messages: 0, asks: 1, answers: 1 });
+	assert.deepEqual(by.beta!.counts, { messages: 1, asks: 0, answers: 1, jobs_working: 0 });
+	assert.deepEqual(by.gamma!.counts, { messages: 0, asks: 1, answers: 1, jobs_working: 0 });
 	assert.deepEqual([by.delta!.done_at, by.eps!.done_at, by.delta!.id], ["2026-10-06T09:00:00Z", null, DELTA]);
 	assert.equal(list.body.total, 5);
 	assert.equal(list.body.warning, null);
@@ -124,6 +124,21 @@ test("job id collisions do not move legacy counts, waiting reasons or the done r
 	assert.deepEqual(after.body.threads, before.body.threads, "job refs with existing ids add no counts and remove no waiting items");
 	const refused = await call(port, DONE, json(String(after.body.token), { id: ALPHA }));
 	assert.equal(refused.status, 409, "an open ask still blocks done after a colliding job bind");
+});
+
+test("counts.jobs_working counts job refs that are live workers; missing fleet is 0, unreadable fleet is null", async (t) => {
+	const { stateDir, port } = await setup(t);
+	fixture(stateDir);
+	const working = async () => ((await call(port, LIST)).body.threads as Array<{ tag: string; counts: { jobs_working: number | null } }>).find((th) => th.tag === "eps")!.counts.jobs_working;
+	assert.equal(await working(), 0, "no fleet.json");
+	for (const id of ["cp-live", "cp-idle", "cp-ghost"]) assert.ok(appendThreadLine(stateDir, bind(EPS, "job", id, "2026-10-06T08:00:08Z")).ok);
+	put(join(stateDir, "fleet.json"), JSON.stringify({ jobs: [{ job_id: "cp-live", phase: "working" }, { job_id: "cp-idle", phase: "working" }, { job_id: "cp-other", phase: "working" }] }));
+	put(join(stateDir, "runs", "cp-live", "status.json"), JSON.stringify({ phase: "working" }));
+	put(join(stateDir, "runs", "cp-idle", "status.json"), JSON.stringify({ phase: "exited" }));
+	put(join(stateDir, "runs", "cp-other", "status.json"), JSON.stringify({ phase: "working" }));
+	assert.equal(await working(), 1, "only the live worker bound to the thread counts");
+	put(join(stateDir, "fleet.json"), "{not json");
+	assert.equal(await working(), null);
 });
 
 test("every done refusal, in order, is one viewer line of kind thread_done and never a done line; then 202 with its done line", async (t) => {
