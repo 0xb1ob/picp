@@ -180,7 +180,7 @@ export interface JobTranscriptResponse {entries: SessionEntry[]; truncated: bool
 export interface BoardResponse extends JobsResponse {
  columns: {key:JobPhase;name:string;hint:string}[];
  lanes: {id:string;status:string;active:boolean;objective:string;expiry:string | null;ask_on:string[];spend:number | null;cap:number | null;note:string | null}[];
- revoked_hidden: number; stranded_count: number | null;
+ revoked_hidden: number; hidden_mandates: {id: string; status: string; objective: string}[]; stranded_count: number | null;
 }
 /** `GET /api/stats` (docs/viewer-app.md, Stats definitions). Instants are UTC ISO; null is unknown, never 0. */
 export interface StatsBucket { start: string; end: string }

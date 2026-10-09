@@ -93,11 +93,12 @@ export function boardView(state:ViewerState,now=Date.now()):BoardResponse {
  const jobs=data.jobs.filter(j=>j.phase!=="done" || j.finished_today).map(j=>({...j,board_lane_id:lanes.some(l=>l.id===j.mandate_id && (l.active || l.status==="paused" || l.status==="closed" || j.phase==="done" && j.finished_today)) ? j.mandate_id! : "unassigned"}));
  if(jobs.some(j=>j.board_lane_id==="unassigned")) lanes.push({id:"unassigned",status:"unassigned",active:true,objective:"No covering live grant",expiry:null,ask_on:[],spend:null,cap:null,note:null});
  lanes=lanes.filter(l=>jobs.some(j=>j.board_lane_id===l.id)).sort((a,b)=>Number(b.active)-Number(a.active));
+ const hidden=grants.filter(m=>m.status==="revoked" && !lanes.some(l=>l.id===m.id)).map(m=>({id:String(m.id),status:"revoked",objective:str(m.objective) ?? ""}));
  return {...data,jobs,lanes,columns:[
   {key:"queued",name:"Queued",hint:"blocked, or waiting for a slot"},{key:"launching",name:"Launching",hint:"worker starting"},
   {key:"working",name:"Working",hint:"worker running"},{key:"waiting",name:"Waiting",hint:"needs a person, or the worker is idle"},{key:"held",name:"Held",hint:"waiting on CI or review, normal for hours"},
   {key:"done",name:"Landed today",hint:"merged or closed"},{key:"failed",name:"Failed",hint:"stopped; may continue on its lease"}],
-  revoked_hidden:grants.filter(m=>m.status==="revoked" && !lanes.some(l=>l.id===m.id)).length,stranded_count:base.blocked.stranded_count};
+  revoked_hidden:hidden.length,hidden_mandates:hidden,stranded_count:base.blocked.stranded_count};
 }
 const eventLabels:Record<string,string>={spawned:"Spawned",envelope_received:"Report filed",review_decided:"Review",failure:"Failed",worker_revived:"Worker revived",question_asked:"Question asked",question_closed:"Question closed",ci_observed:"CI observed",merge_recorded:"Merge recorded"};
 export function jobEventsFile(state:ViewerState,id:string):string | undefined {

@@ -58,6 +58,7 @@ test("board, jobs and map refresh 200 runs with 100 revoked grants within budget
   if (view === boardView) {
    const board = first as ReturnType<typeof boardView>;
    assert.equal(board.revoked_hidden,100);
+   assert.equal(board.hidden_mandates.length,100);
    assert.deepEqual(board.lanes.map(l=>[l.id,l.spend]),[["md-live",300]]);
    assert.ok(board.jobs.every(j=>j.mandate_id==="md-live" && j.cost_usd===1.5));
   }
