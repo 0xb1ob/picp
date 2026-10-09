@@ -43,6 +43,8 @@ export function runAuthority(ctx: ScheduleAuthorityContext, jobId: string): RunV
 		if (!record || !record.revisions.some((policy) => policy.revision === run!.policy_revision)) throw new ScheduleAuthorityError("policy_missing", `${run.id}: policy revision missing`, run.id);
 		return { source: "schedule-run", run, snapshot: run.policy };
 	}
+	const open = ctx.runs.openRun(schedule!);
+	if (open && (!record || !record.revisions.some((policy) => policy.revision === open.policy_revision))) throw new ScheduleAuthorityError("policy_missing", `${open.id}: policy revision missing`, open.id);
 	if (record?.active_revision === null || !record?.activated_at) return { source: "mandate" };
 	if (ledger?.created_at && ledger.created_at < record.activated_at) return { source: "mandate" };
 	throw new ScheduleAuthorityError("not_member", `${jobId}: activated schedule ${schedule} requires run membership`, ctx.runs.openRun(schedule!)?.id);

@@ -96,6 +96,20 @@ test("run members fail closed for missing and corrupt policies",async(t)=>{
 });
 
 
+test("missing policy after interrupted child admission refuses without touching grants",async(t)=>{
+ const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
+ await runs.activatePolicy(run.schedule_id,1,at,{channel:"dashboard",request_id:"sc-test"});
+ const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
+ const job = await ledger.create({title:"interrupted child",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
+ const grantFile = `${home.path}/${LAYOUT.mandates}/${mandates.list()[0]!.id}.json`;
+ const before = readFileSync(grantFile,"utf8");
+ writeFileSync(runs.policiesFile,JSON.stringify({schema_version:1,policies:[]}));
+ await assert.rejects(mandates.assertDispatchAllowed({jobId:job.id,project:"demo",kind:"ship"}),e=>e instanceof ScheduleAuthorityError && e.code==="policy_missing" && e.runId===run.id);
+ assert.equal(readFileSync(grantFile,"utf8"),before);
+ assert.equal(runs.runOfJob(job.id),undefined);
+});
+
+
 test("post-activation non-members fail closed; legacy jobs remain under mandates",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
  await runs.activatePolicy(run.schedule_id,1,at,{channel:"dashboard",request_id:"sc-test"});
