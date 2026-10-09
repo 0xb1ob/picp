@@ -444,8 +444,12 @@ Model pickers: `GET /api/settings` also carries `available_models` (`provider/id
 the cp-install parser, `src/viewer/model-list.ts`; cached 5 minutes, a failure 30 seconds) or `null` with `models_error`. The read never
 waits for pi: it answers with the cached list (stale included) or `models_loading: true` while one deduplicated background run fills it,
 and the page asks again after 2 seconds until the list lands. Every
-model input gets one `<datalist>`; each rubric row also has an "add a listed fallback" input. Free text stays allowed: a value
-not in the list shows an inline "Not in pi's model list" warning and still saves, and with no list the page says "Loading the model list…" or "Model list unavailable".
+model field is a `<select>` (cp-lol1): the rubric row model, one dropdown per fallback (each with a × to remove it, plus an "Add
+fallback…" dropdown that appends, up to 4), the parent and the operator model. Options are one `<optgroup>` per provider, alphabetical
+within each; parent and operator start with "(unset)" (empty is unset), rubric models have none. A current value not in the list stays
+selected as "<id> (not in pi's list)" with the inline "Not in pi's model list" warning, and still saves; the last option, "Custom…",
+reveals a text input for any id. While the list loads or is unavailable each dropdown holds only the current value and "Custom…", and the
+page says "Loading the model list…" or "Model list unavailable". Screenshots: `docs/tui-verification/settings-model-dropdown.md`.
 
 ## Live Data
 
