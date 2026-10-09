@@ -375,7 +375,7 @@ imported only by `control-api.ts`, the image upload route `operator-upload-api.t
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
-390 px and keeps the composer at the transcript's `min(760px, 100%)` column at 1440 px.
+390 px and lets the composer, the pinned decisions and the plain session messages run the transcript pane's full width at 1440 px (frames 06/16, main addendum ps-20261009102407-b9a45251); only your own right-hand bubbles stay capped at `min(760px, 100%)`.
 
 **Schedule controls** (cp-hhuf P6, docs/contracts.md §Schedule controls). The Schedules page reads
 `GET /api/schedules/control` (`use-schedule-control.ts`, on mount, on every refresh and after each send) and shows

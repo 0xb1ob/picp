@@ -94,7 +94,9 @@
 .session-own > .session-body { background: var(--bubble-own); border-color: var(--bubble-own); border-top-right-radius: 6px; }
 .session-own > .session-who { justify-content: flex-end; }
 .session-who > time.session-time::before { content: "· "; }
-.session-avatar { display: none; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; font-size: 9px; color: var(--muted); }
+.session-message.session-other { position: relative; padding-left: 32px; }
+.session-other > .session-who > .session-avatar { position: absolute; left: 0; top: -2px; }
+.session-avatar { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; font-size: 9px; color: var(--muted); }
 .session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .session-failed .session-bubble > .session-body { border-color: var(--border); }
 .session-bubble .session-send { margin-top: 4px; }
@@ -213,8 +215,7 @@
  .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
  .session-transcript { padding: 12px 24px 16px; }
  .session-entries { max-width: none; }
- .session-message.session-other { position: relative; padding-left: 36px; }
- .session-other > .session-who > .session-avatar { display: flex; position: absolute; left: 0; top: -2px; }
+ .session-message.session-other { padding-left: 36px; }
  /* Chat in the 760px column: bubbles at most min(760px,100%) wide; system rows share the tool calls' 56px time column. */
  .session-bubble > .session-who, .session-bubble > .session-body { max-width: min(760px, 100%); }
  .session-message.session-system { gap: 12px; }
