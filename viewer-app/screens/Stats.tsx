@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import type { StatsResponse } from "../../src/viewer/api-types.ts";
-import { amount, count, elapsed, money, percent, zone } from "../format.ts";
+import { amount, count, elapsed, money, percent } from "../format.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import "./stats.css";
 
@@ -19,7 +19,7 @@ const dayLabel = (iso: string): string => new Intl.DateTimeFormat("en-US",{month
 export function rangeCaption(range: StatsResponse["range"]): string {
  const span = (Date.parse(range.to) - Date.parse(range.from))/1000;
  const before = range.key === "custom" ? elapsed(span) : range.key;
- return `${dayTime(range.from)} – ${dayTime(range.to)} ${zone(new Date(range.to))} · compared with the ${before} before`.replace(/ {2}/g," ");
+ return `${dayTime(range.from)} – ${dayTime(range.to)} · compared with the ${before} before`;
 }
 
 /** The hash is the one home for filters; a change rewrites it and the route's own hashchange reloads the data. */
@@ -108,7 +108,7 @@ export function Stats({data, query}: {data:StatsResponse; query:string}) {
  const day = data.range.bucket_seconds >= 86400;
  const label = (iso: string) => day ? dayLabel(iso) : hm(iso);
  const empty = jf.merged === 0 && jf.closed === 0;
- const total = jf.merged === null && jf.closed === null ? null : (jf.merged ?? 0) + (jf.closed ?? 0);
+ const total = jf.merged === null || jf.closed === null ? null : jf.merged + jf.closed;
  const delta = k.spend_delta_pct === null ? "-" : `${k.spend_delta_pct > 0 ? "+" : ""}${k.spend_delta_pct}%`;
  const kpis: [string,string,string,string?][] = [
   ["Jobs finished",count(total),`${count(jf.merged)} merged · ${count(jf.closed)} closed`],

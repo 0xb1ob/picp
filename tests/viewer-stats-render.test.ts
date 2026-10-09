@@ -45,12 +45,22 @@ test("From/To appear only for Custom; an empty range says so", async () => {
  assert.match(draw(data({jobs_finished:{merged:0,closed:0,buckets:[]}}),"range=7d"),/Nothing finished in this range/);
 });
 
-test("the range caption shows two distinct instants and the prior window", async () => {
+test("the range caption is browser-local, has two distinct instants, no zone suffix and the prior window", async () => {
  const {draw} = await load();
- const html = draw(data({range:{from:"2026-01-01T00:00:00.000Z",to:"2026-01-02T00:00:00.000Z",key:"24h",bucket_seconds:3600,tz:"UTC"}}),"range=24h");
- const cap = /class="stats-caption">([^<]+)</.exec(html)![1]!.replace(/&#x2F;|&amp;/g,"");
- const [from,rest] = cap.split(" – "); assert.ok(from && rest && !rest.startsWith(from), cap);
- assert.match(cap,/ · compared with the 24h before$/);
+ const was = process.env.TZ;
+ try {
+  process.env.TZ = "Asia/Ho_Chi_Minh";
+  const html = draw(data({range:{from:"2026-01-01T00:00:00.000Z",to:"2026-01-02T00:00:00.000Z",key:"24h",bucket_seconds:3600,tz:"UTC"}}),"range=24h");
+  const cap = /class="stats-caption">([^<]+)</.exec(html)![1]!;
+  assert.equal(cap,"Jan 1, 07:00 – Jan 2, 07:00 · compared with the 24h before");
+  assert.doesNotMatch(cap,/UTC|GMT/);
+ } finally { if (was === undefined) delete process.env.TZ; else process.env.TZ = was; }
+});
+
+test("Jobs finished is a dash when either side is unknown, never missing-as-zero", async () => {
+ const {draw} = await load();
+ const value = (merged: number | null, closed: number | null) => /<h2>Jobs finished<\/h2><strong>([^<]*)<\/strong>/.exec(draw(data({jobs_finished:{merged,closed,buckets:[]}}),"range=24h"))![1];
+ assert.equal(value(null,5),"-"); assert.equal(value(4,null),"-"); assert.equal(value(null,null),"-"); assert.equal(value(4,5),"9");
 });
 
 test("CSV export escapes quotes and formula starts and leaves missing values empty", async () => {
