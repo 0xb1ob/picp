@@ -255,7 +255,9 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			clicks.set(askId, { at: now().getTime(), id });
 		}
 		// cp-y43c: busy, or behind an earlier queued message: the dashboard holds it (journaled) until the session settles.
-		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0 || inboxAt !== null)) {
+		// Also while a handoff is unfinished (review 3): `handing` is set from the shift, through image/file preparation,
+		// until that turn settles or fails, so a send made with the queue just emptied still goes behind it.
+		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0 || inboxAt !== null || handing !== null)) {
 			const held = outcome(id, kind, askId, peer, "queued", null, false);
 			if (!held.ok) return refuse(500, `failed: audit journal unwritable (${held.error})`);
 			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(thread ? { thread } : {}) });

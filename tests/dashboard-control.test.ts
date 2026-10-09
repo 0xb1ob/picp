@@ -181,7 +181,10 @@ test("delivery: a message is injected as a user message with the marker; idle is
 	assert.equal(typeof first.session_started_at, "string");
 	assert.equal(first.session_file, "/tmp/operator-session.jsonl");
 	fake.state.echo = false;
+	control.settled(); // the handed-over "next" ran its turn; until then an idle send would queue behind it (review 3)
 	const pending = await controlRequest(record, "send", {kind:"message",text:"abandoned"});
+	assert.equal(pending.ok && (pending.result as {state:string}).state, "queued", "idle, nothing in flight: injected directly, unseen within the wait");
+	assert.equal(fake.state.injected.at(-1)![0].split("\n\n")[0], "abandoned");
 	const pendingId = pending.ok && (pending.result as {id:string}).id;
 	control.stop(); control.stop();
 	assert.equal(journal(stateDir).filter(row=>row.id === pendingId && row.state === "dropped").length,1,"shutdown settles unseen accepted messages exactly once");

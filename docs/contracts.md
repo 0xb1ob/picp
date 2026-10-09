@@ -5880,7 +5880,8 @@ answer is 503 `{state:"handing"}` (try again); after the claim, 409 `{state:"sen
 A held message keeps its request's `ask_id` through reload into the marker. The bridge reloads held ids (no
 `injected` line) at `session_start`. **FIFO across the restart:** the offline inbox turn takes its place by the time of
 its oldest line: older held messages go first, the inbox turn next, then newer ones, one per settled turn, and an idle
-send waits behind them. >24 h is `dropped`. Steers and decision-card clicks (`kind: answer`) never queue and may pass
+send waits behind them, as does any send while a handoff is unfinished (from the shift through image/file
+preparation until that turn settles or fails). >24 h is `dropped`. Steers and decision-card clicks (`kind: answer`) never queue and may pass
 held messages; a card's free-text reply is a message and queues with its `ask-…:` prefix.
 **Guarantee: at most once, not exactly once.** The journal append and pi's acceptance cannot be one atomic step, so
 the claim is written first: a crash between them, or a session ending before the transcript shows the message, leaves

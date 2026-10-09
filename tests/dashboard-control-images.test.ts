@@ -231,3 +231,34 @@ test("cp-y43c review 1: while a queued image message is prepared for its handoff
 	assert.deepEqual([(late as { status?: number }).status, (late as { result?: unknown }).result], [409, { id, state: "sent", text: "with a picture" }]);
 	assert.deepEqual(journal(stateDir).filter((line) => line.id === id).map((line) => line.type === "outcome" ? line.state : line.type), ["request", "queued", "injected"]);
 });
+
+test("cp-y43c review 3: a send made after the held head was shifted off (queue empty, its image still being prepared) queues behind it; pi gets the older one first, each exactly once", async (t) => {
+	const { stateDir, uploadRoot } = scratch(t);
+	let release: (() => void) | undefined;
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	const { state, ports } = fakePorts(async (bytes, mimeType) => { await gate; return { data: Buffer.from(bytes).toString("base64"), mimeType }; });
+	let idle = false;
+	ports.isIdle = () => idle;
+	const control = await startDashboardControl({ stateDir, ports, uploadRoot, deliveredWaitMs: 50, log: () => {} }) as DashboardControl;
+	assert.equal(control.state, "listening");
+	t.after(() => control.stop());
+	const record = (readControlRecord(stateDir) as { record: Record_ }).record;
+	const [image] = stored(uploadRoot, 1);
+	const older = await controlRequest(record, "send_images", { kind: "message", text: "older, with a picture", images: [image] });
+	assert.equal(older.ok && (older.result as { state: string }).state, "queued");
+	idle = true;
+	control.settled(); // shifts the head off: the queue is now empty while its image waits on the gate
+	assert.equal(state.injected.length, 0, "still preparing");
+	const newer = await controlRequest(record, "send", { kind: "message", text: "newer, plain text" });
+	assert.deepEqual(newer.ok && { state: (newer.result as { state: string }).state, editable: (newer.result as { editable?: boolean }).editable }, { state: "queued", editable: true }, "held behind the handoff in progress, not sent directly");
+	assert.equal(state.injected.length, 0, "nothing reaches pi before the older message");
+	release!();
+	await new Promise((done) => setTimeout(done, 20));
+	assert.deepEqual(state.injected.map((sent) => sent.text.split("\n\n")[0]), ["older, with a picture"], "the older one first; the newer waits for the next settled turn");
+	control.settled();
+	assert.deepEqual(state.injected.map((sent) => sent.text.split("\n\n")[0]), ["older, with a picture", "newer, plain text"]);
+	control.settled();
+	assert.equal(state.injected.length, 2, "each exactly once");
+	const ids = [(older.result as { id: string }).id, (newer.result as { id: string }).id];
+	assert.deepEqual(ids.map((id) => journal(stateDir).filter((line) => line.id === id).map((line) => line.type === "outcome" ? line.state : line.type)), [["request", "queued", "injected"], ["request", "queued", "injected"]]);
+});
