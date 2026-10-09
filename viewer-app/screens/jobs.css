@@ -73,8 +73,9 @@
 @media (max-width: 899px) {
  /* Phone: title and cost lead the row, the id follows at 11px. */
  .jobs-screen .job-row-link { gap: 2px; }
- .jobs-screen .job-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4.5rem; }
- .jobs-screen .job-cost { position: absolute; top: 14px; right: 0; }
+ .jobs-screen .job-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .jobs-screen .job-row-done .job-title { padding-right: 4.5rem; } /* Done rows only: their cost has no signals grid, so it rides the title row. */
+ .jobs-screen .job-row-done .job-cost { position: absolute; top: 14px; right: 0; }
  .jobs-screen .job-row-id > code { font-size: 11px; color: var(--dim); }
 }
 @media (min-width: 900px) {
@@ -88,7 +89,7 @@
  .jobs-columns-done, .job-row-done { grid-template-columns: 240px minmax(0,1fr) 112px 80px 96px 52px 56px; }
  .job-row-queued { grid-template-columns: 220px minmax(0,1fr) auto; }
  .jobs-columns { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
- .jobs-screen .job-row { min-height: 40px; row-gap: 0; padding: 4px 0; }
+ .jobs-screen .job-row { min-height: 40px; row-gap: 0; padding: 4px 0; } /* Approved S4 compact desktop rows: 40px flight / 36px done; phone keeps 44px. */
  .jobs-screen .job-row-done { min-height: 36px; }
  .job-row-link { grid-area: 1 / 1 / 2 / 3; display: grid; grid-template-columns: subgrid; align-items: center; column-gap: 16px; min-height: 0; } /* Covers job + title only; the phone keeps the 44px base. */
  .job-signals, .job-finished { display: contents; }

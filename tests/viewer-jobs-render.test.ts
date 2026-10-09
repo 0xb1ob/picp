@@ -198,9 +198,11 @@ test("Board shares status columns and mandate filters, complete flight facts, an
 });
 
 
-test("desktop Jobs detail link owns a 44px box across only the job and title columns", () => {
+test("Jobs detail link keeps the 44px base target for phone; desktop link spans only the job and title columns in the compact approved rows", () => {
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8");
- assert.match(css,/\.job-row-link \{[^}]*min-height: 44px/);
+ assert.match(css,/\.job-row-link \{[^}]*min-height: 44px/,"phone base target");
+ assert.match(css,/\.jobs-screen \.job-row-done \.job-cost \{ position: absolute;/,"absolute cost rides the title row on done rows only");
+ assert.doesNotMatch(css,/\.jobs-screen \.job-cost \{ position: absolute/);
  const desktop=css.split("@media (min-width: 900px) {")[1]!.split("/* Narrow desktop")[0]!;
  assert.match(desktop,/\.job-row-link \{[^}]*grid-area: 1 \/ 1 \/ 2 \/ 3;[^}]*display: grid;[^}]*min-height: 0;/);
  assert.match(desktop,/\.jobs-columns-flight, \.job-row-flight \{ grid-template-columns: 220px minmax\(0,1fr\) 104px 140px 120px 92px 88px 56px;/);
