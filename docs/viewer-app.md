@@ -390,7 +390,7 @@ latest request's state under them. A click is one `POST /api/schedules/request` 
 `x-cp-control-token` header; the parent applies it. **+ Add** opens
 `#sessions?view=you&transcript=1&draft=…`: the composer starts with that draft (it never reaches the API). The long note on how schedules run sits in a `<details>` ("How schedules run"). The
 buttons wrap (`.schedule-controls`, flex-wrap) at 390 px and sit in the card grid at 1440 px; long reasons wrap with
-the card (`overflow-wrap: anywhere`).
+the card (`overflow-wrap: anywhere`). Chrome only (S10, frames 09/19): the card heading shows an enabled/disabled pill (dot plus word, green dot only when enabled); below 900 px the toolbar reads `+ Add`, the card shows a `title · trigger · mandate` identity line instead of the result sentence and facts, the aside becomes a closed "How schedules run" `<details>`, and the controls sit in a two-column grid with Remove spanning. The Schedules body (run history, last run, request wording) belongs to the schedules P3b track, not this restyle.
 Run history groups jobs by run (`src/viewer/schedule-run-groups.ts`): one anchor job (a fire or Run now) and the jobs it fanned out to are one run, the five newest runs show, "Last fire" shows the newest run, and a job no run claims sits under "Unattributed jobs". A done Run now reads "Run accepted · <job>" (acceptance, not completion). Display only: no authority, schedule or journal write.
 
 **Answers to acknowledge** (cp-mxk4, docs/contracts.md §Answers to acknowledge). `screens/Answers.tsx` renders
