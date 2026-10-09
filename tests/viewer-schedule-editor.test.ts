@@ -66,6 +66,43 @@ test("editor: a server refusal lands under the field it names", async t => {
 	await mod.act(() => mod.unmount(root));
 });
 
+test("editor: correcting a field clears its server refusal so Save works again", async t => {
+	const { window, root } = dom(t);
+	const sent: unknown[] = [];
+	const control: ScheduleControlView = { status: ready, sending: null, failed: { schedule_id: "sch-aaaaaa", reason: "invalid schedule policy: /limits/usd: must be above 0" }, request: (op, id, extra) => { sent.push([op, id, extra]); } };
+	await mod.act(() => mod.editor(root, { s: sched as unknown as ScheduleItem, policy: response, control, onClose: () => {} }));
+	const save = () => [...root.querySelectorAll("button")].find(b => b.textContent === "Save settings")!;
+	assert.equal(save().hasAttribute("disabled"), true, "refusal blocks the unchanged values");
+	await mod.act(() => type(window, input(root, /USD/), "9"));
+	assert.equal(root.querySelectorAll(".schedule-field-error").length, 0);
+	assert.equal(save().hasAttribute("disabled"), false);
+	await mod.act(() => { save().dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); });
+	assert.equal(sent.length, 1, "corrected draft resubmits");
+	await mod.act(() => mod.unmount(root));
+});
+
+test("editor: an external policy update cannot rebase the draft; Save stays off until an explicit reload", async t => {
+	const { window, root } = dom(t);
+	const sent: unknown[] = [];
+	const control: ScheduleControlView = { status: ready, sending: null, failed: null, request: (op, id, extra) => { sent.push([op, id, extra]); } };
+	const props = { s: sched as unknown as ScheduleItem, control, onClose: () => {} };
+	const saved = (revision: number, usd: number) => ({ ...response, policy: { ...legacy, revision, limits: { ...legacy.limits, usd } } });
+	await mod.act(() => mod.editor(root, { ...props, policy: saved(1, 5) }));
+	await mod.act(() => type(window, input(root, /USD/), "7"));
+	await mod.act(() => mod.editor(root, { ...props, policy: saved(2, 11) }));
+	const button = (name: string) => [...root.querySelectorAll("button")].find(b => b.textContent === name);
+	assert.equal(button("Save settings")!.hasAttribute("disabled"), true, "stale draft cannot be saved");
+	assert.match(root.querySelector(".schedule-field-error")?.textContent ?? "", /changed elsewhere/);
+	assert.equal(input(root, /USD/).value, "7", "the draft keeps its own values");
+	await mod.act(() => { button("Save settings")!.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); });
+	assert.equal(sent.length, 0, "nothing is sent against the newer revision");
+	await mod.act(() => { button("Reload latest settings")!.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); });
+	assert.equal(input(root, /USD/).value, "11", "reload re-opens on the newest settings");
+	await mod.act(() => { button("Save settings")!.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); });
+	assert.equal((sent[0] as [string, string, { revision: number }])[2].revision, 2);
+	await mod.act(() => mod.unmount(root));
+});
+
 test("control hook: a send keeps its receipt id across a reload and never resends; a double click sends once", async t => {
 	const { root } = dom(t);
 	const store = new Map<string, string>();
