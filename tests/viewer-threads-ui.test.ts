@@ -13,10 +13,10 @@ import { type ControlBody, type ControlView, deliveryLine } from "../viewer-app/
 import { normalizeTag, readThreads, sendThreadDone, threadBands, threadFilter, type ThreadsView, visibleEntries } from "../viewer-app/threads.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
-const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {OperatorComposer} from "./viewer-app/components/OperatorComposer.tsx"; export {act}; export const screen=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); export const mount=(root,control,thread)=>render(h(OperatorComposer,{control,thread}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
-const { act, screen, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {
+const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {OperatorComposer} from "./viewer-app/components/OperatorComposer.tsx"; import {ThreadChips} from "./viewer-app/components/ThreadNav.tsx"; export {act}; export const screen=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); export const mount=(root,control,thread)=>render(h(OperatorComposer,{control,thread}),root); export const mountNav=(root,threads,control)=>render(h(ThreadChips,{threads,control}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const { act, screen, mount, mountNav, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {
 	act: (fn: () => unknown) => Promise<void>; screen: (data: unknown, control?: ControlView, threads?: ThreadsView) => string;
-	mount: (root: unknown, control: ControlView, thread?: ThreadsView) => void; unmount: (root: unknown) => void;
+	mount: (root: unknown, control: ControlView, thread?: ThreadsView) => void; mountNav: (root: unknown, threads: ThreadsView, control?: ControlView) => void; unmount: (root: unknown) => void;
 };
 
 const B = "th-0123456789ab", O = "th-aaaaaaaaaaaa", D = "th-dddddddddddd";
@@ -73,7 +73,7 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 
 	const html = screen(full, control, threads()), all = parseHTML(`<body>${html}</body>`).document;
 	const chips = [...all.querySelectorAll("nav.session-threads[aria-label=Threads] button")].map(b => [b.textContent, b.getAttribute("aria-pressed")]);
-	assert.deepEqual(chips, [["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "All first and pressed; done threads are not chips");
+	assert.deepEqual(chips, [["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"], ["+ New", null]], "All first and pressed; done threads are not chips; + New opens the dialog");
 	assert.equal(all.querySelector('nav.session-threads button[aria-pressed="false"]')?.getAttribute("aria-label"), "billing-bug: waiting, 1 open ask(s), 1 unacknowledged answer(s)");
 	const nav = all.querySelector("nav.session-threads")!;
 	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
@@ -114,7 +114,7 @@ test("Mark done is disabled while waiting, with the reason as its title; enabled
 	assert.match(screen(full, undefined, threads({ selected: "ops", failed: { id: O, reason: "answer or acknowledge first" } })), /role="alert">Not done: answer or acknowledge first/);
 });
 
-test("composer picker: a selected tag rides the send; New thread… normalizes and refuses a bad tag", async t => {
+test("composer picker: a selected tag rides the send; the picker only selects (no inline New thread)", async t => {
 	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
 	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
@@ -129,7 +129,8 @@ test("composer picker: a selected tag rides the send; New thread… normalizes a
 
 	await act(() => mount(root, control, threads({ selected: "ops", select: tag => { picked.push(tag); } })));
 	const select = root.querySelector('select[aria-label="Thread"]') as HTMLSelectElement;
-	assert.deepEqual([...select.querySelectorAll(":scope > option")].map(o => o.textContent), ["No thread", "billing-bug · 2", "ops", "New thread…"]);
+	assert.deepEqual([...select.querySelectorAll(":scope > option")].map(o => o.textContent), ["No thread", "billing-bug · 2", "ops"], "no inline New thread… option: the dialog creates threads");
+	assert.equal(root.querySelector('input[aria-label="New thread tag"]'), null);
 	assert.deepEqual([...select.querySelectorAll("optgroup[label=Done] option")].map(o => o.textContent), ["old"]);
 	assert.ok(root.innerHTML.indexOf("operator-composer-thread") < root.innerHTML.indexOf("operator-composer-row"), "the picker sits above the text row");
 	await typeInto(root.querySelector("textarea")!, "hello");
@@ -142,23 +143,78 @@ test("composer picker: a selected tag rides the send; New thread… normalizes a
 	await fire(sendButton(), "click");
 	assert.deepEqual(sends.at(-1), { kind: "message", text: "plain" }, "No thread: no thread key");
 	const picker = root.querySelector('select[aria-label="Thread"]') as HTMLSelectElement;
-	for (const option of picker.querySelectorAll("option")) option.toggleAttribute("selected", option.textContent === "New thread…");
-	Object.defineProperty(picker, "value", { configurable: true, value: "+new" });
+	Object.defineProperty(picker, "value", { configurable: true, value: "billing-bug" });
 	await fire(picker, "change");
-	const input = () => root.querySelector('input[aria-label="New thread tag"]') as HTMLInputElement;
-	assert.equal(input().getAttribute("maxlength") ?? input().getAttribute("maxLength"), "32");
-	const use = () => [...root.querySelectorAll(".operator-composer-thread button")].find(b => b.textContent === "Use")!;
-	await typeInto(input(), "-x");
-	assert.equal(use().hasAttribute("disabled"), true);
-	assert.match(root.querySelector('.operator-composer-thread [role="alert"]')?.textContent ?? "", /1-32 of a-z 0-9 -, starting with a letter or digit/);
-	await typeInto(input(), "  Billing   Fix ");
-	assert.equal(use().hasAttribute("disabled"), false);
-	await fire(use(), "click");
-	assert.deepEqual(picked, ["billing-fix"], "the tag is normalized the server's way");
+	assert.deepEqual(picked, ["billing-bug"]);
 	await act(() => unmount(root));
 	await act(() => mount(root, control, threads({ status: list({ availability: "unavailable", threads: [], warning: "x" }) })));
 	assert.equal(root.querySelector('select[aria-label="Thread"]'), null, "an unreadable list hides the picker");
 	await act(() => unmount(root));
+});
+
+test("New thread dialog: no request until Create; Create selects and sends the first message once; Esc, scrim and × close without selecting; separators and N working", async t => {
+	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
+	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
+	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+	t.after(() => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
+	const root = document.getElementById("root")!;
+	const sends: ControlBody[] = [], picked: Array<string | null> = [];
+	const control: ControlView = { status, delivery: null, send: body => { sends.push(body); } };
+	const view = threads({ select: tag => { picked.push(tag); } });
+	const fire = async (el: Element, type: string, init: Record<string, unknown> = {}) => act(() => { const event = new window.Event(type, { bubbles: true }); Object.assign(event, init); el.dispatchEvent(event); });
+	const typeInto = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => { el.value = value; await fire(el, "input"); };
+	const open = async () => { await act(() => mountNav(root, view, control)); await fire(root.querySelector("button.session-thread-new")!, "click"); };
+	const create = () => root.querySelector("button.new-thread-create")!;
+	const name = () => root.querySelector(".new-thread input") as HTMLInputElement;
+
+	await open();
+	assert.deepEqual([sends.length, picked.length], [0, 0], "opening the dialog requests and selects nothing");
+	assert.ok(root.querySelector('[role="dialog"][aria-modal="true"]'));
+	await typeInto(name(), "-x");
+	assert.equal(create().hasAttribute("disabled"), true);
+	assert.match(root.querySelector('.new-thread [role="alert"]')?.textContent ?? "", /1-32 of a-z 0-9 -, starting with a letter or digit/);
+	await typeInto(name(), "#Design Review");
+	assert.equal(create().hasAttribute("disabled"), false, "a leading # is the adornment, stripped");
+	await fire(create(), "click");
+	assert.deepEqual([picked, sends], [["design-review"], []], "Create without text selects only: no send");
+	assert.equal(root.querySelector(".new-thread"), null, "Create closes");
+	await act(() => unmount(root));
+
+	await open();
+	await typeInto(name(), "billing-fix");
+	await typeInto(root.querySelector(".new-thread textarea") as HTMLTextAreaElement, "  first  ");
+	await fire(create(), "click");
+	assert.deepEqual(picked.at(-1), "billing-fix");
+	assert.deepEqual(sends, [{ kind: "message", text: "first", thread: "billing-fix" }], "one POST body, once");
+	await act(() => unmount(root));
+
+	const closers: Array<() => Promise<void>> = [() => fire(root.querySelector(".new-thread-hit")!, "click"), () => fire(root.querySelector(".new-thread-close")!, "click"), () => fire(document.documentElement, "keydown", { key: "Escape" })];
+	for (const close of closers) {
+		const before: number[] = [picked.length, sends.length];
+		await open();
+		await typeInto(name(), "never");
+		await close();
+		assert.equal(root.querySelector(".new-thread"), null);
+		assert.deepEqual([picked.length, sends.length], before, "closing selects and sends nothing");
+		await act(() => unmount(root));
+	}
+
+	const busy = [thread(B, "billing-bug", "open"), thread(O, "ops", "open")];
+	busy[0]!.counts.jobs_working = 2;
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	const base = sessionsView({ home: scratch.path, stateDir: join(scratch.path, LAYOUT.state) }, "you", null, { transcript: true })!;
+	const html = screen({ ...base, entries: [] }, control, threads({ status: list({ threads: busy }) }));
+	assert.match(html, /<span class="session-thread-working"> · 2 working<\/span>/, "neutral N working badge");
+	assert.equal((html.match(/session-thread-working/g) ?? []).length, 2, "one in the chips, one in the sidebar; 0 shows nothing");
+	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
+
+	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
+	const sep = screen(full, control, threads({ selected: "billing-bug" }));
+	assert.match(sep, /Show 2 earlier/); assert.match(sep, /Show 1 later/);
+	assert.doesNotMatch(sep, /text a-before|text a-after/, "collapsed until asked");
+	assert.match(sep, /text own/);
+	assert.doesNotMatch(screen(full, control, threads()), /Show \d+ (earlier|later)/, "All has no separators");
 });
 
 test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine shows an unrecorded thread; CSS rules", async () => {
@@ -182,7 +238,15 @@ test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine show
 	assert.match(css, /\.session-thread-chip \{[^}]*min-height: 44px/);
 	assert.match(css, /\.session-threads \{[^}]*overflow-x: auto/);
 	const control = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), phone = control.lastIndexOf("@media (max-width: 899px)");
-	assert.match(control.slice(phone), /\.operator-composer-thread select, \.operator-composer-thread input \{ font-size: 16px; \}/, "16 px fields on the phone");
+	assert.match(control.slice(phone), /\.operator-composer-thread select \{ font-size: 16px; \}/, "16 px fields on the phone");
+	assert.doesNotMatch(control, /operator-composer-thread (input|button)/, "the dead inline-tag rules are gone");
+	assert.match(control, /\.new-thread \{[^}]*border-radius: 12px 12px 0 0/, "sheet below 900 px");
+	assert.match(control.slice(control.indexOf("@media (min-width: 900px)")), /\.new-thread \{[^}]*border-radius: 12px; \}/, "dialog from 900 px");
+	assert.match(control, /\.new-thread-create \{[^}]*min-height: 44px/);
+	assert.match(css, /\.session-message\.session-other \{[^}]*padding-left: 32px/, "S6a low: the phone avatar gutter is 32px");
+	assert.match(css, /\.session-other > \.session-who > \.session-avatar \{[^}]*position: absolute/);
+	assert.match(css, /\.session-avatar \{ display: flex;/, "the phone avatar is visible, not hidden below 900 px");
+	assert.doesNotMatch(css.slice(0, desktop), /\.session-avatar \{[^}]*display: none/);
 });
 
 test("a composer send whose thread was not recorded shows the reason as an alert, never hidden on the phone", async t => {

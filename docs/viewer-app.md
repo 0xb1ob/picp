@@ -425,9 +425,8 @@ transcript): **All messages** first, a row per open or waiting thread, done thre
 /api/threads/done {id}` with the thread token, `x-cp-control-token`) is disabled, with the reason as its title, while the
 thread waits, while control is off and while asks or answers are unreadable; a refusal is an alert (`Not done: …`), a
 success goes back to **All** (a later send or bind reopens the thread). The composer's **Thread** select (`ThreadPicker`
-in `components/ThreadNav.tsx`, above the text row) offers No thread, each open or waiting tag, a `Done` group and `New
-thread…`, which opens a 32-character tag field with **Use**: the tag is normalized the server's way (trim, lowercase,
-spaces to `-`) and a bad one disables **Use** and shows the rule. A send with a tag carries `thread` in the
+in `components/ThreadNav.tsx`, above the text row) offers No thread, each open or waiting tag and a `Done` group. **`+ New`** (the last phone chip) / **`+`** (the sidebar's Threads heading) opens `components/NewThreadDialog.tsx`: a centred 12px-radius dialog at 900 px and up, a bottom sheet below, with a name field (`#` adornment, the tag rule as its hint: a leading `#` is stripped client-side, the server still refuses `#tag`), an optional first message and Cancel (desktop) / Create (44 px targets, 16 px fields). Nothing is requested until Create; Create selects the tag and, only with non-empty text, sends it once as the usual `POST /api/operator/message` (`POST /api/threads/done` is unchanged); Esc, the scrim and × close without selecting. While a thread is selected, entries before its first and after its last own entry are not dropped but collapsed as `Show N earlier` / `Show N later` buttons (`threadBands`). A thread's row/chip adds a neutral `· N working` badge (`counts.jobs_working`: its job refs that are live workers; `null` and 0 show nothing). The tag is normalized the server's way (trim, lowercase,
+spaces to `-`). A send with a tag carries `thread` in the
 `POST /api/operator/message` body; its normalized tag reaches the session's footer marker as `; thread=<tag>`.
 The session passes that tag on its answer/ask and files jobs it creates with `cp_parent thread_bind`; bound job
 bridge notices open a turn in that thread. Unbound notices, compactions and the aggregate inbox replay stay shared.
