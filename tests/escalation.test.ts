@@ -383,7 +383,7 @@ test("cp_escalate action batch_risk_high (6B-T2): every refusal writes nothing a
 	const pi = { on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<never> }) => tools.set(tool.name, tool as never) };
 	let refreshed = 0;
 	const deps = {
-		commandPost: () => ({ escalations: store, mandates, ledger: () => ledger }),
+		commandPost: () => ({ escalations: store, mandates, ledger: () => ledger, fleet: { read: () => ({ jobs: [] }) }, runs: { get: () => undefined } }),
 		setLive: () => {},
 		refreshWidget: () => {
 			refreshed += 1;
