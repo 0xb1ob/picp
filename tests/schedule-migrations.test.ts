@@ -5,7 +5,9 @@
  */
 import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { SCHEMA_VERSION } from "../src/contracts.ts";
@@ -232,6 +234,49 @@ test("P4 backup failure and damaged retry snapshot fail closed before any store 
 	writeFileSync(backups.find(r => r.source === b.scheduler.file)!.backup!, "damaged snapshot");
 	await assert.rejects(b.sweep(), /backup verification failed/);
 	assert.deepEqual(readFileSync(b.scheduler.file), original); assert.deepEqual(readFileSync(b.mandates.file(s.mandate_id!)), grant); assert.equal(existsSync(b.runs.policiesFile), false);
+});
+
+test("P4 syncs snapshot directories and ancestors before publication; every directory-sync failure prevents store writes", async (t) => {
+	const b = await importBench(t), schedule = await b.add("directory-durability");
+	await b.runs.savePolicyRevision(policyFromLegacy(schedule, schedule.grant_template!));
+	b.v1();
+	const stores = [b.scheduler.file, b.runs.policiesFile, b.mandates.file(schedule.mandate_id!)];
+	const originals = stores.map(file => readFileSync(file));
+	const dir = join(b.home.path, ".pi-command-post", "state", ".migrations", "backups");
+	const manifest = join(dirname(dir), "2026-12-schedule-policy-v2.backup.json");
+	const marker = join(dirname(dir), "2026-12-schedule-policy-v2.done");
+	assert.equal(existsSync(dirname(dir)), false, "the migration directory must also be created durably");
+	const chain: string[] = [];
+	for (let path = dir; ; path = dirname(path)) { chain.push(path); if (dirname(path) === path) break; }
+	const opened = new Map<number, string>(), synced: string[] = [];
+	const open = fs.openSync, sync = fs.fsyncSync;
+	let failAt: string | undefined;
+	t.mock.method(fs, "openSync", (...args: Parameters<typeof fs.openSync>) => {
+		const fd = open(...args); opened.set(fd, String(args[0])); return fd;
+	});
+	t.mock.method(fs, "fsyncSync", (fd: number) => {
+		const path = opened.get(fd)!;
+		if (!existsSync(manifest)) {
+			synced.push(path);
+			if (path === failAt) throw new Error("injected directory-sync failure");
+		}
+		return sync(fd);
+	});
+	syncBuiltinESMExports();
+	t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+	for (const path of chain) {
+		failAt = path; synced.length = 0;
+		await assert.rejects(b.sweep(), /injected directory-sync failure/);
+		assert.deepEqual(stores.map(file => readFileSync(file)), originals, "no policy, mandate or schedule rewrite after sync failure");
+		assert.equal(existsSync(manifest), false); assert.equal(existsSync(marker), false);
+		assert.deepEqual(synced.filter(p => chain.includes(p)), chain.slice(0, chain.indexOf(path) + 1));
+	}
+	failAt = undefined; synced.length = 0;
+	const report = await b.sweep();
+	assert.deepEqual(synced.slice(0, 3), report.backups.map(row => row.backup), "snapshot files are synced first");
+	assert.deepEqual(synced.slice(3, 3 + chain.length), chain, "every directory entry is durable before manifest publication");
+	assert.match(synced[3 + chain.length]!, /backup\.json\..+\.tmp$/, "manifest staging follows directory syncs");
+	assert.ok(existsSync(manifest)); assert.ok(b.runs.activePolicy(schedule.id));
 });
 
 test("P4 crash after activation retries retirement/v2 write with the original snapshot, no duplicate revisions", async (t) => {

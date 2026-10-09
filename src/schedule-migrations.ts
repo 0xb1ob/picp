@@ -10,7 +10,7 @@
 
 import { chmodSync, closeSync, constants, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isoTimestamp, LAYOUT, type Mandate } from "./contracts.ts";
 import { atomicWriteJson, atomicWriteText, queued } from "./json-store.ts";
 import { readJobsDocument } from "./ledger.ts";
@@ -131,6 +131,12 @@ export function policyImportBackups(home: string, mandates: MandateStore, now: D
 		try { fsyncSync(fd); } finally { closeSync(fd); }
 		if (hash(backup) !== sha256) throw new SchedulerError(`schedule import backup verification failed: ${backup}`);
 		rows.push({ source, backup, sha256 });
+	}
+	// Persist snapshot entries and their ancestor links, including directories left by a failed attempt.
+	for (let path = resolve(dir); ; path = dirname(path)) {
+		const fd = openSync(path, "r");
+		try { fsyncSync(fd); } finally { closeSync(fd); }
+		if (dirname(path) === path) break;
 	}
 	atomicWriteJson(manifest, rows, { mode: 0o600, syncDir: true });
 	return rows;
