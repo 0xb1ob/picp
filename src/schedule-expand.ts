@@ -10,6 +10,8 @@ import { orgReviewMaxReviewers, readScheduleFile, type Schedule } from "./viewer
 import type { ScheduleRunStore } from "./schedule-runs.ts";
 import { parseJobLabels } from "./ledger.ts";
 
+import { readSchedulePolicies, readScheduleRuns } from "./viewer/schedule-run-core.ts";
+import { policySchedule } from "./schedule-run-fire.ts";
 export const EXPANDED_MARKER = "expanded:";
 const SCHEDULE_LABEL = "schedule:";
 const ID_PATTERN = /^sch-[0-9a-f]{6}$/;
@@ -19,7 +21,13 @@ export const parentExpandedIds = (schedules: readonly Schedule[]): Set<string> =
 
 /** The saved schedules, [] when unreadable: the fail-closed direction (nothing is parent-expanded, so nothing is minted). */
 export function readSchedulesOrEmpty(home: string): Schedule[] {
-	try { return readScheduleFile(join(home, LAYOUT.state, "schedules.json")); } catch { return []; }
+	try {
+		const state = join(home,LAYOUT.state), policies = readSchedulePolicies(join(state,"schedule-policies.json")), runs = readScheduleRuns(join(state,"schedule-runs.json"));
+		return readScheduleFile(join(state,"schedules.json")).map(schedule=>{
+			const record = policies.find(p=>p.schedule_id === schedule.id);
+			return policySchedule(schedule,runs.find(r=>r.schedule_id === schedule.id && r.phase !== "closed")?.policy ?? record?.revisions.find(p=>p.revision === record.active_revision));
+		});
+	} catch { return []; }
 }
 
 export const readParentExpanded = (home: string): Set<string> => parentExpandedIds(readSchedulesOrEmpty(home));

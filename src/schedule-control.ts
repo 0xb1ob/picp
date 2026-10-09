@@ -29,7 +29,7 @@ export const RUN_NOW_REQUEST_ID = /^sc-[0-9]{14}-[0-9a-f]{8}$/;
  * dashboard control on. Each failure names why. The journal is 0600 under the home's uid: this binds the record to
  * the authenticated POST path (tailnet, schedule token), not against a same-uid writer (docs/contracts.md, U1).
  */
-export function verifiedRunNowClick(stateDir: string, requestId: string, scheduleId: string, pid: number): RunNowClick {
+export function verifiedRunNowClick(stateDir: string, requestId: string, scheduleId: string, pid: number, op = "run_now"): RunNowClick {
 	if (!RUN_NOW_REQUEST_ID.test(requestId)) return { ok: false, why: `${JSON.stringify(requestId)} is not a dashboard request id` };
 	let text: string;
 	try {
@@ -50,7 +50,7 @@ export function verifiedRunNowClick(stateDir: string, requestId: string, schedul
 	if (requests.length !== 1) return { ok: false, why: `${requests.length} request lines for ${requestId} in the journal, not one` };
 	const request = requests[0] as Record<string, unknown>;
 	if (request.by !== "viewer") return { ok: false, why: `the request was written by ${JSON.stringify(request.by)}, not the viewer` };
-	if (request.op !== "run_now") return { ok: false, why: `the request is ${JSON.stringify(request.op)}, not run_now` };
+	if (request.op !== op) return { ok: false, why: `the request is ${JSON.stringify(request.op)}, not ${op}` };
 	if (request.schedule_id !== scheduleId) return { ok: false, why: `the request names ${JSON.stringify(request.schedule_id)}, not ${scheduleId}` };
 	if (typeof request.peer !== "string" || request.peer.length === 0) return { ok: false, why: "the request records no peer" };
 	const claims = rows.slice(rows.indexOf(request) + 1).filter((line) => line.type === "claimed");
@@ -70,7 +70,7 @@ type Append = (line: ScheduleControlLine) => { ok: true } | { ok: false; error: 
 
 export interface ScheduleControlPorts {
 	stateDir: string;
-	scheduler: Pick<Scheduler, "setEnabled" | "remove" | "fireNow">;
+	scheduler: Pick<Scheduler, "setEnabled" | "remove" | "fireNow"> & Partial<Pick<Scheduler, "savePolicy" | "activatePolicy" | "deactivatePolicy">>;
 	now?: () => Date;
 	pid?: number;
 	log?: (line: string) => void;
@@ -166,8 +166,13 @@ export class ScheduleControl {
 			} else if (request.op === "remove") {
 				const { note } = await scheduler.remove(id);
 				this.#outcome(request, "done", `removed ${id}${note}`);
+			} else if (request.op === "save_policy" || request.op === "adopt" || request.op === "deactivate") {
+				const action = { saved_by: "dashboard" as const, provenance: { channel: "dashboard" as const, request_id: request.id } };
+				const record = request.op === "save_policy" ? await scheduler.savePolicy!(id, request.policy!, action, request.revision!)
+					: request.op === "adopt" ? await scheduler.activatePolicy!(id, action, request.revision!) : await scheduler.deactivatePolicy!(id, action);
+				this.#outcome(request, "done", request.op === "deactivate" ? "Back on per-fire grants" : `Settings saved · revision ${record.active_revision} (applies to the next run)`);
 			} else {
-				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer });
+				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer, ...(request.revision !== undefined ? { revision: request.revision } : {}) });
 				if (event.outcome !== "fired") {
 					this.#outcome(request, "refused", event.reason);
 					return undefined;

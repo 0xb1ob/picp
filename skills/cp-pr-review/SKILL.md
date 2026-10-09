@@ -21,6 +21,10 @@ below is still gated by `cp_dispatch` (mandate, job cap, parallelism, risk, the 
 grant as it stands: never ask the operator about its budget or cap, never raise one, and never issue another grant for
 the run.
 
+For an activated schedule, the anchor names its durable run (`under run <id>`). Children are admitted members of
+that run, under its frozen policy limits and validated model pins: no grant is minted and no standing order is
+needed for fan-out. The legacy fire-grant rules above apply only to schedules without an activated policy.
+
 ## Targets
 
 The anchor's description lists the PRs, one line each: `pr: https://github.com/<owner>/<repo>/pull/<n>` (1-20, all in

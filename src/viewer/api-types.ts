@@ -1,6 +1,8 @@
 import type { Listing, Root } from "./explorer.ts";
 import type { SessionRow } from "./sessions.ts";
 import type { Schedule } from "./schedule-core.ts";
+import type { SchedulePolicy } from "./schedule-policy.ts";
+import type { ScheduleRun } from "./schedule-run-core.ts";
 import type { SettingField, SettingKey, SettingsSnapshot, SettingValue } from "../contracts.ts";
 
 export type SessionTier = "you" | "parent" | "workers";
@@ -254,12 +256,15 @@ export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	last_run: { job_id: string; at: string; via: ScheduleRunView["via"]; missed: boolean } | null;
 	run_count: number; job_count: number;
 	lands: "board" | "report" | "branch" | "pull_request" | "plan" | "answer";
+	policy?: { active_revision: number; activated_at: string; limits: SchedulePolicy["limits"]; model: SchedulePolicy["model_policy"] } | null;
+	active_run?: ScheduleRun | null;
 };
 /** `/api/schedules`: `error` names an unreadable or invalid `state/schedules.json`; it is never silently empty. */
 export interface SchedulesResponse { generated_at: string; error: string | null; schedules: ScheduleItem[] }
 /** cp-hhuf P6: one Schedules page request and its latest state in `state/schedule-control.jsonl`. */
 export interface ScheduleControlRequestView {
-	id: string; at: string; op: "enable" | "disable" | "run_now" | "remove"; schedule_id: string;
+	id: string; at: string; op: "enable" | "disable" | "run_now" | "remove" | "save_policy" | "adopt" | "deactivate"; schedule_id: string;
+	revision?: number; client_id?: string;
 	state: "queued" | "applying" | "done" | "refused" | "expired" | "interrupted"; reason: string | null; job_id: string | null;
 }
 /** `GET /api/schedules/control` (--require-tailnet only): the CSRF token only while control is on. */
@@ -267,6 +272,11 @@ export interface ScheduleControlStatusResponse {
 	generated_at: string; enabled: boolean; reason: string | null; token: string | null;
 	parent: { running: boolean; pid: number | null; reason: string };
 	requests: ScheduleControlRequestView[]; error: string | null;
+}
+export interface SchedulePolicyResponse {
+ policy: SchedulePolicy | null; active_revision: number | null; legacy: SchedulePolicy | null;
+ effective: {limits:SchedulePolicy["limits"];exclusions:SchedulePolicy["exclusions"];notes:string[]} | null;
+ blocking: string[];
 }
 /** `POST /api/schedules/request` accepted: 202 once its `request` line is on disk. */
 export interface ScheduleControlSendResponse { id: string; state: "queued" }

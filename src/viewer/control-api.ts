@@ -59,6 +59,16 @@ import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 import { readPendingSends } from "./control-pending.ts";
 import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
+import { scheduleControlFieldError, type ScheduleControlFields } from "./control-files.ts";
+import { schedulePolicyView } from "./schedule-policy-view.ts";
+export const SCHEDULE_POLICY_PATH = "/api/schedules/policy";
+export function handleSchedulePolicy(req: IncomingMessage, options: ControlRouteOptions): ControlRouteResult {
+ if (options.requireTailnet !== true) return {status:403,body:{error:"schedule policy is served only under --require-tailnet"}};
+ const id = new URL(req.url ?? "/", "http://localhost").searchParams.get("schedule_id");
+ if (!id || !SCHEDULE_ID.test(id)) return {status:400,body:{error:"schedule_id must be sch-<6 hex>"}};
+ try { return {status:200,body:schedulePolicyView(options.stateDir,id)}; }
+ catch (error) { const message = (error as Error).message; return {status:message === `no schedule ${id}` ? 404 : 503,body:{error:message}}; }
+}
 export const CONTROL_STATUS_PATH = "/api/operator/control";
 export const CONTROL_MESSAGE_PATH = "/api/operator/message";
 export const OPERATOR_START_PATH = "/api/operator/start";
@@ -534,7 +544,7 @@ export function handleOperatorStart(req: IncomingMessage, options: ControlRouteO
 function requestView(request: ScheduleControlRequest, now: Date): ScheduleControlStatusResponse["requests"][number] {
 	const stale = request.state === "queued" && !(now.getTime() - Date.parse(request.at) <= SCHEDULE_CONTROL_MAX_AGE_MS);
 	return {
-		id: request.id, at: request.at, op: request.op, schedule_id: request.schedule_id,
+		id: request.id, at: request.at, op: request.op, schedule_id: request.schedule_id, ...(request.revision !== undefined ? {revision:request.revision} : {}), ...(request.client_id ? {client_id:request.client_id} : {}),
 		state: stale ? "expired" : request.state,
 		reason: stale ? `not taken by the parent within ${SCHEDULE_CONTROL_MAX_AGE_MS / 1000} s; it will not be applied` : request.reason,
 		job_id: request.job_id,
@@ -566,7 +576,9 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 		const op = (SCHEDULE_CONTROL_OPS as readonly unknown[]).includes(value?.op) ? (value?.op as ScheduleControlOp) : undefined;
 		const scheduleId = typeof value?.schedule_id === "string" && SCHEDULE_ID.test(value.schedule_id) ? value.schedule_id : undefined;
 		parsed({ kind: "schedule", text: null, ask_id: null, ...(op ? { op } : {}), ...(scheduleId ? { schedule_id: scheduleId } : {}) });
-		if (!value || !op || !scheduleId || Object.keys(value).length !== 2) return refuse(400, 'body must be {"op": "enable" | "disable" | "run_now" | "remove", "schedule_id": "sch-<6 hex>"}');
+		if (!value || !op || !scheduleId || Object.keys(value).some(k=>!["op","schedule_id","revision","policy","client_id"].includes(k))) return refuse(400, 'body must be {op, schedule_id, revision?, policy?, client_id?}');
+		const invalid = scheduleControlFieldError(value);
+		if (invalid) return refuse(400, invalid);
 		const parent = parentHolder(options.stateDir);
 		if (!parent.running) return refuse(503, `parent not running: ${parent.reason}; schedule controls apply only while it holds the home`);
 		if (!tokenMatches(req.headers["x-cp-control-token"], SCHEDULE_TOKEN)) return refuse(403, "control token missing or stale; reload the page");
@@ -579,10 +591,13 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 		if (!known) return refuse(404, `no schedule ${scheduleId}`);
 		const journal = readScheduleControl(options.stateDir);
 		if (journal.error) return refuse(500, `schedule control journal unreadable: ${journal.error}`);
+		const duplicate = value.client_id ? journal.requests.find(r=>r.client_id === value.client_id) : undefined;
+		if (duplicate) return {status:202,body:{id:duplicate.id,state:requestView(duplicate,now).state}};
 		const pending = journal.requests.filter((request) => requestView(request, now).state === "queued").length;
 		if (pending >= SCHEDULE_CONTROL_MAX_PENDING) return refuse(409, `${SCHEDULE_CONTROL_MAX_PENDING} schedule requests already wait for the parent`);
 		const id = scheduleRequestId(now);
-		const written = appendScheduleControlLine(options.stateDir, { type: "request", by: "viewer", id, at: now.toISOString(), peer, op, schedule_id: scheduleId });
+		const fields: ScheduleControlFields = { ...(value.revision !== undefined ? {revision:value.revision as number} : {}), ...(value.policy !== undefined ? {policy:value.policy as NonNullable<ScheduleControlFields["policy"]>} : {}), ...(value.client_id ? {client_id:value.client_id as string} : {}) };
+		const written = appendScheduleControlLine(options.stateDir, { type: "request", by: "viewer", id, at: now.toISOString(), peer, op, schedule_id: scheduleId, ...fields });
 		if (!written.ok) return refuse(500, `schedule control journal unwritable (${scheduleControlFile(options.stateDir)}): ${written.error}`);
 		return { status: 202, body: { id, state: "queued" } satisfies ScheduleControlSendResponse };
 	});

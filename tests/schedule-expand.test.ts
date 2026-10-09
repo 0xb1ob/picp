@@ -85,6 +85,12 @@ test("scheduleLabelRefusal: a cp-org-pr-review run holds at most max_reviewers r
 	assert.equal(scheduleRiskRefusal("cp-old1", ["risk:high"], [anchor, r1, r2, { ...old, labels: [label] }], [org]), undefined, "an earlier run's job");
 });
 
+test("all expansion recipes document durable run membership without new authority",()=>{
+ for(const skill of ["cp-self-review","cp-pr-review","cp-org-pr-review"]) {
+  const text=readFileSync(join(REPO_ROOT,`skills/${skill}/SKILL.md`),"utf8");
+  for(const part of ["anchor names its durable run","admitted members","no grant is minted","no standing order"]) assert.ok(text.includes(part),`${skill}: ${part}`);
+ }
+});
 test("the cp-self-review skill documents the recipe the plan fixes", () => {
 	const text = readFileSync(join(REPO_ROOT, "skills/cp-self-review/SKILL.md"), "utf8");
 	for (const part of [

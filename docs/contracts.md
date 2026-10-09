@@ -6139,22 +6139,40 @@ no daemon, socket or listener: the viewer appends a line, the parent reads it.
 `GET /api/schedules/control` (403 without `--require-tailnet`; never writes) returns `{enabled, reason, token,
 parent: {running, pid, reason}, requests, error}` — `token` is this viewer process's random schedule token, only
 while control is on; `parent` is `state/parent.lock` and whether its pid runs; `requests` are the last 20 with their
-latest state (a queued one older than 120 s is shown `expired`). `POST /api/schedules/request` takes exactly
-`{"op": "enable" | "disable" | "run_now" | "remove", "schedule_id": "sch-<6 hex>"}` and refuses, in order:
+latest state (a queued one older than 120 s is shown `expired`). `POST /api/schedules/request` takes
+`{op, schedule_id, revision?, policy?, client_id?}`. Operations are `enable|disable|run_now|remove|save_policy|adopt|deactivate`.
+`revision` is the expected active revision for Run now and latest/base revision for adopt/save (0 before the first save).
+`policy` is required only for save and must pass the closed policy validator. `client_id`, when supplied, is
+`sk-<14 digits>-<8 hex>`; repeating it returns the original receipt without applying another request. Refusals, in order:
 
 | Check | Refusal |
 |---|---|
 | method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `schedule`) |
-| body shape | 400 `body must be {"op": …, "schedule_id": "sch-<6 hex>"}` |
+| body shape, revision/client id, draft policy | 400 with the malformed field or policy errors |
 | the parent holds the home (`state/parent.lock` pid alive) | 503 `parent not running: …` |
 | `x-cp-control-token` equals the schedule token | 403 `control token missing or stale; reload the page` |
 | `state/schedules.json` readable / names the schedule | 503 `schedules unreadable: …` / 404 `no schedule <id>` |
+| readable control journal / duplicate client_id | 500 if unreadable; duplicate returns the same id and its current state |
 | fewer than 20 fresh requests queued | 409 |
 | the `request` line is appended | 500 `schedule control journal unwritable (…)` |
 | — | 202 `{id: "sc-<14 digits>-<8 hex>", state: "queued"}` |
 
 Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "schedule"`, `op`/`schedule_id` once
 parsed) in `state/operator/dashboard.jsonl`; no refusal writes a request line.
+
+`GET /api/schedules/policy?schedule_id=<id>` is read-only and tailnet-only. It returns
+`{policy, active_revision, legacy, effective, blocking}`; malformed ids return 400, absent schedules 404 and unreadable stores 503.
+The preview names live token narrowing and exclusion union; it never saves or activates.
+
+**Adopt/Deactivate.** The parent claims the request before checking live bounds and writing one atomic policy revision.
+Adopt refuses while any labelled legacy job or run is open. Save activates its new revision; it applies to the next run,
+while an open run retains its frozen recipe, model pins and bounds. Activation retires the legacy pointer with a system
+revoke unless another schedule names it. Deactivate refuses an open run, records a revision and clears activation,
+restoring the original v1 recipe and per-fire mint. Pipelines remain legacy. Authenticated saves preserve existing approval
+provenance and cannot synthesize org-review clearance. A stale/missing activated Run now revision refuses
+`Schedule changed; review updated settings`; every parent refusal is an outcome in the journal.
+`cp_schedule policy` previews; adopt/deactivate require one verified operator quote naming the schedule as a whole token,
+recording its source hash in policy provenance and refusing reuse across policy actions.
 
 **Journal** `state/schedule-control.jsonl` (0600, append-only, one `O_APPEND` write + `fsync` per line, two writers
 through [`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts)): the viewer's `request` (`id`, `at`, `peer`,
@@ -7694,13 +7712,13 @@ kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewer
 `cp-org-pr-review` as invalid (fail closed): `cp_schedule remove` it first; a fire grant carrying `risk_preapproval`
 validates on older binaries (the field is already in `MandateSchema`). No data migration.
 
-**Scheduled runs (P2b/A1, dormant).** A schedule with an activated policy starts a run instead of minting a grant. This build ships no way to activate or save a policy revision, and A1 keeps the production code lock `SCHEDULE_RUNS_ACTIVE=false`: every production store write still throws. Tests inject an active store to exercise the cutover. Pipeline schedules remain on the legacy grant path.
+**Scheduled runs: activation (P3a).** The production lock is `SCHEDULE_RUNS_ACTIVE=true`, landed together with the first authenticated policy writer. Only an authenticated adopt/save activates a schedule; unadopted schedules and pipelines keep per-fire grants. Activated fires start one durable run and mint no grant. P2b landed the consumers inert with the lock false; the approved P3a addendum corrects A1's attribution of that false lock to the plan.
 
 Run authority intercepts dispatch, promotion, implementation, reviewer start, repair, merge and checkpoint auto-decision before grant selection. The saved policy snapshot binds actions, exclusions, risk, USD/token caps, child admission and parallelism. A post-activation scheduled job without membership fails closed (`not_member`); legacy jobs created before activation continue under mandates. Missing/corrupt policies fail closed. Other named refusals are `run_closed`, `run_usd_cap`, `run_token_cap`, `child_cap`, `parallelism_full`, `deadline_passed`, `action_not_allowed`, `kind_excluded`, `path_excluded`, `subsystem_excluded`, `risk_high` and `hard_stop`. Only same-kind continuation is permitted after the deadline, and caps still bind it.
 
 A run checkpoint cites the closed basis `{run, clause}`, with clause `schedule-run <run-id> (policy rev N)` and attribution `schedule-run:<run-id>`. No synthetic mandate is created. Permits/refusals journal only to the run's `authority_log`; risk pre-approval covers run members only, never scripts, and hard stops still ask. Advice reads write nothing. Worker and reviewer non-cached usage count together; 80%/cap notices say no new admission, in-flight work continues, and the run closes partial, with no raise advice.
 
-**Downgrade:** once a later build enables adoption, disable adopted schedules and drain every open run before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize their open members. P2b/A1 itself writes no production runs or policies, so rollback is a revert.
+**Downgrade:** disable adopted schedules, drain every open run and its jobs, then deactivate each schedule before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize open members. Preserve both policy and run stores as audit history; deactivation restores legacy mint without a bulk migration.
 
 **Fresh grant per fire.** Every fire of a schedule without an activated policy — a cron slot, a watch fire, the page's Run now and
 `cp_schedule run_now` — files its job under a grant minted for that fire alone, from the schedule's saved
@@ -7751,14 +7769,13 @@ would refuse: "move the schedule to a new grant" for a revoke, "resume it, or mo
 pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
 template with its verbatim approval, or that the schedule has no template with the migration's reason.
 
-### Schedule policy (proposed; not yet authoritative)
+### Schedule policy (authoritative for adopted schedules)
 
-P1 defines `SchedulePolicy` and its closed validator in
-`src/viewer/schedule-policy.ts` (`SCHEDULE_POLICY_SCHEMA_VERSION = 1`), with
-pure live narrowing in `src/schedule-policy.ts`. Nothing reads or writes these
-policies in production yet. The existing fire path above is unchanged;
-legacy schedules, including pipeline delivery, still mint per-fire grants.
-Rollback is a revert; there is no stored policy or migration to undo.
+P1 defines `SchedulePolicy` and its closed validator in `src/viewer/schedule-policy.ts`
+(`SCHEDULE_POLICY_SCHEMA_VERSION = 1`), with pure live narrowing in `src/schedule-policy.ts`.
+P3a saves and activates revisions through the authenticated controls above. Run snapshots freeze the effective
+policy; unadopted schedules and pipeline delivery keep the legacy fire path. Rollback requires the drain/deactivate
+procedure above; P4 bulk import and schedules.json v2 are later.
 
 A policy saves the schedule id, revision (integer ≥ 1), save time and actor,
 provenance (channel and optional request/tool/send/delegation/hash/legacy-seed

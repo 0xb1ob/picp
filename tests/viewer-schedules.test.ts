@@ -21,6 +21,9 @@ import type { ScheduleControlStatusResponse, SchedulesResponse } from "../src/vi
 import type { ScheduleControlView } from "../viewer-app/schedule-control.ts";
 import { ANSWER_MAX_BYTES, DELIVERIES, JOB_KINDS, LAYOUT, MANDATE_ACTIONS, MANDATE_ASK_ON, MANDATE_CHANNELS, MANDATE_ID_PATTERN, SCHEMA_VERSION } from "../src/contracts.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
+import { readScheduleFile } from "../src/viewer/schedule-core.ts";
+import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
 
 const NOW = Date.parse("2026-09-28T01:41:00Z");
 
@@ -73,6 +76,27 @@ function fixture(t: { after(fn: () => void): void }, schedules?: string): Viewer
 }
 const file = (...schedules: unknown[]) => JSON.stringify({ schema_version: SCHEMA_VERSION, schedules });
 
+
+
+test("activated projection uses durable membership and preserves legacy history without double counting",async(t)=>{
+ const state=fixture(t,file(cron));
+ const jobsFile=join(state.home,".pi-command-post","jobs.json"), jobs=JSON.parse(readFileSync(jobsFile,"utf8"));
+ jobs.jobs.find((j:{id:string})=>j.id==="cp-fire1").notes="scheduled for sch-aaaaaa";
+ writeFileSync(jobsFile,JSON.stringify(jobs));
+ const schedule=readScheduleFile(join(state.stateDir,"schedules.json"))[0]!;
+ const runs=openScheduleRunStore(state.home);
+ const policy=policyFromLegacy(schedule,schedule.grant_template!);
+ await runs.savePolicyRevision(policy,{at:"2026-09-21T04:00:00Z",provenance:{channel:"dashboard"}});
+ const id="run-20260921040000-abcdef";
+ await runs.createRun({schema_version:1,id,schedule_id:schedule.id,policy_revision:1,policy,trigger:{via:"dashboard",at:"2026-09-21T04:00:10Z",request_id:"sc-20260921040010-abcdef12"},anchor_job_id:null,members:[],phase:"accepted",outcome:null,started_at:"2026-09-21T04:00:10Z",deadline_at:"2026-09-22T04:00:10Z",risk_preapproved:[],authority_log:[],cap_notices:[]});
+ await runs.attachAnchor(id,{job_id:"cp-fire2",role:null,admitted_at:"2026-09-21T04:00:10Z"});await runs.setPhase(id,"running");
+ const view=schedulesView(state,()=>{},NOW).schedules[0]!;
+ assert.equal(view.policy?.active_revision,1);assert.deepEqual(view.policy?.limits,policy.limits);assert.equal(view.active_run?.id,id);
+ assert.equal(view.run_count,2);assert.equal(view.job_count,2);
+ assert.deepEqual(view.runs.map(r=>r.run_id),[id,"cp-fire1"]);
+ assert.equal(view.history.find(j=>j.id==="cp-fire2")?.run_id,id);
+ writeFileSync(runs.runsFile,"{");assert.match(schedulesView(state,()=>{},NOW).error!,/JSON/);
+});
 test("nextCronSlot walks forward in the schedule's time zone, across a DST change", () => {
 	const spec = parseCron("0 6 * * 1");
 	assert.equal(nextCronSlot(spec, "Europe/Warsaw", new Date(NOW))?.toISOString(), "2026-09-28T04:00:00.000Z", "06:00 CEST");

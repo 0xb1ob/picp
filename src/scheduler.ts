@@ -30,7 +30,9 @@ import { verifiedRunNowClick } from "./schedule-control.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
-import { startRun } from "./schedule-run-fire.ts";
+import { changePolicy, policySchedule, startRun, type PolicyAction } from "./schedule-run-fire.ts";
+import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { effectivePolicyBounds } from "./schedule-policy.ts";
 
 export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
@@ -138,8 +140,8 @@ export interface ScheduleEvent {
  * is 12 hex of sha256 of that quote's source message, which authorizes at most one run now per schedule.
  */
 export type FireTrigger =
-	| { via: "dashboard"; request_id: string; peer: string | null }
-	| { via: "cp_schedule"; tool_call_id: string; operator_quote: string; decided_by: string; source_sha: string; send_id?: string; delegation_rule?: string };
+	| { via: "dashboard"; request_id: string; peer: string | null; revision?: number }
+	| { via: "cp_schedule"; tool_call_id: string; operator_quote: string; decided_by: string; source_sha: string; send_id?: string; delegation_rule?: string; revision?: number };
 
 /** Written on a cp_schedule run now's job (notes and quote comment); finding it on any job of the schedule refuses a replay. */
 export const runNowQuoteMarker = (sourceSha: string): string => `run-now quote sha ${sourceSha}`;
@@ -202,12 +204,12 @@ export class Scheduler {
 	}
 
 	list(): Schedule[] {
-		return readScheduleFile(this.file);
+		return readScheduleFile(this.file).map(s=>policySchedule(s,this.#ports.runs?.openRun(s.id)?.policy ?? this.#ports.runs?.activePolicy(s.id)));
 	}
 
 	#mutate<T>(fn: (schedules: Schedule[]) => T): Promise<T> {
 		return queued(this.file, async () => {
-			const schedules = this.list();
+			const schedules = readScheduleFile(this.file);
 			const out = fn(schedules);
 			const doc = { schema_version: SCHEMA_VERSION, schedules };
 			const errors = scheduleFileErrors(doc);
@@ -310,6 +312,33 @@ export class Scheduler {
 		return `; revoked its grant ${grant.id} (in-flight workers were not killed)`;
 	}
 
+	/** The first production policy writer; every operation shares the fire lane. */
+	savePolicy(id: string, draft: SchedulePolicy, action: PolicyAction, base: number): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
+		return this.#policy("save", id, action, base, draft);
+	}
+	activatePolicy(id: string, action: PolicyAction, revision: number): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
+		return this.#policy("adopt", id, action, revision);
+	}
+	deactivatePolicy(id: string, action: PolicyAction): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
+		return this.#policy("deactivate", id, action);
+	}
+	#policy(op: "save" | "adopt" | "deactivate", id: string, action: PolicyAction, base?: number, draft?: SchedulePolicy): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
+		return this.#serial(async () => {
+			const schedule = this.list().find(s => s.id === id), runs = this.#ports.runs;
+			if (!schedule || !runs?.active) throw new SchedulerError(`no schedule or active policy store for ${id}`);
+			if (action.provenance.channel === "dashboard") {
+				const click = verifiedRunNowClick(dirname(this.file), action.provenance.request_id ?? "", id, this.#ports.controlPid ?? process.pid, op === "save" ? "save_policy" : op === "adopt" ? "adopt" : "deactivate");
+				if (!click.ok) throw new SchedulerError(`policy action unauthenticated: ${click.why}`);
+			} else if (action.provenance.channel !== "cp_schedule" || !action.provenance.quote_sha || !action.provenance.tool_call_id) throw new SchedulerError("policy action requires an authenticated operator action");
+			const context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "live policy bounds are not wired" };
+			if (refused(context)) throw new SchedulerError(context.refusal);
+			const record = await changePolicy({ op, schedule, runs, ledger: this.#ports.ledger(), mandates: this.#ports.mandates, context, action, now: this.#now(), base, draft,
+				validate: s => { this.#validateSkill(s.job, s.trigger.type === "manual", s.project); assertScriptIntake({kind:s.job.kind,delivery:s.job.delivery,...(s.job.script_path ? {scriptPath:s.job.script_path} : {})}); } });
+			if (op !== "deactivate") this.#retire(schedule.mandate_id, this.list().filter(s => s.id !== id).map(s => s.mandate_id));
+			return record;
+		});
+	}
+
 	/**
 	 * Retargets a schedule to a fresh seed grant (`cp_schedule move`): the template is re-derived from the new seed and
 	 * written with the pointer in one write, in the fire lane, so the id, its `schedule:<id>` label and any open run are
@@ -364,6 +393,7 @@ export class Scheduler {
 			if (Object.keys(given).length === 0) throw new SchedulerError("cp_schedule update needs at least one of skill, description, title, kind, delivery");
 			const found = this.list().find((entry) => entry.id === id);
 			if (!found) throw new SchedulerError(`no schedule ${id}`);
+			if (this.#ports.runs?.activePolicy(id)) throw new SchedulerError("use save_policy to update an activated schedule");
 			const open = await this.#ports.ledger().list({ labels: [`schedule:${id}`] });
 			if (open.length) throw new SchedulerError(`schedule ${id} has an open run (${open.map((job) => job.id).join(", ")}); update it once every job of that run is closed`);
 			const job = { ...found.job, ...given, ...(given.title !== undefined ? { title: given.title.trim() } : {}) } as Schedule["job"];
@@ -399,8 +429,10 @@ export class Scheduler {
 		const at = isoTimestamp(now);
 		const mandate = this.#ports.mandates.sweep(at, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
 		// The pointer may have expired between clicks: what must hold is the next fire's re-evaluation.
-		const bounds = schedule.grant_template ? this.#fireBounds(schedule, now) : undefined;
-		const refusal = bounds ? pointerRefusal(mandate) ?? (refused(bounds) ? bounds.refusal : undefined) : noTemplate(schedule);
+		const policy = this.#ports.runs?.activePolicy(id);
+		const context = policy ? this.#ports.mintContext?.(schedule.project) ?? {refusal:"live policy bounds are not wired"} : undefined;
+		const bounds = policy && context ? (refused(context) ? context : effectivePolicyBounds(policy,context,schedule.project,policy.recipe.kind,now)) : schedule.grant_template ? this.#fireBounds(schedule, now) : undefined;
+		const refusal = bounds ? (!policy ? pointerRefusal(mandate) : undefined) ?? (refused(bounds) ? bounds.refusal : undefined) : noTemplate(schedule);
 		if (refusal) throw new SchedulerError(`enable ${id} refused: ${refusal}`);
 		return this.#mutate((schedules) => {
 			const found = schedules.find((entry) => entry.id === id);
@@ -447,7 +479,8 @@ export class Scheduler {
 		try {
 			const events: ScheduleEvent[] = [];
 			const now = this.#now();
-			for (const schedule of this.list()) {
+			for (const saved of this.list()) {
+				const schedule = policySchedule(saved, this.#ports.runs?.activePolicy(saved.id));
 				if (!schedule.enabled) continue;
 				let event: ScheduleEvent | undefined;
 				try {
@@ -521,6 +554,11 @@ export class Scheduler {
 	 * refusals are always reported and never recorded, and it writes no last_fire.
 	 */
 	async #fireOnce(schedule: Schedule, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
+		const latestSchedule = this.list().find(s => s.id === schedule.id);
+		if (!latestSchedule?.enabled) throw new SchedulerError(`schedule ${schedule.id} was removed or disabled`);
+		const currentPolicy = this.#ports.runs?.activePolicy(schedule.id);
+		if (manual && ((currentPolicy && manual.revision === undefined) || (manual.revision !== undefined && manual.revision !== (currentPolicy?.revision ?? 0)))) throw new SchedulerError("Schedule changed; review updated settings");
+		schedule = policySchedule(latestSchedule, currentPolicy);
 		const template = this.#template(schedule);
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
@@ -555,7 +593,7 @@ export class Scheduler {
 			try { context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "this host does not wire live policy bounds" }; }
 			catch (error) { return refuse(`live policy bounds unreadable (${(error as Error).message})`); }
 			if (refused(context)) return refuse(context.refusal);
-			const started = await startRun({ runs, ledger, schedule: latest, policy, context, title, now, slot, missed, missedAt, manual, controlPid: this.#ports.controlPid });
+			const started = await startRun({ runs, ledger, schedule, policy, context, title, now, slot, missed, missedAt, manual, controlPid: this.#ports.controlPid });
 			if (refused(started)) return refuse(started.refusal);
 			if (!manual) await this.#patch(schedule.id, { last_fire: { at, slot: slot.toISOString(), job_id: started.job_id, missed } });
 			return { ...base, ...started, outcome: "fired", delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...manualFields };

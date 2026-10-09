@@ -22,6 +22,7 @@ import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-co
 import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, SCHEDULER_TICK_MS } from "../../src/scheduler.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
+import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 /** The quote is written verbatim as one ledger comment (≤4000 chars) after its `run-now quote sha <12 hex>: ` prefix. */
 const RUN_NOW_QUOTE_MAX = 3900;
 
@@ -144,9 +145,10 @@ export function registerScheduleTools(
 	});
 
 	const parameters = Type.Object({
-		action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now", "move", "update"]),
-		id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now/move/update)" })),
-		operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now only: the operator's verbatim sentence naming the schedule (id or name)" })),
+		action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now", "move", "update", "policy", "adopt", "deactivate"]),
+		id: Type.Optional(Type.String({ description: "Schedule id" })),
+		revision: Type.Optional(Type.Integer({ minimum: 0, description: "Expected policy/base revision; required for adopt and an activated run_now" })),
+		operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now/adopt/deactivate: the operator's verbatim sentence naming the schedule (id or name)" })),
 		name: Type.Optional(Type.String()),
 		project: Type.Optional(Type.String()),
 		mandate_id: Type.Optional(Type.String({ description: "add/move: the seed schedule grant (schedule_grant:true) whose bounds every fire's fresh grant is minted from; one grant per schedule" })),
@@ -172,8 +174,9 @@ export function registerScheduleTools(
 			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`; " +
 			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use); `move` retargets a schedule to a fresh seed grant; " +
 			"`update` changes a schedule's skill, description, title, kind or delivery under add's rules (refused while a run is open). " +
-			"Every fire mints a fresh grant from the schedule's saved template (its seed grant's bounds; merge and risk:high always asked) and records an ordinary " +
-			"ledger job under it. answer/board/local fires are dispatched and torn down by the schedule runner " +
+			"`policy` previews saved/legacy settings; `adopt` (with revision) and `deactivate` require a single-use operator quote naming the schedule. " +
+			"Activated schedules start durable runs with saved per-run bounds and no grant minted; other schedules mint a fresh grant from the saved template. " +
+			"answer/board/local fires are dispatched and torn down by the schedule runner " +
 			"in code (an LLM schedule as one short-lived worker with its description as the task, a script_path schedule directly, no model); " +
 			"pr/pipeline fires wake you (cp-schedule) for cp_next/cp_dispatch. Job caps, parallelism, risk gates and review apply either way. " +
 			"Fires in the always-on parent; a slot missed while it was down is caught up once at start, noted \"missed <time>\".",
@@ -241,10 +244,24 @@ export function registerScheduleTools(
 				}
 				const event = await s.fireNow(id, {
 					via: "cp_schedule", tool_call_id: toolCallId, operator_quote: verified.stored.operator_quote, decided_by: verified.decidedBy,
+					...(params.revision !== undefined ? {revision:params.revision} : {}),
 					source_sha: createHash("sha256").update(verified.source).digest("hex").slice(0, 12), ...(verified.provenance ?? {}),
 				});
 				handle(event, (runner ??= buildRunner()));
 				text = formatScheduleEvent(event);
+			}
+			else if (params.action === "policy") text = JSON.stringify(schedulePolicyView(dirname(s.file),need("id")),null,2);
+			else if (params.action === "adopt" || params.action === "deactivate") {
+				if (!holdsLock()) throw new Error("only the parent holding the fleet lock may change schedule authority");
+				const id = need("id"), schedule = s.list().find(entry=>entry.id === id);
+				if (!schedule) throw new Error(`no schedule ${id}`);
+				const quote = need("operator_quote");
+				const verified = requireOperatorQuote(quote,{operatorTexts:operatorTextsFromEntries(ctx.sessionManager.getEntries())});
+				if (!namesToken(verified.stored.operator_quote,id,"") && !namesToken(verified.stored.operator_quote,schedule.name,"i")) throw new Error("the operator quote must name this schedule as a whole token");
+				const action = {saved_by:verified.decidedBy as "operator-quote"|"operator-delegated",provenance:{channel:"cp_schedule" as const,tool_call_id:toolCallId,quote_sha:createHash("sha256").update(verified.source).digest("hex").slice(0,12),...(verified.provenance ?? {})}};
+				if (params.action === "adopt" && params.revision === undefined) throw new Error("adopt needs revision: read cp_schedule policy first");
+				const record = params.action === "adopt" ? await s.activatePolicy(id,action,params.revision!) : await s.deactivatePolicy(id,action);
+				text = params.action === "adopt" ? `Settings saved · revision ${record.active_revision} (applies to the next run)` : "Back on per-fire grants";
 			}
 			else text = formatSchedules([await s.setEnabled(need("id"), params.action === "enable")]);
 			return { content: [{ type: "text", text }], details: {} };

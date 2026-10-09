@@ -61,7 +61,7 @@ export function scheduleControlLine(status: ScheduleControlStatus | null | undef
 export const latestRequest = (status: ScheduleControlStatus | null | undefined, scheduleId: string): ScheduleControlRequestView | undefined =>
  answered(status) ? [...status.requests].reverse().find(r => r.schedule_id === scheduleId) : undefined;
 
-const OP_LABEL: Record<ScheduleOp, string> = {enable: "Enable", disable: "Disable", run_now: "Run now", remove: "Remove"};
+const OP_LABEL: Record<ScheduleOp, string> = {enable: "Enable", disable: "Disable", run_now: "Run now", remove: "Remove", save_policy: "Save settings", adopt: "Adopt", deactivate: "Deactivate"};
 
 /** One request's state as the page says it. */
 export function requestLine(request: ScheduleControlRequestView): string {

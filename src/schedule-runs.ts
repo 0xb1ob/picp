@@ -1,4 +1,4 @@
-/** Durable schedule runs and policies. Code lock stays OFF until P2b wires authority consumers. */
+/** Durable schedule runs and policies; activation is operator-authenticated through Scheduler. */
 import { join } from "node:path";
 import { LAYOUT } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir, queued } from "./json-store.ts";
@@ -8,7 +8,7 @@ import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
 
 export const SCHEDULE_RUNS_FILE = "schedule-runs.json";
 export const SCHEDULE_POLICIES_FILE = "schedule-policies.json";
-export const SCHEDULE_RUNS_ACTIVE = false;
+export const SCHEDULE_RUNS_ACTIVE = true;
 export class ScheduleRunsInactiveError extends Error {}
 export class ScheduleRunStore {
 	readonly runsFile: string;
@@ -112,11 +112,16 @@ export class ScheduleRunStore {
 	noteCap(id: string, key: string): Promise<ScheduleRun> {
 		return this.#update(id, (run) => { if (!run.cap_notices.includes(key)) run.cap_notices.push(key); });
 	}
-	savePolicyRevision(policy: SchedulePolicy): Promise<PolicyRecord> {
+	savePolicyRevision(policy: SchedulePolicy, activation?: { at: string; provenance: SchedulePolicy["provenance"] }): Promise<PolicyRecord> {
 		return this.#policies((rows) => {
 			let record = rows.find((r) => r.schedule_id === policy.schedule_id);
 			if (!record) { record = { schedule_id: policy.schedule_id, revisions: [], active_revision: null, activated_at: null, activation: null }; rows.push(record); }
 			record.revisions.push(structuredClone(policy));
+			if (activation) {
+				record.active_revision = policy.revision;
+				record.activated_at ??= activation.at;
+				record.activation = structuredClone(activation.provenance);
+			}
 			return record;
 		});
 	}
@@ -124,14 +129,15 @@ export class ScheduleRunStore {
 		return this.#policies((rows) => {
 			const record = rows.find((r) => r.schedule_id === scheduleId);
 			if (!record || revision !== record.revisions.at(-1)?.revision) throw new ScheduleRunError(`${scheduleId}: missing or stale policy revision ${revision}`);
-			record.active_revision = revision; record.activated_at = at; record.activation = structuredClone(activation);
+			record.active_revision = revision; record.activated_at ??= at; record.activation = structuredClone(activation);
 			return record;
 		});
 	}
-	deactivatePolicy(scheduleId: string): Promise<PolicyRecord> {
+	deactivatePolicy(scheduleId: string, policy?: SchedulePolicy): Promise<PolicyRecord> {
 		return this.#policies((rows) => {
 			const record = rows.find((r) => r.schedule_id === scheduleId);
 			if (!record) throw new ScheduleRunError(`unknown policy ${scheduleId}`);
+			if (policy) record.revisions.push(structuredClone(policy));
 			record.active_revision = null; record.activated_at = null; record.activation = null;
 			return record;
 		});

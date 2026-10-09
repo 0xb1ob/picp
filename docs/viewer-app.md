@@ -69,7 +69,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
-| Schedule controls | `GET /api/schedules/control` (status + this viewer's schedule token), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
+| Schedule controls | `GET /api/schedules/control` (status + schedule token), `GET /api/schedules/policy?schedule_id=` (pure policy preview), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 | Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
 | Threads | `GET /api/threads` (list + this viewer's thread token), `POST /api/threads/done` (only under `--require-tailnet`; appends one `done` line, no session or parent) |
 | Settings | `GET /api/settings`, `POST /api/settings/apply`, `POST /api/settings/restore` (only under `--require-tailnet`; forwarded to the operator session, which validates, audits and writes the owner file) |
@@ -381,6 +381,11 @@ receives. There is no login or device allowlist: the HTTPS origin is reachable o
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
 390 px and lets the composer, the pinned decisions and the plain session messages run the transcript pane's full width at 1440 px (frames 06/16, main addendum ps-20261009102407-b9a45251); only your own right-hand bubbles stay capped at `min(760px, 100%)`.
+
+P3a server controls also accept `save_policy`, `adopt`, `deactivate`, expected `revision`, a validated draft `policy`
+and optional `client_id` correlation. Activated Run now requires its current revision. The policy route returns saved,
+legacy and effective policy with blocking reasons; saves preserve frozen open runs. The P3b editor and revision-aware
+buttons follow separately.
 
 **Schedule controls** (cp-hhuf P6, docs/contracts.md §Schedule controls). The Schedules page reads
 `GET /api/schedules/control` (`use-schedule-control.ts`, on mount, on every refresh and after each send) and shows

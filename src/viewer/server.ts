@@ -39,6 +39,7 @@ import { dashboard, jobDetail } from "./fleet-view.ts";
 import { sidebar, type ViewerState } from "./sessions.ts";
 import { handlePushSubscription, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, pushStatus } from "./push-api.ts";
 import { ANSWER_ACK_PATH, ANSWERS_CONTROL_PATH, CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleAnswerAck, handleAnswersControlStatus, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
+import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
 import { handleThreadDone, handleThreadsStatus, THREAD_DONE_PATH, THREADS_PATH } from "./threads-api.ts";
@@ -224,6 +225,11 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 					if (!res.headersSent) sendJson(res, 500, { error: "internal" });
 				});
 			return;
+		case SCHEDULE_POLICY_PATH: {
+			const out = handleSchedulePolicy(req, options);
+			sendJson(res, out.status, out.body, out.headers);
+			return;
+		}
 		case SCHEDULE_CONTROL_STATUS_PATH: {
 			const out = handleScheduleControlStatus(req, options);
 			sendJson(res, out.status, out.body, out.headers);
