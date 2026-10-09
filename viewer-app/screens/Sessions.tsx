@@ -22,7 +22,7 @@ import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 import { ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
-import { threadFilter, type ThreadsView, visibleEntries } from "../threads.ts";
+import { threadBands, threadFilter, type ThreadsView } from "../threads.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -259,8 +259,14 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
  // Operator threads (cp-xmw2): own entries, plus shared ones inside that thread's own span; pinned decisions are never filtered.
- const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, shown=visibleEntries(data.entries,filter);
- const rowList=rows(shown), starts=groupStarts(rowList);
+ const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, bands=threadBands(data.entries,filter), shown=bands.inside;
+ // `Show N earlier / later`: what the thread filter hides around its span, collapsed until asked for; a new selection collapses them again.
+ const [edges,setEdges]=useState({tag:threads?.selected ?? null,before:false,after:false});
+ const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
+ const rowList=rows(shown);
+ // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
+ const renderRows=(list:SessionEntry[])=>{const rl=rows(list), st=groupStarts(rl); return rl.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>);};
+ const edge=(side:"before"|"after",list:SessionEntry[],word:string)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
@@ -272,12 +278,12 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   <PageHeader title="Sessions"/>
   <aside class="session-sidebar" aria-label="Session streams">
    <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",modelText(data.operator_context ?? {}),data.selected === "you","unknown",data.operator_context)}</section>
-   {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads}/>}
+   {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads} control={control}/>}
    <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "active" : "idle"}`,data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context)}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
-   {data.transcript === true && threads && <ThreadChips threads={threads}/>}
+   {data.transcript === true && threads && <ThreadChips threads={threads} control={control}/>}
    <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<CtxPct usage={context} label/></div>
     {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
@@ -286,7 +292,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{rowList.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={starts.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>)}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!}/>)}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier")}{renderRows(shown)}{edge("after",bands.after,"later")}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">

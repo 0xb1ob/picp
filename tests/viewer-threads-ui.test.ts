@@ -13,10 +13,10 @@ import { type ControlBody, type ControlView, deliveryLine } from "../viewer-app/
 import { normalizeTag, readThreads, sendThreadDone, threadBands, threadFilter, type ThreadsView, visibleEntries } from "../viewer-app/threads.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
-const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {OperatorComposer} from "./viewer-app/components/OperatorComposer.tsx"; export {act}; export const screen=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); export const mount=(root,control,thread)=>render(h(OperatorComposer,{control,thread}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
-const { act, screen, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {
+const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {OperatorComposer} from "./viewer-app/components/OperatorComposer.tsx"; import {ThreadChips} from "./viewer-app/components/ThreadNav.tsx"; export {act}; export const screen=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); export const mount=(root,control,thread)=>render(h(OperatorComposer,{control,thread}),root); export const mountNav=(root,threads,control)=>render(h(ThreadChips,{threads,control}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const { act, screen, mount, mountNav, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {
 	act: (fn: () => unknown) => Promise<void>; screen: (data: unknown, control?: ControlView, threads?: ThreadsView) => string;
-	mount: (root: unknown, control: ControlView, thread?: ThreadsView) => void; unmount: (root: unknown) => void;
+	mount: (root: unknown, control: ControlView, thread?: ThreadsView) => void; mountNav: (root: unknown, threads: ThreadsView, control?: ControlView) => void; unmount: (root: unknown) => void;
 };
 
 const B = "th-0123456789ab", O = "th-aaaaaaaaaaaa", D = "th-dddddddddddd";
@@ -73,14 +73,15 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 
 	const html = screen(full, control, threads()), all = parseHTML(`<body>${html}</body>`).document;
 	const chips = [...all.querySelectorAll("nav.session-threads[aria-label=Threads] button")].map(b => [b.textContent, b.getAttribute("aria-pressed")]);
-	assert.deepEqual(chips, [["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "All first and pressed; done threads are not chips");
+	assert.deepEqual(chips, [["+ New", null], ["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "+ New first, All pressed; done threads are not chips; + New opens the dialog");
 	assert.equal(all.querySelector('nav.session-threads button[aria-pressed="false"]')?.getAttribute("aria-label"), "billing-bug: waiting, 1 open ask(s), 1 unacknowledged answer(s)");
 	const nav = all.querySelector("nav.session-threads")!;
 	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
 	const sidebar = all.querySelector('.session-sidebar section[aria-label="Threads"]');
 	assert.ok(sidebar, "a Threads section in the sidebar");
 	assert.equal(sidebar!.previousElementSibling?.querySelector("h2")?.textContent, "Operator ↔ you");
-	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["All messages", "billing-bug · 2waiting", "opsopen"]);
+	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["+", "All messages", "billing-bug · 2waiting", "Mark done", "opsopen", "Mark done"], "+ New is a sibling of the heading, not inside the h2; Mark done on every open row");
+	assert.equal(sidebar!.querySelector("h2")?.textContent, "Threads", "the dialog trigger and dialog stay out of the heading");
 	assert.match(sidebar!.querySelector("details > summary")?.textContent ?? "", /^Done \(1\)$/);
 	assert.match(html, /about billing/); assert.match(html, /about ops/);
 	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|<h2>Threads/, "Decisions view: no threads");
@@ -102,19 +103,18 @@ test("Mark done is disabled while waiting, with the reason as its title; enabled
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const full = { ...sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!, entries: [] };
 	const doneButtons = (view: ThreadsView) => [...parseHTML(`<body>${screen(full, undefined, view)}</body>`).document.querySelectorAll("button.session-thread-done")];
-	const waiting = doneButtons(threads({ selected: "billing-bug" }));
-	assert.equal(waiting.length, 2, "one on the chip row, one in the sidebar");
-	for (const button of waiting) {
-		assert.equal(button.hasAttribute("disabled"), true);
-		assert.equal(button.getAttribute("title"), "Answer or acknowledge first: 1 open ask(s), 1 unacknowledged answer(s)");
-	}
-	for (const button of doneButtons(threads({ selected: "ops" }))) assert.equal(button.hasAttribute("disabled"), false);
+	const disabled = (view: ThreadsView) => doneButtons(view).map(b => b.hasAttribute("disabled"));
+	const refusal = "Answer or acknowledge first: 1 open ask(s), 1 unacknowledged answer(s)";
+	// The sidebar renders Mark done on every open row (CSS shows it on hover or focus only); the chip row only on the selected thread.
+	assert.deepEqual(disabled(threads({ selected: "billing-bug" })), [true, false, true], "sidebar billing-bug refused while waiting, sidebar ops enabled, then the chip row (billing-bug)");
+	assert.deepEqual(doneButtons(threads({ selected: "billing-bug" })).filter(b => b.hasAttribute("disabled")).map(b => b.getAttribute("title")), [refusal, refusal]);
+	assert.deepEqual(disabled(threads({ selected: "ops" })), [true, false, false]);
 	for (const button of doneButtons(threads({ selected: "ops", status: list({ enabled: false, token: null, reason: "Dashboard control is off: opt-out" }) }))) assert.equal(button.getAttribute("title"), "Dashboard control is off: opt-out");
-	assert.equal(doneButtons(threads()).length, 0, "nothing selected, no Mark done");
+	assert.equal(doneButtons(threads()).length, 2, "nothing selected: no chip button, one per open sidebar row");
 	assert.match(screen(full, undefined, threads({ selected: "ops", failed: { id: O, reason: "answer or acknowledge first" } })), /role="alert">Not done: answer or acknowledge first/);
 });
 
-test("composer picker: a selected tag rides the send; New thread… normalizes and refuses a bad tag", async t => {
+test("composer picker: a selected tag rides the send; the picker only selects (no inline New thread)", async t => {
 	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
 	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
@@ -129,7 +129,8 @@ test("composer picker: a selected tag rides the send; New thread… normalizes a
 
 	await act(() => mount(root, control, threads({ selected: "ops", select: tag => { picked.push(tag); } })));
 	const select = root.querySelector('select[aria-label="Thread"]') as HTMLSelectElement;
-	assert.deepEqual([...select.querySelectorAll(":scope > option")].map(o => o.textContent), ["No thread", "billing-bug · 2", "ops", "New thread…"]);
+	assert.deepEqual([...select.querySelectorAll(":scope > option")].map(o => o.textContent), ["No thread", "billing-bug · 2", "ops"], "no inline New thread… option: the dialog creates threads");
+	assert.equal(root.querySelector('input[aria-label="New thread tag"]'), null);
 	assert.deepEqual([...select.querySelectorAll("optgroup[label=Done] option")].map(o => o.textContent), ["old"]);
 	assert.ok(root.innerHTML.indexOf("operator-composer-thread") < root.innerHTML.indexOf("operator-composer-row"), "the picker sits above the text row");
 	await typeInto(root.querySelector("textarea")!, "hello");
@@ -142,23 +143,84 @@ test("composer picker: a selected tag rides the send; New thread… normalizes a
 	await fire(sendButton(), "click");
 	assert.deepEqual(sends.at(-1), { kind: "message", text: "plain" }, "No thread: no thread key");
 	const picker = root.querySelector('select[aria-label="Thread"]') as HTMLSelectElement;
-	for (const option of picker.querySelectorAll("option")) option.toggleAttribute("selected", option.textContent === "New thread…");
-	Object.defineProperty(picker, "value", { configurable: true, value: "+new" });
+	Object.defineProperty(picker, "value", { configurable: true, value: "billing-bug" });
 	await fire(picker, "change");
-	const input = () => root.querySelector('input[aria-label="New thread tag"]') as HTMLInputElement;
-	assert.equal(input().getAttribute("maxlength") ?? input().getAttribute("maxLength"), "32");
-	const use = () => [...root.querySelectorAll(".operator-composer-thread button")].find(b => b.textContent === "Use")!;
-	await typeInto(input(), "-x");
-	assert.equal(use().hasAttribute("disabled"), true);
-	assert.match(root.querySelector('.operator-composer-thread [role="alert"]')?.textContent ?? "", /1-32 of a-z 0-9 -, starting with a letter or digit/);
-	await typeInto(input(), "  Billing   Fix ");
-	assert.equal(use().hasAttribute("disabled"), false);
-	await fire(use(), "click");
-	assert.deepEqual(picked, ["billing-fix"], "the tag is normalized the server's way");
+	assert.deepEqual(picked, ["billing-bug"]);
 	await act(() => unmount(root));
 	await act(() => mount(root, control, threads({ status: list({ availability: "unavailable", threads: [], warning: "x" }) })));
 	assert.equal(root.querySelector('select[aria-label="Thread"]'), null, "an unreadable list hides the picker");
 	await act(() => unmount(root));
+});
+
+test("New thread dialog: no request until Create; Create selects and sends the first message once; Esc, scrim and × close without selecting; separators and N working", async t => {
+	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
+	const originals = ["window", "document"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	Object.defineProperty(globalThis, "window", { configurable: true, value: window });
+	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+	t.after(() => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
+	const root = document.getElementById("root")!;
+	const sends: ControlBody[] = [], picked: Array<string | null> = [];
+	const control: ControlView = { status, delivery: null, send: body => { sends.push(body); } };
+	const view = threads({ select: tag => { picked.push(tag); } });
+	const fire = async (el: Element, type: string, init: Record<string, unknown> = {}) => act(() => { const event = new window.Event(type, { bubbles: true }); Object.assign(event, init); el.dispatchEvent(event); });
+	const typeInto = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => { el.value = value; await fire(el, "input"); };
+	const open = async () => { await act(() => mountNav(root, view, control)); await fire(root.querySelector("button.session-thread-new")!, "click"); };
+	const create = () => root.querySelector("button.new-thread-create")!;
+	const name = () => root.querySelector(".new-thread input") as HTMLInputElement;
+
+	await open();
+	assert.deepEqual([sends.length, picked.length], [0, 0], "opening the dialog requests and selects nothing");
+	assert.ok(root.querySelector('[role="dialog"][aria-modal="true"]'));
+	await typeInto(name(), "-x");
+	assert.equal(create().hasAttribute("disabled"), true);
+	assert.match(root.querySelector('.new-thread [role="alert"]')?.textContent ?? "", /1–32 characters: a-z, 0-9 and - only/);
+	await typeInto(name(), "#Design Review");
+	assert.match(root.querySelector(".new-thread-help")?.textContent ?? "", /Lowercase words and hyphens\. Shown as # design-review on messages and jobs\./);
+	assert.match(root.querySelector(".new-thread-chip")?.textContent ?? "", /# design-review/, "live tag chip");
+	assert.equal(create().hasAttribute("disabled"), false, "a leading # is the adornment, stripped");
+	await fire(create(), "click");
+	assert.deepEqual([picked, sends], [["design-review"], []], "Create without text selects only: no send");
+	assert.equal(root.querySelector(".new-thread"), null, "Create closes");
+	await act(() => unmount(root));
+
+	await open();
+	await typeInto(name(), "billing-fix");
+	await typeInto(root.querySelector(".new-thread textarea") as HTMLTextAreaElement, "  first  ");
+	await fire(create(), "click");
+	assert.deepEqual(picked.at(-1), "billing-fix");
+	assert.deepEqual(sends, [{ kind: "message", text: "first", thread: "billing-fix" }], "one POST body, once");
+	await act(() => unmount(root));
+
+	const closers: Array<() => Promise<void>> = [() => fire(root.querySelector(".new-thread-hit")!, "click"), () => fire(root.querySelector(".new-thread-close")!, "click"), () => fire(document.documentElement, "keydown", { key: "Escape" })];
+	for (const close of closers) {
+		const before: number[] = [picked.length, sends.length];
+		await open();
+		await typeInto(name(), "never");
+		await close();
+		assert.equal(root.querySelector(".new-thread"), null);
+		assert.deepEqual([picked.length, sends.length], before, "closing selects and sends nothing");
+		await act(() => unmount(root));
+	}
+
+	const busy = [thread(B, "billing-bug", "open"), thread(O, "ops", "open")];
+	busy[0]!.counts.jobs_working = 2;
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	const base = sessionsView({ home: scratch.path, stateDir: join(scratch.path, LAYOUT.state) }, "you", null, { transcript: true })!;
+	const html = screen({ ...base, entries: [] }, control, threads({ status: list({ threads: busy }) }));
+	assert.match(html, /<span class="session-thread-working">2 working<\/span>/, "neutral N working badge");
+	assert.equal((html.match(/session-thread-working/g) ?? []).length, 2, "one in the chips, one in the sidebar; 0 shows nothing");
+	const css = readFileSync(new URL("../viewer-app/screens/sessions.css", import.meta.url), "utf8");
+	assert.match(css, /\.session-thread-row:hover > \.session-thread-done, \.session-thread-row:focus-within > \.session-thread-done \{ display: block/, "Mark done only on hover or focus");
+	assert.doesNotMatch(css, /aria-pressed=true\]\) > \.session-thread-done/, "selected alone never shows Mark done");
+	assert.match(css, /\.session-thread-row:hover:has\(> \.session-thread-done\) \.session-thread-working[^{]*\{ visibility: hidden/, "the badge is hidden only on a row that has the action");
+	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
+
+	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
+	const sep = screen(full, control, threads({ selected: "billing-bug" }));
+	assert.match(sep, /2 earlier messages in other threads · show/); assert.match(sep, /1 later message in other threads · show/);
+	assert.doesNotMatch(sep, /text a-before|text a-after/, "collapsed until asked");
+	assert.match(sep, /text own/);
+	assert.doesNotMatch(screen(full, control, threads()), /in other threads · show/, "All has no separators");
 });
 
 test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine shows an unrecorded thread; CSS rules", async () => {
@@ -182,7 +244,15 @@ test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine show
 	assert.match(css, /\.session-thread-chip \{[^}]*min-height: 44px/);
 	assert.match(css, /\.session-threads \{[^}]*overflow-x: auto/);
 	const control = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), phone = control.lastIndexOf("@media (max-width: 899px)");
-	assert.match(control.slice(phone), /\.operator-composer-thread select, \.operator-composer-thread input \{ font-size: 16px; \}/, "16 px fields on the phone");
+	assert.match(control.slice(phone), /\.operator-composer-thread select \{ font-size: 16px; \}/, "16 px fields on the phone");
+	assert.doesNotMatch(control, /operator-composer-thread (input|button)/, "the dead inline-tag rules are gone");
+	assert.match(control, /\.new-thread \{[^}]*border-radius: 12px 12px 0 0/, "sheet below 900 px");
+	assert.match(control.slice(control.indexOf("@media (min-width: 900px)")), /\.new-thread \{[^}]*border-radius: 12px; \}/, "dialog from 900 px");
+	assert.match(control, /\.new-thread-create \{[^}]*min-height: 44px/);
+	assert.match(css, /\.session-message\.session-other \{[^}]*padding-left: 32px/, "S6a low: the phone avatar gutter is 32px");
+	assert.match(css, /\.session-other > \.session-who > \.session-avatar \{[^}]*position: absolute/);
+	assert.match(css, /\.session-avatar \{ display: flex;/, "the phone avatar is visible, not hidden below 900 px");
+	assert.doesNotMatch(css.slice(0, desktop), /\.session-avatar \{[^}]*display: none/);
 });
 
 test("a composer send whose thread was not recorded shows the reason as an alert, never hidden on the phone", async t => {
@@ -216,4 +286,26 @@ test("bound job notices and main replies obey #155's span filter; empty threads 
 	assert.doesNotMatch(owned, /notice before|notice after/);
 	assert.doesNotMatch(screen(full, undefined, threads({ selected: "ops" })), /notice owned|long reply|Context compacted/);
 	assert.match(screen(full, undefined, threads({ selected: "brand-new" })), /No messages in brand-new yet/);
+});
+
+test("sidebar rail: a 12-character thread name is full text and not ellipsised in a real browser layout (skipped without playwright)", async t => {
+	const long = "billing-bugs";
+	const busy = [thread(B, long, "open"), thread(O, "ops", "open")]; busy[0]!.counts.jobs_working = 2;
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const base = sessionsView({ home: home.path, stateDir: join(home.path, LAYOUT.state) }, "you", null, { transcript: true })!;
+	const html = screen({ ...base, entries: [] }, undefined, threads({ status: list({ threads: busy }), selected: long }));
+	const names = [...parseHTML(`<body>${html}</body>`).document.querySelectorAll(".session-thread-row strong")].map(e => e.textContent);
+	assert.ok(names.includes(long), "the full name is the text content (CSS never truncates the string)");
+	let pw: { chromium: { launch(o: object): Promise<any> } };
+	try { pw = await import(process.env.CP_PLAYWRIGHT ?? "playwright"); } catch { t.skip("playwright not installed; set CP_PLAYWRIGHT to run the layout assertion"); return; }
+	const css = ["../viewer-app/screens/sessions.css", "../viewer-app/components/control.css"].map(f => readFileSync(new URL(f, import.meta.url), "utf8")).join("\n");
+	const browser = await pw.chromium.launch({ args: ["--no-sandbox"] }); t.after(() => browser.close());
+	const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+	await page.setContent(`<style>body{margin:0}${css}</style><body>${html}</body>`);
+	for (const hover of [false, true]) {
+		if (hover) await page.locator(".session-thread-row").first().hover();
+		const m = await page.evaluate((name: string) => { const e = [...document.querySelectorAll(".session-thread-row strong")].find(x => x.textContent === name) as HTMLElement; return { scroll: e.scrollWidth, client: e.clientWidth, text: e.textContent }; }, long);
+		assert.ok(m.scroll <= m.client, `name not ellipsised (hover ${hover}): scrollWidth ${m.scroll} <= clientWidth ${m.client}`);
+		assert.equal(m.text, long);
+	}
 });
