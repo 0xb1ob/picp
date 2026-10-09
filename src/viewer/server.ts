@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
+import { statsView } from "./stats-view.ts";
 import { reportsView } from "./reports-view.ts";
 import { schedulesView } from "./schedules-view.ts";
 import { overview } from "./overview-view.ts";
@@ -253,6 +254,11 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			send(res, 200, "application/json; charset=utf-8", JSON.stringify({ ...sidebar(options), boards: listBoards(options, warn) }));
 			return;
   }
+		case "/api/stats": {
+			const out = statsView(options, url.searchParams, Date.now());
+			sendJson(res, out.status, out.body);
+			return;
+		}
 		case "/api/jobs":
 			sendJson(res, 200, jobsView(options));
 			return;
@@ -317,7 +323,7 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			return;
 		}
 		case "/api/stream": {
-			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "schedules"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res); return; }
+			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res); return; }
 			send(res, 404, "text/plain; charset=utf-8", "no such view\n");
 			return;
 		}
