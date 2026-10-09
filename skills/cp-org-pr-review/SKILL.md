@@ -21,6 +21,12 @@ every dispatch below is still gated by `cp_dispatch` (mandate, job cap, parallel
 as it stands: never ask the operator about its budget or cap, never raise one, and never issue another grant for the
 run. Its `dispatch_parallelism` is the seed's; when it is below max_reviewers the rest of the reviewers simply wait.
 
+For an activated schedule, the anchor names its durable run (`under run <id>`). Children are admitted members of
+that run, under its frozen policy limits and validated model pins: no grant is minted and no standing order is
+needed for fan-out. `max_reviewers` defaults to 3 and never exceeds 3. Only a verified dashboard Run now may carry
+saved org-review approval; cp_schedule and slot/watch starts still ask. Every per-head CI/review/merge gate stays.
+The legacy fire-grant rules above apply only to schedules without an activated policy.
+
 ## Configuration
 
 The schedule's description holds the config, one line each; `cp_schedule add`/`update` already validated it. A config

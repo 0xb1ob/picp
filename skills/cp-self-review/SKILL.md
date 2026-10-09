@@ -19,6 +19,11 @@ every fire, job cap at least 8: these seven jobs plus the anchor) is the only au
 still gated by `cp_dispatch` (mandate, job cap, parallelism, risk). Expand under that fire grant as it stands: never ask
 the operator about its budget or cap, never raise one, and never issue another grant for the run.
 
+For an activated schedule, the anchor names its durable run (`under run <id>`). Children are admitted members of
+that run, under its frozen policy limits and validated model pins: no grant is minted and no standing order is
+needed for fan-out. Follow a refused pin; never substitute a model. The legacy fire-grant rules above apply only
+to schedules without an activated policy.
+
 ## Window
 
 `end` = the anchor's `created_at`; `start` = `end` − N hours. N = 36 unless the anchor's description has a line

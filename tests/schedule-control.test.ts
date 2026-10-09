@@ -20,6 +20,7 @@ import { handleScheduleControlStatus } from "../src/viewer/control-api.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
 import { controlConfigFile, readScheduleControl, scheduleControlFile, type ScheduleControlLine } from "../src/viewer/control-files.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
+import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
 
 const T0 = new Date("2026-07-01T07:03:00Z");
 
@@ -48,6 +49,20 @@ function bench(t: import("node:test").TestContext) {
 	const state = (id: string) => readScheduleControl(stateDir).requests.find((entry) => entry.id === id);
 	return { clock, ledger, mandates, scheduler, stateDir, grant, control, request, lines, state, logs };
 }
+
+
+test("parent claims a stale revision-bound start before refusing it, without creating a job",async(t)=>{
+ const b=bench(t), schedule=await b.scheduler.add({name:"nightly",project:"demo",mandate_id:b.grant().id,manual:true,title:"Report",kind:"research",delivery:"answer"});
+ const runs=b.mandates.scheduleRuns;
+ await runs.savePolicyRevision(policyFromLegacy(schedule,schedule.grant_template!),{at:T0.toISOString().replace(/\.\d{3}Z$/,"Z"),provenance:{channel:"dashboard"}});
+ const scheduler=new Scheduler({home:b.mandates.home,ledger:()=>b.ledger,mandates:b.mandates,runs,usageJobs:()=>[],now:()=>T0,cloneOf:()=>b.mandates.home});
+ const id="sc-20260701070300-abcdef12";
+ appendScheduleControlLine(b.stateDir,{type:"request",by:"viewer",id,at:T0.toISOString(),peer:null,op:"run_now",schedule_id:schedule.id,revision:0});
+ await b.control({scheduler}).pass();
+ assert.deepEqual(b.lines().filter(l=>l.id===id).map(l=>l.type),["request","claimed","outcome"]);
+ assert.equal(b.state(id)?.state,"refused");assert.match(b.state(id)?.reason!,/Schedule changed/);
+ assert.deepEqual(await b.ledger.list(),[]);
+});
 
 const job = { title: "nightly report", kind: "research" as const, delivery: "answer" as const };
 

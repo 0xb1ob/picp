@@ -16,6 +16,7 @@ import { PR_URL, readMandates } from "./fleet-view.ts";
 import { objectList, strings } from "./overview-read.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 
+import { readSchedulePolicies, readScheduleRuns } from "./schedule-run-core.ts";
 export const SCHEDULE_HISTORY = 40;
 
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
@@ -122,6 +123,17 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 		return { generated_at, error: (error as Error).message, schedules: [] };
 	}
 	if (!schedules.length) return { generated_at, error: null, schedules: [] };
+	let policies: ReturnType<typeof readSchedulePolicies>, durable: ReturnType<typeof readScheduleRuns>;
+	try { policies = readSchedulePolicies(join(state.stateDir, "schedule-policies.json")); durable = readScheduleRuns(join(state.stateDir, "schedule-runs.json")); }
+	catch (error) { return {generated_at,error:(error as Error).message,schedules:[]}; }
+	schedules = schedules.map(s=>{
+		const record = policies.find(p=>p.schedule_id === s.id);
+		const active = record?.revisions.find(p=>p.revision === record.active_revision);
+		const policy = durable.find(r=>r.schedule_id === s.id && r.phase !== "closed")?.policy ?? active;
+		if (!policy) return s;
+		const {skill,...recipe} = policy.recipe;
+		return {...s,trigger:active?.trigger ?? s.trigger,job:{...recipe,...(skill ? {skill} : {})}};
+	});
 	const grants = readMandates(state);
 	const ledger = objectList(join(runtimeRoot(state.home), "jobs.json"), "jobs", (j) => typeof j.id === "string" && isSafeId(j.id)).value;
 	const boards = listBoards(state, warn);
@@ -135,11 +147,21 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 		const jobs = ledger.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`));
 		const cache = new Map<string, ReturnType<typeof factsOf>>();
 		const facts = (id: string) => { let f = cache.get(id); if (!f) cache.set(id, f = factsOf(id)); return f; };
-		const groups = groupScheduleRuns(jobs, schedule, schedule.last_fire, facts);
-		const runOf = new Map(groups.runs.flatMap((r) => r.job_ids.map((id): [string, string] => [id, r.run_id])));
+		const stored = durable.filter(r=>r.schedule_id === schedule.id);
+		const memberIds = new Set(stored.flatMap(r=>r.members.map(m=>m.job_id)));
+		const groups = groupScheduleRuns(jobs.filter(j=>!memberIds.has(String(j.id))), schedule, schedule.last_fire, facts);
+		const storedViews = stored.map(r=>{
+			const members = jobs.filter(j=>r.members.some(m=>m.job_id === j.id));
+			const {skill,...recipe} = r.policy.recipe;
+			const inferred = groupScheduleRuns(members,{...schedule,job:{...recipe,...(skill ? {skill} : {})}},schedule.last_fire,facts).runs.find(v=>v.anchor_id === r.anchor_job_id);
+			return {run_id:r.id,anchor_id:r.anchor_job_id ?? r.id,via:r.trigger.via === "watch" ? "slot" as const : r.trigger.via,at:r.started_at,missed:r.trigger.missed ?? false,
+				status:r.phase === "closed" ? "closed" as const : "open" as const,jobs_open:r.members.filter(m=>!members.some(j=>j.id === m.job_id && j.status === "closed")).length,jobs_total:r.members.length,job_ids:r.members.map(m=>m.job_id),result:inferred?.result ?? null};
+		});
+		const views = [...storedViews,...groups.runs].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,5);
+		const runOf = new Map(views.flatMap((r) => r.job_ids.map((id): [string, string] => [id, r.run_id])));
 		const windowIds = new Set([...runOf.keys(), ...groups.unattributed]);
 		return {
-			runs: groups.runs, last_run: groups.last_run, run_count: groups.run_count, job_count: groups.job_count, lands: scheduleLands(schedule.job),
+			runs: views, last_run: views[0] ? {job_id:views[0].anchor_id,at:views[0].at,via:views[0].via,missed:views[0].missed} : null, run_count: groups.run_count + stored.length, job_count: jobs.length, lands: scheduleLands(schedule.job),
 			history: jobs
 				.filter((j) => windowIds.has(String(j.id)))
 				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))
@@ -167,6 +189,8 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			grant_stopped: operatorStop(grants.find((g) => g.id === schedule.mandate_id)) !== undefined,
 			fan_out: fanOut(schedule),
 			run_now_clearance: runNowClearance(grants, schedule),
+			policy: (()=>{ const r = policies.find(p=>p.schedule_id === schedule.id); const p = r?.revisions.find(p=>p.revision === r.active_revision); return r && p ? {active_revision:p.revision,activated_at:r.activated_at!,limits:p.limits,model:p.model_policy} : null; })(),
+			active_run: durable.find(r=>r.schedule_id === schedule.id && r.phase !== "closed") ?? null,
 			...schedulePage(schedule),
 		})),
 	};

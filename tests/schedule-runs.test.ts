@@ -24,10 +24,10 @@ function run(): ScheduleRun {
 }
 const member = (job_id: string) => ({ job_id, role: null, admitted_at: at });
 
-test("S1: every production write throws before touching either file; absent reads are empty", (t) => {
+test("explicit inactive store writes throw before touching either file; absent reads are empty", (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
-	const store = openScheduleRunStore(home.path);
-	assert.equal(SCHEDULE_RUNS_ACTIVE, false);
+	assert.equal(SCHEDULE_RUNS_ACTIVE, true);
+	const store = new ScheduleRunStore({home:home.path,active:false});
 	assert.deepEqual(store.runs(), []);
 	assert.equal(store.run("missing"), undefined);
 	assert.equal(store.runOfJob("missing"), undefined);
@@ -170,15 +170,4 @@ test("S1: full legacy Scheduler fire mints normally and leaves both new files ab
 	const store = openScheduleRunStore(home.path);
 	assert.equal(existsSync(join(home.path, LAYOUT.state, "schedule-runs.json")), false);
 	assert.equal(existsSync(store.policiesFile), false); assert.deepEqual(store.runs(), []);
-});
-
-test("P2b: production has no policy activation or revision-save caller", () => {
-	function scan(dir: string): void {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const file = join(dir, entry.name);
-			if (entry.isDirectory()) scan(file);
-			else if (/\.[cm]?tsx?$/.test(file) && file !== "src/schedule-runs.ts") assert.doesNotMatch(readFileSync(file, "utf8"), /\.(?:activatePolicy|savePolicyRevision)\s*\(/, file);
-		}
-	}
-	scan("src"); scan("extensions");
 });

@@ -22,7 +22,7 @@ import { decisions } from "../src/viewer/overview-decisions.ts";
 const now = isoTimestamp(), at = isoTimestamp(new Date(Date.now()-600_000));
 async function fixture(orgReview = false) {
  const home = createScratchHome();
- const runs = new ScheduleRunStore({home:home.path, active:true});
+ const runs = new ScheduleRunStore({home:home.path});
  const approval = {operator_quote:"approve these run jobs",decided_by:"operator-delegated" as const,scope:"mandate_jobs" as const,granted_at:at};
  const policy = policyFromLegacy({id:"sch-123456", name:"Nightly work", project:"demo", mandate_id:"md-123456", enabled:true, created_at:at, trigger:{type:"manual"}, job:orgReview ? {title:"Nightly work",kind:"research",delivery:"local",skill:"cp-org-pr-review",description:"org: demo\nmax_reviewers: 1"} : {title:"Nightly work", kind:"ship", delivery:"pr"}}, {
   seed_mandate_id:"md-123456", channel:"operator_chat", objective:"Nightly work", expiry_hours:1, spend_usd:10, spend_tokens:1000, job_cap:orgReview ? 8 : 3,

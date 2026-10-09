@@ -167,3 +167,37 @@ test("without --require-tailnet both routes are 403 and nothing is journaled", a
 	assert.equal(existsSync(controlJournalFile(stateDir)), false);
 	assert.equal(existsSync(scheduleControlFile(stateDir)), false);
 });
+
+
+test("new policy bodies keep the guard chain; client_id returns one receipt without another request",async(t)=>{
+ const {stateDir,port}=await setup(t);
+ const token=String((await call(port,STATUS)).body.token);
+ const body={op:"adopt",schedule_id:SCHEDULE,revision:0,client_id:"sk-20261009090000-abcdef12"};
+ assert.equal((await call(port,REQUEST,json(null,body))).status,403);
+ assert.equal((await call(port,REQUEST,json(token,body,{origin:"https://evil.example"}))).status,403);
+ assert.equal((await call(port,REQUEST,json(token,{...body,revision:-1}))).status,400);
+ assert.equal((await call(port,REQUEST,json(token,{...body,op:"save_policy",policy:{}}))).status,400);
+ const first=await call(port,REQUEST,json(token,body));assert.equal(first.status,202);
+ const before=readFileSync(scheduleControlFile(stateDir),"utf8");
+ const again=await call(port,REQUEST,json(token,body));assert.deepEqual(again.body,first.body);
+ assert.equal(readFileSync(scheduleControlFile(stateDir),"utf8"),before);
+ appendScheduleControlLine(stateDir,{type:"outcome",by:"parent",id:String(first.body.id),at:new Date().toISOString(),state:"done",reason:"Settings saved",job_id:null});
+ const done=await call(port,REQUEST,json(token,body));assert.equal(done.body.id,first.body.id);assert.equal(done.body.state,"done");
+ const requests=(await call(port,STATUS)).body.requests as Record<string,unknown>[];
+ assert.equal(requests[0]?.client_id,body.client_id);assert.equal(requests[0]?.revision,0);
+ assert.equal(lines(scheduleControlFile(stateDir)).filter(r=>r.type==="request").length,1);
+ const deactivate=await call(port,REQUEST,json(token,{op:"deactivate",schedule_id:SCHEDULE}));assert.equal(deactivate.status,202);
+});
+
+test("policy GET is tailnet-only, pure, and names absent/malformed readiness",async(t)=>{
+ const {stateDir,port}=await setup(t);
+ const path=`/api/schedules/policy?schedule_id=${SCHEDULE}`;
+ const before=readFileSync(join(stateDir,"schedules.json"),"utf8");
+ const view=await call(port,path);assert.equal(view.status,200);assert.equal(view.body.policy,null);assert.equal(view.body.legacy,null);assert.match(String(view.body.blocking),/needs setup/);
+ assert.equal(readFileSync(join(stateDir,"schedules.json"),"utf8"),before);
+ assert.equal(existsSync(join(stateDir,"schedule-policies.json")),false);assert.equal(existsSync(scheduleControlFile(stateDir)),false);
+ assert.equal((await call(port,"/api/schedules/policy?schedule_id=../bad")).status,400);
+ assert.equal((await call(port,"/api/schedules/policy?schedule_id=sch-ffffff")).status,404);
+ put(join(stateDir,"schedule-policies.json"),"{");assert.equal((await call(port,path)).status,503);
+ const off=await setup(t,{requireTailnet:false});assert.equal((await call(off.port,path)).status,403);
+});

@@ -23,6 +23,7 @@ import { pushDataDir, readPushConfig } from "./push-files.ts";
 import { IMAGE_ID_SOURCE, TEXT_ID_SOURCE, isUploadId, sanitizeUploadName } from "./uploads.ts";
 import { isSafeId } from "./sessions.ts";
 
+import { schedulePolicyErrors, type SchedulePolicy } from "./schedule-policy.ts";
 export const CONTROL_PROTOCOL = 1;
 /** Composer text cap; with its JSON envelope it fits the body cap. */
 export const CONTROL_TEXT_MAX = 16_000;
@@ -47,17 +48,31 @@ export type InboxLine =
 
 /** cp-hhuf P6: Schedules page requests; the viewer appends `request`, the parent `claimed` then `outcome`. */
 export const scheduleControlFile = (stateDir: string): string => join(stateDir, "schedule-control.jsonl");
-export const SCHEDULE_CONTROL_OPS = ["enable", "disable", "run_now", "remove"] as const;
+export const SCHEDULE_CONTROL_OPS = ["enable", "disable", "run_now", "remove", "save_policy", "adopt", "deactivate"] as const;
 export type ScheduleControlOp = (typeof SCHEDULE_CONTROL_OPS)[number];
 /** A request the parent has not claimed within this is expired, never applied. */
 export const SCHEDULE_CONTROL_MAX_AGE_MS = 120_000;
 export const SCHEDULE_CONTROL_MAX_PENDING = 20;
 export type ScheduleControlState = "queued" | "applying" | "done" | "refused" | "expired" | "interrupted";
 export type ScheduleControlLine =
-	| { type: "request"; by: "viewer"; id: string; at: string; peer: string | null; op: ScheduleControlOp; schedule_id: string }
+	| ({ type: "request"; by: "viewer"; id: string; at: string; peer: string | null; op: ScheduleControlOp; schedule_id: string } & ScheduleControlFields)
 	| { type: "claimed"; by: "parent"; id: string; at: string; pid: number }
 	| { type: "outcome"; by: "parent"; id: string; at: string; state: "done" | "refused" | "expired" | "interrupted"; reason: string | null; job_id: string | null };
-export interface ScheduleControlRequest {
+export interface ScheduleControlFields { revision?: number; policy?: SchedulePolicy; client_id?: string }
+export const SCHEDULE_CLIENT_ID = /^sk-[0-9]{14}-[0-9a-f]{8}$/;
+/** Shared ingress and journal validation; legacy requests may omit revision until a policy is active. */
+export function scheduleControlFieldError(value: Record<string, unknown>): string | undefined {
+ const op = value.op;
+ if (value.client_id !== undefined && (typeof value.client_id !== "string" || !SCHEDULE_CLIENT_ID.test(value.client_id))) return "client_id must be sk-<14 digits>-<8 hex>";
+ if ((value.revision !== undefined && (!Number.isSafeInteger(value.revision) || Number(value.revision) < 0)) || ((op === "adopt" || op === "save_policy") && value.revision === undefined)) return "revision must be a non-negative integer";
+ if (value.revision !== undefined && !["run_now", "adopt", "save_policy"].includes(String(op))) return "revision is only for run_now, adopt or save_policy";
+ if (op === "save_policy") {
+  const errors = schedulePolicyErrors(value.policy);
+  if (errors.length) return `invalid schedule policy: ${errors.join("; ")}`;
+ } else if (value.policy !== undefined) return "policy is only for save_policy";
+ return undefined;
+}
+export interface ScheduleControlRequest extends ScheduleControlFields {
 	id: string;
 	at: string;
 	peer: string | null;
@@ -89,8 +104,8 @@ export function readScheduleControl(stateDir: string): { requests: ScheduleContr
 		}
 		if (typeof line?.id !== "string" || typeof line.at !== "string") continue;
 		if (line.type === "request") {
-			if (requests.has(line.id) || !(SCHEDULE_CONTROL_OPS as readonly unknown[]).includes(line.op) || typeof line.schedule_id !== "string") continue;
-			requests.set(line.id, { id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, op: line.op as ScheduleControlOp, schedule_id: line.schedule_id, state: "queued", claimed_pid: null, reason: null, job_id: null });
+			if (requests.has(line.id) || !(SCHEDULE_CONTROL_OPS as readonly unknown[]).includes(line.op) || typeof line.schedule_id !== "string" || scheduleControlFieldError(line)) continue;
+			requests.set(line.id, { id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, op: line.op as ScheduleControlOp, schedule_id: line.schedule_id, ...(line.revision !== undefined ? {revision:line.revision as number} : {}), ...(line.policy !== undefined ? {policy:line.policy as SchedulePolicy} : {}), ...(line.client_id !== undefined ? {client_id:line.client_id as string} : {}), state: "queued", claimed_pid: null, reason: null, job_id: null });
 			continue;
 		}
 		const request = requests.get(line.id);

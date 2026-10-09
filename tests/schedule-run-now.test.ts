@@ -49,6 +49,25 @@ async function bench(t: { after(fn: () => void): void }, delivery: Delivery = "p
 	return { ledger, mandates, scheduler, schedule, lock, said, run, call, jobs, sent, options, dispatched };
 }
 
+
+test("adopt/deactivate tools require one naming quote, bind revisions and never mint a grant for a run",async(t)=>{
+ const b=await bench(t,"pr");
+ const adopt=`Adopt ${b.schedule.id}.`;
+ await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/quote not found/);
+ b.said.push(adopt,"Yes, please.");
+ await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:"Yes, please.",revision:0}),/whole token/);
+ b.lock.held=false;await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/fleet lock/);b.lock.held=true;
+ await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt}),/needs revision/);
+ assert.match(await b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/revision 1/);
+ await assert.rejects(b.call({action:"deactivate",id:b.schedule.id,operator_quote:adopt}),/already used/);
+ b.said.push(`Run ${b.schedule.id}.`);
+ const grants=JSON.stringify(b.mandates.list());
+ await assert.rejects(b.call({action:"run_now",id:b.schedule.id,operator_quote:`Run ${b.schedule.id}.`,revision:0}),/Schedule changed/);
+ assert.match(await b.call({action:"run_now",id:b.schedule.id,operator_quote:`Run ${b.schedule.id}.`,revision:1}),/no grant minted/);
+ assert.equal(JSON.stringify(b.mandates.list()),grants);
+ assert.equal(b.mandates.scheduleRuns.openRun(b.schedule.id)?.policy_revision,1);
+});
+
 test("run_now fires on a verified quote naming the schedule, records it verbatim, and refuses a replay of the same message", async (t) => {
 	const { ledger, schedule, said, run, jobs, sent } = await bench(t);
 	const quote = `Run ${schedule.id} now.`;
