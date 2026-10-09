@@ -2,7 +2,9 @@ import { useState } from "preact/hooks";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
 import { observedTime } from "../format.ts";
 import { composerHref, jobHref, navigation } from "../routes.ts";
-import { ADD_SCHEDULE_DRAFT, latestRequest, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
+import { acceptedRunJob, ADD_SCHEDULE_DRAFT, latestRequest, readinessLine, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
+import { useSchedulePolicy } from "../use-schedule-control.ts";
+import { ScheduleEditor } from "./ScheduleEditor.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import "./jobs.css";
 import "./schedules.css";
@@ -12,6 +14,33 @@ const LANDS_TEXT: Record<ScheduleItem["lands"], string> = {pull_request:"a pull 
 const TRIGGER_TEXT = {slot:"Scheduled", dashboard:"Run now (dashboard)", cp_schedule:"Run now (cp_schedule)"};
 const RESULT_TEXT: Record<NonNullable<ScheduleItem["runs"][number]["result"]>["kind"], string> = {board:"Report board", pull_request:"Pull request", answer:"Answer", report:"Report", branch:"Branch (no PR)", job:"Job"};
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const EFFECT_TEXT: Record<ScheduleItem["lands"], string> = {pull_request: "a pull request", branch: "a pushed branch", plan: "a plan", answer: "an answer", board: "a report board", report: "a report"};
+
+/** One line of what a run may do. Concurrency is capped by the child-job cap, so it never claims more than can exist. */
+export function policySummary(s: ScheduleItem): string | null {
+ const t = s.grant_template;
+ const limits = s.policy?.limits ?? (t ? {usd: t.spend_usd, tokens: t.spend_tokens, child_jobs: t.job_cap, parallelism: t.dispatch_parallelism ?? 1} : null);
+ if (!limits) return null;
+ const at = Math.max(1, Math.min(limits.parallelism, limits.child_jobs));
+ const model = s.policy?.model.mode === "pinned" ? `pinned (${Object.entries(s.policy.model.by_role).map(([role, id]) => `${role} ${id}`).join(", ")})` : "routing default";
+ return `${s.fan_out ? `Up to ${s.fan_out.reviewers} reviewers, ` : ""}${at === 1 ? "1 at a time" : `${at} at once`}, plus ${EFFECT_TEXT[s.lands]}; $${limits.usd}/run; model ${model}.`;
+}
+
+/** Stage, child progress and limits of the open run. Spend is not in the projection, so it is not shown; a limit is not a spend. */
+function ActiveRun({s}: {s: ScheduleItem}) {
+ const run = s.active_run;
+ if (!run) return null;
+ return <p class="job-meta schedule-active-run" role="status">Active run <code>{run.id}</code> · {run.phase === "accepted" ? "accepted, not yet started" : "running"} · {run.members.length} of {run.policy.limits.child_jobs} child jobs admitted · limit ${run.policy.limits.usd} / {run.policy.limits.tokens} tokens · must finish by {observedTime(run.deadline_at)}{run.outcome === "partial" && " · partial"}</p>;
+}
+
+/** The three newest runs. "closed" means every job closed; it does not say the run succeeded. */
+function LastRuns({s}: {s: ScheduleItem}) {
+ const runs = s.runs.slice(0, 3);
+ return <section class="schedule-last-runs" aria-label="Last 3 runs"><h3>Last 3 runs</h3>
+  <ActiveRun s={s}/>
+  {runs.length ? <ol>{runs.map(r => <li key={r.run_id} class="job-meta"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a><span>{TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status === "open" ? `open, ${r.jobs_open} of ${r.jobs_total} jobs still open` : `all ${r.jobs_total} jobs closed`}</span>{r.result && <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a>}</li>)}</ol> : <p class="job-meta">No runs yet</p>}
+ </section>;
+}
 
 function JobRow({j}: {j:ScheduleHistoryJob}) {
  return <li key={j.id} class="job-meta">
@@ -43,6 +72,9 @@ export function triggerText(s: ScheduleItem): string {
 
 
 function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) {
+ const stamp = control?.status && "generated_at" in control.status ? control.status.generated_at : null;
+ const policy = useSchedulePolicy(!!control && scheduleControlReady(control.status), s.id, stamp);
+ const summary = policySummary(s);
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
  return <article class="schedule-card">
   <div class="schedule-card-heading"><h2>{s.name}</h2><span class={`schedule-pill${s.enabled ? " schedule-pill-on" : ""}`}>{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
@@ -55,6 +87,9 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
    <dt>Last fire</dt><dd>{s.last_run ? <><a href={jobHref(s.last_run.job_id)}><code>{s.last_run.job_id}</code></a> at {observedTime(s.last_run.at)} · {TRIGGER_TEXT[s.last_run.via]}{s.last_run.missed && " (missed)"}</> : s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {plural(s.run_count, "recent run")} · {plural(s.job_count, "job")}</dd>
   </dl>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
+  {summary && <p class="schedule-policy-line">{summary}</p>}
+  {control && scheduleControlReady(control.status) && <p class="job-meta schedule-readiness">{readinessLine(policy)}</p>}
+  <LastRuns s={s}/>
   <details class="schedule-details"><summary>Grant, template &amp; run history · {plural(s.runs.length, "run")}</summary>
    {s.grant_template ? <>
     <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
@@ -66,26 +101,38 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
    {s.last_fire && <p class="job-meta">Last fire slot: {observedTime(s.last_fire.slot)}</p>}
    {s.history.length ? <RunHistory s={s}/> : <p class="jobs-empty">No job fired yet</p>}
   </details>
-  {control && <ScheduleControls s={s} control={control}/>}
+  {control && <ScheduleControls s={s} control={control} policy={policy}/>}
  </article>;
 }
 
-/** Run now (enabled only), then Enable/Disable, then a two-tap Remove; disabled unless ready and nothing is pending for this schedule. */
-export function ScheduleControls({s, control}: {s:ScheduleItem; control:ScheduleControlView}) {
+type PolicyState = ReturnType<typeof useSchedulePolicy>;
+
+/** Run now (revision-bound once a policy is active) or View active run, Enable/Disable, a two-tap Remove; settings actions sit below. Disabled unless ready and nothing is pending for this schedule. */
+export function ScheduleControls({s, control, policy = null}: {s:ScheduleItem; control:ScheduleControlView; policy?: PolicyState}) {
  const [confirmRemove,setConfirmRemove] = useState(false);
+ const [editing,setEditing] = useState(false);
  const latest = latestRequest(control.status, s.id);
  const pending = latest?.state === "queued" || latest?.state === "applying" || control.sending !== null;
  const disabled = !scheduleControlReady(control.status) || pending;
  const failed = control.failed?.schedule_id === s.id ? control.failed.reason : null;
  const remove = () => { if (!confirmRemove) { setConfirmRemove(true); return; } setConfirmRemove(false); control.request("remove", s.id); };
+ const answered = policy && !("error" in policy) ? policy : null;
+ const anchor = s.active_run?.anchor_job_id ?? null;
+ const acceptedJob = latest && !failed ? acceptedRunJob(latest) : null;
  return <div class="schedule-control">
   <div class="schedule-controls">
-   {s.enabled && <button type="button" class="schedule-primary" disabled={disabled} onClick={() => control.request("run_now", s.id)}>Run now</button>}
+   {s.enabled && (s.active_run ? (anchor ? <a class="schedule-primary schedule-view-run" href={jobHref(anchor)}>View active run</a> : <button type="button" class="schedule-primary" disabled>Run starting…</button>) : <button type="button" class="schedule-primary" disabled={disabled} onClick={() => control.request("run_now", s.id, s.policy ? {revision: s.policy.active_revision} : {})}>Run now</button>)}
    <button type="button" disabled={disabled} onClick={() => control.request(s.enabled ? "disable" : "enable", s.id)}>{s.enabled ? "Disable" : "Enable"}</button>
    <button type="button" class="schedule-remove" disabled={disabled} onClick={remove}>{confirmRemove ? "Tap again to remove" : "Remove…"}</button>
   </div>
+  {answered && <div class="schedule-settings">
+   <button type="button" disabled={disabled} aria-expanded={editing} onClick={() => setEditing(open => !open)}>{editing ? "Close editor" : "Edit settings"}</button>
+   {!s.policy && (answered.policy || answered.legacy) && <button type="button" disabled={disabled || answered.blocking.length > 0} onClick={() => control.request("adopt", s.id, {revision: answered.policy?.revision ?? 0})}>Adopt saved settings</button>}
+   {s.policy && <button type="button" disabled={disabled || !!s.active_run} onClick={() => control.request("deactivate", s.id)}>Back to per-fire grants</button>}
+  </div>}
+  {editing && answered && <ScheduleEditor s={s} policy={answered} control={control} onClose={() => setEditing(false)}/>}
   {s.fan_out && <FanOut s={s} fan={s.fan_out}/>}
-  {failed ? <p role="alert" class="job-meta">Refused: {failed}</p> : latest && <p role="status" class="job-meta">{requestLine(latest)}</p>}
+  {failed ? <p role="alert" class="job-meta">Refused: {failed}</p> : latest && <p role="status" class="job-meta">{acceptedJob ? <>Run accepted · <code>{acceptedJob}</code> · <a href={jobHref(acceptedJob)}>view run</a></> : requestLine(latest)}</p>}
  </div>;
 }
 

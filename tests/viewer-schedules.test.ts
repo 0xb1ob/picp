@@ -433,6 +433,12 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.ok(document.querySelector(".schedule-card-heading .schedule-pill"), "enabled state is a pill");
 	assert.ok(document.querySelector(".schedule-how-phone"), "phone gets a closed how-schedules-run disclosure");
 	assert.equal(document.querySelector(".schedule-how-phone")?.hasAttribute("open"), false);
+	assert.equal(document.querySelector(".schedule-heading .schedule-add-phone")?.textContent, "+ Add", "phone + Add sits in the title row");
+	assert.equal(document.querySelector(".schedule-heading")?.textContent?.includes("Saved triggers and the jobs they fired."), false, "the old tagline is gone");
+	assert.match(document.querySelector(".schedule-card .schedule-policy-line")?.textContent ?? "", /^1 at a time, plus an answer; \$10\/run; model routing default\.$/, "never more concurrency than exists");
+	assert.equal(document.querySelectorAll(".schedule-card").length, 2);
+	assert.equal(document.querySelector(".schedule-last-runs h3")?.textContent, "Last 3 runs");
+	assert.equal(document.querySelectorAll("form, [style]").length, 0, "no form, no inline style");
 	assert.ok(document.querySelector(".schedule-layout > aside"), "explanation beside the schedule list");
 	for (const card of document.querySelectorAll(".schedule-card")) {
 		assert.deepEqual([...card.querySelectorAll(".schedule-facts > dt")].map(e => e.textContent), ["Trigger", "Recipe", "Mandate", "Last fire"]);
