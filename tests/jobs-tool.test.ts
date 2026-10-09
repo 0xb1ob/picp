@@ -193,6 +193,33 @@ test("a schedule: label is refused on create and update unless a parent-expanded
 	await runJobAction({ action: "update", job_id: plainId, add_labels: ["schedule:sch-abc123"] }, p);
 });
 
+test("cp_job on a cp-org-pr-review run: risk:high from the label or the parameter counts against max_reviewers; an idempotent re-create past the cap returns the job", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const label = "schedule:sch-0a0b0c";
+	const schedule = { id: "sch-0a0b0c", name: "org", project: "demo", mandate_id: "md-abcd", trigger: { type: "manual" }, job: { title: "Org review", kind: "research", delivery: "local", skill: "cp-org-pr-review", description: "org: acme\nmax_reviewers: 2" }, enabled: true, created_at: "2026-01-01T00:00:00Z" };
+	mkdirSync(join(scratch.path, LAYOUT.state), { recursive: true });
+	writeFileSync(join(scratch.path, LAYOUT.state, "schedules.json"), JSON.stringify({ schema_version: 1, schedules: [schedule] }));
+	const anchor = await scratch.ledger.create({ title: "Org review (run now)", project: "demo", delivery: "local", kind: "research", labels: [label] });
+	await scratch.ledger.update(anchor.id, { status: "deferred" });
+	const job = (title: string, extra: Partial<JobActionInput> = {}): JobActionInput => ({ action: "create", title: `${title} [${anchor.id}]`, project: "demo", delivery: "local", kind: "research", labels: [label], ...extra } as JobActionInput);
+	const id = (result: { details: Record<string, unknown> }) => (result.details.job as { id: string }).id;
+	const r1 = id(await runJobAction(job("R1/2", { risk: "high" }), p));
+	await runJobAction(job("R2/2", { labels: [label, "risk:high"] }), p); // the raw label, no risk parameter
+	await assert.rejects(runJobAction(job("R3/2", { labels: [label, "risk:high"] }), p), /already has 2 reviewer job\(s\) \(max_reviewers 2\)/);
+	await assert.rejects(runJobAction(job("R3/2", { risk: "high" }), p), /already has 2 reviewer job\(s\)/);
+	const s1 = id(await runJobAction(job("S1"), p));
+	await assert.rejects(runJobAction(job("extra"), p), /already has 3 job\(s\) \(max_reviewers 2 plus one synthesis\)/);
+	// Past the cap, the same create is the same job (findDuplicate runs before the cap), with its risk unchanged.
+	const again = await runJobAction(job("R1/2", { risk: "high" }), p);
+	assert.deepEqual([id(again), again.details.existing], [r1, true]);
+	assert.equal(id(await runJobAction(job("S1"), p)), s1);
+	// Raising the synthesis to risk:high would make a third reviewer: refused; a no-op re-add on a reviewer is not.
+	await assert.rejects(runJobAction({ action: "update", job_id: s1, add_labels: ["risk:high"] }, p), /cp_job update refused: .*already has 2 reviewer job\(s\)/);
+	await runJobAction({ action: "update", job_id: r1, add_labels: ["risk:high"] }, p);
+	await runJobAction({ action: "update", job_id: r1, remove_labels: ["risk:high"] }, p);
+	await runJobAction({ action: "update", job_id: s1, add_labels: ["risk:high"] }, p);
+});
+
 test("intake: three-item list with one dep; re-run creates nothing", async (t) => {
 	const created: string[] = [];
 	const { ports: base, scratch } = ports(t);

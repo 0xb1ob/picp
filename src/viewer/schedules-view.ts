@@ -5,9 +5,10 @@
  * labelled `schedule:<id>`. Read-only; changes are `cp_schedule`'s or the page's journaled requests (control-api.ts,
  * src/schedule-control.ts).
  */
+import { createHash } from "node:crypto";
 import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
-import { nextCronSlot, operatorStop, parseCron, readScheduleFile, type Schedule } from "./schedule-core.ts";
+import { nextCronSlot, operatorStop, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, parseCron, readScheduleFile, type Schedule } from "./schedule-core.ts";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "./api-types.ts";
 import { listBoards, type BoardWarn } from "./boards.ts";
 import { PR_URL, readMandates } from "./fleet-view.ts";
@@ -42,6 +43,31 @@ function mandateStatus(grants: Json[], id: string, now: number): ScheduleItem["m
 function pauseReason(grants: Json[], id: string): string | null {
 	const m = grants.find((g) => g.id === id);
 	return m?.status === "paused" ? str(m.pause_reason) ?? "operator" : null;
+}
+
+/** cp-org-pr-review only: the Run now card's fan-out, from the same parser `cp_schedule add` validates with. */
+function fanOut(schedule: Schedule): ScheduleItem["fan_out"] {
+	if (schedule.job.skill !== "cp-org-pr-review") return null;
+	try {
+		const config = orgReviewConfig(schedule.job.description ?? "");
+		return { reviewers: config.max_reviewers, org: config.org, user: config.user, teams: config.teams, holds: config.holds.length, error: null };
+	} catch (error) {
+		return { reviewers: ORG_REVIEW_MAX_REVIEWERS, org: null, user: null, teams: [], holds: 0, error: (error as Error).message };
+	}
+}
+
+/**
+ * cp-org-pr-review only: the template seed's standing pre-approval a verified Run now click would carry (the same seed
+ * conditions as `carriedPreapproval`), as its quote's sha12 — the quote itself never leaves the home.
+ */
+function runNowClearance(grants: Json[], schedule: Schedule): ScheduleItem["run_now_clearance"] {
+	if (schedule.job.skill !== "cp-org-pr-review" || !schedule.grant_template) return null;
+	const seed = grants.find((g) => g.id === schedule.grant_template?.seed_mandate_id);
+	const pre = obj(seed?.risk_preapproval);
+	const quote = str(pre?.operator_quote);
+	const granted = str(pre?.granted_at);
+	if (!seed || seed.schedule_grant !== true || seed.schedule_fire !== undefined || pre?.scope !== "mandate_jobs" || operatorStop(seed) || !quote || !granted) return null;
+	return { quote_sha: createHash("sha256").update(quote).digest("hex").slice(0, 12), granted_at: granted };
 }
 
 function prUrl(state: ViewerState, id: string, envelope: Json | undefined): string | null {
@@ -106,6 +132,8 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			mandate_status: mandateStatus(grants, schedule.mandate_id, now),
 			mandate_pause_reason: pauseReason(grants, schedule.mandate_id),
 			grant_stopped: operatorStop(grants.find((g) => g.id === schedule.mandate_id)) !== undefined,
+			fan_out: fanOut(schedule),
+			run_now_clearance: runNowClearance(grants, schedule),
 			history: ledger
 				.filter((j) => strings(j.labels).includes(`schedule:${schedule.id}`))
 				.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) || String(b.id).localeCompare(String(a.id)))

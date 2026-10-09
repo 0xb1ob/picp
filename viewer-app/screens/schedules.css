@@ -28,6 +28,8 @@
 .schedule-controls button:disabled { opacity: 0.5; }
 .schedule-controls .schedule-primary { background: var(--text); color: var(--background); border-color: var(--text); }
 .schedule-controls .schedule-remove { background: none; color: var(--muted); border-color: transparent; font-weight: 400; }
+.schedule-fan-out { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.schedule-fan-out p { margin: 0; line-height: 1.5; }
 .schedule-how h2 { margin-bottom: 8px; color: var(--muted); font-size: 14px; font-weight: 500; }
 .schedule-how p { color: var(--muted); font-size: 13px; line-height: 1.6; }
 @media (max-width: 899px) {

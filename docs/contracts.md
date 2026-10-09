@@ -3563,6 +3563,7 @@ move is the right one.
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
 | `ci_checks_read` | parent bash `gh [flags] pr checks`, or a `gh` `--json`/`gh api` argument naming `statusCheckRollup` (the checks API is refused in this home; prose mentioning it is allowed) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
+| `schedule_control_write` | parent `write`/`edit` of a `schedule-control.jsonl` path, or a bash statement naming it with a stage that is not a plain reader (`cat`, `head`, `tail`, `less`, `more`, `grep`, `rg`, `jq`, `wc`, `ls`, `stat`), an output redirect or a substitution | the operator clicks Run now, or `cp_schedule run_now` with their verbatim sentence (*Run now clearance*) |
 
 The bash rule is an allowlist, because that is the only shape that fails
 closed: a command that mentions an artifact path is refused unless it is a
@@ -4117,7 +4118,9 @@ quote, never the quote), evidence (≤8 × ≤200 chars)}`, shown with the quote
 `wouldAskRiskHigh` (dry run, H6 warning) reads the same predicate. A pre-approval is dispatch/promotion only: it
 never touches `evaluateAuthority` (checkpoints, `merge`, `final_fix`, plan approval), `ask_on: merge`, a
 `human_handoff` project's merge, `batchRiskHigh`, or `decide()`. Both fields are optional and additive; a grant
-written before them validates unchanged.
+written before them validates unchanged. A fire grant of a cp-org-pr-review schedule may carry its seed's
+pre-approval for one verified dashboard Run now click (*Run now clearance*, under Schedules); that record is
+`operator-delegated` and its audit rows lead with `fire run_now <request_id>`.
 
 **Batch approval** (`cp_escalate action:"batch_risk_high" job_ids:[2..16]`,
 `batchRiskHigh` in `src/risk-batch.ts`): one `risk_high_irreversible` record
@@ -7054,7 +7057,7 @@ shell are marked *outside guard coverage*.
 
 A headless bridge parent is started with `PARENT_BRIDGE_FLAGS` (`--no-extensions
 --no-skills`) plus `-e` the command-post extension and `--skill
-<home>/skills/<name>` for each `PARENT_SKILLS` entry (`cp-memory`, `cp-self-review`, `cp-pr-review`; each falling back to the package's shipped copy when
+<home>/skills/<name>` for each `PARENT_SKILLS` entry (`cp-memory`, `cp-self-review`, `cp-pr-review`, `cp-org-pr-review`; each falling back to the package's shipped copy when
 the home has none), so that path reports zero foreign tools and loads no
 implementation skills. The doctor check is for a human-launched TUI parent that still loads
 global extensions.
@@ -7588,7 +7591,7 @@ Parent transport waits behind the shared compaction hold described in *Parent co
 **Manual and parent-expanded schedules.** `manual: true` saves `trigger:
 {type:"manual"}`: no tick ever fires it or writes to it (no `last_checked_at`,
 `last_fire` or `last_skip`); only Run now does, with the grant, archived-project and
-open-fire checks above. `skill: cp-self-review` or `skill: cp-pr-review` (the expander registry
+open-fire checks above. `skill: cp-self-review`, `skill: cp-pr-review` or `skill: cp-org-pr-review` (the expander registry
 `SCHEDULE_SKILLS`, each with its anchor in `SCHEDULE_SKILL_ANCHOR`: manual, `research`, `local`, no
 `script_path` only; refused on cron and watch) makes the fire a **parent-expanded
 run**: the job it records is a `deferred` anchor (never dispatched, never offered
@@ -7626,6 +7629,64 @@ PR's title, body, diff or comments. Nothing is posted to GitHub. This rule is br
 home's `gh` credentials, and a read-only token is a noted follow-up, not built. An older binary reads a
 `schedules.json` naming `cp-pr-review` as invalid (see CHANGELOG, Downgrade).
 
+**Org PR-review schedules.** `skill: cp-org-pr-review` (manual, research/local) reviews the requested-review queue of
+one GitHub org with up to three reviewers that may each post a bare approval. Its description config
+(`orgReviewConfig`, `src/viewer/schedule-core.ts`; `cp_schedule add`/`update` refuse a fault naming the line) is one line
+per key, a trimmed line starting `<key>:` (key case-insensitive); every other line is prose, ignored: exactly one
+`org: <login>`; at most one `user: <login>` (absent: the gh-authenticated user); 0–10 distinct bare `team: <slug>`
+(`<org>/<slug>` is refused); 0–50 distinct `hold: https://github.com/<org>/<repo>/pull/<n>` in the org; at most one
+`max_reviewers: <1-3>` (default and cap 3, `ORG_REVIEW_MAX_REVIEWERS`); no `pr:` line. No org, user, team or repository
+is built into the code or the skill. The recipe (`skills/cp-org-pr-review`) discovers the queue with `gh search prs`,
+pre-filters it (holds, own and bot authors, drafts, `CHANGES_REQUESTED`, unresolved threads, open bot findings, CI not
+green by `--checks success`), deals the passing PRs round-robin into k = min(N, max_reviewers) disjoint sets, comments
+the frozen assignment on the anchor, then creates R1…Rk (research/local, `risk: high`) and one report-only research/local
+synthesis S1 depending on them; N = 0 creates no job and closes the anchor with the filtered/held report. **Run cap:**
+`scheduleLabelRefusal` refuses a `schedule:<id>` job past max_reviewers + 1 beside the open anchor (jobs not created
+before it; an unreadable `created_at` counts), and a `risk:high` one — from the `risk` parameter or a raw `risk:high`
+label — past max_reviewers; `scheduleRiskRefusal` holds `cp_job update add_labels: [risk:high]` on a run job to the same
+reviewer cap. An idempotent re-create (`findDuplicate` first) never counts its job twice. **Floor:**
+max_reviewers + 2 (5 by default); `dispatch_parallelism` is the seed's, never raised by code — add, move and update name
+it when it is below max_reviewers. **Brief-level gates** (the reviewers run with this home's `gh` credentials, as
+cp-pr-review's): a reviewer's one GitHub write is `gh pr review <url> --approve`, no body, on the head SHA it reviewed,
+only when the gh user is `user:`, the PR is open, non-draft, not archived, not its own or a bot's, the head equals the
+assigned and reviewed SHA, CI is `SUCCESS` at it, no unresolved thread, no `CHANGES_REQUESTED`, no open bot finding, no
+`hold:`, no critical finding, and no approval of that user on that SHA already exists (never twice); it never requests
+changes, comments, merges, closes, pushes, edits, labels, dismisses or re-requests. `gh pr review` cannot pin a commit,
+so the reviewer re-reads the head immediately before and reads the review's `commit_id` back after; a mismatch is
+reported and stops its posting. S1 makes zero GitHub calls and posts nothing; reviewers never combine or re-post.
+
+**Run now clearance (org PR-review only).** A fire template never mints, stores or inherits a pre-approval. A seed
+grant with a `risk_preapproval` is still refused as a template seed, except for a cp-org-pr-review schedule whose
+pre-approval is `mandate_jobs` (a `named_jobs` one is refused); its template still holds none, and the add/move/update
+notes say so. Per fire, before the mint retires the seed, `carriedPreapproval` (`src/schedule-grant.ts`) copies the
+seed's pre-approval onto the fresh fire grant only when both hold: (a) the seed is a schedule grant (no fire grant), with
+no operator stop (`operatorStop`; its system revoke after the first fire, expiry or a cap pause do not stop it), whose
+`risk_preapproval` (`decided_by` `operator-quote` or `operator-delegated`, both through `requireOperatorQuote`) covers
+the grant's jobs; and (b) the fire's trigger is `via: dashboard` and `verifiedRunNowClick` (`src/schedule-control.ts`)
+verifies its record in `state/schedule-control.jsonl`, read raw: the viewer's id shape `sc-<14 digits>-<8 hex>`, exactly
+one `request` line by `viewer`, op `run_now`, this schedule, a peer; exactly one later `claimed` line by this parent pid
+within 120 s; no outcome yet; dashboard control on. The carried record quotes the seed's words verbatim with
+`decided_by: operator-delegated`, `scope: mandate_jobs` and `delegation_rule` `run_now <sc-id> (peer <peer>): seed <id>
+pre-approval [<sha12>] carried to this fire's schedule:<id> jobs`; the fire grant's `schedule_fire.trigger.request_id`
+is the same id and every audit row's first evidence line is `fire run_now <sc-id>`. It covers only that grant's jobs:
+`covers()` gives a schedule grant only its own schedule's labelled jobs while the pointer names it, `mandate_jobs` needs
+a job created after the grant was issued, the anchor is deferred and the run cap holds the rest, and the next fire
+revokes the grant. It opens only the `ask_on: risk:high` dispatch/promotion gate — never a hard stop, a merge, a
+checkpoint or a script. `cp_schedule run_now` (a chat quote), cron, watch, a string trigger, a forged or unverified
+record, a seed without a `mandate_jobs` pre-approval, and every other skill stay gated exactly as before; a gated fire
+still fires, its notes saying `no risk:high pre-approval carried (<why>)`. The Schedules page shows the fan-out and the
+pre-approval's sha12 and grant time, never the quote. **Residual (U1):** the journal is 0600 under the home's uid, so
+the check binds a carry to the authenticated POST path, not against a same-uid writer. The parent's own `write`, `edit`
+and bash tools are refused on that file (`schedule_control_write`, *The guards*), but that guard is a name match (a
+glob or a variable that hides the name passes) and any other process running as the home's uid could still append a
+well-formed request line, which a claim would then treat as genuine; an HMAC would not help under the same uid.
+**External operator runbook:** `cp_schedule update id:<sch-id> skill:cp-org-pr-review
+kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewers: 3"`; then, for click clearance,
+`cp_mandate issue … schedule_grant:true risk_preapproval:{operator_quote:"<their words>"}` (no `job_ids`) and
+`cp_schedule move id:<sch-id> mandate_id:<that seed>`. **Downgrade:** an older binary reads a `schedules.json` naming
+`cp-org-pr-review` as invalid (fail closed): `cp_schedule remove` it first; a fire grant carrying `risk_preapproval`
+validates on older binaries (the field is already in `MandateSchema`). No data migration.
+
 **Fresh grant per fire.** Every fire of every schedule — a cron slot, a watch fire, the page's Run now and
 `cp_schedule run_now` — files its job under a grant minted for that fire alone, from the schedule's saved
 `grant_template`. This is hard-coded: there is no flag, parameter, config, environment variable, mandate default or
@@ -7637,9 +7698,11 @@ issued_at) / 1 h), bounded to 1–168), `spend_usd`, `spend_tokens`, `job_cap`, 
 (`merge` removed), `ask_on` (`merge` and `risk:high` always added), `exclusions`, and `approval`: the seed's own
 objective quoted verbatim, `decided_by: operator-delegated`, `delegation_rule` `<cp_schedule add | cp_schedule move |
 schedule migration>: the objective of seed grant <id>, quoted verbatim` (`synthesizedApproval`) — never invented
-words. A seed with a risk:high pre-approval, `job_ids`, a zero USD or token cap, or only `merge` allowed is refused.
+words. A seed with a risk:high pre-approval (unless a cp-org-pr-review schedule's `mandate_jobs` one, *Run now
+clearance*), `job_ids`, a zero USD or token cap, or only `merge` allowed is refused.
 **No top-up:** a skill schedule's template `job_cap` is raised to its fan-out plus its anchor (`cp-self-review`: 6
-readers + 1 synthesis + the anchor = 8; `cp-pr-review`: N reviewers + 1 synthesis + the anchor = N + 2) and the raise is
+readers + 1 synthesis + the anchor = 8; `cp-pr-review`: N reviewers + 1 synthesis + the anchor = N + 2;
+`cp-org-pr-review`: max_reviewers + 1 synthesis + the anchor = max_reviewers + 2, 5 by default) and the raise is
 named in the add result, never refused; the skills expand under their fire grant without asking the operator about
 budget. Every normalization is named in the add result; the template authorizes nothing on its own. **Each fire**,
 inside the serialized fire lane: throws if the schedule has no template or its template is seeded by a fire grant
@@ -7677,6 +7740,14 @@ template with its verbatim approval, or that the schedule has no template with t
 `schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
 skill floor apply), `mandate_id` set to the seed, `last_skip` cleared; the old pointer is revoked unless another
 schedule names it. It is the way back from an operator revoke or pause, and from a schedule the migration skipped.
+
+**`cp_schedule update id [skill] [description] [title] [kind] [delivery]`** changes a schedule's job — at least one
+field — under the add rules (a known skill on a manual schedule with the anchor's kind and delivery and no script, its
+targets or config valid, the script intake), in the fire lane. It is refused while a run is open (any `schedule:<id>`
+job not closed), when the template excludes the new kind, or when the seed holds a risk:high pre-approval and the
+schedule would not be cp-org-pr-review. The skill floor is re-applied (raised and named, never lowered). Trigger,
+project, grant, id and history stay; a skill is never cleared here (remove and re-add). It is the supported way to
+switch an existing ordinary manual schedule onto a skill.
 
 **Upgrade (one-shot migration).** At `session_start`, before the scheduler ticks, `sweepScheduleGrantTemplates`
 (`src/schedule-migrations.ts`) gives every schedule without a `grant_template` one derived from its seed grant — its

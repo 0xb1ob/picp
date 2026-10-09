@@ -25,12 +25,76 @@ export const SCHEDULE_SCHEMA_VERSION = 1;
  * Skills a manual schedule may name (the expander registry): its fire records a deferred anchor and wakes the parent to
  * expand it with `skills/<name>/SKILL.md`. Each is also a `PARENT_SKILLS` entry (src/cp-bridge.ts); tests pin the two.
  */
-export const SCHEDULE_SKILLS = ["cp-self-review", "cp-pr-review"] as const;
+export const SCHEDULE_SKILLS = ["cp-self-review", "cp-pr-review", "cp-org-pr-review"] as const;
 /** The anchor job each skill's schedule must record: its kind and delivery (no `script_path`). */
 export const SCHEDULE_SKILL_ANCHOR: Record<(typeof SCHEDULE_SKILLS)[number], { kind: (typeof SCHEDULE_JOB_KINDS)[number]; delivery: (typeof SCHEDULE_DELIVERIES)[number] }> = {
 	"cp-self-review": { kind: "research", delivery: "local" },
 	"cp-pr-review": { kind: "research", delivery: "local" },
+	"cp-org-pr-review": { kind: "research", delivery: "local" },
 };
+
+/** cp-org-pr-review: at most this many reviewers per fire (the default too); `max_reviewers:` may only lower it. */
+export const ORG_REVIEW_MAX_REVIEWERS = 3;
+export const ORG_REVIEW_MAX_TEAMS = 10;
+export const ORG_REVIEW_MAX_HOLDS = 50;
+/** A cp-org-pr-review schedule's description config (skills/cp-org-pr-review/SKILL.md); `user` null is the gh-authenticated user. */
+export interface OrgReviewConfig { org: string; user: string | null; teams: string[]; holds: string[]; max_reviewers: number }
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+const TEAM_SLUG = /^[a-z0-9][a-z0-9_-]{0,99}$/;
+const HOLD_URL = /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/[A-Za-z0-9._-]+\/pull\/[1-9][0-9]*$/;
+const ORG_REVIEW_KEYS = ["org", "user", "team", "hold", "max_reviewers", "pr"] as const;
+
+/**
+ * A cp-org-pr-review description's config lines: a trimmed line starting `<key>:` (key case-insensitive) for org, user,
+ * team, hold or max_reviewers; every other line is prose, ignored by code and never forwarded to a reviewer. Throws a
+ * SchedulerError naming the first fault: exactly one `org:` login, at most one `user:` login, 0-10 bare distinct team
+ * slugs, 0-50 distinct PR urls in the org for `hold:`, `max_reviewers:` an integer 1-3 (default 3), and no `pr:` line.
+ */
+export function orgReviewConfig(description: string): OrgReviewConfig {
+	const fail = (why: string): never => { throw new SchedulerError(`cp-org-pr-review: ${why}`); };
+	const values = Object.fromEntries(ORG_REVIEW_KEYS.map((key) => [key, [] as string[]])) as Record<(typeof ORG_REVIEW_KEYS)[number], string[]>;
+	for (const raw of description.split("\n")) {
+		const match = /^(org|user|team|hold|max_reviewers|pr)\s*:(.*)$/i.exec(raw.trim());
+		if (match) values[(match[1] as string).toLowerCase() as (typeof ORG_REVIEW_KEYS)[number]].push((match[2] as string).trim());
+	}
+	if (values.pr.length) fail("pr: lines belong to cp-pr-review; use hold: <url> to exclude a PR from the org queue");
+	if (values.org.length !== 1) fail(`needs exactly one description line "org: <github-org>"; found ${values.org.length}`);
+	const org = values.org[0] as string;
+	if (!GITHUB_LOGIN.test(org)) fail(`org: ${JSON.stringify(org)} is not a GitHub login`);
+	if (values.user.length > 1) fail(`at most one user: line; found ${values.user.length}`);
+	const user = values.user[0] ?? null;
+	if (user !== null && !GITHUB_LOGIN.test(user)) fail(`user: ${JSON.stringify(user)} is not a GitHub login`);
+	if (values.team.length > ORG_REVIEW_MAX_TEAMS) fail(`at most ${ORG_REVIEW_MAX_TEAMS} team: lines; found ${values.team.length}`);
+	for (const team of values.team) {
+		if (team.includes("/")) fail(`team: ${JSON.stringify(team)}: give the bare team slug (it is always in ${org})`);
+		if (!TEAM_SLUG.test(team)) fail(`team: ${JSON.stringify(team)} is not a team slug`);
+	}
+	if (values.hold.length > ORG_REVIEW_MAX_HOLDS) fail(`at most ${ORG_REVIEW_MAX_HOLDS} hold: lines; found ${values.hold.length}`);
+	for (const hold of values.hold) {
+		const owner = HOLD_URL.exec(hold)?.[1];
+		if (owner === undefined) fail(`hold: ${JSON.stringify(hold)} is not a PR url (https://github.com/<owner>/<repo>/pull/<n>)`);
+		if ((owner as string).toLowerCase() !== org.toLowerCase()) fail(`hold: ${hold} is not in ${org}`);
+	}
+	for (const [key, list] of [["team", values.team], ["hold", values.hold]] as const) {
+		const dupe = list.find((item, i) => list.indexOf(item) !== i);
+		if (dupe !== undefined) fail(`${key}: ${dupe} is listed twice`);
+	}
+	if (values.max_reviewers.length > 1) fail(`at most one max_reviewers: line; found ${values.max_reviewers.length}`);
+	let max = ORG_REVIEW_MAX_REVIEWERS;
+	if (values.max_reviewers.length) {
+		const given = values.max_reviewers[0] as string;
+		if (!/^[0-9]+$/.test(given)) fail(`max_reviewers ${JSON.stringify(given)} is not an integer 1-${ORG_REVIEW_MAX_REVIEWERS}`);
+		max = Number(given);
+		if (max > ORG_REVIEW_MAX_REVIEWERS) fail(`max_reviewers ${max} is over the cap ${ORG_REVIEW_MAX_REVIEWERS}`);
+		if (max < 1) fail(`max_reviewers ${max} is under 1`);
+	}
+	return { org, user, teams: values.team, holds: values.hold, max_reviewers: max };
+}
+
+/** `orgReviewConfig(description).max_reviewers`, or the cap on any fault: never throws (a floor or a label cap reads it). */
+export function orgReviewMaxReviewers(description?: string): number {
+	try { return orgReviewConfig(description ?? "").max_reviewers; } catch { return ORG_REVIEW_MAX_REVIEWERS; }
+}
 /** A grant template's lifetime bound in hours: each fire grant lives this long from its fire. */
 export const GRANT_TEMPLATE_MAX_HOURS = 168;
 /** What a fire grant may auto-decide: never `merge` (mirrors MANDATE_ACTIONS minus merge). */

@@ -203,6 +203,10 @@ export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	mandate_pause_reason: string | null;
 	/** Whether the fire path refuses the next fire on this pointer (`operatorStop`, the predicate `pointerRefusal` uses). */
 	grant_stopped: boolean;
+	/** cp-org-pr-review only (else null): what one Run now fans out to, from the description config; `error` names a bad config. */
+	fan_out: { reviewers: number; org: string | null; user: string | null; teams: string[]; holds: number; error: string | null } | null;
+	/** cp-org-pr-review only: the seed's standing operator risk:high pre-approval a Run now click carries — its quote's sha12, never the quote. */
+	run_now_clearance: { quote_sha: string; granted_at: string } | null;
 	history: ScheduleHistoryJob[];
 };
 /** `/api/schedules`: `error` names an unreadable or invalid `state/schedules.json`; it is never silently empty. */

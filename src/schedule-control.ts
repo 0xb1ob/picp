@@ -11,12 +11,59 @@
  * the grant check on enable and the fire checks on run now apply unchanged.
  */
 
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import type { RunNowClick } from "./schedule-grant.ts";
 import type { Scheduler, ScheduleEvent } from "./scheduler.ts";
 import { appendScheduleControlLine } from "./viewer/control-audit.ts";
 import { readControlConfig, readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, scheduleControlFile, type ScheduleControlLine, type ScheduleControlRequest } from "./viewer/control-files.ts";
 
 export const SCHEDULE_CONTROL_POLL_MS = 2_000;
+/** The id shape the viewer mints for a Schedules page request (src/viewer/control-api.ts `scheduleRequestId`). */
+export const RUN_NOW_REQUEST_ID = /^sc-[0-9]{14}-[0-9a-f]{8}$/;
+
+/**
+ * Whether `requestId` is a genuine dashboard Run now of `scheduleId` that this parent (`pid`) is applying right now,
+ * re-read raw from `state/schedule-control.jsonl` (never `readScheduleControl`, which drops `by`): the viewer's id
+ * shape; exactly one `request` line by the viewer, op run_now, this schedule, a peer; exactly one later `claimed` line,
+ * by this parent pid, within the 120 s request age; no outcome yet (the fire runs between claim and outcome); and
+ * dashboard control on. Each failure names why. The journal is 0600 under the home's uid: this binds the record to
+ * the authenticated POST path (tailnet, schedule token), not against a same-uid writer (docs/contracts.md, U1).
+ */
+export function verifiedRunNowClick(stateDir: string, requestId: string, scheduleId: string, pid: number): RunNowClick {
+	if (!RUN_NOW_REQUEST_ID.test(requestId)) return { ok: false, why: `${JSON.stringify(requestId)} is not a dashboard request id` };
+	let text: string;
+	try {
+		text = readFileSync(scheduleControlFile(stateDir), "utf8");
+	} catch (error) {
+		return { ok: false, why: `the control journal is unreadable (${(error as Error).message})` };
+	}
+	const rows: Record<string, unknown>[] = [];
+	for (const row of text.split("\n")) {
+		try {
+			const line = JSON.parse(row) as unknown;
+			if (typeof line === "object" && line !== null && (line as { id?: unknown }).id === requestId) rows.push(line as Record<string, unknown>);
+		} catch {
+			// a torn line: never evidence
+		}
+	}
+	const requests = rows.filter((line) => line.type === "request");
+	if (requests.length !== 1) return { ok: false, why: `${requests.length} request lines for ${requestId} in the journal, not one` };
+	const request = requests[0] as Record<string, unknown>;
+	if (request.by !== "viewer") return { ok: false, why: `the request was written by ${JSON.stringify(request.by)}, not the viewer` };
+	if (request.op !== "run_now") return { ok: false, why: `the request is ${JSON.stringify(request.op)}, not run_now` };
+	if (request.schedule_id !== scheduleId) return { ok: false, why: `the request names ${JSON.stringify(request.schedule_id)}, not ${scheduleId}` };
+	if (typeof request.peer !== "string" || request.peer.length === 0) return { ok: false, why: "the request records no peer" };
+	const claims = rows.slice(rows.indexOf(request) + 1).filter((line) => line.type === "claimed");
+	if (claims.length !== 1) return { ok: false, why: `${claims.length} claims after the request, not one` };
+	const claim = claims[0] as Record<string, unknown>;
+	if (claim.by !== "parent" || claim.pid !== pid) return { ok: false, why: `claimed by ${JSON.stringify(claim.by)} pid ${JSON.stringify(claim.pid)}, not this parent (pid ${pid})` };
+	const age = Date.parse(String(claim.at)) - Date.parse(String(request.at));
+	if (!(age >= 0 && age <= SCHEDULE_CONTROL_MAX_AGE_MS)) return { ok: false, why: `claimed ${Number.isFinite(age) ? `${age} ms` : "at an unreadable time"} after the request, outside 0-${SCHEDULE_CONTROL_MAX_AGE_MS} ms` };
+	if (rows.some((line) => line.type === "outcome")) return { ok: false, why: "the request already has an outcome" };
+	const config = readControlConfig(stateDir);
+	if (config.state !== "on") return { ok: false, why: `dashboard control is off (${config.reason})` };
+	return { ok: true, peer: request.peer };
+}
 
 type Outcome = Extract<ScheduleControlLine, { type: "outcome" }>;
 type Append = (line: ScheduleControlLine) => { ok: true } | { ok: false; error: string };

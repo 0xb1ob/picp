@@ -226,7 +226,7 @@ export const WORKER_REQUIRED_FLAGS: readonly string[] = Object.freeze([
  * Flags a headless bridge parent MUST carry so global extensions (pi-lens,
  * fetch tools) and implementation skills never load. Pass `-e` the
  * command-post extension and `--skill <home>/skills/<name>` for each `PARENT_SKILLS` entry (cp-memory and the schedule
- * expanders cp-self-review, cp-pr-review)
+ * expanders cp-self-review, cp-pr-review, cp-org-pr-review)
  * (`parentSkillPaths`, src/cp-bridge.ts) separately; discovery stays off.
  * `/doctor`'s `session.tools` check is then empty of foreign tools.
  */
