@@ -80,6 +80,9 @@ test("missing and historical recorded grants stay attached without hiding jobs",
  for(const id of ["cp-old","cp-missing","cp-revoked"]) assert.equal(board.jobs.find(j=>j.id===id)?.board_lane_id,"unassigned");
  assert.equal(board.jobs.find(j=>j.id==="cp-closed")?.board_lane_id,"md-closed");
  assert.deepEqual(board.lanes.map(l=>l.id),["md-original","unassigned","md-closed"]);
+ assert.deepEqual(board.hidden_mandates.map(m=>m.id).sort(),["md-old","md-revoked"],"revoked non-lanes are offered; the revoked-today md-closed lane is not");
+ assert.equal(board.hidden_mandates[0]?.status,"revoked");
+ assert.equal(board.revoked_hidden,2);
 });
 
 test("a grant closed by its mission end (answered close, revoked today) is a closed lane, not a revoked one",t=>{
@@ -112,10 +115,6 @@ test("QA rendering: recorded grant, shared mandate filters, escalation note and 
  const board=boardView(state,now);board.lanes[0]!.objective="Land the remaining dashboard vertical slices with exact typography, readable provenance, durable test evidence, and one reviewed pull request per bead.";
  const rendered=screen("Board",board);const dom=parseHTML(rendered).document;
  assert.equal(dom.querySelector(".board-note")?.getAttribute("title"),board.jobs.find(j=>j.id==="cp-recorded")!.note);
- assert.equal(dom.querySelector(".board-filters button[title]")?.getAttribute("title"),board.lanes[0]!.objective);
- assert.equal(dom.querySelectorAll(".board-filters button").length,4,"All mandates and the three nonempty recorded lanes stay available");
- assert.doesNotMatch(dom.querySelector(".board-filters")!.textContent!,/md-empty|md-expired/);
- assert.match(dom.querySelector(".board-filters")!.textContent!,/md-paused.*paused/);
  assert.ok(dom.querySelector('a[href="#job/cp-paused"]'),"All mandates retains live paused-grant work");
  assert.deepEqual(visibleBoard(board,"all").lanes.map((l:{id:string})=>l.id),["md-original","unassigned","md-paused"]);
  assert.match(rendered,/job-ci-red/);
@@ -138,10 +137,6 @@ test("empty Board columns fold to strips on phone and desktop", async t => {
  const cut=columnKinds.indexOf("strip");
  assert.ok(cut>0 && columnKinds.slice(cut).every(k=>k==="strip") && columnKinds.slice(0,cut).every(k=>k==="col"),"strips follow the columns that have cards");
  assert.deepEqual(labels(waiting,".board-strip"),["Held · 0","Launching · 0","Queued · 0","Failed · 0","Landed today · 0"]);
- assert.equal(waiting.querySelector('button[title="Ship the board fold"] .board-chip-name')?.textContent,"Ship the board fold");
- assert.equal(waiting.querySelector('button[title="No covering live grant"] .board-chip-name')?.textContent,"No covering live grant");
- assert.match(waiting.querySelector(".board-filters")!.textContent!,/All mandates/);
- assert.match(waiting.querySelector(".board-filters")!.textContent!,/Unassigned/);
  const blocker=waiting.querySelector('a[href="#job/cp-idle"]')!;
  assert.match(blocker.textContent!,/blocks cp-work/);
  assert.doesNotMatch(waiting.querySelector('a[href="#job/cp-work"]')!.textContent!,/blocks cp-idle/);
@@ -149,7 +144,7 @@ test("empty Board columns fold to strips on phone and desktop", async t => {
  const folded=parseHTML(screen(board)).document;
  assert.equal(labels(folded,".board-strip").includes("Waiting · 0"),true,"the shared renderer folds an empty Waiting column on both widths");
  assert.equal([...folded.querySelectorAll(".board-column h2")].some(h=>/Waiting/.test(h.textContent!)),false);
- assert.match(folded.querySelector(".board-phone.board-fold")!.textContent!,/Empty now:.*Waiting/);
+ assert.equal(folded.querySelector(".board-phone.board-fold"),null,"no Empty now sentence");
  const again=kinds(folded.querySelector(".board-columns")!);
  const at=again.indexOf("strip");
  assert.ok(at>0 && again.slice(at).every(k=>k==="strip"));
