@@ -16,6 +16,7 @@
 .schedule-facts { margin: 0; display: grid; grid-template-columns: 76px minmax(0,1fr); align-items: baseline; gap: 12px 16px; font-size: 13px; }
 .schedule-facts dt { color: var(--dim); }
 .schedule-facts dd { margin: 0; min-width: 0; }
+.schedule-facts > :nth-child(n+3) { border-top: 1px solid var(--divider); padding-top: 12px; }
 .schedule-facts dd p { margin: 4px 0 0; }
 .schedule-facts a, .schedule-history a { display: inline-flex; align-items: center; min-height: 44px; }
 .schedule-card summary { min-height: 44px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
@@ -36,7 +37,9 @@
 .schedule-controls .schedule-remove { background: none; color: var(--muted); border-color: transparent; font-weight: 400; }
 .schedule-fan-out { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .schedule-fan-out p { margin: 0; line-height: 1.5; }
-.schedule-how h2 { margin-bottom: 8px; color: var(--muted); font-size: 14px; font-weight: 500; }
+.schedule-how h2 { margin-bottom: 8px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.schedule-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schedule-status-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
 .schedule-how p { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .schedule-identity, .schedule-how-phone { display: none; }
 @media (max-width: 899px) {

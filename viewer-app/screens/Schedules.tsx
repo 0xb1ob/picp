@@ -104,8 +104,8 @@ export function Schedules({data, control}: {data:SchedulesResponse; control?:Sch
   <header class="schedule-heading"><PageHeader title="Schedules"/><p>Saved triggers and the jobs they fired.</p></header>
   <div class="schedule-toolbar">
    <nav class="board-view" aria-label="Schedules and files">{navigation.filter(n => n.id === "schedules" || n.id === "files").map(n => <a key={n.id} href={n.href} aria-current={n.id === "schedules" ? "page" : undefined}>{n.label}</a>)}</nav>
-   {control && <p role="status" class="job-meta">{scheduleControlLine(control.status)}</p>}
-   <a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}>+ Add<span class="schedule-add-long"> schedule</span></a>
+   {control && <p role="status" class="job-meta schedule-status"><span class="schedule-status-dot" aria-hidden="true"/>{scheduleControlLine(control.status)}</p>}
+   <a class="schedule-add" href={composerHref(ADD_SCHEDULE_DRAFT)}><span>+ Add<span class="schedule-add-long"> schedule</span></span></a>
   </div>
   {data.error && <p role="alert" class="overview-error">Schedules unavailable: {data.error}</p>}
   <div class="schedule-layout">
