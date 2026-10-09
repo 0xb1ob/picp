@@ -44,9 +44,13 @@ const isReport = (e: SessionEntry) => e.kind === "tool" && e.name === "report_re
 const isWorker = (e: SessionEntry) => e.kind === "say" && e.who === "Worker";
 
 export const POLL_MS = 10_000;
-/** Whether a screen refresh should start a transcript request: never while one runs; once only when finished; at most every POLL_MS when live. */
-export function shouldFetch(s: {inflight: boolean; loaded: boolean; finished: boolean; sinceMs: number}): boolean {
- return !s.inflight && (!s.loaded || (!s.finished && s.sinceMs >= POLL_MS));
+/**
+ * Whether a screen refresh should start a transcript request: never while one runs; at most every POLL_MS when live; once when
+ * finished, plus one final fetch when the loaded copy predates the finish (`loadedLive`), so the last interval's entries
+ * (report, review) are not lost.
+ */
+export function shouldFetch(s: {inflight: boolean; loaded: boolean; loadedLive: boolean; finished: boolean; sinceMs: number}): boolean {
+ return !s.inflight && (!s.loaded || (s.finished ? s.loadedLive : s.sinceMs >= POLL_MS));
 }
 /**
  * The worker's session as a read-only document: no composer, no POST. A finished job is fetched once; a live one refetches on
@@ -57,14 +61,18 @@ export function JobTranscript({jobId, generatedAt, model, reports, finished}: {j
  const [data, setData] = useState<JobTranscriptResponse | null>(null);
  const [failed, setFailed] = useState(false);
  const inflight = useRef<AbortController | null>(null);
- const loaded = useRef(false), lastAt = useRef(0);
+ const loaded = useRef(false), loadedLive = useRef(false), lastAt = useRef(0);
+ const [settled, setSettled] = useState(0);
+ const finishedNow = useRef(finished);
+ finishedNow.current = finished;
  useEffect(() => () => { inflight.current?.abort(); inflight.current = null; }, []);
  useEffect(() => {
-  if (!shouldFetch({inflight: inflight.current !== null, loaded: loaded.current, finished, sinceMs: Date.now() - lastAt.current})) return;
+  if (!shouldFetch({inflight: inflight.current !== null, loaded: loaded.current, loadedLive: loadedLive.current, finished, sinceMs: Date.now() - lastAt.current})) return;
   const abort = inflight.current = new AbortController();
   lastAt.current = Date.now();
-  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { loaded.current = true; setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (inflight.current === abort) inflight.current = null; });
- }, [jobId, generatedAt, finished]);
+  const wasLive = !finished;
+  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { loaded.current = true; loadedLive.current = wasLive; setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (inflight.current !== abort) return; inflight.current = null; if (wasLive && finishedNow.current) setSettled(n => n + 1); });
+ }, [jobId, generatedAt, finished, settled]);
  if (failed && !data) return <p class="jobs-empty" role="status">Transcript unavailable</p>;
  if (!data) return <p role="status">Loading</p>;
  return <TranscriptDocument data={data} model={model} reports={reports}/>;
