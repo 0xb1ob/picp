@@ -12,10 +12,10 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../src/dashboard-control.ts";
-import { controlJournalFile, readControlRecord } from "../src/viewer/control-files.ts";
+import { controlJournalFile, readControlRecord, readUploadMetadata } from "../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
-import { newUploadId, uploadFile, writeUpload } from "../src/viewer/uploads.ts";
+import { newUploadId, TEXT_MESSAGE_INLINE_BYTES, uploadFile, writeUpload } from "../src/viewer/uploads.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { STUBS, syntheticPng } from "./harness/images.ts";
 
@@ -229,12 +229,14 @@ test("text uploads: validate extensions/UTF-8/JSON/size, store metadata only, se
   ["binary.txt", Buffer.from([1, 0, 2]), 415, /NUL/],
   ["broken.md", Buffer.from([0xc3, 0x28]), 415, /UTF-8/],
   ["broken.json", Buffer.from("{oops}"), 415, /valid JSON/],
-  ["big.txt", Buffer.alloc(1024 * 1024 + 1, 97), 413, /1048576/],
+  ["big.txt", Buffer.alloc(Math.round(4.1 * 1024 * 1024), 97), 413, /larger than 4194304 bytes/],
   ["file.csv", Buffer.from("hello"), 415, /extension/],
   ["file.svg", Buffer.from("<svg></svg>"), 415, /extension/],
  ] as const) {
   const reply = await call(port, UPLOAD, text(name, bytes)); assert.equal(reply.status, status, JSON.stringify(reply.body)); assert.match(String(reply.body.error), reason);
  }
+ const nearCap = await call(port, UPLOAD, text("near-cap.txt", Buffer.alloc(Math.round(3.9 * 1024 * 1024), 97)));
+ assert.equal(nearCap.status, 201, JSON.stringify(nearCap.body)); assert.equal(nearCap.body.bytes, Math.round(3.9 * 1024 * 1024));
  const html = Buffer.from("<script>UNIQUE_ATTACHMENT_CONTENT</script>");
  const uploaded = await call(port, UPLOAD, text("../folder\\report[1].HTML", html));
  assert.equal(uploaded.status, 201, JSON.stringify(uploaded.body));
@@ -265,4 +267,13 @@ test("text uploads: validate extensions/UTF-8/JSON/size, store metadata only, se
  assert.equal((await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "", files: [gone]}))).status, 410);
  assert.deepEqual((await call(port, `/api/operator/uploads/${gone}`)).body, {error: "file expired"});
  for (const [name, bytes] of [["note.txt", "plain"], ["note.md", "# markdown"], ["note.json", '{"ok": true}']] as const) assert.equal((await call(port, UPLOAD, text(name, Buffer.from(bytes)))).status, 201);
+ // Near-cap file end to end: the send reads it back (readUpload re-check), the journal rescan (#163) finds its name/size, and only the inline budget is truncated.
+ const nearId = String(nearCap.body.id), nearBytes = Math.round(3.9 * 1024 * 1024);
+ assert.deepEqual(readUploadMetadata(stateDir, [nearId]).get(nearId), {name: "near-cap.txt", bytes: nearBytes});
+ const nearSent = await call(port, "/api/operator/message", message(csrf, {kind: "message", text: "", files: [nearId]}));
+ assert.equal(nearSent.status, 202, JSON.stringify(nearSent.body));
+ const nearText = injected.at(-1)!.text;
+ assert.ok(nearText.includes("File: near-cap.txt\n")); assert.ok(nearText.includes(`[truncated — full file at ${uploadFile(uploadRoot, nearId)}]`));
+ assert.ok(Buffer.byteLength(nearText) < TEXT_MESSAGE_INLINE_BYTES + 1024, "inline budget unchanged");
+ assert.deepEqual(readFileSync(uploadFile(uploadRoot, nearId)!), Buffer.alloc(nearBytes, 97));
 });

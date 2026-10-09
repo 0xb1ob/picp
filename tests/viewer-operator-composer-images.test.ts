@@ -140,8 +140,8 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	assert.equal(pastedText.defaultPrevented, true);
 	await click($(".operator-composer-send"));
 	assert.deepEqual(sends.at(-1), {kind: "message", text: "", files: [idFor(next - 1).replace(/^im-/, "tx-").replace(/\.png$/, ".md"), idFor(next).replace(/^im-/, "tx-").replace(/\.png$/, ".md")]});
-	await pick([{name: "huge.json", type: "application/json", size: 1024 * 1024 + 1}]);
-	assert.match($(".operator-composer-attachment-failed")!.textContent!, /larger than 1 MiB/); assert.equal(sendDisabled(), true);
+	await pick([{name: "huge.json", type: "application/json", size: 4 * 1024 * 1024 + 1}]);
+	assert.match($(".operator-composer-attachment-failed")!.textContent!, /larger than 4 MiB/); assert.equal(sendDisabled(), true);
 	await click($(".operator-composer-thumb-remove"));
 	await act(() => unmount(root));
 });

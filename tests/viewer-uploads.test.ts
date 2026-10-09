@@ -126,7 +126,7 @@ test("inline budget: 768 KiB for one image, an even share of 2 MiB beyond", () =
 });
 
 
-test("text validation: UTF-8, no NUL, valid JSON, and 1 MiB; safe tx ids and revalidation on read", t => {
+test("text validation: UTF-8, no NUL, valid JSON, and 4 MiB; safe tx ids and revalidation on read", t => {
  const root = scratch(t);
  for (const ext of ["txt", "md", "html", "json"] as const) {
   const bytes = Buffer.from(ext === "json" ? '{"ok":true}' : "<script>literal</script> café");
@@ -140,7 +140,7 @@ test("text validation: UTF-8, no NUL, valid JSON, and 1 MiB; safe tx ids and rev
   writeFileSync(uploadFile(root, id)!, Buffer.from([0xc3, 0x28]));
   assert.equal(readUpload(root, id, NOW).state, "invalid");
  }
- for (const [bytes, ext, reason] of [[Buffer.from([0]), "txt", /NUL/], [Buffer.from([0xc3, 0x28]), "md", /UTF-8/], [Buffer.from("{bad}"), "json", /valid JSON/], [Buffer.alloc(TEXT_UPLOAD_MAX_BYTES + 1, 97), "html", /1 MiB/]] as const) {
+ for (const [bytes, ext, reason] of [[Buffer.from([0]), "txt", /NUL/], [Buffer.from([0xc3, 0x28]), "md", /UTF-8/], [Buffer.from("{bad}"), "json", /valid JSON/], [Buffer.alloc(TEXT_UPLOAD_MAX_BYTES + 1, 97), "html", /4 MiB/]] as const) {
   const result = validateText(bytes, ext); assert.ok("refused" in result); assert.match(result.refused, reason);
  }
  assert.ok("text" in validateText(Buffer.alloc(TEXT_UPLOAD_MAX_BYTES, 97), "txt"));

@@ -6093,7 +6093,7 @@ button, wrapping long names on phone and desktop); sent chips link to `/api/oper
 The browser sends the URI-encoded original filename in `x-cp-upload-name` and raw text bytes with
 `Content-Type: application/octet-stream`; MIME is not trusted. The server requires an allowlisted extension,
 **strict UTF-8 without NUL**, and parseable JSON for `.json`. Empty text files are allowed, empty JSON is refused.
-Text bodies over **1 MiB** are 413; invalid encoding, binary/NUL, invalid JSON and unsupported extensions are 415
+Text bodies over **4 MiB** are 413; invalid encoding, binary/NUL, invalid JSON and unsupported extensions are 415
 with a specific reason. The same tailnet, Origin, CSRF, live-session, rate, safe-directory and journal-first guards apply.
 An absent filename on an image upload keeps the existing image protocol; text needs the filename header.
 
