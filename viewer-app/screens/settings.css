@@ -51,8 +51,12 @@ label > .settings-meta, legend > .settings-meta { margin-left: 6px; padding: 1px
  .settings-actions button { flex: 1; }
  .settings-unsaved { flex-basis: 100%; margin-left: 0; }
 }
+@media (max-width: 899px) {
+ .settings-screen .settings-chip select, .settings-screen .settings-chip input[type="text"] { min-height: 44px; }
+ .settings-chip button { min-width: 44px; min-height: 44px; padding: 0 12px 0 4px; }
+}
 @media (min-width: 900px) {
- .settings-rules-head, .settings-rule { display: grid; grid-template-columns: 170px 230px minmax(0,1fr) 110px; gap: 12px; align-items: center; }
+ .settings-rules-head, .settings-rule { display: grid; grid-template-columns: 200px 250px minmax(0,1fr) 110px; gap: 12px; align-items: center; }
  .settings-rules-head { padding: 0 18px 6px 21px; color: var(--dim); font-size: 12px; }
  .settings-rule { min-height: 68px; padding-block: 8px; }
  .settings-rule .settings-label { display: none; }
