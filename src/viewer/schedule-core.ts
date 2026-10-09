@@ -172,17 +172,17 @@ export interface Schedule {
 	last_skip?: { at: string; reason: string };
 }
 
-type Check = (value: unknown, path: string, errors: string[]) => void;
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const line = (max: number): Check => (v, path, errors) => {
+export type Check = (value: unknown, path: string, errors: string[]) => void;
+export const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const line = (max: number): Check => (v, path, errors) => {
 	if (typeof v !== "string" || v.length < 1 || v.length > max || !/^[^\r\n]+$/.test(v)) errors.push(`${path}: must be one line of 1-${max} characters`);
 };
 const string: Check = (v, path, errors) => { if (typeof v !== "string") errors.push(`${path}: must be a string`); };
-const boolean: Check = (v, path, errors) => { if (typeof v !== "boolean") errors.push(`${path}: must be a boolean`); };
-const pattern = (re: RegExp): Check => (v, path, errors) => { if (typeof v !== "string" || !re.test(v)) errors.push(`${path}: must match ${re.source}`); };
-const oneOf = (values: readonly unknown[]): Check => (v, path, errors) => { if (!values.includes(v)) errors.push(`${path}: must be one of ${values.join(", ")}`); };
+export const boolean: Check = (v, path, errors) => { if (typeof v !== "boolean") errors.push(`${path}: must be a boolean`); };
+export const pattern = (re: RegExp): Check => (v, path, errors) => { if (typeof v !== "string" || !re.test(v)) errors.push(`${path}: must match ${re.source}`); };
+export const oneOf = (values: readonly unknown[]): Check => (v, path, errors) => { if (!values.includes(v)) errors.push(`${path}: must be one of ${values.join(", ")}`); };
 /** An object with exactly these keys; a key whose name ends in `?` is optional. */
-const object = (shape: Record<string, Check>): Check => (v, path, errors) => {
+export const object = (shape: Record<string, Check>): Check => (v, path, errors) => {
 	if (!isObject(v)) { errors.push(`${path || "/"}: must be an object`); return; }
 	const fields = new Map(Object.entries(shape).map(([key, check]) => [key.replace(/\?$/, ""), { check, optional: key.endsWith("?") }]));
 	for (const key of Object.keys(v)) if (!fields.has(key)) errors.push(`${path}/${key}: unexpected property`);
@@ -192,26 +192,26 @@ const object = (shape: Record<string, Check>): Check => (v, path, errors) => {
 	}
 };
 
-const cronTrigger = object({ type: oneOf(["cron"]), cron: line(200), tz: line(64) });
-const manualTrigger = object({ type: oneOf(["manual"]) });
-const watchTrigger = object({
+export const cronTrigger = object({ type: oneOf(["cron"]), cron: line(200), tz: line(64) });
+export const manualTrigger = object({ type: oneOf(["manual"]) });
+export const watchTrigger = object({
 	type: oneOf(["watch"]), script_path: line(1000), on: oneOf(["exit0", "changed"]),
 	every_seconds: (v, path, errors) => { if (!Number.isInteger(v) || (v as number) < 30 || (v as number) > 86_400) errors.push(`${path}: must be an integer 30-86400`); },
 });
-const text = (max: number): Check => (v, path, errors) => { if (typeof v !== "string" || v.length < 1 || v.length > max) errors.push(`${path}: must be a string of 1-${max} characters`); };
-const number = (min: number, max: number, integer: boolean, exclusiveMin = false): Check => (v, path, errors) => {
+export const text = (max: number): Check => (v, path, errors) => { if (typeof v !== "string" || v.length < 1 || v.length > max) errors.push(`${path}: must be a string of 1-${max} characters`); };
+export const number = (min: number, max: number, integer: boolean, exclusiveMin = false): Check => (v, path, errors) => {
 	if (typeof v !== "number" || !Number.isFinite(v) || (integer && !Number.isInteger(v)) || (exclusiveMin ? v <= min : v < min) || v > max) errors.push(`${path}: must be ${integer ? "an integer" : "a number"} ${exclusiveMin ? `over ${min}` : `${min}`}-${max}`);
 };
 /** A non-empty list of distinct `values`, at most `max` long; `required` must all be in it. */
-const subset = (values: readonly string[], max: number, required: readonly string[] = []): Check => (v, path, errors) => {
+export const subset = (values: readonly string[], max: number, required: readonly string[] = []): Check => (v, path, errors) => {
 	if (!Array.isArray(v) || v.length < 1 || v.length > max || new Set(v).size !== v.length || v.some((item) => !values.includes(item))) errors.push(`${path}: must be 1-${max} distinct of ${values.join(", ")}`);
 	else if (required.some((item) => !v.includes(item))) errors.push(`${path}: must include ${required.join(", ")}`);
 };
-const lines = (max: number, items: number): Check => (v, path, errors) => {
+export const lines = (max: number, items: number): Check => (v, path, errors) => {
 	if (!Array.isArray(v) || v.length > items) errors.push(`${path}: must be an array of at most ${items}`);
 	else v.forEach((item, i) => line(max)(item, `${path}/${i}`, errors));
 };
-const ISO_SECOND = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+export const ISO_SECOND = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
 const grantTemplate = object({
 	seed_mandate_id: pattern(SCHEDULE_MANDATE_ID), channel: oneOf(MANDATE_CHANNEL_VALUES), objective: text(2000),
 	expiry_hours: number(1, GRANT_TEMPLATE_MAX_HOURS, true), spend_usd: number(0, Number.MAX_SAFE_INTEGER, false, true),

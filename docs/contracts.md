@@ -7740,6 +7740,62 @@ would refuse: "move the schedule to a new grant" for a revoke, "resume it, or mo
 pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
 template with its verbatim approval, or that the schedule has no template with the migration's reason.
 
+### Schedule policy (proposed; not yet authoritative)
+
+P1 defines `SchedulePolicy` and its closed validator in
+`src/viewer/schedule-policy.ts` (`SCHEDULE_POLICY_SCHEMA_VERSION = 1`), with
+pure live narrowing in `src/schedule-policy.ts`. Nothing reads or writes these
+policies in production yet. The existing fire path above is unchanged;
+legacy schedules, including pipeline delivery, still mint per-fire grants.
+Rollback is a revert; there is no stored policy or migration to undo.
+
+A policy saves the schedule id, revision (integer ≥ 1), save time and actor,
+provenance (channel and optional request/tool/send/delegation/hash/legacy-seed
+references), verbatim `approval` in the grant template's shape, project,
+recipe (skill or null, kind, delivery, title, optional description/script),
+parsed org-review `recipe_config` or null, unchanged trigger, effects and
+start channels. It also saves per-run limits (`usd`, non-cached `tokens`,
+`child_jobs`, `parallelism`, `run_hours`), model policy, allowed actions,
+`ask_on`, and path/subsystem/job-kind exclusions. Unknown fields or invalid
+values refuse. Model policy is routing-default or pinned by implementer,
+planner and/or reviewer role; P1 checks pin shape only, and dispatch model
+availability validation belongs to P2b.
+
+| Recipe | Base effect | Start/effect channels |
+|---|---|---|
+| research/answer | `answer` | permitted start channels |
+| research/board; cp-self-review or cp-pr-review | `board_publish` | permitted start channels |
+| research/local (including cp-org-pr-review report) | `report` | permitted start channels |
+| ship/local | `branch_push` | permitted start channels |
+| ship/pr | `pull_request` | permitted start channels |
+| pipeline delivery | `pipeline` | legacy fire path remains |
+| cp-org-pr-review with saved approval effect | `org_review_approve` (in addition to report) | exactly `["dashboard"]` in effect channels |
+
+`permitted_start_channels` records slot, dashboard and cp_schedule booleans.
+Approval effects require an enabled dashboard start channel; they never
+permit approval from slot/watch or cp_schedule starts. `policyFromLegacy`
+copies bounds, actions, asks, exclusions and approval without mutating its
+inputs, marks the snapshot as migration, and adds the approval effect only
+when the template seed meets the existing Run now clearance conditions.
+An absent legacy parallelism retains the existing serial fallback (1).
+
+USD and tokens must be positive; child cap and parallelism must be positive
+integers (parallelism at most 32), and run hours an integer 1–168. Child caps
+must cover the skill's fan-out plus anchor: 8 for self-review, N+2 for
+PR-review, max_reviewers+2 for org-review. Org-review config comes from
+`orgReviewConfig`, with max_reviewers 1–3. No standing order is needed for
+fan-out. Budgets reset per run; no previous run's spend consumes a new run's
+budget. This contract does not activate that accounting yet.
+
+Live ceilings only narrow: exclusion paths are the union of policy, live
+home and project paths (over 32 refuses without dropping any); tokens are
+min(policy cap, live ceiling), and the clamp is named. An excluded kind or
+a ceiling with nothing to spend refuses. Other saved limits remain fixed,
+never widened by live defaults. Merge is absent from allowed actions;
+`risk:high` and `merge` are always in `ask_on`. Review and repository merge
+bounds remain binding, and the selected-grant policy and supplement
+selection rule are unchanged.
+
 **`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
 `schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
 skill floor apply), `mandate_id` set to the seed, `last_skip` cleared; the old pointer is revoked unless another
