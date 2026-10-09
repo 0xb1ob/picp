@@ -24,10 +24,10 @@ function DecidedRow({row}: {row:DecisionDetail}) {
  const evidence = row.job_ids[0] ? jobHref(row.job_ids[0]) : "#sessions?view=parent";
  const basis = basisView(row);
  const [open,setOpen] = useState(false);
- // The job id already leads the content stack as a link, so the question drops it; the raw text stays in the title.
- const asked = row.job_ids.reduce((q,id) => q.split(id).join(""),row.question).replace(/^[\s:\u00b7,;\u2013\u2014-]+|\s+$/g,"").replace(/\s{2,}/g," ") || row.question;
+ // The job id already leads the content stack as a link, so a leading "<id>: " prefix is dropped (later mentions stay); the raw text stays in the title.
+ const asked = row.job_ids.reduce((q,id) => q.startsWith(id) ? q.slice(id.length).replace(/^[\s:\u00b7,;\u2013\u2014-]+/,"") : q,row.question.trim()) || row.question;
  const toggle = () => setOpen(!open);
- return <article class="decided-row"><div class="decided-time"><code>{row.today ? time(row.answered_at) : observedTime(row.answered_at)}</code></div><div class="decided-content"><div class="decided-job">{row.job_ids.map(id => <a key={id} href={jobHref(id)}><code>{id}</code></a>)}<code class="decided-id">{row.id}</code>{row.source === "you" && <span class="decided-source">answered by you</span>}</div><p class="decided-question" title={row.question}>{asked}</p><div class="decided-answer"><strong>{row.answer}</strong>{row.quote && <span class={`decided-quote${open ? " decided-quote-open" : ""}`} role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={(e:KeyboardEvent) => { if (e.key === "Enter") toggle(); }}>&ldquo;{row.quote}&rdquo;</span>}</div></div><p class="decided-rule"><span class={`decided-basis${basis.standing ? " decided-basis-standing" : ""}${row.basis?.kind === "judgement" ? " decided-basis-judgement" : ""}`}>{basis.label}</span>{basis.ref && <span class="decided-basis-ref">{basis.ref}</span>}</p><div class="decided-evidence">{row.source_escalation ? <a href={evidence}><span class="decision-phone">evidence</span><span class="decision-desktop">open</span> &rarr;</a> : <span title="Operator transcript is not recorded">not recorded</span>}</div></article>;
+ return <article class="decided-row"><div class="decided-time"><code>{row.today ? time(row.answered_at) : observedTime(row.answered_at)}</code></div><div class="decided-content"><div class="decided-job">{row.job_ids.map(id => <a key={id} href={jobHref(id)}><code>{id}</code></a>)}<code class="decided-id">{row.id}</code>{row.source === "you" && <span class="decided-source">answered by you</span>}</div><p class="decided-question" title={row.question}>{asked}</p><div class="decided-answer"><strong>{row.answer}</strong>{row.quote && <span class={`decided-quote${open ? " decided-quote-open" : ""}`} role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={(e:KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}>&ldquo;{row.quote}&rdquo;</span>}</div></div><p class="decided-rule"><span title={row.worth.length ? row.worth.join(", ") : undefined} class={`decided-basis${basis.standing ? " decided-basis-standing" : ""}${row.basis?.kind === "judgement" ? " decided-basis-judgement" : ""}`}>{basis.label}</span>{basis.ref && <span class="decided-basis-ref">{basis.ref}</span>}</p><div class={`decided-evidence${row.job_ids.length ? "" : " decided-evidence-jobless"}`}>{row.source_escalation ? <a href={evidence}><span class="decision-phone">evidence</span><span class="decision-desktop">open</span> &rarr;</a> : <span title="Operator transcript is not recorded">not recorded</span>}</div></article>;
 }
 function onTabKey(who:Who, key:string): Who | null {
  if (key !== "ArrowLeft" && key !== "ArrowRight") return null;
@@ -36,16 +36,19 @@ function onTabKey(who:Who, key:string): Who | null {
  return order[(i + (key === "ArrowRight" ? 1 : -1) + order.length) % order.length]!;
 }
 export function DecidedScreen({data}: {data:DecidedResponse}) {
- const [range,setRange] = useState<"today" | "all">("today");
- const [worth,setWorth] = useState(false);
- const [who,setWho] = useState<Who>("for");
+ const [range,setRangeRaw] = useState<"today" | "all">("today");
+ const [worth,setWorthRaw] = useState(false);
+ const [who,setWhoRaw] = useState<Who>("for");
+ const [more,setMore] = useState(false); // re-closes whenever who/range/worth changes
+ const setWho = (v:Who) => { setMore(false); setWhoRaw(v); };
+ const setRange = (v:"today" | "all") => { setMore(false); setRangeRaw(v); };
+ const setWorth = (v:boolean) => { setMore(false); setWorthRaw(v); };
  const ranged = filterDecisions(data.items,range,false);
  const forRows = ranged.filter(d => d.source !== "you");
  const youRows = ranged.filter(d => d.source === "you");
  const rows = who === "you" ? youRows : (worth ? forRows.filter(d => d.worth.length > 0) : forRows);
  // Audit P1 #6: a day's routine mission-end closes fold into one line until shown; one close alone stays a row.
  const [shown,setShown] = useState<string[]>([]);
- const [more,setMore] = useState(false);
  const closes = new Map<string,number>();
  for (const row of rows) if (row.kind === "mission_end") closes.set(day(row),(closes.get(day(row)) ?? 0)+1);
  const collapsed = (row:DecisionDetail) => row.kind === "mission_end" && (closes.get(day(row)) ?? 0) > 1 && !shown.includes(day(row));

@@ -120,6 +120,22 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  assert.equal(root.querySelectorAll(".decided-row").length,5);
  await act(() => button("1 more decided for you").dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.equal(root.querySelectorAll(".decided-row").length,6);
+ // The fold resets when the view changes.
+ await act(() => tab("Answered by you").dispatchEvent(new window.Event("click",{bubbles:true})));
+ await act(() => tab("Decided for you").dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(root.querySelectorAll(".decided-row").length,5,"fold re-closes after a view change");
+ // Only a leading "<id>: " prefix is stripped; later mentions stay. Space toggles the quote.
+ await act(() => mount(root,{...decided,items:[{...base,question:"Close cp-demo? cp-demo is idle"},{...base,id:"es-two",question:"cp-demo: Close cp-demo?"}]}));
+ const asks = [...root.querySelectorAll(".decided-question")].map(q => q.textContent);
+ assert.deepEqual(asks,["Close cp-demo? cp-demo is idle","Close cp-demo?"]);
+ const spaceQuote = root.querySelector(".decided-quote")!;
+ const space = new window.Event("keydown",{bubbles:true,cancelable:true}); Object.defineProperty(space,"key",{value:" "});
+ await act(() => spaceQuote.dispatchEvent(space));
+ assert.equal(space.defaultPrevented,true);
+ assert.equal(root.querySelector(".decided-quote")?.getAttribute("aria-expanded"),"true");
+ // A jobless row keeps its phone-visible evidence link to the parent transcript.
+ await act(() => mount(root,{...decided,items:[{...base,job_ids:[]}]}));
+ assert.match(root.querySelector(".decided-evidence-jobless a")?.getAttribute("href") ?? "",/#sessions\?view=parent/);
  await act(() => unmount(root));
 });
 

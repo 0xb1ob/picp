@@ -32,6 +32,8 @@
 .decided-rule > span { color: var(--dim); }
 .decided-rule > .decided-basis-judgement { color: var(--text); }
 .decided-evidence { display: none; }
+.decided-evidence-jobless { display: block; grid-column: 2; font-size: 12px; color: var(--subtle); }
+.decided-evidence-jobless a { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; }
 .decided-empty { padding: 24px 0; font-size: 14px; color: var(--muted); }
 .decided-closes { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 0; border-bottom: 1px solid var(--divider); font-size: 13px; color: var(--muted); }
 .decided-closes button, .decided-more { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; background: transparent; color: var(--muted); }
@@ -52,7 +54,7 @@
  .decided-question { display: block; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; line-height: 1.45; color: var(--objective); }
  .decided-answer { font-size: 13px; }
  .decided-rule { grid-column: auto; margin: 0; }
- .decided-evidence { display: block; grid-column: auto; text-align: right; color: var(--subtle); font-size: 12px; }
+ .decided-evidence, .decided-evidence-jobless { display: block; grid-column: auto; text-align: right; color: var(--subtle); font-size: 12px; }
  .decided-evidence a { min-height: 44px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
 }
 @media (min-width: 1200px) {
