@@ -157,3 +157,10 @@ test("description and mandate goal keep their stored spaces and line breaks; hea
  assert.match(css,/\.jt-jump \{[^}]*margin-left: auto/);
  assert.match(css,/@media \(max-width: 899px\) \{\s*\.jt-tools > summary[^}]*min-height: 44px/,"44px summary targets are phone-only");
 });
+
+test("summary renders collapsed with no `more` before a client measurement says it overflows", () => {
+ const html = detail({summary: "Short"});
+ assert.match(html, /<p class="job-summary job-summary-clamp">Short<\/p>/);
+ assert.doesNotMatch(html, /job-summary-more/, "more is shown only on measured overflow");
+ assert.doesNotMatch(detail({summary: null}), /job-summary-row/);
+});

@@ -230,3 +230,17 @@ test("GET /api/job/:id/transcript reads a torn-down job's worker session read-on
  assert.deepEqual(detail.mandate,{id:"md-a",status:"active",objective:"Goal  A\nline two",spend_usd:detail.mandate!.spend_usd,cap_usd:20,jobs:detail.mandate!.jobs});
  assert.equal((await (await get("/api/job/cp-small")).json() as JobResponse).mandate,null);
 });
+
+test("detail summary is the envelope headline cut at 600 chars; the list keeps 80", t => {
+ const home=createScratchHome(); t.after(()=>home.cleanup());
+ const state={home:home.path,stateDir:join(home.path,LAYOUT.state)}, at="2026-09-26T12:00:00Z";
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};
+ put(".pi-command-post/jobs.json",{jobs:["cp-long","cp-fit"].map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo"]}))});
+ put(LAYOUT.fleetFile,{jobs:["cp-long","cp-fit"].map(job_id=>({job_id,project:"demo",phase:"done",dispatched_at:at,closed_at:at}))});
+ put(join(LAYOUT.runs,"cp-long/envelope.json"),{envelope:{summary:`\n${"y".repeat(700)}\nsecond`}});
+ put(join(LAYOUT.runs,"cp-fit/envelope.json"),{envelope:{summary:"z".repeat(600)}});
+ const long=jobView(state,"cp-long",Date.parse(at))!.job.summary!;
+ assert.equal(long.length,600); assert.equal(long,`${"y".repeat(599)}…`);
+ assert.equal(jobView(state,"cp-fit",Date.parse(at))!.job.summary,"z".repeat(600),"exactly 600 is not cut");
+ assert.equal(jobsView(state,Date.parse(at)).jobs.find(j=>j.id==="cp-long")!.summary,`${"y".repeat(79)}…`);
+});

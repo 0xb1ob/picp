@@ -43,25 +43,39 @@ const isReview = (e: SessionEntry) => /review/i.test(e.bridge?.kind ?? "");
 const isReport = (e: SessionEntry) => e.kind === "tool" && e.name === "report_result";
 const isWorker = (e: SessionEntry) => e.kind === "say" && e.who === "Worker";
 
-/** The worker's session as a read-only document: no composer, no POST. */
-export function JobTranscript({jobId, generatedAt, model, reports}: {jobId: string; generatedAt: string; model: string | null; reports: ReportItem[]}) {
+export const POLL_MS = 10_000;
+/** Whether a screen refresh should start a transcript request: never while one runs; once only when finished; at most every POLL_MS when live. */
+export function shouldFetch(s: {inflight: boolean; loaded: boolean; finished: boolean; sinceMs: number}): boolean {
+ return !s.inflight && (!s.loaded || (!s.finished && s.sinceMs >= POLL_MS));
+}
+/**
+ * The worker's session as a read-only document: no composer, no POST. A finished job is fetched once; a live one refetches on
+ * a screen refresh at most every POLL_MS, one request at a time (aborting on each tick would never let a big session land).
+ * The caller keys this by job id, so a switch mounts fresh: no stale transcript, and unmount aborts the request.
+ */
+export function JobTranscript({jobId, generatedAt, model, reports, finished}: {jobId: string; generatedAt: string; model: string | null; reports: ReportItem[]; finished: boolean}) {
  const [data, setData] = useState<JobTranscriptResponse | null>(null);
  const [failed, setFailed] = useState(false);
- const [fullBrief, setFullBrief] = useState(false);
- const live = useRef<AbortController | null>(null);
- useEffect(() => () => { live.current?.abort(); live.current = null; }, [jobId]);
- // One request at a time: the page refreshes every second or so, and a big session parses slower than that, so aborting on each
- // generated_at change would never let a transcript land. A change while one is in flight is picked up by the next change.
+ const inflight = useRef<AbortController | null>(null);
+ const loaded = useRef(false), lastAt = useRef(0);
+ useEffect(() => () => { inflight.current?.abort(); inflight.current = null; }, []);
  useEffect(() => {
-  if (live.current) return;
-  const abort = live.current = new AbortController();
-  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (live.current === abort) live.current = null; });
- }, [jobId, generatedAt]);
+  if (!shouldFetch({inflight: inflight.current !== null, loaded: loaded.current, finished, sinceMs: Date.now() - lastAt.current})) return;
+  const abort = inflight.current = new AbortController();
+  lastAt.current = Date.now();
+  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { loaded.current = true; setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (inflight.current === abort) inflight.current = null; });
+ }, [jobId, generatedAt, finished]);
  if (failed && !data) return <p class="jobs-empty" role="status">Transcript unavailable</p>;
  if (!data) return <p role="status">Loading</p>;
+ return <TranscriptDocument data={data} model={model} reports={reports}/>;
+}
+
+/** The transcript page from a fetched response; pure of fetching so a fixture renders it. */
+export function TranscriptDocument({data, model, reports}: {data: JobTranscriptResponse; model: string | null; reports: ReportItem[]}) {
+ const [fullBrief, setFullBrief] = useState(false);
  const brief = data.entries.find(e => e.kind === "say" && e.who === "Parent");
  const rest = group(data.entries.filter(e => e !== brief));
- const lastKey = rest.map((b, i) => [b, i] as const).filter(([b]) => b.kind === "entry" && (isWorker(b.entry) || isReport(b.entry))).at(-1)?.[1] ?? rest.length - 1;
+ const lastKey = rest.map((b, i) => [b, i] as const).filter(([b]) => b.kind === "entry" && (isWorker(b.entry) || isReport(b.entry) || isReview(b.entry))).at(-1)?.[1] ?? rest.length - 1;
  const shown = rest.slice(0, lastKey + 1), trailing = rest.slice(lastKey + 1);
  const hasReport = data.entries.some(isReport), hasReviews = data.entries.some(isReview);
  const jump = (id: string) => () => document.getElementById(id)?.scrollIntoView({block: "start"});

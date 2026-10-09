@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JobResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, prNumber, shortSha, time } from "../format.ts";
@@ -55,6 +55,27 @@ function TimelineMeta({meta}: {meta: string}) {
  return <div class="job-event-meta">{meta.split(/(\b[a-f0-9]{40}\b)/gi).map((part,index) => /^[a-f0-9]{40}$/i.test(part) ? <ShaCopy key={index} sha={part}/> : part)}</div>;
 }
 
+/** True when a clipped element hides part of its text (one line, ellipsis): the only case `more` has anything to show. */
+export function overflows(el: {scrollWidth: number; clientWidth: number}): boolean { return el.scrollWidth > el.clientWidth; }
+
+function Summary({text}: {text: string}) {
+ const ref = useRef<HTMLParagraphElement>(null);
+ const [more, setMore] = useState(false);
+ const [clipped, setClipped] = useState(false);
+ // Measured, never assumed: re-checked on a text change and on resize, only while collapsed (expanded text wraps and never overflows).
+ useLayoutEffect(() => {
+  const el = ref.current;
+  if (!el || more) return;
+  const measure = () => setClipped(overflows(el));
+  measure();
+  if (typeof ResizeObserver !== "function") return;
+  const watch = new ResizeObserver(measure);
+  watch.observe(el);
+  return () => watch.disconnect();
+ }, [text, more]);
+ return <div class="job-summary-row"><p ref={ref} class={more ? "job-summary" : "job-summary job-summary-clamp"}>{text}</p>{(clipped || more) && <button type="button" class="job-summary-more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>;
+}
+
 type Tab = "details" | "transcript" | "timeline";
 const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width: 900px)").matches : true;
 
@@ -67,7 +88,6 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
  const job = data.job;
  const [isWide, setWide] = useState(wide ?? nowWide());
  const [tab, setTab] = useState<Tab>(initial ?? (isWide ? "transcript" : "details"));
- const [more, setMore] = useState(false);
  useEffect(() => {
   if (wide !== undefined || typeof matchMedia !== "function") return;
   const query = matchMedia("(min-width: 900px)"), change = () => setWide(query.matches);
@@ -85,13 +105,13 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
   <div class="job-detail-top">
    {data.questions.map(q => <section class="job-question" key={q.id}><h2>{q.kind === "final_fix" ? "Final-fix approval open" : "Parent question open"}</h2><p><code>{q.id}</code> · {q.question}</p><p>Being handled by the operator session.</p></section>)}
    {data.asks.map(ask => <section class="job-question job-question-awaiting" key={ask.id}><h2>Awaiting you</h2><p>{ask.question}</p>{ask.options.map(option => <CopyReply key={option.label} reply={option.reply}/>)}</section>)}
-   {job.summary && <div class="job-summary-row"><p class={more ? "job-summary" : "job-summary job-summary-clamp"}>{job.summary}</p>{job.summary.length > 60 && <button type="button" class="job-summary-more" onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>}{job.failure && <p class="job-failure">{job.failure}</p>}
+   {job.summary && <Summary key={job.id} text={job.summary}/>}{job.failure && <p class="job-failure">{job.failure}</p>}
    {data.reports.length > 0 && <div class="job-links job-report-links">{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Web report · {report.title} ↗</a>)}</div>}
   </div>
   <div class="job-tabs" role="tablist">{tabs.map(name => <button type="button" role="tab" key={name} aria-selected={active === name} class={active === name ? "job-tab job-tab-on" : "job-tab"} onClick={() => setTab(name)}>{name === "details" ? "Details" : name === "transcript" ? "Transcript" : "Timeline"}</button>)}</div>
   <div class="job-detail-body">
    <div class="job-detail-main">
-    {active === "transcript" && <JobTranscript jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports}/>}
+    {active === "transcript" && <JobTranscript key={job.id} jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports} finished={job.phase === "done" || job.phase === "failed"}/>}
     {active === "timeline" && <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/></div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>}
    </div>
    <div class="job-detail-side">
