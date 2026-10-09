@@ -31,7 +31,7 @@ test("QA: operator tier contains decisions and every ask state, not parent repli
  assert.equal(new URLSearchParams(route("#sessions").query).get("view"),"you");
  const worker=sessionsView(state,"workers","cp-live")!;const rendered=screen(worker);
  assert.equal(worker.entries.filter(e=>e.kind==="tool").length,1,"the view still carries the tool entry; only the render hides it");
- assert.match(rendered,/<button type="button" class="session-tools" aria-expanded="false"/);assert.match(rendered,/>· 1 tool call ·</);
+ assert.match(rendered,/<button type="button" class="session-tools" aria-expanded="false"/);assert.match(rendered,/<\/span> 1 tool call/);
  assert.doesNotMatch(rendered,/class="session-tool"|Full file contents/,"a hidden tool call renders neither its summary nor its result");
  // The toggle on (its persisted key): the shown entry renders its summary, never its raw args.
  const windowDescriptor=Object.getOwnPropertyDescriptor(globalThis,"window");
@@ -81,7 +81,7 @@ test("QA: the operator tier has no Decisions | Full transcript toggle; system en
  assert.match(rendered,/>cp-bridge<\/span><span>bridge<\/span>/);
  assert.match(rendered,/>compaction<\/span>/);
  assert.match(rendered,/Context compacted \(260000 tokens before\)/);
- assert.match(rendered,/Show tool calls \(1\)/,"the transcript header offers the hidden count");
- assert.match(rendered,/>· 1 tool call ·</,"the long tool call collapses to its one-line run");
+ assert.match(rendered,/Tools 1/,"the transcript header offers the hidden count");
+ assert.match(rendered,/<\/span> 1 tool call/,"the long tool call collapses to its one-line run");
  assert.doesNotMatch(rendered,/show all|-TAIL-MARKER/,"its text and its show-all link both stay hidden until shown");
 });

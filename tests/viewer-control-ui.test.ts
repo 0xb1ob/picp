@@ -55,7 +55,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.doesNotMatch(card(ready, "answered"), /<button/);
 	assert.equal(card(ready, "withdrawn"), '<p class="session-ask-settled">Withdrawn: No longer needed</p>');
 	assert.doesNotMatch(screen({ ...full, open_asks: [] }, view(status({}))), /session-pinned/, "no open ask, no pinned block");
-	assert.match(ready, /Operator \(dashboard\)<\/span><span>dashboard<\/span>/);
+	assert.match(ready, /<span>You<\/span><span>dashboard<\/span>/, "the operator's own dashboard message reads You");
 	assert.match(ready, /dashboard dc-20260927082600-0123abcd · ask-aaaa/);
 	assert.match(ready, /<textarea aria-label="Message to the operator session" maxLength="16000"|<textarea aria-label="Message to the operator session" maxlength="16000"/);
 	assert.match(ready, /placeholder="Message \(Enter to send\)"/, "one short placeholder that fits the 390px one-row box; no separate hint line");
@@ -244,7 +244,7 @@ test("layout: the pinned decision block and its cards hold at 390px and 1440px",
 	assert.match(desktop, /\.session-pinned \{ padding: 0 40px; \}/, "the wide layout keeps its 40px inset around a one-line bar");
 	assert.match(phone ?? "", /\.decision-card \{ display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-wrap: anywhere; \}/, "long text wraps inside the card at 390px");
 	assert.match(phone ?? "", /\.decision-card-options \{ display: grid; grid-template-columns: minmax\(0,1fr\);[^}]*\}/, "one option per row at 390px");
-	assert.match(desktop, /\.session-pinned > \* \{ max-width: 780px; \}/, "and the transcript's 780px column at 1440px");
+	assert.match(desktop, /\.session-pinned > \* \{ max-width: none; \}/, "intentional override of the old min(760px,100%) column (main addendum ps-20261009102407-b9a45251, frames 06/16): the pinned block spans the transcript pane edge to edge at 1440px");
 	assert.match(desktop, /\.decision-card-options \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); \}/, "two options per row from 900px up");
 	assert.match(phone ?? "", /\.start-session \{ display: flex; flex-wrap: wrap;[^}]*min-width: 0; \}/, "Start session wraps at 390px");
 	assert.match(phone ?? "", /\.start-session-line \{ flex: 1 1 220px; min-width: 0;[^}]*overflow-wrap: anywhere; \}/, "a long reason wraps instead of widening the page, and sits beside the button at 1440px");

@@ -12,7 +12,7 @@ function MarkDone({threads, status, view, class: cls}: {threads: ThreadsView; st
 }
 const Failed = ({threads}: {threads: ThreadsView}) => threads.failed ? <span class="session-thread-failed" role="alert">Not done: {threads.failed.reason}</span> : null;
 
-/** Below 900 px: All, then each thread not done (a selected new or done tag too), then Mark done for the selected one. */
+/** Below 900 px, the filter line under the top bar: All messages, then each thread not done (a selected new or done tag too), then Mark done for the selected one. */
 export function ThreadChips({threads}: {threads: ThreadsView}) {
  const status = threads.status;
  if (!threadsReady(status)) return null;
@@ -20,7 +20,7 @@ export function ThreadChips({threads}: {threads: ThreadsView}) {
  const current = selectedView(threads, status);
  const extra = threads.selected && !live.some(t => t.tag === threads.selected) ? threads.selected : null;
  return <nav class="session-threads" aria-label="Threads">
-  <button type="button" class="session-thread-chip" aria-pressed={!threads.selected} onClick={() => threads.select(null)}>All</button>
+  <button type="button" class="session-thread-chip" aria-pressed={!threads.selected} onClick={() => threads.select(null)}>All messages</button>
   {live.map(t => <button type="button" key={t.id} class="session-thread-chip" aria-pressed={threads.selected === t.tag} aria-label={threadAria(t)} onClick={() => threads.select(t.tag)}>{t.tag}{threadBadge(t)}</button>)}
   {extra && <button type="button" class="session-thread-chip" aria-pressed="true">{extra}</button>}
   {current && <MarkDone threads={threads} status={status} view={current} class="session-thread-chip session-thread-done"/>}
@@ -40,7 +40,7 @@ export function ThreadSidebar({threads}: {threads: ThreadsView}) {
   {threads.selected === t.tag && <MarkDone threads={threads} status={status} view={t} class="session-thread-done"/>}
  </div>;
  return <section aria-label="Threads"><h2>Threads</h2>
-  <button type="button" class="session-thread-choice" aria-pressed={!threads.selected} onClick={() => threads.select(null)}><strong>All</strong></button>
+  <button type="button" class="session-thread-choice" aria-pressed={!threads.selected} onClick={() => threads.select(null)}><strong>All messages</strong></button>
   {live.map(row)}
   {done.length > 0 && <details><summary>Done ({done.length})</summary>{done.map(row)}</details>}
   {status.warning && <p role="alert">{status.warning}</p>}

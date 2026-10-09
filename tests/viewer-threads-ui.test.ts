@@ -73,14 +73,14 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 
 	const html = screen(full, control, threads()), all = parseHTML(`<body>${html}</body>`).document;
 	const chips = [...all.querySelectorAll("nav.session-threads[aria-label=Threads] button")].map(b => [b.textContent, b.getAttribute("aria-pressed")]);
-	assert.deepEqual(chips, [["All", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "All first and pressed; done threads are not chips");
+	assert.deepEqual(chips, [["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "All first and pressed; done threads are not chips");
 	assert.equal(all.querySelector('nav.session-threads button[aria-pressed="false"]')?.getAttribute("aria-label"), "billing-bug: waiting, 1 open ask(s), 1 unacknowledged answer(s)");
 	const nav = all.querySelector("nav.session-threads")!;
-	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-pinned", "operator-composer"], "chips sit between the pinned decisions and the composer");
+	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
 	const sidebar = all.querySelector('.session-sidebar section[aria-label="Threads"]');
 	assert.ok(sidebar, "a Threads section in the sidebar");
 	assert.equal(sidebar!.previousElementSibling?.querySelector("h2")?.textContent, "Operator ↔ you");
-	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["All", "billing-bug · 2waiting", "opsopen"]);
+	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["All messages", "billing-bug · 2waiting", "opsopen"]);
 	assert.match(sidebar!.querySelector("details > summary")?.textContent ?? "", /^Done \(1\)$/);
 	assert.match(html, /about billing/); assert.match(html, /about ops/);
 	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|<h2>Threads/, "Decisions view: no threads");
