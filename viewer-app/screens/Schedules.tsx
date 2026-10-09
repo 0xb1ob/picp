@@ -11,6 +11,7 @@ import "./schedules.css";
 const LANDS_TEXT: Record<ScheduleItem["lands"], string> = {pull_request:"a pull request", branch:"a pushed branch, no PR", plan:"a plan, its gate, then an implementation", answer:"this page's run history (not the operator session)", board:"a report board under Reports", report:"a report (the run's job page)"};
 const TRIGGER_TEXT = {slot:"Scheduled", dashboard:"Run now (dashboard)", cp_schedule:"Run now (cp_schedule)"};
 const RESULT_TEXT: Record<NonNullable<ScheduleItem["runs"][number]["result"]>["kind"], string> = {board:"Report board", pull_request:"Pull request", answer:"Answer", report:"Report", branch:"Branch (no PR)", job:"Job"};
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function JobRow({j}: {j:ScheduleHistoryJob}) {
  return <li key={j.id} class="job-meta">
@@ -50,10 +51,10 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
    <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
    <dt>Recipe</dt><dd>{s.job.skill ? <><code>{s.job.skill}</code> skill</> : "Saved job"}</dd>
    <dt>Mandate</dt><dd><code>{s.mandate_id}</code> · {s.mandate_status}{s.grant_stopped ? " · stopped" : !s.grant_template ? " · no grant template" : ""}</dd>
-   <dt>Last fire</dt><dd>{s.last_run ? <><a href={jobHref(s.last_run.job_id)}><code>{s.last_run.job_id}</code></a> at {observedTime(s.last_run.at)} · {TRIGGER_TEXT[s.last_run.via]}{s.last_run.missed && " (missed)"}</> : s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {s.run_count} recent runs · {s.job_count} jobs</dd>
+   <dt>Last fire</dt><dd>{s.last_run ? <><a href={jobHref(s.last_run.job_id)}><code>{s.last_run.job_id}</code></a> at {observedTime(s.last_run.at)} · {TRIGGER_TEXT[s.last_run.via]}{s.last_run.missed && " (missed)"}</> : s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {plural(s.run_count, "recent run")} · {plural(s.job_count, "job")}</dd>
   </dl>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
-  <details class="schedule-details"><summary>Grant, template &amp; run history · {s.runs.length} runs</summary>
+  <details class="schedule-details"><summary>Grant, template &amp; run history · {plural(s.runs.length, "run")}</summary>
    {s.grant_template ? <>
     <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
     <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>

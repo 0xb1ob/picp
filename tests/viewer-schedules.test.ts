@@ -459,11 +459,13 @@ test("a manual skill schedule's dashboard run shows in Last fire; runs and jobs 
 	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(d: SchedulesResponse): string };
 	const [card = "", orgCard = ""] = screen(data).split('<article class="schedule-card">').slice(1);
 	const { document } = parseHTML(`<div>${card}</div>`);
-	assert.match(document.querySelector(".schedule-facts")?.textContent ?? "", /Last fire.*cp-ra.*Run now \(dashboard\).*1 recent runs · 8 jobs/);
+	assert.match(document.querySelector(".schedule-facts")?.textContent ?? "", /Last fire.*cp-ra.*Run now \(dashboard\).*1 recent run · 8 jobs/);
 	assert.match(document.querySelector(".schedule-result")?.textContent ?? "", /report board/);
 	assert.doesNotMatch(card, /pushed branch/);
 	assert.equal(document.querySelectorAll(".schedule-history > li").length, 1, "one run");
 	assert.equal(document.querySelectorAll(".schedule-run-jobs > li").length, 8);
-	assert.match(card, /run history · 1 runs/);
+	assert.match(card, /run history · 1 run</);
+	assert.match(orgCard, /1 recent run · 2 jobs/);
+	assert.match(screen({ ...data, schedules: [{ ...m!, run_count: 0, job_count: 0, runs: [], history: [] }] }), /0 recent runs · 0 jobs.*run history · 0 runs</s);
 	assert.match(orgCard, /href="#job\/cp-os1">Report<\/a>/);
 });
