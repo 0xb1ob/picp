@@ -54,10 +54,13 @@ export function quoteSha(quote: string): string {
 	return createHash("sha256").update(quote).digest("hex").slice(0, 12);
 }
 
+/** One audit row; a dashboard Run now fire grant's rows lead with `fire run_now <request id>` (the click it was carried for). */
 export function preapprovedRow(grant: Mandate, jobId: string, use: RiskPreapprovedUse, at: string, evidence: readonly string[] = []): RiskPreapprovedRow {
 	const pre = grant.risk_preapproval;
 	if (!pre) throw new MandateError(`${grant.id} has no risk pre-approval`);
-	const rows = evidence.map((line) => line.trim().slice(0, 200)).filter(Boolean).slice(0, 8);
+	const trigger = grant.schedule_fire?.trigger;
+	const fire = trigger?.via === "dashboard" ? [`fire run_now ${trigger.request_id}`] : [];
+	const rows = [...fire, ...evidence].map((line) => line.trim().slice(0, 200)).filter(Boolean).slice(0, 8);
 	return { at, job_id: jobId, use, decided_by: "operator-delegated", quote_sha: quoteSha(pre.operator_quote), evidence: rows };
 }
 

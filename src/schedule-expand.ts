@@ -6,7 +6,7 @@
  */
 import { join } from "node:path";
 import { LAYOUT, type Job } from "./contracts.ts";
-import { readScheduleFile, type Schedule } from "./viewer/schedule-core.ts";
+import { orgReviewMaxReviewers, readScheduleFile, type Schedule } from "./viewer/schedule-core.ts";
 
 export const EXPANDED_MARKER = "expanded:";
 const SCHEDULE_LABEL = "schedule:";
@@ -42,14 +42,28 @@ export function formatExpansionWake(anchor: Job, schedule: Schedule): string {
 		`Never dispatch ${anchor.id}; close it after the synthesis job is torn down.`;
 }
 
-/** Why `labels` may not be added to a job, or undefined: a `schedule:` label is minted by a fire, never by hand. */
-export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[]): string | undefined {
+/**
+ * Why `labels` may not be added to a job, or undefined: a `schedule:` label is minted by a fire, never by hand. A
+ * cp-org-pr-review run also caps its jobs: at most max_reviewers + one synthesis beside the anchor, at most
+ * max_reviewers of them risk:high reviewers (`options.risk` is the new job's). `options.reuseId`: an idempotent
+ * re-create of a job already in the run is never refused by the cap.
+ */
+export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly Job[], schedules: readonly Schedule[], options: { reuseId?: string; risk?: string } = {}): string | undefined {
 	for (const label of labels) {
 		if (!label.startsWith(SCHEDULE_LABEL)) continue;
 		const id = label.slice(SCHEDULE_LABEL.length);
 		if (!ID_PATTERN.test(id)) return `${label} is not a schedule label (schedule:sch-xxxxxx)`;
 		if (!parentExpandedIds(schedules).has(id)) return `${label} is minted by a fire; only a parent-expanded schedule's open run may add jobs to it`;
-		if (!jobs.some((job) => anchorOpen(job, id))) return `no open run of schedule ${id} (Run now first)`;
+		const anchor = jobs.find((job) => anchorOpen(job, id));
+		if (!anchor) return `no open run of schedule ${id} (Run now first)`;
+		const schedule = schedules.find((entry) => entry.id === id);
+		if (schedule?.job.skill !== "cp-org-pr-review") continue;
+		const run = jobs.filter((job) => job.id !== anchor.id && job.labels.includes(label) && Date.parse(job.created_at) >= Date.parse(anchor.created_at));
+		if (options.reuseId !== undefined && run.some((job) => job.id === options.reuseId)) continue;
+		const max = orgReviewMaxReviewers(schedule.job.description);
+		if (run.length >= max + 1) return `cp-org-pr-review run ${anchor.id} already has ${run.length} job(s) (max_reviewers ${max} plus one synthesis); a fire never fans out wider`;
+		const reviewers = run.filter((job) => job.labels.includes("risk:high")).length;
+		if (options.risk === "high" && reviewers >= max) return `cp-org-pr-review run ${anchor.id} already has ${reviewers} reviewer job(s) (max_reviewers ${max}); a fire never fans out wider`;
 	}
 	return undefined;
 }

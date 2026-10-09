@@ -18,18 +18,19 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isoTimestamp, isSafeScriptPath, LAYOUT, SCHEMA_VERSION, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
 import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
-import { liveFireBounds, mintFireGrant, type MintContext, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { carriedPreapproval, liveFireBounds, mintFireGrant, type MintContext, parallelismNote, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, orgReviewConfig, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { parsePrUrl } from "./ci-watch.ts";
+import { verifiedRunNowClick } from "./schedule-control.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 
-export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
 export const SCHEDULER_TICK_MS = 30_000;
 const WATCH_TIMEOUT_CAP_S = 600;
@@ -80,7 +81,12 @@ export interface SchedulerPorts {
 	mintContext?: (project: string) => MintContext | Refusal;
 	/** The project's GitHub `owner/repo` (its registered clone_url): where a cp-pr-review schedule's PRs must live. Absent or undefined refuses it. */
 	repoOf?: (project: string) => string | undefined;
+	/** The pid whose `claimed` line a dashboard Run now must carry to be a verified click; default `process.pid`, as ScheduleControl's. */
+	controlPid?: number;
 }
+
+/** What `cp_schedule update` may change on a schedule's job; trigger, project and grant stay (`move` retargets the grant). */
+export interface ScheduleJobPatch { skill?: string; description?: string; title?: string; kind?: JobKind; delivery?: Delivery }
 
 /** A cp-pr-review schedule reviews at most this many PRs per fire (one `pr:` line each). */
 export const PR_REVIEW_MAX_TARGETS = 20;
@@ -164,6 +170,10 @@ const minuteIso = (at: Date): string => `${at.toISOString().slice(0, 16)}Z`;
 
 const archivedRefusal = (project: string, prefix?: string): string => `${prefix ? `${prefix}: ` : ""}archived project ${project} — unarchive with cp_project unarchive first`;
 
+/** A derived template's notes, then its job-cap raise, then (cp-org-pr-review) its parallelism note: never applied silently. */
+const templateNotes = (notes: readonly string[], floored: { template: GrantTemplate; note?: string }, job: Schedule["job"]): string[] =>
+	[...notes, floored.note, parallelismNote(floored.template, job)].filter((note): note is string => note !== undefined);
+
 /** A template-less schedule's refusal: the migration's saved reason when it has one (never overwritten, never hidden). */
 const noTemplate = (schedule: Schedule): string => {
 	const saved = schedule.last_skip?.reason;
@@ -211,12 +221,7 @@ export class Scheduler {
 		const cron = input.cron !== undefined;
 		const manual = input.manual === true;
 		if ([cron, input.watch_script !== undefined, manual].filter(Boolean).length !== 1) throw new SchedulerError("a schedule is exactly one of cron (cron + tz), watch (watch_script + every_seconds + on) or manual (manual:true, Run now only)");
-		if (input.skill !== undefined) {
-			if (!(SCHEDULE_SKILLS as readonly string[]).includes(input.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(input.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
-			const anchor = SCHEDULE_SKILL_ANCHOR[input.skill as (typeof SCHEDULE_SKILLS)[number]];
-			if (!manual || input.kind !== anchor.kind || input.delivery !== anchor.delivery || input.script_path !== undefined) throw new SchedulerError(`skill needs a manual schedule with kind ${anchor.kind}, delivery ${anchor.delivery} and no script_path`);
-			if (input.skill === "cp-pr-review") prReviewTargets(input.description ?? "", this.#ports.repoOf?.(input.project));
-		}
+		this.#validateSkill(input, manual, input.project);
 		if (cron) {
 			parseCron(input.cron as string);
 			if (!input.tz) throw new SchedulerError("a cron schedule needs tz (an IANA time zone, e.g. UTC)");
@@ -235,14 +240,14 @@ export class Scheduler {
 		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
 		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
 		const seed = mandate as Mandate;
-		const seeded = templateFromSeed(seed, synthesizedApproval(seed, "cp_schedule add"), stamp);
-		if (refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
 		const job: Schedule["job"] = {
 			title: input.title.trim(), kind: input.kind, delivery: input.delivery,
 			...(input.description ? { description: input.description } : {}),
 			...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
 			...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
 		};
+		const seeded = templateFromSeed(seed, synthesizedApproval(seed, "cp_schedule add"), stamp, job);
+		if (refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
 		// One fire's whole fan-out plus its anchor runs under its own fire grant: a lower job cap is raised, never refused.
 		const floored = withSkillJobFloor(seeded.template, job);
 		const schedule: Schedule = {
@@ -260,7 +265,7 @@ export class Scheduler {
 			enabled: true,
 			created_at: now.toISOString(),
 		};
-		const notes = [...seeded.notes, ...(floored.note ? [floored.note] : [])];
+		const notes = templateNotes(seeded.notes, floored, job);
 		return this.#mutate((schedules) => {
 			if (schedules.some((entry) => entry.name === schedule.name && entry.project === schedule.project)) throw new SchedulerError(`project ${schedule.project} already has a schedule named ${JSON.stringify(schedule.name)}`);
 			const shared = schedules.find((entry) => entry.mandate_id === schedule.mandate_id);
@@ -314,7 +319,7 @@ export class Scheduler {
 			const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === mandateId);
 			const refusal = mandateRefusal(mandate, mandateId, found.project, found.job.kind, stamp, found.id, this.list());
 			if (refusal) throw new SchedulerError(`cp_schedule move refused: ${refusal}`);
-			const seeded = templateFromSeed(mandate as Mandate, synthesizedApproval(mandate as Mandate, "cp_schedule move"), stamp);
+			const seeded = templateFromSeed(mandate as Mandate, synthesizedApproval(mandate as Mandate, "cp_schedule move"), stamp, found.job);
 			if (refused(seeded)) throw new SchedulerError(`cp_schedule move refused: ${seeded.refusal}`);
 			const floored = withSkillJobFloor(seeded.template, found.job);
 			let named: string[] = [];
@@ -328,7 +333,51 @@ export class Scheduler {
 				return entry;
 			});
 			const note = found.mandate_id === mandateId ? "" : this.#retire(found.mandate_id, named);
-			return { schedule, note, notes: [...seeded.notes, ...(floored.note ? [floored.note] : [])] };
+			return { schedule, note, notes: templateNotes(seeded.notes, floored, found.job) };
+		});
+	}
+
+	/** Add's skill rules, shared with `update`: a known skill, a manual trigger, the anchor's kind/delivery, no script, valid targets. */
+	#validateSkill(job: { kind: JobKind; delivery: Delivery; description?: string; script_path?: string; skill?: string }, manual: boolean, project: string): void {
+		if (job.skill === undefined) return;
+		if (!(SCHEDULE_SKILLS as readonly string[]).includes(job.skill)) throw new SchedulerError(`unknown skill ${JSON.stringify(job.skill)}; known: ${SCHEDULE_SKILLS.join(", ")}`);
+		const anchor = SCHEDULE_SKILL_ANCHOR[job.skill as (typeof SCHEDULE_SKILLS)[number]];
+		if (!manual || job.kind !== anchor.kind || job.delivery !== anchor.delivery || job.script_path !== undefined) throw new SchedulerError(`skill needs a manual schedule with kind ${anchor.kind}, delivery ${anchor.delivery} and no script_path`);
+		if (job.skill === "cp-pr-review") prReviewTargets(job.description ?? "", this.#ports.repoOf?.(project));
+		else if (job.skill === "cp-org-pr-review") orgReviewConfig(job.description ?? "");
+	}
+
+	/**
+	 * `cp_schedule update`: changes the job's skill, description, title, kind or delivery under add's rules
+	 * (`#validateSkill`, the script intake), in the fire lane. Refused while a run is open (any `schedule:<id>` job not
+	 * closed), when the template excludes the kind, or when the seed holds a risk:high pre-approval and the result is no
+	 * cp-org-pr-review schedule. A skill's job-cap floor is raised and named, never lowered. Trigger, project, grant and
+	 * history stay; a skill is never cleared here (remove and re-add).
+	 */
+	update(id: string, patch: ScheduleJobPatch): Promise<{ schedule: Schedule; notes: string[] }> {
+		return this.#serial(async () => {
+			const given = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as ScheduleJobPatch;
+			if (Object.keys(given).length === 0) throw new SchedulerError("cp_schedule update needs at least one of skill, description, title, kind, delivery");
+			const found = this.list().find((entry) => entry.id === id);
+			if (!found) throw new SchedulerError(`no schedule ${id}`);
+			const open = await this.#ports.ledger().list({ labels: [`schedule:${id}`] });
+			if (open.length) throw new SchedulerError(`schedule ${id} has an open run (${open.map((job) => job.id).join(", ")}); update it once every job of that run is closed`);
+			const job = { ...found.job, ...given, ...(given.title !== undefined ? { title: given.title.trim() } : {}) } as Schedule["job"];
+			this.#validateSkill(job, found.trigger.type === "manual", found.project);
+			assertScriptIntake({ kind: job.kind, delivery: job.delivery, ...(job.script_path !== undefined ? { scriptPath: job.script_path } : {}) });
+			const template = found.grant_template;
+			if (template?.exclusions?.job_kinds?.includes(job.kind)) throw new SchedulerError(`cp_schedule update refused: the template of ${template.seed_mandate_id} excludes ${job.kind} jobs`);
+			const seed = template ? this.#ports.mandates.list().find((entry) => entry.id === template.seed_mandate_id) : undefined;
+			if (seed?.risk_preapproval && job.skill !== "cp-org-pr-review") throw new SchedulerError(`cp_schedule update refused: seed ${seed.id} carries a risk:high pre-approval, which only a cp-org-pr-review schedule may name; cp_schedule move it to a seed without one first`);
+			const floored = template ? withSkillJobFloor(template, job) : undefined;
+			const schedule = await this.#mutate((schedules) => {
+				const entry = schedules.find((candidate) => candidate.id === id);
+				if (!entry) throw new SchedulerError(`no schedule ${id}`);
+				entry.job = job;
+				if (floored) entry.grant_template = floored.template;
+				return entry;
+			});
+			return { schedule, notes: floored ? templateNotes([], floored, job) : [] };
 		});
 	}
 
@@ -578,11 +627,18 @@ export class Scheduler {
 				: schedule.trigger.type === "watch"
 					? { via: "watch" as const, at: stamp, ...(schedule.last_output_sha ? { output_sha: schedule.last_output_sha } : {}) }
 					: { via: "cron" as const, slot: isoTimestamp(slot), missed };
+		// cp-org-pr-review: the seed's operator pre-approval is read before the mint (which retires the seed), and carried
+		// only for a verified dashboard Run now click; every other fire stays gated (src/schedule-grant.ts carriedPreapproval).
+		const carry = carriedPreapproval({
+			skill: schedule.job.skill, scheduleId: schedule.id, trigger, at: stamp,
+			seed: this.#ports.mandates.list().find((entry) => entry.id === template.seed_mandate_id),
+			click: trigger.via === "dashboard" && schedule.job.skill === "cp-org-pr-review" ? verifiedRunNowClick(dirname(this.file), trigger.request_id, schedule.id, this.#ports.controlPid ?? process.pid) : undefined,
+		});
 		let fire: Awaited<ReturnType<typeof mintFireGrant>>;
 		try {
 			fire = await mintFireGrant({
 				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template,
-				previousId: schedule.mandate_id, bounds: bounds.input, trigger, at: stamp,
+				previousId: schedule.mandate_id, bounds: carry && "record" in carry ? { ...bounds.input, risk_preapproval: carry.record } : bounds.input, trigger, at: stamp,
 				movePointer: async (id) => void (await this.#patch(schedule.id, { mandate_id: id }, true)),
 				named: (id) => this.list().some((entry) => entry.id !== schedule.id && entry.mandate_id === id),
 			});
@@ -592,7 +648,8 @@ export class Scheduler {
 		if (fire.grant.id === schedule.mandate_id) throw new SchedulerError(`schedule ${schedule.id} would reuse ${fire.grant.id}; every fire files under a fresh grant`);
 		const refusal = mandateRefusal(fire.grant, fire.grant.id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
 		if (refusal) return { refusal: `the minted fire grant refuses the fire: ${refusal}` };
-		return { grant: fire.grant, notes: [...bounds.notes, ...(fire.revoked.length ? [`revoked ${fire.revoked.join(", ")}`] : [])] };
+		const carried = carry ? ["record" in carry ? carry.note : carry.gated] : [];
+		return { grant: fire.grant, notes: [...bounds.notes, ...carried, ...(fire.revoked.length ? [`revoked ${fire.revoked.join(", ")}`] : [])] };
 	}
 
 	/** Recorded on the schedule every time; reported only when the reason changed, so a paused grant is news once. */

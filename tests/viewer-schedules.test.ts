@@ -5,6 +5,7 @@
  * time zone, and the screen rendered from a fixture.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -170,6 +171,48 @@ test("a manual skill schedule: schema accepts it, the view has no next fire, the
 	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under that fire's own grant\./);
 	assert.match(html, /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: move it to a schedule grant to resume<\/strong>/, "a template-less schedule with no recorded reason says so");
 	assert.doesNotMatch(html, /Next fire|Next check/);
+});
+
+test("a cp-org-pr-review schedule: the view names its fan-out and the seed's Run now clearance by sha only; the card says both", async (t) => {
+	const quote = "Approve the org reviews, SECRET-WORDS-NEVER-SHOWN";
+	const org = {
+		id: "sch-ffffff", name: "org review", project: "demo", mandate_id: "md-live1", trigger: { type: "manual" },
+		job: { title: "Org review", kind: "research", delivery: "local", skill: "cp-org-pr-review", description: `org: acme\nteam: ${"platform-infrastructure-".repeat(3)}core\nteam: web\nhold: https://github.com/acme/api/pull/7\nmax_reviewers: 2` },
+		enabled: true, created_at: "2026-09-01T00:00:00Z", grant_template: template,
+	};
+	const options = fixture(t, file(org, { ...org, id: "sch-a0a0a0", name: "broken", job: { ...org.job, description: "no org line" } }));
+	const seed = (pre: Record<string, unknown> | undefined) => writeFileSync(join(options.stateDir, "mandates", "md-seed1.json"), JSON.stringify({ id: "md-seed1", status: "revoked", revoked_by: { by: "system" }, schedule_grant: true, expiry: "2026-12-01T00:00:00Z", issued_at: "2026-09-01T00:00:00Z", projects: ["demo"], spend_cap: { usd: 10 }, ...(pre ? { risk_preapproval: pre } : {}) }));
+	seed(undefined);
+	const bare = schedulesView(options, () => {}, NOW);
+	assert.deepEqual(bare.schedules[0]?.fan_out, { reviewers: 2, org: "acme", user: null, teams: [`${"platform-infrastructure-".repeat(3)}core`, "web"], holds: 1, error: null });
+	assert.equal(bare.schedules[0]?.run_now_clearance, null);
+	assert.match(bare.schedules[1]?.fan_out?.error ?? "", /cp-org-pr-review: needs exactly one description line "org: <github-org>"/);
+	seed({ operator_quote: quote, decided_by: "operator-quote", scope: "mandate_jobs", granted_at: "2026-09-02T00:00:00Z" });
+	const data = schedulesView(options, () => {}, NOW);
+	assert.deepEqual(data.schedules[0]?.run_now_clearance, { quote_sha: createHash("sha256").update(quote).digest("hex").slice(0, 12), granted_at: "2026-09-02T00:00:00Z" });
+	assert.doesNotMatch(JSON.stringify(data), /SECRET-WORDS/, "the quote never leaves the home");
+	seed({ operator_quote: quote, decided_by: "operator-quote", scope: "named_jobs", job_ids: ["cp-abcd"], granted_at: "2026-09-02T00:00:00Z" });
+	assert.equal(schedulesView(options, () => {}, NOW).schedules[0]?.run_now_clearance, null, "a named_jobs pre-approval is never carried");
+	assert.equal(schedulesView(fixture(t, file(cron)), () => {}, NOW).schedules[0]?.fan_out, null, "other schedules have none");
+
+	const built = await build({
+		stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {Schedules} from "./viewer-app/screens/Schedules.tsx"; export const controlled=(d,c)=>render(h(Schedules,{data:d,control:c}));', loader: "tsx", resolveDir: REPO_ROOT },
+		bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" },
+	});
+	const { controlled } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { controlled(data: SchedulesResponse, control: ScheduleControlView): string };
+	const status: ScheduleControlStatusResponse = { generated_at: new Date(NOW).toISOString(), enabled: true, reason: null, token: "t".repeat(64), parent: { running: true, pid: 1, reason: "running" }, error: null, requests: [] };
+	const [cleared = "", broken = ""] = controlled(data, { status, sending: null, failed: null, request: () => {} }).split('<article class="schedule-card">').slice(1);
+	assert.match(cleared, /Run now fans out to up to 2 reviewers over acme's requested-review queue \(the gh user; teams platform-infrastructure-/);
+	assert.match(cleared, new RegExp(`Run now carries the operator's risk:high pre-approval \\[${data.schedules[0]?.run_now_clearance?.quote_sha}\\]`));
+	assert.doesNotMatch(cleared, /SECRET-WORDS/);
+	assert.match(broken, /role="alert" class="job-meta">Recipe error: cp-org-pr-review: needs exactly one/);
+	const uncleared = controlled(bare, { status, sending: null, failed: null, request: () => {} });
+	assert.match(uncleared, /Reviewers wait for a risk:high approval \(no standing pre-approval on the seed\)/);
+	assert.doesNotMatch(uncleared, /carries the operator/);
+	// Long text wraps at 390 px and 1440 px alike: the screen sets overflow-wrap, never a fixed width.
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/schedules.css"), "utf8");
+	assert.match(css, /\.schedule-screen \{ overflow-wrap: anywhere; \}/);
+	assert.match(css, /\.schedule-fan-out \{[^}]*min-width: 0;/);
 });
 
 test("fire grant template: validates (no merge, merge and risk:high always asked), the page shows the fire grant and the verbatim approval", async (t) => {

@@ -65,7 +65,18 @@ export function ScheduleControls({s, control}: {s:ScheduleItem; control:Schedule
    <button type="button" disabled={disabled} onClick={() => control.request(s.enabled ? "disable" : "enable", s.id)}>{s.enabled ? "Disable" : "Enable"}</button>
    <button type="button" class="schedule-remove" disabled={disabled} onClick={remove}>{confirmRemove ? "Tap again to remove" : "Remove…"}</button>
   </div>
+  {s.fan_out && <FanOut s={s} fan={s.fan_out}/>}
   {failed ? <p role="alert" class="job-meta">Refused: {failed}</p> : latest && <p role="status" class="job-meta">{requestLine(latest)}</p>}
+ </div>;
+}
+
+/** cp-org-pr-review: what Run now fans out to, and whether it carries the seed's standing risk:high pre-approval (its sha only). */
+function FanOut({s, fan}: {s:ScheduleItem; fan:NonNullable<ScheduleItem["fan_out"]>}) {
+ const scope = fan.org ? `${fan.org}'s requested-review queue (${fan.user ?? "the gh user"}${fan.teams.length ? `; teams ${fan.teams.join(", ")}` : ""}; ${fan.holds} held)` : "the org review queue";
+ return <div class="schedule-fan-out">
+  <p class="job-meta">Run now fans out to up to {fan.reviewers} reviewers over {scope}.</p>
+  {fan.error && <p role="alert" class="job-meta">Recipe error: {fan.error}</p>}
+  <p class="job-meta">{s.run_now_clearance ? `Run now carries the operator's risk:high pre-approval [${s.run_now_clearance.quote_sha}] (granted ${observedTime(s.run_now_clearance.granted_at)}).` : "Reviewers wait for a risk:high approval (no standing pre-approval on the seed)."}</p>
  </div>;
 }
 

@@ -143,8 +143,8 @@ export function registerScheduleTools(
 	});
 
 	const parameters = Type.Object({
-		action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now", "move"]),
-		id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now/move)" })),
+		action: StringEnum(["add", "list", "enable", "disable", "remove", "run_now", "move", "update"]),
+		id: Type.Optional(Type.String({ description: "Schedule id (enable/disable/remove/run_now/move/update)" })),
 		operator_quote: Type.Optional(Type.String({ maxLength: RUN_NOW_QUOTE_MAX, description: "run_now only: the operator's verbatim sentence naming the schedule (id or name)" })),
 		name: Type.Optional(Type.String()),
 		project: Type.Optional(Type.String()),
@@ -160,7 +160,7 @@ export function registerScheduleTools(
 		description: Type.Optional(Type.String()),
 		script_path: Type.Optional(Type.String({ description: "Make each fired job a script job (ship/local)" })),
 		manual: Type.Optional(Type.Boolean({ description: "A manual schedule: never fires on its own, only on Run now" })),
-		skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill; cp-pr-review needs 1-20 description lines `pr: https://github.com/<owner>/<repo>/pull/<n>` in the project's own repo" })),
+		skill: Type.Optional(StringEnum([...SCHEDULE_SKILLS], { description: "manual only: the fire records a deferred anchor and wakes you to expand it with this skill; cp-pr-review needs 1-20 description lines `pr: https://github.com/<owner>/<repo>/pull/<n>` in the project's own repo; cp-org-pr-review needs one description line `org: <github-org>` and takes optional `user: <login>`, `team: <slug>` (0-10), `hold: <PR url in the org>` (0-50) and `max_reviewers: <1-3>` lines (skills/cp-org-pr-review/SKILL.md)" })),
 	});
 
 	pi.registerTool({
@@ -169,7 +169,8 @@ export function registerScheduleTools(
 		description:
 			"Saved schedules: `add` a cron line (5 fields + IANA tz), a watch (a tracked script run every N seconds in the project's " +
 			"canonical clone, firing on exit 0 or on changed stdout) or manual (Run now only); `list`, `enable`, `disable`, `remove`; " +
-			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use); `move` retargets a schedule to a fresh seed grant. " +
+			"`run_now` fires one schedule now, only with operator_quote: the operator's verbatim sentence naming the schedule (single use); `move` retargets a schedule to a fresh seed grant; " +
+			"`update` changes a schedule's skill, description, title, kind or delivery under add's rules (refused while a run is open). " +
 			"Every fire mints a fresh grant from the schedule's saved template (its seed grant's bounds; merge and risk:high always asked) and records an ordinary " +
 			"ledger job under it. answer/board/local fires are dispatched and torn down by the schedule runner " +
 			"in code (an LLM schedule as one short-lived worker with its description as the task, a script_path schedule directly, no model); " +
@@ -178,7 +179,7 @@ export function registerScheduleTools(
 		promptSnippet: "Manage cron/watch schedules that file jobs under a mandate (cp_schedule)",
 		promptGuidelines: [
 			"A cp-schedule wake-up (pr/pipeline schedules only) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's, never dispatch them yourself.",
-			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
+			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review, cp-org-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
 			"A schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule) as its seed: add saves its bounds as the schedule's template, and every fire mints a fresh grant from that template, so an expired or spent fire grant never stops the next fire and its budget is never yours to raise or ask about.",
 			"run_now needs the operator's verbatim sentence naming the schedule (its id or name) as operator_quote; never on your own initiative, and never by replaying an earlier sentence: one operator message authorizes one run now per schedule.",
 			"An operator revoke or pause of a schedule's current fire grant stops the schedule until it is moved (`move` with id and mandate_id: a fresh schedule grant) or the grant is resumed.",
@@ -209,6 +210,13 @@ export function registerScheduleTools(
 				});
 				const notes = added.notes?.length ? `\nfire grant template: ${added.notes.join("; ")}` : "";
 				text = `added ${formatSchedules([added])}${notes}${holdsLock() ? "" : "\n(this session does not hold the parent lock: it will not fire here)"}`;
+			} else if (params.action === "update") {
+				const updated = await s.update(need("id"), {
+					...(params.skill !== undefined ? { skill: params.skill } : {}), ...(params.description !== undefined ? { description: params.description } : {}),
+					...(params.title !== undefined ? { title: params.title } : {}), ...(params.kind !== undefined ? { kind: params.kind as JobKind } : {}),
+					...(params.delivery !== undefined ? { delivery: params.delivery as Delivery } : {}),
+				});
+				text = `updated ${formatSchedules([updated.schedule])}${updated.notes.length ? `\nfire grant template: ${updated.notes.join("; ")}` : ""}`;
 			} else if (params.action === "move") {
 				const moved = await s.move(need("id"), need("mandate_id"));
 				text = `moved ${formatSchedules([moved.schedule])}${moved.note}${moved.notes.length ? `\nfire grant template: ${moved.notes.join("; ")}` : ""}`;

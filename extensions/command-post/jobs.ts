@@ -205,10 +205,10 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const project = ports.resolveProject(params.project);
 			const labelErrors = jobLabelErrors([...formatJobLabels({ project, delivery, kind: params.kind, risk: params.risk }), ...(params.labels ?? [])]);
 			if (labelErrors.length > 0) throw new Error(`cp_job create refused: ${labelErrors.join("; ")}`);
-			// A `schedule:<id>` label is minted by a fire: only a parent-expanded schedule's open run may add jobs to it.
-			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home));
-			if (labelRefusal) throw new Error(`cp_job create refused: ${labelRefusal}`);
 			const existing = ledger.findDuplicate({ title, project, ...(params.external_ref !== undefined ? { externalRef: params.external_ref } : {}) });
+			// A `schedule:<id>` label is minted by a fire: only a parent-expanded schedule's open run may add jobs to it.
+			const labelRefusal = scheduleLabelRefusal(params.labels ?? [], ledger.read().jobs, readSchedulesOrEmpty(ledger.home), { ...(existing ? { reuseId: existing.id } : {}), ...(params.risk ? { risk: params.risk } : {}) });
+			if (labelRefusal) throw new Error(`cp_job create refused: ${labelRefusal}`);
 			if (existing) {
 				const errors = jobLabelErrors(existing.labels);
 				if (errors.length > 0) throw new Error(`${existing.id}: label error: ${errors.join("; ")}; repair with cp_job update add_labels/remove_labels`);
