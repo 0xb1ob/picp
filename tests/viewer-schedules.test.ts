@@ -97,6 +97,25 @@ test("activated projection uses durable membership and preserves legacy history 
  assert.equal(view.history.find(j=>j.id==="cp-fire2")?.run_id,id);
  writeFileSync(runs.runsFile,"{");assert.match(schedulesView(state,()=>{},NOW).error!,/JSON/);
 });
+
+
+test("a new active trigger is projected while an open run retains its snapshot",async(t)=>{
+ const state=fixture(t,file(cron)), schedule=readScheduleFile(join(state.stateDir,"schedules.json"))[0]!;
+ const runs=openScheduleRunStore(state.home), policy=policyFromLegacy(schedule,schedule.grant_template!);
+ await runs.savePolicyRevision(policy,{at:"2026-09-21T04:00:00Z",provenance:{channel:"dashboard"}});
+ const id="run-20260921040000-abcdef";
+ await runs.createRun({schema_version:1,id,schedule_id:schedule.id,policy_revision:1,policy,trigger:{via:"slot",at:"2026-09-21T04:00:10Z"},anchor_job_id:null,members:[],phase:"accepted",outcome:null,started_at:"2026-09-21T04:00:10Z",deadline_at:"2026-09-22T04:00:10Z",risk_preapproved:[],authority_log:[],cap_notices:[]});
+ await runs.attachAnchor(id,{job_id:"cp-fire2",role:null,admitted_at:"2026-09-21T04:00:10Z"});await runs.setPhase(id,"running");
+ const updated=structuredClone(policy);updated.revision=2;updated.trigger={type:"manual"};
+ await runs.savePolicyRevision(updated,{at:"2026-09-21T04:01:00Z",provenance:{channel:"dashboard"}});
+ const view=schedulesView(state,()=>{},NOW).schedules[0]!;
+ assert.equal(view.policy?.active_revision,2);
+ assert.deepEqual(view.trigger,updated.trigger);assert.equal(view.next_at,null);assert.match(view.next_note!,/Run now/);
+ assert.equal(view.active_run?.policy_revision,1);assert.deepEqual(view.active_run?.policy.trigger,policy.trigger);
+ await runs.closeRun(id,"completed","2026-09-21T04:02:00Z");
+ const closed=schedulesView(state,()=>{},NOW).schedules[0]!;
+ assert.deepEqual(closed.trigger,updated.trigger);assert.equal(closed.active_run,null);
+});
 test("nextCronSlot walks forward in the schedule's time zone, across a DST change", () => {
 	const spec = parseCron("0 6 * * 1");
 	assert.equal(nextCronSlot(spec, "Europe/Warsaw", new Date(NOW))?.toISOString(), "2026-09-28T04:00:00.000Z", "06:00 CEST");

@@ -51,7 +51,7 @@ export function policySchedule(schedule: Schedule, policy: SchedulePolicy | unde
 }
 
 /** Called inside Scheduler's lane after authenticated control/tool admission. */
-export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; schedule:Schedule; runs:ScheduleRunStore; ledger:Ledger; mandates:import("./mandate.ts").MandateStore; context:MintContext; action:PolicyAction; now:Date; base?:number; draft?:SchedulePolicy; validate:(schedule:Schedule)=>void}): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
+export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; schedule:Schedule; runs:ScheduleRunStore; ledger:Ledger; mandates:import("./mandate.ts").MandateStore; context?:MintContext; action:PolicyAction; now:Date; base?:number; draft?:SchedulePolicy; validate:(schedule:Schedule)=>void}): Promise<import("./viewer/schedule-run-core.ts").PolicyRecord> {
  const {schedule,runs,action,now} = input;
  const record = runs.policyRecord(schedule.id);
  const latest = record?.revisions.at(-1);
@@ -72,11 +72,13 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  if (draft.recipe.delivery === "pipeline") throw new Error("pipeline schedules remain on per-fire grants");
  if (draft.effects.includes("org_review_approve") && !baseline.effects.includes("org_review_approve")) throw new Error("org-review approval requires the existing dashboard-only seed clearance");
  const policy:SchedulePolicy = {...structuredClone(draft),revision:(latest?.revision ?? 0)+1,saved_at:isoTimestamp(now),saved_by:action.saved_by,provenance:structuredClone(action.provenance),approval:structuredClone(baseline.approval)};
+ // Deactivation removes authority; live admission checks must not prevent rollback after drain.
+ if (input.op === "deactivate") return runs.deactivatePolicy(schedule.id,policy);
+ if (!input.context) throw new Error("live policy bounds are not wired");
  input.validate(policySchedule(schedule,policy));
  const bounds = effectivePolicyBounds(policy,input.context,schedule.project,policy.recipe.kind,now);
  if (refused(bounds)) throw new Error(bounds.refusal);
  // Persist narrowed bounds, with provenance; a later ceiling increase cannot widen this save.
  policy.limits = bounds.limits; policy.exclusions = bounds.exclusions;
- if (input.op === "deactivate") return runs.deactivatePolicy(schedule.id,policy);
  return runs.savePolicyRevision(policy,{at:isoTimestamp(now),provenance:action.provenance});
 }

@@ -128,10 +128,11 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 	catch (error) { return {generated_at,error:(error as Error).message,schedules:[]}; }
 	schedules = schedules.map(s=>{
 		const record = policies.find(p=>p.schedule_id === s.id);
-		const policy = durable.find(r=>r.schedule_id === s.id && r.phase !== "closed")?.policy ?? record?.revisions.find(p=>p.revision === record.active_revision);
+		const active = record?.revisions.find(p=>p.revision === record.active_revision);
+		const policy = durable.find(r=>r.schedule_id === s.id && r.phase !== "closed")?.policy ?? active;
 		if (!policy) return s;
 		const {skill,...recipe} = policy.recipe;
-		return {...s,trigger:policy.trigger,job:{...recipe,...(skill ? {skill} : {})}};
+		return {...s,trigger:active?.trigger ?? s.trigger,job:{...recipe,...(skill ? {skill} : {})}};
 	});
 	const grants = readMandates(state);
 	const ledger = objectList(join(runtimeRoot(state.home), "jobs.json"), "jobs", (j) => typeof j.id === "string" && isSafeId(j.id)).value;

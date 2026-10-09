@@ -128,3 +128,37 @@ test("read-only policy preview matches live narrowing and reports malformed/over
  writeFileSync(join(data,"mandate-defaults.json"),"{");assert.match(schedulePolicyView(b.stateDir,b.schedule.id).blocking.join(";"),/unreadable/);
  writeFileSync(join(data,"mandate-defaults.json"),JSON.stringify({...defaults,exclude_paths:Array.from({length:33},(_,i)=>`path-${i}`)}));assert.match(schedulePolicyView(b.stateDir,b.schedule.id).blocking.join(";"),/32/);
 });
+
+
+test("deactivation drains authority even when bounds forbid new runs, preserving authentication and audit",async(t)=>{
+ const b=await bench(t);await b.request("adopt",{revision:0});
+ const started=await b.request("run_now",{revision:1}), event=started.events[0]!;
+ const policy=structuredClone(b.runs.activePolicy(b.schedule.id)!);
+ policy.revision=2;policy.exclusions.job_kinds=["research"];
+ await b.runs.savePolicyRevision(policy,{at:policy.saved_at,provenance:{channel:"dashboard"}});
+ const blocked=await b.request("run_now",{revision:2});assert.equal(blocked.receipt.state,"refused");
+ const open=await b.request("deactivate");assert.equal(open.receipt.state,"refused");assert.match(open.receipt.reason!,/open run/);
+ await b.ledger.close(event.job_id!,"completed");await b.runs.closeRun(event.run_id!,"completed",policy.saved_at);
+ const excluded=await b.request("run_now",{revision:2});assert.equal(excluded.receipt.state,"refused");assert.match(excluded.receipt.reason!,/excludes research/);
+ await assert.rejects(b.scheduler.deactivatePolicy(b.schedule.id,{saved_by:"dashboard",provenance:{channel:"dashboard",request_id:"sc-fake"}}),/unauthenticated/);
+ const before=JSON.stringify(b.mandates.list());
+ const off=await b.request("deactivate");assert.equal(off.receipt.state,"done",off.receipt.reason!);
+ const record=b.runs.policyRecord(b.schedule.id)!;
+ assert.equal(record.active_revision,null);assert.equal(record.revisions.length,3);
+ assert.equal(record.revisions.at(-1)?.provenance.request_id,off.receipt.id);
+ assert.deepEqual(record.revisions.at(-1)?.exclusions,policy.exclusions);
+ assert.deepEqual(record.revisions.at(-1)?.approval,policy.approval);
+ assert.equal(JSON.stringify(b.mandates.list()),before);assert.equal(b.runs.run(event.run_id!)?.phase,"closed");
+});
+
+
+test("authenticated deactivation does not need a readable live admission context",async(t)=>{
+ const b=await bench(t);await b.request("adopt",{revision:0});
+ const scheduler=new Scheduler({home:b.home.path,ledger:()=>b.ledger,mandates:b.mandates,runs:b.runs,usageJobs:()=>[],cloneOf:()=>b.home.path,mintContext:()=>{throw new Error("live bounds unreadable");}});
+ const control=new ScheduleControl({stateDir:b.stateDir,scheduler,log:()=>{}}), id="sc-20261009090000-abcdef12";
+ appendScheduleControlLine(b.stateDir,{type:"request",by:"viewer",id,at:new Date().toISOString(),peer:"127.0.0.1",op:"deactivate",schedule_id:b.schedule.id});
+ await control.pass();
+ const receipt=readScheduleControl(b.stateDir).requests.find(r=>r.id===id)!;
+ assert.equal(receipt.state,"done",receipt.reason!);assert.equal(b.runs.activePolicy(b.schedule.id),undefined);
+ assert.equal(b.runs.policyRecord(b.schedule.id)?.revisions.at(-1)?.provenance.request_id,id);
+});

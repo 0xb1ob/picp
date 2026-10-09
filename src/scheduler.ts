@@ -330,8 +330,8 @@ export class Scheduler {
 				const click = verifiedRunNowClick(dirname(this.file), action.provenance.request_id ?? "", id, this.#ports.controlPid ?? process.pid, op === "save" ? "save_policy" : op === "adopt" ? "adopt" : "deactivate");
 				if (!click.ok) throw new SchedulerError(`policy action unauthenticated: ${click.why}`);
 			} else if (action.provenance.channel !== "cp_schedule" || !action.provenance.quote_sha || !action.provenance.tool_call_id) throw new SchedulerError("policy action requires an authenticated operator action");
-			const context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "live policy bounds are not wired" };
-			if (refused(context)) throw new SchedulerError(context.refusal);
+			const context = op === "deactivate" ? undefined : this.#ports.mintContext?.(schedule.project) ?? { refusal: "live policy bounds are not wired" };
+			if (context && refused(context)) throw new SchedulerError(context.refusal);
 			const record = await changePolicy({ op, schedule, runs, ledger: this.#ports.ledger(), mandates: this.#ports.mandates, context, action, now: this.#now(), base, draft,
 				validate: s => { this.#validateSkill(s.job, s.trigger.type === "manual", s.project); assertScriptIntake({kind:s.job.kind,delivery:s.job.delivery,...(s.job.script_path ? {scriptPath:s.job.script_path} : {})}); } });
 			if (op !== "deactivate") this.#retire(schedule.mandate_id, this.list().filter(s => s.id !== id).map(s => s.mandate_id));
