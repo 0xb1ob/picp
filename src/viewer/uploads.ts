@@ -36,7 +36,7 @@ const FILE_NAME = /^[0-9a-f]{24}\.(?:png|jpg|webp|gif|txt|md|html|json)$/;
 export const isUploadId = (value: unknown): value is string => typeof value === "string" && UPLOAD_ID_RE.test(value);
 export const isImageUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${IMAGE_ID_SOURCE}$`).test(value);
 export const isTextUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${TEXT_ID_SOURCE}$`).test(value);
-export const TEXT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export const TEXT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 export const TEXT_MESSAGE_INLINE_BYTES = 200 * 1024;
 export type TextExt = "txt" | "md" | "html" | "json";
 export type ImageExt = "png" | "jpg" | "webp" | "gif";
@@ -47,7 +47,7 @@ export const textExtension = (name: string): TextExt | undefined => /\.(txt|md|h
 export const sanitizeUploadName = (name: string): string => name.replace(/\\/g, "/").split("/").pop()!.replace(/[^a-zA-Z0-9 ._-]/g, "_").slice(-120) || "attachment";
 
 export function validateText(bytes: Uint8Array, ext: TextExt): { text: string } | { refused: string } {
-	if (bytes.length > TEXT_UPLOAD_MAX_BYTES) return { refused: "text file is larger than 1 MiB" };
+	if (bytes.length > TEXT_UPLOAD_MAX_BYTES) return { refused: "text file is larger than 4 MiB" };
 	if (bytes.includes(0)) return { refused: "text file contains NUL (binary files are not supported)" };
 	let text: string;
 	try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }

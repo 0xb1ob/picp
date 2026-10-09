@@ -229,12 +229,14 @@ test("text uploads: validate extensions/UTF-8/JSON/size, store metadata only, se
   ["binary.txt", Buffer.from([1, 0, 2]), 415, /NUL/],
   ["broken.md", Buffer.from([0xc3, 0x28]), 415, /UTF-8/],
   ["broken.json", Buffer.from("{oops}"), 415, /valid JSON/],
-  ["big.txt", Buffer.alloc(1024 * 1024 + 1, 97), 413, /1048576/],
+  ["big.txt", Buffer.alloc(Math.round(4.1 * 1024 * 1024), 97), 413, /larger than 4194304 bytes/],
   ["file.csv", Buffer.from("hello"), 415, /extension/],
   ["file.svg", Buffer.from("<svg></svg>"), 415, /extension/],
  ] as const) {
   const reply = await call(port, UPLOAD, text(name, bytes)); assert.equal(reply.status, status, JSON.stringify(reply.body)); assert.match(String(reply.body.error), reason);
  }
+ const nearCap = await call(port, UPLOAD, text("near-cap.txt", Buffer.alloc(Math.round(3.9 * 1024 * 1024), 97)));
+ assert.equal(nearCap.status, 201, JSON.stringify(nearCap.body)); assert.equal(nearCap.body.bytes, Math.round(3.9 * 1024 * 1024));
  const html = Buffer.from("<script>UNIQUE_ATTACHMENT_CONTENT</script>");
  const uploaded = await call(port, UPLOAD, text("../folder\\report[1].HTML", html));
  assert.equal(uploaded.status, 201, JSON.stringify(uploaded.body));

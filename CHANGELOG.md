@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- The operator composer's text-attachment cap is now 4 MiB (was 1 MiB); the 200 KiB inline budget and the 10 MiB image cap are unchanged. Larger text files are still sent by stored path.
+
 ### Settings: model fields are dropdowns (cp-lol1)
 
 Every model field on `#settings` (rubric row model, each fallback, parent and operator) is now a `<select>` instead of a text input with a `<datalist>`: options grouped by provider from `available_models`, "(unset)" first for parent and operator, an unlisted current value kept as "<id> (not in pi's list)" with its warning, and "Custom…" revealing the text input. Fallbacks are one dropdown each with a ×, plus an "Add fallback…" dropdown (up to 4). No API change. Migration: none. Rollback: revert.

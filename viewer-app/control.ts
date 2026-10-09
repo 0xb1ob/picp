@@ -17,7 +17,7 @@ export const uploadUrl = (id: string): string => `/api/operator/uploads/${encode
 export const UPLOAD_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const UPLOAD_MAX_PER_MESSAGE = 8;
-export const TEXT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export const TEXT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 export const isTextFile = (file: {name: string}): boolean => /\.(txt|md|html|json)$/i.test(file.name);
 export const attachmentSize = (bytes: number): string => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 
@@ -78,7 +78,7 @@ export const controlFiles = (status: ControlStatus | null | undefined): boolean 
 /** Why the next attachment is refused, or null. HEIC is named, since iPhones make it. */
 export function attachRefusal(file: {name: string; type: string; size: number}, count: number): string | null {
  if (count >= UPLOAD_MAX_PER_MESSAGE) return `At most ${UPLOAD_MAX_PER_MESSAGE} attachments per message`;
- if (isTextFile(file)) return file.size > TEXT_UPLOAD_MAX_BYTES ? `${file.name} is larger than 1 MiB` : null;
+ if (isTextFile(file)) return file.size > TEXT_UPLOAD_MAX_BYTES ? `${file.name} is larger than 4 MiB` : null;
  if (/^image\/hei[cf]$/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return "HEIC/HEIF is not supported; share the photo as JPEG";
  if (!UPLOAD_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG, WebP or GIF image or a .txt, .md, .html or .json file`;
  if (file.size > UPLOAD_MAX_BYTES) return `${file.name || "This image"} is larger than 10 MiB`;
