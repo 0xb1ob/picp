@@ -23,9 +23,12 @@ function auditLine(row: SettingsAuditRow): string {
  const mode = typeof row.mode === "string" ? ` ${row.mode}` : "";
  return `${row.at} · ${row.type}${mode}${reason}`;
 }
+const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => JSON.stringify(row) !== JSON.stringify(was);
 
-function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; children: ComponentChildren}) {
+
+function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, unsavedCount, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; unsavedCount?: number; children: ComponentChildren}) {
  const changes = pick(drafts, keys);
+ const unsaved = unsavedCount ?? Object.keys(changes).length;
  const save = async () => { if (await view.save(changes)) setDrafts(current => omit(current, keys)); };
  const reset = async () => {
   if (!restore || !(globalThis.confirm?.(restoreText) ?? true)) return;
@@ -34,10 +37,11 @@ function Section({title, help, keys, drafts, setDrafts, view, restore, restoreTe
  return <section class="settings-section" aria-label={title}>
   <h2>{title}</h2>
   <p class="settings-help">{help}</p>
-  {children}
+  <div class="settings-body">{children}</div>
   {restore && <div class="settings-actions">
    <button type="button" class="settings-primary" disabled={disabled || !Object.keys(changes).length} onClick={() => void save()}>Save</button>
    <button type="button" disabled={disabled} onClick={() => void reset()}>Restore defaults</button>
+   {unsaved > 0 && <span class="settings-unsaved">{unsaved} unsaved change{unsaved === 1 ? "" : "s"}</span>}
   </div>}
  </section>;
 }
@@ -80,7 +84,7 @@ function ModelSelect({id, name, label, value, set, models, unset, required, disa
 function AddFallback({rowId, models, add, disabled}: {rowId: string; models: string[] | null | undefined; add: (model: string) => void; disabled: boolean}) {
  const [custom, setCustom] = useState(false);
  const list = models?.length ? models : null;
- return <div class="settings-model">
+ return <div class="settings-model settings-chip settings-add">
   <select aria-label={`Add a fallback to ${rowId}`} value={custom ? CUSTOM : ""} disabled={disabled} onChange={event => {
    const next = event.currentTarget.value;
    setCustom(next === CUSTOM);
@@ -99,20 +103,20 @@ function AddFallback({rowId, models, add, disabled}: {rowId: string; models: str
  </div>;
 }
 
-function Rubric({rows, setRow, disabled, models}: {rows: RoutingRule[]; setRow: (index: number, patch: Partial<RoutingRule>) => void; disabled: boolean; models: string[] | null | undefined}) {
- return <ol class="settings-rules">{rows.map((row, index) => {
+function Rubric({rows, original, setRow, disabled, models}: {rows: RoutingRule[]; original: RoutingRule[]; setRow: (index: number, patch: Partial<RoutingRule>) => void; disabled: boolean; models: string[] | null | undefined}) {
+ return <ol class="settings-rules"><li class="settings-rules-head" aria-hidden="true"><span>Rule</span><span>Model</span><span>Fallbacks, in order</span><span>Thinking</span></li>{rows.map((row, index) => {
   const fallbacks = row.fallbacks ?? [];
-  return <li key={row.id} class="settings-rule">
-  <div class="settings-rule-head"><code>{row.id}</code><span class="settings-chips" title={row.note}>{[row.role, row.scope?.join("/"), row.risk && `risk ${row.risk}`, row.project].filter(Boolean).join(" · ")}</span></div>
-  <label>Model<ModelSelect label={`Model of ${row.id}`} value={row.model} set={model => setRow(index, {model})} models={models} required disabled={disabled}/><ModelNote models={models} values={[row.model]}/></label>
-  <div class="settings-fallbacks" role="group" aria-label={`Fallbacks of ${row.id}`}><span>Fallbacks</span>
-   {fallbacks.map((fallback, at) => <div key={at} class="settings-fallback">
+  return <li key={row.id} class={rowEdited(row, original[index]) ? "settings-rule settings-rule-edited" : "settings-rule"}>
+  <div class="settings-rule-head"><code>{row.id}</code><span class="settings-chips" title={row.note}>{[row.role, row.scope?.join("/"), row.risk && `risk:${row.risk}`, row.project].filter(Boolean).join(" · ")}</span></div>
+  <label><span class="settings-label">Model</span><ModelSelect label={`Model of ${row.id}`} value={row.model} set={model => setRow(index, {model})} models={models} required disabled={disabled}/><ModelNote models={models} values={[row.model]}/></label>
+  <div class="settings-fallbacks" role="group" aria-label={`Fallbacks of ${row.id}`}><span class="settings-label">Fallbacks</span>
+   {fallbacks.map((fallback, at) => <span key={at} class="settings-chip">
     <ModelSelect name={`Fallback ${at + 1} of ${row.id}`} label={`Fallback ${at + 1} of ${row.id}`} value={fallback} set={next => setRow(index, {fallbacks: fallbacks.map((item, i) => i === at ? next : item)})} models={models} required disabled={disabled}/>
     <button type="button" aria-label={`Remove fallback ${fallback || at + 1} from ${row.id}`} disabled={disabled} onClick={() => setRow(index, {fallbacks: fallbacks.filter((_, i) => i !== at)})}>×</button>
-   </div>)}
+   </span>)}
    {fallbacks.length < MAX_FALLBACKS && <AddFallback rowId={row.id} models={models} disabled={disabled} add={added => { if (!fallbacks.includes(added)) setRow(index, {fallbacks: [...fallbacks, added]}); }}/>}
    <ModelNote models={models} values={fallbacks}/></div>
-  <label>Thinking<select value={row.thinking ?? ""} disabled={disabled} onChange={event => setRow(index, {thinking: (event.currentTarget.value || undefined) as ThinkingLevel | undefined})}>
+  <label><span class="settings-label">Thinking</span><select value={row.thinking ?? ""} disabled={disabled} onChange={event => setRow(index, {thinking: (event.currentTarget.value || undefined) as ThinkingLevel | undefined})}>
    <option value="">profile default</option>
    {THINKING.map(level => <option key={level} value={level}>{level}</option>)}
   </select></label>
@@ -140,7 +144,7 @@ function Field({field, value, source, set, disabled, models}: {field: SettingFie
 export function Settings({view}: {view: SettingsView}) {
  const [drafts, setDrafts] = useState<Drafts>({});
  const status = view.status;
- const header = <header class="settings-heading"><PageHeader title="Settings"/><p>Worker, parent and operator models, and the defaults new grants start from. Saved to this home's owner files.</p></header>;
+ const header = <header class="settings-heading"><PageHeader title="Settings" context="This machine"/></header>;
  if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p></div>;
  if ("error" in status || !status.snapshot || !status.catalog) return <div class="settings-screen">{header}<p role="alert" class="overview-error">Settings unavailable: {"error" in status ? status.error : status.reason ?? "no snapshot"}</p></div>;
  const data: SettingsResponse = status;
@@ -149,6 +153,7 @@ export function Settings({view}: {view: SettingsView}) {
  const view_ = (key: SettingKey) => data.snapshot?.fields.find(field => field.key === key);
  const routingAbsent = status.snapshot.owners.find(owner => owner.owner === "routing")?.state === "absent";
  const rows = (valueOf(data, drafts, "models.rubric") ?? []) as RoutingRule[];
+ const original = (view_("models.rubric")?.value ?? []) as RoutingRule[];
  const setRow = (index: number, patch: Partial<RoutingRule>) => set("models.rubric", rows.map((row, at) => {
   if (at !== index) return row;
   const next: RoutingRule = {...row, ...patch};
@@ -167,8 +172,8 @@ export function Settings({view}: {view: SettingsView}) {
   {header}
   {!data.writable || !view.token ? <p role="status" class="settings-readonly">Read only: {data.reason ?? "no operator session serves dashboard control; start it to change settings"}</p> : null}
   {notice && <div role={notice.kind === "ok" ? "status" : "alert"} class={`settings-notice settings-${notice.kind}`}><p>{notice.text}</p>{notice.errors.length > 0 && <ul>{notice.errors.map(error => <li key={error}>{error}</li>)}</ul>}</div>}
-  <Section title="Worker models" help="Model, fallbacks and thinking per data/routing.json rubric row; the rest of each row is fixed here. Applies at the next dispatch." keys={["models.rubric"]} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ["models.rubric"]}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches? Rows you added stay." disabled={disabled}>
-   {routingAbsent ? <p class="settings-readonly">No data/routing.json: workers use each profile's own model.</p> : <Rubric rows={rows} setRow={setRow} disabled={disabled} models={models}/>}
+  <Section title="Model routing" help="First matching rule wins. Model, fallbacks and thinking apply from the next job or review; role, scope and risk stay fixed." keys={["models.rubric"]} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ["models.rubric"]}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches? Rows you added stay." disabled={disabled} unsavedCount={rows.filter((row, index) => rowEdited(row, original[index])).length}>
+   {routingAbsent ? <p class="settings-readonly">No data/routing.json: workers use each profile's own model.</p> : <Rubric rows={rows} original={original} setRow={setRow} disabled={disabled} models={models}/>}
    {modelsNote}
   </Section>
   <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models?" disabled={disabled}>

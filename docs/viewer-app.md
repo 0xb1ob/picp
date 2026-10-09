@@ -431,9 +431,10 @@ sidebar section says `Threads unavailable: <reason>`. Styles: `.session-thread*`
 ellipsize in their chip at 390 px and in the 300 px sidebar at 1440 px.
 
 **Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
-`use-settings-control.ts`, `settings-control.ts`). `#settings`, under More, has exactly three sections, each with its own
-**Save** and **Restore defaults** (a `confirm()` first): **Worker models** (one row per `data/routing.json` rubric entry:
-the id and `role · scope · risk · project` chips, a model input, comma-separated fallbacks and a thinking select whose
+`use-settings-control.ts`, `settings-control.ts`). `#settings`, in the desktop rail and under More on phone, has exactly three sections, each with its own
+**Save** and **Restore defaults** (a `confirm()` first) in each rounded hairline card's footer (≤1000 px wide), with `{n} unsaved change(s)` beside them (for Model routing, changed rubric rows; an edited row gets an accent left bar and tint): **Model routing** (one row per `data/routing.json` rubric entry,
+a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mono id and `role · scope · risk:<level> · project` meta, a compact model select, fallbacks as inline mono chips with × that wrap only when needed, ending in a dashed `+ Add fallback` chip (still a native select; ×/chip hold the same 4-fallback cap),
+and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
 model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
 its source; empty unsets it) and **Grant defaults** (the `grants.*` fields from the catalog). It reads `GET /api/settings`
@@ -441,7 +442,7 @@ on mount and after each write; a write is one `POST /api/settings/apply` (only t
 `If-Match` and the operator session's `x-cp-control-token` from `/api/operator/control`. A 412 swaps in the fresh
 snapshot and keeps the drafts ("Changed on disk"), a 400 lists its errors, and every control is disabled with the reason
 when the response is not `writable`. The last five audit lines sit at the foot. `screens/settings.css`: one column at
-390 px with 44 px controls and `overflow-wrap: anywhere`; a label/input grid from 900 px. Screenshots:
+390 px with 44 px controls (fallback chip selects and × have 44 px hit areas below 900 px) and `overflow-wrap: anywhere`; from 900 px the rubric columns are 200 px Rule / 250 px Model / flexible fallbacks / 110 px Thinking. Screenshots:
 `docs/tui-verification/settings-minimal.md`.
 
 Model pickers: `GET /api/settings` also carries `available_models` (`provider/id`, from `pi --no-extensions --list-models` through
