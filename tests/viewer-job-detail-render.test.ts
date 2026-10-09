@@ -165,3 +165,22 @@ test("summary renders collapsed with no `more` before a client measurement says 
  assert.doesNotMatch(html, /job-summary-more/, "more is shown only on measured overflow");
  assert.doesNotMatch(detail({summary: null}), /job-summary-row/);
 });
+
+test("failure headline sits above the tabs; the Ask action lives in the facts rail, shown on desktop and phone Details only", () => {
+ const ask = (props: {wide?: boolean; initial?: string}) => {
+  const {document} = parseHTML(detail({phase: "failed", failure: "wall clock limit"}, {}, props));
+  const root = document.querySelector(".job-detail")!;
+  const link = [...document.querySelectorAll("a")].find(a => a.textContent === "Ask about this failure");
+  return {tab: root.getAttribute("data-tab"), inSide: !!link?.closest(".job-detail-side"), headline: document.querySelector(".job-detail-top .job-failure")?.textContent, tabsAfterTop: !!document.querySelector(".job-detail-top + .job-tabs")};
+ };
+ const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/job-detail.css"), "utf8");
+ assert.match(css, /\.job-detail-side \{ display: none;/, "phone: the rail is hidden by default");
+ assert.match(css, /\.job-detail\[data-tab="details"\] \.job-detail-side \{ display: flex; \}/, "phone: shown on the Details tab");
+ for (const [name, props] of [["phone details", {wide: false}], ["desktop", {wide: true}]] as const) {
+  const r = ask(props);
+  assert.deepEqual([r.inSide, r.headline, r.tabsAfterTop], [true, "wall clock limit", true], name);
+ }
+ assert.equal(ask({wide: false}).tab, "details", "the phone opens on Details, where the action is visible");
+ assert.equal(ask({wide: false, initial: "transcript"}).tab, "transcript", "on phone Transcript the rail is CSS-hidden");
+ assert.equal(detail({phase: "done"}).includes("Ask about this failure"), false, "only failed jobs offer it");
+});

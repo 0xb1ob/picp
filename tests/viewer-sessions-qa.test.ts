@@ -32,6 +32,7 @@ test("QA: operator tier contains decisions and every ask state, not parent repli
  const worker=sessionsView(state,"workers","cp-live")!;const rendered=screen(worker);
  assert.equal(worker.entries.filter(e=>e.kind==="tool").length,1,"the view still carries the tool entry; only the render hides it");
  assert.match(rendered,/<button type="button" class="session-tools" aria-expanded="false"/);assert.match(rendered,/<\/span> 1 tool call/);
+ assert.match(rendered,/<div class="session-tool-run"><button type="button" class="session-tools" aria-expanded="false"><span aria-hidden="true">▸<\/span> 1 tool call(<small> · [^<]*<\/small>)?<\/button><\/div>/,"the Sessions row is the shared ToolRunRow, collapsed: wrapper, button, marker, count, no rows");
  assert.doesNotMatch(rendered,/class="session-tool"|Full file contents/,"a hidden tool call renders neither its summary nor its result");
  // The toggle on (its persisted key): the shown entry renders its summary, never its raw args.
  const windowDescriptor=Object.getOwnPropertyDescriptor(globalThis,"window");
