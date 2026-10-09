@@ -386,6 +386,10 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.equal(nav.querySelector('[aria-current="page"]')?.getAttribute("href"), "#schedules");
 	assert.equal(nav.querySelector('a[href="#files"]')?.textContent, "Files");
 	assert.equal(document.querySelector(".schedule-add")?.textContent, "+ Add schedule");
+	assert.equal(document.querySelector(".schedule-add-long")?.textContent, " schedule", "phone CSS hides the long label");
+	assert.ok(document.querySelector(".schedule-card-heading .schedule-pill"), "enabled state is a pill");
+	assert.ok(document.querySelector(".schedule-how-phone"), "phone gets a closed how-schedules-run disclosure");
+	assert.equal(document.querySelector(".schedule-how-phone")?.hasAttribute("open"), false);
 	assert.ok(document.querySelector(".schedule-layout > aside"), "explanation beside the schedule list");
 	for (const card of document.querySelectorAll(".schedule-card")) {
 		assert.deepEqual([...card.querySelectorAll(".schedule-facts > dt")].map(e => e.textContent), ["Trigger", "Recipe", "Mandate", "Last fire"]);

@@ -1,5 +1,4 @@
 .schedule-screen { overflow-wrap: anywhere; }
-.schedule-heading p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .schedule-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .schedule-toolbar > p { min-width: 0; flex: 1; }
 .schedule-add { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; font-weight: 600; text-decoration: none; }
@@ -7,11 +6,16 @@
 .schedule-card { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .schedule-card-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .schedule-card-heading h2 { font-size: 17px; min-width: 0; color: var(--text); }
+.schedule-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
+.schedule-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.schedule-pill-on { color: var(--text); }
+.schedule-pill-on::before { background: var(--green); }
 .schedule-project { margin-left: auto; font-size: 11px; color: var(--dim); }
 .schedule-result { margin: 0; color: var(--secondary); font-size: 14px; line-height: 1.55; }
 .schedule-facts { margin: 0; display: grid; grid-template-columns: 76px minmax(0,1fr); align-items: baseline; gap: 12px 16px; font-size: 13px; }
 .schedule-facts dt { color: var(--dim); }
 .schedule-facts dd { margin: 0; min-width: 0; }
+.schedule-facts > :nth-child(n+3) { border-top: 1px solid var(--divider); padding-top: 12px; }
 .schedule-facts dd p { margin: 4px 0 0; }
 .schedule-facts a, .schedule-history a { display: inline-flex; align-items: center; min-height: 44px; }
 .schedule-card summary { min-height: 44px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
@@ -32,21 +36,31 @@
 .schedule-controls .schedule-remove { background: none; color: var(--muted); border-color: transparent; font-weight: 400; }
 .schedule-fan-out { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .schedule-fan-out p { margin: 0; line-height: 1.5; }
-.schedule-how h2 { margin-bottom: 8px; color: var(--muted); font-size: 14px; font-weight: 500; }
+.schedule-how h2 { margin-bottom: 8px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.schedule-status { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.schedule-status-dot { flex: none; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: var(--dim); }
 .schedule-how p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.schedule-identity, .schedule-how-phone, .schedule-add-phone { display: none; }
 @media (max-width: 899px) {
  .schedule-toolbar > p { flex-basis: 100%; order: 1; }
- .schedule-add { margin-left: auto; }
- .schedule-controls .schedule-primary { flex-basis: 100%; }
- .schedule-controls button:not(.schedule-primary) { flex: 1; }
- .schedule-facts dd { text-align: right; }
+ .schedule-add { display: none; }
+ .schedule-heading { display: flex; align-items: center; gap: 12px; }
+ .schedule-heading h1 { flex: 1; min-width: 0; }
+ .schedule-add-phone { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; font-weight: 600; text-decoration: none; }
+ .schedule-add-long, .schedule-how { display: none; }
+ .schedule-identity { display: block; margin: 0; color: var(--muted); font-size: 13px; }
+ .schedule-facts, .schedule-result { display: none; }
+ .schedule-how-phone { display: block; }
+ .schedule-how-phone summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 13px; color: var(--muted); }
+ .schedule-how-phone p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+ .schedule-controls { display: grid; grid-template-columns: 1fr 1fr; }
+ .schedule-controls .schedule-remove { grid-column: 1 / -1; justify-self: center; }
 }
 @media (min-width: 900px) {
  .schedule-card { padding: 20px; }
  .schedule-facts { grid-template-columns: 120px minmax(0,1fr); }
  .schedule-controls .schedule-remove { margin-left: auto; }
  /* The tagline leaves the header row; the How schedules run aside says it at length. */
- .schedule-heading > p { display: none; }
  .schedule-heading { margin-bottom: calc(var(--page-header-gap) - 22px); }
 }
 @media (min-width: 1200px) {
