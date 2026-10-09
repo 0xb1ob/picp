@@ -143,6 +143,39 @@ test("read-only when the session is not writable; an absent routing.json shows o
 	assert.equal(posts.length, 0);
 });
 
+test("model pickers: one datalist of pi's models on every model field; an unlisted value warns but saves; a listed fallback is added", async (t) => {
+	const snap = snapshot(true);
+	const { fetcher, posts } = server(() => settings(snap, { available_models: ["anthropic/claude-opus-5-5", "openai/gpt-5"], models_error: null }), () => [200, { status: 200, state: "applied", changes: [] }]);
+	const ui = await page(t, fetcher);
+	assert.deepEqual([...ui.root.querySelectorAll("datalist#settings-models option")].map((option) => option.getAttribute("value")), ["anthropic/claude-opus-5-5", "openai/gpt-5"]);
+	const workers = ui.section("Worker models");
+	const first = workers.querySelector("li.settings-rule")!;
+	const [model, , add] = [...first.querySelectorAll("input")];
+	assert.equal(ui.root.querySelectorAll("input[list='settings-models']").length, 6 * 2 + 2, "model + add-fallback per row, parent and operator");
+	const warns = (scope: Element) => [...scope.querySelectorAll(".settings-warn")].map((warn) => warn.textContent);
+	assert.deepEqual(warns(first), ["Not in pi's model list: openai/gpt-6.1-sol. It can still be saved."], "the shipped fallback this machine lacks warns, its value stays shown; the listed model does not");
+	await ui.type(model!, "my/other");
+	assert.equal(warns(first).length, 2, "an unlisted model warns too");
+	await ui.type(model!, "openai/gpt-5");
+	assert.equal(warns(first).length, 1, "a listed value does not warn");
+	await ui.type(add!, "anthropic/claude-opus-5-5", "change");
+	await ui.type(ui.section("Parent and operator models").querySelector("#setting-models-parent")!, "my/custom-model");
+	assert.match(ui.section("Parent and operator models").querySelector(".settings-warn")?.textContent ?? "", /my\/custom-model/);
+	await ui.click(workers, "Save");
+	const rows = posts[0]!.body.changes as { "models.rubric": Array<{ model: string; fallbacks?: string[] }> };
+	assert.deepEqual([rows["models.rubric"][0]!.model, rows["models.rubric"][0]!.fallbacks?.at(-1)], ["openai/gpt-5", "anthropic/claude-opus-5-5"]);
+});
+
+test("model pickers: an unavailable list leaves free-text inputs and one note", async (t) => {
+	const snap = snapshot(true);
+	const { fetcher } = server(() => settings(snap, { available_models: null, models_error: "model list unavailable" }), () => [500, {}]);
+	const ui = await page(t, fetcher);
+	assert.equal(ui.root.querySelector("datalist"), null);
+	assert.equal(ui.root.querySelectorAll("input[list]").length, 6 + 2, "the model inputs still offer nothing but text; no add-fallback inputs");
+	assert.equal(ui.root.querySelectorAll(".settings-warn").length, 0);
+	assert.match(ui.section("Worker models").querySelector("p[role=status]")?.textContent ?? "", /^Model list unavailable \(model list unavailable\): type a provider\/model\.$/);
+});
+
 test("writeSettings: the exact restore request; a refusal without a transaction body is an error", async () => {
 	const calls: Array<[string, RequestInit | undefined]> = [];
 	const ok = async (url: string, init?: RequestInit) => { calls.push([url, init]); return new Response(JSON.stringify({ status: 200, state: "unchanged" }), { status: 200 }); };

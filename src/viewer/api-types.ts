@@ -93,6 +93,9 @@ export interface SettingsResponse {
 	snapshot: SettingsSnapshot | null;
 	catalog: SettingField[] | null;
 	audit: SettingsAuditRow[];
+	/** `provider/id` models pi can use here, for the pickers; null when the list is unavailable (`models_error` says why). Absent while offline. */
+	available_models?: string[] | null;
+	models_error?: string | null;
 }
 /** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */
 export interface SettingsWriteResponse {

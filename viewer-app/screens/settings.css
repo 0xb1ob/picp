@@ -17,6 +17,7 @@
 .settings-field legend { padding: 0; margin-bottom: 4px; }
 .settings-screen input[type="text"], .settings-screen input[type="number"], .settings-screen select, .settings-screen textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--text); font: inherit; font-size: 14px; }
 .settings-screen input:invalid { border-color: var(--danger, var(--border)); }
+.settings-warn { color: var(--danger, var(--text)); font-size: 12px; line-height: 1.4; }
 .settings-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .settings-checks label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13px; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -34,5 +35,6 @@
  .settings-section > .settings-field { grid-template-columns: 260px minmax(0,1fr); column-gap: 16px; }
  .settings-section > .settings-field > .settings-help { grid-column: 1; grid-row: 2; }
  .settings-section > .settings-field > :is(input, textarea, .settings-checks) { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
+ .settings-section > .settings-field > .settings-warn { grid-column: 2; grid-row: 3; }
  .settings-section > fieldset.settings-field { display: grid; }
 }

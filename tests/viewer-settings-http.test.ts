@@ -125,6 +125,7 @@ test("settings write routes: the session's outcomes pass through with no viewer 
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
 	assert.equal((status.body.catalog as unknown[]).length, 31);
+	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
 
