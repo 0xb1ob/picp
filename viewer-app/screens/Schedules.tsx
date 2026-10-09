@@ -33,12 +33,21 @@ function ActiveRun({s}: {s: ScheduleItem}) {
  return <p class="job-meta schedule-active-run" role="status">Active run <code>{run.id}</code> · {run.phase === "accepted" ? "accepted, not yet started" : "running"} · {run.members.length} of {run.policy.limits.child_jobs} child jobs admitted · limit ${run.policy.limits.usd} / {run.policy.limits.tokens} tokens · must finish by {observedTime(run.deadline_at)}{run.outcome === "partial" && " · partial"}</p>;
 }
 
-/** The three newest runs. "closed" means every job closed; it does not say the run succeeded. */
+const reportLink = (r: ScheduleItem["runs"][number]) => r.result ? <a href={r.result.href} {...(r.result.kind === "board" || r.result.kind === "report" ? {target: "_blank", rel: "noopener noreferrer"} : {})}>{r.result.kind === "board" || r.result.kind === "report" ? "Web report ↗" : RESULT_TEXT[r.result.kind]}</a> : <span class="schedule-no-report">no report</span>;
+const runState = (r: ScheduleItem["runs"][number]) => <span class="schedule-run-state"><span class={`schedule-run-dot schedule-run-${r.status}`} aria-hidden="true"/>{r.status === "open" ? `open · ${r.jobs_open} of ${r.jobs_total} jobs` : `closed · ${r.jobs_total} jobs`}</span>;
+
+/** The three newest runs (frames 09/19): a table on desktop, blocks on a phone. "closed" means every job closed; it does not say the run succeeded. */
 function LastRuns({s}: {s: ScheduleItem}) {
  const runs = s.runs.slice(0, 3);
- return <section class="schedule-last-runs" aria-label="Last 3 runs"><h3>Last 3 runs</h3>
+ return <section class="schedule-last-runs" aria-label="Last 3 runs"><header><h3>Last 3 runs</h3>{s.run_count > 0 && <a class="schedule-all-runs" href="#jobs">All {s.run_count} {s.run_count === 1 ? "run" : "runs"} →</a>}</header>
   <ActiveRun s={s}/>
-  {runs.length ? <ol>{runs.map(r => <li key={r.run_id} class="job-meta"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a><span>{TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status === "open" ? `open, ${r.jobs_open} of ${r.jobs_total} jobs still open` : `all ${r.jobs_total} jobs closed`}</span>{r.result && <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a>}</li>)}</ol> : <p class="job-meta">No runs yet</p>}
+  {runs.length ? <>
+   <table class="schedule-runs-table"><thead><tr><th>Started</th><th>Job</th><th>Status</th><th>Transcript</th><th>Report</th></tr></thead>
+    <tbody>{runs.map(r => <tr key={r.run_id}><td>{observedTime(r.at)}{r.missed && " (missed)"}<span class="schedule-run-via"> · {TRIGGER_TEXT[r.via]}</span></td><td><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a></td><td>{runState(r)}</td><td><a href={jobHref(r.anchor_id)}>Transcript</a></td><td>{reportLink(r)}</td></tr>)}</tbody></table>
+   <ol class="schedule-runs-blocks">{runs.map(r => <li key={r.run_id}>
+    <p class="schedule-run-top"><span class="schedule-run-id"><span class={`schedule-run-dot schedule-run-${r.status}`} aria-hidden="true"/><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a></span><time>{observedTime(r.at)}{r.missed && " (missed)"}</time></p>
+    <p class="schedule-run-buttons"><a href={jobHref(r.anchor_id)}>Transcript</a>{reportLink(r)}</p>
+   </li>)}</ol></> : <p class="job-meta">No runs yet</p>}
  </section>;
 }
 

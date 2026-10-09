@@ -519,6 +519,12 @@ test("a manual skill schedule's dashboard run shows in Last fire; runs and jobs 
 	assert.equal(document.querySelectorAll(".schedule-run-jobs > li").length, 8);
 	assert.match(card, /run history · 1 run</);
 	assert.match(orgCard, /1 recent run · 2 jobs/);
+	assert.deepEqual([...document.querySelectorAll(".schedule-runs-table th")].map(e => e.textContent), ["Started", "Job", "Status", "Transcript", "Report"]);
+	assert.equal(document.querySelector(".schedule-last-runs header h3")?.textContent, "Last 3 runs");
+	assert.equal(document.querySelector(".schedule-all-runs")?.textContent, "All 1 run →");
+	assert.match(document.querySelector(".schedule-runs-table tbody")?.textContent ?? "", /cp-ra.*closed · 8 jobs.*Transcript.*Web report ↗/);
+	assert.equal(document.querySelectorAll(".schedule-runs-blocks li .schedule-run-buttons a").length, 2, "phone blocks: Transcript and Web report buttons");
+	assert.match(orgCard, /schedule-no-report|Web report ↗/);
 	assert.match(screen({ ...data, schedules: [{ ...m!, run_count: 0, job_count: 0, runs: [], history: [] }] }), /0 recent runs · 0 jobs.*run history · 0 runs</s);
 	assert.match(orgCard, /href="#job\/cp-os1">Report<\/a>/);
 });
