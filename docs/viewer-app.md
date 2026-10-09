@@ -89,7 +89,7 @@ Sessions, More, with Reports under More on phone only. Jobs carries a List | Boa
 three views, and Board and Map light the Jobs item. More holds Schedules, Files and Notifications on both layouts, and Reports and Settings on phone only. Decisions is one page (`/api/decisions`, the Awaiting asks as `items` plus the Decided log
 as `decided`): the one-click Awaiting you cards on top, then "Being handled · N (oldest Xm)" — the
 parent's questions the operator session is still handling, collapsed, amber past 10 minutes, and
-hidden when there are none — then the Decided log, two tabs (Decided for you / Answered by you) with counts for the Today/All range. Worth a look filters only the for-you tab, and only rows whose recorded basis is the operator's own judgement. `/api/awaiting` and `/api/decided` stay.
+hidden when there are none — then the Decided log, two tabs (Decided for you / Answered by you) with counts for the Today/All range, the summary on the toolbar row. Each row is four cells (time; a content stack of job link plus escalation id, the question with its job id stripped, the bold answer and the quote clamped to 2 lines, click or Enter expanding it; a basis chip; evidence on desktop). After the mission-end fold five rows show, then "N more decided for you today" reveals the rest; phone adds a basis legend. Worth a look (with its for-you count) filters only the for-you tab, and only rows whose recorded basis is the operator's own judgement. `/api/awaiting` and `/api/decided` stay.
 
 The Sessions **Operator ↔ you** tier opens on the **Full transcript** (the default
 for `#sessions` and `#sessions?view=you`) with no Decisions toggle, since the decision log lives on the

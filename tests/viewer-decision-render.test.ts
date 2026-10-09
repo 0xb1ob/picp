@@ -53,7 +53,7 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  assert.ok(toolbar.querySelector('.decided-toolbar [role="tablist"]'));
  assert.ok(toolbar.querySelector('.decided-toolbar [aria-label="Range"]'));
  assert.ok(toolbar.querySelector('.decided-toolbar .decided-worth'));
- assert.equal(toolbar.querySelector('.decided-summary')?.textContent,"Today · 1 decided for you · 1 answered by you · 1 worth a look");
+ assert.equal(toolbar.querySelector('.decided-toolbar .decided-summary')?.textContent,"Today · 1 decided for you · 1 answered by you");
  assert.match(screen(mine,true),/role="tablist"/); assert.match(screen(mine,true),/aria-selected="true"/); assert.match(screen(mine,true),/aria-controls="decided-panel-for"/); assert.match(screen(mine,true),/role="tabpanel"/); assert.match(screen(mine,true),/tabindex="0"/); assert.match(screen(mine,true),/tabindex="-1"/); assert.match(screen(mine,true),/your words/);
  assert.doesNotMatch(screen(decided,true),/\/classic/);
  const {window,document} = parseHTML("<html><body><main></main></body></html>");
@@ -64,11 +64,12 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  const root = document.querySelector("main")!;
  await act(() => mount(root,decided));
  const button = (label:string) => [...root.querySelectorAll("button")].find(b => b.textContent === label)!;
+ const worthButton = () => [...root.querySelectorAll("button")].find(b => b.textContent?.startsWith("Worth a look only"))!;
  const key = (k:string) => { const e = new window.Event("keydown",{bubbles:true,cancelable:true}); Object.defineProperty(e,"key",{value:k}); return e; };
  const tab = (name:string) => [...root.querySelectorAll("[role=tab]")].find(b => b.textContent?.startsWith(name))!;
  await act(() => button("All").dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.equal(button("All").getAttribute("aria-pressed"),"true");
- assert.equal(root.querySelector('.decided-summary')?.textContent,"All time · 1 decided for you · 1 answered by you · 1 worth a look");
+ assert.equal(root.querySelector('.decided-summary')?.textContent,"All time · 1 decided for you · 1 answered by you");
  assert.doesNotMatch(root.textContent!,/Older human answer/,"All stays on the for-you tab");
  assert.equal(tab("Decided for you").getAttribute("aria-selected"),"true");
  assert.equal(tab("Decided for you").getAttribute("tabIndex"),"0");
@@ -78,7 +79,7 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  assert.equal(tab("Answered by you").getAttribute("aria-selected"),"true");
  assert.equal(tab("Answered by you").getAttribute("tabIndex"),"0");
  assert.match(root.textContent!,/Older human answer/); assert.match(root.textContent!,/your reply/); assert.match(root.textContent!,/answered by you/);
- await act(() => button("Worth a look only").dispatchEvent(new window.Event("click",{bubbles:true})));
+ await act(() => worthButton().dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.match(root.textContent!,/Older human answer/,"worth applies only to the for-you tab");
  await act(() => tab("Answered by you").dispatchEvent(key("ArrowLeft")));
  assert.equal(tab("Decided for you").getAttribute("aria-selected"),"true");
@@ -87,7 +88,7 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  await act(() => mount(root,{...decided,items:decided.items.filter((d:{worth:string[]}) => !d.worth.length)}));
  assert.match(root.textContent!,/own judgement appear here/);
  assert.match(root.textContent!,/rests on your words or a standing order/);
- await act(() => button("Worth a look only").dispatchEvent(new window.Event("click",{bubbles:true})));
+ await act(() => worthButton().dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.match(root.textContent!,/Nothing here for this filter/);
  await act(() => tab("Answered by you").dispatchEvent(new window.Event("click",{bubbles:true})));
  assert.match(root.textContent!,/Older human answer/);
@@ -103,6 +104,38 @@ test("Awaiting and Decided render truthful empty, unavailable, provenance and fi
  await act(() => button("All").dispatchEvent(new window.Event("click",{bubbles:true})));
  await act(() => button("show").dispatchEvent(new window.Event("click",{bubbles:true})));
  for (const id of ["md-aaaa","md-bbbb","md-cccc"]) assert.match(root.textContent!,new RegExp(id)); assert.doesNotMatch(root.textContent!,/mandate closes/);
+ // Four-column row: the job id leads the content stack once, the quote is clamped and expands in place.
+ const base = decided.items[0]!;
+ await act(() => mount(root,{...decided,items:[{...base,question:"cp-demo: Risk?"}]}));
+ assert.equal(root.querySelector(".decided-question")?.textContent,"Risk?");
+ assert.equal(root.querySelector(".decided-question")?.getAttribute("title"),"cp-demo: Risk?");
+ assert.equal((root.textContent!.match(/cp-demo/g) ?? []).length,1);
+ const quote = root.querySelector(".decided-quote")!;
+ assert.equal(quote.getAttribute("aria-expanded"),"false");
+ await act(() => quote.dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(root.querySelector(".decided-quote")?.getAttribute("aria-expanded"),"true");
+ // Fold: six rows show five, then a button reveals the sixth.
+ const six = Array.from({length:6},(_,i) => ({...base,id:`es-r${i}`,question:`Q${i}?`,job_ids:[]}));
+ await act(() => mount(root,{...decided,items:six}));
+ assert.equal(root.querySelectorAll(".decided-row").length,5);
+ await act(() => button("1 more decided for you").dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(root.querySelectorAll(".decided-row").length,6);
+ // The fold resets when the view changes.
+ await act(() => tab("Answered by you").dispatchEvent(new window.Event("click",{bubbles:true})));
+ await act(() => tab("Decided for you").dispatchEvent(new window.Event("click",{bubbles:true})));
+ assert.equal(root.querySelectorAll(".decided-row").length,5,"fold re-closes after a view change");
+ // Only a leading "<id>: " prefix is stripped; later mentions stay. Space toggles the quote.
+ await act(() => mount(root,{...decided,items:[{...base,question:"Close cp-demo? cp-demo is idle"},{...base,id:"es-two",question:"cp-demo: Close cp-demo?"}]}));
+ const asks = [...root.querySelectorAll(".decided-question")].map(q => q.textContent);
+ assert.deepEqual(asks,["Close cp-demo? cp-demo is idle","Close cp-demo?"]);
+ const spaceQuote = root.querySelector(".decided-quote")!;
+ const space = new window.Event("keydown",{bubbles:true,cancelable:true}); Object.defineProperty(space,"key",{value:" "});
+ await act(() => spaceQuote.dispatchEvent(space));
+ assert.equal(space.defaultPrevented,true);
+ assert.equal(root.querySelector(".decided-quote")?.getAttribute("aria-expanded"),"true");
+ // A jobless row keeps its phone-visible evidence link to the parent transcript.
+ await act(() => mount(root,{...decided,items:[{...base,job_ids:[]}]}));
+ assert.match(root.querySelector(".decided-evidence-jobless a")?.getAttribute("href") ?? "",/#sessions\?view=parent/);
  await act(() => unmount(root));
 });
 
