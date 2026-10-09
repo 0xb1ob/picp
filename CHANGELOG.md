@@ -6,6 +6,10 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+### Settings: pick models from the ones pi can use (cp-qfe0)
+
+`GET /api/settings` now also returns `available_models` (`provider/id`, from `pi --no-extensions --list-models` through cp-install's parser, cached 5 minutes in the viewer; a failure is cached 30 seconds; the read never waits for pi, it serves the cached list or `models_loading: true` while one background run fills it) or `null` with `models_error`. Every model field on `#settings` offers them in a `<datalist>`, each rubric row has an "add a listed fallback" input, and a value that is not listed shows an inline warning but still saves. With no list the page says so and stays free text. Write-time validation is unchanged. Migration: none. Rollback: revert.
+
 ### Dashboard Settings: worker, parent and operator models and grant defaults (cp-settings-minimal)
 
 `#settings` (under More) edits three sections through the Settings write API: the `data/routing.json` rubric rows' model, fallbacks and thinking (Restore puts back the shipped values per row id and keeps hand-added rows), `data/parent.json` / `data/operator.json` `model`, and the `grants.*` defaults. The catalog grows to 31 fields (`models.rubric`, `models.parent`, `models.operator`). A set `parent.json` `model` picks the parent model on the next start or rotation and beats `CP_PARENT_MODEL` (an explicit `cp_parent start model` or a live `cp_parent model` switch still wins, across rotation too); a set `operator.json` `model` beats `CP_OPERATOR_MODEL` on a fresh `cp-operator` launch. Absent, behaviour is unchanged. Migration: none. Rollback: unset the models in Settings (or delete the keys), then revert (`docs/contracts.md` §Settings catalog, §Parent context control).

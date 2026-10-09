@@ -16,12 +16,15 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
  const [generation, setGeneration] = useState(0);
  useEffect(() => {
   const controller = new AbortController();
+  let retry: ReturnType<typeof setTimeout> | undefined;
   void Promise.all([readSettings(fetcher, controller.signal), readControl(fetcher, controller.signal)]).then(([settings, control]) => {
    if (controller.signal.aborted) return;
    setStatus(settings);
    setToken("error" in control || !control.running ? null : control.token ?? null);
+   // The server answers at once while its first `pi --list-models` run is going: ask again shortly (bounded: that run ends in at most 8 s).
+   if (!("error" in settings) && settings.models_loading) retry = setTimeout(() => setGeneration(value => value + 1), 2000);
   });
-  return () => controller.abort();
+  return () => { controller.abort(); clearTimeout(retry); };
  }, [generation]);
  const write = async (body: {changes: Drafts} | RestoreSelector): Promise<boolean> => {
   const revision = status && !("error" in status) ? status.snapshot?.revision : undefined;
