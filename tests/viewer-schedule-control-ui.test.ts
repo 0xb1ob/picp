@@ -4,7 +4,7 @@ import { build } from "esbuild";
 import { test } from "node:test";
 import { parseHTML } from "linkedom";
 import type { ScheduleControlStatusResponse, ScheduleItem } from "../src/viewer/api-types.ts";
-import { readScheduleControl, type ScheduleControlView, type ScheduleOp, sendScheduleControl } from "../viewer-app/schedule-control.ts";
+import { readScheduleControl, requestLine, type ScheduleControlView, type ScheduleOp, sendScheduleControl } from "../viewer-app/schedule-control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 
 const result = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {ScheduleControls} from "./viewer-app/screens/Schedules.tsx"; export {act}; export const mount=(root,s,control)=>render(h(ScheduleControls,{s,control}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
@@ -71,4 +71,11 @@ test("sendScheduleControl posts the exact body and token; readScheduleControl ma
 	assert.deepEqual(await sendScheduleControl(refused, "t", { op: "enable", schedule_id: "sch-aaaaaa" }), { error: "parent not running: no parent lock", status: 503 });
 	const forbidden = async () => new Response(JSON.stringify({ error: "schedule controls are served only under --require-tailnet" }), { status: 403 });
 	assert.deepEqual(await readScheduleControl(forbidden), { error: "schedule controls are served only under --require-tailnet" });
+});
+
+test("requestLine: a done run_now reads Run accepted; other ops keep Done", () => {
+	const req = (op: ScheduleOp, job_id: string | null) => ({ id: "sc-1", at: "2026-07-01T07:00:00Z", op, schedule_id: "sch-aaaaaa", state: "done" as const, reason: null, job_id });
+	assert.equal(requestLine(req("run_now", "cp-x")), "Run accepted · cp-x");
+	assert.equal(requestLine(req("run_now", null)), "Run accepted");
+	assert.equal(requestLine(req("disable", null)), "Done · Disable");
 });

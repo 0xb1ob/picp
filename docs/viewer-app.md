@@ -387,6 +387,7 @@ latest request's state under them. A click is one `POST /api/schedules/request` 
 `#sessions?view=you&transcript=1&draft=…`: the composer starts with that draft (it never reaches the API). The long note on how schedules run sits in a `<details>` ("How schedules run"). The
 buttons wrap (`.schedule-controls`, flex-wrap) at 390 px and sit in the card grid at 1440 px; long reasons wrap with
 the card (`overflow-wrap: anywhere`).
+Run history groups jobs by run (`src/viewer/schedule-run-groups.ts`): one anchor job (a fire or Run now) and the jobs it fanned out to are one run, the five newest runs show, "Last fire" shows the newest run, and a job no run claims sits under "Unattributed jobs". A done Run now reads "Run accepted · <job>" (acceptance, not completion). Display only: no authority, schedule or journal write.
 
 **Answers to acknowledge** (cp-mxk4, docs/contracts.md §Answers to acknowledge). `screens/Answers.tsx` renders
 `answers` from `/api/decisions` as a section between Awaiting you and Being handled (`#answers`); it is absent while no

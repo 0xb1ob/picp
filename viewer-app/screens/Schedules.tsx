@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
+import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
 import { observedTime } from "../format.ts";
 import { composerHref, jobHref, navigation } from "../routes.ts";
 import { ADD_SCHEDULE_DRAFT, latestRequest, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
@@ -8,7 +8,32 @@ import "./jobs.css";
 import "./schedules.css";
 
 /** Where a fired job's result lands, by its template's delivery. */
-const LANDS: Record<string, string> = {pr:"a pull request", local:"a pushed branch, no PR", pipeline:"a plan, its gate, then an implementation", answer:"this page's run history (not the operator session)", board:"a published report under Reports"};
+const LANDS_TEXT: Record<ScheduleItem["lands"], string> = {pull_request:"a pull request", branch:"a pushed branch, no PR", plan:"a plan, its gate, then an implementation", answer:"this page's run history (not the operator session)", board:"a report board under Reports", report:"a report (the run's job page)"};
+const TRIGGER_TEXT = {slot:"Scheduled", dashboard:"Run now (dashboard)", cp_schedule:"Run now (cp_schedule)"};
+const RESULT_TEXT: Record<NonNullable<ScheduleItem["runs"][number]["result"]>["kind"], string> = {board:"Report board", pull_request:"Pull request", answer:"Answer", report:"Report", branch:"Branch (no PR)", job:"Job"};
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function JobRow({j}: {j:ScheduleHistoryJob}) {
+ return <li key={j.id} class="job-meta">
+  <a href={jobHref(j.id)}><code>{j.id}</code></a> {j.status}{j.close_reason && ` · ${j.close_reason}`}
+  {j.reported_at && <> · reported {observedTime(j.reported_at)}</>}
+  {j.pr_url && <> · <a href={j.pr_url} target="_blank" rel="noopener noreferrer">{j.pr_url}</a></>}
+  {j.board_href && <> · <a href={j.board_href} target="_blank" rel="noopener noreferrer">report</a></>}
+  {j.summary && <p class="schedule-summary">{j.summary}</p>}
+  {j.answer && <pre class="schedule-answer">{j.answer.text}{j.answer.truncated && `\n… truncated at 8 KiB of ${j.answer.bytes} bytes`}</pre>}
+ </li>;
+}
+
+function RunHistory({s}: {s:ScheduleItem}) {
+ const jobs = (ids: (string|null)[]) => s.history.filter(j => ids.includes(j.run_id));
+ const loose = s.history.filter(j => j.run_id === null);
+ return <ul class="schedule-history">{s.runs.map(r => <li key={r.run_id} class="job-meta">
+  <p class="schedule-run-head"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a> · {TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status} ({r.jobs_open} of {r.jobs_total} jobs open){r.result && <> · <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a></>}</p>
+  <ul class="schedule-run-jobs">{jobs([r.run_id]).map(j => <JobRow key={j.id} j={j}/>)}</ul>
+ </li>)}
+  {loose.length > 0 && <li class="job-meta"><p class="schedule-run-head">Unattributed jobs</p><ul class="schedule-run-jobs">{loose.map(j => <JobRow key={j.id} j={j}/>)}</ul></li>}
+ </ul>;
+}
 
 export function triggerText(s: ScheduleItem): string {
  const t = s.trigger;
@@ -21,15 +46,15 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
  const next = s.trigger.type === "manual" ? "Manual: fires only on Run now" : s.next_at ? `${s.trigger.type === "cron" ? "Next fire" : "Next check ≈"} ${observedTime(s.next_at)}` : `Next ${s.trigger.type === "cron" ? "fire" : "check"} unknown: ${s.next_note ?? "not recorded"}`;
  return <article class="schedule-card">
   <div class="schedule-card-heading"><h2>{s.name}</h2><span class="job-ledger">{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
-  <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS[s.job.delivery] ?? s.job.delivery}.</p>
+  <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS_TEXT[s.lands]}.</p>
   <dl class="schedule-facts">
    <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
    <dt>Recipe</dt><dd>{s.job.skill ? <><code>{s.job.skill}</code> skill</> : "Saved job"}</dd>
    <dt>Mandate</dt><dd><code>{s.mandate_id}</code> · {s.mandate_status}{s.grant_stopped ? " · stopped" : !s.grant_template ? " · no grant template" : ""}</dd>
-   <dt>Last fire</dt><dd>{s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {s.history.length} recent runs</dd>
+   <dt>Last fire</dt><dd>{s.last_run ? <><a href={jobHref(s.last_run.job_id)}><code>{s.last_run.job_id}</code></a> at {observedTime(s.last_run.at)} · {TRIGGER_TEXT[s.last_run.via]}{s.last_run.missed && " (missed)"}</> : s.last_fire ? <><a href={jobHref(s.last_fire.job_id)}><code>{s.last_fire.job_id}</code></a> at {observedTime(s.last_fire.at)}{s.last_fire.missed && " (missed)"}</> : "never"} · {plural(s.run_count, "recent run")} · {plural(s.job_count, "job")}</dd>
   </dl>
   {s.last_skip && <p class="job-meta">Last skip {observedTime(s.last_skip.at)}: {s.last_skip.reason}</p>}
-  <details class="schedule-details"><summary>Grant, template &amp; run history · {s.history.length}</summary>
+  <details class="schedule-details"><summary>Grant, template &amp; run history · {plural(s.runs.length, "run")}</summary>
    {s.grant_template ? <>
     <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
     <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
@@ -38,14 +63,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
    <p class="job-meta"><code>{triggerText(s)}</code> · <code>{s.job.kind}</code>/<code>{s.job.delivery}</code></p>
    {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under that fire's own grant.</p>}
    {s.last_fire && <p class="job-meta">Last fire slot: {observedTime(s.last_fire.slot)}</p>}
-   {s.history.length ? <ul class="schedule-history">{s.history.map(j => <li key={j.id} class="job-meta">
-    <a href={jobHref(j.id)}><code>{j.id}</code></a> {j.status}{j.close_reason && ` · ${j.close_reason}`}
-    {j.reported_at && <> · reported {observedTime(j.reported_at)}</>}
-    {j.pr_url && <> · <a href={j.pr_url} target="_blank" rel="noopener noreferrer">{j.pr_url}</a></>}
-    {j.board_href && <> · <a href={j.board_href} target="_blank" rel="noopener noreferrer">report</a></>}
-    {j.summary && <p class="schedule-summary">{j.summary}</p>}
-    {j.answer && <pre class="schedule-answer">{j.answer.text}{j.answer.truncated && `\n… truncated at 8 KiB of ${j.answer.bytes} bytes`}</pre>}
-   </li>)}</ul> : <p class="jobs-empty">No job fired yet</p>}
+   {s.history.length ? <RunHistory s={s}/> : <p class="jobs-empty">No job fired yet</p>}
   </details>
   {control && <ScheduleControls s={s} control={control}/>}
  </article>;
