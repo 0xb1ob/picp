@@ -324,6 +324,7 @@ export class Sender {
 			const recorded = recordedRisk({ ...(routing?.risk && recordedProvenance(routing.provenance?.risk) ? { requested: routing.risk } : {}), ...(routing?.recorded_risk ? { fleet: routing.recorded_risk } : {}), taskText: resolvedTask.forInference });
 			const gate = inferredRiskGate({
 				mandates: this.#options.mandates,
+				jobs: fleet.read().jobs,
 				job: { jobId: request.jobId, project: record.project, kind: record.kind, pathHints: [resolvedTask.forInference] },
 				routed: routing?.risk === "high" ? "high" : (assessed.risk ?? "low"),
 				routedFrom,

@@ -14,9 +14,11 @@
  * continuation still needs its action in `allowed_actions`, and the grant's caps and risk:high ask still bind.
  * Every non-expired cell is the behaviour that shipped before this rule, except that a cap-paused or revoked grant
  * refuses repair. `docs/contracts.md` has the matrix.
+ * Active selection may substitute only another non-schedule named grant when the first is full without this job.
+ * All checks after selection remain final; no persistence or dispatch-order binding is introduced.
  */
 import type { JobKind, Mandate, MandateAction } from "./contracts.ts";
-import { capReached, covers, MandateError, type MandateUsageJob, type ScheduleScope } from "./mandate-accounting.ts";
+import { capReached, covers, jobCapFullWithout, MandateError, type MandateUsageJob, type ScheduleScope } from "./mandate-accounting.ts";
 import { compareActiveGrants } from "./grant-order.ts";
 
 export const GRANT_USES = ["dispatch", "promote", "implement", "review", "repair", "merge"] as const;
@@ -91,12 +93,17 @@ function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: 
 	return { standing: P, cause: "expired" };
 }
 
-/** Pure selection: standing first, deterministic active precedence, then the existing ordered fallback. */
-export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string) {
+/** Pure selection: standing, deterministic active precedence, then named headroom without this job. */
+export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string, jobs?: readonly MandateUsageJob[]) {
 	const judged = grants.map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
 		.filter((entry): entry is { grant: Mandate; at: Exclude<GrantStanding, { standing: "none" }> } => entry.at.standing !== "none");
-	return judged.filter(({ at }) => at.standing === P && at.cause === "active").sort((a, b) => compareActiveGrants(a.grant, b.grant))[0]
-		?? judged.filter(({ at }) => at.standing === P || at.standing === R).at(-1);
+	const active = judged.filter(({ at }) => at.standing === P && at.cause === "active").sort((a, b) => compareActiveGrants(a.grant, b.grant));
+	const first = active[0];
+	const named = (grant: Mandate) => (grant.job_ids?.length ?? 0) > 0 && !grant.schedule_grant;
+	if (jobs && first && named(first.grant) && jobCapFullWithout(first.grant, job.jobId, jobs)) {
+		return active.slice(1).find(({ grant }) => named(grant) && !jobCapFullWithout(grant, job.jobId, jobs)) ?? first;
+	}
+	return first ?? judged.filter(({ at }) => at.standing === P || at.standing === R).at(-1);
 }
 
 export interface GrantStore {
@@ -121,7 +128,7 @@ export function assertGrantsPermit(
 ): GrantPermission {
 	const record = inFlightRecord(job, jobs);
 	const target = { ...job, startedAt: record?.dispatched_at ?? job.startedAt, inFlight: record !== undefined, failed: record?.phase === "failed" };
-	const selected = selectGrant(store.sweep(now, jobs), use, target, now);
+	const selected = selectGrant(store.sweep(now, jobs), use, target, now, jobs);
 	if (!selected) return {};
 	const { grant, at } = selected;
 	if (at.standing === P && at.cause === "active") return { selected: grant, cause: at.cause };

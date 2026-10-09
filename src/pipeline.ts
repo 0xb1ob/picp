@@ -1393,8 +1393,9 @@ export class PipelineRunner {
 		const mandates = this.#options.mandates;
 		if (!mandates) return undefined;
 		const job = { jobId: record.ship_id, project: record.project, jobKind: "ship" as const, ...mandates.scheduleOf(record.ship_id) };
-		const flight = inFlightRecord(job, this.#mandateJobs());
-		const selected = selectGrant(mandates.list(), "implement", { ...job, startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now());
+		const jobs = this.#mandateJobs();
+		const flight = inFlightRecord(job, jobs);
+		const selected = selectGrant(mandates.list(), "implement", { ...job, startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now(), jobs);
 		if (selected?.at.standing !== "permit" || selected.at.cause !== "active" || !selected.grant.ask_on.includes("plan_approval")) return undefined;
 		const hit = selected.grant;
 		return { mandate_id: hit.id, mandate_clause: `${hit.id}: ask_on includes plan_approval` };

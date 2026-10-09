@@ -96,7 +96,7 @@ export class ScriptDispatcher {
 			script_path: issue.script.path,
 			wall_clock_seconds: this.#bounds(request).wall_clock_seconds,
 			...(blockers.length ? { blockers } : {}),
-			...(this.options.mandates?.wouldAskRiskHigh(job, inputs.risk) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(this.options.mandates?.wouldAskRiskHigh(job, inputs.risk, this.options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
 		};
 	}
 

@@ -12,8 +12,9 @@ export function ContextChip({usage,compact=false}:{usage:ContextUsage | null | u
  const compacted = usage.last_compact_at ? `compacted ${time(usage.last_compact_at)}` : null;
  const detail = [usage.percent === null ? usage.reason : null,compacted].filter(Boolean).join(" · ");
  const title = [usage.model,usage.percent === null ? usage.reason : null,compacted].filter(Boolean).join(" · ");
+ const text = contextText(usage);
  return <span class={`ctx-chip ctx-${usage.level ?? "unknown"}${compact ? " ctx-compact" : ""}`} title={title || undefined}>
-  <span class="ctx-text">{contextText(usage)}{!compact && detail && <small> · {detail}</small>}</span>
+  <span class="ctx-text">{text.startsWith("ctx ") ? <><span class="ctx-prefix">ctx </span>{text.slice(4)}</> : text}{!compact && detail && <small> · {detail}</small>}</span>
   {usage.percent !== null && <progress aria-label="Context window used" max="100" value={Math.min(100,usage.percent)}/>}
  </span>;
 }
