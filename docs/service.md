@@ -419,10 +419,9 @@ never mid-update), the viewer (`/api/identity` for this home within 3 s; 2 runs)
 the supervisor (the parent role `failed` / `start-limit-hit` in `state/daemon-runtime.json`; skipped on a
 legacy home), disk (< 5 GiB or < 10 % free),
 `git ls-remote origin` and `gh auth status` (hourly) and the updater's last
-result. It pushes once when a check starts failing, once per distinct updater
-failure, and once on recovery; its record is `state/health.json`. It reads the
-VAPID key and subscriptions but never writes the push ledger or deletes a
-subscription (`docs/contracts.md` §Web Push).
+result. It records each check (failing, its key, since when, recovered) in `state/health.json` and pushes nothing:
+the Overview `health failing` line shows a failure at once, and the parent raises a `service_health` escalation
+for it on the dashboard (`docs/contracts.md` §Escalation, §Web Push).
 
 ## Auto-update (P4)
 
@@ -473,9 +472,9 @@ one result in `state/update.json` (its only writer):
   `cp_parent stop` + `start`.
 
 Every failure (`failed`, `drain_timeout`, `rolled_back`, `rollback_failed`, `config_invalid`, and
-`fetch_failed` from its third run in a row on) asks cp-daemon for a health run, which pushes exactly once per
-distinct failure (result + target sha; a `drain_timeout` is one push per episode, result + `since`) and once on recovery at the next `updated`/`up_to_date`; the
-updater itself never pushes. A `rollback_failed` whose reset, npm ci, restart or verify failed (phase `idle`) is sticky: nothing runs until you check the
+`fetch_failed` from its third run in a row on) asks cp-daemon for a health run, which records it under one key per
+distinct failure (result + target sha; a `drain_timeout` is one key per episode, result + `since`) and records the recovery at the next `updated`/`up_to_date`;
+nothing pushes. A `rollback_failed` whose reset, npm ci, restart or verify failed (phase `idle`) is sticky: nothing runs until you check the
 checkout and remove `state/update.json`. `/doctor` `service.update` shows on/off and the last result,
 and warns on a failure or on a skip that has lasted over 24 h with `origin/main` ahead.
 
@@ -490,7 +489,7 @@ says to run `cp-daemon restart` (then the next update applies it).
 ## Crash loop
 
 A 7th parent-supervisor start within 30 minutes leaves the parent role `failed` (`start-limit-hit`;
-`/doctor` `service.daemon`, a health push). Read `cp-daemon log`, fix the cause, then `cp-daemon reload`
+`/doctor` `service.daemon`, the dashboard's `health failing` line). Read `cp-daemon log`, fix the cause, then `cp-daemon reload`
 (a fresh inner starts the supervisor again). cp-daemon itself under systemd: six starts in 30 min leave
 `cp-daemon.service` `failed`; read `journalctl --user -u cp-daemon.service` and `cp-daemon log`, then
 `systemctl --user reset-failed cp-daemon.service && systemctl --user start cp-daemon.service`.

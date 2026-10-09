@@ -13,7 +13,7 @@ import { createScratchHome } from "./harness/index.ts";
 
 const NOW = new Date("2026-10-02T16:00:00Z");
 const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOString();
-const failing = (key: string, secondsAgo: number): CheckRecord => ({ status: "fail", key, since: ago(secondsAgo), detail: "x", fails: 3, notified_key: null, notified_state: "ok", push_attempts: 0, checked_at: ago(0) });
+const failing = (key: string, secondsAgo: number): CheckRecord => ({ status: "fail", key, since: ago(secondsAgo), detail: "x", fails: 3, checked_at: ago(0) });
 const record = (checks: HealthRecord["checks"]): HealthRecord => ({ schema_version: 1, last_run_at: ago(0), checks });
 
 test("rollback_failed alerts at once; any other check only after 15 min", () => {

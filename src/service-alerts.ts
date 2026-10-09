@@ -1,7 +1,8 @@
 /**
- * Service health → escalation (cp-6fyl PR2). cp-health (`src/service/health.ts`, a daemon oneshot) only pushes; a
+ * Service health → escalation (cp-6fyl PR2). cp-health (`src/service/health.ts`, a daemon oneshot) only records; a
  * failing service the operator never saw sat 47 min. The parent turns the watchdog's record into one `service_health`
- * escalation per failing check, so it reaches the dashboard, Web Push and the operator session like any ask.
+ * escalation per failing check, so it reaches the dashboard and the operator session like any escalation. It never
+ * pushes: Web Push is for open ask cards only (`PUSH_RULE`).
  *
  *  - `rollback_failed:*` (the updater's sticky failure) alerts at once; any other check once it has failed
  *    `SERVICE_ALERT_AFTER_SECONDS` (three watchdog runs, so the 2-run debounce of parent/viewer is not undercut);
@@ -9,7 +10,7 @@
  *    re-ticks, and a check that recovers (or changes key) withdraws its open record;
  *  - a record the operator already answered or that was withdrawn is never raised again for the same failure.
  *
- * The parent is the single writer of escalations.json; cp-health only reads and pushes.
+ * The parent is the single writer of escalations.json; cp-health only reads and records.
  */
 import { join } from "node:path";
 import { SERVICE_HEALTH_JOB_ID } from "./contracts.ts";

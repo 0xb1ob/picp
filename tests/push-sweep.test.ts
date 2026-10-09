@@ -64,7 +64,6 @@ function bench(t: import("node:test").TestContext, configured = true) {
 	const sweep = () =>
 		runPushSweep({
 			stateDir,
-			openEscalations: () => escalations.open(),
 			projectsOf: () => ["demo"],
 			fetch,
 			now: () => clock,
@@ -92,18 +91,17 @@ test("unconfigured: no ledger, no fetch", async (t) => {
 	assert.equal(b.calls.length, 0);
 });
 
-test("first sweep baselines what is open; a new human-only escalation is pushed once per device, encrypted, and never again", async (t) => {
+test("first sweep baselines what is open; a new open ask is pushed once per device, encrypted, and never again", async (t) => {
 	const b = bench(t);
 	const [a, m] = [b.subscribe(FCM), b.subscribe(MOZ)];
-	const risky = { kind: "service_health" as const };
-	const before = await b.escalations.raise(raiseInput("Approve the old plan?", risky));
+	const before = b.asks.open({ ...ASK, question: "Approve the old plan?" });
 	const baseline = await b.sweep();
 	assert.equal(baseline.baseline, 1);
 	assert.equal(b.calls.length, 0);
 	assert.deepEqual(b.ledger()?.items.map((item) => [item.id, item.status, item.last_error]), [[before.id, "skipped", "open before push was enabled"]]);
 
 	const long = `Approve   the\nnew plan at $1.20 ${"x".repeat(200)}?`;
-	const raised = await b.escalations.raise(raiseInput(long, { ...risky, mandate_id: "md-abc123", evidence_paths: ["state/artifacts/secret.md"] }));
+	const raised = b.asks.open({ ...ASK, question: long, job_ids: ["cp-demo1"] });
 	const report = await b.sweep();
 	assert.equal(report.sent, 1);
 	assert.equal(b.calls.length, 2);
@@ -114,24 +112,21 @@ test("first sweep baselines what is open; a new human-only escalation is pushed 
 		const device = call.url === FCM ? a : m;
 		const payload = JSON.parse(device.decrypt(Buffer.from(call.init.body)));
 		assert.deepEqual(Object.keys(payload), ["project", "kind", "headline"]);
-		assert.equal(payload.project, "demo");
-		assert.equal(payload.kind, "decision needed: service health");
+		assert.equal(payload.project, "alpha");
+		assert.equal(payload.kind, "decision needed");
 		assert.equal(payload.headline.length, 100);
 		assert.match(payload.headline, /^Approve the new plan at \$1\.20 x+…$/);
 	}
 	assert.deepEqual(b.ledger()?.items.find((item) => item.id === raised.id), {
-		id: raised.id, source: "escalation", kind: "service_health", status: "sent", attempts: 1, delivered: 2, created_at: "2026-09-27T00:00:00Z", settled_at: "2026-09-27T00:00:00Z",
+		id: raised.id, source: "ask", kind: "operator_ask", status: "sent", attempts: 1, delivered: 2, created_at: "2026-09-27T00:00:00Z", settled_at: "2026-09-27T00:00:00Z",
 	});
-	assert.doesNotMatch(readFileSync(pushDeliveriesFile(b.stateDir), "utf8"), /Approve|secret\.md|fcm\.googleapis/);
+	assert.doesNotMatch(readFileSync(pushDeliveriesFile(b.stateDir), "utf8"), /Approve|alpha|fcm\.googleapis/);
 
-	// Later sweeps and a refreshed raise (same id, new numbers) send nothing.
+	// Later sweeps send nothing.
 	b.advance(60);
 	const inode = statSync(pushDeliveriesFile(b.stateDir)).ino;
 	await b.sweep();
 	assert.equal(statSync(pushDeliveriesFile(b.stateDir)).ino, inode, "an idle sweep writes nothing");
-	const refreshed = await b.escalations.raise(raiseInput(long.replace("1.20", "3.45"), { ...risky, mandate_id: "md-abc123" }));
-	assert.equal(refreshed.id, raised.id);
-	await b.sweep();
 	assert.equal(b.calls.length, 2);
 	assert.deepEqual(b.lines, []);
 });
@@ -161,7 +156,7 @@ test("retryable failures back off 30/60/120/240 s and fail after 5 attempts, one
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
+	const raised = b.asks.open({ ...ASK, question: "Down?" });
 	const outcomes: Array<number | Error> = [500, 429, new TypeError("fetch failed"), 503, 500];
 	b.respondWith(() => outcomes.shift() ?? 201);
 	const record = () => b.ledger()?.items.find((item) => item.id === raised.id);
@@ -193,10 +188,10 @@ test("answered before the next attempt is skipped without a fetch", async (t) =>
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
+	const raised = b.asks.open({ ...ASK, question: "Down?" });
 	b.respondWith(() => 500);
 	await b.sweep();
-	await b.escalations.answer(raised.id, { answer: "approve", by: "operator" });
+	b.asks.answer(raised.id, "Approve");
 	b.advance(30);
 	await b.sweep();
 	assert.equal(b.calls.length, 1);
@@ -212,7 +207,7 @@ test("404 and 410 delete the subscription; 403 fails without retry; an off-allow
 	b.subscribe("https://evil.example/push/steal");
 	await b.sweep();
 	b.respondWith((url) => (url.endsWith("404") ? 404 : url.endsWith("410") ? 410 : 403));
-	const raised = await b.escalations.raise(raiseInput("Risky?", { kind: "service_health" }));
+	const raised = b.asks.open({ ...ASK, question: "Risky?" });
 	await b.sweep();
 	assert.deepEqual(b.calls.map((call) => call.url.split("/").pop()).sort(), ["forbidden", "gone-404", "gone-410"]);
 	for (const url of ["https://fcm.googleapis.com/fcm/send/gone-404", "https://fcm.googleapis.com/fcm/send/gone-410"]) {
@@ -233,7 +228,7 @@ test("404 and 410 delete the subscription; 403 fails without retry; an off-allow
 test("with no subscribed device a new item is skipped, so a later subscriber gets no backlog", async (t) => {
 	const b = bench(t);
 	await b.sweep();
-	const raised = await b.escalations.raise(raiseInput("Down?", { kind: "service_health" }));
+	const raised = b.asks.open({ ...ASK, question: "Down?" });
 	await b.sweep();
 	b.subscribe(FCM);
 	await b.sweep();
@@ -242,12 +237,13 @@ test("with no subscribed device a new item is skipped, so a later subscriber get
 	assert.deepEqual([record?.status, record?.last_error], ["skipped", "no subscribed device"]);
 });
 
-test("a corrupt escalations file is reported and changes nothing", async (t) => {
+test("a corrupt asks file is reported and changes nothing", async (t) => {
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
 	const before = readFileSync(pushDeliveriesFile(b.stateDir), "utf8");
-	writeFileSync(join(b.stateDir, "escalations.json"), "{not json");
+	mkdirSync(join(b.stateDir, "operator"), { recursive: true });
+	writeFileSync(join(b.stateDir, "operator", "asks.jsonl"), "{not json\n");
 	const report = await b.sweep();
 	assert.match(report.error ?? "", /cannot read the ask records/);
 	assert.equal(readFileSync(pushDeliveriesFile(b.stateDir), "utf8"), before);
@@ -298,7 +294,7 @@ test("risk:high never pushes on its own; the ask the main session opens for it p
 	assert.equal(b.ledger()?.items.find((item) => item.id === ask.id)?.source, "ask");
 });
 
-test("only a real ask card or the downtime alert pushes: delegated kinds, merge asks and final fixes never do", async (t) => {
+test("only a real ask card pushes: delegated kinds, service health (downtime), merge asks and final fixes never do; the dashboard keeps them", async (t) => {
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep();
@@ -309,21 +305,21 @@ test("only a real ask card or the downtime alert pushes: delegated kinds, merge 
 		await b.escalations.raise(raiseInput("Risky?", { kind: "risk_high_irreversible" })),
 		await raiseMissionEnd(b.escalations, { jobIds: ["cp-demo1"], mandateId: "md-abc123", summary: "landed 1, dropped 0, cost $1.00" }),
 	];
+	const down = await b.escalations.raise(raiseInput("Down?", { kind: "service_health", job_ids: ["cp-service-health"] }));
 	b.finalFix.request({ jobId: "cp-demo2", scope: "abcdef123456", prUrl: "https://github.com/o/r/pull/2", question: "One final fix?", evidence: [] });
 	await b.awaiting.declare({ type: "approval", decision: "Merge PR #12 for cp-demo1?", why: "w", blocks: "b", job_id: "cp-demo1" });
 	await b.sweep();
 	assert.equal(b.calls.length, 0);
 	assert.equal(delegated.length, 4);
-	// What does push has a real destination: the ask is a dashboard Awaiting you card, the alert an open question.
+	// What does push has a real destination: the ask is a dashboard Awaiting you card.
 	const ask = b.asks.open({ ...ASK, question: "Which base?" });
-	const down = await b.escalations.raise(raiseInput("Down?", { kind: "service_health", job_ids: ["cp-service-health"] }));
 	await b.sweep();
-	assert.equal(b.calls.length, 2);
+	assert.equal(b.calls.length, 1);
 	const pushed = b.ledger()?.items.filter((item) => item.status === "sent") ?? [];
-	assert.deepEqual(pushed.map((item) => item.id).sort(), [ask.id, down.id].sort());
+	assert.deepEqual(pushed.map((item) => item.id), [ask.id]);
 	const dashboard = decisions({ stateDir: b.stateDir } as ViewerState, Date.now());
 	assert.deepEqual(dashboard.awaiting.items.map((item) => item.id), [ask.id]);
-	assert.ok(dashboard.parent_questions.some((item) => item.id === down.id));
+	assert.ok(dashboard.parent_questions.some((item) => item.id === down.id), "the unpushed service_health escalation stays on the dashboard");
 });
 
 test("an answered or withdrawn operator ask does not push", async (t) => {
@@ -372,6 +368,7 @@ test("pending legacy records for removed push kinds settle skipped without a fet
 		{ id: "es-aaaaaa", source: "escalation", kind: "risk_high_irreversible" },
 		{ id: "es-bbbbbb", source: "escalation", kind: "budget_exhausted" },
 		{ id: "es-cccccc", source: "escalation", kind: "merge_refused" },
+		{ id: "es-eeeeee", source: "escalation", kind: "service_health" },
 		{ id: "aw-dddddd", source: "merge_ask", kind: "merge_ask" },
 		{ id: "aw-checkpoint-cp-demo1.final-fix-abcdef123456", source: "checkpoint", kind: "final_fix" },
 	].map((item) => ({ ...item, status: "pending", attempts: 0, delivered: 0, created_at: "2026-09-26T00:00:00Z" }));
@@ -382,7 +379,7 @@ test("pending legacy records for removed push kinds settle skipped without a fet
 	await b.sweep();
 	assert.equal(b.calls.length, 0);
 	const items = b.ledger()?.items.filter((item) => legacy.some((old) => old.id === item.id)) ?? [];
-	assert.equal(items.length, 6);
+	assert.equal(items.length, 7);
 	for (const item of items) assert.deepEqual([item.status, item.last_error], ["skipped", "no longer open before delivery"]);
 });
 
@@ -393,32 +390,45 @@ test("a legacy pending or sent record of a removed kind never suppresses a new r
 	const risk = await b.escalations.raise(raiseInput("Risky?", { kind: "risk_high_irreversible" }));
 	const budget = await b.escalations.raise(raiseInput("Budget?", { kind: "budget_exhausted" }));
 	const refused = await b.escalations.raise(raiseInput("Merge refused?", { kind: "merge_refused" }));
+	const down = await b.escalations.raise(raiseInput("Down?", { kind: "service_health", job_ids: ["cp-service-health"] }));
 	const old = (id: string, kind: string, status: string) => ({ id, source: "escalation", kind, status, attempts: status === "sent" ? 1 : 0, delivered: status === "sent" ? 1 : 0, created_at: "2026-09-26T00:00:00Z" });
-	const legacy = [old(risk.id, "risk_high_irreversible", "pending"), old(budget.id, "budget_exhausted", "sent"), old(refused.id, "merge_refused", "pending")];
+	const legacy = [old(risk.id, "risk_high_irreversible", "pending"), old(budget.id, "budget_exhausted", "sent"), old(refused.id, "merge_refused", "pending"), old(down.id, "service_health", "sent")];
 	writeFileSync(pushDeliveriesFile(b.stateDir), JSON.stringify({ schema_version: 1, baseline_at: "2026-09-26T00:00:00Z", rule_baseline_at: "2026-09-26T00:00:00Z", items: legacy }));
-	const asks = [risk, budget, refused].map((raised, index) => b.asks.open({ ...ASK, question: `Real ask ${index}?`, source_escalation: raised.id }));
+	const asks = [risk, budget, refused, down].map((raised, index) => b.asks.open({ ...ASK, question: `Real ask ${index}?`, source_escalation: raised.id }));
 	await b.sweep();
-	assert.deepEqual(b.payloads().map((payload) => (payload as { headline: string }).headline).sort(), ["Real ask 0?", "Real ask 1?", "Real ask 2?"]);
+	assert.deepEqual(b.payloads().map((payload) => (payload as { headline: string }).headline).sort(), ["Real ask 0?", "Real ask 1?", "Real ask 2?", "Real ask 3?"]);
 	const items = b.ledger()?.items ?? [];
 	for (const ask of asks) assert.equal(items.find((item) => item.id === ask.id)?.status, "sent");
 	assert.deepEqual([risk, refused].map((raised) => items.find((item) => item.id === raised.id)?.status), ["skipped", "skipped"]);
-	assert.equal(items.find((item) => item.id === budget.id)?.status, "sent", "a settled legacy record stays as it was");
+	for (const raised of [budget, down]) assert.equal(items.find((item) => item.id === raised.id)?.status, "sent", "a settled legacy record stays as it was");
 });
 
-test("PUSH_RULE names the watchdog's pushes (cp-daemon P3), which never go through this sweep's ledger", () => {
-	assert.match(PUSH_RULE, /; health \(cp-health, once per failure\/recovery\)$/);
+test("PUSH_RULE names open ask cards only: no health, downtime or recovery push", () => {
+	assert.match(PUSH_RULE, /open ask cards/);
+	assert.match(PUSH_RULE, /health and downtime stay on the dashboard$/);
+	assert.doesNotMatch(PUSH_RULE, /service health|cp-health|failure\/recovery/);
 	assert.ok(PUSH_RULE.length <= 200, "one /doctor line");
-	assert.doesNotMatch(readFileSync(new URL("../src/service/health.ts", import.meta.url), "utf8"), /PushDeliveryStore|pushDeliveriesFile|subscriptionFile|rmSync|unlinkSync/, "the watchdog neither writes the ledger nor deletes a subscription");
 });
 
-test("an open service_health escalation is pushed once as a decision needed", async (t) => {
+test("a service_health escalation never pushes, raised, refreshed or withdrawn on recovery; it stays on the dashboard while open and its ask pushes once", async (t) => {
 	const b = bench(t);
 	b.subscribe(FCM);
 	await b.sweep(); // the first sweep baselines
-	const raised = await b.escalations.raise(raiseInput("cp-daemon health check \"update\" failing since 2026-09-27T00:00:00Z (key rollback_failed:abc)", { kind: "service_health", job_ids: ["cp-service-health"], recommended: "ack", options: [{ id: "ack", label: "Acknowledged", consequence: "closes", cost: "none" }] }));
+	const question = "cp-daemon health check \"update\" failing since 2026-09-27T00:00:00Z (key rollback_failed:abc)";
+	const raise = () => b.escalations.raise(raiseInput(question, { kind: "service_health", job_ids: ["cp-service-health"], recommended: "ack", options: [{ id: "ack", label: "Acknowledged", consequence: "closes", cost: "none" }] }));
+	const raised = await raise();
+	await b.sweep();
+	assert.equal((await raise()).id, raised.id, "a re-tick refreshes the same record");
+	await b.sweep();
+	assert.equal(b.calls.length, 0, "the downtime escalation is not pushed");
+	assert.deepEqual(b.ledger()?.items, [], "nor recorded as a push candidate");
+	assert.ok(decisions({ stateDir: b.stateDir } as ViewerState, Date.now()).parent_questions.some((item) => item.id === raised.id), "the dashboard still shows it");
+	const ask = b.asks.open({ ...ASK, question: "The updater failed; roll back by hand?", source_escalation: raised.id });
 	await b.sweep();
 	await b.sweep();
-	assert.equal(b.calls.length, 1, "once, however often it sweeps");
-	assert.equal(b.ledger()?.items.find((item) => item.id === raised.id)?.source, "escalation");
-	assert.equal((b.payloads()[0] as { kind: string }).kind, "decision needed: service health");
+	assert.deepEqual(b.payloads(), [{ project: "alpha", kind: "decision needed", headline: "The updater failed; roll back by hand?" }]);
+	assert.equal(b.ledger()?.items.find((item) => item.id === ask.id)?.status, "sent");
+	await b.escalations.withdraw(raised.id);
+	await b.sweep();
+	assert.equal(b.calls.length, 1, "the recovery (withdraw) pushes nothing");
 });
