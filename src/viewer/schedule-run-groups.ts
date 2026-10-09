@@ -49,10 +49,13 @@ export function groupScheduleRuns(jobs: readonly Job[], schedule: Schedule, last
 	const anchors = jobs.filter((j) => ANCHOR_NOTE.test(text(j.notes))).sort((a, b) => created(a).localeCompare(created(b)) || text(a.id).localeCompare(text(b.id)));
 	const members = new Map<string, Job[]>(anchors.map((a) => [text(a.id), [a]]));
 	const unattributed: Job[] = [];
+	// An anchor's own `expanded:` comment names its children (the S1 carries no title suffix): explicit linkage beats time. A child named by two anchors belongs to the earliest (anchors are sorted oldest first).
+	const expanded = new Map<string, string>();
+	for (const a of anchors) for (const id of Object.values(expandedRoles(Array.isArray(a.comments) ? (a.comments as { text?: unknown }[]) : []))) if (!expanded.has(id)) expanded.set(id, text(a.id));
 	for (const j of jobs) {
 		if (members.has(text(j.id))) continue;
 		const suffix = /\s\[([A-Za-z0-9_-]+)\]$/.exec(text(j.title))?.[1];
-		let home = suffix && members.has(suffix) ? suffix : undefined;
+		let home = suffix && members.has(suffix) ? suffix : expanded.get(text(j.id));
 		// Time-based attribution only for skill schedules: the latest anchor at or before the job (so before the next anchor).
 		if (!home && schedule.job.skill) home = anchors.filter((a) => created(a) <= created(j)).map((a) => text(a.id)).pop();
 		if (home) members.get(home)!.push(j); else unattributed.push(j);

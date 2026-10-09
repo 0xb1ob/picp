@@ -38,6 +38,20 @@ test("the title suffix wins over time; a note-less legacy job of a non-skill sch
 	assert.deepEqual(groupScheduleRuns([legacy], skill, undefined, none).unattributed, ["cp-old"], "no anchor before it");
 });
 
+test("interleaved runs: an unsuffixed S1 named by the first anchor's expanded: comment stays with it, not the newer run", () => {
+	const a1 = anchor("cp-a1", "2026-09-01T10:00:00Z", { comments: [{ text: "expanded: L1 cp-l1, S1 cp-s1" }] });
+	const a2 = anchor("cp-a2", "2026-09-01T10:10:00Z");
+	const l1 = job("cp-l1", "2026-09-01T10:01:00Z", { title: "L1 [cp-a1]" });
+	const s1 = job("cp-s1", "2026-09-01T10:20:00Z", { status: "open" });
+	const g = groupScheduleRuns([a1, a2, l1, s1], skill, undefined, (id) => ({ board_href: id === "cp-s1" ? "/boards/x/" : null, pr_url: null }));
+	const [r2, r1] = g.runs;
+	assert.deepEqual([r1!.run_id, r1!.job_ids, r1!.jobs_total, r1!.status, r1!.result?.kind], ["cp-a1", ["cp-a1", "cp-l1", "cp-s1"], 3, "open", "board"]);
+	assert.deepEqual([r2!.run_id, r2!.job_ids, r2!.status, r2!.result?.kind], ["cp-a2", ["cp-a2"], "closed", "report"]);
+	// A child named by two anchors' expanded: comments belongs to the earliest one.
+	const dup = anchor("cp-a2", "2026-09-01T10:10:00Z", { comments: [{ text: "expanded: S1 cp-s1" }] });
+	assert.deepEqual(groupScheduleRuns([a1, dup, l1, s1], skill, undefined, none).runs.map((r) => [r.run_id, r.jobs_total]), [["cp-a2", 1], ["cp-a1", 3]]);
+});
+
 test("legacy `scheduled by sch-…` is an anchor; a missed slot comes from last_fire; the window keeps the latest 5", () => {
 	const legacy = job("cp-leg", "2026-09-01T10:00:00Z", { notes: "scheduled by sch-aaaaaa (x)" });
 	const g = groupScheduleRuns([legacy], plain, { at: "", slot: "", job_id: "cp-leg", missed: true }, none);

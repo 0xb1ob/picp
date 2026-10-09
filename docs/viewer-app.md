@@ -389,6 +389,13 @@ latest request's state under them. A click is one `POST /api/schedules/request` 
 buttons wrap (`.schedule-controls`, flex-wrap) at 390 px and sit in the card grid at 1440 px; long reasons wrap with
 the card (`overflow-wrap: anywhere`).
 Run history groups jobs by run (`src/viewer/schedule-run-groups.ts`): one anchor job (a fire or Run now) and the jobs it fanned out to are one run, the five newest runs show, "Last fire" shows the newest run, and a job no run claims sits under "Unattributed jobs". A done Run now reads "Run accepted · <job>" (acceptance, not completion). Display only: no authority, schedule or journal write.
+Visual evidence (cp-1y2f, P0; images are never committed): paired dark screenshots of `#schedules` under `state/artifacts/cp-1y2f/` — before from the live dashboard read-only, after from a scratch-home `bin/cp-view` on 127.0.0.1:8791 (no Run now, Save or any other mutation). Both 390 px shots log `scrollWidth <= clientWidth` true (docX 0).
+
+| Frame | Viewport | Before | After |
+|---|---|---|---|
+| `design-web-ui/shots/09-*.png` | 1440x900 | `before-schedules-1440-dark.png` | `after-schedules-1440-dark.png` |
+| `design-web-ui/shots/19-*.png` | 430x932 | `before-schedules-430-dark.png` | `after-schedules-430-dark.png` |
+| `design-web-ui/shots/19-*.png` | 390x844 | `before-schedules-390-dark.png` | `after-schedules-390-dark.png` |
 
 **Answers to acknowledge** (cp-mxk4, docs/contracts.md §Answers to acknowledge). `screens/Answers.tsx` renders
 `answers` from `/api/decisions` as a section between Awaiting you and Being handled (`#answers`); it is absent while no
