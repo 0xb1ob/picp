@@ -8,7 +8,7 @@ are recorded here with the migration; the binding detail lives in
 
 ### Settings: pick models from the ones pi can use (cp-qfe0)
 
-`GET /api/settings` now also returns `available_models` (`provider/id`, from `pi --no-extensions --list-models` through cp-install's parser, cached 5 minutes in the viewer; a failure is cached 30 seconds) or `null` with `models_error`. Every model field on `#settings` offers them in a `<datalist>`, each rubric row has an "add a listed fallback" input, and a value that is not listed shows an inline warning but still saves. With no list the page says so and stays free text. Write-time validation is unchanged. Migration: none. Rollback: revert.
+`GET /api/settings` now also returns `available_models` (`provider/id`, from `pi --no-extensions --list-models` through cp-install's parser, cached 5 minutes in the viewer; a failure is cached 30 seconds; the read never waits for pi, it serves the cached list or `models_loading: true` while one background run fills it) or `null` with `models_error`. Every model field on `#settings` offers them in a `<datalist>`, each rubric row has an "add a listed fallback" input, and a value that is not listed shows an inline warning but still saves. With no list the page says so and stays free text. Write-time validation is unchanged. Migration: none. Rollback: revert.
 
 ### Dashboard Settings: worker, parent and operator models and grant defaults (cp-settings-minimal)
 

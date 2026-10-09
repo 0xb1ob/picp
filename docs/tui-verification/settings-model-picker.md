@@ -8,7 +8,7 @@ A scratch home in a `mktemp -d` directory, removed afterwards; no operational ho
 
 ## Captures
 
-The first rubric row's Model input holds an unlisted value (`openai/gpt-`), so its inline warning shows; the fallback row has the extra "add a listed fallback" input. The desktop frame shows Parent model with its long unlisted value and warning. Headless screenshots do not draw a browser's native `<datalist>` popup, so the open suggestion list is not captured; the four `<option>` values were counted in the DOM instead.
+The first rubric row's Model input holds an unlisted value (`openai/gpt-`), so its inline warning shows; the fallback row has the extra "add a listed fallback" input. The desktop frame shows Parent model with its long unlisted value and warning. **The open picker is not captured**: headless Chromium does not draw a browser's native `<datalist>` popup, and the field deliberately stays a native datalist (no custom combobox). That the options render from `available_models` is pinned by the DOM tests in `tests/viewer-settings-ui.test.ts` (and the four `<option>` values were counted in the DOM here). The frames were taken before the read was made non-blocking (the page then waited for the list); the markup and CSS they show are unchanged by that fix, which adds only a "Loading the model list…" line while the first listing runs.
 
 ![Settings at 390×844](settings-model-picker/phone.png)
 

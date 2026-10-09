@@ -104,7 +104,7 @@ export function Settings({view}: {view: SettingsView}) {
   return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} set={value => set(key, value)} disabled={disabled} models={models}/>;
  };
  const models = data.available_models;
- const modelsNote = models === null ? <p class="settings-readonly" role="status">Model list unavailable{data.models_error ? ` (${data.models_error})` : ""}: type a provider/model.</p> : null;
+ const modelsNote = models === null ? <p class="settings-readonly" role="status">{data.models_loading ? "Loading the model list…" : `Model list unavailable${data.models_error ? ` (${data.models_error})` : ""}: type a provider/model.`}</p> : null;
  const notice = view.notice;
  return <div class="settings-screen">
   {header}

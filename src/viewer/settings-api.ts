@@ -92,7 +92,7 @@ function settingsBase(now: Date): SettingsResponse {
 	return { generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null, snapshot: null, catalog: null, audit: [] };
 }
 
-export async function handleSettingsStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => Promise<ModelList> = availableModels): Promise<ControlRouteResult> {
+export async function handleSettingsStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => ModelList = availableModels): Promise<ControlRouteResult> {
 	if (options.requireTailnet !== true) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	if (config.state !== "on") return { status: 200, body: { ...settingsBase(now), reason: `Dashboard control is off: ${config.reason}` } };
@@ -101,7 +101,8 @@ export async function handleSettingsStatus(_req: IncomingMessage, options: Contr
 	if (record.state !== "ok" || !session.running) {
 		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: `Operator session offline: ${session.reason}` } };
 	}
-	const [reply, models] = await Promise.all([controlRequest(record.record, "settings_get", {}), listModels()]);
+	const reply = await controlRequest(record.record, "settings_get", {});
+	const models = listModels(); // never awaited: the cached list, or `loading` while one background run fills it
 	if (!reply.ok) {
 		if (reply.status === 400 && /^unknown op/.test(reply.error)) return { status: 200, body: { ...settingsBase(now), enabled: true, running: true, reason: SETTINGS_PREDATE } };
 		return { status: 200, body: { ...settingsBase(now), enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
@@ -114,7 +115,7 @@ export async function handleSettingsStatus(_req: IncomingMessage, options: Contr
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],
-			available_models: models.models, models_error: models.error,
+			available_models: models.models, models_error: models.error, models_loading: models.loading,
 		} satisfies SettingsResponse,
 	};
 }

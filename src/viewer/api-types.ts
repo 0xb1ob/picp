@@ -96,6 +96,8 @@ export interface SettingsResponse {
 	/** `provider/id` models pi can use here, for the pickers; null when the list is unavailable (`models_error` says why). Absent while offline. */
 	available_models?: string[] | null;
 	models_error?: string | null;
+	/** True while the first `pi --list-models` run has not landed; the page asks again shortly. */
+	models_loading?: boolean;
 }
 /** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */
 export interface SettingsWriteResponse {

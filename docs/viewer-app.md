@@ -441,9 +441,11 @@ when the response is not `writable`. The last five audit lines sit at the foot. 
 `docs/tui-verification/settings-minimal.md`.
 
 Model pickers: `GET /api/settings` also carries `available_models` (`provider/id`, from `pi --no-extensions --list-models` through
-the cp-install parser, `src/viewer/model-list.ts`; cached 5 minutes, a failure 30 seconds) or `null` with `models_error`. Every
+the cp-install parser, `src/viewer/model-list.ts`; cached 5 minutes, a failure 30 seconds) or `null` with `models_error`. The read never
+waits for pi: it answers with the cached list (stale included) or `models_loading: true` while one deduplicated background run fills it,
+and the page asks again after 2 seconds until the list lands. Every
 model input gets one `<datalist>`; each rubric row also has an "add a listed fallback" input. Free text stays allowed: a value
-not in the list shows an inline "Not in pi's model list" warning and still saves, and with no list the page says "Model list unavailable".
+not in the list shows an inline "Not in pi's model list" warning and still saves, and with no list the page says "Loading the model list…" or "Model list unavailable".
 
 ## Live Data
 

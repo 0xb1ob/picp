@@ -1,11 +1,12 @@
 /**
  * The models pi can use on this machine, for the Settings pickers: `pi --no-extensions --list-models` parsed by the
- * cp-install parser (src/service/models.ts). Read-only and cached in memory; a failure is a note, never an error for the page.
+ * cp-install parser (src/service/models.ts). Read-only, cached in memory and never awaited by a request: a caller gets the
+ * cached list at once (stale included) or `loading`, while one background run refreshes it. A failure is a note, never an error.
  */
 import { execFile } from "node:child_process";
 import { parseModelList } from "../service/models.ts";
 
-export interface ModelList { models: string[] | null; error: string | null }
+export interface ModelList { models: string[] | null; error: string | null; /** No list yet: the first run is still going. */ loading: boolean }
 export type ListRun = () => Promise<{ status: number; stdout: string }>;
 
 const TTL_MS = 5 * 60_000;
@@ -18,21 +19,25 @@ const piList: ListRun = () => new Promise((resolve) => {
 	});
 });
 
-/** A lister with its own cache: one run in flight, a good list kept 5 minutes, a failure 30 seconds. */
-export function modelLister(run: ListRun = piList, clock: () => number = Date.now): () => Promise<ModelList> {
+/**
+ * A lister with its own cache. Each call answers synchronously; a missing or expired entry starts one background run
+ * (deduplicated). A good list is fresh for 5 minutes, a failure for 30 seconds; a stale entry keeps being served until the run lands.
+ */
+export function modelLister(run: ListRun = piList, clock: () => number = Date.now): () => ModelList {
 	let cached: { at: number; ttl: number; list: ModelList } | undefined;
-	let inflight: Promise<ModelList> | undefined;
-	const load = async (): Promise<ModelList> => {
+	let inflight = false;
+	const refresh = async (): Promise<void> => {
 		const result = await run().catch(() => ({ status: 1, stdout: "" }));
 		const models = result.status === 0 ? parseModelList(result.stdout) : undefined;
-		const list: ModelList = models === undefined ? { models: null, error: "model list unavailable" } : models.length === 0 ? { models: null, error: "pi lists no usable models" } : { models, error: null };
+		const list: ModelList = models === undefined ? { models: null, error: "model list unavailable", loading: false } : models.length === 0 ? { models: null, error: "pi lists no usable models", loading: false } : { models, error: null, loading: false };
 		cached = { at: clock(), ttl: list.error ? FAILED_TTL_MS : TTL_MS, list };
-		return list;
 	};
 	return () => {
-		if (cached && clock() - cached.at < cached.ttl) return Promise.resolve(cached.list);
-		inflight ??= load().finally(() => { inflight = undefined; });
-		return inflight;
+		if (!inflight && (!cached || clock() - cached.at >= cached.ttl)) {
+			inflight = true;
+			void refresh().catch(() => undefined).finally(() => { inflight = false; });
+		}
+		return cached?.list ?? { models: null, error: null, loading: true };
 	};
 }
 

@@ -166,6 +166,18 @@ test("model pickers: one datalist of pi's models on every model field; an unlist
 	assert.deepEqual([rows["models.rubric"][0]!.model, rows["models.rubric"][0]!.fallbacks?.at(-1)], ["openai/gpt-5", "anthropic/claude-opus-5-5"]);
 });
 
+test("model pickers: while the server's first listing runs the page says so, offers free text, and asks again", async (t) => {
+	const snap = snapshot(true);
+	let reads = 0;
+	const { fetcher } = server(() => { reads++; return reads === 1 ? settings(snap, { available_models: null, models_error: null, models_loading: true }) : settings(snap, { available_models: ["openai/gpt-5"], models_error: null }); }, () => [500, {}]);
+	const ui = await page(t, fetcher);
+	assert.equal(ui.section("Worker models").querySelector("p[role=status]")?.textContent, "Loading the model list…");
+	assert.equal(ui.root.querySelector("datalist"), null);
+	for (let i = 0; i < 40 && !ui.root.querySelector("datalist"); i++) await new Promise((done) => setTimeout(done, 100));
+	assert.deepEqual([...ui.root.querySelectorAll("datalist#settings-models option")].map((option) => option.getAttribute("value")), ["openai/gpt-5"], "the retry picked the list up");
+	assert.equal(ui.section("Worker models").querySelector("p[role=status]"), null);
+});
+
 test("model pickers: an unavailable list leaves free-text inputs and one note", async (t) => {
 	const snap = snapshot(true);
 	const { fetcher } = server(() => settings(snap, { available_models: null, models_error: "model list unavailable" }), () => [500, {}]);

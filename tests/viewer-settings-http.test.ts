@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
+import { type IncomingMessage, request } from "node:http";
 import { type AddressInfo, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -17,7 +17,8 @@ import { settingsPorts } from "../src/settings-control.ts";
 import { controlConfigFile, controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord } from "../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
-import { SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "../src/viewer/settings-api.ts";
+import { modelLister } from "../src/viewer/model-list.ts";
+import { handleSettingsStatus, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "../src/viewer/settings-api.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 const ORIGIN = "https://cp.example.ts.net";
@@ -152,6 +153,24 @@ test("settings write routes: the session's outcomes pass through with no viewer 
 	const audit = (await call(port, SETTINGS_PATH)).body.audit as Array<{ type: string; actor?: string; peer?: string }>;
 	assert.deepEqual(audit.map((line) => line.type), ["intent", "applied", "refused", "refused", "refused", "refused", "intent", "applied"]);
 	assert.equal(audit[0]!.peer, "127.0.0.1");
+});
+
+test("GET /api/settings never waits for pi --list-models: a listing that never returns answers `loading` at once, and the list shows once it lands", async (t) => {
+	const { home, stateDir, port } = await setup(t);
+	await bridge(t, home, stateDir);
+	let finish: (out: { status: number; stdout: string }) => void = () => {};
+	let runs = 0;
+	const lister = modelLister(() => { runs++; return new Promise((resolve) => { finish = resolve; }); });
+	const options = { home, stateDir, host: "127.0.0.1", port, requireTailnet: true };
+	const read = async () => (await handleSettingsStatus({} as IncomingMessage, options, new Date(), lister)).body as Record<string, unknown>;
+	const first = await read(); // resolves although the run below is still pending
+	assert.deepEqual([first.available_models, first.models_error, first.models_loading, (first.catalog as unknown[]).length], [null, null, true, 31]);
+	await read();
+	assert.equal(runs, 1, "repeat reads share the one background run");
+	finish({ status: 0, stdout: "provider model\nopenai gpt-5\n" });
+	await new Promise((done) => setImmediate(done));
+	const later = await read();
+	assert.deepEqual([later.available_models, later.models_error, later.models_loading], [["openai/gpt-5"], null, false]);
 });
 
 test("settings: an older bridge (`unknown op`) is 409 unsupported with one refused line, and GET reports supported:false", async (t) => {
