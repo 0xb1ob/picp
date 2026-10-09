@@ -37,7 +37,7 @@ import {
 	paths,
 	validate,
 } from "./contracts.ts";
-import { EscalationStore, raiseBudgetExhausted, raiseConflictingRef, raiseRiskHigh } from "./escalation.ts";
+import { EscalationStore, raiseBudgetExhausted, raiseConflictingRef } from "./escalation.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { stripSendMarkers } from "./parent-outbox.ts";
 import { batchRefusal, capReached, covers, enrollCapacity, isActive, jobCapRefuses, MandateError, mandateSpend, matchingJobs, type MandateUsageJob, reviewerUsage, type ScheduleScope, scheduleIdOf, scheduleScope, supersedeReason, usageBaseline } from "./mandate-accounting.ts";
@@ -48,6 +48,7 @@ import { preapprovedRow, riskPreapproval, withPreapproval } from "./risk-preappr
 import { type Ledger, readJobsDocument } from "./ledger.ts";
 import { grantPolicyRefusal, loadTokenCeiling } from "./mandate-defaults.ts";
 import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "./verify-external-ref.ts";
+import { assertDispatchAllowed, type DispatchAuthorityJob } from "./dispatch-authority.ts";
 
 export * from "./mandate-accounting.ts";
 export * from "./mandate-permission.ts";
@@ -631,71 +632,14 @@ export class MandateStore {
 	 * escalation for this job id that approves is read as permission for this
 	 * job only \u2014 a new job needs a new decision.
 	 */
-	async assertDispatchAllowed(job: {
-		jobId: string;
-		project: string;
-		kind?: JobKind;
-		pathHints?: string[];
-		risk?: Risk;
-		evidence?: readonly string[];
-		/** A same-worker promotion of an existing job: gated like a dispatch, but never by the parallelism slot. */
-		promotion?: boolean;
-		/** A script dispatch: never covered by a risk pre-approval (its text is a path, so no hard stop can be read). */
-		script?: boolean;
-	}, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
-		const permission = this.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
-		const { selected, cause } = permission;
-		if (!selected) return permission;
-		const speaking = [selected];
+	assertDispatchAllowed(job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> { return assertDispatchAllowed(this, job, jobs); }
 
-		let preapproved: Mandate[] = [];
-		if (job.risk === "high" && speaking.some((mandate) => mandate.ask_on.includes("risk:high"))) {
-			const escalations = new EscalationStore({ home: this.home });
-			// Not escalationApproves: its recommended-shortcut approves a bare
-			// match against `escalation.recommended`, and raiseRiskHigh recommends
-			// "drop" \u2014 so that generic helper would fail open on the operator's
-			// own refusal. This gate requires an explicit approve answer.
-			const APPROVE = /^(?:approve|approved|yes)$/i;
-			const authorized = escalations
-				.list({ jobId: job.jobId, kind: "risk_high_irreversible" })
-				.some((entry) => entry.status === "answered" && APPROVE.test((entry.answer ?? "").trim()));
-			const asking = speaking.filter((mandate) => mandate.ask_on.includes("risk:high"));
-			// An operator pre-approval naming the job passes (audited below, after the caps); a hard stop still asks.
-			const pre = authorized ? undefined : riskPreapproval(asking, job, this.jobCreatedAt(job.jobId));
-			if (pre?.covered) preapproved = asking;
-			else if (pre) {
-				const raised = await raiseRiskHigh(escalations, { jobId: job.jobId, evidence: [...(job.evidence ?? []), ...pre.stops], ...(asking[0] ? { mandateId: asking[0].id } : {}) });
-				throw new MandateError(
-					`${job.jobId}: risk:high under ask_on \u2014 refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it`,
-				);
-			}
-		}
-
-		if (cause === "active") {
-			const mandate = selected;
-			const counted = this.withReviewerSpend(jobs, speaking);
-			// The job cap limits fresh dispatches only: a job already counted (a promotion, a repair) never hits it.
-			if (!job.promotion && jobCapRefuses(mandate, job.jobId, counted)) {
-				throw new MandateError(
-					`${job.jobId}: mandate ${mandate.id} job cap ${mandate.job_cap} reached \u2014 no new dispatch; the jobs it already covers continue (review, repair, merge)`,
-				);
-			}
-			// Serial means one fresh implementer at a time; repairing an existing job (its own worker) may overlap.
-			if (mandate.dispatch_parallelism && !job.promotion) {
-				const spend = mandateSpend(mandate, counted);
-				if (spend.inFlight >= mandate.dispatch_parallelism) {
-					throw new MandateError(
-						`${job.jobId}: mandate ${mandate.id} dispatch-parallelism ${mandate.dispatch_parallelism} is full`, { code: "parallelism_full" },
-					);
-				}
-			}
-		}
+	recordDispatchPreapproval(grants: readonly Mandate[], job: DispatchAuthorityJob): void {
 		const at = this.#stamp();
-		for (const { id } of preapproved) {
+		for (const { id } of grants) {
 			const grant = this.require(id);
 			this.#write({ ...grant, risk_preapproved: [...(grant.risk_preapproved ?? []), preapprovedRow(grant, job.jobId, job.promotion ? "promote" : "dispatch", at, job.evidence)].slice(-500) });
 		}
-		return permission;
 	}
 
 	/** Record an operator risk:high pre-approval on a grant (`withPreapproval` checks it; audit rows stay). */
