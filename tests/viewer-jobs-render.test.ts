@@ -69,7 +69,11 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  const job:ViewerJob={id:"cp-wide",project:"demo",title:"A long title ".repeat(20),phase:"working",model:"wide-model",script_path:null,elapsed_seconds:600,limit_seconds:7200,head:"b".repeat(40),ci:"green",review:null,review_attempts:0,routing:"explicit",note:null,ledger_status:null,ledger_disagrees:false,mandate_id:null,cost_usd:1.5,pr_url:null,pr_status:null,finished_at:null,finished_today:false,merge_sha:null,failure:null,summary:null,blockers:[]};
  const jobs=screen("Jobs",{generated_at:"2026-09-27T00:00:00Z",awaiting_count:0,jobs:[job],projects:[],warnings:[]});
  const document = parseHTML(jobs).document;
- assert.deepEqual([...document.querySelectorAll(".jobs-columns-flight > span")].map(e=>e.textContent),["job","title","elapsed / budget","context","review","CI","model","cost"]);
+ assert.deepEqual([...document.querySelectorAll(".jobs-columns-flight > span")].map(e=>e.textContent),["Job","Title","Wall clock","Context","Review","CI","Model","Cost"]);
+ assert.equal(document.querySelector(".job-row-id code")?.getAttribute("title"),"cp-wide","the full id rides on the id title");
+ assert.ok(document.querySelector(".job-row-link > .job-title + .job-row-heading"),"title precedes the id inside the one job link");
+ assert.equal(document.querySelectorAll(".jobs-toolbar > p").length,0,"the held hint lives on the In flight header only");
+ assert.match(document.querySelector(".jobs-group > header")!.textContent,/held = waiting on CI or review/);
  const signals = document.querySelector(".job-signals")!;
  assert.deepEqual([...signals.children].map(e=>e.className),["job-clock","job-context","job-review","job-ci job-ci-green","job-model","job-cost"]);
  assert.match(signals.textContent,/10m \/ 2h 0m.*context n\/a.*review not started.*CI green.*wide-model.*\$1\.50/);
@@ -93,7 +97,7 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
   {...job,id:"cp-failed",phase:"failed",finished_today:true,finished_at:"2026-09-27T09:30:00Z",failure:"provider unavailable"}
  ];
  const doneDoc=parseHTML(screen("Jobs",{generated_at:"2026-09-27T10:00:00Z",awaiting_count:0,jobs:finished,projects:[],warnings:[]})).document;
- assert.deepEqual([...doneDoc.querySelectorAll(".jobs-columns-done > span")].map(e=>e.textContent),["job","title","outcome","commit","model","finished","cost"]);
+ assert.deepEqual([...doneDoc.querySelectorAll(".jobs-columns-done > span")].map(e=>e.textContent),["Job","Title","Outcome","Commit","Model","Done","Cost"]);
  const doneRows=[...doneDoc.querySelectorAll(".job-row-done")];
  assert.deepEqual(doneRows.map(e=>e.querySelector(".job-outcome")!.textContent.trim()),["#42 ↗ merged","closed · no PR","#43 ↗ PR closed","failed"]);
  assert.equal(doneRows[0]!.querySelector(".job-outcome a")?.getAttribute("href"),"https://github.com/acme/repo/pull/42");
@@ -131,7 +135,11 @@ test("Done today groups newest first, shows five rows, and finished rows have no
  const waiting=job({id:"cp-wait",phase:"waiting",finished_today:false,finished_at:null,context:null});
  const html=screen({generated_at:"2026-09-27T04:00:00Z",awaiting_count:0,jobs:[beta,...demo,live,waiting],projects:[{name:"alpha",paused:true},{name:"beta",paused:false},{name:"delta",paused:false},{name:"demo",paused:false},{name:"gamma",paused:false}],warnings:[]});
  const done=html.split(">Done today ·")[1]!;
- assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project h3")].map(e=>e.textContent),["demo · 1 merged · 5 closed without PR · $7.00","beta · 0 merged · 1 closed without PR · $1.00"],"groups follow the newest job, with counts then cost");
+ assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project h3 > :not(.jobs-project-cost)")].map(e=>e.textContent),["demo"," · 1 merged · 5 closed without PR","beta"," · 0 merged · 1 closed without PR"],"groups follow the newest job, with counts");
+ assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project-cost")].map(e=>e.textContent),["$7.00","$1.00"],"project cost is the bare amount, no middot");
+ assert.match(parseHTML(html).document.querySelector(".jobs-group:last-of-type > header")!.textContent,/newest first/);
+ assert.ok(parseHTML(html).document.querySelector(".jobs-done-foot .jobs-more"),"show-more sits in the done foot");
+ assert.match(parseHTML(html).document.querySelector(".jobs-done-foot")!.textContent,/Show 1 more from demo.*Nothing done today in alpha/);
  assert.deepEqual([...parseHTML(html).document.querySelectorAll(".jobs-project h3 strong")].map(e=>e.textContent),["demo","beta"]);
  assert.match(done,/cp-d0[\s\S]*cp-d4/); assert.doesNotMatch(done.split("Show 1 more from demo")[0]!,/cp-d5/);
  assert.match(done,/Show 1 more from demo/);
@@ -190,10 +198,13 @@ test("Board shares status columns and mandate filters, complete flight facts, an
 });
 
 
-test("desktop Jobs detail link owns a 44px box across only the job and title columns", () => {
+test("Jobs detail link keeps the 44px base target for phone; desktop link spans only the job and title columns in the compact approved rows", () => {
  const css=readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8");
- assert.match(css,/\.job-row-link \{[^}]*min-height: 44px/);
+ assert.match(css,/\.job-row-link \{[^}]*min-height: 44px/,"phone base target");
+ assert.match(css,/\.jobs-screen \.job-row-done \.job-cost \{ position: absolute;/,"absolute cost rides the title row on done rows only");
+ assert.doesNotMatch(css,/\.jobs-screen \.job-cost \{ position: absolute/);
  const desktop=css.split("@media (min-width: 900px) {")[1]!.split("/* Narrow desktop")[0]!;
- assert.match(desktop,/\.job-row-link \{[^}]*grid-area: 1 \/ 1 \/ 3 \/ 3;[^}]*display: grid;/);
+ assert.match(desktop,/\.job-row-link \{[^}]*grid-area: 1 \/ 1 \/ 2 \/ 3;[^}]*display: grid;[^}]*min-height: 0;/);
+ assert.match(desktop,/\.jobs-columns-flight, \.job-row-flight \{ grid-template-columns: 220px minmax\(0,1fr\) 104px 140px 120px 92px 88px 56px;/);
  assert.doesNotMatch(desktop,/\.job-row-link\s*(?:,|\{)[^}]*display: contents/);
 });
