@@ -55,7 +55,7 @@
 .operator-composer-state, .operator-composer-delivery, .operator-composer-posting { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .operator-composer-posting { flex-basis: 100%; order: 3; }
 .operator-composer-field { position: relative; flex: 1; min-width: 0; display: flex; }
-.operator-composer-field > textarea { padding-left: 42px; }
+.operator-composer .operator-composer-field > textarea { padding-left: 42px; } /* beats `.operator-composer textarea` below (same specificity, later wins) that reset it to 12px and put the icon over the text */
 .operator-composer-field > .operator-composer-attach { position: absolute; left: 0; bottom: 0; }
 .operator-composer-failed { color: var(--secondary); }
 .operator-composer-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
