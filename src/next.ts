@@ -83,7 +83,7 @@ export interface NextMandateView {
 export interface NextResult {
 	/** Advisory only; never changes the mandate recommendation. */
 	warning?: string;
-	/** Workers working across the whole fleet, every mandate: `live_workers` is one grant's scope only. */
+	/** Waiting/launching fleet records across every mandate: informational, never an admission quota; `live_workers` is one grant's scope only. */
 	fleet_live_workers?: number;
 	ready_beads?: ReadyBeads[];
 	mandate?: NextMandateView;
@@ -344,7 +344,7 @@ export function formatNext(result: NextResult): string {
 	} else {
 		lines.push("no active mandate");
 	}
-	if (result.fleet_live_workers !== undefined) lines.push(`fleet: ${result.fleet_live_workers} workers working across all mandates`);
+	if (result.fleet_live_workers !== undefined) lines.push(`fleet: ${result.fleet_live_workers} in-flight worker records (waiting/launching) across all mandates \u2014 informational, not a dispatch quota: each grant's parallelism decides admission, held deliveries take no slot, and cp_dispatch queues at a full spawn cap`);
 	lines.push(result.ready.length === 0 ? "ready: (none)" : `ready: ${result.ready.map((job) => job.id).join(", ")}`);
 	for (const row of (result.blocked ?? []).slice(0, 10)) {
 		lines.push(`blocked: ${row.job.id}: waiting on ${row.waiting_on}${row.escalation_ids?.length ? `; cp_decide ${row.escalation_ids.join(", ")}` : ""}`);
