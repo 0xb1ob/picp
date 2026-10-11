@@ -35,7 +35,10 @@ export async function runAutoControl(
 	else if (outcome.event === "refused") log(`refused ${outcome.error}${tokens}`);
 	else {
 		log(`${outcome.event}${outcome.ms !== undefined ? ` ms=${outcome.ms}` : ""}${tokens} error=${JSON.stringify(outcome.error)}`);
-		relayError(`parent automatic context control ${outcome.event === "timed_out" ? "timed out" : "failed"}: ${outcome.error}`);
+		const next = outcome.event === "timed_out"
+			? "; retry the compaction once the parent has settled — a rotation or restart can abort running workers and is no substitute for that retry"
+			: "";
+		relayError(`parent automatic context control ${outcome.event === "timed_out" ? "timed out" : "failed"}: ${outcome.error}${next}`);
 	}
 }
 

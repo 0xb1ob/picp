@@ -228,6 +228,7 @@ test("T3(f): an over-threshold run holds every wake, including schedule and send
 	t.mock.timers.tick(PARENT_COMPACT_START_MS - 1);
 	assert.equal(p.sent.length, 0);
 	p.fire("session_before_compact", { reason: "manual" });
+	assert.equal(PARENT_COMPACT_HOLD_MS, 270_000, "the hold outlasts the bridge's 240 s compact timeout");
 	t.mock.timers.tick(PARENT_COMPACT_HOLD_MS - 1);
 	assert.equal(p.sent.length, 0);
 	p.fire("session_compact", {});
@@ -257,7 +258,9 @@ test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_st
 	t.mock.timers.tick(PARENT_COMPACT_START_MS);
 	await run("G3");
 	p.fire("session_before_compact", { reason: "manual" });
-	t.mock.timers.tick(PARENT_COMPACT_HOLD_MS);
+	t.mock.timers.tick(PARENT_COMPACT_HOLD_MS - 1);
+	assert.equal(p.tags().includes("G3"), false, "held until the 270 s cap");
+	t.mock.timers.tick(1);
 	assert.deepEqual(p.tags(), ["G1", "G2", "G3"]);
 	for (const reason of ["failed", "start_timeout", "cap_timeout"]) assert.equal(count(new RegExp(`hold released reason=${reason} `)), 1, reason);
 	assert.equal(count(/hold disabled failures=3/), 1);

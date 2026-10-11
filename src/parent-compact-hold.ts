@@ -13,8 +13,10 @@ import { effectiveContextTokens, lastValidAssistant, parentSettings } from "./pa
 
 /** No compaction start this long after an over-threshold settle: release (the bridge did not compact). */
 export const PARENT_COMPACT_START_MS = 15_000;
-/** Longer than the bridge's 120 s compact RPC timeout. */
-export const PARENT_COMPACT_HOLD_MS = 150_000;
+/** The bridge's compact RPC timeout when no explicit `requestTimeoutMs` is set; successful compactions run close to 120 s. */
+export const PARENT_COMPACT_TIMEOUT_MS = 240_000;
+/** Longer than the bridge's 240 s compact RPC timeout. */
+export const PARENT_COMPACT_HOLD_MS = 270_000;
 export const PARENT_COMPACT_MAX_FAILURES = 3;
 
 export interface ContextReading {
