@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { EscalationStore } from "../src/escalation.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { Scheduler } from "../src/scheduler.ts";
@@ -113,6 +114,31 @@ test("unverified org-review click never carries saved clearance and expansion re
  assert.equal(readSchedulesOrEmpty(b.home.path)[0]?.job.description,policy.recipe.description,"open run's fanout stays frozen");
  writeFileSync(b.runs.policiesFile,"{");
  await assert.rejects(b.mandates.assertDispatchAllowed({jobId:event.job_id!,project:"demo",kind:"research"}),/policy unreadable/);
+});
+
+test("a verified dashboard Run now and a cp_schedule run now record their run's pre-approval; an unverified click records none and still asks",async(t)=>{
+ const b=await bench(t);await b.request("adopt",{revision:0});
+ const stamp=()=>new Date().toISOString().replace(/\.\d{3}Z$/,"Z");
+ const started=await b.request("run_now",{revision:1}), event=started.events[0]!;
+ const run=b.runs.run(event.run_id!)!;
+ assert.equal(run.risk_preapproval?.operator_quote,run.policy.approval.operator_quote);
+ const permission=await b.mandates.assertDispatchAllowed({jobId:event.job_id!,project:"demo",kind:"research",risk:"high"});
+ assert.match(permission.run?.started_by ?? "",new RegExp(`^Started by the operator via dashboard Run now \\(request ${started.receipt.id}, `));
+ const escalations=new EscalationStore({home:b.home.path});
+ assert.equal(escalations.list({kind:"risk_high_irreversible"}).length,0);
+ assert.deepEqual(b.runs.run(run.id)?.risk_preapproved.map(r=>[r.job_id,r.decided_by,r.evidence[0]]),[[event.job_id,"operator",`fire run_now ${started.receipt.id}`]]);
+ await b.ledger.close(event.job_id!,"completed");await b.runs.closeRun(run.id,"completed",stamp());
+ const unverified=await b.scheduler.fireNow(b.schedule.id,{via:"dashboard",request_id:"sc-unverified",peer:null,revision:1});
+ assert.ok(unverified.run_id,unverified.reason);
+ assert.equal(b.runs.run(unverified.run_id!)?.risk_preapproval,undefined);
+ await assert.rejects(b.mandates.assertDispatchAllowed({jobId:unverified.job_id!,project:"demo",kind:"research",risk:"high"}),/risk:high requires operator text/);
+ const asked=escalations.list({jobId:unverified.job_id!,kind:"risk_high_irreversible",status:"open"})[0]!;
+ assert.match(asked.question,/Started via dashboard Run now \(request sc-unverified, /);assert.equal(asked.mandate_id,unverified.run_id);
+ await b.ledger.close(unverified.job_id!,"completed");await b.runs.closeRun(unverified.run_id!,"completed",stamp());
+ const quoted=await b.scheduler.fireNow(b.schedule.id,{via:"cp_schedule",tool_call_id:"call-1",operator_quote:`Run ${b.schedule.id} now.`,decided_by:"operator-quote",source_sha:"0123456789ab",revision:1});
+ assert.ok(quoted.run_id,quoted.reason);
+ const pre=b.runs.run(quoted.run_id!)?.risk_preapproval;
+ assert.deepEqual([pre?.operator_quote,pre?.decided_by,pre?.scope],[`Run ${b.schedule.id} now.`,"operator-quote","mandate_jobs"]);
 });
 
 

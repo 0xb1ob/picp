@@ -12,7 +12,7 @@ export interface RiskPreapproval {
 	job_ids?: string[]; scope: "named_jobs" | "mandate_jobs"; granted_at: string;
 }
 export interface RiskPreapprovedRow {
-	at: string; job_id: string; use: "dispatch" | "promote"; decided_by: "operator-delegated"; quote_sha: string; evidence: string[];
+	at: string; job_id: string; use: "dispatch" | "promote"; decided_by: "operator-delegated" | "operator"; quote_sha: string; evidence: string[];
 }
 export interface ScheduleRun {
 	schema_version: 1; id: string; schedule_id: string; policy_revision: number; policy: SchedulePolicy;
@@ -48,7 +48,7 @@ const runShape = object({
 	anchor_job_id: nullable(jobId), members: array(member), phase: oneOf(["accepted", "running", "closed"]), outcome: oneOf([null, "completed", "partial", "refused"]),
 	started_at: at, deadline_at: at, "closed_at?": at,
 	"risk_preapproval?": object({ operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), "delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/), "job_ids?": array(jobId, 64, 1), scope: oneOf(["named_jobs", "mandate_jobs"]), granted_at: at }),
-	risk_preapproved: array(object({ at, job_id: jobId, use: oneOf(["dispatch", "promote"]), decided_by: oneOf(["operator-delegated"]), quote_sha: pattern(/^[0-9a-f]{12}$/), evidence: lines(200, 8) }), 200),
+	risk_preapproved: array(object({ at, job_id: jobId, use: oneOf(["dispatch", "promote"]), decided_by: oneOf(["operator-delegated", "operator"]), quote_sha: pattern(/^[0-9a-f]{12}$/), evidence: lines(200, 8) }), 200),
 	authority_log: array(object({ at, use: line(100), job_id: jobId, decision: line(100), "code?": line(200) }), 200), cap_notices: lines(200, Number.MAX_SAFE_INTEGER),
 });
 export function scheduleRunErrors(value: unknown): string[] {
@@ -63,7 +63,7 @@ export function scheduleRunErrors(value: unknown): string[] {
 	if (run.deadline_at <= run.started_at) errors.push("/deadline_at: must follow started_at");
 	if (run.phase === "closed" ? !run.closed_at || run.outcome === null : run.closed_at !== undefined || run.outcome !== null) errors.push("/phase: only a closed run has closed_at and outcome");
 	if (run.closed_at !== undefined && run.closed_at < run.started_at) errors.push("/closed_at: cannot precede started_at");
-	if (run.risk_preapproval && (run.trigger.via !== "dashboard" || !run.trigger.request_id || !run.policy.effects.includes("org_review_approve"))) errors.push("/risk_preapproval: requires an org-review dashboard click");
+	if (run.risk_preapproval && !(run.trigger.via === "dashboard" ? run.trigger.request_id : run.trigger.via === "cp_schedule" && run.trigger.tool_call_id)) errors.push("/risk_preapproval: requires a verified operator start (dashboard Run now or cp_schedule run_now)");
 	return errors;
 }
 export function policyRecordErrors(value: unknown): string[] {

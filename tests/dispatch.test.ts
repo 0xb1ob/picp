@@ -30,6 +30,8 @@ import { LeaseManager } from "../src/leases.ts";
 import { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { batchRiskHigh } from "../src/risk-batch.ts";
+import { ScheduleRunStore } from "../src/schedule-runs.ts";
+import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
 import { Preflight, type PreflightRequest, type PreflightResult } from "../src/preflight.ts";
 import { loadProfile } from "../src/profiles.ts";
 import { ProjectRegistry } from "../src/projects.ts";
@@ -179,6 +181,24 @@ test("tv8: model dispatch and preview expose the selected grant; its cap refuses
 	mandates.save({ ...selected, job_cap: 10 });
 	const result = await dispatcher.dispatch(request);
 	assert.equal(result.mandate_id, selected.id);
+});
+
+test("a schedule-run dispatch tells the worker who started the run", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const runs = new ScheduleRunStore({ home: b.home });
+	const job = await b.ledger.create({ title: "run member", project: "demo", delivery: "local", kind: "ship" });
+	const at = isoTimestamp(new Date(Date.now() - 600_000));
+	const policy = policyFromLegacy({ id: "sch-123456", name: "Nightly work", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly work", kind: "ship", delivery: "local" } }, {
+		seed_mandate_id: "md-123456", channel: "operator_chat", objective: "Nightly work", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 3,
+		allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run nightly work", decided_by: "operator-quote", approved_at: at },
+	});
+	await runs.savePolicyRevision(policy);
+	const click = "sc-20261010030653-11806a8e";
+	await runs.createRun({ schema_version: 1, id: "run-20261010030655-53ff68", schedule_id: policy.schedule_id, policy_revision: 1, policy, trigger: { via: "dashboard", at, request_id: click }, anchor_job_id: job.id,
+		members: [{ job_id: job.id, role: null, admitted_at: at }], phase: "running", outcome: null, started_at: at, deadline_at: isoTimestamp(new Date(Date.now() + 3_600_000)), risk_preapproved: [], authority_log: [], cap_notices: [] });
+	await b.makeDispatcher({ mandates: new MandateStore(b.home, { runs }) }).dispatch({ jobId: job.id, task: "Bump x.", model: b.model, fetch: false });
+	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
+	assert.match(brief, new RegExp(`> Started via dashboard Run now \\(request ${click}, ${at}\\); no operator pre-approval recorded`));
 });
 
 test("model-only dispatcher refuses declared scripts without falling through to routing", { skip: SKIP }, async (t) => {

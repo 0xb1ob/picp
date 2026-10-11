@@ -644,17 +644,18 @@ export function raiseMissionEnd(
  */
 export function raiseRiskHigh(
 	store: EscalationStore,
-	input: { jobId: string; evidence: readonly string[]; mandateId?: string },
+	input: { jobId: string; evidence: readonly string[]; mandateId?: string; clause?: string; startedBy?: string },
 ): Promise<Escalation> {
 	// An open batch (src/risk-batch.ts) already asks about this job: name it, never mint a duplicate per-job row.
 	const batch = store.list({ jobId: input.jobId, kind: "risk_high_irreversible", status: "open" }).find((item) => item.job_ids.length > 1);
 	if (batch) return Promise.resolve(batch);
 	const words = input.evidence.length > 0 ? input.evidence.join("; ") : "risk:high";
 	return store.raise({
-		...(input.mandateId ? { mandate_id: input.mandateId, mandate_clause: `${input.mandateId}: ask_on includes risk:high` } : {}),
+		...(input.mandateId ? { mandate_id: input.mandateId, mandate_clause: input.clause ?? `${input.mandateId}: ask_on includes risk:high` } : {}),
 		job_ids: [input.jobId],
 		kind: "risk_high_irreversible",
-		question: `${input.jobId}: risk:high under ask_on \u2014 refused before dispatch (${words})`.slice(0, 1000),
+		// The evidence group stays last: src/risk-batch.ts parses the trailing parenthetical.
+		question: `${input.jobId}: risk:high under ask_on \u2014 refused before dispatch${input.startedBy ? `; ${input.startedBy}` : ""} (${words})`.slice(0, 1000),
 		options: [
 			{ id: "approve", label: "approve", consequence: "cp_dispatch (or the cp_send promotion) proceeds for this job", cost: "operator accepts the risk" },
 			{ id: "drop", label: "drop", consequence: "the job is not dispatched", cost: "sunk planning" },
