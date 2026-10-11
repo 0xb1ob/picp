@@ -148,7 +148,7 @@ deliberately leaves it alone, so an operator's file is only ever the operator's.
 | | |
 |---|---|
 | absent (the normal case) | `readUserContext`/`userContextDigest` return `undefined`; session start loads nothing and says nothing — behaviour identical to before the file existed |
-| present | loaded at `session_start` as a `cp-user-context` message (`display: false`, `deliverAs: "nextTurn"` — the same background delivery memory uses), trimmed and capped at `USER_CONTEXT_MAX_CHARS` (8000) with a truncation note |
+| present | loaded at `session_start` as a `cp-user-context` message (`display: false`, `triggerTurn: false` — the same background delivery memory uses), trimmed and capped at `USER_CONTEXT_MAX_CHARS` (8000) with a truncation note |
 | empty or unreadable | treated as absent; optional context that fails to load is never an error a session hears about |
 
 **Precedence is one-way and stated in the payload itself.** The digest's first
@@ -7329,8 +7329,10 @@ of the only function that can do the thing:
   budget exists precisely because this text enters every session's context. A
   fresh home returns nothing rather than announcing that it has no memory.
 
-Delivery: the digest reaches the parent as a `cp-memory` custom message with
-`deliverAs: "nextTurn"`, so it is in context when the operator speaks and never
+Delivery: the digest reaches the parent as a hidden `cp-memory` custom message
+sent with `triggerTurn: false` at `session_start` and again after every
+successful compaction, skipped when the branch already holds the same pair
+(`digestsInContext`), so it is in context when the operator speaks and never
 triggers a turn of its own. Memory is background, not an event.
 
 `/memory status` renders budget, tiers, decay candidates, untiered lines and
@@ -7355,7 +7357,7 @@ only, and a worker must never promote into a memory it does not live in.
 Scope, ported unchanged: `data/` is machine-local and gitignored. Anything a
 fresh command post would need is a **contract edit** (AGENTS.md, docs/), not a
 learning; project-intrinsic facts belong in that repo's `AGENTS.md` via a
-dispatched worker; **job history lives in br**, not in memory.
+dispatched worker; **job history lives in the ledger** (`cp_job list --all`), not in memory.
 
 ## Curation, autonomous
 

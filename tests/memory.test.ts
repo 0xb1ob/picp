@@ -202,6 +202,14 @@ test("capture appends one dated line to candidates and never touches learnings",
 	assert.equal(readFileSync(learningsPath(home.path), "utf8"), learningsBefore, "capture is not promotion");
 });
 
+test("capture never double-dates a lesson that already starts with a date", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const result = captureCandidate(home.path, "2026-10-11 lesson text", AT);
+	assert.equal(result.line, "2026-08-27 lesson text");
+	assert.deepEqual(scanCandidates(readMemoryFile(home.path, "candidates") ?? "").lines, ["2026-08-27 lesson text"]);
+});
+
 test("a candidate that is not the contract shape is reported, never silently dropped", (t) => {
 	// cp-2lh: curation reads what the file says it contains, so a line the counter
 	// cannot see is a lesson that will never be promoted — invisible, not merely
