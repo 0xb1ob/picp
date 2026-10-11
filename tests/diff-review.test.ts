@@ -74,6 +74,7 @@ import {
 	type ScriptStep,
 	WORKER_REPORTER_EXTENSION,
 } from "./harness/index.ts";
+import { REVIEW_CONTEXT_MANIFEST, type ReviewContextResult, reviewContextPointer } from "../src/review-context.ts";
 
 // ---------------------------------------------------------------------------
 // Contract additions — additive, backward compatible
@@ -869,11 +870,14 @@ test("pass: the verdict is recorded with head_sha + diff_stat, and the diff body
 	assert.ok(existsSync(join(b.home, paths.reviewVerdictFile(jobId, 1))));
 	assert.ok(existsSync(join(b.home, paths.reviewRunDir(jobId, 1), "events.jsonl")));
 	const scratch = join(b.home, paths.reviewScratchDir(jobId, 1));
-	// This job froze no task, so the packet is the diff alone (do8.4) — and the
+	// This job froze no task, so the packet is the diff plus the repository context (do8.4, R2) — and the
 	// brief says so rather than letting the reviewer assume it saw what was asked.
-	assert.deepEqual(readdirSync(scratch), ["diff.md"], "the reviewer's cwd holds the diff and nothing else");
+	assert.deepEqual(readdirSync(scratch).sort(), ["context-manifest.json", "context.md", "diff.md"], "the reviewer's cwd holds the diff, its context and nothing else");
 	const materialized = readFileSync(join(scratch, "diff.md"), "utf8");
 	assert.ok(materialized.includes(BODY_MARKER), "the reviewer really was given the diff body");
+	assert.ok(readFileSync(join(scratch, "context.md"), "utf8").includes(`### head ${head.slice(0, 12)} src/app.ts`), "the changed file's head blob is in the context");
+	assert.ok(!readFileSync(join(b.home, paths.reviewRunDir(jobId, 1), "events.jsonl"), "utf8").includes(BODY_MARKER), "no context body in the reviewer's events");
+	assert.ok(!JSON.stringify(result).includes(BODY_MARKER), "no context body in the tool payload");
 
 	// The brief pointed at the materialized copy, never at the clone or a worktree.
 	const brief = readFileSync(join(b.home, paths.reviewRunDir(jobId, 1), "brief.md"), "utf8");
@@ -1108,8 +1112,8 @@ test("the packet is the diff and the frozen original task, both as files, neithe
 	const scratch = join(b.home, paths.reviewScratchDir(jobId, 1));
 	assert.deepEqual(
 		readdirSync(scratch).sort(),
-		["diff.md", ORIGINAL_TASK_COPY],
-		"the reviewer's cwd holds the diff and the frozen task, and nothing else",
+		["context-manifest.json", "context.md", "diff.md", ORIGINAL_TASK_COPY],
+		"the reviewer's cwd holds the diff, its context and the frozen task, and nothing else",
 	);
 	assert.equal(readFileSync(join(scratch, ORIGINAL_TASK_COPY), "utf8"), task, "copied file-to-file, in full");
 
@@ -1124,13 +1128,41 @@ test("the packet is the diff and the frozen original task, both as files, neithe
 		values: {
 			job_id: jobId, project: PROJECT, branch: jobId, artifact_path: join(scratch, "diff.md"),
 			original_task: diffOriginalTaskBlock(join(scratch, ORIGINAL_TASK_COPY)),
-			review_context: "This is the first review on the branch; diff.md is the complete branch diff.",
+			review_context: "This is the first review on the branch; diff.md is the complete branch diff. " +
+				reviewContextPointer(JSON.parse(readFileSync(join(scratch, REVIEW_CONTEXT_MANIFEST), "utf8")) as ReviewContextResult),
 		},
 	}), "no addenda produces the identical pre-amendment brief");
 
 	// The task body is a file the reviewer reads, never a thing the parent logs.
 	const events = readFileSync(join(b.home, paths.eventsFile(jobId)), "utf8");
 	assert.ok(!events.includes(TASK_MARKER), "an original task must never reach a log line");
+});
+
+test("R2: context.md holds the base version of a task-named unchanged file, and the brief only points at it", { timeout: 120_000 }, async (t) => {
+	const b = await reviewBenchOf(t);
+	const jobId = "cp-review-context";
+	b.pushJobBranch(jobId);
+	await b.shipRecord(jobId);
+	mkdirSync(join(b.home, paths.runDir(jobId)), { recursive: true });
+	writeFileSync(join(b.home, paths.originalTaskFile(jobId)), "Keep README.md as it is.\n");
+	const model = b.script("review-context", [verdictCall(jobId)]);
+	b.seal();
+	await b.review.reviewAndWait({ jobId, model });
+
+	const scratch = join(b.home, paths.reviewScratchDir(jobId, 1));
+	const manifest = JSON.parse(readFileSync(join(scratch, REVIEW_CONTEXT_MANIFEST), "utf8")) as ReviewContextResult;
+	const fork = manifest.fork_point as string;
+	assert.equal(fork, b.repo.head(b.repo.branch), "the fork point is the base the branch was cut from");
+	assert.ok(manifest.entries.some((entry) => entry.path === "README.md" && entry.side === "fork" && entry.reason === "task-named" && entry.state === "included"));
+	const context = readFileSync(join(scratch, "context.md"), "utf8");
+	assert.ok(context.includes(`### fork ${fork.slice(0, 12)} README.md (`), "the base version is a whole section");
+	assert.ok(context.includes(BODY_MARKER), "the changed file's body is in the context");
+	const brief = readFileSync(join(b.home, paths.reviewRunDir(jobId, 1), "brief.md"), "utf8");
+	assert.ok(brief.includes(reviewContextPointer(manifest)), "the brief carries the pointer");
+	assert.ok(!brief.includes(BODY_MARKER), "the brief never inlines a context body");
+	for (const events of [paths.eventsFile(jobId), join(paths.reviewRunDir(jobId, 1), "events.jsonl")]) {
+		assert.ok(!readFileSync(join(b.home, events), "utf8").includes(BODY_MARKER), `${events} never carries a context body`);
+	}
 });
 
 test("the diff-review brief includes ordered authorized addenda with provenance", { timeout: 120_000 }, async (t) => {
@@ -1351,6 +1383,7 @@ test("escalate/policy: omitted hunks under the file cap stop the review — no r
 	assert.match(reasons, /omitted: src\/check\.ts/, "the hidden code is named, not the visible CSV passed");
 	assert.doesNotMatch(reasons, /omitted: data\/results\.csv/, "the CSV fit; the code behind it did not");
 	assert.equal(existsSync(join(b.home, paths.reviewRunDir(jobId, 1), "brief.md")), false);
+	for (const file of ["context.md", REVIEW_CONTEXT_MANIFEST]) assert.equal(existsSync(join(b.home, paths.reviewScratchDir(jobId, 1), file)), false, "an incomplete subject writes no context");
 	assert.equal(b.provider.requests("review-bytes").length, 0, "a partial subject never reaches a model");
 	assert.equal(readReviewPassVerdict(b.home, jobId, head), undefined);
 	assert.equal(b.sent.length, 0, "decided synchronously: no pending, no wake-up");
