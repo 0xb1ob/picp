@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { DISPATCH_QUEUE_MAX, type FleetRecord, type Job, LAYOUT, isoTimestamp } from "../src/contracts.ts";
-import { DispatchQueue } from "../src/dispatch-queue.ts";
+import { DispatchQueue, toDispatchRequest } from "../src/dispatch-queue.ts";
 import { drainFile } from "../src/drain.ts";
 import { MandateError } from "../src/mandate-accounting.ts";
 import { MandateStore } from "../src/mandate.ts";
@@ -60,6 +60,15 @@ test("4B2-T1: FIFO, positions, the duplicate and 32-entry caps, and persistence 
 	assert.equal(b.calls.length, DISPATCH_QUEUE_MAX);
 	assert.deepEqual(b.queue.ids(), []);
 	assert.equal(b.wakes.filter((wake) => /QUEUED DISPATCH STARTED — cp-aaa1\b/.test(wake.content)).length, 1);
+});
+
+test("skill mentions PR2: a queued request keeps skill names, refuses a path-shaped one, and replays them", async (t) => {
+	const b = queueBench(t);
+	assert.throws(() => b.queue.enqueue("cp-bad", { skills: ["../etc"] }), /refusing to write an invalid/);
+	assert.throws(() => b.queue.enqueue("cp-bad", { skills: ["tdd-x", "tdd-x"] }), /refusing to write an invalid/);
+	b.queue.enqueue("cp-sk1", { task: "x", skills: ["tdd-x", "writing-plans"] });
+	assert.deepEqual(toDispatchRequest({ job_id: "cp-sk1", request: { task: "x", skills: ["tdd-x", "writing-plans"] } }), { jobId: "cp-sk1", task: "x", skills: ["tdd-x", "writing-plans"] });
+	assert.deepEqual(toDispatchRequest({ job_id: "cp-sk2", request: { task: "x" } }), { jobId: "cp-sk2", task: "x" }, "no skills, no key");
 });
 
 test("4B2-T1: spawn_cap and parallelism_full keep the head untouched and stop the drain", async (t) => {

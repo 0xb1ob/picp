@@ -507,6 +507,18 @@ test("settleBound: a refused redispatch announces the outcome once, never a prev
 	assert.equal(b.escalations.list().length, 1);
 });
 
+test("skill mentions PR2: a redispatch whose recorded skill vanished escalates revive_refused naming skill_unresolved", async (t) => {
+	const b = await bench(t, { ...TRIPPED(), skills: [{ name: "gone-skill", dir: "/gone" }] });
+	let spawned = 0;
+	const manager = { get: () => undefined, ready: async () => {}, spawn: () => (spawned++, undefined), shutdown: async () => {} } as unknown as RecoveryManager;
+	const recovery = new BoundedRecovery({ home: b.home.path, fleet: b.fleet, runs: b.runs, escalations: b.escalations, reviver: () => b.reviver, sender: b.sender, manager, profilesDir: join(REPO_ROOT, "profiles"), skillAgentDir: join(b.home.path, "no-agent-dir") });
+	const outcome = await recovery.onBound(JOB_ID, BOUND(), WORK);
+	assert.equal(outcome.action, "revive_refused");
+	assert.match(outcome.action === "revive_refused" ? outcome.reason : "", /could not redispatch cp-recover: skill_unresolved: skill gone-skill is not installed/);
+	assert.equal(spawned, 0, "nothing spawned");
+	assert.equal(b.escalations.list().length, 1);
+});
+
 test("settleBound: a spent bound announces BOUND_SPENT_PHRASE with 0 attempts left", async (t) => {
 	const b = await bench(t, TRIPPED());
 	recordRecoveryAttempt(b.home.path, JOB_ID, "wall_clock_exceeded");

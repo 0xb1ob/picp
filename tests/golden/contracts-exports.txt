@@ -44,9 +44,9 @@ AnsweredOutboxFileSchema	value	6753f4d50b9d4732	d77f8618d750f456
 AnsweredSend	type	23de0cd9f3485dce	-
 AnsweredSendSchema	value	67afda8c43fc54f6	13862f3e18c830be
 ArmedDispatchEntry	type	597e2e5bf8d6060f	-
-ArmedDispatchEntrySchema	value	6cc115eac0cef6bd	f1b741c637169ff0
+ArmedDispatchEntrySchema	value	6cc115eac0cef6bd	35a8e5b13921f7e1
 ArmedDispatchFile	type	69f2df726c30de2b	-
-ArmedDispatchFileSchema	value	50fcc829d1aa9b76	91f690db9d80f808
+ArmedDispatchFileSchema	value	50fcc829d1aa9b76	fc3fab263bcc3dab
 AwaitingDeclaredType	type	51c8a15e8c9398f2	-
 AwaitingDeclaredTypeSchema	value	23d550656cf58e23	883abdaaaf466dbc
 AwaitingFile	type	f2854410f34ae97c	-
@@ -146,9 +146,9 @@ DiffReviewConfigSchema	value	653bd2f8a3e802a6	45f7df13f61b505a
 DiffVerdict	type	3d9db624a1d998e8	-
 DiffVerdictSchema	value	6a3f1fe754dba070	6ddeb0af39bd4960
 DispatchQueueEntry	type	dad77fe22fd82e46	-
-DispatchQueueEntrySchema	value	6f0de259b7870358	8040502747afa9aa
+DispatchQueueEntrySchema	value	6f0de259b7870358	70f19095f18502c0
 DispatchQueueFile	type	0c6a3a55f0e3d4f5	-
-DispatchQueueFileSchema	value	e1beebd2806e727a	7aa66c24857253b3
+DispatchQueueFileSchema	value	e1beebd2806e727a	cd781d8dd6bc419d
 DoctorFinding	type	aa5d891425255f72	-
 DoctorFindingSchema	value	b23a9c4cfbf50684	b2d0cec94426cf21
 DoctorReport	type	83d41069de768ae9	-
@@ -220,9 +220,9 @@ FailureClass	type	56ae13662dfb3b19	-
 FailureClassSchema	value	1b2489a58baf391f	13b4201f71b01c43
 FailureSchema	value	e4525f3a26734172	19b2ab35e005c745
 FleetFile	type	296e2f8058552d67	-
-FleetFileSchema	value	392f27c9bf875f52	ba5df3b531e2fa16
+FleetFileSchema	value	392f27c9bf875f52	3cc1fa5303ff2f49
 FleetRecord	type	bba4eea4f16bb7f2	-
-FleetRecordSchema	value	a79c25b91e19b789	a6db3f2360aed817
+FleetRecordSchema	value	35c4e6f1ff9f3eb0	37aa41a86529e0d6
 ForeignCiEvent	type	8d1b00c8be47fc57	-
 ForeignCiWatchFile	type	565f7401ba125830	-
 ForeignCiWatchFileSchema	value	826ca6f687cfcec6	618ebc9ab0a49b46
@@ -412,7 +412,7 @@ QuestionOutcomeSchema	value	c3199453b6a724ac	43966f50a0eebe2f
 QuestionRecord	type	4668237b72099107	-
 QuestionRecordSchema	value	0ba928388defb908	1d775a6f1359f568
 QueuedDispatchRequest	type	d9245ef57b68b970	-
-QueuedDispatchRequestSchema	value	91876c8b1c1c7ee9	514bed4049163c34
+QueuedDispatchRequestSchema	value	be4136a0b680d07d	0f7f6062e0192e20
 RECOVERY_ATTEMPT_BOUND	value	b111130ecf9f46e0	6b86b273ff34fce1
 RECOVERY_MESSAGE_TYPE	value	dd36d3e3b011b067	ab7c77b7ea6048e4
 RECOVERY_POLICY	value	db3d391a46df1fc2	8e3b80a11ed3404f
@@ -492,6 +492,7 @@ SETTING_STATUSES	value	f6e27b038ac93721	f38f590d102e0e12
 SETTING_VALUE_TYPES	value	21574bf53119299c	e22f838525958da1
 SHIPPED_SEEN_KEEP_SESSIONS	value	fd68c8920d52c840	6b51d431df5d7f14
 SHIPPED_SEEN_MAX_IDS	value	3eb892ebd74841a1	0604cd3138feed20
+SKILL_NAME_PATTERN	value	4c493b4cc694f9b6	487d40de31a98d69
 STATE_WAKEUP_ANNOUNCEMENTS	value	9ece273ff642df31	3f8062a21da69e20
 STATUS_ACTIVE_PHASES	value	0502e188c53da808	84230c4ee0dcfc8a
 STATUS_INCLUDES	value	cf9b361a200a1abe	5282fecaefb2bcad
@@ -551,6 +552,7 @@ ShippedSeenFile	type	30b1541f05f9289b	-
 ShippedSeenFileSchema	value	906a513366037c4b	636ab46eec2d141d
 ShippedSeenSession	type	57978f203a48cb60	-
 ShippedSeenSessionSchema	value	b7c4ae21fec30b4a	d065cf6a10055f30
+SkillNameSchema	value	6c8ad02b53cd5997	41ad12ab6bd9d39d
 StateWakeupAnnouncement	type	c704adb295124277	-
 StatusInclude	type	89e7e1814053bada	-
 StatusIncludeSchema	value	c0a096e462b8f96f	8bcedc5af99c0f3e

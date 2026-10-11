@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths } from "../src/contracts.ts";
@@ -700,6 +700,40 @@ test("continueFailed: a failed job continues on its original session, worktree a
 	assert.equal(payload?.continuation, "operator", "operator continuation is distinguishable from bounded recovery");
 	assert.deepEqual(payload?.prior_failure, CRASH);
 	assert.equal(existsSync(join(home.path, LAYOUT.state, "recovery-attempts.json")), false, "the automatic attempt counter is untouched");
+});
+
+test("skill mentions PR2: a revive re-resolves the record's skills by name and spawns with them; a vanished skill refuses skill_unresolved", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const runs = new RunRegistry(home.path);
+	t.after(() => runs.closeAll());
+	const skillDir = join(home.path, "skills", "tdd-x");
+	mkdirSync(skillDir, { recursive: true });
+	writeFileSync(join(skillDir, "SKILL.md"), "---\ndescription: tdd\n---\n");
+	const dir = realpathSync(skillDir);
+	const before = await addFailed(home.path, fleet, "cp-skilled", { skills: [{ name: "tdd-x", dir: "/stale/recorded/dir" }] });
+	const spawned: (readonly string[] | undefined)[] = [];
+	const manager = new WorkerManager({
+		home: home.path,
+		workerReporterPath: WORKER_REPORTER_EXTENSION,
+		spawnFn: (options) => {
+			spawned.push(options.skills);
+			return { pid: DEAD_PID + 1, alive: true, busy: false, closed: new Promise(() => {}), onEvent: () => () => {}, shutdown: async () => ({ code: 0, signal: null, at: Date.now() }) } as unknown as ReturnType<WorkerManager["spawn"]>["worker"];
+		},
+	});
+	t.after(async () => manager.shutdownAll());
+	const reviver = new Reviver({ home: home.path, profilesDir: PROFILES_DIR, fleet, manager, runs, isPidAlive: () => false, git: fakeGit(join(before.worktree, ".git")), skillAgentDir: join(home.path, "no-agent-dir") });
+	const plan = await reviver.plan("cp-skilled", { continueFailed: true });
+	assert.deepEqual(plan.ok && plan.skills, [{ name: "tdd-x", dir }], "the directory is re-resolved, never read from the record");
+	rmSync(skillDir, { recursive: true });
+	const refused = await reviver.plan("cp-skilled", { continueFailed: true });
+	assert.equal(refused.ok ? "" : refused.code, "skill_unresolved");
+	assert.match(refused.ok ? "" : refused.message, /skill tdd-x is not installed .* reinstall it, or tear the job down and re-dispatch without it/);
+	mkdirSync(skillDir, { recursive: true });
+	writeFileSync(join(skillDir, "SKILL.md"), "---\ndescription: tdd\n---\n");
+	await reviver.revive("cp-skilled", { continueFailed: true });
+	assert.deepEqual(spawned, [[dir]]);
 });
 
 test("continueFailed refuses without mutation: live pid, script job, missing session, hazardous git, unresolved envelope", async (t) => {
