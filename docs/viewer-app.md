@@ -323,6 +323,10 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   strict UTF-8/no NUL, JSON syntax and a 4 MiB cap. `files: [id…]` sends alongside `images`, with 8 attachments total.
   Sent chips (`components/TranscriptFiles.tsx`, `SessionEntry.files` and `file_metadata`) link to a plain-text view;
   HTML is always literal text. Long chip names wrap within the composer/bubble at 390 px and 1440 px.
+- **Skill mentions** (docs/contracts.md §Skill mentions): the server turns each installed `@name` in a sent message into
+  a `[cp-skill <name> <dir>]` line; the Full transcript strips those lines from a dashboard message and shows one
+  `@name` chip each (`components/TranscriptSkills.tsx`, `SessionEntry.skills`, reusing `.session-files`). Job detail
+  shows a **Skills** fact (`ViewerJob.skills` from the fleet record, "none" when absent) as one wrapping `<code>` line.
 - **Mobile layout** (below 900 px, every Sessions view): the global header and the
   bottom nav give way to one 48 px top bar — back to Overview, a menu of every
   session (Operator ↔ you, CP parent, each worker), the view's name, the live dot,

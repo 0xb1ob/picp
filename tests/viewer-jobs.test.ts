@@ -120,6 +120,16 @@ test("a merged job's CI fact follows its recorded CI event once ci-watch has pru
  assert.equal(jobView(state,"cp-stale")?.job.ci,null,"a green run on another head is not this head's CI");
 });
 
+test("a fleet record's operator-named skills reach the job as names; a job without them has no skills key",t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};
+ const at="2026-09-26T12:00:00Z";
+ put(".pi-command-post/jobs.json",{jobs:["cp-skilled","cp-plain"].map(id=>({id,title:id,status:"open",labels:["project:demo","kind:ship"]}))});
+ put(LAYOUT.fleetFile,{jobs:[{job_id:"cp-skilled",project:"demo",kind:"ship",phase:"held",dispatched_at:at,skills:[{name:"tdd-x",dir:"/skills/tdd-x"},{name:"lint-y",dir:"/skills/lint-y"}]},{job_id:"cp-plain",project:"demo",kind:"ship",phase:"held",dispatched_at:at}]});
+ assert.deepEqual(jobView(state,"cp-skilled")?.job.skills,["tdd-x","lint-y"],"names only, never a dir");
+ assert.equal("skills" in (jobView(state,"cp-plain")?.job ?? {}),false);
+});
+
 test("a merged job's Review fact reads its recorded review files; no review stays not started",t=>{
  const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
  const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};

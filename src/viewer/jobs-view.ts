@@ -64,6 +64,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const ended=[status?.exited_at,entry?.closed_at,failureAt].find(timestamp);
   const duration=started ? Math.max(0,((ended ? Date.parse(ended) : now)-Date.parse(started))/1000) : null;
   const mandate=dispatchMandate(state,id,entry,status) ?? str(covering(job ?? entry ?? {},project,grants,str(entry?.kind) ?? labels.find(l=>l.startsWith("kind:"))?.slice(5),now,entry?.dispatched_at)?.id) ?? null;
+  const skills=(Array.isArray(entry?.skills) ? entry.skills : []).map(s=>str(obj(s)?.name)).filter((s):s is string=>!!s);
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
@@ -77,7 +78,8 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
    failure:phase==="failed" ? str(obj(status?.failure)?.message) ?? str(obj(entry?.failure)?.message) ?? null : null,
    // The envelope headline: one line, 80 chars like the failure headline. Never the artifact body.
    summary:(()=>{const line=str(envelope?.summary)?.split("\n").find(l=>l.trim())?.trim();return line ? line.length>80 ? `${line.slice(0,79)}…` : line : null;})(),
-   blockers:base.blocked.items.find(j=>j.id===id)?.blockers.map(b=>b.id) ?? [],context:entry ? workerContext(state,id,detail?.model,windows) : null};
+   blockers:base.blocked.items.find(j=>j.id===id)?.blockers.map(b=>b.id) ?? [],context:entry ? workerContext(state,id,detail?.model,windows) : null,
+   ...(skills.length ? {skills} : {})};
  });
  return {generated_at:base.generated_at,awaiting_count:base.awaiting.count,jobs,
   projects:[...new Set([...jobs.map(j=>j.project),...base.mandates.paused_projects])].sort().map(name=>({name,paused:base.mandates.paused_projects.includes(name)})),warnings:base.warnings};

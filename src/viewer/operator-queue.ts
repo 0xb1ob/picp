@@ -11,9 +11,10 @@
  */
 import type { IncomingMessage } from "node:http";
 import type { OperatorQueueResponse } from "./api-types.ts";
-import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, tokenMatches } from "./control-api.ts";
+import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, tokenMatches, withMentionedSkills } from "./control-api.ts";
 import { CONTROL_TEXT_MAX, DASHBOARD_ID_RE, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
+import { stripSkillLines } from "./skill-mentions.ts";
 
 export const OPERATOR_QUEUE_PATH = "/api/operator/queue";
 
@@ -30,10 +31,15 @@ export function handleOperatorQueue(req: IncomingMessage, options: ControlRouteO
 		const session = operatorSession(options.stateDir);
 		if (record.state !== "ok" || !session.running) return refuse(409, `no operator session is running (${session.reason}); a queued message is edited through its session`, undefined, { state: "offline" });
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
-		const reply = await controlRequest(record.record, op === "edit" ? "queue_edit" : "queue_cancel", { id, peer, ...(op === "edit" ? { text } : {}) });
-		if (reply.ok) return { status: 200, body: reply.result as OperatorQueueResponse };
+		const skilled = op === "edit" ? withMentionedSkills(text ?? "", options) : undefined;
+		if (skilled && !skilled.ok) return refuse(400, skilled.reason);
+		const reply = await controlRequest(record.record, op === "edit" ? "queue_edit" : "queue_cancel", { id, peer, ...(skilled?.ok ? { text: skilled.text } : {}) });
+		// The bridge's text (committed, or the text pi was given) carries the skill lines; the dashboard compares against what was typed.
+		const result = reply.result && typeof reply.result === "object" ? (reply.result as Record<string, unknown>) : {};
+		const shown = typeof result.text === "string" ? { ...result, text: stripSkillLines(result.text) } : result;
+		if (reply.ok) return { status: 200, body: shown as OperatorQueueResponse };
 		if (reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates queued-message edits; restart the session (⋮ → Restart session)");
 		// The bridge writes edited/cancelled lines only; every refusal (404, 409 already sent, transport) is one refused line here.
-		return refuse(reply.status, reply.error, undefined, reply.result && typeof reply.result === "object" ? (reply.result as Record<string, unknown>) : {});
+		return refuse(reply.status, reply.error, undefined, shown);
 	});
 }

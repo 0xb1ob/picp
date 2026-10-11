@@ -1755,6 +1755,15 @@ test("cp_parent delegated send crosses the host socket and stamps the injected m
 	const tool = tools.get("cp_parent")!;
 	const started = await tool.execute("start", { action: "start", home: ctx.home, mode: "multi", model: "mock/parent" });
 	assert.match(started.content[0]!.text, /started pid=/);
+	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = scratch();
+	t.after(() => { if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir; });
+	const fakeEntries = `${started.details.sessionFile as string}.fake-entries.jsonl`;
+	const entryCount = () => existsSync(fakeEntries) ? lines(fakeEntries).length : 0;
+	const before = entryCount();
+	const unknown = await tool.execute("send", { action: "send", text: "dispatch with @nope", skills: ["nope"] });
+	assert.equal(unknown.content[0]!.text, "cp_parent send: skill nope is not installed (agent or home skills); nothing was sent", "refused before any frame reaches the host");
+	assert.equal(entryCount(), before);
 	const receipt = await tool.execute("send", { action: "send", text: "approve this plan", delegated: true, delegation_rule: "standing approval" });
 	assert.equal(receipt.details.level, "owner_observed");
 	const session = started.details.sessionFile as string;

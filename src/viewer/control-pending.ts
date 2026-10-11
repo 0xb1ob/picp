@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { ControlPendingSend } from "./api-types.ts";
 import { controlInboxFile, controlJournalFile, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, readThreads } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
+import { stripSkillLines } from "./skill-mentions.ts";
 
 /**
  * cp-y43c review 1: how long a lost send (session ended unseen, crash window, 24 h queue expiry) stays a visible failed
@@ -36,7 +37,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
    if ((line.type === "request" && line.kind === "message") || line.type === "held") {
     if (typeof line.text !== "string" || typeof line.at !== "string" || !Number.isFinite(Date.parse(line.at)) || sends.has(line.id)) continue;
     sends.set(line.id, {id:line.id,at:line.at,state:line.type === "held" ? "held" : "queued",reason:null,ask_id:typeof line.ask_id === "string" ? line.ask_id : null,
-     body:{kind:"message",text:line.text,...(line.deliver === "followUp" || line.deliver === "steer" ? {deliver:line.deliver} : {}),...(Array.isArray(line.images) && line.images.every(id=>typeof id === "string") ? {images:line.images} : {}),...(Array.isArray(line.files) && line.files.every(id=>typeof id === "string") ? {files:line.files} : {}),...(typeof line.thread === "string" ? {thread:line.thread} : {})}});
+     body:{kind:"message",text:stripSkillLines(line.text),...(line.deliver === "followUp" || line.deliver === "steer" ? {deliver:line.deliver} : {}),...(Array.isArray(line.images) && line.images.every(id=>typeof id === "string") ? {images:line.images} : {}),...(Array.isArray(line.files) && line.files.every(id=>typeof id === "string") ? {files:line.files} : {}),...(typeof line.thread === "string" ? {thread:line.thread} : {})}});
     if (line.type === "request") targets.set(line.id, {since:typeof line.session_started_at === "string" ? line.session_started_at : undefined,file:typeof line.session_file === "string" ? line.session_file : undefined});
     if (line.type === "held") accepted.add(line.id);
    } else {
@@ -46,7 +47,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
     if (line.state === "injected") injected.add(line.id);
     if (send.state === "dropped") continue;
     // cp-y43c: an edit applies only while the dashboard still holds the message (control-queue.ts).
-    if (line.type === "edited") { if (typeof line.text === "string" && !injected.has(line.id)) send.body = {...send.body,text:line.text}; continue; }
+    if (line.type === "edited") { if (typeof line.text === "string" && !injected.has(line.id)) send.body = {...send.body,text:stripSkillLines(line.text)}; continue; }
     if (line.type === "outcome" && line.state === "cancelled") { send.state = "dropped"; send.reason = "Cancelled from the dashboard"; continue; }
     // A bridge drop is a loss the operator did not ask for (cp-y43c addendum 2): visible as failed below, never resent.
     if (line.type === "outcome" && line.state === "dropped") { send.state = "dropped"; send.reason = typeof line.reason === "string" ? line.reason : "Abandoned operator send"; if (line.by === "bridge") lost.add(line.id); continue; }
