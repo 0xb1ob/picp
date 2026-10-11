@@ -1607,11 +1607,26 @@ worktree's `.git` file):
 
 **The refusal ladder** (`Reviver.plan`, re-checked at revive time, never trusted
 from a startup classification): no fleet record; phase is neither `held` nor
-`waiting`; the session file is gone; a `WorkerManager` entry already exists for
+`waiting`; the session file is gone; the session carries a
+`worker-compaction-policy-block` entry (`session_policy_blocked`) or cannot be
+read or parsed as JSONL (`session_scan_failed`); a `WorkerManager` entry already exists for
 the job; a child of the stored pid is alive; the pid is alive; the worktree is gone; the worktree has an
 in-progress git operation or a detached HEAD. Every refusal is a `{ok: false,
 code, message}` value, never a thrown error, so `cp_revive` can show it to the
 operator instead of crashing.
+
+**A policy-blocked transcript takes no new work** (P2, `src/worker-session-policy.ts`).
+The worker summarizer's guard (`extensions/worker-reporter/compaction.ts`) only stops
+later summarization; `Reviver.plan` and `cp_send` stream-scan the recorded session for
+that structural custom entry — revive right after the session-exists check, before any
+shutdown or spawn; send right after its script/failed/phase guards and before waiting on a stop,
+restoring a released worker, reopening the envelope, clearing settles or delivering.
+Prose that merely names the marker does not count. A file that cannot be read or holds a
+malformed nonblank line is a named refusal naming the path, never "healthy"; `cp_send`
+skips only a session file that does not exist yet (pi writes it at the first user
+message, so it holds no marker). The refusal kills nothing, moves no branch or lease and
+edits no transcript: surface the block to the operator and keep the lease for a recovery
+decision.
 
 **Constraint 9, mechanically:** before `cp_revive` spawns anything it shows the
 interrupted tool call (name and arguments, read from the session file's last

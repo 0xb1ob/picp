@@ -33,6 +33,7 @@
  * needs this, because it already resolves to `prompt` for an idle worker.
  */
 
+import { existsSync } from "node:fs";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
@@ -50,6 +51,7 @@ import { decideReopen, reopenEnvelopeSlot, type Supersession, type TaskUpdate, u
 import { type BudgetSource, resolveBudgetSource } from "./worker-manager.ts";
 import { readTaskAddenda, taskAddendaText } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
+import { policyBlockedRefusal, sessionPolicyBlocked } from "./worker-session-policy.ts";
 
 export class SendError extends Error {}
 
@@ -209,6 +211,17 @@ export class Sender {
 					`(cp_teardown ${request.jobId}, then cp_dispatch a new job id), never a brief to a closed envelope slot.`,
 			);
 		}
+
+		// P2: a transcript the summarizer marked policy-blocked takes no new work — checked before any wait, restore,
+		// envelope reopen or delivery. pi writes the file at the first user message, so an absent one has no marker.
+		const sessionFile = record.worker.session_file;
+		let policyBlocked: boolean;
+		try {
+			policyBlocked = existsSync(sessionFile) && (await sessionPolicyBlocked(sessionFile));
+		} catch (error) {
+			throw new SendError(`cp_send ${request.jobId}: ${(error as Error).message}. Nothing was sent; surface it and keep the lease.`);
+		}
+		if (policyBlocked) throw new SendError(policyBlockedRefusal(request.jobId, sessionFile));
 
 		// The invariant, checked before anything is delivered: could a report for
 		// this brief still be accepted? A landed delivery cannot be reopened, and

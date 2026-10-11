@@ -40,6 +40,7 @@ import { resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import { readCheckpoint } from "./checkpoint-ref.ts";
+import { policyBlockedRefusal, sessionPolicyBlocked } from "./worker-session-policy.ts";
 
 export class ReviveError extends Error {}
 
@@ -54,6 +55,8 @@ export const REVIVE_REFUSAL_CODES = [
 	"tool_child_alive",
 	"repo_detached_head",
 	"envelope_unresolved",
+	"session_policy_blocked",
+	"session_scan_failed",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -388,6 +391,15 @@ export class Reviver {
 				`${jobId}'s session file ${record.worker.session_file || "(none recorded)"} is gone \u2014 there is nothing to revive from`,
 			);
 		}
+
+		// P2: never resume a transcript the summarizer marked policy-blocked; checked before any shutdown or spawn.
+		let policyBlocked: boolean;
+		try {
+			policyBlocked = await sessionPolicyBlocked(record.worker.session_file);
+		} catch (error) {
+			return refuse(jobId, "session_scan_failed", `${(error as Error).message}. Nothing was spawned; surface it and keep the lease.`);
+		}
+		if (policyBlocked) return refuse(jobId, "session_policy_blocked", policyBlockedRefusal(jobId, record.worker.session_file));
 
 		// cp-mub7: a failed job's registered worker is stale, not live work — the
 		// job is already failed, and cp_send refuses it for that reason and points

@@ -1,6 +1,6 @@
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { WORKER_COMPACTION_POLICY_BLOCK as POLICY_BLOCK } from "../../src/worker-session-policy.ts";
 
-const POLICY_BLOCK = "worker-compaction-policy-block";
 const policyBlocked = (entries: readonly SessionEntry[]) =>
 	entries.some((entry) => entry.type === "custom" && entry.customType === POLICY_BLOCK);
 
