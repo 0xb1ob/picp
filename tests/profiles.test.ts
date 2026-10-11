@@ -652,6 +652,11 @@ test("reviewer fixtures define pass/revise/escalate by quality, and demand actio
 	assert.doesNotMatch(diff, /answered in the PR/);
 	assert.doesNotMatch(diff, /Prefer `revise` or `escalate` over `pass` when an omitted file/);
 	assert.match(profile, /Limited evidence is not proof of a defect/);
+
+	// R4: disconfirm before high confidence, never fill the checklist, and what pass means.
+	assert.match(diff, /refute/i);
+	assert.match(diff, /never invent/i);
+	assert.match(diff, /`pass` means no blocking/);
 });
 
 // The reviewer's packet is untrusted input (do8.3, do8.4): a plan artifact was

@@ -96,6 +96,10 @@ test(
 		// spec 2026-09-05: `action` is start (default) | status — the async surface,
 		// not a subject switch. The subject is still the pushed diff and nothing else.
 		assert.deepEqual(properties, ["action", "deliver_revise", "job_id", "model"]);
+		// R4: a retry re-runs the same routing decision, and a pass is no blocking high/high finding.
+		const description = spec?.function?.description ?? "";
+		assert.doesNotMatch(description, /different model is chosen/);
+		assert.match(description, /no blocking high\/high/);
 
 		// cp_gate stays what it was: no diff/mode/subject switch grew onto it.
 		const gate = (provider.requests("review-tool-wiring")[0]?.body.tools as ToolSpec[] | undefined)?.find(
@@ -182,6 +186,13 @@ test("details.verdict round-trips through validate<DiffVerdict>(DiffVerdictSchem
 	// gate.ts's derivation, not a schema field, and DiffVerdictSchema is closed.
 	assert.equal(payload.details.next, "proceed");
 	assert.equal(validate(DiffVerdictSchema, { ...verdictOf(), next: "proceed" }).ok, false);
+});
+
+test("a pass whose reasons carry a medium finding relays that finding and still proceeds", () => {
+	const medium = "[severity: medium] [confidence: high] src/x.ts:7 — retry → stale timer → clear it";
+	const payload = diffReviewToolPayload(resultOf({ verdict: verdictOf({ reasons: [medium] }) }));
+	assert.equal(payload.details.next, "proceed");
+	assert.ok((payload.content[0]?.text as string).includes(medium), "the medium reason must reach the relay text");
 });
 
 test("a verdict that does not satisfy the schema is refused by the tool, not shipped as details", () => {

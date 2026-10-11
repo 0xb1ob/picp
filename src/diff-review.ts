@@ -23,7 +23,7 @@
  * One thing about the *subject* changes how long the ladder runs, and it is
  * passed into the shared code rather than reimplemented beside it: a plan gate
  * spends one revise per artifact (`GATE_MAX_REVISE`), while a ship branch is
- * reviewed until a review comes back with no unfixed findings, bounded at
+ * reviewed until a review comes back with no blocking high/high finding, bounded at
  * `REVIEW_MAX_ATTEMPTS` reviews per branch (`reviewCapExhausted` is handed to
  * `readPriorAttempts`; the cap's wording is handed to `decideGate`). The last
  * permitted review never delivers another revise, and a review past the cap is

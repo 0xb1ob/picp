@@ -2451,7 +2451,7 @@ Every real verdict records git's stable `patch-id` for the complete branch diff.
 | `revise` | `revise` | promoted to the live **implementer** (same worker, same worktree); fix commit + push, then **review again** (up to `REVIEW_MAX_ATTEMPTS` reviews per branch) |
 | `escalate` / `flagged` | `authorize` | gate-only: DiffReview passes `vetoFlags: []`, so a raised flag is reported and the reviewer's verdict stands |
 | `escalate` / `policy` | `surface` | a judgment about the diff: tell the operator, stop — never authorizable |
-| `escalate` / `operational` | `retry` | a tool fault: `cp_review` again (next attempt picks a **different** model) |
+| `escalate` / `operational` | `retry` | a tool fault: `cp_review` again (the same routing decision re-runs) |
 | `escalate` / `operational_persistent` | `surface` | the reviewer model cannot meet the contract; stop looping |
 
 **In-pipeline automation.** When `PipelineRecord.review` is absent or `enabled: false`, a pipeline that reaches done does not review the diff itself: the parent still owes the branch a `cp_review` by the rule below, out of band. When `enabled: true` and the implementer reports, `advance()` checks the diff; an opt-in without a diff reviewer wired into the runner (`PipelineRunner#review`) is a hold short of done, naming `cp_review` as the out-of-band mechanism.
@@ -2483,7 +2483,7 @@ A plan gate's subject is a filed document: it is sound or it is not, and one rev
 
 So `cp_review` **keeps reviewing the same branch until a review comes back with no `[severity: high] [confidence: high]` finding**, bounded at `REVIEW_MAX_ATTEMPTS` = **5 reviews per branch** ([`src/contracts.ts`](../src/contracts.ts)). Mechanically:
 
-- `pass` → `proceed`, at any review number. Unchanged: a pass is the end of the loop, and it is still evidence about the diff, never authorization to merge.
+- `pass` → `proceed`, at any review number. Unchanged: a pass is the end of the loop, and it is still evidence about the diff, never authorization to merge. A pass means no blocking high/high finding; medium/low reasons are relayed, never merge gates.
 - a `revise` on review *n* < 5 → `revise`, delivered to the **live implementer** by promote (same worker, same branch, never a second PR, never a re-dispatch). The promote text names *n* of 5 and how many reviews remain.
 - **review 5 is the last one, and it never asks for another revision.** `reviewCapExhausted` ([`src/gate.ts`](../src/gate.ts), beside `gateCapExhausted`) reports the budget spent on the attempt that *is* the cap, so `decideGate` turns that reviewer's `revise` into `escalate`/`policy` → **`surface`**, with `reviewCapReason` naming the cap in `reasons`. Nothing is promoted and nothing loops.
 - a **6th** review is **refused before any diff is materialized**: `DiffReview.review` throws, naming the last verdict file and the operator's options (accept the diff, hand the branch back with a scope decision, or drop it). `PipelineRunner#reviewStep` holds `escalated`/`surface` for the same reason rather than calling the orchestrator.
