@@ -100,8 +100,18 @@ test("uncovered jobs, scripts and hard-stop text escalate exactly as without a p
 
 	const pushing = { pathHints: ["Rebase, then force push to main."] };
 	assert.equal(store.wouldAskRiskHigh({ jobId: job.id, project: "demo", ...pushing }, "high"), true);
-	await assert.rejects(() => gate(job.id, pushing), /risk:high under ask_on/);
+	await assert.rejects(() => gate(job.id, pushing), /risk:high under ask_on.*; hard stop in the task text \(force push\): no standing risk pre-approval covers a hard stop/);
 	assert.match(escalations.list({ jobId: job.id, kind: "risk_high_irreversible" })[0]?.question ?? "", /hard stop force push: force push/);
+	// A repeated pre-approval adds no authority: the same hard stop refuses again with the same cause.
+	store.preapproveRisk(mandate.id, verified([job.id]));
+	await assert.rejects(() => gate(job.id, pushing), /refused before dispatch; .* raised, cp_decide it with an operator quote.*\(force push\)/);
+	// Categories only, deduplicated and capped: never the raw task text or a secret-looking value.
+	const secret = "sk-live-ABCDEF1234567890";
+	const noisy = { pathHints: [`print the token ${secret}`, "git push --force origin main", "force-push again", "rm -rf build", "npm publish"] };
+	const refusal = await gate(job.id, noisy).then(() => assert.fail("must refuse"), (error: Error) => error.message);
+	assert.match(refusal, /\(credential handling, data deletion, force push, external publishing\)/);
+	for (const raw of [secret, "print the token", "--force", "rm -rf", "npm publish"]) assert.equal(refusal.includes(raw), false, `no raw text: ${raw}`);
+	await assert.rejects(() => gate(other.id), (error: Error) => !error.message.includes("hard stop"), "an uncovered job keeps the generic refusal");
 	await assert.rejects(() => gate(job.id, { script: true }), /risk:high under ask_on/, "a script dispatch");
 	assert.equal(store.wouldAskRiskHigh({ jobId: job.id, project: "demo", script: true }, "high"), true);
 	assert.equal(store.require(mandate.id).risk_preapproved, undefined, "nothing audited for a refusal");

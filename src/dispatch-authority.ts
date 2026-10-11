@@ -4,7 +4,7 @@ import { EscalationStore, raiseRiskHigh } from "./escalation.ts";
 import { jobCapRefuses, MandateError, mandateSpend, type MandateUsageJob } from "./mandate-accounting.ts";
 import type { GrantPermission } from "./mandate-permission.ts";
 import type { MandateStore } from "./mandate.ts";
-import { riskPreapproval } from "./risk-preapproval.ts";
+import { HARD_STOP_SIGNALS, riskPreapproval } from "./risk-preapproval.ts";
 import { runStartedBy, scheduleRunVerdict, ScheduleAuthorityError } from "./schedule-authority.ts";
 
 export interface DispatchAuthorityJob {
@@ -35,7 +35,10 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 		if (pre?.covered) preapproved = asking;
 		else if (pre) {
 			const raised = await raiseRiskHigh(escalations, { jobId: job.jobId, evidence: [...(job.evidence ?? []), ...pre.stops], ...(asking[0] ? { mandateId: asking[0].id } : {}) });
-			throw new MandateError(`${job.jobId}: risk:high under ask_on — refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it`);
+			// Canonical category labels only — never the matched task text.
+			const kinds = [...new Set(pre.stops.flatMap((stop) => HARD_STOP_SIGNALS.filter(({ why }) => stop.startsWith(`hard stop ${why}:`)).map(({ why }) => why)))].slice(0, 4);
+			const hard = kinds.length ? `; hard stop in the task text (${kinds.join(", ")}): no standing risk pre-approval covers a hard stop, so another preapprove_risk will not clear it` : "";
+			throw new MandateError(`${job.jobId}: risk:high under ask_on — refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it${hard}`);
 		}
 	}
 	if (cause === "active") {
