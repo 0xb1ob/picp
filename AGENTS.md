@@ -103,7 +103,7 @@ are recorded reviewed-by-equivalence with no spend; a changed patch
 gets a delta review. Never re-review an unchanged head. Cap: 5 reviews per
 branch; a complete 5th with findings raises one `final_fix` checkpoint on the capped head — operator quote only (`cp_decide`), never a mandate; approved, `cp_integrate` promotes once and only the next reported fix head may merge (green CI, repo permission; a later push voids it).
 
-A review is evidence, never authorization, and never a merge action. CI remains authoritative for correctness; merge permission is the repository's.
+A review is evidence, never authorization, and never a merge action. A pass means no blocking high/high finding — relay its medium/low reasons; they never hold a merge or open a job by themselves. CI remains authoritative for correctness; merge permission is the repository's.
 **Never merge red.**
 
 ## While they work

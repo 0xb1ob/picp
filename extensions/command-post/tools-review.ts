@@ -240,7 +240,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			"Returns {next: wait, attempt, deadline} the moment the reviewer is spawned; the verdict arrives as a " +
 			"cp-verdict wake-up. Returns the decision directly only when this attempt is already decided on disk: " +
 			"{verdict, cause, flags, reasons, revisions?, next}, where next is proceed (pass), revise (sent to the " +
-			"live planner), retry (operational: re-run, a different model is chosen) or surface (stop and tell the " +
+			"live planner), retry (operational: re-run, the same routing decision is re-run) or surface (stop and tell the " +
 			"operator). One revise per artifact is enforced here, not by you. Never reads the artifact into this session.",
 		promptSnippet: "Gate a research artifact and get a verdict with a cause (cp_gate)",
 		promptGuidelines: [
@@ -315,9 +315,9 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			"pushed head, so a head that already passed is never reviewed again. Returns " +
 			"{verdict, cause, flags, reasons, revisions?, next} plus the head sha and file count it reviewed: next is " +
 			"proceed (pass), revise (sent to the live implementer for one more commit on the same branch, never a second " +
-			"PR), retry (operational: re-run, a different model is chosen) or surface (stop and tell the operator). On " +
+			"PR), retry (operational: re-run, the same routing decision is re-run) or surface (stop and tell the operator). On " +
 			"revise, run cp_review on the same branch again once the implementer's fix is pushed, and keep going until a " +
-			"review comes back with no unfixed findings (pass) or it surfaces: the cap is 5 reviews per branch " +
+			"review comes back with no blocking high/high finding (pass; medium/low findings may remain in reasons) or it surfaces: the cap is 5 reviews per branch " +
 			"(REVIEW_MAX_ATTEMPTS), the 5th never asks for another revision, and a 6th is refused — all enforced here, not " +
 			"by you. Never reads the diff into this session: the verdict is the interface, and no diff text is returned, ever.",
 		promptSnippet: "Review a pushed ship branch's diff and get a verdict with a cause (cp_review)",
@@ -325,6 +325,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			"Use cp_review on a kind:ship job whose branch is on origin; use cp_gate for a research artifact — they are separate tools on purpose and neither reviews the other's subject.",
 			"Run cp_review on every kind:ship delivery:pr job once its PR exists and the head sha is on origin — the standing rule, not an opt-in. One pass per pushed head: before cp_integrate, review only if that head has no passing verdict yet, and never re-review an unchanged head. delivery:local and delivery:answer have no PR and get no review.",
 			"Branch on cp_review's cause field, never on the reason prose; a pass is evidence about the diff, never authorization to merge.",
+			"A cp_review pass means no blocking high/high finding, not no findings: carry its medium/low reasons into your relay (or name an already-authorized follow-up). They never hold a merge and never create a job by themselves.",
 			"A revise is not the end of the review loop: re-run cp_review on the same branch after the implementer pushes the fix, until pass or surface (5 reviews per branch, enforced by the tool).",
 			"next: wait means end the turn; the verdict arrives as a cp-verdict wake-up. Never call cp_review status to wait for it.",
 		],

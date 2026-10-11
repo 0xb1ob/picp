@@ -17,7 +17,7 @@ export const GATE_MAX_REVISE = 1;
  * named, pushes, and the *new* head is a different subject — refusing to look at
  * it after a single revise ended the loop with the findings still unfixed and
  * the operator holding a branch nobody had re-read. So `cp_review` keeps
- * reviewing the same branch until a review comes back with no unfixed findings
+ * reviewing the same branch until a review comes back with no blocking high/high finding
  * (`pass`), and stops at this many reviews whatever happens, because "keep
  * going" without a bound is a loop.
  *

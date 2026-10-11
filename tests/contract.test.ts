@@ -53,6 +53,7 @@ test("AGENTS.md stays at or under the 250-line diet cap", () => {
 	assert.match(AGENTS, /short fix list/);
 	assert.match(AGENTS, /approved slice verbatim/);
 	assert.match(AGENTS, /until the branch moves/);
+	assert.match(AGENTS, /no blocking high\/high finding/);
 });
 
 test("every cp_ tool the contract names is registered", () => {

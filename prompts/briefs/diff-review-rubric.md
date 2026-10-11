@@ -53,6 +53,16 @@ that `offset` until a result is not cut. Never score from the first page alone.
    omitted hunks. A delta review's `full-diff.md` may name omitted paths: they
    are unseen, evidence of nothing either way.
 
+**Before you score:**
+
+- For each changed interface, find its consumers, tests, fixtures, test doubles and limit/size tests in
+  the supplied context. A consumer the diff does not update is a finding only when supplied evidence shows it breaks.
+- Trace failure and cleanup paths: error, timeout, cancellation, retry-budget reset, timers/listeners disposed, and the alternate viewport for UI.
+- Disconfirm before you claim high confidence: look for the supplied evidence that would refute the finding (a base file
+  that already satisfies it, a guard elsewhere in the diff, a test that covers it) and cite where you looked.
+  Never invent a counterexample or a finding to fill this checklist; a clean diff passes with no findings.
+- `pass` means no blocking `[severity: high] [confidence: high]` finding, not no findings: real medium/low findings stay in `reasons`.
+
 No high-confidence missing-import, missing-file or scope-growth claim without a supplied file that shows it.
 
 A finding in `prior-verdict.json` that this delta resolves is not re-raised unless the delta regresses it; you never see PR discussion, so never cite it.
