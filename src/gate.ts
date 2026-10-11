@@ -555,7 +555,9 @@ export interface CappedPayload {
  * (the old `fitWordCap`) produced quotes nobody could act on. When anything is
  * dropped, the pre-cap arrays travel back on `.raw` so the caller can persist
  * the full decision alongside the capped one — a truncated verdict is never
- * the only copy.
+ * the only copy. The first revision, when it fits the cap on its own, is
+ * charged before any reason, so an over-budget reasons list can never drop the
+ * one change the implementer must make.
  */
 export function capPayload(
 	reasons: readonly string[],
@@ -565,7 +567,9 @@ export function capPayload(
 ): CappedPayload {
 	const keptReasons: string[] = [];
 	const keptRevisions: string[] = [];
-	let used = 0;
+	// The first required change is what the implementer acts on: reserve its words before reasons fill the budget.
+	const reserved = revisions?.[0] !== undefined && words(revisions[0]) <= cap ? revisions[0] : undefined;
+	let used = reserved === undefined ? 0 : words(reserved);
 	let droppedReasons = 0;
 	let droppedRevisions = 0;
 	for (const reason of reasons) {
@@ -577,7 +581,8 @@ export function capPayload(
 			droppedReasons += 1;
 		}
 	}
-	for (const revision of revisions ?? []) {
+	if (reserved !== undefined) keptRevisions.push(reserved);
+	for (const revision of (revisions ?? []).slice(reserved === undefined ? 0 : 1)) {
 		const size = words(revision);
 		if (keptRevisions.length < maxItems && used + size <= cap) {
 			keptRevisions.push(revision);

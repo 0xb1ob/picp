@@ -102,10 +102,13 @@ report_verdict({
 
 - `reasons`: each item ≤ 400 characters (about three lines), max 10 items. One
   finding per item; split a long finding rather than pad one. A longer item is
-  rejected before it reaches the parent, and you pay another turn to resend it.
+  cut at 400 characters (your full text is kept on disk, not relayed), so lead
+  with the required change.
 - `revisions`: **only when `verdict` is `revise`** — omit the key entirely on
   `pass` and on `escalate`. Same 400-character, 10-item bound. On `revise` it is
   required and non-empty.
+- On `revise`, put each required change in `revisions` and keep `reasons` to
+  defects — no restated acceptance or praise.
 - No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`.
 
 Report what you observed. The parent applies the review policy — flag
