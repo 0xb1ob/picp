@@ -43,6 +43,7 @@ import {
 	type VerdictRecord,
 	VerdictRecordSchema,
 } from "../src/contracts.ts";
+import { REVIEWER_RAW_FILE } from "../src/diff-revise-message.ts";
 import { type WorkerDialogAnswer, type WorkerDialogRequest, WorkerProcess } from "../src/worker-process.ts";
 import {
 	createAgentDir,
@@ -1267,6 +1268,8 @@ test(
 	// And the worker is told, so it does not read the record back and re-report.
 	assert.match(results[0] ?? "", /clamp|cut to/i);
 	assert.ok((results[0] ?? "").includes(VERDICT_RAW_FILE), "the success text names the raw copy");
+	// src/ mirrors this name to point a revise promote at the raw copy (R3).
+	assert.equal(REVIEWER_RAW_FILE, VERDICT_RAW_FILE);
 	},
 );
 

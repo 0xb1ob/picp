@@ -642,6 +642,9 @@ test("reviewer fixtures define pass/revise/escalate by quality, and demand actio
 	for (const part of [/severity/i, /confidence/i, /path:line/i, /trigger/i, /impact/i, /required change/i]) {
 		assert.match(diff, part, `diff-review-rubric must name ${part}`);
 	}
+	// An over-long item is clamped, not refused (R3).
+	assert.match(diff, /cut at 400 characters/);
+	assert.doesNotMatch(diff, /rejected before it reaches the parent/);
 
 	// Absence is not evidence: a reviewer claims a gap only from a supplied file.
 	assert.match(diff, /absent hunk is not proof of absence/i);

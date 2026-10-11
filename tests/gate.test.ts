@@ -538,6 +538,37 @@ test("the verdict payload is capped so it can be relayed verbatim", () => {
 	});
 });
 
+test("capPayload reserves the first revision so an over-budget reasons list cannot crowd it out", () => {
+	const item = (label: string, size: number) => `${label} ${"w ".repeat(size - 1).trim()}`;
+	const reasons = Array.from({ length: 4 }, (_unused, index) => item(`reason${index}`, 90));
+	const revisions = [item("fix-first", 40), item("fix-second", 40)];
+	const capped = capPayload(reasons, revisions, 300);
+	assert.equal(capped.revisions?.[0], revisions[0], "the first required change survives the cap");
+	assert.deepEqual(capped.raw, { reasons, revisions }, ".raw holds every input");
+	const kept = capped.reasons.length + (capped.revisions?.length ?? 0);
+	assert.ok(kept <= GATE_REASONS_MAX_ITEMS, `${kept} items kept`);
+
+	// A first revision that alone exceeds the cap is not reserved: today's behavior.
+	const huge = capPayload(["short reason"], [item("huge", 310)], 300);
+	assert.deepEqual(huge.reasons, ["short reason"]);
+	assert.equal(huge.revisions?.length, 1);
+	assert.ok(huge.revisions?.[0]?.includes("dropped"));
+
+	// The plan gate (no highOnlyBar) still produces a schema-valid decision.
+	const decision = decideGate({
+		jobId: "cp-r3",
+		attempt: 1,
+		prior: NO_PRIOR,
+		model: "m",
+		review: review({ job_id: "cp-r3", verdict: "revise", reasons, revisions }),
+	});
+	const { raw: _raw, ...persisted } = decision;
+	const validated = validate<GateVerdict>(GateVerdictSchema, persisted);
+	assert.ok(validated.ok, !validated.ok ? validated.errors.join("; ") : "");
+	assert.equal(persisted.verdict, "revise");
+	assert.equal(persisted.revisions?.[0], revisions[0]);
+});
+
 test("capPayload enforces the item cap even when everything fits the word budget (cp-yg2)", () => {
 	// A dozen short reasons: nowhere near the 300-word budget, but one item
 	// over the schema's maxItems. The old implementation only counted words,

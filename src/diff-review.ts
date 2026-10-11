@@ -79,7 +79,8 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { diffReviseMessage, REVIEWER_RAW_FILE } from "./diff-revise-message.ts";
 import type { CapacityReader } from "./capacity.ts";
 import { dirname, join } from "node:path";
 import { selectReviewerModel } from "./reviewer-model.ts";
@@ -1034,10 +1035,16 @@ export class DiffReview {
 	async #deliverRevise(result: DiffReviewResult): Promise<void> {
 		const sender = this.#options.sender;
 		if (!sender) return;
+		const { home } = this.#options;
+		const { job_id: jobId, attempt } = result.verdict;
+		const rawPaths = [
+			join(home, reviewFileRaw(jobId, attempt)),
+			join(home, paths.reviewRunDir(jobId, attempt), REVIEWER_RAW_FILE),
+		].filter(existsSync);
 		try {
 			const receipt = await sender.send({
 				jobId: result.verdict.job_id,
-				message: diffReviseMessage(result.verdict),
+				message: diffReviseMessage(result.verdict, rawPaths),
 				purpose: "repair",
 			});
 			result.revise_receipt = receipt.receipt;
@@ -1054,28 +1061,7 @@ export class DiffReview {
 	}
 }
 
-/** The promote text: the reviewer's revisions, verbatim and bounded. */
-export function diffReviseMessage(verdict: DiffVerdict): string {
-	const remaining = Math.max(REVIEW_MAX_ATTEMPTS - verdict.attempt, 0);
-	const lines = [
-		`Diff review of ${verdict.job_id} at ${verdict.head_sha.slice(0, 12)} (attempt ${verdict.attempt}): revise.`,
-		"",
-		"Revisions required:",
-		...(verdict.revisions ?? []).map((revision) => `- ${revision}`),
-		"",
-		"Reasons given:",
-		...verdict.reasons.map((reason) => `- ${reason}`),
-		"",
-		`Fix this on the same branch (${verdict.job_id}) with one more commit and push it — never a second PR, never a new`,
-		"branch. Run the project's checks before you push; then reply here with one line naming what you changed.",
-		"Only a changed head commit can be re-reviewed. Your envelope slot was reopened when this promote was delivered,",
-		"so if the fix changes what your envelope said you may call report_result once more and it will be accepted.",
-		`This was review ${verdict.attempt} of ${REVIEW_MAX_ATTEMPTS} on this branch: the pushed fix is reviewed again, ` +
-			`and ${remaining === 1 ? "1 review remains" : `${remaining} reviews remain`} before remaining findings go to the ` +
-			"operator instead of back to you. Fix everything named above in this one commit.",
-	];
-	return lines.join("\n");
-}
+export { diffReviseMessage } from "./diff-revise-message.ts";
 
 /** One relayable block per decision. The verdict travels; the diff never does. */
 export function formatDiffReview(result: DiffReviewResult): string {

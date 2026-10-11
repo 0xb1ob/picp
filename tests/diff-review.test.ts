@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
 	DEFAULT_ORIGIN,
@@ -387,6 +387,8 @@ interface ReviewBench {
 	runs: RunRegistry;
 	review: DiffReview;
 	sent: ReviewWakeup[];
+	/** Every promote message the review handed the sender, verbatim. */
+	promotes: string[];
 	reviews: ReviewRuns;
 	/** The review's own mandate store: empty unless a test issues a grant. */
 	mandates: MandateStore;
@@ -419,6 +421,9 @@ async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void },
 		parentEnv: { ...process.env, ...agentDir.env },
 	});
 	const sender = new Sender({ fleet, manager, runs, home: home.path });
+	const promotes: string[] = [];
+	const send = sender.send.bind(sender);
+	sender.send = (request) => (promotes.push(request.message), send(request));
 	const sent: ReviewWakeup[] = [];
 	const reviews = new ReviewRuns({ home: home.path, runs, wakeup: (wakeup) => (sent.push(wakeup), true) });
 	const registry = new ProjectRegistry({ home: home.path });
@@ -459,6 +464,7 @@ async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void },
 		runs,
 		review,
 		sent,
+		promotes,
 		reviews,
 		mandates,
 		registry,
@@ -1259,6 +1265,8 @@ test("revise: the live implementer is promoted for a fix commit on the same bran
 	assert.match(message, new RegExp(`review 1 of ${REVIEW_MAX_ATTEMPTS}`));
 	assert.match(message, /4 reviews remain/);
 	assert.doesNotMatch(message, /only revision available/, "the loop continues until pass or the cap");
+	assert.equal(b.promotes.length, 1);
+	assert.doesNotMatch(b.promotes[0] ?? "", /Uncapped reviewer feedback/, "no raw copy on disk, so none is named");
 
 	// The run log records a delivered promote as a receipt, never as a payload.
 	const events = readFileSync(join(b.home, paths.eventsFile(jobId)), "utf8");
@@ -1267,12 +1275,18 @@ test("revise: the live implementer is promoted for a fix commit on the same bran
 
 	// Second attempt: still a review, still a revise. A prior revise is not the
 	// cap any more — the branch is reviewed until it comes back clean.
+	// An uncapped copy on disk is named by absolute path in the promote.
+	const raw2 = join(b.home, `${paths.reviewRunDir(jobId, 2)}-raw.json`);
+	mkdirSync(dirname(raw2), { recursive: true });
+	writeFileSync(raw2, "{}");
 	const again = await b.review.reviewAndWait({ jobId, model: second });
 	assert.equal(again.verdict.attempt, 2);
 	assert.equal(again.verdict.verdict, "revise");
 	assert.equal(again.next, "revise");
 	assert.equal(again.revise_receipt, "delivered", `second revise not delivered: ${again.revise_error}`);
 	assert.match(diffReviseMessage(again.verdict), new RegExp(`review 2 of ${REVIEW_MAX_ATTEMPTS}`));
+	assert.ok(b.promotes[1]?.includes(`Uncapped reviewer feedback (read before fixing; the lists above may be cut):\n- ${raw2}\n`));
+	assert.match(b.promotes[1] ?? "", new RegExp(`review 2 of ${REVIEW_MAX_ATTEMPTS}`));
 });
 
 test("revise with the worker gone: revise_error and surface — never a retry, never a re-dispatch", { timeout: 120_000 }, async (t) => {
