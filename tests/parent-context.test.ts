@@ -17,6 +17,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings, standingOrdersFile } from "../src/parent-context.ts";
 import { runAutoControl } from "../src/parent-auto-control.ts";
+import { PARENT_CONTROL_BUSY } from "../src/parent-diagnostics.ts";
 import type { ParentStatus } from "../src/cp-bridge.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
 import { WorkerProcess } from "../src/worker-process.ts";
@@ -231,6 +232,30 @@ test("parent compact instructions name current open decisions, held PR jobs and 
 		piBin: resolve(import.meta.dirname, "fixtures/fake-parent.mjs") });
 	await explicit.compact();
 	assert.equal(timeouts.at(-1), 45_000, "an explicit requestTimeoutMs override is honored");
+});
+
+test("cp-35d0 S6: a new drain is refused with PARENT_CONTROL_BUSY and no drain RPC while a compaction runs; a cancel still goes through", async (t) => {
+	const home = createScratchHome();
+	const bridge = new CpBridge();
+	t.after(async () => { await bridge.stop(); home.cleanup(); });
+	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: resolve(import.meta.dirname, "fixtures/fake-parent.mjs") });
+	const request = WorkerProcess.prototype.request;
+	const requests: string[] = [];
+	let release!: () => void;
+	const gate = new Promise<void>((done) => { release = done; });
+	t.mock.method(WorkerProcess.prototype, "request", function (this: WorkerProcess, ...args: Parameters<typeof request>) {
+		requests.push(String(args[0]));
+		return args[0] === "compact" ? gate.then(() => request.apply(this, args)) : request.apply(this, args);
+	});
+	const compacting = bridge.compact();
+	for (const timeoutS of [undefined, 30] as const) {
+		await assert.rejects(bridge.drain(timeoutS), (error: Error) => error.message === PARENT_CONTROL_BUSY);
+	}
+	assert.deepEqual(requests, ["compact"], "refused before any diagnostic RPC");
+	await bridge.drainCancel().catch((error: Error) => assert.notEqual(error.message, PARENT_CONTROL_BUSY));
+	assert.equal(requests[1], "get_commands", "a cancel is never refused by the control gate");
+	release();
+	await compacting;
 });
 
 test("compact context retains only unsettled bridge sends, including after a session rotation", (t) => {
