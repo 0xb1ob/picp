@@ -187,6 +187,13 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				...(params.base ? { base: params.base } : {}),
 			});
 			refreshWidget(ctx);
+			// The parent kept re-calling cp_review on a head already under review and ate the refusal: say so here (text only; `details` stays the step result).
+			const inFlight = result.next === "review" ? post.reviewRuns.pending(params.job_id, "review") : undefined;
+			if (inFlight) {
+				const head = (inFlight.subject?.head_sha ?? result.head_sha)?.slice(0, 12) ?? "the pushed head";
+				const text = `${formatIntegration(result)}\n  review already in flight on ${head} (attempt ${inFlight.attempt}, started ${inFlight.started_at}); wait for its cp-verdict and do not call cp_review`;
+				return { content: [{ type: "text", text }], details: result };
+			}
 			return {
 				// laf: a landed job names its tracker write-back; writeBackLine reads local files only and never throws.
 				content: [{ type: "text", text: result.next === "done" ? `${formatIntegration(result)}\n  ${writeBackLine(post.home, () => post.ledger(), () => new TrackerStore({ home: post.home, registry: post.registry }).list(), params.job_id)}` : formatIntegration(result) }],
