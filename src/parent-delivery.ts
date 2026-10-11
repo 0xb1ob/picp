@@ -84,7 +84,7 @@ export class ParentDelivery {
 	#reconcilePending = false;
 	/** Wake-turn retry ladder (`retryWake`): attempts spent, and whether a nudge timer is pending. */
 	#wakeAttempts = 0;
-	#wakeTimer = false;
+	#wakeTimer: object | undefined;
 	/**
 	 * Ids injected or landed by the current parent process. A reconcile never
 	 * requeues and a resume never nudges one of these: they did not cross a restart.
@@ -244,7 +244,8 @@ export class ParentDelivery {
 	retryWake(turn: LandedTurn, stale: boolean, giveUp: () => void): boolean {
 		const error = turn.error?.message;
 		if (!error) {
-			this.#wakeAttempts = 0;
+			this.#wakeTimer = undefined; // recovered: no stale "previous turn failed" nudge
+			if (turn.landed.length === 0) this.#wakeAttempts = 0; // a send-owned clean turn proves nothing about the wake ladder
 			return false;
 		}
 		if (turn.landed.length > 0 || stale || !isTransientProviderError(error)) return false;
@@ -255,11 +256,13 @@ export class ParentDelivery {
 			return false;
 		}
 		const attempt = ++this.#wakeAttempts;
-		this.#wakeTimer = true;
+		const timer = {};
+		this.#wakeTimer = timer;
 		const delayMs = OUTER_RETRY_DELAYS_MS[attempt - 1] as number;
 		this.#host.journal("outer_retry_attempt", { wake: true, attempt, delayMs, message: error });
 		void this.#host.sleep(delayMs).then(async () => {
-			this.#wakeTimer = false;
+			if (this.#wakeTimer !== timer) return; // cancelled by a clean turn
+			this.#wakeTimer = undefined;
 			const proc = this.#host.liveProc();
 			if (!proc) return giveUp();
 			const sent = await proc.send(RESUME_NUDGE, "prompt", PARENT_STREAMING);
