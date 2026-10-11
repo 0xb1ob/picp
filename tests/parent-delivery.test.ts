@@ -669,6 +669,37 @@ test("a wake turn that recovers resets the ladder; stale, non-transient and send
 	assert.equal(ctx.sleeps.length, 2);
 });
 
+test("a clean turn while a wake nudge is pending cancels it", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	const turn = ctx.turn();
+	turn.error = { message: "503 unavailable" };
+	assert.equal(delivery.retryWake(turn, false, () => undefined), true);
+	assert.equal(delivery.retryWake(ctx.turn(), false, () => undefined), false);
+	ctx.sleeps[0]?.release();
+	await flush();
+	assert.equal(ctx.sent.length, 0, "no stale nudge after recovery");
+});
+
+test("a send-owned clean turn does not reset the wake budget", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	const errored = () => {
+		const turn = ctx.turn();
+		turn.error = { message: "503 unavailable" };
+		return turn;
+	};
+	const owned = ctx.turn();
+	owned.landed.push({ id: ctx.entry.id, index: 0, assistants: 0 });
+	for (let attempt = 0; attempt < OUTER_RETRY_DELAYS_MS.length; attempt++) {
+		assert.equal(delivery.retryWake(errored(), false, () => undefined), true);
+		ctx.sleeps[attempt]?.release();
+		await flush();
+		assert.equal(delivery.retryWake(owned, false, () => undefined), false);
+	}
+	assert.equal(delivery.retryWake(errored(), false, () => undefined), false, "budget spent despite interleaved sends");
+});
+
 test("a wake nudge that cannot be sent gives the error relay back to the caller", async () => {
 	const ctx = laddered();
 	const delivery = ctx.fresh();
