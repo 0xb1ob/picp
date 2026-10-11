@@ -87,6 +87,10 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		if (event.reason === "manual") compactHold.failed();
 	});
 
+	// cp-35d0 S10: a queued set is not on the branch yet, so a same-tick second call would
+	// re-send it. Reserve the latest set per home, session and successful-compaction epoch.
+	let compactEpoch = 0;
+	let reserved: string | undefined;
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
 		const messages: Array<{ customType: string; content: string; display: false }> = [];
 		messages.push({ customType: "cp-parent-guidance", display: false, content: "Parent only: Put independent tool calls in one assistant message; keep dependent calls sequential. A dispatch turn stops at 15 model rounds: compact or end the turn and report decisions already made instead of further investigation." });
@@ -104,11 +108,20 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		if (orders) messages.push({ customType: "cp-standing-orders", content: orders, display: false });
 		// picp-99l: a resumed session already holding this exact pair gets no second copy.
 		if (digestsInContext(ctx.sessionManager.getBranch(), messages)) return;
-		for (const message of messages) pi.sendMessage(message, { triggerTurn: false });
+		const key = JSON.stringify([home, ctx.sessionManager.getSessionId(), compactEpoch, messages.map((message) => [message.customType, message.content])]);
+		if (reserved === key) return;
+		reserved = key;
+		try {
+			for (const message of messages) pi.sendMessage(message, { triggerTurn: false });
+		} catch (error) {
+			reserved = undefined; // a failed send stays retryable
+			throw error;
+		}
 	};
 
 	// Only successful compactions emit this event; the next turn gets fresh disk context.
 	pi.on("session_compact", (_event, ctx) => {
+		compactEpoch++;
 		// After pi's compact() has returned (its isCompacting cleared), held wakes go out.
 		setTimeout(() => compactHold.compacted(), 0);
 		if (s.parentLock) deliverDigests(currentRuntime().home, ctx);
