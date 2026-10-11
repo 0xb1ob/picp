@@ -111,6 +111,30 @@ test("the checked-in corpus is 20-50 cases and covers every required scenario", 
 	// list, so every finding counts against precision.
 	const trap = corpus.cases.find((item) => item.scenario === "false-positive-trap");
 	assert.deepEqual(trap?.expect?.labels, []);
+	// Unsafe/safe twins share a subject shape; only the unsafe one is a blocking
+	// defect, so a reviewer that flags both is caught on precision.
+	const byId = (id: string) => corpus.cases.find((item) => item.id === id) as EvalCase;
+	for (const [unsafeId, safeId] of [
+		["reviewer-seeded-p0", "reviewer-shell-argv-safe"],
+		["reviewer-instruction-promotion", "reviewer-quoted-evidence-safe"],
+	]) {
+		const unsafe = byId(unsafeId as string);
+		const safe = byId(safeId as string);
+		assert.ok(unsafe && safe, `twin pair ${unsafeId} ↔ ${safeId} must both exist`);
+		assert.equal(unsafe.expect?.verdict, "revise");
+		assert.ok((unsafe.expect?.labels ?? []).some((label) => label.severity === "P0"), `${unsafeId} needs a P0 label`);
+		assert.equal(safe.expect?.verdict, "pass");
+		assert.deepEqual(safe.expect?.labels, []);
+	}
+	// Pass-with-findings is distinct from a miss: medium/low findings never block.
+	for (const item of corpus.cases.filter((c) => c.kind === "quality" && c.surface === "diff-rubric")) {
+		const labels = item.expect?.labels ?? [];
+		if (labels.length > 0 && labels.every((label) => label.severity !== "P0")) {
+			assert.equal(item.expect?.verdict, "pass", `${item.id} has only P1/P2 labels, so it expects pass`);
+		}
+	}
+	assert.equal(byId("reviewer-unscorable-slice").expect?.verdict, "escalate");
+	assert.equal(byId("reviewer-consumer-fixture").expect?.labels?.length, 2);
 });
 
 test("the planner fixture checks every required section plus the changed function's consumer and preserved behavior", () => {

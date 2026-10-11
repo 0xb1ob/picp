@@ -23,12 +23,12 @@
   "corpus": {
     "version": 1,
     "cases": 50,
-    "sha": "sha256:23811194d62721a926d6184c172f298904f93726e5f3f90673c97a22ec9c60a4"
+    "sha": "sha256:c92e9d13fddacf3e2c870c99fb6bd57cb7875d1cc8ccb5910c19001924ac2011"
   },
   "metrics": {
-    "cases_scored": 27,
-    "cases_passed": 27,
-    "quality_skipped": 23,
+    "cases_scored": 22,
+    "cases_passed": 22,
+    "quality_skipped": 28,
     "contract_compliance": 1,
     "terminal_report": null,
     "task_coverage": null,
@@ -75,9 +75,9 @@
       "median_tool_calls": null
     },
     "reviewer": {
-      "cases_scored": 8,
-      "cases_passed": 8,
-      "quality_skipped": 9,
+      "cases_scored": 3,
+      "cases_passed": 3,
+      "quality_skipped": 14,
       "contract_compliance": 1,
       "terminal_report": null,
       "task_coverage": null,
@@ -648,6 +648,16 @@
       "checks": []
     },
     {
+      "case_id": "reviewer-consumer-fixture",
+      "role": "reviewer",
+      "scenario": "seeded-p0",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
       "case_id": "reviewer-diff-rubric-finding-shape",
       "role": "reviewer",
       "scenario": "seeded-p1",
@@ -666,21 +676,6 @@
           "ok": true
         },
         {
-          "name": "excludes \"you have no plan to compare against here\"",
-          "bucket": "contract",
-          "ok": true
-        }
-      ]
-    },
-    {
-      "case_id": "reviewer-diff-rubric-no-style-nits",
-      "role": "reviewer",
-      "scenario": "style-only",
-      "kind": "contract",
-      "trial": 1,
-      "status": "passed",
-      "checks": [
-        {
           "name": "includes \"No praise, no style nits, no speculation\"",
           "bucket": "contract",
           "ok": true
@@ -689,17 +684,7 @@
           "name": "includes \"speculate about files you cannot see.\"",
           "bucket": "contract",
           "ok": true
-        }
-      ]
-    },
-    {
-      "case_id": "reviewer-diff-rubric-verdict-bounds",
-      "role": "reviewer",
-      "scenario": "clean-diff",
-      "kind": "contract",
-      "trial": 1,
-      "status": "passed",
-      "checks": [
+        },
         {
           "name": "includes \"each item ≤ 400 characters (about three lines), max 10 items.\"",
           "bucket": "contract",
@@ -714,6 +699,26 @@
           "name": "includes \"No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`.\"",
           "bucket": "contract",
           "ok": true
+        },
+        {
+          "name": "includes \"An absent hunk is not proof of absence\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"look for the supplied evidence that would refute\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"`pass` means no blocking\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"you have no plan to compare against here\"",
+          "bucket": "contract",
+          "ok": true
         }
       ]
     },
@@ -726,51 +731,6 @@
       "status": "skipped",
       "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
       "checks": []
-    },
-    {
-      "case_id": "reviewer-gate-rubric-unscorable",
-      "role": "reviewer",
-      "scenario": "unscorable-input",
-      "kind": "contract",
-      "trial": 1,
-      "status": "passed",
-      "checks": [
-        {
-          "name": "includes \"the artifact is unreadable, fundamentally unscorable\"",
-          "bucket": "contract",
-          "ok": true
-        },
-        {
-          "name": "includes \"the verdict is `escalate`\"",
-          "bucket": "contract",
-          "ok": true
-        }
-      ]
-    },
-    {
-      "case_id": "reviewer-gate-rubric-verdict-bounds",
-      "role": "reviewer",
-      "scenario": "missing-section",
-      "kind": "contract",
-      "trial": 1,
-      "status": "passed",
-      "checks": [
-        {
-          "name": "includes \"each item ≤ 400 characters (about three lines), max 10 items.\"",
-          "bucket": "contract",
-          "ok": true
-        },
-        {
-          "name": "includes \"**only when `verdict` is `revise`**\"",
-          "bucket": "contract",
-          "ok": true
-        },
-        {
-          "name": "includes \"No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`, `decision_summary`.\"",
-          "bucket": "contract",
-          "ok": true
-        }
-      ]
     },
     {
       "case_id": "reviewer-gate-rubric-verdict-ladder",
@@ -789,8 +749,43 @@
           "name": "includes \"Still `pass` when flags are true\"",
           "bucket": "contract",
           "ok": true
+        },
+        {
+          "name": "includes \"the artifact is unreadable, fundamentally unscorable\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"the verdict is `escalate`\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"each item ≤ 400 characters (about three lines), max 10 items.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"**only when `verdict` is `revise`**\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`, `decision_summary`.\"",
+          "bucket": "contract",
+          "ok": true
         }
       ]
+    },
+    {
+      "case_id": "reviewer-instruction-promotion",
+      "role": "reviewer",
+      "scenario": "seeded-p0",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
     },
     {
       "case_id": "reviewer-missing-section",
@@ -831,32 +826,22 @@
           "ok": true
         },
         {
-          "name": "excludes \"escalate whenever\"",
-          "bucket": "contract",
-          "ok": true
-        },
-        {
-          "name": "excludes \"escalate if any flag\"",
-          "bucket": "contract",
-          "ok": true
-        }
-      ]
-    },
-    {
-      "case_id": "reviewer-profile-grep-locates",
-      "role": "reviewer",
-      "scenario": "seeded-p1",
-      "kind": "contract",
-      "trial": 1,
-      "status": "passed",
-      "checks": [
-        {
           "name": "includes \"grepping tells you where, `read` tells you what\"",
           "bucket": "contract",
           "ok": true
         },
         {
           "name": "includes \"Do not open the repository\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"escalate whenever\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"escalate if any flag\"",
           "bucket": "contract",
           "ok": true
         },
@@ -871,6 +856,16 @@
           "ok": true
         }
       ]
+    },
+    {
+      "case_id": "reviewer-quoted-evidence-safe",
+      "role": "reviewer",
+      "scenario": "false-positive-trap",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
     },
     {
       "case_id": "reviewer-seeded-p0",
@@ -903,6 +898,16 @@
       "checks": []
     },
     {
+      "case_id": "reviewer-shell-argv-safe",
+      "role": "reviewer",
+      "scenario": "false-positive-trap",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
       "case_id": "reviewer-style-only",
       "role": "reviewer",
       "scenario": "style-only",
@@ -914,6 +919,16 @@
     },
     {
       "case_id": "reviewer-unscorable-input",
+      "role": "reviewer",
+      "scenario": "unscorable-input",
+      "kind": "quality",
+      "trial": 1,
+      "status": "skipped",
+      "skipped_reason": "model-quality evals need a transport: --replay <dir> for a recorded run, or CP_EVAL_LIVE=1 for a paid live run",
+      "checks": []
+    },
+    {
+      "case_id": "reviewer-unscorable-slice",
       "role": "reviewer",
       "scenario": "unscorable-input",
       "kind": "quality",
