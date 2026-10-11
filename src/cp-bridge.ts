@@ -691,7 +691,8 @@ export class CpBridge {
 				this.#delivery?.settle(turn);
 				this.#lastReplyAt = new Date().toISOString();
 			}
-			this.#relayWake(turn, open ? undefined : turn.error);
+			const retrying = !open && (this.#delivery?.retryWake(turn, turn.stale, () => this.#relayWake(turn, turn.error)) ?? false);
+			this.#relayWake(turn, open || retrying ? undefined : turn.error);
 			// Automatic control first, then the queued sends: a queued send never blocks compaction (A2).
 			void this.#runControl().then(() => this.#delivery?.afterSettle());
 		}
