@@ -4,6 +4,7 @@ import { ALREADY_SENT, canStart, type ControlBody, controlFiles, controlImages, 
 import { restartInFlight } from "./restart-control.ts";
 import { useRestart } from "./use-restart.ts";
 import { emptyPending, readPending, reconcilePending, rememberPending, type PendingState } from "./pending-sends.ts";
+import { fetchSkills, type SkillCatalog } from "./skills.ts";
 
 /**
  * The Full transcript's dashboard control: reads `/api/operator/control` on mount and on every refresh of the
@@ -17,6 +18,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const [starting, setStarting] = useState<Starting | null>(null);
  const [pending, setPending] = useState<PendingState>(()=>composer ? readPending() : emptyPending());
  const requests = useRef<Promise<unknown>>(Promise.resolve());
+ const skillList = useRef<Promise<SkillCatalog> | null>(null);
  const updatePending = (change: (value: PendingState)=>PendingState) => setPending(value=>rememberPending(change(value)));
  const transcriptKey = entries.map(e=>`${e.id}:${e.dashboard_id ?? ""}`).join("|");
  useEffect(()=>{
@@ -118,5 +120,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const edit = (key: string, text: string) => queueOp(key,text);
  const cancel = (key: string) => queueOp(key);
  const cardDelivery = visible?.findLast(item=>item.ask_id !== null);
- return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard,edit,cancel} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {})};
+ // The `@` catalogue: fetched lazily on the first mention, once per mount.
+ const skills = controlReady(status) ? () => (skillList.current ??= fetchSkills(fetcher)) : undefined;
+ return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard,edit,cancel} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {}), ...(skills ? {skills} : {})};
 }

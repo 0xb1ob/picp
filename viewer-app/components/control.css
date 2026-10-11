@@ -89,6 +89,14 @@
 .operator-composer-file-name small { display: block; font-size: 12px; color: var(--muted); }
 .operator-composer-file .operator-composer-thumb-remove { width: 44px; height: 44px; top: 9px; }
 .operator-composer-file .operator-composer-thumb-remove::after { inset: 0; }
+/* Skill mentions: a listbox above the field (44 px options, a one-line description), then mentioned-skill chips and plain-text hints that wrap at 390 px. */
+.operator-composer-skills { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.operator-composer-skills > li { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; min-width: 0; padding: 4px 10px; border-radius: 8px; font-size: 14px; color: var(--text); overflow-wrap: anywhere; cursor: pointer; }
+.operator-composer-skills > li[aria-selected="true"] { background: var(--nav-selected); }
+.operator-composer-skills small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.operator-composer-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.operator-composer-mentions > li { min-width: 0; max-width: 100%; padding: 2px 10px; background: var(--nav-selected); color: var(--text); border-radius: 999px; font-size: 12px; overflow-wrap: anywhere; }
+.operator-composer-hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 /* The composer's thread picker (cp-xmw2): one wrapping row above the text box; 44 px select, 16 px on the phone (no iOS zoom). New threads come from the dialog below. */
 .operator-composer-thread { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .operator-composer-thread select { min-width: 0; max-width: 100%; min-height: 44px; padding: 0 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; text-overflow: ellipsis; }
@@ -143,7 +151,7 @@
  .operator-composer-options > summary > svg { display: block; }
  .operator-composer-row { order: 1; grid-column: 2; }
  .operator-composer:not(:has(.operator-composer-options)) .operator-composer-row { grid-column: 1 / -1; }
- .operator-composer-delivery { order: 2; grid-column: 1 / -1; }
+ .operator-composer-delivery, .operator-composer-mentions, .operator-composer-hint { order: 2; grid-column: 1 / -1; }
  /* The status and file name live in the top bar (chip and ⋯ sheet); only a failure or an unready session speaks here. */
  .operator-composer-state-ready, .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
  .operator-composer-thread select { font-size: 16px; }
