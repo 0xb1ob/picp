@@ -16,10 +16,12 @@ const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOS
 const failing = (key: string, secondsAgo: number): CheckRecord => ({ status: "fail", key, since: ago(secondsAgo), detail: "x", fails: 3, checked_at: ago(0) });
 const record = (checks: HealthRecord["checks"]): HealthRecord => ({ schema_version: 1, last_run_at: ago(0), checks });
 
-test("rollback_failed alerts at once; any other check only after 15 min", () => {
+test("rollback_failed alerts at once; any other check only after 10 min", () => {
 	assert.deepEqual(serviceAlerts(record({ update: failing("rollback_failed:abc123", 0) }), NOW).map((a) => [a.check, a.key]), [["update", "rollback_failed:abc123"]]);
-	assert.deepEqual(serviceAlerts(record({ disk: failing("low", SERVICE_ALERT_AFTER_SECONDS - 60) }), NOW), [], "disk failing 14 min: none");
-	assert.deepEqual(serviceAlerts(record({ disk: failing("low", SERVICE_ALERT_AFTER_SECONDS) }), NOW).map((a) => a.check), ["disk"], "15 min: one");
+	assert.equal(SERVICE_ALERT_AFTER_SECONDS, 600, "three watchdog observations, not 15 min");
+	assert.deepEqual(serviceAlerts(record({ disk: failing("low", 599) }), NOW), [], "disk failing 599 s: none");
+	assert.deepEqual(serviceAlerts(record({ disk: failing("low", 540) }), NOW), [], "disk failing 9 min: none");
+	assert.deepEqual(serviceAlerts(record({ disk: failing("low", 600) }), NOW).map((a) => a.check), ["disk"], "600 s (10 min): one");
 	assert.deepEqual(serviceAlerts(record({ disk: { ...failing("low", 3600), status: "ok", key: null } }), NOW), [], "an ok check is no alert");
 	assert.deepEqual(serviceAlerts(undefined, NOW), [], "no record, no alert");
 });

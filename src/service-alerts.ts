@@ -18,7 +18,7 @@ import type { EscalationStore } from "./escalation.ts";
 import type { CheckRecord, HealthRecord } from "./service/health.ts";
 
 /** A non-sticky check must have failed this long before it is an escalation. */
-export const SERVICE_ALERT_AFTER_SECONDS = 900;
+export const SERVICE_ALERT_AFTER_SECONDS = 600;
 const KEY_MAX = 120;
 
 export interface ServiceAlert { check: string; key: string; since: string }
