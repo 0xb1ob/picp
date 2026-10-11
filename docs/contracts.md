@@ -4181,7 +4181,10 @@ rotate/revoke/print/leak a secret/token/key/credential; data deletion — `rm -r
 delete/purge/wipe production/user/customer data; force push — `force push`, `git push -f|--force|--force-with-lease|+ref`;
 external publishing — `npm publish`, `gh release create`, `docker push`, publish to npm/pypi/registry, deploy to
 production — each skipped when negated, `negatedAt`/`negatedHeadAt`/`benignSenseAt`). A hard stop raises today's
-escalation with `hard stop <kind>: <words>` added to its evidence; an uncovered job raises it unchanged. Caps and
+escalation with `hard stop <kind>: <words>` added to its evidence, and the thrown refusal appends only the canonical
+`<kind>` labels (deduplicated, at most four, never the matched words or other task text) with a note that no standing
+pre-approval covers a hard stop, so another `preapprove_risk` will not clear it — the `cp_decide` operator-quote route
+is unchanged; an uncovered job raises it unchanged, with the generic refusal. Caps and
 parallelism still bind afterwards; only a pass writes one audit row to the grant's `risk_preapproved` (newest 500
 kept): `{at, job_id, use: dispatch|promote, decided_by: operator-delegated, quote_sha (first 12 hex of sha256 of the
 quote, never the quote), evidence (≤8 × ≤200 chars)}`, shown with the quote (120 chars) by `cp_mandate show`.
