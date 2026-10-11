@@ -1,4 +1,4 @@
-import type { ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse } from "../src/viewer/api-types.ts";
+import type { ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse, SkillsResponse } from "../src/viewer/api-types.ts";
 import type { Restarting } from "./restart-control.ts";
 
 /** Dashboard control (cp-dashboard-operator-control): what the Full transcript's composer and decision cards can say and do. */
@@ -30,8 +30,8 @@ export interface PendingSend extends Delivery { key: string; at: string; body: C
 export type QueueOutcome = { state: "queued" | "cancelled" } | { state: "sent"; text: string } | { error: string };
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
-/** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; edit?(key: string, text: string): Promise<QueueOutcome>; cancel?(key: string): Promise<QueueOutcome>; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}> }
+/** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images; `skills` (the `@` catalogue, fetched once) only while control is ready. */
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; edit?(key: string, text: string): Promise<QueueOutcome>; cancel?(key: string): Promise<QueueOutcome>; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}>; skills?(): Promise<SkillsResponse | {error: string}> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function failure(response: Response): Promise<string> {

@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlFiles, controlImages, controlLine, controlReady, deliveryLine, isTextFile, uploadUrl } from "../control.ts";
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
 import { threadsReady, type ThreadsView } from "../threads.ts";
 import { ThreadPicker } from "./ThreadNav.tsx";
+import { composerMentions, matchSkills, mentionAt, type SkillCatalog } from "../skills.ts";
 
 /** The composer's placeholder: short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message (Enter to send)";
@@ -23,6 +24,13 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
  const [text,setText] = useState((draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [confirmAbort,setConfirmAbort] = useState(false);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
+ // `@skill` autocomplete: the catalogue (fetched on the first `@`), the caret, the highlighted option, and Escape's close.
+ const [catalog,setCatalog] = useState<SkillCatalog | null>(null);
+ const [caret,setCaret] = useState<number | null>(null);
+ const [active,setActive] = useState(0);
+ const [closed,setClosed] = useState(false);
+ const asked = useRef(false);
+ const placeCaret = useRef<number | null>(null);
  const field = useRef<HTMLTextAreaElement>(null);
  const menu = useRef<HTMLDetailsElement>(null);
  const picker = useRef<HTMLInputElement>(null);
@@ -46,7 +54,32 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
   el.style.height = "auto";
   // Empty measures the placeholder, which may wrap: an empty field stays one row.
   if (el.value && el.scrollHeight) el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  // A picked skill puts the caret after its `@name `.
+  if (placeCaret.current !== null) { el.setSelectionRange?.(placeCaret.current, placeCaret.current); placeCaret.current = null; }
  },[text,ready]);
+ const mention = mentionAt(text, Math.min(caret ?? text.length, text.length));
+ const skills = catalog && !("error" in catalog) ? catalog.skills : null;
+ const matches = mention && skills ? matchSkills(skills, mention.query) : [];
+ const listOpen = ready && !sending && !closed && matches.length > 0;
+ const highlighted = Math.min(active, matches.length - 1);
+ const mentions = skills ? composerMentions(text, skills) : {known: [], unknown: []};
+ // The token being completed is not "unknown" yet while the list still offers names for it.
+ const unknown = mentions.unknown.filter(name => !(listOpen && name === mention?.query));
+ useEffect(() => {
+  if (asked.current || !control.skills || !text.includes("@")) return;
+  asked.current = true;
+  void control.skills().catch((error: unknown) => ({error: error instanceof Error ? error.message : "request failed"})).then(setCatalog);
+ },[text,control.skills]);
+ const pick = (name: string) => {
+  if (!mention) return;
+  const end = mention.start + 1 + mention.query.length;
+  const next = `${text.slice(0, mention.start)}@${name} ${text.slice(end)}`.slice(0, CONTROL_TEXT_MAX);
+  const at = Math.min(mention.start + name.length + 2, next.length);
+  setText(next);
+  setCaret(at);
+  setActive(0);
+  placeCaret.current = at;
+ };
  const closeMenu = () => { if (menu.current) menu.current.open = false; setConfirmAbort(false); };
  const update = (key: number, change: Partial<Attachment>) => setAttachments(list => list.map(a => a.key === key ? {...a, ...change} : a));
  const attach = (files: Picked[]) => {
@@ -106,7 +139,13 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    <div class="operator-composer-field">
    {upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title="Attach files or images (or paste/drop)" disabled={sending} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
+   {listOpen && <ul role="listbox" id="operator-composer-skills" class="operator-composer-skills" aria-label="Installed skills">
+    {matches.map((s, i) => <li key={s.name} id={`operator-composer-skill-${i}`} role="option" aria-selected={i === highlighted} onMouseDown={e => { e.preventDefault(); pick(s.name); }}>
+     <span>@{s.name}</span>{s.description && <small>{s.description}</small>}
+    </li>)}
+   </ul>}
    <textarea ref={field} aria-label="Message to the operator session" maxLength={CONTROL_TEXT_MAX} rows={1} value={text} disabled={sending}
+    aria-autocomplete="list" aria-expanded={listOpen} aria-controls={listOpen ? "operator-composer-skills" : undefined} aria-activedescendant={listOpen ? `operator-composer-skill-${highlighted}` : undefined}
     placeholder={composerPlaceholder(thread?.selected)} title="Enter sends · Shift+Enter for a new line"
     onPaste={e => {
      // File pastes attach; text in a mixed paste keeps the browser's default.
@@ -115,7 +154,16 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
      if (!e.clipboardData?.types.includes("text/plain")) e.preventDefault();
      attach(files);
     }}
-    onInput={e => setText(e.currentTarget.value)} onKeyDown={e => { if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return; e.preventDefault(); send(busy ? "followUp" : undefined); }}/>
+    onClick={e => setCaret(e.currentTarget.selectionStart ?? null)}
+    onInput={e => { setText(e.currentTarget.value); setCaret(e.currentTarget.selectionStart ?? null); setActive(0); setClosed(false); }} onKeyDown={e => {
+     if (e.isComposing || e.keyCode === 229) return;
+     if (listOpen) {
+      // The open list owns the arrows, Enter/Tab (insert `@name `) and Escape; Enter sends only while it is closed.
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setActive((highlighted + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length); return; }
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") { e.preventDefault(); pick(matches[highlighted]!.name); return; }
+      if (e.key === "Escape") { e.preventDefault(); setClosed(true); return; }
+     }
+     if (e.key !== "Enter" || e.shiftKey) return; e.preventDefault(); send(busy ? "followUp" : undefined); }}/>
    </div>
    {busy && <details class="operator-composer-more" ref={menu} onToggle={() => setConfirmAbort(false)}>
     <summary aria-label="Steer or abort" title="Steer or abort"><Icon name="more"/></summary>
@@ -126,6 +174,9 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    </details>}
    <button type="button" class="operator-composer-send" aria-label={sendLabel} title={sendLabel} disabled={!canSend} onClick={() => send(busy ? "followUp" : undefined)}><Icon name="send"/></button>
   </div>}
+  {ready && mentions.known.length > 0 && <ul class="operator-composer-mentions" aria-label="Skills mentioned">{mentions.known.map(name => <li key={name}><code>@{name}</code></li>)}</ul>}
+  {ready && unknown.map(name => <p key={name} role="status" class="operator-composer-hint">@{name} is not an installed skill — sent as plain text</p>)}
+  {ready && catalog && "error" in catalog && <p role="status" class="operator-composer-hint">skill list unavailable: {catalog.error}</p>}
   {ready && threadsReady(thread?.status) && <p class="operator-composer-posting">{thread?.selected ? `Posting to #${thread.selected}` : "Posting to no thread"}</p>}
   {/* A failure, or a delivered send with a reason (its thread not recorded), is an alert the phone shows too. */}
   {line && <p role={flagged ? "alert" : "status"} class={flagged ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}

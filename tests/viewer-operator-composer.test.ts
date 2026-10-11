@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { test } from "node:test";
 import { parseHTML } from "linkedom";
-import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
+import type { ControlStatusResponse, SkillsResponse } from "../src/viewer/api-types.ts";
+import { composerMentions, matchSkills, mentionAt } from "../viewer-app/skills.ts";
 import type { ControlBody, ControlView } from "../viewer-app/control.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import type { ThreadsView } from "../viewer-app/threads.ts";
@@ -174,4 +175,94 @@ test("composer: the filename and thread picker live in compact, closed message o
  await act(() => mount(root,{status:{...ready,session_file:null},delivery:null,send:()=>{}},undefined,{...threads,status:{error:"HTTP 403"}}));
  assert.equal(root.querySelector(".operator-composer-options"),null,"no empty options when neither a destination nor threads are available");
  await act(() => unmount(root));
+});
+
+test("composer: @ opens the installed-skill listbox; arrows, Enter/Tab insert, Escape closes, unknown tokens hint", async t => {
+	const {window,document} = parseHTML("<html><body><div id='root'></div></body></html>");
+	const originals = ["window","document"].map(key => [key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+	Object.defineProperty(globalThis,"window",{configurable:true,value:window});
+	Object.defineProperty(globalThis,"document",{configurable:true,value:document});
+	const root = document.getElementById("root")!;
+	t.after(() => { unmount(root); for (const [key,descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis,key,descriptor); else Reflect.deleteProperty(globalThis,key); } });
+	const catalog: SkillsResponse = {generated_at: ready.generated_at, skills: [
+		{name:"teach",description:"Explain step by step",source:"agent"},
+		{name:"test-driven-development",description:"Red, green, refactor",source:"agent"},
+		{name:"write-tests",description:"Cover the change",source:"home"},
+	], skipped: [], omitted: 0};
+	const sends: ControlBody[] = [];
+	let fetches = 0;
+	const control = (skills: ControlView["skills"]): ControlView => ({status: ready, delivery: null, send: body => { sends.push(body); }, ...(skills ? {skills} : {})});
+	const textarea = () => root.querySelector("textarea")!;
+	const settle = () => act(async () => { await new Promise(done => setTimeout(done, 0)); });
+	const type = async (value: string) => { textarea().value = value; await act(() => textarea().dispatchEvent(new window.Event("input",{bubbles:true}))); await settle(); };
+	const press = async (key: string) => {
+		const event = new window.Event("keydown",{bubbles:true,cancelable:true});
+		Object.defineProperties(event,{key:{value:key},shiftKey:{value:false},isComposing:{value:false},keyCode:{value:0}});
+		await act(() => textarea().dispatchEvent(event));
+	};
+	const options = () => [...root.querySelectorAll('[role="listbox"] [role="option"]')];
+	const hints = () => [...root.querySelectorAll(".operator-composer-hint")].map(p => p.textContent);
+
+	await act(() => mount(root, control(() => { fetches++; return Promise.resolve(catalog); })));
+	await type("please @te");
+	assert.equal(fetches, 1, "the first @ fetches the catalogue");
+	assert.deepEqual(options().map(o => o.textContent), ["@teachExplain step by step","@test-driven-developmentRed, green, refactor","@write-testsCover the change"], "prefix matches first, then substring, each with its description");
+	assert.equal(textarea().getAttribute("aria-expanded"), "true");
+	assert.equal(textarea().getAttribute("aria-controls"), "operator-composer-skills");
+	assert.equal(options()[0]!.getAttribute("aria-selected"), "true");
+	assert.deepEqual(hints(), [], "the token being completed is not hinted while names are offered");
+	await press("ArrowDown");
+	assert.equal(options()[1]!.getAttribute("aria-selected"), "true", "ArrowDown moves the highlight");
+	await press("Enter");
+	assert.equal(textarea().value, "please @test-driven-development ", "Enter inserts @name and a space");
+	assert.deepEqual(sends, [], "Enter with the list open never sends");
+	assert.equal(root.querySelector('[role="listbox"]'), null, "the list closes after the insert");
+	assert.deepEqual([...root.querySelectorAll(".operator-composer-mentions li")].map(li => li.textContent), ["@test-driven-development"], "a chip per installed mention");
+	await press("Enter");
+	assert.deepEqual(sends, [{kind:"message",text:"please @test-driven-development"}], "Enter with the list closed sends the token as text");
+
+	await type("@wr");
+	await press("Tab");
+	assert.equal(textarea().value, "@write-tests ", "Tab inserts too");
+	await type("@te");
+	await press("Escape");
+	assert.equal(root.querySelector('[role="listbox"]'), null, "Escape closes the list");
+	await press("Enter");
+	assert.deepEqual(sends.at(-1), {kind:"message",text:"@te"}, "and Enter sends again");
+
+	await type("ask @nope about it");
+	assert.deepEqual(hints(), ["@nope is not an installed skill — sent as plain text"]);
+	assert.equal(root.querySelector(".operator-composer-send")!.hasAttribute("disabled"), false, "an unknown token never blocks Send");
+	await type("mail a@b.com");
+	assert.equal(root.querySelector('[role="listbox"]'), null, "an email opens nothing");
+	assert.deepEqual(hints(), []);
+	assert.equal(fetches, 1, "the catalogue is fetched once");
+	await act(() => unmount(root));
+
+	await act(() => mount(root, control(() => Promise.reject(new Error("HTTP 403")))));
+	await type("@te");
+	assert.equal(root.querySelector('[role="listbox"]'), null);
+	assert.deepEqual(hints(), ["skill list unavailable: HTTP 403"]);
+	await press("Enter");
+	assert.deepEqual(sends.at(-1), {kind:"message",text:"@te"}, "a failed catalogue never blocks sending");
+	await act(() => unmount(root));
+
+	await act(() => mount(root, control(undefined)));
+	await type("@te");
+	assert.equal(root.querySelector('[role="listbox"]'), null, "no catalogue seam, no list and no hint");
+	assert.deepEqual(hints(), []);
+});
+
+test("skills client: mentionAt, matchSkills and composerMentions", () => {
+	assert.deepEqual(mentionAt("hi @te", 6), {start: 3, query: "te"});
+	assert.deepEqual(mentionAt("@", 1), {start: 0, query: ""});
+	assert.deepEqual(mentionAt("hi @te there", 6), {start: 3, query: "te"}, "the caret decides, not the end of the text");
+	assert.equal(mentionAt("a@b", 3), null, "not at a word start");
+	assert.equal(mentionAt("hi @te ", 7), null, "a space ends the mention");
+	assert.equal(mentionAt("@Te", 3), null, "names are lowercase");
+	const skills = ["zeta-te","teach","alpha","test"].map(name => ({name}));
+	assert.deepEqual(matchSkills(skills, "te").map(s => s.name), ["teach","test","zeta-te"]);
+	assert.equal(matchSkills(skills, "").length, 4);
+	assert.equal(matchSkills(Array.from({length: 12}, (_, i) => ({name: `s${i}`})), "s").length, 8, "at most 8");
+	assert.deepEqual(composerMentions("use @teach and @nope, mail a@b.com, @teach again", skills), {known: ["teach"], unknown: ["nope"]});
 });
