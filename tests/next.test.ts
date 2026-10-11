@@ -309,7 +309,39 @@ test("a paused mandate's zero is scoped to it; live workers under other mandates
 	assert.equal(result.fleet_live_workers, 3);
 	const text = formatNext(result);
 	assert.match(text, new RegExp(`${paused.id}: paused, 0/1 workers working under this mandate`));
-	assert.match(text, /fleet: 3 workers working across all mandates/);
+	assert.match(text, /fleet: 3 in-flight worker records \(waiting\/launching\) across all mandates — informational, not a dispatch quota/);
+	assert.doesNotMatch(text, /workers working across all mandates/);
+});
+
+test("T3 (cp-speedup-next): a fleet total above three is informational — a grant with room still dispatches, held records take no slot, drain refuses", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const job = await ports.ledger.create({ title: "job", project: "demo", delivery: "pr", kind: "ship" });
+	const grant = ports.mandates.issue({ projects: ["demo"], objective: "ship it", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, dispatch_parallelism: 3 });
+	ports.mandates.issue({ projects: ["other"], objective: "elsewhere", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, dispatch_parallelism: 5 });
+	await ports.fleet.mutate((jobs) => {
+		for (const id of ["cp-o1", "cp-o2", "cp-o3", "cp-o4"]) jobs.push(fleetRecord({ job_id: id, project: "other", branch: id, worktree: `/wt/${id}` }));
+		jobs.push(fleetRecord({ job_id: "cp-h1", project: "other", phase: "held", reported_at: "2026-08-27T12:30:00Z", branch: "cp-h1", worktree: "/wt/cp-h1" }));
+	});
+
+	const result = await cpNext(ports, "demo");
+	assert.equal(result.fleet_live_workers, 4, "held records are not counted");
+	assert.deepEqual([result.action.kind, result.action.job_id], ["dispatch", job.id]);
+	assert.equal(result.mandate?.id, grant.id);
+	assert.equal(result.mandate?.live_workers, 0);
+	const text = formatNext(result);
+	assert.match(text, /fleet: 4 in-flight worker records .* informational, not a dispatch quota: each grant's parallelism decides admission, held deliveries take no slot, and cp_dispatch queues at a full spawn cap/);
+	assert.match(text, new RegExp(`action: dispatch ${job.id}`));
+	const capped = await cpNext({ ...ports, capacity: () => ({ active: 10, cap: 10, held: [] }) }, "demo");
+	assert.deepEqual([capped.action.kind, capped.action.job_id], ["dispatch", job.id], "a full spawn cap still recommends dispatch");
+	assert.match(capped.action.reason, /spawn cap 10 full: .* cp_dispatch queues it/);
+
+	mkdirSync(join(home.path, LAYOUT.state), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ state: "draining", started_at: "2026-08-27T12:00:00Z", deadline: "2026-08-27T12:10:00Z", timeout_s: 600, jobs: [] }));
+	const drained = await cpNext(ports, "demo");
+	assert.equal(drained.action.kind, "draining");
+	assert.match(formatNext(drained), /action: draining — draining since 2026-08-27T12:00:00Z/);
 });
 
 test("an older paused grant never shadows a newer active one; a token-capped grant tells the parent to raise it itself", async (t) => {
