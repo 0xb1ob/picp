@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths } from "../src/contracts.ts";
@@ -766,6 +766,40 @@ test("continueFailed refuses without mutation: live pid, script job, missing ses
 		}),
 		"envelope_unresolved",
 	);
+	const marker = JSON.stringify({ type: "custom", customType: "worker-compaction-policy-block", data: {} });
+	assert.equal(await refusal("cp-blocked", { setup: (record) => appendFileSync(record.worker.session_file, `${marker}\n`) }), "session_policy_blocked");
+	assert.equal(await refusal("cp-garbled", { setup: (record) => appendFileSync(record.worker.session_file, "{\"type\":\n") }), "session_scan_failed");
+});
+
+test("S5: explicit and automatic revival refuse a policy-blocked or unreadable session before shutdown or spawn", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const runs = new RunRegistry(home.path);
+	t.after(() => runs.closeAll());
+	const manager = fakeManager(home.path, t);
+	const marker = JSON.stringify({ type: "custom", customType: "worker-compaction-policy-block", data: {} });
+	const record = await addFailed(home.path, fleet, "cp-p2");
+	appendFileSync(record.worker.session_file, `${marker}\n`);
+	const reviver = new Reviver({ home: home.path, profilesDir: PROFILES_DIR, fleet, manager, runs, isPidAlive: () => false, git: fakeGit(join(record.worktree, ".git")) });
+	const automatic = await reviver.plan("cp-p2", { recovering: true });
+	assert.equal(automatic.ok ? "" : automatic.code, "session_policy_blocked");
+	assert.match(automatic.ok ? "" : automatic.message, /worker-compaction-policy-block.*keep the lease/s);
+	await fleet.mutate((jobs) => {
+		const job = jobs.find((candidate) => candidate.job_id === "cp-p2");
+		if (job) {
+			job.phase = "waiting";
+			delete job.failure;
+		}
+	});
+	const before = fleet.require("cp-p2");
+	await assert.rejects(() => reviver.revive("cp-p2"), /session_policy_blocked/);
+	writeFileSync(record.worker.session_file, "not json\n");
+	const unreadable = await reviver.plan("cp-p2");
+	assert.equal(unreadable.ok ? "" : unreadable.code, "session_scan_failed");
+	assert.ok(!unreadable.ok && unreadable.message.includes(record.worker.session_file), "the scan error names the path");
+	assert.deepEqual(fleet.require("cp-p2"), before);
+	assert.equal(manager.get("cp-p2"), undefined, "nothing spawned");
 });
 
 test("continueFailed: a spawn that fails keeps the failure and the lease", async (t) => {

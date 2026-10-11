@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -1190,4 +1190,60 @@ test("4B1-T5: a repair refusal comes before any revive; a revive refusal is surf
 		assert.match(error.message, /Restoring the released worker failed: cannot revive cp-aaa1 \(pid_alive\)/);
 		return true;
 	});
+});
+
+// ---------------------------------------------------------------------------
+// P2 (cp-35d0 S5): a policy-blocked transcript takes no new work
+// ---------------------------------------------------------------------------
+
+const POLICY_MARKER = JSON.stringify({ type: "custom", customType: "worker-compaction-policy-block", data: { errorMessage: "content_filter" } });
+
+test("S5: every send mode refuses a policy-blocked session before restore, envelope reopen, settle clear or delivery", async (t) => {
+	const b = await releaseBench(t);
+	const sessionFile = join(b.home, "s.jsonl");
+	writeFileSync(sessionFile, `{"type":"session"}\n${POLICY_MARKER}\n`);
+	const fleet = new FleetStore({ home: b.home });
+	await fleet.patch(b.jobId, { unreported_settles: 1 });
+	const before = fleet.require(b.jobId);
+	const live = b.workers.spawn(b.jobId);
+	const sends = [
+		{ message: "go" },
+		...(["auto", "prompt", "steer", "follow_up"] as const).map((mode) => ({ message: "go", mode })),
+		{ message: "go", task: "new scope" },
+		{ message: "fix CI", purpose: "repair" as const },
+	];
+	for (const request of sends) {
+		await assert.rejects(b.sender.send({ jobId: b.jobId, ...request }), (error: unknown) => {
+			assert.ok(error instanceof SendError);
+			assert.ok(error.message.includes(sessionFile) && /worker-compaction-policy-block.*keep the lease/s.test(error.message), error.message);
+			return true;
+		});
+	}
+	assert.deepEqual(live.sent, [], "nothing delivered");
+	assert.deepEqual(new FleetStore({ home: b.home }).require(b.jobId), before, "no envelope reopen or settle clear");
+
+	await b.workers.manager.shutdown(b.jobId);
+	b.released.add(b.jobId);
+	await assert.rejects(b.sender.send({ jobId: b.jobId, message: "go" }), /worker-compaction-policy-block/);
+	assert.deepEqual(b.revived, [], "a released worker is never restored onto a blocked transcript");
+});
+
+test("S5: a malformed session is a named refusal; marker-looking prose and an unwritten session still deliver", async (t) => {
+	const b = await releaseBench(t);
+	const sessionFile = join(b.home, "s.jsonl");
+	const live = b.workers.spawn(b.jobId);
+	writeFileSync(sessionFile, `{"type":"session"}\n{"type":"cust\n`);
+	await assert.rejects(b.sender.send({ jobId: b.jobId, message: "go" }), (error: unknown) => {
+		assert.ok(error instanceof SendError);
+		assert.match(error.message, /worker session .*s\.jsonl line 2 is not valid JSON/);
+		return true;
+	});
+	assert.deepEqual(live.sent, []);
+
+	const prose = { type: "message", message: { role: "user", content: [{ type: "text", text: POLICY_MARKER }] } };
+	writeFileSync(sessionFile, `${JSON.stringify(prose)}\n`);
+	assert.equal((await b.sender.send({ jobId: b.jobId, message: "first" })).receipt, "delivered");
+	rmSync(sessionFile);
+	assert.equal((await b.sender.send({ jobId: b.jobId, message: "second" })).receipt, "delivered", "pi has not written the file yet");
+	assert.equal(live.sent.length, 2);
 });
