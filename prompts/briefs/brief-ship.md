@@ -94,8 +94,7 @@ Run it in order, once the change is complete. This list is authoritative.
    whatever it says, you report and stop. Your envelope needs **no CI claim**:
    `head_sha` with no word about CI is complete, and a pending run is not
    unfinished work. Never manufacture a green claim.
-   Never run `gh pr merge` (or pass `--admin`) either: merging is the parent's `cp_integrate`, and the tool boundary refuses it.
-   Leave the PR in draft; only the parent's integration path marks a reviewed head ready.
+   Never run `gh pr merge` (or pass `--admin`): merging is the parent's `cp_integrate`, and the tool boundary refuses it. Leave the PR in draft; only the parent's integration path marks a reviewed head ready.
 8. **Check the tree.** `git status --porcelain` must be empty, your commits
    must be on `${branch}` (never a detached HEAD), and the branch must be
    pushed. Dirty, detached or unpushed is `status: "blocked"` naming the exact
