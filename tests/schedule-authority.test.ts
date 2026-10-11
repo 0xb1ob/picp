@@ -243,13 +243,16 @@ test("org-review keeps dashboard-only clearance: a cp_schedule start records the
  await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
 });
 
-test("org-review dashboard run without the dashboard org_review_approve channel gets no pre-approval",async(t)=>{
- const {home,run} = await fixture(true);t.after(()=>home.cleanup());
+test("org-review dashboard run whose org_review_approve channel lacks dashboard still asks",async(t)=>{
+ const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
  assert.equal(runRiskPreapproval(run,job),true);
- // The runs-file validator refuses to persist this shape; the gate still must not trust it.
- const stripped = structuredClone(run);delete stripped.policy.effect_channels.org_review_approve;
- assert.equal(runRiskPreapproval(stripped,job),false);
+ const other = structuredClone(run);other.policy.effect_channels.org_review_approve = ["cp_schedule"] as unknown as ["dashboard"];
+ assert.equal(runRiskPreapproval(other,job),false);
+ // The runs-file validator refuses to persist this channel list, so the store read serves it in memory.
+ const runOfJob = runs.runOfJob.bind(runs);
+ t.mock.method(runs,"runOfJob",(id:string)=>id === job.jobId ? structuredClone(other) : runOfJob(id));
+ await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
 });
 
 
