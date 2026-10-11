@@ -447,7 +447,7 @@ export interface CaptureResult {
  * promotion" stops being a thing the model has to remember.
  */
 export function captureCandidate(home: string, lesson: string, at: Date = new Date()): CaptureResult {
-	const text = lesson.trim();
+	const text = lesson.trim().replace(/^\d{4}-\d{2}-\d{2}\s+/, "");
 	if (text.length === 0) throw new MemoryError("capture needs a one-line lesson");
 	if (text.includes("\n")) {
 		throw new MemoryError("a candidate is one line — put the long version in a report and capture the lesson");

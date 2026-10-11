@@ -148,7 +148,7 @@ deliberately leaves it alone, so an operator's file is only ever the operator's.
 | | |
 |---|---|
 | absent (the normal case) | `readUserContext`/`userContextDigest` return `undefined`; session start loads nothing and says nothing — behaviour identical to before the file existed |
-| present | loaded at `session_start` as a `cp-user-context` message (`display: false`, `deliverAs: "nextTurn"` — the same background delivery memory uses), trimmed and capped at `USER_CONTEXT_MAX_CHARS` (8000) with a truncation note |
+| present | loaded at `session_start` as a `cp-user-context` message (`display: false`, `triggerTurn: false` — the same background delivery memory uses), trimmed and capped at `USER_CONTEXT_MAX_CHARS` (8000) with a truncation note |
 | empty or unreadable | treated as absent; optional context that fails to load is never an error a session hears about |
 
 **Precedence is one-way and stated in the payload itself.** The digest's first
@@ -1229,7 +1229,7 @@ An existing `parent.json` with an invalid `compact_at_tokens` disables automatic
 
 Parent-directed `cp-schedule` wakes share this same compaction hold: ordinary PR/pipeline fires, live parent-expanded skill fires (including local skill anchors), and startup recovery of unexpanded anchors. Release sends each offered wake once in offer order with its original content/details, `display: true`, `deliverAs: followUp` and `triggerTurn: true`. Anchor dedupe is recorded at offer time. Only transport waits: schedule/control polling, fire timing, job creation, quote verification/single-use recording, fresh-grant minting, open-fire guards and runner-owned answer/board/local dispatch/teardown retain their existing boundaries. Release never mints another grant. The queue is in memory; a new parent process recovers unexpanded anchors from the ledger. Operator steering and the existing schedule send-first/busy-gate behavior are unchanged.
 
-Home-local `data/standing-orders.md` is ignored by git. The first `session_start` seeds generic operational orders when the file is absent; home-specific model allowlists, wall-clock values and paused projects belong only in the operator/parent-edited file. Later starts, including rotation, and successful in-place compactions load that file without replacing it. Its full contents are injected beside the memory digest from `data/learnings.md` as hidden `nextTurn` messages; a read or write failure is surfaced rather than silently shortening the orders. Keep authorization in the mandate store. `AGENTS.md` and this contract always win on conflict.
+Home-local `data/standing-orders.md` is ignored by git. The first `session_start` seeds generic operational orders when the file is absent; home-specific model allowlists, wall-clock values and paused projects belong only in the operator/parent-edited file. Later starts, including rotation, and successful in-place compactions load that file without replacing it. Its full contents are injected beside the memory digest from `data/learnings.md` as hidden messages sent with `triggerTurn: false` at `session_start` and again after every successful compaction, skipped when the branch already holds the same pair (`digestsInContext`); a read or write failure is surfaced rather than silently shortening the orders. Keep authorization in the mandate store. `AGENTS.md` and this contract always win on conflict.
 
 The parent extension also injects hidden parent-only guidance beside these
 digests: independent tool calls share one assistant message, dependent calls
@@ -7329,8 +7329,10 @@ of the only function that can do the thing:
   budget exists precisely because this text enters every session's context. A
   fresh home returns nothing rather than announcing that it has no memory.
 
-Delivery: the digest reaches the parent as a `cp-memory` custom message with
-`deliverAs: "nextTurn"`, so it is in context when the operator speaks and never
+Delivery: the digest reaches the parent as a hidden `cp-memory` custom message
+sent with `triggerTurn: false` at `session_start` and again after every
+successful compaction, skipped when the branch already holds the same pair
+(`digestsInContext`), so it is in context when the operator speaks and never
 triggers a turn of its own. Memory is background, not an event.
 
 `/memory status` renders budget, tiers, decay candidates, untiered lines and
@@ -7355,7 +7357,7 @@ only, and a worker must never promote into a memory it does not live in.
 Scope, ported unchanged: `data/` is machine-local and gitignored. Anything a
 fresh command post would need is a **contract edit** (AGENTS.md, docs/), not a
 learning; project-intrinsic facts belong in that repo's `AGENTS.md` via a
-dispatched worker; **job history lives in br**, not in memory.
+dispatched worker; **job history lives in the ledger** (`cp_job list --all`), not in memory.
 
 ## Curation, autonomous
 
