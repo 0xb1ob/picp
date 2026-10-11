@@ -113,6 +113,24 @@ test("the checked-in corpus is 20-50 cases and covers every required scenario", 
 	assert.deepEqual(trap?.expect?.labels, []);
 });
 
+test("the planner fixture checks every required section plus the changed function's consumer and preserved behavior", () => {
+	const corpus = loadCorpus(CORPUS_PATH);
+	const planner = corpus.cases.find((item) => item.id === "planner-complete-executable-plan") as EvalCase;
+	assert.equal(planner.kind, "quality");
+	const coverage = planner.expect?.coverage ?? [];
+	for (const section of ["Goal", "Acceptance", "Non-goals", "Evidence", "Approach", "File list", "Implementation order", "Constraints", "Test plan", "Unknowns", "Self-assessment"]) {
+		assert.ok(coverage.includes(section), `planner fixture lost required section ${section}`);
+	}
+	// The subject carries a real consumer and its test; coverage demands the plan name both sides.
+	assert.match(planner.subject ?? "", /src\/report\.ts:\d+.*formatBytes/);
+	assert.match(planner.subject ?? "", /tests\/report\.test\.ts:\d+.*512 B/);
+	assert.ok(coverage.some((pattern) => new RegExp(pattern, "i").test("renderReport in src/report.ts")), "coverage must require the consumer");
+	assert.ok(coverage.some((pattern) => new RegExp(pattern, "i").test("512 B stays 512 B")), "coverage must require the preserved behavior");
+	assert.equal(planner.expect?.evidence, true);
+	const contract = corpus.cases.find((item) => item.id === "planner-profile-executable-plan") as EvalCase;
+	assert.ok((contract.expect?.includes ?? []).some((needle) => needle.includes("callers/consumers")));
+});
+
 test("a corpus that drops a scenario, repeats an id or mislabels a case does not load", (t) => {
 	const corpus = loadCorpus(CORPUS_PATH);
 	const dir = scratch();

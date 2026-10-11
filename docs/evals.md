@@ -178,6 +178,33 @@ then reviewer, then implementer** — never two in one merge — and for each:
 4. Merge that role's prompts alone, then watch the next real jobs of that role
    before starting the next role.
 
+A fair baseline/candidate comparison:
+
+- **Identical inputs.** Both arms run the same corpus file, model, effort,
+  `--trials` count and transport; only the prompt directories differ. A run
+  that changed anything else is not a comparison.
+- **Tuning versus held-out cases, by case ID.** Before the first paid trial,
+  write down which case IDs the prompt author may look at while iterating
+  (tuning) and which stay untouched until the final run (held-out). Report the
+  held-out numbers separately; a gain only on tuning cases is wording fit, not
+  evidence.
+- **Offline compliance is not behavior.** A green contract arm proves the
+  prompt *says* the thing; only quality trials (or retained recordings) measure
+  whether a model *does* it. Skipped quality cases stay unknown.
+- **Cost is recorded, not inferred.** `median_tokens` and `median_tool_calls`
+  are worker costs. They are not parent latency; a shorter worker transcript is
+  no claim that the parent loop got faster.
+
+**Planner evidence mapping (bigpowers R1).** The planner profile and research
+brief ask a plan to record, for each changed interface, current → intended
+behavior, its callers/consumers and existing tests with evidence paths, and to
+map each acceptance condition to change and proof inside the existing
+sections — missing evidence stays unknown. `planner-profile-executable-plan`
+pins that wording (contract); `planner-complete-executable-plan` gives the
+model a real consumer (`renderReport`) and a preserved behavior (`512 B`) and
+requires the plan to name both (quality). Provenance:
+[`bigpowers-attribution.md`](bigpowers-attribution.md).
+
 ### Thresholds
 
 Ship a role's prompt change when, on ≥5 trials of that role's cases:

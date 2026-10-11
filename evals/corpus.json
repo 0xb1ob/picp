@@ -7,12 +7,15 @@
       "scenario": "complete-executable-plan",
       "kind": "contract",
       "surface": "planner-profile",
-      "why": "do8.8: the planner profile must demand an executable plan and a requirement-by-requirement check before reporting.",
+      "why": "do8.8: the planner profile must demand an executable plan and a requirement-by-requirement check before reporting. bigpowers R1: it records each changed boundary's before→after behavior, callers/consumers and existing tests with evidence, and treats missing evidence as unknown.",
       "expect": {
         "includes": [
           "A plan is executable or it is not a plan.",
           "Check every requirement of the task against your artifact before reporting.",
-          "Every File list entry names an exact path and the exact change"
+          "Every File list entry names an exact path and the exact change",
+          "each changed interface or boundary, record current behavior → intended",
+          "behavior, its affected callers/consumers, and the existing tests or",
+          "absence from a search or diff is not proof that behavior is absent."
         ]
       }
     },
@@ -427,8 +430,8 @@
       "scenario": "complete-executable-plan",
       "kind": "quality",
       "surface": "research-brief",
-      "why": "The representative happy path: every required section present, with evidence and a runnable check.",
-      "subject": "Plan this change in the `demo` repository.\n\nTask: `formatBytes(1024)` must render \"1.0 KB\" instead of \"1024 B\". Values under 1024 keep their current rendering.\n\nRepository excerpt:\n\n    src/format.ts:3   export function formatBytes(n: number): string {\n    src/format.ts:5     return `${n} B`;\n    tests/format.test.ts:4 test(\"formats bytes\", () => {\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
+      "why": "The representative happy path: every required section present, with evidence and a runnable check. bigpowers R1: the plan must name the real consumer of the changed function and keep its preserved behavior (values under 1024) proven, not only the new rendering.",
+      "subject": "Plan this change in the `demo` repository.\n\nTask: `formatBytes(1024)` must render \"1.0 KB\" instead of \"1024 B\". Values under 1024 keep their current rendering.\n\nRepository excerpt:\n\n    src/format.ts:3   export function formatBytes(n: number): string {\n    src/format.ts:5     return `${n} B`;\n    src/report.ts:8     lines.push(`${file.name}  ${formatBytes(file.size)}`);\n    tests/format.test.ts:4 test(\"formats bytes\", () => {\n    tests/report.test.ts:6   assert.match(renderReport([{ name: \"a.txt\", size: 512 }]), /a\\.txt  512 B/);\n\n`package.json` scripts: { \"test\": \"node --test tests/**/*.test.ts\" }",
       "expect": {
         "coverage": [
           "Goal",
@@ -441,7 +444,9 @@
           "Constraints",
           "Test plan",
           "Unknowns",
-          "Self-assessment"
+          "Self-assessment",
+          "src/report\\.ts|renderReport",
+          "512 B"
         ],
         "evidence": true
       }

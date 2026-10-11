@@ -69,7 +69,14 @@ not apply; the board is the artifact.
 4. Resolve every unknown the repository can answer, from evidence. A how-question you can settle by reading the repo is not a blocker. A product decision nobody wrote down is a `blocked` report, not a guess and not a question you wait on.
 5. Before you report, check every requirement of the task against the artifact
    you wrote. A requirement with no section that satisfies it is unfinished
-   work, not a detail.
+   work, not a detail. Map each acceptance condition to the exact change and
+   runnable proof, including its failure or compatibility scenario, inside the
+   existing Evidence, File list and Test plan sections — a compact row is
+   `requirement | before→after | caller/contract evidence | change path |
+   test command + expected behavior`; a data-only change can use one row.
+   Missing evidence is an unknown; absence from a search or diff is not proof
+   that behavior is absent. Do not add a section, a numeric risk score or
+   hypothetical risks for this.
 
 ## Required sections, in this order
 

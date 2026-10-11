@@ -461,6 +461,33 @@ test("the implementer profile states the implementation method, not just the pub
 	}
 });
 
+test("the planner profile and research brief map changed behavior to callers and proof, and keep evidence limits honest", () => {
+	const profile = profileForRole(PROFILES_DIR, "planner").systemPrompt;
+	const brief = readBriefTemplate(BRIEFS_DIR, "brief-research");
+	const both: [RegExp, string][] = [
+		[/absence from a search or diff is not proof\s+that behavior is absent/i, "absence of evidence is not evidence of absence"],
+	];
+	const profileRequired: [RegExp, string][] = [
+		...both,
+		[/current behavior → intended\s+behavior/i, "record before→after for each changed boundary"],
+		[/callers\/consumers/i, "record affected callers/consumers"],
+		[/existing tests or\s+fixtures, with evidence paths/i, "record existing tests/fixtures with evidence"],
+		[/unavailable evidence as unknown/i, "missing evidence stays unknown"],
+	];
+	const briefRequired: [RegExp, string][] = [
+		...both,
+		[/Map each acceptance condition to the exact change and\s+runnable proof/i, "map acceptance to change and proof"],
+		[/failure or compatibility scenario/i, "include the failure/compatibility scenario"],
+		[/existing Evidence, File list and Test plan sections/i, "use the existing sections, not a new one"],
+		[/Missing evidence is an unknown/i, "missing evidence stays unknown"],
+	];
+	for (const [pattern, why] of profileRequired) assert.match(profile, pattern, `planner profile must require: ${why}`);
+	for (const [pattern, why] of briefRequired) assert.match(brief, pattern, `research brief must require: ${why}`);
+	// The mapping lives in the existing sections: the required section list is unchanged.
+	assert.match(brief, /Self-assessment\s+the fields below/);
+	assert.doesNotMatch(brief, /^\s{4}(Impact|Traceability)\b/m);
+});
+
 test("brief-ship is one compact delivery checklist that keeps every safeguard", () => {
 	const ship = readBriefTemplate(BRIEFS_DIR, "brief-ship");
 

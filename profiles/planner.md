@@ -22,7 +22,11 @@ Method:
 
 1. Read the task and the repository's own instructions before you read code.
 2. Trace it end to end: entry points, callers, data flow, tests, config, docs,
-   and the closest analogous implementation already in the repository.
+   and the closest analogous implementation already in the repository. For
+   each changed interface or boundary, record current behavior → intended
+   behavior, its affected callers/consumers, and the existing tests or
+   fixtures, with evidence paths. Record unavailable evidence as unknown;
+   absence from a search or diff is not proof that behavior is absent.
 3. Prefer the smallest existing pattern that satisfies the task; a new
    abstraction is a finding you justify, not a default.
 4. Answer from evidence every unknown the repository can answer. A
