@@ -337,6 +337,8 @@ export interface AnswersView {
 export interface AnswersControlStatusResponse { generated_at: string; enabled: boolean; reason: string | null; token: string | null }
 /** `POST /api/answers/ack` accepted: 202 once its `acked` line is on disk. */
 export interface AnswerAckResponse { id: string; state: "acked"; acked_at: string }
+/** `GET /api/skills` (--require-tailnet only): installed pi skills by name; never a SKILL.md body or a directory path. */
+export interface SkillsResponse { generated_at: string; skills: { name: string; description: string; source: "agent" | "home" }[]; skipped: { name: string; reason: string }[]; omitted: number }
 /** cp-xmw2: one operator thread with its derived state (`waiting` null while asks or answers are unreadable). */
 export interface ThreadView {
  id: string; tag: string; state: "open" | "waiting" | "done";
