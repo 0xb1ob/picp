@@ -6144,7 +6144,7 @@ reads and validates every text file, and retains the existing image preparation 
 becomes 409 with a restart hint; `GET /api/operator/control` advertises `files: true` separately from `images: true`.
 
 The main session receives each file inline as `File: <sanitized name>` followed by a fenced `text` block. The total
-**200 KiB** budget includes names, fences and notices, shared evenly across the files. UTF-8 prefixes end on code-point
+**16 KiB** budget includes names, fences and notices, shared evenly across the files. UTF-8 prefixes end on code-point
 boundaries. Fences use backticks or tildes longer than any matching run in the included content, so arbitrary source
 text cannot close them. Over-budget files end with **`[truncated — full file at <absolute path>]`**; the stored file is
 complete and the session can use its read tool on that path. File contents are never added to the upload/request journal.

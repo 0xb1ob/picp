@@ -37,7 +37,7 @@ export const isUploadId = (value: unknown): value is string => typeof value === 
 export const isImageUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${IMAGE_ID_SOURCE}$`).test(value);
 export const isTextUploadId = (value: unknown): value is string => typeof value === "string" && new RegExp(`^${TEXT_ID_SOURCE}$`).test(value);
 export const TEXT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
-export const TEXT_MESSAGE_INLINE_BYTES = 200 * 1024;
+export const TEXT_MESSAGE_INLINE_BYTES = 16 * 1024;
 export type TextExt = "txt" | "md" | "html" | "json";
 export type ImageExt = "png" | "jpg" | "webp" | "gif";
 export type UploadExt = ImageExt | TextExt;
