@@ -199,8 +199,7 @@ export function readTask(request: TaskInput): ResolvedTask {
 		throw new DispatchError(`${request.jobId}: pass task or taskFile, not both`);
 	}
 	if (request.taskFile !== undefined) {
-		// Resolved once against the parent's cwd: the worker runs elsewhere and needs an absolute pointer.
-		const path = resolve(request.taskFile);
+		const path = resolve(request.taskFile); // once, against the parent's cwd: the worker reads from elsewhere
 		if (!existsSync(path)) {
 			throw new DispatchError(`${request.jobId}: task file ${path} does not exist`);
 		}
