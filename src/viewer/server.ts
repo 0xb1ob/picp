@@ -16,7 +16,7 @@
  * parent reads. Every route answers only
  * its own bind Host; the operator's own Full transcript
  * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes, both answers routes,
- * both thread routes and the three settings routes are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
+ * both thread routes, the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  */
 
 import { readFileSync } from "node:fs";
@@ -44,6 +44,7 @@ import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
 import { handleThreadDone, handleThreadsStatus, THREAD_DONE_PATH, THREADS_PATH } from "./threads-api.ts";
+import { handleSkillsList, SKILLS_PATH } from "./skill-catalog.ts";
 import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, serveOperatorUpload } from "./operator-upload-api.ts";
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
@@ -65,6 +66,8 @@ export interface ViewerOptions extends ViewerState {
 	controlLimiter?: ControlLimiter;
 	/** Image attachments: upload root (default `CP_UPLOAD_ROOT`, else /tmp/cp-dashboard-uploads) and the 24/60 s upload limiter. Test seams. */
 	uploadRoot?: string;
+	/** pi's agent dir for `GET /api/skills` (default `agentDirFor(process.env)`). A test seam. */
+	agentDir?: string;
 	uploadLimiter?: ControlLimiter;
 	/** Start session (`POST /api/operator/start`): test seams and the last start's time. */
 	operatorStart?: OperatorStart;
@@ -244,6 +247,11 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		case THREADS_PATH: {
 			const out = handleThreadsStatus(req, options);
 			sendJson(res, out.status, out.body, out.headers);
+			return;
+		}
+		case SKILLS_PATH: {
+			const out = handleSkillsList(options);
+			sendJson(res, out.status, out.body);
 			return;
 		}
 		case SERVICE_WORKER_PATH:

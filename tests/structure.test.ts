@@ -173,6 +173,7 @@ const R2_ALLOWED = [
 	"src/projects.ts",
 	"src/service/units.ts",
 	"src/viewer/explorer.ts",
+	"src/viewer/skill-catalog.ts",
 	"src/worker-packages.ts",
 ];
 

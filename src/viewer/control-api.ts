@@ -115,6 +115,8 @@ export interface ControlRouteOptions {
 	controlLimiter?: ControlLimiter;
 	/** Image attachments: the upload root (default `CP_UPLOAD_ROOT`, else /tmp/cp-dashboard-uploads) and the upload rate limiter (24 per 60 s). */
 	uploadRoot?: string;
+	/** pi's agent dir for the skill catalog (default `agentDirFor(process.env)`). A test seam. */
+	agentDir?: string;
 	uploadLimiter?: ControlLimiter;
 	operatorStart?: OperatorStart;
 	log?: (line: string) => void;
