@@ -642,6 +642,13 @@ test("reviewer fixtures define pass/revise/escalate by quality, and demand actio
 	for (const part of [/severity/i, /confidence/i, /path:line/i, /trigger/i, /impact/i, /required change/i]) {
 		assert.match(diff, part, `diff-review-rubric must name ${part}`);
 	}
+
+	// Absence is not evidence: a reviewer claims a gap only from a supplied file.
+	assert.match(diff, /absent hunk is not proof of absence/i);
+	assert.match(diff, /already by the base/i);
+	assert.doesNotMatch(diff, /answered in the PR/);
+	assert.doesNotMatch(diff, /Prefer `revise` or `escalate` over `pass` when an omitted file/);
+	assert.match(profile, /Limited evidence is not proof of a defect/);
 });
 
 // The reviewer's packet is untrusted input (do8.3, do8.4): a plan artifact was
