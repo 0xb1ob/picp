@@ -3,12 +3,19 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import "./harness/fake-parent-tracker.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerSessionHooks } from "../extensions/command-post/session-hooks.ts";
+import { createSessionPost } from "../extensions/command-post/session-post.ts";
+import { createSessionState } from "../extensions/command-post/shared.ts";
+import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
+import { CommandPost } from "../src/command-post.ts";
+import { PACKAGE_ROOT } from "../src/home.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT } from "../src/contracts.ts";
 import { CpBridge } from "../src/cp-bridge.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings } from "../src/parent-context.ts";
+import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings, standingOrdersFile } from "../src/parent-context.ts";
 import { runAutoControl } from "../src/parent-auto-control.ts";
 import type { ParentStatus } from "../src/cp-bridge.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
@@ -113,6 +120,73 @@ test("picp-99l: an identical latest digest pair is not re-sent; a compaction or 
 	const guidance = { customType: "cp-parent-guidance", content: "parent guidance" };
 	assert.equal(digestsInContext(resumed, [...pair, guidance]), false, "an old pair needs the new parent guidance");
 	assert.equal(digestsInContext([...resumed, entry(guidance.customType, guidance.content)], [...pair, guidance]), true);
+});
+
+test("cp-35d0 S10: a queued digest set is reserved per session and successful-compaction epoch", async (t) => {
+	const home = createScratchHome();
+	const previous = { home: process.env.CP_HOME, mode: process.env.CP_MODE };
+	process.env.CP_HOME = home.path;
+	process.env.CP_MODE = "multi";
+	const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+	const fire = async (name: string, ctx?: unknown) => { for (const handler of handlers.get(name) ?? []) await handler({}, ctx); };
+	type Digest = { message: { customType: string; content: string; display?: boolean }; options: { triggerTurn?: boolean } };
+	const sent: Digest[] = [];
+	let failSend = false;
+	const DIGESTS = ["cp-parent-guidance", "cp-memory", "cp-standing-orders"];
+	const pi = {
+		on(name: string, handler: (event: unknown, ctx: unknown) => unknown) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+		registerEntryRenderer() {}, registerTool() {}, getAllTools: () => [],
+		sendMessage(message: Digest["message"], options: Digest["options"]) {
+			if (!DIGESTS.includes(message.customType)) return;
+			if (failSend) throw new Error("synthetic send failure");
+			sent.push({ message, options });
+		},
+	} as unknown as ExtensionAPI;
+	const state = createSessionState();
+	state.post = new CommandPost({ home: home.path, packageRoot: PACKAGE_ROOT });
+	state.parentLock = { release() {} } as never;
+	state.installNudgeShown = state.piVersionNudgeShown = state.routingNudgeShown = true;
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => state.post!, repaintWidget: () => {} });
+	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
+	t.after(async () => {
+		await fire("session_shutdown");
+		for (const [key, value] of [["CP_HOME", previous.home], ["CP_MODE", previous.mode]] as const) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		home.cleanup();
+	});
+	// The branch never shows what was just queued: that is the same-tick race.
+	const session = (id: string, branch: unknown[] = []) => ({ hasUI: false, cwd: home.path, sessionManager: { getSessionId: () => id, getBranch: () => branch } });
+
+	await fire("session_start", session("A"));
+	const size = sent.length;
+	assert.ok(size >= 2, "guidance and standing orders at least");
+	assert.ok(sent.every((entry) => entry.message.display === false && entry.options.triggerTurn === false), "no model turn starts");
+	await fire("session_start", session("A"));
+	assert.equal(sent.length, size, "a duplicate session_start for the same session and epoch enqueues one set");
+	const recorded = sent.map((entry) => ({ type: "custom_message", customType: entry.message.customType, content: entry.message.content }));
+	await fire("session_start", session("B", recorded));
+	assert.equal(sent.length, size, "a resumed session already holding the set skips");
+	await fire("session_start", session("C"));
+	assert.equal(sent.length, 2 * size, "a new session sends a fresh set");
+	await fire("session_compact", session("C"));
+	assert.equal(sent.length, 3 * size, "a successful compaction opens a fresh epoch");
+	await fire("session_compact", session("C"));
+	assert.equal(sent.length, 4 * size);
+	writeFileSync(standingOrdersFile(home.path), "changed orders\n");
+	await fire("session_start", session("C"));
+	assert.equal(sent.length, 5 * size, "a changed digest sends");
+	assert.match(sent.at(-1)!.message.content, /changed orders/);
+
+	writeFileSync(standingOrdersFile(home.path), "orders after a failed send\n");
+	failSend = true;
+	await assert.rejects(fire("session_start", session("C")), /synthetic send failure/);
+	failSend = false;
+	await fire("session_start", session("C"));
+	assert.equal(sent.length, 6 * size, "a failed send releases its reservation, so the retry goes out");
+	await fire("session_start", session("C"));
+	assert.equal(sent.length, 6 * size);
 });
 
 test("parent compact instructions name current open decisions, held PR jobs and active mandates from disk", async (t) => {
