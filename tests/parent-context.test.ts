@@ -9,6 +9,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings } from "../src/parent-context.ts";
+import { runAutoControl } from "../src/parent-auto-control.ts";
 import type { ParentStatus } from "../src/cp-bridge.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
 import { WorkerProcess } from "../src/worker-process.ts";
@@ -72,6 +73,23 @@ test("autoParentContext: a failed mission-end rotate falls through to compaction
 	assert.equal((await autoParentContext(home.path, undefined, undefined, { ...control(205000), compact: async () => { throw new Error("compact rejected: x"); } })).event, "failed");
 });
 
+test("runAutoControl: a timed_out compact relay names the retry and the worker consequence; a failure does not", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const control = (error: string) => ({
+		unsettled: () => undefined, status: async () => ({ contextTokens: 205000 }) as ParentStatus,
+		rotate: async () => undefined, compact: async () => { throw new Error(error); },
+	});
+	const relayed: string[] = [];
+	await runAutoControl(home.path, undefined, undefined, control("timeout after 240000ms waiting for response to compact"), (text) => relayed.push(text));
+	await runAutoControl(home.path, undefined, undefined, control("compact rejected: x"), (text) => relayed.push(text));
+	assert.equal(relayed.length, 2);
+	assert.match(relayed[0]!, /^parent automatic context control timed out: timeout after 240000ms .*retry the compaction once the parent has settled.*rotation or restart can abort running workers/);
+	assert.equal(relayed[1], "parent automatic context control failed: compact rejected: x");
+	const log = readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8");
+	assert.match(log, /timed_out .*error="timeout after 240000ms/, "the log keeps the error evidence");
+});
+
 test("parentContextLog appends exactly one line to state/daemon.log", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
@@ -120,8 +138,9 @@ test("parent compact instructions name current open decisions, held PR jobs and 
 	});
 	const request = WorkerProcess.prototype.request;
 	let instructions = "";
+	const timeouts: (number | undefined)[] = [];
 	t.mock.method(WorkerProcess.prototype, "request", function (this: WorkerProcess, ...args: Parameters<typeof request>) {
-		if (args[0] === "compact") instructions = String(args[1]?.customInstructions);
+		if (args[0] === "compact") { instructions = String(args[1]?.customInstructions); timeouts.push(args[2]); }
 		return request.apply(this, args);
 	});
 	await bridge.compact();
@@ -130,6 +149,14 @@ test("parent compact instructions name current open decisions, held PR jobs and 
 	await bridge.compact("Keep the review rationale too.");
 	assert.match(instructions, /Keep the review rationale too/);
 	assert.ok(instructions.includes(escalation.id), "caller instructions must not discard disk context");
+	assert.deepEqual(timeouts, [240_000, 240_000], "an unset requestTimeoutMs gives compact 240 s");
+	await bridge.stop();
+	const explicit = new CpBridge();
+	t.after(() => explicit.stop());
+	await explicit.start({ home: home.path, mode: "multi", model: "mock/parent", requestTimeoutMs: 45_000,
+		piBin: resolve(import.meta.dirname, "fixtures/fake-parent.mjs") });
+	await explicit.compact();
+	assert.equal(timeouts.at(-1), 45_000, "an explicit requestTimeoutMs override is honored");
 });
 
 test("compact context retains only unsettled bridge sends, including after a session rotation", (t) => {

@@ -20,6 +20,7 @@ import {
 import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
 import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
+import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
@@ -435,7 +436,7 @@ export class CpBridge {
 		this.#controlBusy = true;
 		try {
 			const customInstructions = [parentCompactInstructions(this.#home!), instructions?.trim()].filter(Boolean).join("\n\n");
-			const response = await proc.request("compact", { customInstructions }, this.#options?.requestTimeoutMs ?? 120_000);
+			const response = await proc.request("compact", { customInstructions }, this.#options?.requestTimeoutMs ?? PARENT_COMPACT_TIMEOUT_MS);
 			if (response.success === false) throw new CpBridgeError(`compact rejected: ${response.error ?? "unknown error"}`);
 			this.#recordControl({ lastCompactAt: new Date().toISOString(), contextTokens: (response.data as { estimatedTokensAfter?: number } | undefined)?.estimatedTokensAfter ?? null });
 			return (response.data ?? {}) as { tokensBefore?: number; estimatedTokensAfter?: number };
