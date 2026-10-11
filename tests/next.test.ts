@@ -313,7 +313,7 @@ test("a paused mandate's zero is scoped to it; live workers under other mandates
 	assert.doesNotMatch(text, /workers working across all mandates/);
 });
 
-test("cp-speedup-next: a fleet total above three is informational — a grant with room still dispatches, held records take no slot, drain refuses", async (t) => {
+test("T3 (cp-speedup-next): a fleet total above three is informational — a grant with room still dispatches, held records take no slot, drain refuses", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const ports = bench(home);
