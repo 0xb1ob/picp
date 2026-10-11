@@ -221,6 +221,8 @@ test("without --host, the operator uses the tailnet address for parent board lin
 	rmSync(tailscale);
 	process.env.PATH = dir;
 	await assert.rejects(runOperator([], { piBin: FAKE_PI, viewer: { port, command: [process.execPath, FAKE_VIEWER, String(port)] } }), /require-tailnet/);
+	// The first run's viewer may still hold the port; a busy port takes startViewer's reuse path instead of spawning.
+	await until("the first viewer to release the port", async () => !(await portInUse(port)));
 	const viewer = await startViewer({ port });
 	t.after(() => viewer.stop());
 	await until("cp-view to exit and release the port", async () => !alive(viewer.pid as number) && !(await portInUse(port)));
