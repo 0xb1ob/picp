@@ -164,3 +164,30 @@ test("text inline: bounded total including robust fences and paths, truncation k
  assert.ok(Buffer.byteLength(pathological) <= TEXT_MESSAGE_INLINE_BYTES);
  assert.equal(inlineTextFiles([]), "");
 });
+
+test("text inline: the file preview is capped at 16384 bytes while a 4 MiB upload stays allowed and fully stored", (t) => {
+ assert.equal(TEXT_MESSAGE_INLINE_BYTES, 16384);
+ assert.ok("text" in validateText(Buffer.alloc(TEXT_UPLOAD_MAX_BYTES, 97), "txt"));
+ const root = scratch(t);
+ const stored = (ext: "html" | "md" | "txt" | "json", bytes: Buffer) => { const id = newUploadId(ext, NOW); writeUpload(root, id, bytes); return {id, path: uploadFile(root, id)!, bytes}; };
+ const html = stored("html", Buffer.from(`<!doctype html>\n<p>${"<div class=\"row\">héllo ✓ 😀</div>\n".repeat(5_400)}</p>`));
+ assert.ok(html.bytes.length > 200 * 1024 && html.bytes.length < 212 * 1024, String(html.bytes.length));
+ const one = inlineTextFiles([{name: "page.html", path: html.path, bytes: html.bytes}]);
+ assert.ok(Buffer.byteLength(one) <= 16384, String(Buffer.byteLength(one)));
+ assert.doesNotMatch(one, /\uFFFD/);
+ assert.ok(one.includes(`[truncated — full file at ${html.path}]`));
+ const samples = ["é", "✓", "😀", "日本", "ascii ", "```", "~~~", "Ω"];
+ const mixed = samples.map((s, i) => ({name: `mix-${i}.md`, ...stored("md", Buffer.from(`# ${i}\n` + s.repeat(4_000 + i * 997)))}));
+ const eight = inlineTextFiles(mixed);
+ assert.ok(Buffer.byteLength(eight) <= 16384, String(Buffer.byteLength(eight)));
+ assert.doesNotMatch(eight, /\uFFFD/);
+ assert.equal((eight.match(/File: mix-/g) ?? []).length, 8);
+ for (const file of [html, ...mixed]) {
+  assert.ok(file === html || eight.includes(`[truncated — full file at ${file.path}]`));
+  const read = readUpload(root, file.id, NOW);
+  assert.equal(read.state, "ok");
+  assert.deepEqual(read.state === "ok" && read.bytes, file.bytes, "the stored file keeps every byte");
+ }
+ const small = inlineTextFiles([{name: "small.txt", path: "/tmp/store/small.txt", bytes: Buffer.from("short note ✓")}]);
+ assert.equal(small, "File: small.txt\n```text\nshort note ✓\n```\n\n");
+});
