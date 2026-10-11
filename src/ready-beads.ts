@@ -75,6 +75,8 @@ export function formatReadyBeads(rows: readonly ReadyBeads[]): string[] {
  */
 export function idleBeadObserver(read: () => Promise<ReadyBeads[]>, emit: (text: string) => void, fleetNow: () => readonly FleetRecord[]) {
 	let generation = 0;
+	// The last successful summary emitted: an unchanged ready set is not news after the next working period.
+	let lastSuccess: string | undefined;
 	const working = (jobs: readonly FleetRecord[]) => jobs.some((job) => job.phase === "waiting" || job.phase === "launching");
 	// A fleet read that throws propagates to the caller (it logs); it never reads as idle.
 	const stillIdle = (own: number) => generation === own && !working(fleetNow());
@@ -92,6 +94,13 @@ export function idleBeadObserver(read: () => Promise<ReadyBeads[]>, emit: (text:
 		if (!stillIdle(own)) return;
 		const count = rows.reduce((sum, row) => sum + row.ids.length, 0);
 		const lines = formatReadyBeads(rows);
-		if (lines.length) emit(`${count ? `fleet idle with ${count} ready beads\n` : "fleet idle; ready beads could not be read\n"}${lines.join("\n")}`);
+		// An empty successful read forgets the last summary, so work that disappears and returns announces again.
+		if (!lines.length) { lastSuccess = undefined; return; }
+		const text = `${count ? `fleet idle with ${count} ready beads\n` : "fleet idle; ready beads could not be read\n"}${lines.join("\n")}`;
+		// Read failures always surface and never count as the remembered success.
+		const failed = rows.some((row) => row.error);
+		if (!failed && text === lastSuccess) return;
+		emit(text);
+		if (!failed) lastSuccess = text;
 	};
 }
