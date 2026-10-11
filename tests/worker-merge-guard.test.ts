@@ -25,3 +25,21 @@ test("quoted or heredoc mentions are not a merge", () => {
 	assert.equal(detectWorkerMerge("echo 'gh pr merge 12 --admin'"), undefined);
 	assert.equal(detectWorkerMerge("git commit -F - <<'EOF'\nnever run\ngh pr merge 12\nEOF"), undefined);
 });
+
+test("refuses gh pr ready in standalone, chained or flagged command position", () => {
+	for (const command of ["gh pr ready 12", "git push && gh pr ready 12", "gh -R o/r pr ready 12", "gh --repo=o/r pr ready", "(cd x; gh pr ready)"]) {
+		const finding = detectWorkerMerge(command);
+		assert.equal(finding?.action, "ready", command);
+		const refusal = workerMergeRefusal(finding);
+		assert.match(refusal, /cp_integrate/);
+		assert.match(refusal, /draft/);
+		assert.doesNotMatch(refusal, /merge/i, "a ready refusal is not a merge refusal");
+	}
+	assert.equal(detectWorkerMerge("gh pr merge 12")?.action, "merge");
+});
+
+test("quoted or heredoc mentions of ready are prose", () => {
+	assert.equal(detectWorkerMerge('grep "gh pr ready" docs/x.md'), undefined);
+	assert.equal(detectWorkerMerge("echo 'gh pr ready 12'"), undefined);
+	assert.equal(detectWorkerMerge("git commit -F - <<'EOF'\nthe parent runs\ngh pr ready 12\nEOF"), undefined);
+});
