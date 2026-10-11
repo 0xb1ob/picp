@@ -25,7 +25,6 @@ import type { CapacityReader } from "./capacity.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
-	JOB_ID_PATTERN,
 	type Delivery,
 	type FleetRecord,
 	isoTimestamp,
@@ -69,6 +68,10 @@ import { watchOuterProviderRetry } from "./provider-retry.ts";
 import type { PipelineRecordedRisk } from "./risk-warning.ts";
 import { composeRoutingInputs, riskGate } from "./dispatch-inputs.ts";
 import { ScriptDispatcher, type ScriptDispatchResult, type ScriptPreview } from "./script-dispatch.ts";
+import { cleanupCreatedJobBranch, lastLine } from "./job-branch-cleanup.ts";
+import { resolveJobSkills, skillsBriefNote } from "./job-skills.ts";
+import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
+export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
 
 /** A git invocation, injectable so the branch paths are testable without a repo. */
 export type GitRunner = (
@@ -303,6 +306,8 @@ export interface DispatchRequest {
 	/** Per-dispatch tool-start cap; home/env default otherwise. */
 	toolCallCap?: number;
 	/** cp-wlhu S5: the foreign-CI line `CommandPost.dispatch`'s reviewer gate computed; snapshotted into the brief, never stored. */ foreignCi?: string;
+	/** Installed skill names the operator mentioned for THIS worker (src/job-skills.ts); never paths. */
+	skills?: string[];
 }
 export interface DispatchResult {
 	job_id: string;
@@ -325,6 +330,10 @@ export interface DispatchResult {
 	wall_clock_seconds?: number;
 	/** H6: an inferred-only risk:high against a recorded low dispatched under ask_on risk:high; one line naming the keywords. */
 	risk_warning?: string;
+	/** The skill names the worker was spawned with. */
+	skills?: string[];
+	/** A promote spawns nothing, so the named skills did not reach the live worker. */
+	skills_not_applied?: string[];
 }
 /**
  * What `cp_dispatch dry_run` answers (routing T5): the route this request would
@@ -365,6 +374,8 @@ export interface DispatchPreview {
 	blockers?: string[];
 	/** Set (verbatim `"would ask: risk:high"`) when a real dispatch would hit the risk:high gate (cur.2.4); nothing is escalated for a dry run. */
 	mandate_gate?: string;
+	/** The named skills, resolved exactly as a dispatch would. */
+	skills?: ResolvedSkill[];
 }
 
 export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"> {
@@ -400,6 +411,8 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	deps?: DepsPorts;
 	/** 4b-1: at the spawn cap, release one idle held author and reserve its slot (HeldRelease.makeRoom); the returned release frees it on failure. */
 	makeRoom?: (jobId: string, role: Role) => Promise<(() => void) | undefined>;
+	/** pi's agent dir for skill resolution; tests pass a scratch dir. Defaults to `agentDirFor(process.env)`. */
+	skillAgentDir?: string;
 }
 
 export class Dispatcher {
@@ -412,11 +425,20 @@ export class Dispatcher {
 	}
 
 	async previewScript(request: DispatchRequest): Promise<ScriptPreview> {
+		if (request.skills?.length) throw new DispatchError(`${request.jobId}: skills apply to pi workers; a script job runs no pi`);
 		return this.#script().preview(request);
 	}
 
 	async dispatchScript(request: DispatchRequest): Promise<ScriptDispatchResult> {
+		if (request.skills?.length) throw new DispatchError(`${request.jobId}: skills apply to pi workers; a script job runs no pi`);
 		return this.#script().dispatch(request);
+	}
+
+	/** Named skills re-resolved after profile selection and before any lease; refusals are named. */
+	#skills(request: DispatchRequest, profile: WorkerProfile): { skills: ResolvedSkill[]; overridden: string[] } {
+		const resolved = resolveJobSkills(request.skills, { home: this.#options.home, agentDir: this.#options.skillAgentDir, role: profile.frontmatter.role });
+		if (!resolved.ok) throw new DispatchError(`${request.jobId}: ${resolved.error}`);
+		return resolved;
 	}
 
 	#script(): ScriptDispatcher {
@@ -437,6 +459,7 @@ export class Dispatcher {
 		const delivery: Delivery = labels.delivery;
 		const blockers = await options.ledger.blockersOf(issue.id);
 		const profile = selectProfile(options.profilesDir, request, { kind, delivery });
+		const { skills } = this.#skills(request, profile);
 		const inputs = composeRoutingInputs(request, issue, task);
 		let decision: RoutingDecision | undefined;
 		let error: string | undefined;
@@ -489,6 +512,7 @@ export class Dispatcher {
 			},
 			...(blockers.length > 0 ? { blockers } : {}),
 			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference] }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(skills.length ? { skills } : {}),
 		};
 	}
 
@@ -511,6 +535,8 @@ export class Dispatcher {
 
 		// --- 2. profile + model, both before anything is taken ---------------
 		const profile: WorkerProfile = selectProfile(options.profilesDir, request, { kind, delivery });
+		const { skills, overridden } = this.#skills(request, profile);
+		const skillNames = skills.map((s) => s.name);
 		const inputs = composeRoutingInputs(request, issue, task);
 		const { scope, risk } = inputs;
 		const routing: RoutingDecision = await resolveWithCapacity(
@@ -562,6 +588,7 @@ export class Dispatcher {
 				receipt: "refused",
 				promote: pre.promote,
 				findings: pre.findings,
+				...(skills.length ? { skills_not_applied: skillNames } : {}),
 			};
 		}
 		if (pre.status !== "ok") {
@@ -637,7 +664,7 @@ export class Dispatcher {
 					task: task.forBrief + references,
 					artifact_path: artifactPath,
 				},
-			}) + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
+			}) + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
 			// Freeze parent input for reviewer coverage, never worker-authored text.
 			// taskFile stays out of the brief; both receive the reference snapshot.
@@ -665,6 +692,7 @@ export class Dispatcher {
 				sessionDir: join(options.home, LAYOUT.sessions),
 				sessionName: issue.id,
 				...(beadsDb ? { extraEnv: { BEADS_DIR: dirname(beadsDb) } } : {}),
+				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 			});
 			recorder.markSpawned({
 				pid: managed.worker.pid,
@@ -754,6 +782,7 @@ export class Dispatcher {
 				// `cp:routing_resolved`, persisted where a read-only view (status, the
 				// status block) can reach it without re-running `inferScopeAndRisk` at
 				// render time. One source of truth: this IS the routing decision.
+				...(skills.length ? { skills } : {}),
 				routing: recorded,
 			};
 			// A re-dispatch after a failed or finished attempt replaces the old
@@ -780,6 +809,7 @@ export class Dispatcher {
 				session_id: record.worker.session_id,
 				wall_clock_seconds: hardBounds.wall_clock_seconds,
 				...(gate.warning ? { risk_warning: gate.warning } : {}),
+				...(skills.length ? { skills: skillNames } : {}),
 			};
 		} catch (error) {
 			reservation?.();
@@ -850,63 +880,6 @@ function assertDispatchable(issue: Job): void {
 	}
 }
 
-/** What `cleanupCreatedJobBranch` did, and why. Journaled as `job_branch_cleaned`. */
-export interface JobBranchCleanup {
-	deleted: boolean;
-	/** The sha the branch pointed at when it was removed. Only when deleted. */
-	at?: string;
-	/** Why it was left alone, or why the removal failed. Only when NOT deleted. */
-	note?: string;
-}
-
-/**
- * cp-bw4: undo the branch **this dispatch** created, and only when deleting it
- * provably destroys nothing.
- *
- * The guard is deliberately narrow, because this runs inside a `catch` — the
- * one place the code already knows an assumption failed:
- *
- *  - the caller must have observed `#createJobBranch` succeed in this call
- *    (that is the caller's `branchCreatedHere` flag, never inferred here from
- *    the branch merely existing);
- *  - the branch name must be a job id. It always is — it is the job id — so a
- *    name that is not is a bug upstream, and a delete is the last thing that
- *    should run on it. Nothing is executed at all in that case;
- *  - the branch tip must equal `origin/<base>`, i.e. no commit was ever made on
- *    it. A branch with commits, or a tip that cannot be read, is left alone.
- *
- * Never throws: the caller wraps it in `safely()` like every other cleanup.
- * Exported so the guard is testable without a lease, a ledger or a worker.
- */
-export async function cleanupCreatedJobBranch(options: {
-	git: GitRunner;
-	worktree: string;
-	branch: string;
-	base: string;
-}): Promise<JobBranchCleanup> {
-	const { git, worktree, branch, base } = options;
-	if (!new RegExp(JOB_ID_PATTERN).test(branch)) {
-		return { deleted: false, note: `refusing to remove ${branch} in ${worktree}: not a job id` };
-	}
-	const left = (why: string): JobBranchCleanup => ({
-		deleted: false,
-		note: `branch ${branch} was left in place at ${worktree} (${why}) — remove it by hand before re-dispatching`,
-	});
-
-	const tip = await git(worktree, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
-	const baseTip = await git(worktree, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base}`]);
-	const head = tip.stdout.trim();
-	const anchor = baseTip.stdout.trim();
-	if (tip.status !== 0 || head === "") return left("its tip could not be read");
-	if (baseTip.status !== 0 || anchor === "") return left(`origin/${base} could not be read`);
-	if (head !== anchor) return left("it has commits on it");
-
-	const detached = await git(worktree, ["switch", "--detach", anchor]);
-	if (detached.status !== 0) return left(`the worktree could not leave it: ${lastLine(detached.stderr)}`);
-	const deleted = await git(worktree, ["branch", "-D", branch]);
-	if (deleted.status !== 0) return left(`the delete failed: ${lastLine(deleted.stderr)}`);
-	return { deleted: true, at: head };
-}
 
 async function safely(fn: () => Promise<unknown>): Promise<void> {
 	try {
@@ -939,15 +912,6 @@ async function defaultGit(
 	});
 }
 
-function lastLine(text: string): string {
-	return (
-		text
-			.split("\n")
-			.map((line) => line.trim())
-			.filter((line) => line.length > 0)
-			.at(-1) ?? ""
-	);
-}
 
 /** Stdout parity with `cmdp dispatch`: one JSON object, no prose. */
 export function formatDispatchResult(result: DispatchResult | ScriptDispatchResult): string {

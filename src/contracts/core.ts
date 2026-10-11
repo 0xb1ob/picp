@@ -27,6 +27,10 @@ export const JobIdSchema = Type.String({
 	description: "job id, e.g. cp-t02-contracts-vuh",
 });
 
+/** An installed pi skill name (pi docs/skills.md; `SKILL_NAME_RE` in src/viewer/skill-mentions.ts): never a path. */
+export const SKILL_NAME_PATTERN = "^[a-z0-9]+(-[a-z0-9]+)*$";
+export const SkillNameSchema = Type.String({ pattern: SKILL_NAME_PATTERN, maxLength: 64 });
+
 export function isSafeJobId(value: string): boolean {
 	return JOB_ID_RE.test(value);
 }

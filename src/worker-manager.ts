@@ -15,7 +15,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
 	ASK_OPERATOR_TOOL,
 	type BudgetConfig,
@@ -59,6 +59,12 @@ export class SpawnSafetyError extends Error {
 		super(message);
 		if (options?.code !== undefined) this.code = options.code;
 	}
+}
+
+/** Package skills, then the per-job ones; backstop: each per-job dir was resolved upstream (src/job-skills.ts). */
+function withJobSkills(packaged: readonly string[], perJob: readonly string[] = []): string[] {
+	for (const dir of perJob) if (!isAbsolute(dir) || !existsSync(join(dir, "SKILL.md"))) throw new SpawnSafetyError(`per-job skill ${dir} is not an absolute skill directory`);
+	return [...packaged, ...perJob];
 }
 
 /**
@@ -353,6 +359,8 @@ export interface SpawnRequest {
 	extraArgs?: readonly string[];
 	parentEnv?: NodeJS.ProcessEnv;
 	extraEnv?: NodeJS.ProcessEnv;
+	/** Per-job operator-named skill dirs (`cp_dispatch skills`): absolute realpaths resolved upstream; package skills stay off. */
+	skills?: readonly string[];
 }
 
 export interface WorkerManagerOptions {
@@ -514,6 +522,7 @@ export class WorkerManager {
 		// cur.3.1: planner questions are a blocked envelope, not ask_operator.
 		// The dialog relay stays for the plan-review console until that ticket lands.
 		const optional = this.#optionalPackages(request.profile);
+		const skills = withJobSkills(optional.skills, request.skills);
 		// An activated package's own tools (pi-web-access) join the profile's allowlist.
 		const tools = resolveWorkerTools({
 			...request.profile,
@@ -544,7 +553,7 @@ export class WorkerManager {
 			model: request.model,
 			tools,
 			extensions: [this.#options.workerReporterPath, ...(request.extensions ?? []), ...optional.extensions],
-			...(optional.skills.length > 0 ? { skills: optional.skills } : {}),
+			...(skills.length > 0 ? { skills } : {}),
 			env,
 			...(request.thinking ?? request.profile.frontmatter.thinking
 				? { thinking: (request.thinking ?? request.profile.frontmatter.thinking) as ThinkingLevel }
@@ -635,7 +644,7 @@ export class WorkerManager {
 			tools: plan.tools,
 			...(onDialog ? { onDialog } : {}),
 			extensions: [this.#options.workerReporterPath, ...(request.extensions ?? []), ...optional.extensions],
-			...(optional.skills.length > 0 ? { skills: optional.skills } : {}),
+			...(optional.skills.length + (request.skills?.length ?? 0) > 0 ? { skills: withJobSkills(optional.skills, request.skills) } : {}),
 			env: plan.env,
 			...(request.thinking ?? request.profile.frontmatter.thinking
 				? { thinking: (request.thinking ?? request.profile.frontmatter.thinking) as ThinkingLevel }

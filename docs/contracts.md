@@ -1620,7 +1620,9 @@ from a startup classification): no fleet record; phase is neither `held` nor
 `worker-compaction-policy-block` entry (`session_policy_blocked`) or cannot be
 read or parsed as JSONL (`session_scan_failed`); a `WorkerManager` entry already exists for
 the job; a child of the stored pid is alive; the pid is alive; the worktree is gone; the worktree has an
-in-progress git operation or a detached HEAD. Every refusal is a `{ok: false,
+in-progress git operation or a detached HEAD; an operator-named skill on the record no longer
+resolves by name (`skill_unresolved` — reinstall it, or tear down and re-dispatch without it;
+bounded recovery's redispatch escalates the same refusal as `revive_refused`). Every refusal is a `{ok: false,
 code, message}` value, never a thrown error, so `cp_revive` can show it to the
 operator instead of crashing.
 
@@ -1957,7 +1959,7 @@ implementer, ship workers and the CP parent get no MCP; a home with no enabled s
 read-only workers exactly as before. `/doctor` prints `mcp.operator` (a live `pi mcp list --json`,
 bounded at 20 s, run only when a server is enabled; never a config value) and `mcp.workers`.
 
-**No worker gets a `--skill` path (skillreads-vqy).** pi lists every loaded
+**No worker gets a package `--skill` path (skillreads-vqy).** pi lists every loaded
 skill with "use the read tool to load a skill's file", and some models then
 read each `SKILL.md` at session start (34 gpt-6-sol jobs, about 11.6K tokens
 and 3-6 turns each). An activated package contributes its extensions, flags,
@@ -1970,7 +1972,8 @@ own mode, and the process rules the four superpowers skills carried
 activated**, by any role or profile (`NEVER_WORKER_RESOURCES`): `writing-plans`,
 `brainstorming`, `requesting-code-review`, `rpiv-ask-user-question`,
 `pi-goal-x`, `pi-subagents`; and `pi-caveman` never for a planner or a
-reviewer (`ROLE_NEVER`).
+reviewer (`ROLE_NEVER`). The one exception is an operator-named per-job skill
+(below): package skills stay off.
 
 Precedence, highest first: **profile** (`packages: [...]` in the frontmatter
 replaces the role default outright; `packages: []` means none) → **role**
@@ -1986,10 +1989,30 @@ profile in `profiles/`: each gets only its configured resources, `--no-extension
 and `--no-skills` stay on, and no artifact-producing role loads caveman.
 
 **External skills do not reach a worker.** Workers run `--no-skills` and
-receive no `--skill <path>`; a rule a worker needs is one line in its profile
+receive no `--skill <path>` except an operator-named one (below); a rule a worker needs is one line in its profile
 or brief, not a skill file it is invited to read. The obra/superpowers suite
 is not loaded, and `writing-plans` would conflict with the gate's own
 implementation-plan rubric — two plan formats, one of which nothing scores.
+
+**One exception: an operator-named per-job skill** (`cp_dispatch skills`,
+`src/job-skills.ts`). At most 8 installed skill names (never paths), re-resolved
+in code under `~/.pi/agent/skills` (pi's agent dir) or `<home>/skills` after
+profile selection and before any lease, reach that one worker as
+`--skill <realpath>` (`--no-skills` stays on) and are named in a brief note;
+the fleet record stores `skills: [{name, dir}]`, and revive and bounded
+recovery re-resolve them by name or refuse `skill_unresolved`. Reviewers
+(gate, quality, diff) never get one, a script job refuses them, and a promote
+reports them as `skills_not_applied`. An explicit mention **may override
+`NEVER_WORKER_RESOURCES` and `ROLE_NEVER`** for that one worker — so
+`writing-plans`, `brainstorming`, `requesting-code-review`, `pi-caveman` and
+`pi-hashline-edit-pro` are allowed by mention, and the brief note adds that
+the skill was attached by explicit operator mention and, since no human
+answers inside a worker, must not wait for user input. These stay
+hard-refused even by mention, with a named reason (they hang a headless
+worker or recurse into dispatch): `rpiv-ask-user-question`,
+`@juicesharp/rpiv-ask-user-question`, `pi-goal-x`, `pi-subagents`,
+`@tintinweb/pi-subagents`. Package auto-loading stays off, and the
+never-lists are unchanged for everything that is not an explicit mention.
 
 Forbidden at spawn (`WORKER_FORBIDDEN_FLAGS`): `--approve`/`-a` (would trust
 foreign project config) and `--continue`/`-c` (would resume an unrelated

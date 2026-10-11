@@ -2,7 +2,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, normalizeLegacyRoles, OriginSchema, type Role, RoleSchema, SCHEMA_VERSION, UsageSchema, validate, type ValidationResult } from "./core.ts";
+import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type JobKind, JobKindSchema, normalizeLegacyRoles, OriginSchema, type Role, RoleSchema, SCHEMA_VERSION, SkillNameSchema, UsageSchema, validate, type ValidationResult } from "./core.ts";
 import { isSafeScriptPath } from "./jobs.ts";
 import { type Failure, FailureSchema, JobHardBoundsSchema } from "./limits.ts";
 import { type JobRouting, JobRoutingSchema } from "./routing.ts";
@@ -291,6 +291,8 @@ export const FleetRecordSchema = Type.Object(
 		bounds: Type.Optional(JobHardBoundsSchema),
 		failure: Type.Optional(FailureSchema),
 		receipts: Type.Optional(Type.Array(ReceiptSchema, { maxItems: 20 })),
+		/** Operator-named skills this worker was spawned with (`cp_dispatch skills`); revive/recovery re-resolve them by name. */
+		skills: Type.Optional(Type.Array(Type.Object({ name: SkillNameSchema, dir: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 8 })),
 		/** The scope/risk/thinking that decided this job's model (cp-status-scope-risk). */
 		routing: Type.Optional(JobRoutingSchema),
 		/**

@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { test } from "node:test";
@@ -44,7 +44,7 @@ import {
 	registryProbe,
 	splitModelRef,
 } from "../src/routing.ts";
-import { SpawnSafetyError, WorkerManager } from "../src/worker-manager.ts";
+import { SpawnSafetyError, type SpawnRequest, WorkerManager } from "../src/worker-manager.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -81,6 +81,7 @@ interface Bench {
 	provider: MockProvider;
 	clone: string;
 	model: string;
+	manager: WorkerManager;
 	cleanup(): Promise<void>;
 }
 
@@ -161,6 +162,7 @@ async function bench(
 		provider,
 		clone,
 		model,
+		manager,
 		cleanup,
 	};
 }
@@ -201,6 +203,50 @@ test("a schedule-run dispatch tells the worker who started the run", { skip: SKI
 	await b.makeDispatcher({ mandates: new MandateStore(b.home, { runs }) }).dispatch({ jobId: job.id, task: "Bump x.", model: b.model, fetch: false });
 	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 	assert.match(brief, new RegExp(`> Started via dashboard Run now \\(request ${click}, ${at}\\); no operator pre-approval recorded`));
+});
+
+test("skills: a named skill reaches the spawn, the brief, the fleet record and the result; writing-plans on a planner by mention; refusals take nothing", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const agent = realpathSync(mkdtempSync(join(tmpdir(), "cp-dispatch-skills-")));
+	t.after(() => rmSync(agent, { recursive: true, force: true }));
+	for (const name of ["tdd-x", "writing-plans", "pi-subagents"]) {
+		mkdirSync(join(agent, "skills", name), { recursive: true });
+		writeFileSync(join(agent, "skills", name, "SKILL.md"), `---\ndescription: does ${name}\n---\n`);
+	}
+	const spawned: SpawnRequest[] = [];
+	const manager = new Proxy(b.manager, {
+		get(target, prop) {
+			if (prop === "spawn") return (request: SpawnRequest) => (spawned.push(request), target.spawn(request));
+			const value = Reflect.get(target, prop) as unknown;
+			return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+		},
+	});
+	const dispatcher = b.makeDispatcher({ manager, skillAgentDir: agent });
+
+	const refused = await b.ledger.create({ title: "refused skills", project: "demo", delivery: "local", kind: "ship" });
+	for (const [skills, why] of [[["nope"], /skill nope is not installed/], [["pi-subagents"], /skill pi-subagents is never given to a worker, even by explicit mention/]] as const) {
+		await assert.rejects(dispatcher.dispatch({ jobId: refused.id, task: "x", model: b.model, fetch: false, skills: [...skills] }), (error: unknown) => error instanceof DispatchError && why.test(error.message));
+	}
+	assert.equal(b.fleet.get(refused.id), undefined);
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")), "a refused skill takes no lease");
+	assert.equal(spawned.length, 0);
+
+	const job = await b.ledger.create({ title: "plan with skills", project: "demo", delivery: "local", kind: "ship" });
+	const request = { jobId: job.id, task: "Plan x.", model: b.model, fetch: false, profile: "planner", skills: ["writing-plans", "tdd-x"] };
+	const preview = await dispatcher.preview(request);
+	assert.deepEqual(preview.skills, [{ name: "writing-plans", dir: join(agent, "skills", "writing-plans") }, { name: "tdd-x", dir: join(agent, "skills", "tdd-x") }]);
+	const result = await dispatcher.dispatch(request);
+	assert.deepEqual(result.skills, ["writing-plans", "tdd-x"]);
+	assert.deepEqual(spawned[0]?.skills, [join(agent, "skills", "writing-plans"), join(agent, "skills", "tdd-x")]);
+	assert.deepEqual(b.fleet.get(job.id)?.skills, preview.skills);
+	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
+	assert.match(brief, /> Skills the operator named for this job: `writing-plans`/);
+	assert.match(brief, /> `writing-plans` was attached by explicit operator mention .* must not wait for user input/);
+	assert.doesNotMatch(brief, /`tdd-x` was attached by explicit operator mention/);
+
+	const script = await b.ledger.create({ title: "script", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
+	await assert.rejects(dispatcher.dispatchScript({ jobId: script.id, skills: ["tdd-x"] }), /skills apply to pi workers; a script job runs no pi/);
+	await assert.rejects(dispatcher.previewScript({ jobId: script.id, skills: ["tdd-x"] }), /skills apply to pi workers/);
 });
 
 test("model-only dispatcher refuses declared scripts without falling through to routing", { skip: SKIP }, async (t) => {

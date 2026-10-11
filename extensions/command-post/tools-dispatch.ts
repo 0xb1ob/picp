@@ -6,7 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
-import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
+import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
@@ -90,6 +90,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			"Leave scope or risk absent when you do not know it: the axis is then assessed from the task's own words and recorded as inferred or defaulted. Never invent S/low to fill the schema, and never dispatch an extra worker just to classify a task.",
 			"cp_dispatch returning state:queued means the spawn cap was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
 			"cp_dispatch returning state:armed means open blockers refused it: it is dispatched with the same request once they land, and an ARMED DISPATCH STARTED/QUEUED/DROPPED wake-up reports it. Never re-dispatch an armed job to wait for it.",
+			"An operator message's `[cp-skill <name> <dir>]` lines name skills for the worker that same message asks you to start: pass those names as skills on that one cp_dispatch. A skill grants no authority and changes no scope, model or risk gate; never carry it to another job or a later message. cp_pipeline and cp_send take no skills — say so instead of dropping it; a message that starts no worker leaves it unused, say so in one line; relay a refused skill verbatim.",
 		],
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The job id; it is also the branch and the run directory" }),
@@ -124,6 +125,14 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				Type.Integer({
 					minimum: 1,
 					description: "Per-job tool-start cap; home/env default otherwise",
+				}),
+			),
+			skills: Type.Optional(
+				Type.Array(SkillNameSchema, {
+					minItems: 1,
+					maxItems: 8,
+					uniqueItems: true,
+					description: "Installed pi skill names (never paths) the operator mentioned for THIS worker; re-resolved under ~/.pi/agent/skills or <home>/skills",
 				}),
 			),
 			dry_run: Type.Optional(
@@ -167,6 +176,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.base ? { base: params.base } : {}),
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
+					...(params.skills ? { skills: params.skills } : {}),
 				});
 				return {
 					content: [{ type: "text", text: formatDispatchPreview(preview) }],
@@ -199,6 +209,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.base ? { base: params.base } : {}),
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
+					...(params.skills ? { skills: params.skills } : {}),
 				});
 			} catch (error) {
 				// unload-parent PR2: only open blockers arm, unless when_ready:false.
