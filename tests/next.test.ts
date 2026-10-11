@@ -333,6 +333,9 @@ test("T3 (cp-speedup-next): a fleet total above three is informational — a gra
 	const text = formatNext(result);
 	assert.match(text, /fleet: 4 in-flight worker records .* informational, not a dispatch quota: each grant's parallelism decides admission, held deliveries take no slot, and cp_dispatch queues at a full spawn cap/);
 	assert.match(text, new RegExp(`action: dispatch ${job.id}`));
+	const capped = await cpNext({ ...ports, capacity: () => ({ active: 10, cap: 10, held: [] }) }, "demo");
+	assert.deepEqual([capped.action.kind, capped.action.job_id], ["dispatch", job.id], "a full spawn cap still recommends dispatch");
+	assert.match(capped.action.reason, /spawn cap 10 full: .* cp_dispatch queues it/);
 
 	mkdirSync(join(home.path, LAYOUT.state), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ state: "draining", started_at: "2026-08-27T12:00:00Z", deadline: "2026-08-27T12:10:00Z", timeout_s: 600, jobs: [] }));
