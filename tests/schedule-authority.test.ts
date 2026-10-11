@@ -15,7 +15,7 @@ import { createScratchLedger } from "./harness/index.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { cpNext, formatNext } from "../src/next.ts";
-import { EMPTY_USAGE, ESCALATION_NO_MANDATE } from "../src/contracts.ts";
+import { EMPTY_USAGE } from "../src/contracts.ts";
 import { observeRunUsage, runAuthority, runRiskPreapproval } from "../src/schedule-authority.ts";
 import { decisions } from "../src/viewer/overview-decisions.ts";
 
@@ -172,13 +172,15 @@ test("A1 viewer readers retain run basis and source",async(t)=>{
 });
 
 
-test("run high-risk asks once without mandate attribution; scripts never use standing approval",async(t)=>{
+test("run high-risk asks once under run attribution; scripts never use standing approval",async(t)=>{
  const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const,script:true};
  const before = JSON.stringify(mandates.list());
  for(let i=0;i<2;i++) await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
  const escalations = new EscalationStore({home:home.path}).list({jobId:job.jobId,kind:"risk_high_irreversible"});
- assert.equal(escalations.length,1);assert.match(escalations[0]!.question,new RegExp(run.id));assert.equal(escalations[0]!.mandate_id,ESCALATION_NO_MANDATE);
+ assert.equal(escalations.length,1);assert.match(escalations[0]!.question,new RegExp(run.id));assert.equal(escalations[0]!.mandate_id,run.id);
+ assert.match(escalations[0]!.mandate_clause,new RegExp(`^${run.id} \\(schedule ${run.schedule_id}, policy rev 1\\)`));
+ assert.match(escalations[0]!.question,/Started by the operator via dashboard Run now \(request sc-approval, /);
  const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
  const dangerous = await ledger.create({title:"dangerous review",description:"force push the branch",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`,"risk:high"]});
  await runs.admitMember(run.id,{job_id:dangerous.id,role:null,admitted_at:dangerous.created_at});
@@ -191,6 +193,66 @@ test("run high-risk asks once without mandate attribution; scripts never use sta
  const auditBefore = JSON.stringify(runs.run(run.id)?.authority_log);
  assert.throws(()=>scheduleRunVerdict(mandates.runContext(),"dispatch",{...job,advice:true},[],now),ScheduleAuthorityError);
  assert.equal(JSON.stringify(runs.run(run.id)?.authority_log),auditBefore);
+});
+
+test("verified operator starts pre-approve risk:high for their run only; timer runs and hard stops still ask under run attribution",async(t)=>{
+ const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
+ const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
+ const store = new EscalationStore({home:home.path});
+ await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
+ const timer = store.list({jobId:job.jobId,kind:"risk_high_irreversible",status:"open"})[0]!;
+ assert.equal(timer.mandate_id,run.id);
+ assert.match(timer.mandate_clause,new RegExp(`^${run.id} \\(schedule sch-123456, policy rev 1\\): ask_on includes risk:high$`));
+ assert.ok(timer.question.includes(`Started by the timer (slot ${at})`),timer.question);
+ await store.withdraw(timer.id);
+ const click = "sc-20261010030653-11806a8e";
+ runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,slot:at,missed:false,request_id:click};r.risk_preapproval={operator_quote:r.policy.approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
+ const permission = await mandates.assertDispatchAllowed(job);
+ assert.equal(permission.run?.started_by,`Started by the operator via dashboard Run now (request ${click}, ${at})`);
+ assert.equal(store.list({kind:"risk_high_irreversible",status:"open"}).length,0);
+ assert.deepEqual(runs.run(run.id)?.risk_preapproved.map(r=>[r.decided_by,r.evidence[0]]),[["operator",`fire run_now ${click}`]]);
+ const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
+ const dangerous = await ledger.create({title:"dangerous",description:"force push the branch",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`,"risk:high"]});
+ await runs.admitMember(run.id,{job_id:dangerous.id,role:null,admitted_at:dangerous.created_at});
+ await assert.rejects(mandates.assertDispatchAllowed({jobId:dangerous.id,project:"demo",kind:"ship",risk:"high"}),e=>e instanceof ScheduleAuthorityError && e.code==="hard_stop");
+ const stop = store.list({jobId:dangerous.id,kind:"risk_high_irreversible",status:"open"})[0]!;
+ assert.equal(stop.mandate_id,run.id);assert.match(stop.mandate_clause,/hard stop/);
+ assert.match(stop.question,new RegExp(`Started by the operator via dashboard Run now \\(request ${click}, `));
+ runs.editRun(run.id,r=>{r.trigger={via:"cp_schedule",at,slot:at,missed:false,tool_call_id:"call-1",quote_sha:"0123456789ab"};r.risk_preapproval={...r.risk_preapproval!,operator_quote:"Run sch-123456 now."};});
+ assert.equal((await mandates.assertDispatchAllowed({...job,promotion:true})).run?.started_by,`Started by the operator via cp_schedule run_now (call call-1, ${at})`);
+ assert.equal(runs.run(run.id)?.risk_preapproved.at(-1)?.evidence[0],"fire run_now call-1");
+ runs.editRun(run.id,r=>{r.policy.exclusions={job_kinds:["ship"]};});
+ await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="kind_excluded");
+});
+
+test("a pre-approved run passes review, repair and implement uses of a risk:high member with no escalation",async(t)=>{
+ const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
+ runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,request_id:"sc-click"};r.risk_preapproval={operator_quote:r.policy.approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
+ const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
+ for (const use of ["review","repair","implement"] as const) assert.equal(scheduleRunVerdict(mandates.runContext(),use,job,[],now).source,"schedule-run");
+ assert.equal(new EscalationStore({home:home.path}).list({kind:"risk_high_irreversible"}).length,0);
+ assert.deepEqual(runs.run(run.id)?.risk_preapproved,[],"only dispatch and promote are audited as risk_preapproved");
+ assert.deepEqual(runs.run(run.id)?.authority_log.map(r=>[r.use,r.decision]),[["review","permit"],["repair","permit"],["implement","permit"]]);
+});
+
+test("org-review keeps dashboard-only clearance: a cp_schedule start records the quote but still asks",async(t)=>{
+ const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
+ const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
+ assert.equal((await mandates.assertDispatchAllowed(job)).run?.id,run.id);
+ runs.editRun(run.id,r=>{r.trigger={via:"cp_schedule",at,tool_call_id:"call-1",quote_sha:"0123456789ab"};});
+ await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
+});
+
+test("org-review dashboard run whose org_review_approve channel lacks dashboard still asks",async(t)=>{
+ const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
+ const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
+ assert.equal(runRiskPreapproval(run,job),true);
+ const other = structuredClone(run);other.policy.effect_channels.org_review_approve = ["cp_schedule"] as unknown as ["dashboard"];
+ assert.equal(runRiskPreapproval(other,job),false);
+ // The runs-file validator refuses to persist this channel list, so the store read serves it in memory.
+ const runOfJob = runs.runOfJob.bind(runs);
+ t.mock.method(runs,"runOfJob",(id:string)=>id === job.jobId ? structuredClone(other) : runOfJob(id));
+ await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
 });
 
 

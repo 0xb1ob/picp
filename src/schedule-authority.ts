@@ -59,14 +59,24 @@ export function withRunReviewerSpend(home: string, jobs: readonly MandateUsageJo
 }
 export function runRiskPreapproval(run: ScheduleRun, job: RunAuthorityJob, createdAt?: string): boolean {
 	return job.project === run.policy.project && !job.script && hardStops([...(job.pathHints ?? []), job.text ?? ""].join("\n")).length === 0 &&
+		// Org-review approvals keep the saved dashboard-only clearance.
+		(run.policy.recipe.skill !== "cp-org-pr-review" || (run.trigger.via === "dashboard" && run.policy.effects.includes("org_review_approve") && run.policy.effect_channels.org_review_approve?.includes("dashboard") === true)) &&
 		preapprovalRecordCovers(run.risk_preapproval, run.members.map((m) => m.job_id), job, createdAt);
+}
+/** Who started a run, in the words a brief and an escalation carry. */
+export function runStartedBy(run: ScheduleRun): string {
+	const { trigger } = run;
+	if (trigger.via === "dashboard") return run.risk_preapproval ? `Started by the operator via dashboard Run now (request ${trigger.request_id}, ${trigger.at})` : `Started via dashboard Run now (request ${trigger.request_id}, ${trigger.at}); no operator pre-approval recorded`;
+	if (trigger.via === "cp_schedule") return `Started by the operator via cp_schedule run_now (call ${trigger.tool_call_id}, ${trigger.at})`;
+	return trigger.via === "watch" ? `Started by the watch trigger (${trigger.at})` : `Started by the timer (slot ${trigger.slot ?? trigger.at})`;
 }
 function audit(ctx: ScheduleAuthorityContext, run: ScheduleRun, use: GrantUse, job: RunAuthorityJob, now: string, code?: string): void {
 	ctx.runs.editRun(run.id, (row) => {
 		row.authority_log = [...row.authority_log, { at: now, use, job_id: job.jobId, decision: code ? "refuse" : "permit", ...(code ? { code } : {}) }].slice(-200);
 		if (!code && (use === "dispatch" || use === "promote") && job.risk === "high" && runRiskPreapproval(row, job, ctx.ledgerJob(job.jobId)?.created_at)) {
-			row.risk_preapproved = [...row.risk_preapproved, { at: now, use, job_id: job.jobId, decided_by: "operator-delegated" as const,
-				quote_sha: quoteSha(row.risk_preapproval!.operator_quote), evidence: [...(row.trigger.request_id ? [`fire run_now ${row.trigger.request_id}`] : []), ...(job.evidence ?? [])].slice(0, 8).map((s) => s.slice(0, 200)) }].slice(-200);
+			const start = row.trigger.request_id ?? row.trigger.tool_call_id;
+			row.risk_preapproved = [...row.risk_preapproved, { at: now, use, job_id: job.jobId, decided_by: "operator" as const,
+				quote_sha: quoteSha(row.risk_preapproval!.operator_quote), evidence: [...(start ? [`fire run_now ${start}`] : []), ...(job.evidence ?? [])].slice(0, 8).map((s) => s.slice(0, 200)) }].slice(-200);
 		}
 	});
 }
@@ -95,9 +105,11 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 	if (stops.length || (risk === "high" && policy.ask_on.includes("risk:high"))) {
 		const escalations = new EscalationStore({ home: ctx.home });
 		const approved = !job.checkpoint && escalations.list({ jobId: job.jobId, kind: "risk_high_irreversible" }).some((row) => row.status === "answered" && (row.answered_by === "operator-quote" || row.answered_by === "operator-delegated") && row.basis && "operator_quote" in row.basis && /^(approve|approved|yes)$/i.test((row.answer ?? "").trim()) && row.question.includes(run.id));
-		if (!approved && !(!stops.length && (use === "dispatch" || use === "promote") && runRiskPreapproval(run, job, ledger?.created_at))) {
+		// A verified operator start covers every use of its members (the operator triggers and runs it); hard stops never.
+		if (!approved && !(!stops.length && runRiskPreapproval(run, job, ledger?.created_at))) {
 			if (job.advice) refuse(stops.length ? "hard_stop" : "risk_high", "risk:high requires operator text");
-			const raised = raiseRiskHigh(escalations, { jobId: job.jobId, evidence: [`schedule-run ${run.id}`, ...(job.evidence ?? []), ...stops] });
+			const raised = raiseRiskHigh(escalations, { jobId: job.jobId, evidence: [`schedule-run ${run.id}`, ...(job.evidence ?? []), ...stops], mandateId: run.id,
+				clause: `${run.id} (schedule ${run.schedule_id}, policy rev ${run.policy_revision}): ${stops.length ? "hard stop; no standing approval covers it" : "ask_on includes risk:high"}`, startedBy: runStartedBy(run) });
 			// Synchronous checkpoint/reviewer consumers still refuse immediately; a failed escalation is named.
 			void raised.catch((error) => process.stderr.write(`schedule-run ${run.id}: risk escalation failed: ${(error as Error).message}\n`));
 			refuse(stops.length ? "hard_stop" : "risk_high", "risk:high requires operator text", raised);

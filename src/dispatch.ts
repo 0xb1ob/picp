@@ -570,13 +570,13 @@ export class Dispatcher {
 		const base = pre.base as string;
 
 		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs);
-		let mandateId: string | undefined;
+		let mandateId: string | undefined, startedBy: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(
 				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
 				options.fleet.read().jobs,
 			);
-			mandateId = permission?.selected?.id;
+			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
 		} catch (error) {
 			throw error instanceof MandateError && error.code ? error : new DispatchError((error as Error).message); // a coded refusal keeps its code (dispatch queue)
 		}
@@ -636,7 +636,7 @@ export class Dispatcher {
 					task: task.forBrief + references,
 					artifact_path: artifactPath,
 				},
-			}) + (deps.note ? `\n\n> ${deps.note}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
+			}) + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
 			// Freeze parent input for reviewer coverage, never worker-authored text.
 			// taskFile stays out of the brief; both receive the reference snapshot.

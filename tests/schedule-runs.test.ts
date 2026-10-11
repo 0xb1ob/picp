@@ -124,14 +124,20 @@ test("corrupt JSON and invalid contracts are named errors; failed validation pre
 	}
 });
 
-test("validators fail closed for nested fields, cap, audit bounds and dashboard-only preapproval", () => {
+test("validators fail closed for nested fields, cap, audit bounds and verified-start-only preapproval", () => {
+	const approval = { operator_quote: "Review the queue", decided_by: "operator-quote" as const, scope: "mandate_jobs" as const, granted_at: at };
 	for (const mutate of [
 		(r: ScheduleRun) => Object.assign(r, { unknown: true }), (r: ScheduleRun) => Object.assign(r.trigger, { unknown: true }),
 		(r: ScheduleRun) => { r.policy_revision = 2; }, (r: ScheduleRun) => { r.members = [member("cp-a"), member("cp-a")]; },
 		(r: ScheduleRun) => { r.anchor_job_id = "cp-a"; }, (r: ScheduleRun) => { r.risk_preapproved = Array(201).fill({}); },
 		(r: ScheduleRun) => { r.authority_log = Array(201).fill({}); }, (r: ScheduleRun) => { r.deadline_at = at; },
-		(r: ScheduleRun) => { r.risk_preapproval = { operator_quote: "Review the queue", decided_by: "operator-quote", scope: "mandate_jobs", granted_at: at }; },
+		(r: ScheduleRun) => { r.risk_preapproval = approval; },
+		(r: ScheduleRun) => { r.trigger = { via: "dashboard", at }; r.risk_preapproval = approval; },
+		(r: ScheduleRun) => { r.trigger = { via: "cp_schedule", at, quote_sha: "0123456789ab" }; r.risk_preapproval = approval; },
 	]) { const r = run(); mutate(r); assert.ok(scheduleRunErrors(r).length); }
+	const started = run(); started.trigger = { via: "cp_schedule", at, tool_call_id: "call-1", quote_sha: "0123456789ab" }; started.risk_preapproval = approval;
+	started.risk_preapproved = [{ at, job_id: "cp-a", use: "dispatch", decided_by: "operator", quote_sha: "123456abcdef", evidence: ["fire run_now call-1"] }];
+	assert.deepEqual(scheduleRunErrors(started), []);
 	// Compile-time parity with the contracts' dependency-bearing types.
 	const pre: RiskPreapproval = { operator_quote: "Review the queue", decided_by: "operator-quote", scope: "mandate_jobs", granted_at: at };
 	const row: RiskPreapprovedRow = { at, job_id: "cp-a", use: "dispatch", decided_by: "operator-delegated", quote_sha: "123456abcdef", evidence: [] };
