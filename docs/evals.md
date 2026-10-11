@@ -137,8 +137,16 @@ does not load):
   review-revision, blocked-evidence, clean-pushed-delivery, exactly-once-report
 
 An empty `labels: []` is meaningful ground truth: the clean, style-only and
-false-positive-trap cases say *there is nothing to find*, so every finding
-counts against precision.
+false-positive-trap cases — including the safe twins — say *there is nothing to
+find*, so every finding counts against precision. Two unsafe/safe twin pairs
+share a subject shape and differ only in the defect: `reviewer-seeded-p0`
+(payload branch in a shell string, P0, `revise`) ↔ `reviewer-shell-argv-safe`
+(the same branch as one `execFileSync` argument, `pass`), and
+`reviewer-instruction-promotion` (an issue body under `## Instructions`, P0,
+`revise`) ↔ `reviewer-quoted-evidence-safe` (the same body fenced as quoted
+input data, `pass`). A diff case whose labels are all P1/P2 expects `pass`:
+a medium or low finding rides in `reasons`, and pass-with-findings is not a
+miss.
 
 ## Metrics
 
@@ -205,6 +213,19 @@ model a real consumer (`renderReport`) and a preserved behavior (`512 B`) and
 requires the plan to name both (quality). Provenance:
 [`bigpowers-attribution.md`](bigpowers-attribution.md).
 
+**Reviewer audit traps (bigpowers R2).** Each reviewer quality case added or
+repurposed by the review audit pins one trap: `reviewer-false-positive-trap` —
+a requirement the fork point already satisfies (#221/#37);
+`reviewer-clean-diff` — helpers the approved slice authorizes (#218/#222);
+`reviewer-consumer-fixture` — a test double and an exact layout fixture the
+diff leaves stale (#42); `reviewer-seeded-p1` — a retry timer left armed and a
+budget reset on success (#216); `reviewer-unscorable-slice` — a task whose
+approved slice is missing (#117/#188); and the two twin pairs above for unsafe
+shell and promoted instructions. The 8 reviewer contract cases were merged into
+3 (each keeps the union of the assertions it absorbed) to stay within the
+50-case cap. Offline contract success measures that the prompt text says
+these things, not that a model does them; only quality trials measure that.
+
 ### Thresholds
 
 Ship a role's prompt change when, on ≥5 trials of that role's cases:
@@ -228,12 +249,12 @@ regressed and why before continuing. A tie goes to the shorter prompt.
 ### Where this stands today
 
 The contract arm is green and committed
-([`evals/results/contract.json`](../evals/results/contract.json)): 27 contract
+([`evals/results/contract.json`](../evals/results/contract.json)): 22 contract
 cases over the planner, reviewer and implementer surfaces, `contract_compliance`
 1.0, versions recorded.
 
 **The paid half has not been run.** Model trials cost money and were not
-authorized for the change that built this suite, so the 23 quality cases are
+authorized for the change that built this suite, so the 28 quality cases are
 recorded as `skipped` with their reason, and the baseline/candidate comparison
 above is a procedure with no numbers in it yet. Nothing here manufactures a
 result it did not measure: run the shadow above under `CP_EVAL_LIVE=1`, commit
