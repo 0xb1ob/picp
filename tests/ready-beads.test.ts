@@ -9,7 +9,7 @@ import { Ledger, normalizeExternalRef } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { cpNext, formatNext, type NextPorts } from "../src/next.ts";
 import { ProjectRegistry } from "../src/projects.ts";
-import { idleBeadObserver, readReadyBeads } from "../src/ready-beads.ts";
+import { idleBeadObserver, readReadyBeads, type ReadyBeads } from "../src/ready-beads.ts";
 import { trackersFile } from "../src/trackers/config.ts";
 import { CpBridge, type BridgeRelay } from "../src/cp-bridge.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
@@ -202,9 +202,50 @@ test("fleet settling emits once per idle period, not per mutation, and cancels s
 	assert.equal(notices.length, 1, "a stale idle observation must not wake a busy fleet");
 	await fleet.patch("cp-two", { phase: "held" });
 	await new Promise<void>((resolve) => setImmediate(resolve));
-	resolveRead!(JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }]));
+	resolveRead!(JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }, { id: "b-new", issue_type: "task", labels: [] }]));
 	await Promise.all(pending);
-	assert.equal(notices.length, 2, "the next idle period gets its own notice");
+	assert.equal(notices.length, 2, "the next idle period with a changed ready set gets its own notice");
+	assert.match(notices[1]!, /fleet idle with 2 ready beads/);
+});
+
+test("S12: an unchanged successful summary is announced once; changes, reappearance and failures still surface", async () => {
+	const notices: string[] = [];
+	let next: () => ReadyBeads[] = () => [];
+	const observe = idleBeadObserver(async () => next(), (text) => notices.push(text), () => []);
+	const busy = [worker("cp-one")];
+	const idle = [{ ...worker("cp-one"), phase: "held" as const }];
+	const cycle = async (rows: () => ReadyBeads[]) => { next = rows; await observe(busy, idle); };
+	const ready = (...ids: string[]) => () => [{ project: "demo", ids }];
+
+	await cycle(ready("b-1"));
+	await cycle(ready("b-1"));
+	assert.equal(notices.length, 1, "identical work→idle summary emits once");
+	await cycle(ready("b-1", "b-2"));
+	assert.equal(notices.length, 2, "a changed set emits");
+	assert.match(notices[1]!, /2 ready beads have no job: b-1, b-2/);
+
+	await cycle(() => { throw new Error("br exploded"); });
+	await cycle(() => [{ project: "demo", ids: [], error: "spawn br ENOENT" }]);
+	await cycle(() => [{ project: "demo", ids: [], error: "spawn br ENOENT" }]);
+	assert.equal(notices.length, 5, "thrown reads and error rows are always observable");
+	assert.match(notices[2]!, /ready beads unavailable: Error: br exploded/);
+	assert.match(notices[4]!, /\[demo\] ready beads unavailable: spawn br ENOENT/);
+	await cycle(ready("b-1", "b-2"));
+	assert.equal(notices.length, 5, "a failed read does not clear the remembered success");
+
+	await cycle(ready());
+	assert.equal(notices.length, 5, "an empty successful set emits nothing");
+	await cycle(ready("b-1", "b-2"));
+	assert.equal(notices.length, 6, "work that disappeared and reappeared announces again");
+
+	// A notice whose emit throws is not remembered, so the next idle period retries it.
+	const delivered: string[] = [];
+	let fail = true;
+	const flaky = idleBeadObserver(async () => ready("b-9")(), (text) => { if (fail) throw new Error("relay down"); delivered.push(text); }, () => []);
+	await assert.rejects(flaky(busy, idle), /relay down/);
+	fail = false;
+	await flaky(busy, idle);
+	assert.equal(delivered.length, 1);
 });
 
 test("a bead linked while br ready runs is not 'no job' when the idle probe emits (cp-05wj race)", async (t) => {
