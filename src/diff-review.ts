@@ -122,6 +122,7 @@ import type { RunRegistry } from "./runs.ts";
 import type { Sender } from "./send.ts";
 import { ReviewRunsError, type ReviewRuns, type ReviewWait, type ReviewWakeup } from "./review-runs.ts";
 import { taskAddendaBlock } from "./task-addenda.ts";
+import { materializeReviewContext, reviewContextPointer } from "./review-context.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
 export class DiffReviewError extends Error {}
@@ -635,9 +636,11 @@ export class DiffReview {
 		};
 
 		// 5. One reviewer, a bounded packet, a scratch cwd that holds nothing else:
-		// the materialized diff and — when the job has one — the frozen original
-		// task it was dispatched with (do8.4). Both are files; neither is inlined.
+		// the materialized diff, the frozen original task it was dispatched with
+		// (do8.4) and the read-only repository context (R2). All are files; none is inlined.
 		const taskCopy = copyOriginalTask({ home, jobId, scratch });
+		const addenda = taskAddendaBlock({ home, jobId, scratch });
+		const context = await materializeReviewContext({ git, clone, base, branch, headSha, scratch });
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
 		const route = await this.#route(profile, jobId, record, selection?.model);
@@ -651,10 +654,10 @@ export class DiffReview {
 				project: record.project,
 				branch,
 				artifact_path: diff.path,
-				original_task: diffOriginalTaskBlock(taskCopy) + taskAddendaBlock({ home, jobId, scratch }),
-				review_context: deltaFrom && previous
+				original_task: diffOriginalTaskBlock(taskCopy) + addenda,
+				review_context: (deltaFrom && previous
 					? `This is a delta review since ${deltaFrom}. Read prior-verdict.json first, then diff.md. The prior findings remain branch-wide evidence. If this delta touches or may invalidate one, read full-diff.md before deciding.`
-					: "This is the first review on the branch; diff.md is the complete branch diff.",
+					: "This is the first review on the branch; diff.md is the complete branch diff.") + " " + reviewContextPointer(context),
 			},
 		});
 		writeFileSync(join(runDir, "brief.md"), brief);
