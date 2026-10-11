@@ -108,6 +108,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 		promptSnippet: "Revive a dead job's worker from its session file (cp_revive)",
 		promptGuidelines: [
 			"Call cp_revive without confirm first and show the operator the plan (especially any interrupted tool call) before ever setting confirm:true.",
+			"A confirmed revival's `revived \u2026 idle` receipt means the next operation is cp_send; never plan cp_revive again for that job without a new observed death or recovery fact \u2014 a contradicting status impression is not one.",
 			"A revived worker believes its last tool call produced no result, whether or not it actually completed — say so.",
 			"cp_revive refusing on a hazardous worktree (rebase/merge/cherry-pick in progress, detached HEAD, dirty tree) is the correct outcome: the operator must resolve it by hand first.",
 			"A failed job is continued with cp_revive continue_failed:true (plan, then confirm), then cp_send — never a takeover job, a new branch or a force push.",
