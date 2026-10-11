@@ -272,6 +272,8 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 				beforeWakeup: (wakeup) => recheckDeferredRows({ kind: "verdict", wakeup }),
 				// jje.2: this live parent advances its held PRs on envelope/CI/review/startup facts itself.
 				continuation: true,
+				// cp-35d0 S6: no drain starts, and none finishes drained, while the parent's compact hold is on.
+				parentControlBusy: () => wakeups.compactHold.holding,
 				// Evidence for the bridge, not a request to dispatch or grant authority.
 				onIdleBeads: (text) => pi.sendMessage({
 					customType: "cp-idle-beads", content: text, display: true,

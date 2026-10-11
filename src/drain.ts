@@ -19,6 +19,7 @@ import { type FleetRecord, isoTimestamp, LAYOUT, type RunPhase } from "./contrac
 import type { DurableWakeupEntry } from "./contracts/wakeups.ts";
 import { isPidAlive } from "./fleet.ts";
 import { atomicWriteJson } from "./json-store.ts";
+import { PARENT_CONTROL_BUSY } from "./parent-diagnostics.ts";
 
 export const DRAIN_DEFAULT_TIMEOUT_S = 600;
 export const DRAIN_MAX_TIMEOUT_S = 3600;
@@ -127,6 +128,8 @@ export interface DrainControlDeps {
 	discard?: (ids: string[]) => void;
 	/** Does this process hold the home's parent lock? Only the owner sees the workers a drain waits for. */
 	owns?: () => boolean;
+	/** The parent's compact hold is on (cp-35d0 S6): no new drain starts, a running one cannot finish `drained`. Absent = false. */
+	parentControlBusy?: () => boolean;
 	now?: () => Date;
 }
 
@@ -186,7 +189,7 @@ export class DrainControl {
 
 	#survivors(): string[] {
 		const steps = this.#mergeSteps;
-		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : [])];
+		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : []), ...(this.#deps.parentControlBusy?.() ? ["parent compaction"] : [])];
 	}
 
 	/**
@@ -198,6 +201,8 @@ export class DrainControl {
 		// Only the lock owner sees the workers a drain waits for: anywhere else an empty manager would say "drained".
 		if (this.#deps.owns?.() === false) throw new DrainError(`refused: this session does not hold the parent lock for ${this.#deps.home}; run /cp-drain (or cp_parent drain) in the parent that does`);
 		const existing = readDrain(this.#deps.home);
+		// Refused before any write; a drain already running is still returned as is (and waits out the hold in #survivors).
+		if (existing?.state !== "draining" && this.#deps.parentControlBusy?.()) throw new DrainError(PARENT_CONTROL_BUSY);
 		this.#owned = true;
 		if (existing?.state === "draining") return existing;
 		const bounded = Math.min(Math.max(Math.round(Number.isFinite(timeoutS) ? timeoutS : DRAIN_DEFAULT_TIMEOUT_S), 0), DRAIN_MAX_TIMEOUT_S);

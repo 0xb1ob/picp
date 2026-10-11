@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { layoutForHome } from "../src/contracts.ts";
 import { CpBridgeError } from "../src/cp-bridge.ts";
 import type { DrainRecord } from "../src/drain.ts";
-import { PARENT_UNSETTLED } from "../src/parent-diagnostics.ts";
+import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../src/parent-diagnostics.ts";
 import { serviceFindings } from "../src/service/status.ts";
 import { DOCTOR_PROBE_MS, type ParentProbe, probeDoctor, readUpdateState, runUpdate, type UpdateState, updateStateFile, type VerifyResult, verifyRestart } from "../src/service/update.ts";
 import { advanceBase, createScratchRepo } from "./harness/scratch-repo.ts";
@@ -29,7 +29,7 @@ function bench(t: import("node:test").TestContext, config: unknown = { enabled: 
 	let clock = Date.parse("2026-09-28T10:00:00Z");
 	const calls: string[] = [];
 	const lines: string[] = [];
-	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, verify: [] as Array<VerifyResult | (() => VerifyResult)>, failing: new Set<string>() };
+	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, verify: [] as Array<VerifyResult | (() => VerifyResult)>, failing: new Set<string>(), hostOps: {} as Record<string, () => unknown> };
 	// cp-daemon's control socket: each op is recorded as `daemon <op>`; a failing one answers like daemonControl.
 	const daemonCall = (op: string): string | undefined => {
 		calls.push(`daemon ${op}`);
@@ -48,6 +48,7 @@ function bench(t: import("node:test").TestContext, config: unknown = { enabled: 
 		host: async (op: string, ...args: unknown[]) => {
 			calls.push(`host ${op}${args.length ? ` ${JSON.stringify(args)}` : ""}`);
 			if (fake.failing.has(`host ${op}`)) throw new Error(`${op} refused`);
+			if (fake.hostOps[op]) return fake.hostOps[op]();
 			return { text: `DRAIN: ${op}`, level: "info" };
 		},
 		drain: () => (fake.drains.length > 1 ? fake.drains.shift() : fake.drains[0] ?? "drained"),
@@ -366,6 +367,49 @@ test("a drain timeout: drainCancel, nothing stopped, drain_timeout pushed via th
 	stuck.fake.drains = ["draining"];
 	assert.equal((await stuck.run())?.last_result, "drain_timeout", "still draining at 660 s: cancelled too");
 	assert.deepEqual(stuck.hostCalls(), ["host drain [600]", "host drainCancel"]);
+});
+
+test("a drain refused during parent control (cp-35d0 S6): skipped_busy, nothing stopped or merged, retried next interval; other drain errors stay failed", async (t) => {
+	for (const message of [PARENT_CONTROL_BUSY, `parent diagnostic /cp-drain failed: ${PARENT_CONTROL_BUSY}`]) {
+		const b = bench(t);
+		const head = b.repo.head();
+		advanceBase(b.repo, "busy.txt", "busy\n");
+		b.fake.hostOps.drain = () => { throw new CpBridgeError(message); };
+		const state = await b.run();
+		assert.equal(state?.last_result, "skipped_busy", message);
+		assert.equal(state?.phase, "idle");
+		assert.ok(state?.detail?.includes(PARENT_CONTROL_BUSY), state?.detail);
+		assert.deepEqual(b.hostCalls(), ["host drain [600]", "host drainCancel"], "best-effort cancel, no stop");
+		assert.ok(!b.calls.includes("daemon hold") && !b.calls.includes("daemon reload") && !b.calls.includes("daemon health"), "a busy skip is not a failure");
+		assert.equal(b.repo.head(), head, "nothing merged");
+		delete b.fake.hostOps.drain;
+		assert.equal((await b.run())?.last_result, "updated", "the next interval retries");
+	}
+	for (const message of [`parent diagnostic /cp-drain failed: something else`, `${PARENT_CONTROL_BUSY} (and more)`, "parent diagnostic /cp-drain is not registered; reload the command-post parent extension"]) {
+		const b = bench(t);
+		advanceBase(b.repo, "other.txt", "other\n");
+		b.fake.hostOps.drain = () => { throw new CpBridgeError(message); };
+		const state = await b.run();
+		assert.equal(state?.last_result, "failed", message);
+		assert.equal(state?.detail, `drain failed: ${message}; nothing was stopped`, "an unrelated error is never swallowed");
+	}
+});
+
+test("a drain gone before it drained (the extension's hold refusal never reaches disk): drain_timeout naming the answer, nothing stopped, 4x the interval", async (t) => {
+	const b = bench(t);
+	const head = b.repo.head();
+	advanceBase(b.repo, "gone.txt", "gone\n");
+	b.fake.hostOps.drain = () => ({ text: `DRAIN: failed: ${PARENT_CONTROL_BUSY}`, level: "error" });
+	b.fake.drains = [undefined, undefined];
+	const state = await b.run();
+	assert.equal(state?.last_result, "drain_timeout");
+	assert.ok(state?.detail?.includes(`the drain answered: DRAIN: failed: ${PARENT_CONTROL_BUSY}`), state?.detail);
+	assert.deepEqual(b.hostCalls(), ["host drain [600]", "host drainCancel"], "best-effort cancel, no stop");
+	assert.equal(b.repo.head(), head, "nothing merged");
+	delete b.fake.hostOps.drain;
+	b.fake.drains = ["drained"];
+	assert.equal(await b.run(30), undefined, "retried like a drain timeout: silent under 4x interval_min");
+	assert.equal((await b.run(31))?.last_result, "updated");
 });
 
 test("fetch_failed counts runs in a row and a successful fetch resets it", async (t) => {

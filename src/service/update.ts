@@ -13,7 +13,8 @@
  *             origin/main is the `bad_sha` → `skipped_bad_sha`; a live script pid, or a mid-turn worker (an idle
  *             held/waiting one does not block) → `skipped_busy`; after 4× interval_min of that, only a script
  *             still skips: the drain decides
- *   drain     host `drain 600`, wait ≤ 660 s for `drained`; a timeout → host `drainCancel` → `drain_timeout`
+ *   drain     host `drain 600`, wait ≤ 660 s for `drained`; a timeout → host `drainCancel` → `drain_timeout`;
+ *             refused during parent control (PARENT_CONTROL_BUSY) → `skipped_busy`; gone before `drained` → `drain_timeout`
  *   update    host `stop`, cp-daemon `hold` (the viewer), `git merge --ff-only <to>`, `npm ci` only when
  *             package-lock.json changed, cp-daemon `reload` (a new inner: parent supervisor and viewer)
  *   verify    ≤ 120 s: a host running a parent whose `/doctor` is not an error, and the viewer's identity
@@ -40,7 +41,7 @@ import { type DrainRecord, liveWorkerJobs, readDrain, restartActivity } from "..
 import { FleetStore, isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
-import { PARENT_UNSETTLED } from "../parent-diagnostics.ts";
+import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../parent-diagnostics.ts";
 import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
 import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
@@ -219,9 +220,11 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		}
 		return ports.daemon.hold();
 	};
+	/** The host's answer to the last `drain`: names why a drain that never reached disk is `gone` (cp-35d0 S6). */
+	let drainAnswer = "no answer";
 	/** Host `drain`, then ≤ 660 s for `drained`; still draining or timed out → `drainCancel`. Throws when no host drains. */
 	const drainFleet = async (): Promise<"drained" | "timeout" | "gone"> => {
-		await ports.host("drain", DRAIN_TIMEOUT_S);
+		drainAnswer = (((await ports.host("drain", DRAIN_TIMEOUT_S)) as { text?: string } | null)?.text) ?? "no answer";
 		const deadline = ports.now().getTime() + DRAIN_WAIT_MS;
 		for (let drain = ports.drain(); drain !== "drained"; drain = ports.drain()) {
 			if (drain === undefined) return "gone";
@@ -336,11 +339,20 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 	save({ phase: "draining", from, to, lock });
 	try {
 		const drained = await drainFleet();
-		if (drained === "gone") return finish("failed", "state/drain.json went away before it drained (cancelled, or the parent restarted); nothing was stopped", { from, to });
+		// Retryable like a timeout (4× interval_min): a refused drain (the parent's compact hold) never reaches disk either.
+		if (drained === "gone") {
+			await cancelDrain();
+			return finish("drain_timeout", `state/drain.json went away before it drained (the drain answered: ${drainAnswer}); nothing was stopped`, { from, to });
+		}
 		if (drained === "timeout") return finish("drain_timeout", `the fleet did not drain within ${DRAIN_TIMEOUT_S}s; the drain was cancelled and nothing was stopped`, { from, to });
 	} catch (error) {
 		await cancelDrain();
-		return finish("failed", `drain failed: ${(error as Error).message}; nothing was stopped`, { from, to });
+		const message = (error as Error).message;
+		// Only the exact refusal, bare (the bridge) or as parentDiagnostic wraps a throwing /cp-drain: every other error stays `failed`.
+		if (message === PARENT_CONTROL_BUSY || message === `parent diagnostic /cp-drain failed: ${PARENT_CONTROL_BUSY}`) {
+			return finish("skipped_busy", `the parent is mid-control (${message}); nothing drained or stopped`, { behind: behind() });
+		}
+		return finish("failed", `drain failed: ${message}; nothing was stopped`, { from, to });
 	}
 
 	save({ phase: "updating" });

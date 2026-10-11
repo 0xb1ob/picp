@@ -22,7 +22,7 @@ import { CpBridgeError } from "./cp-bridge-error.ts";
 import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
-import { PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
+import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S } from "./drain.ts";
 import { durableIdsFromMessage, isLandedContinuation, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
@@ -423,6 +423,8 @@ export class CpBridge {
 	async drain(timeoutS: number | "cancel" = DRAIN_DEFAULT_TIMEOUT_S): Promise<ParentDiagnostic> {
 		const proc = this.#proc;
 		if (!proc?.alive || !this.#ready || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");
+		// A cancel stays open; a new drain never races a compaction or rotation (it would finish while pi is mid-control).
+		if (timeoutS !== "cancel" && (this.#controlBusy || this.#autoControl)) throw new CpBridgeError(PARENT_CONTROL_BUSY);
 		return parentDiagnostic(proc, "drain", this.#options?.requestTimeoutMs, String(timeoutS));
 	}
 	/** `/cp-drain cancel` (cp-update's drain timeout): withdraws a draining or timed-out drain, never a drained one. */

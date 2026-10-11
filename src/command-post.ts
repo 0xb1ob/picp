@@ -173,6 +173,8 @@ export interface CommandPostOptions {
 	onReported?: (result: IntakeResult) => void;
 	/** One evidence-only notice when the last working slot becomes idle. */
 	onIdleBeads?: (text: string) => void;
+	/** The live parent's compact hold (cp-35d0 S6): a new drain is refused and a running one cannot finish `drained` while true. */
+	parentControlBusy?: () => boolean;
 	/**
 	 * Called once per newly recorded human answer, from whichever writer recorded it. The answer
 	 * is already on disk and queued in `state/answered.json`, so a failure to deliver costs a
@@ -596,6 +598,7 @@ export class CommandPost {
 			mainCiScope: (project) => resolveMainCiScope({ project, mandates: () => this.mandates.list(), now: isoTimestamp(), login: () => this.ghLogin() }), // cp-oc0m
 		});
 		this.drain = new DrainControl({ home: options.home, fleet: this.fleet, busy: () => this.manager.quiesce().busy, head: (jobId) => this.reportedHeadSha(jobId), owns: () => this.#ownsHome(),
+			parentControlBusy: () => options.parentControlBusy?.() === true,
 			// Not #journalDurable: an enqueue failure must reach DrainControl.check, which retries on the next tick.
 			journal: (wake) => { if (this.durableWakeups.enqueue({ ...wake, id: boundedWakeupId(wake.id), kind: "recovery" })) this.#options.onDurableWakeup?.(); },
 			discard: (ids) => this.durableWakeups.discard(ids.map((id) => ({ id: boundedWakeupId(id), reason: "the parent restarted after the drain" }))) });

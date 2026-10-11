@@ -655,6 +655,15 @@ was drained, or warn how many live workers they will kill. **Cancel:** `/cp-drai
 removes a `draining` or `timeout` record — never a `drained` one, the restart already
 prepared — and journals one wake `DRAIN: cancelled — … open again` (id
 `drain:<started>:cancelled`), after which every gate is open.
+**Parent control gate** (cp-35d0 S6): a new drain is refused with `PARENT_CONTROL_BUSY`
+([`src/parent-diagnostics.ts`](../src/parent-diagnostics.ts)) before any RPC or write while the
+bridge runs parent control (compact, rotate, a diagnostic, automatic control) or the parent's
+compact hold is on; a cancel is never refused, and a drain already `draining` is returned as is
+but cannot finish `drained` while the hold lasts (a timeout names `parent compaction`). cp-update
+reads that exact refusal (bare, or as `parent diagnostic /cp-drain failed: …`) as `skipped_busy`
+after a best-effort cancel, and a drain gone before `drained` as a retryable `drain_timeout`
+naming the drain's answer; neither stops or merges anything, and every other drain error stays
+`failed`. It is no cross-process interlock against control that starts after a drain finished.
 A cancel also retracts its own drain's undelivered outcome wake (same `started_at`), and at
 delivery the durable sweep drops a `drain:<started>:drained|timeout` wake when the live
 `state/drain.json` is missing, carries another `started_at`, or is in another state; a

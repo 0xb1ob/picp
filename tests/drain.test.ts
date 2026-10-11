@@ -19,7 +19,7 @@ import { IntegrationHolds } from "../src/integration-hold.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { cpNext } from "../src/next.ts";
-import { parentDiagnostic } from "../src/parent-diagnostics.ts";
+import { PARENT_CONTROL_BUSY, parentDiagnostic } from "../src/parent-diagnostics.ts";
 import { loadProfile } from "../src/profiles.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { Sender } from "../src/send.ts";
@@ -144,6 +144,42 @@ test("drain: a session without the parent lock never decides the outcome", async
 	const stranger = control(home2.path, new FleetStore({ home: home2.path }), { owns: () => false });
 	assert.throws(() => stranger.drain.start(), /does not hold the parent lock/, "a non-owner never writes a false 'drained'");
 	assert.equal(existsSync(drainFile(home2.path)), false);
+});
+
+test("drain (cp-35d0 S6): the parent's compact hold refuses a new drain before any write and keeps a running one from finishing drained", async (t) => {
+	const home = createScratchHome();
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentControlBusy: () => true });
+	t.after(async () => {
+		await post.shutdown();
+		home.cleanup();
+	});
+	const fleet = new FleetStore({ home: home.path });
+	let holding = true;
+	const c = control(home.path, fleet, { parentControlBusy: () => holding });
+	assert.throws(() => c.drain.start(), (error: unknown) => error instanceof DrainError && error.message === PARENT_CONTROL_BUSY);
+	assert.equal(existsSync(drainFile(home.path)), false, "refused before the flag is written");
+	assert.throws(() => post.drain.start(), (error: unknown) => error instanceof DrainError && error.message === PARENT_CONTROL_BUSY, "CommandPost forwards the callback");
+	assert.equal(existsSync(drainFile(home.path)), false);
+
+	holding = false;
+	c.setBusy(["cp-busy"]);
+	assert.equal(c.drain.start(5).state, "draining");
+	holding = true;
+	assert.equal(c.drain.start().state, "draining", "a drain already running is returned as is, never refused");
+	c.setBusy([]);
+	assert.equal(c.drain.check()?.state, "draining", "idle workers but the hold is on: not drained");
+	assert.equal(c.wakes.length, 0);
+	holding = false;
+	assert.equal(c.drain.check()?.state, "drained", "the hold released: drained");
+	assert.equal(c.wakes.length, 1);
+
+	const other = control(home.path, fleet, { parentControlBusy: () => holding });
+	other.setBusy(["cp-busy"]);
+	other.drain.start(5);
+	holding = true;
+	other.setBusy([]);
+	other.advance(5000);
+	assert.deepEqual(other.drain.check()?.survivors, ["parent compaction"], "a timeout names the hold");
 });
 
 test("drain: an outcome wake that fails to journal is retried on the next tick, still exactly once", async (t) => {
