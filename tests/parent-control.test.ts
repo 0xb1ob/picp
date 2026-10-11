@@ -56,6 +56,19 @@ test("a dangling saved path is repaired when the spawned fallback equals the rep
 	assert.deepEqual(JSON.parse(readFileSync(parentControlFile(home), "utf8")), { sessionFile: fallback, model: "p/saved" }, "the path is repaired; the saved model choice is not changed");
 });
 
+test("a corrupt control file is logged and still rewritten with the reported path", (t) => {
+	const home = scratch(t);
+	mkdirSync(join(home, LAYOUT.sessions), { recursive: true });
+	writeFileSync(parentControlFile(home), '{"sessionFile": "/gone.js');
+	const reported = join(home, "cp-parent.jsonl");
+	writeFileSync(reported, "");
+	const lines: string[] = [];
+	recordSpawnedSession(home, reported, "p/m", (line) => lines.push(line));
+	assert.deepEqual(JSON.parse(readFileSync(parentControlFile(home), "utf8")), { sessionFile: reported, model: "p/m" });
+	assert.equal(lines.length, 1);
+	assert.match(lines[0]!, /parent control .* unreadable .*; rewriting it for/);
+});
+
 test("a control write that fails is logged, never thrown into the spawn", (t) => {
 	const home = scratch(t);
 	// A home that is a regular file: the control write cannot create its directory.

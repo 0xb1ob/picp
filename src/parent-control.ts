@@ -29,10 +29,15 @@ export function recordSpawnedSession(home: string, reported: unknown, model: str
 		log(`parent host ${process.pid}: reported parent session ${reported} is not on disk; keeping the saved control record`);
 		return;
 	}
+	const file = parentControlFile(home);
+	// The path repair keeps a saved model: start precedence (tests/cp-bridge.test.ts) treats it as the operator's choice.
+	let saved: unknown;
+	if (existsSync(file)) {
+		try { saved = (JSON.parse(readFileSync(file, "utf8")) as { model?: unknown }).model; }
+		catch (error) { log(`parent host ${process.pid}: parent control ${file} unreadable (${(error as Error).message}); rewriting it for ${reported}`); }
+	}
 	try {
-		const file = parentControlFile(home);
-		const saved = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { model?: string }).model : undefined;
-		atomicWriteJson(file, { sessionFile: reported, model: saved ?? model });
+		atomicWriteJson(file, { sessionFile: reported, model: typeof saved === "string" ? saved : model });
 	} catch (error) {
 		log(`parent host ${process.pid}: parent control write failed for ${reported}: ${(error as Error).message}`);
 	}
