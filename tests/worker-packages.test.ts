@@ -664,6 +664,29 @@ test("the never-list is never activated, by any role or any profile override", a
 	}
 });
 
+test("a per-job operator-named skill dir reaches --skill with --no-skills kept; an unmentioned never-list skill never loads", () => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-jobskill-"));
+	writeFileSync(join(dir, "SKILL.md"), "---\ndescription: x\n---\n");
+	// A detection that carries never-list skills, and a profile naming them: none of them loads; only the mention does.
+	const fake: DetectedWorkerPackages = Object.fromEntries(NEVER_WORKER_RESOURCES.map((name) => [name, { extensions: [], skills: [`/x/${name}`] }]));
+	const profile = withPackages(loadProfile(PROFILES_DIR, "planner"), [...NEVER_WORKER_RESOURCES]);
+	let captured: WorkerSpawnOptions | undefined;
+	const manager = managerWith(fake, (options) => {
+		captured = options;
+		return { pid: 1234, closed: Promise.resolve(0), kill: () => {} } as unknown as WorkerProcess;
+	});
+	const request = { ...spawnRequest(profile), skills: [dir] };
+	const planned = manager.plan(request).args;
+	assertTrustPolicy(planned);
+	assert.deepEqual(flagValues(planned, "--skill"), [dir]);
+	assert.ok(planned.includes("--no-skills"));
+	manager.spawn(request);
+	assert.deepEqual(captured?.skills, [dir], "spawn() merges the same per-job skill");
+	assert.deepEqual(flagValues(managerWith(fake).plan(spawnRequest(profile)).args, "--skill"), [], "no mention, no skill");
+	assert.throws(() => managerWith(NO_DETECTED_WORKER_PACKAGES).plan({ ...spawnRequest(), skills: ["rel/skill"] }), /per-job skill rel\/skill is not an absolute skill directory/);
+	assert.throws(() => managerWith(NO_DETECTED_WORKER_PACKAGES).plan({ ...spawnRequest(), skills: [tmpdir()] }), /is not an absolute skill directory/);
+});
+
 test("planner role pi-web-access: on for planner and qa, never gate-reviewer or implementer; web_enable never allowlisted", async () => {
 	const root = scratchRoot();
 	const web = installPackage(root, "pi-web-access", { extensions: ["./index.ts"] });

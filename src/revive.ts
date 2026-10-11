@@ -41,6 +41,8 @@ import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts
 import type { WorkerManager } from "./worker-manager.ts";
 import { readCheckpoint } from "./checkpoint-ref.ts";
 import { policyBlockedRefusal, sessionPolicyBlocked } from "./worker-session-policy.ts";
+import { resolveJobSkills } from "./job-skills.ts";
+import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 
 export class ReviveError extends Error {}
 
@@ -57,6 +59,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"envelope_unresolved",
 	"session_policy_blocked",
 	"session_scan_failed",
+	"skill_unresolved",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -111,6 +114,8 @@ export interface RevivePlan {
 	closesWorker?: true;
 	/** t3code adoption 7: the dispatch-time checkpoint ref and its sha (absent when the ref is gone). Never restored. */
 	checkpoint?: { ref: string; sha?: string };
+	/** The record's operator-named skills, re-resolved by name at plan time. */
+	skills?: ResolvedSkill[];
 }
 
 export type RevivePlanResult = RevivePlan | ReviveRefusal;
@@ -179,6 +184,8 @@ export interface ReviverOptions {
 	makeRoom?: (jobId: string, role: Role) => Promise<(() => void) | undefined>;
 	/** 4b-1: this job's process was stopped by HeldRelease; its revival journals `continuation: "held_release"`. */
 	released?: (jobId: string) => boolean;
+	/** pi's agent dir for skill re-resolution; tests pass a scratch dir. */
+	skillAgentDir?: string;
 }
 
 async function safely(fn: () => Promise<unknown>): Promise<void> {
@@ -467,6 +474,9 @@ export class Reviver {
 			);
 		}
 
+		// Operator-named skills are re-resolved by name: a directory is never trusted from the record.
+		const skills = resolveJobSkills(record.skills?.map((s) => s.name), { home: this.#options.home, agentDir: this.#options.skillAgentDir, role: record.worker.role });
+		if (!skills.ok) return refuse(jobId, "skill_unresolved", `${skills.error} — reinstall it, or tear the job down and re-dispatch without it`);
 		const interruptedTool = readInterruptedTool(record.worker.session_file, fileExists);
 		// t3code adoption 7: shown, never restored. A missing ref does not refuse.
 		const checkpointSha = record.checkpoint_ref ? await readCheckpoint(git, record.worktree, record.checkpoint_ref) : undefined;
@@ -484,6 +494,7 @@ export class Reviver {
 			...(record.phase === "failed" && record.failure ? { continuesFailure: record.failure } : {}),
 			...(closesWorker ? { closesWorker: true as const } : {}),
 			...(record.checkpoint_ref ? { checkpoint: { ref: record.checkpoint_ref, ...(checkpointSha ? { sha: checkpointSha } : {}) } } : {}),
+			...(skills.skills.length ? { skills: skills.skills } : {}),
 		};
 	}
 
@@ -524,6 +535,7 @@ export class Reviver {
 				profile,
 				model: plan.model,
 				...(plan.thinking ? { thinking: plan.thinking } : {}),
+				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
 				// No `brief`: a revived worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.

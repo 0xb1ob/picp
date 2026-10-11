@@ -57,6 +57,7 @@ import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import { loadProfile } from "./profiles.ts";
+import { resolveJobSkills } from "./job-skills.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { RevivePlanOptions, RevivePlanResult, ReviveResult } from "./revive.ts";
 import type { FailRecoveryFact } from "./failure-announcer.ts";
@@ -221,6 +222,8 @@ export interface BoundedRecoveryOptions {
 	manager?: RecoveryManager;
 	/** Required only for a `redispatch` class (cur.4.4); a `revive`-only caller may omit it. */
 	profilesDir?: string;
+	/** pi's agent dir for a redispatch's skill re-resolution; tests pass a scratch dir. */
+	skillAgentDir?: string;
 	/** Observer wiring for a `redispatch`'s fresh worker \u2014 the same options `Reviver` takes. */
 	intake?: WorkerObserverOptions["intake"];
 	failures?: WorkerObserverOptions["failures"];
@@ -456,6 +459,8 @@ export class BoundedRecovery {
 		if (!profilesDir) throw new Error(`${jobId}: bounded recovery cannot redispatch without profilesDir`);
 		if (isScriptFleetRecord(record)) throw new Error(`${jobId} is a script job; bounded recovery cannot redispatch it`);
 		const profile = loadProfile(profilesDir, record.worker.profile);
+		const skills = resolveJobSkills(record.skills?.map((s) => s.name), { home, agentDir: this.#options.skillAgentDir, role: record.worker.role });
+		if (!skills.ok) throw new Error(`skill_unresolved: ${skills.error}`);
 		const runDir = `${home}/${paths.runDir(jobId)}`;
 		mkdirSync(runDir, { recursive: true });
 		if (record.kind === "research") mkdirSync(`${home}/${paths.artifactDir(jobId)}`, { recursive: true });
@@ -472,6 +477,7 @@ export class BoundedRecovery {
 			profile,
 			model: record.worker.model,
 			...(record.routing?.thinking ? { thinking: record.routing.thinking } : {}),
+			...(skills.skills.length ? { skills: skills.skills.map((s) => s.dir) } : {}),
 			sessionDir: `${home}/${LAYOUT.sessions}`,
 			sessionName: jobId,
 		});

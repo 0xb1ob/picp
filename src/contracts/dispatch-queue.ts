@@ -1,7 +1,7 @@
 /** `state/dispatch-queue.json` — `cp_dispatch` requests refused only by the spawn cap (cp-itl4 4b-2). Import via src/contracts.ts. */
 
 import { type Static, Type } from "typebox";
-import { IsoTimestampSchema, JobIdSchema, validate, type ValidationResult } from "./core.ts";
+import { IsoTimestampSchema, JobIdSchema, SkillNameSchema, validate, type ValidationResult } from "./core.ts";
 
 /** At most this many queued dispatches; a full queue refuses the enqueue (today's spawn_cap refusal stands). */
 export const DISPATCH_QUEUE_MAX = 32;
@@ -19,6 +19,7 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		base: Type.Optional(Type.String({ minLength: 1 })),
 		wall_clock_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
 		tool_call_cap: Type.Optional(Type.Integer({ minimum: 1 })),
+		skills: Type.Optional(Type.Array(SkillNameSchema, { minItems: 1, maxItems: 8, uniqueItems: true })),
 	},
 	{ additionalProperties: false },
 );
