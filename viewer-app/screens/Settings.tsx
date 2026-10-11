@@ -1,9 +1,9 @@
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
-import type { RoutingRule, SettingField, SettingKey, SettingValue, ThinkingLevel } from "../../src/contracts.ts";
+import type { RoutingRule, SettingField, SettingFieldView, SettingKey, SettingValue, ThinkingLevel } from "../../src/contracts.ts";
 import type { SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
-import { type Drafts, fieldOf, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
+import { type Drafts, fieldError, fieldOf, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
 import "./settings.css";
 
 /** The browser bundle takes no values from src/contracts.ts; the type pins this list to `ThinkingLevel`. */
@@ -14,6 +14,7 @@ const CUSTOM = "custom";
 const MAX_FALLBACKS = 4;
 const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.operator"];
 const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
+const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"];
 const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
 const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
 const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
@@ -26,7 +27,7 @@ function auditLine(row: SettingsAuditRow): string {
 const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => JSON.stringify(row) !== JSON.stringify(was);
 
 
-function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, unsavedCount, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; unsavedCount?: number; children: ComponentChildren}) {
+function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, invalid, unsavedCount, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; invalid?: boolean; unsavedCount?: number; children: ComponentChildren}) {
  const changes = pick(drafts, keys);
  const unsaved = unsavedCount ?? Object.keys(changes).length;
  const save = async () => { if (await view.save(changes)) setDrafts(current => omit(current, keys)); };
@@ -39,7 +40,7 @@ function Section({title, help, keys, drafts, setDrafts, view, restore, restoreTe
   <p class="settings-help">{help}</p>
   <div class="settings-body">{children}</div>
   {restore && <div class="settings-actions">
-   <button type="button" class="settings-primary" disabled={disabled || !Object.keys(changes).length} onClick={() => void save()}>Save</button>
+   <button type="button" class="settings-primary" disabled={disabled || invalid || !Object.keys(changes).length} onClick={() => void save()}>Save</button>
    <button type="button" disabled={disabled} onClick={() => void reset()}>Restore defaults</button>
    {unsaved > 0 && <span class="settings-unsaved">{unsaved} unsaved change{unsaved === 1 ? "" : "s"}</span>}
   </div>}
@@ -124,7 +125,14 @@ function Rubric({rows, original, setRow, disabled, models}: {rows: RoutingRule[]
  })}</ol>;
 }
 
-function Field({field, value, source, set, disabled, models}: {field: SettingField; value: SettingValue | undefined; source: string | undefined; set: (value: SettingValue) => void; disabled: boolean; models: string[] | null | undefined}) {
+/** What is in force now and where it comes from; an off or fallen-back value says why. */
+function Effective({field}: {field: SettingFieldView | undefined}) {
+ if (!field) return null;
+ const why = field.diagnostic ? `: ${field.diagnostic}` : "";
+ return <p class="settings-meta settings-effective" role="status">{field.status === "disabled" ? `Off${why}` : `In force: ${String(field.value)} tokens, from ${field.source}${why}`}</p>;
+}
+
+function Field({field, value, source, error, set, disabled, models}: {field: SettingField; value: SettingValue | undefined; source: string | undefined; error?: string | null; set: (value: SettingValue) => void; disabled: boolean; models: string[] | null | undefined}) {
  const id = `setting-${field.key.replace(/\./g, "-")}`;
  const meta = <span class="settings-meta">{source ? `from ${source}` : ""}</span>;
  if (field.type === "enum_list") {
@@ -137,8 +145,8 @@ function Field({field, value, source, set, disabled, models}: {field: SettingFie
   ? <textarea id={id} rows={3} disabled={disabled} onChange={event => set(lines(event.currentTarget.value))} value={Array.isArray(value) ? (value as string[]).join("\n") : ""}/>
   : field.type === "model_ref"
    ? <ModelSelect id={id} label={field.label} value={typeof value === "string" ? value : ""} set={next => set(next || null)} models={models} unset disabled={disabled}/>
-   : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" ? 1 : "any"} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
- return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
+   : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" ? 1 : "any"} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
+ return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{error && <small class="settings-warn" role="alert">{error}</small>}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
 }
 
 export function Settings({view}: {view: SettingsView}) {
@@ -163,8 +171,9 @@ export function Settings({view}: {view: SettingsView}) {
  }) as SettingValue);
  const field = (key: SettingKey) => {
   const spec = fieldOf(data, key);
-  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} set={value => set(key, value)} disabled={disabled} models={models}/>;
+  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={key in drafts ? fieldError(spec, drafts[key]) : null} set={value => set(key, value)} disabled={disabled} models={models}/>;
  };
+ const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!spec && key in drafts && fieldError(spec, drafts[key]) !== null; });
  const models = data.available_models;
  const modelsNote = models === null ? <p class="settings-readonly" role="status">{data.models_loading ? "Loading the model list…" : `Model list unavailable${data.models_error ? ` (${data.models_error})` : ""}: type a provider/model.`}</p> : null;
  const notice = view.notice;
@@ -179,8 +188,11 @@ export function Settings({view}: {view: SettingsView}) {
   <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models?" disabled={disabled}>
    {PEOPLE_MODELS.map(field)}
   </Section>
-  <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled}>
+  <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled} invalid={invalid(GRANTS)}>
    {GRANTS.map(field)}
+  </Section>
+  <Section title="Auto-compaction" help="A session compacts once its context reaches this many tokens; a change takes effect at the next compaction check. A whole number of at least 1: an invalid parent value turns parent auto-compaction off." keys={COMPACTION} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: COMPACTION}} restoreText="Restore the parent and operator compaction thresholds to their defaults?" disabled={disabled} invalid={invalid(COMPACTION)}>
+   {COMPACTION.flatMap(key => [field(key), <Effective key={`${key}-effective`} field={view_(key)}/>])}
   </Section>
   <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>
  </div>;
