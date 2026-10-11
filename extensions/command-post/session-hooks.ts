@@ -93,7 +93,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	let reserved: string | undefined;
 	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
 		const messages: Array<{ customType: string; content: string; display: false }> = [];
-		messages.push({ customType: "cp-parent-guidance", display: false, content: "Parent only: Put independent tool calls in one assistant message; keep dependent calls sequential. A dispatch turn stops at 15 model rounds: compact or end the turn and report decisions already made instead of further investigation." });
+		messages.push({ customType: "cp-parent-guidance", display: false, content: "Parent only: Put independent tool calls in one assistant message; keep dependent calls sequential (hold→send, amend→send, revive plan→confirm→send). A dispatch turn stops at 15 model rounds: compact or end the turn and report decisions already made instead of further investigation. Reuse results you hold: no second cp_next without a new event between, no cp_revive after a `revived … idle` receipt (cp_send next). Once every landed send has its outcome or durable blocker and required actions ran, give the one final answer per send — no acknowledgement first, no extra discovery." });
 		try {
 			const post = commandPost();
 			post.scaffoldMemory();
