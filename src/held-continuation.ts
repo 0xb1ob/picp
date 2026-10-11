@@ -112,6 +112,8 @@ export interface HeldContinuationDeps {
 	onLanded?: (jobId: string) => void;
 	/** Local verdict read only; no GitHub calls or authority retained across the deadline. */
 	reviewWindow?: (jobId: string, head: string) => ReviewMergeWindow | undefined;
+	/** Local integration-hold read (`IntegrationHolds.get`), sampled once per new WAITING notice; a throw reads as unconfirmed. */
+	hold?: (jobId: string) => { reason: string } | undefined;
 	now?: () => Date;
 	/** Returns a cancellation function for one deadline event. */
 	schedule?: (delayMs: number, callback: () => void) => () => void;
@@ -134,6 +136,12 @@ export function continuationKey(trigger: ContinuationTrigger): string {
 	const run = trigger.run !== undefined && trigger.run.length > 0 ? `#${trigger.run}` : "";
 	const generation = trigger.generation !== undefined ? `@${trigger.generation}` : "";
 	return `${trigger.jobId}|${trigger.head ?? ""}|${trigger.event}${attempt}${run}${generation}`;
+}
+
+/** A sampled hold reason is shown, never trusted to be short. */
+const HOLD_REASON_MAX = 300;
+function bounded(text: string): string {
+	return text.length > HOLD_REASON_MAX ? `${text.slice(0, HOLD_REASON_MAX)}… (truncated, ${text.length} chars)` : text;
 }
 
 export function formatContinuationNotice(jobId: string, next: string, reason: string, prUrl?: string, extra?: string): string {
@@ -385,8 +393,23 @@ export class HeldContinuation {
 			void this.trigger(trigger).catch((error) => this.#notice(trigger.jobId, `timer:${identity}`, "retry", `deadline continuation failed: ${(error as Error).message.split("\n")[0]}`));
 		});
 		this.#timers.set(trigger.jobId, { identity, trigger, cancel });
-		this.#deps.notify({ id: boundedWakeupId(`continuation:window:${identity}`), job_id: trigger.jobId, keys: [trigger.jobId], content: `HELD PR WAITING — ${trigger.jobId}\n  ${reason}` });
+		const lines = [reason, `The continuation re-enters every gate at ${window.review_resume_at} by itself; no cp_integrate advance is needed just to check this wait.`];
+		const hold = this.#sampledHold(trigger.jobId);
+		if (hold) lines.push(hold);
+		this.#deps.notify({ id: boundedWakeupId(`continuation:window:${identity}`), job_id: trigger.jobId, keys: [trigger.jobId], content: `HELD PR WAITING — ${trigger.jobId}\n${lines.map((line) => `  ${line}`).join("\n")}` });
 		return reason;
+	}
+
+	/** Advisory snapshot for the WAITING notice only; Integrator re-reads the hold before any merge. */
+	#sampledHold(jobId: string): string | undefined {
+		if (!this.#deps.hold) return undefined;
+		try {
+			const hold = this.#deps.hold(jobId);
+			if (!hold) return "Sampled hold: none recorded when this notice was written.";
+			return `Sampled hold (not a fresh CI or permission read): ${bounded(hold.reason)}. It must be released (cp_integrate action:release) before any merge proceeds.`;
+		} catch (error) {
+			return `Hold state unconfirmed (${bounded((error as Error).message.split("\n")[0] ?? "")}); integration fails closed until it reads.`;
+		}
 	}
 
 	/** Fail closed: a drain flag that cannot be read is a drain (`readDrain` throws on an unreadable file). */

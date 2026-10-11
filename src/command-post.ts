@@ -114,6 +114,7 @@ import { Ledger } from "./ledger.ts";
 import { type IntegrateRequest, type IntegrateResult, Integrator } from "./integrate.ts";
 import { HeldContinuation } from "./held-continuation.ts";
 import { readReviewMergeWindow } from "./review-merge-window.ts";
+import { IntegrationHolds } from "./integration-hold.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
@@ -611,6 +612,7 @@ export class CommandPost {
 			reviews: this.reviewRuns,
 			head: (jobId, owner) => (owner === "fleet" ? this.reportedHeadSha(jobId) : this.ciHead(jobId)),
 			reviewWindow: (jobId, head) => readReviewMergeWindow(options.home, jobId, head),
+			hold: (jobId) => new IntegrationHolds(options.home).get(jobId),
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			relay: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,

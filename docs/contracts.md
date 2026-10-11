@@ -3156,6 +3156,15 @@ and arm the same cancellable one-shot timer. This is a deadline event, not a CI
 poll. Duplicate events retain the original due time; head/generation/window
 changes cancel and replace it.
 
+The `HELD PR WAITING` notice also states that the continuation re-enters every
+gate at the deadline by itself, so no manual `cp_integrate` call is needed just
+to check the wait, and carries one sampled read of the local integration hold
+(`IntegrationHolds.get`, taken when the notice is written, reason bounded to 300
+characters): none recorded, the hold's reason with the instruction that it must
+be released before any merge, or "hold state unconfirmed" when the read throws
+(integration fails closed). The snapshot is advisory — no GitHub read, no merge
+permission; the Integrator's own hold read before each step stays authoritative.
+
 At expiry the original trigger re-enters the lane and checks enabled ownership,
 phase, envelope generation, owning head, drain, durable hold, CI, complete review
 and repository permission again. A hold written during the window prevents the
