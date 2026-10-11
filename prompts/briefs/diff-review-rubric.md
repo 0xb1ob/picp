@@ -41,17 +41,21 @@ that `offset` until a result is not cut. Never score from the first page alone.
    defensible reason it does not.
 4. **Requirement coverage** — with the original task in hand, every
    requirement it states (its acceptance criteria, constraints and explicit
-   asks) is carried by something in the diff. A requirement silently dropped or
-   quietly narrowed is a finding, and normally `revise`: name the requirement
-   and where it must be met. Without the original task, skip this criterion and
-   claim nothing about coverage.
-5. **Omitted files** — if the Stat section lists files the Hunks section does
-   not show in full, you cannot judge their risk directly. Prefer `revise` or
-   `escalate` over `pass` when an omitted file could plausibly carry the
-   diff's real risk (e.g. a schema file, a migration, a deletion) — this is
-   your judgment call while scoring, not an automatic rule.
+   asks) is met by the diff or already by the base.
+   An absent hunk is not proof of absence: claim a requirement unmet only when
+   a supplied file (the diff, the task, or supplied context) shows it is unmet,
+   and then name the requirement and where it must be met. When the source that
+   would satisfy it is not in front of you, say so in `reasons` as a coverage
+   limit (confidence low), never as a `[severity: high] [confidence: high]`
+   finding. Never demand an edit to code the base already satisfies. Without
+   the original task, skip this criterion and claim nothing about coverage.
+5. **Omitted files** — the host never hands you a primary `diff.md` with
+   omitted hunks. A delta review's `full-diff.md` may name omitted paths: they
+   are unseen, evidence of nothing either way.
 
-A finding already raised on this branch and answered in the PR is not re-raised unless the new diff regresses it.
+No high-confidence missing-import, missing-file or scope-growth claim without a supplied file that shows it.
+
+A finding in `prior-verdict.json` that this delta resolves is not re-raised unless the delta regresses it; you never see PR discussion, so never cite it.
 
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays
 
