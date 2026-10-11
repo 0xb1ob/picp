@@ -54,3 +54,14 @@ export async function writeSettings(fetch: Fetch, token: string, revision: strin
 export const valueOf = (status: SettingsResponse, drafts: Drafts, key: SettingKey): SettingValue | undefined =>
  key in drafts ? drafts[key] : status.snapshot?.fields.find(field => field.key === key)?.value;
 export const fieldOf = (status: SettingsResponse, key: SettingKey): SettingField | undefined => status.catalog?.find(field => field.key === key);
+/** Why a drafted number breaks its catalog bounds (an invalid parent threshold would disable compaction), or null. */
+export function fieldError(field: SettingField, value: SettingValue | undefined): string | null {
+ if (field.type !== "integer" && field.type !== "number" && field.type !== "nullable_number") return null;
+ if (value === null || value === undefined) return field.type === "nullable_number" ? null : "A value is required";
+ if (typeof value !== "number" || !Number.isFinite(value)) return "Not a number";
+ if (field.type === "integer" && !Number.isInteger(value)) return "Must be a whole number";
+ if (field.minimum !== undefined && value < field.minimum) return `Must be at least ${field.minimum}`;
+ if (field.exclusive_minimum !== undefined && value <= field.exclusive_minimum) return `Must be more than ${field.exclusive_minimum}`;
+ if (field.maximum !== undefined && value > field.maximum) return `Must be at most ${field.maximum}`;
+ return null;
+}

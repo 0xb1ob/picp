@@ -1,4 +1,4 @@
-/** cp-settings-minimal: the Settings screen (three sections) and its fetch helpers, against a real snapshot. */
+/** cp-settings-minimal: the Settings screen (four sections) and its fetch helpers, against a real snapshot. */
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import { parseHTML } from "linkedom";
 import { LAYOUT, SETTING_FIELDS, type SettingsSnapshot } from "../src/contracts.ts";
 import { readSettings } from "../src/settings.ts";
 import type { SettingsResponse } from "../src/viewer/api-types.ts";
+import { settingsPorts } from "../src/settings-control.ts";
+import { parseSettingsBody } from "../src/viewer/settings-api.ts";
 import { writeSettings } from "../viewer-app/settings-control.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -78,7 +80,7 @@ async function page(t: import("node:test").TestContext, fetcher: Fetcher) {
 	return { root, section, click, type, settle };
 }
 
-test("three sections exactly; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", async (t) => {
+test("four sections exactly; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", async (t) => {
 	let snap = snapshot(true);
 	let stale = true;
 	const { fetcher, posts } = server(() => settings(snap), (_url, body) => {
@@ -86,7 +88,7 @@ test("three sections exactly; Save posts If-Match, the control token and only th
 		return [200, { status: 200, state: "applied", changes: [{ key: "models.parent" }] }];
 	});
 	const ui = await page(t, fetcher);
-	assert.deepEqual([...ui.root.querySelectorAll("section > h2")].map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults"]);
+	assert.deepEqual([...ui.root.querySelectorAll("section > h2")].map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction"]);
 	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 6, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
@@ -138,6 +140,42 @@ test("rubric edits post the whole row list; restore bodies per section; a 400 li
 		["/api/settings/restore", ["models.parent", "models.operator"]],
 		["/api/settings/restore", "grants"],
 	]);
+});
+
+test("auto-compaction: both keys with what is in force; a bad threshold blocks Save; a save and a restore round-trip through the guarded settings transaction", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const { settings: port } = settingsPorts({ target: () => ({ home: home.path, mode: "multi" }), env: {} });
+	const read = () => (port.get() as { snapshot: SettingsSnapshot }).snapshot;
+	const { fetcher, posts } = server(() => settings(read()), (url, body) => {
+		const parsed = parseSettingsBody(body, url.endsWith("/apply") ? "set" : "restore");
+		assert.ok(parsed.ok);
+		const ifMatch = posts.at(-1)!.headers["if-match"]!.slice(1, -1);
+		const result = port.apply({ ...parsed.frame, expected_revision: ifMatch, dry_run: parsed.dry_run, request_id: parsed.request_id, peer: null });
+		return [result.status, result];
+	});
+	const ui = await page(t, fetcher);
+	const compaction = ui.section("Auto-compaction");
+	const effective = () => [...compaction.querySelectorAll(".settings-effective")].map((p) => p.textContent);
+	assert.match(compaction.querySelector(".settings-help")?.textContent ?? "", /tokens.*next compaction check/);
+	assert.deepEqual(effective(), ["In force: 200000 tokens, from code", "In force: 200000 tokens, from code"]);
+	const parent = compaction.querySelector("#setting-sessions-parent_compact_at_tokens") as HTMLInputElement;
+	assert.ok(compaction.querySelector("#setting-sessions-operator_compact_at_tokens"));
+	const save = () => [...compaction.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
+	for (const [typed, error] of [["0", "Must be at least 1"], ["1.5", "Must be a whole number"], ["", "A value is required"]] as const) {
+		await ui.type(parent, typed);
+		assert.equal(compaction.querySelector("[role=alert]")?.textContent, error);
+		assert.ok(save().hasAttribute("disabled"), `Save is blocked on ${JSON.stringify(typed)}`);
+	}
+	await ui.type(parent, "150000");
+	assert.equal(compaction.querySelector("[role=alert]"), null);
+	await ui.click(compaction, "Save");
+	assert.deepEqual(posts[0]!.body.changes, { "sessions.parent_compact_at_tokens": 150000 });
+	assert.match(ui.root.querySelector(".settings-ok")?.textContent ?? "", /^Saved/);
+	assert.deepEqual(effective(), ["In force: 150000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
+	await ui.click(compaction, "Restore defaults");
+	assert.deepEqual(posts[1]!.body.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
+	assert.equal(read().fields.find((field) => field.key === "sessions.parent_compact_at_tokens")!.value, 200000);
 });
 
 test("read-only when the session is not writable; an absent routing.json shows one line and no rubric controls", async (t) => {
