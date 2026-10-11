@@ -1157,6 +1157,24 @@ test("cp_integrate appends the tracker write-back line on next: done, and only t
 	assert.ok(done.content[0]!.text.includes(`\n  tracker write-back: demo-beads/b-9 closes with ${PR_URL} on the next write-back tick`), done.content[0]!.text);
 });
 
+test("cp_integrate says a review is already in flight on next: review, and leaves details alone", async (t) => {
+	const b = await benchOf(t, {}, { reviewHead: false });
+	const tools = new Map<string, HoldTool>();
+	let pending: unknown;
+	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
+		commandPost: () => ({ home: b.home, reviewRuns: { pending: () => pending }, integrate: (request: { jobId: string }) => b.integrator().advance(request) }),
+		setLive: () => {}, refreshWidget: () => {},
+	} as never);
+	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: BR }, undefined, undefined, {});
+	const idle = await invoke();
+	assert.equal(idle.details.next, "review");
+	assert.ok(!idle.content[0]!.text.includes("already in flight"), idle.content[0]!.text);
+	pending = { attempt: 2, started_at: "2026-10-11T10:00:00Z", subject: { head_sha: HEAD_A } };
+	const busy = await invoke();
+	assert.equal(busy.details.next, "review", "details are the step result, unchanged");
+	assert.ok(busy.content[0]!.text.includes(`review already in flight on ${HEAD_A.slice(0, 12)} (attempt 2, started 2026-10-11T10:00:00Z); wait for its cp-verdict and do not call cp_review`), busy.content[0]!.text);
+});
+
 test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no checkpoint at all", async (t) => {
 	const b = await benchOf(t);
 
