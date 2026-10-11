@@ -548,7 +548,7 @@ export class CpBridge {
 			if (typeof state.sessionFile === "string" && state.sessionFile.length > 0) {
 				this.#sessionFile = state.sessionFile;
 			}
-			recordSpawnedSession(this.#home, sessionFile, state.sessionFile, this.#model);
+			recordSpawnedSession(this.#home, state.sessionFile, this.#model);
 			this.#ready = true;
 			this.#deathsBeforeReady = 0;
 			this.#booting = false;
