@@ -19,6 +19,7 @@ import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
 import { HOST_PROBE_MS, probeHost, reattachLoop } from "../../src/bridge-reattach.ts";
 import { type BridgeRelay, CpBridgeError, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
+import { agentDirFor, relaySkillLines, skillRoots } from "../../src/viewer/skill-catalog.ts";
 import { OperatorRelayConsumer, RELAY_TICK_MS, recheckRelay } from "../../src/operator-delivery.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile, relayIdOf } from "../../src/operator-outbox.ts";
 import { EscalationStore } from "../../src/escalation.ts";
@@ -585,6 +586,7 @@ export default function (pi: ExtensionAPI): void {
 			"Post every answer the human asked for with answer (project, their question verbatim, the full answer, evidence_paths; job_id when it is the landing of a kind:research job they requested, any delivery (research report, cp_ask answer or board)): it lands on the dashboard without a parent turn and never pushes. Once per job_id; never for status, relays, decisions (ask/ask_answer) or chat.",
 			"Pass thread (a short tag) on answer or ask only when the human named the thread the question belongs to; never invent one and never for relays; it only files the item on the dashboard. Use thread_bind (thread, job_ids) for jobs created for that topic; bookkeeping only.",
 			"A user message `<ask-id>: <label>` whose dashboard marker carries ask=<ask-id> (and may carry thread=<tag>) is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
+			"A dashboard message's `[cp-skill <name> <dir>]` lines are skills the human mentioned; when you relay that request, pass their names as cp_parent send skills (the bridge re-resolves them). Never add a skill the human did not mention.",
 			"Send delegated:true with a short delegation_rule when deciding on the human's behalf; omit it for the human's own answer.",
 			"Use integration_hold with job_id and reason before sending a request to pause merging; it writes immediately even while the parent is busy. Release only when that pause is explicitly lifted, then send cp_integrate advance to resume.",
 			"Send mandates with cp_parent send. Branch on receipt level, never on the word accepted. http_accepted is not this channel.",
@@ -612,6 +614,7 @@ export default function (pi: ExtensionAPI): void {
 			reason: Type.Optional(Type.String({ description: "ask_withdraw or integration_hold: reason" })),
 			...ParentSendDelegationSchema.properties,
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
+			skills: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8, description: "send: skill names the human mentioned ([cp-skill …] lines); the bridge re-resolves them" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
@@ -727,10 +730,12 @@ export default function (pi: ExtensionAPI): void {
 				}
 				if (params.action === "send") {
 					if (!params.text) throw new CpBridgeError("cp_parent send needs text");
+					const relayed = relaySkillLines(params.text, params.skills ?? [], skillRoots((connectedTarget ?? resolveOperatorTarget()).home, agentDirFor(process.env)));
+					if (!relayed.ok) throw new CpBridgeError(`cp_parent send: ${relayed.error}; nothing was sent`);
 					const activeClient = await ensureClient();
 					// The send proves this operator session is driving the parent; record its file for the viewer.
 					noteOperatorSession(connectedTarget);
-					const receipt = await activeClient.request("send", params.text, undefined, {
+					const receipt = await activeClient.request("send", relayed.text, undefined, {
 						...(params.delegated !== undefined ? { delegated: params.delegated } : {}),
 						...(params.delegation_rule !== undefined ? { delegation_rule: params.delegation_rule } : {}),
 					}) as import("../../src/cp-bridge.ts").BridgeReceipt;

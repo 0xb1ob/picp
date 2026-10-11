@@ -13,6 +13,7 @@ import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
 import { TranscriptFiles } from "../components/TranscriptFiles.tsx";
+import { TranscriptSkills } from "../components/TranscriptSkills.tsx";
 import { PendingBubble } from "../components/PendingBubble.tsx";
 import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
@@ -151,7 +152,7 @@ function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boole
  const own = isOwn(e), who = you ? (own ? "You" : e.who === "Assistant" ? "Operator" : e.who) : e.who;
  return <article class={`session-message session-say session-bubble ${isOwn(e) ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
   {first && <div class="session-who">{!own && <span class="session-avatar" aria-hidden="true">{initials(who)}</span>}<span>{who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
-  <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
+  <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.skills?.length ? <TranscriptSkills names={e.skills}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
  </article>;
 }
 function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolean;you?:boolean}) {

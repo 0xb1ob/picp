@@ -29,6 +29,8 @@ export interface SessionEntry {
  images?: string[];
  /** Text upload ids and display metadata from the upload journal; links serve text/plain only. */
  files?: string[];
+ /** The skill names a dashboard message's code-written `[cp-skill …]` lines carry (stripped from `text`), shown as chips. */
+ skills?: string[];
  file_metadata?: Record<string, { name: string; bytes: number }>;
  /** A cp-bridge notice's own `paths:` block (src/cp-bridge.ts formatBridgeRelay), each already a viewer link. */
  paths?: { path: string; href: string | null; read: string | null }[];
@@ -162,6 +164,8 @@ export interface ViewerJob extends FlightJob {
  context?: ContextUsage | null;
  /** Selected recorded routing fields; absent on older payloads, null when nothing was recorded. */
  routing_facts?: ViewerRoutingFacts | null;
+ /** Operator-named skills the fleet record carries (`cp_dispatch skills`); absent when none. */
+ skills?: string[];
 }
 export interface JobsResponse {
  generated_at: string; awaiting_count: number | null;

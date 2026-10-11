@@ -57,6 +57,7 @@ import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 import { readPendingSends } from "./control-pending.ts";
+import { agentDirFor, skillRoots, withSkillLines } from "./skill-catalog.ts";
 import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
 import { scheduleControlFieldError, type ScheduleControlFields } from "./control-files.ts";
@@ -310,6 +311,14 @@ function parseBody(json: unknown): { ok: true; body: Body; thread: string | null
 	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}), ...tagged }, thread, parsed };
 }
 
+/** A message's `@skill` mentions as code-written `[cp-skill <name> <dir>]` lines (typed ones dropped), within CONTROL_TEXT_MAX. */
+export function withMentionedSkills(text: string, options: ControlRouteOptions): { ok: true; text: string } | { ok: false; reason: string } {
+	const skilled = withSkillLines(text, skillRoots(options.home, options.agentDir ?? agentDirFor(process.env)));
+	if (!skilled.ok) return skilled;
+	if (skilled.text.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text plus its skill lines is longer than ${CONTROL_TEXT_MAX} characters` };
+	return { ok: true, text: skilled.text };
+}
+
 /** The journals' timestamp form: ISO seconds, no milliseconds. */
 export const isoSeconds = (now: Date): string => now.toISOString().replace(/\.\d{3}Z$/, "Z");
 
@@ -407,6 +416,12 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		const shape = parseBody(json);
 		parsed(shape.parsed);
 		if (!shape.ok) return refuse(400, shape.reason);
+		if (shape.body.kind === "message") {
+			const skilled = withMentionedSkills(shape.body.text, options);
+			if (!skilled.ok) return refuse(400, skilled.reason);
+			if (!skilled.text && !shape.body.images && !shape.body.files) return refuse(400, "text is empty");
+			shape.body = { ...shape.body, text: skilled.text };
+		}
 		const record = readControlRecord(options.stateDir);
 		const running = record.state === "ok" && operatorSession(options.stateDir).running;
 		const images = shape.body.kind === "message" ? shape.body.images : undefined;

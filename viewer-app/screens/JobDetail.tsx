@@ -124,6 +124,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
      <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>
      <div class="job-fact-wide job-fact-context"><dt>Context</dt><dd>{job.context ? <ContextChip usage={job.context}/> : "none"}</dd></div>
      <div class="job-fact-wide job-fact-routing"><dt>Routing</dt><dd><RoutingFact job={job}/></dd></div>
+     <div class="job-fact-wide job-fact-skills"><dt>Skills</dt><dd>{job.skills?.length ? <code>{job.skills.map(name => `@${name}`).join(" ")}</code> : "none"}</dd></div>
      <div class="job-fact-mandate"><dt>Mandate</dt><dd>{job.mandate_id ? <a href="#map"><code>{job.mandate_id}</code> →</a> : "none"}</dd></div>
      <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>

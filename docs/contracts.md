@@ -6210,6 +6210,26 @@ The trailing marker adds `; files=<id>,…` **after** ask/thread/images, preserv
 **Recovery.** `rm -rf /tmp/cp-dashboard-uploads` is safe at any time (a pending send then answers 410); the opt-out
 stops uploads with every other control. **Migration:** restart the operator session once (⋮ → Restart session) so its
 bridge advertises `images`.
+
+### Skill mentions
+
+The viewer derives `@name` tokens from a `kind: "message"` text on the server (word start only, so `a@b.com` is
+not one), drops any typed `[cp-skill …]` line, and resolves each token against `<agentDir>/skills` and `<home>/skills`
+(`src/viewer/skill-catalog.ts`). Each installed one appends exactly one code-written line,
+**`[cp-skill <name> <absolute realpath dir>]`**, after the text and before the attachments and the dashboard marker.
+A token naming nothing under either root stays plain text (`@alice`); a name present but invalid or ambiguous, more
+than 8 resolved mentions, or a text that grows past 16000 characters with its lines is a **400** naming the reason,
+journaled once by the viewer. Offline-held messages carry the lines in the inbox text; a queued-message edit re-derives
+them. The status `sends[].body.text` and the queue's returned text strip them, so the dashboard compares against what
+was typed. In the Full transcript a dashboard message shows one chip per line (`SessionEntry.skills`) and its text
+without the lines; a non-dashboard message keeps them as text.
+
+`cp_parent send` takes `skills: [names]`: the bridge re-resolves those names plus any copied `[cp-skill …]` lines
+against the parent's home and the operator's agentDir, rewrites fresh lines, and refuses an unknown or invalid name
+before anything is sent. A mention is inert unless the same message starts a worker: it changes no mandate, scope,
+model or risk gate, and nothing carries it to another job. The job detail shows the fleet record's `skills` as a
+Skills row (`ViewerJob.skills`, absent when none).
+
 ### Schedule controls (cp-hhuf P6)
 
 The Schedules page offers **Enable/Disable, Run now and Remove** per schedule, and an **Add schedule…** link that

@@ -11,6 +11,7 @@ import { decisions } from "./overview-decisions.ts";
 import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
 import { modelText } from "./model-text.ts";
+import { parseSkillLines } from "./skill-mentions.ts";
 import { num, obj, resolveSessionFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
 import { BACKLOG_BYTES, readLines, startOffset } from "./tail.ts";
 
@@ -134,7 +135,9 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    const dashboard=role === "user" && sides === SIDES.you && !text.startsWith(INBOX_REPLAY_PREFIX) ? parseDashboardText(textOf(message.content,false)) : undefined;
    if (dashboard) {
     const shown=!dashboard.images && Array.isArray(message.content) ? message.content.filter(b => obj(b)?.type === "image").map(() => "[image]") : [];
-    const e=entry(base,at,"via","Operator (dashboard)",[dashboard.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;
+    const sk=parseSkillLines(dashboard.body);
+    const e=entry(base,at,"via","Operator (dashboard)",[sk.body,...shown].filter(Boolean).join("\n")); e.tag="dashboard"; e.dashboard_id=dashboard.id;
+    if (sk.names.length) e.skills=sk.names;
     if (dashboard.images) e.images=dashboard.images;
     if (dashboard.files) e.files=dashboard.files;
     if (dashboard.askId) e.ask_id=dashboard.askId;

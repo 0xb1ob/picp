@@ -82,11 +82,17 @@ test("hero spans the body and contains title then phase, PR, CI and review badge
  assert.equal(badges.querySelector("a")?.getAttribute("href"), "https://github.com/acme/widgets/pull/12");
  assert.deepEqual([...document.querySelector(".job-detail-body")!.children].map(e=>e.className), ["job-detail-main","job-detail-side"], "the tab content and the facts rail");
  const labels = [...document.querySelectorAll(".job-facts dt")].map(e=>e.textContent);
- assert.deepEqual(labels, ["Wall clock","Cost","Model","Head","Context","Routing","Mandate","PR","CI","Review"]);
+ assert.deepEqual(labels, ["Wall clock","Cost","Model","Head","Context","Routing","Skills","Mandate","PR","CI","Review"]);
  const model = document.querySelector(".job-fact-model dd");
  const provider = detail({model:"anthropic/claude-fixture"});
  assert.match(provider, /<code[^>]*>claude-fixture<\/code><span class="job-provider">anthropic<\/span>/);
  assert.ok(model);
+});
+
+test("Skills fact: the fleet record's names, or none", () => {
+ const skills = (over: Partial<ViewerJob>) => parseHTML(detail(over)).document.querySelector(".job-fact-skills dd")?.textContent;
+ assert.equal(skills({skills: ["tdd-x", "lint-y"]}), "@tdd-x @lint-y");
+ assert.equal(skills({}), "none");
 });
 
 test("routing pills retain recorded provenance once and show one explanation", () => {
