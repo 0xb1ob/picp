@@ -60,7 +60,7 @@ export function withRunReviewerSpend(home: string, jobs: readonly MandateUsageJo
 export function runRiskPreapproval(run: ScheduleRun, job: RunAuthorityJob, createdAt?: string): boolean {
 	return job.project === run.policy.project && !job.script && hardStops([...(job.pathHints ?? []), job.text ?? ""].join("\n")).length === 0 &&
 		// Org-review approvals keep the saved dashboard-only clearance.
-		(run.policy.recipe.skill !== "cp-org-pr-review" || (run.trigger.via === "dashboard" && run.policy.effects.includes("org_review_approve"))) &&
+		(run.policy.recipe.skill !== "cp-org-pr-review" || (run.trigger.via === "dashboard" && run.policy.effects.includes("org_review_approve") && run.policy.effect_channels.org_review_approve?.includes("dashboard") === true)) &&
 		preapprovalRecordCovers(run.risk_preapproval, run.members.map((m) => m.job_id), job, createdAt);
 }
 /** Who started a run, in the words a brief and an escalation carry. */
