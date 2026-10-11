@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../src/contracts.ts";
@@ -632,7 +632,8 @@ test("a promotion (mode prompt) replaces the frozen task, and keeps every prior 
 	const dir = mkdtempSync(join(tmpdir(), "cp-send-task-"));
 	const taskFile = join(dir, "task.md");
 	writeFileSync(taskFile, "Bump x to 2, update the README, and add a changelog entry.");
-	const second = await b.sender.send({ jobId: b.jobId, message: "one more scope change", taskFile, model: b.model });
+	// S9: a relative taskFile (to the parent's cwd) promotes through the same readTask resolution.
+	const second = await b.sender.send({ jobId: b.jobId, message: "one more scope change", taskFile: relative(process.cwd(), taskFile), model: b.model });
 	assert.equal(second.receipt, "delivered");
 	assert.equal(second.task_updated?.generation, 2);
 	assert.equal(second.task_updated?.source, "task_file");

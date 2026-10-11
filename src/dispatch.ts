@@ -23,7 +23,7 @@ import { repoMap } from "./repo-map.ts";
 import type { CommandRunner } from "./merge-ask.ts";
 import type { CapacityReader } from "./capacity.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	JOB_ID_PATTERN,
 	type Delivery,
@@ -199,14 +199,15 @@ export function readTask(request: TaskInput): ResolvedTask {
 		throw new DispatchError(`${request.jobId}: pass task or taskFile, not both`);
 	}
 	if (request.taskFile !== undefined) {
-		if (!existsSync(request.taskFile)) {
-			throw new DispatchError(`${request.jobId}: task file ${request.taskFile} does not exist`);
+		const path = resolve(request.taskFile); // once, against the parent's cwd: the worker reads from elsewhere
+		if (!existsSync(path)) {
+			throw new DispatchError(`${request.jobId}: task file ${path} does not exist`);
 		}
-		const text = readFileSync(request.taskFile, "utf8");
+		const text = readFileSync(path, "utf8");
 		if (text.trim().length === 0) {
-			throw new DispatchError(`${request.jobId}: task file ${request.taskFile} is empty`);
+			throw new DispatchError(`${request.jobId}: task file ${path} is empty`);
 		}
-		return { forBrief: taskFilePointer(request.taskFile), forInference: text };
+		return { forBrief: taskFilePointer(path), forInference: text };
 	}
 	if (request.task === undefined || request.task.trim().length === 0) {
 		throw new DispatchError(`${request.jobId}: a task (or taskFile) is required — a brief without a task is a worker without a job`);
