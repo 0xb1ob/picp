@@ -825,7 +825,7 @@ function heldRecord(jobId: string, overrides: Partial<FleetRecord> = {}): FleetR
 	} as unknown as FleetRecord;
 }
 
-function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } & Partial<Pick<HeldContinuationDeps, "reviewWindow" | "now" | "schedule" | "review">> = {}): ContinuationBench {
+function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } & Partial<Pick<HeldContinuationDeps, "reviewWindow" | "now" | "schedule" | "review" | "hold">> = {}): ContinuationBench {
 	const records = options.records ?? [heldRecord("cp-4wz")];
 	const bench: Omit<ContinuationBench, "continuation"> = {
 		records,
@@ -883,6 +883,7 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		...(options.writeBack ? { writeBack: options.writeBack } : {}),
 		...(options.draining ? { draining: options.draining } : {}),
 		...(options.onLanded ? { onLanded: options.onLanded } : {}),
+		...(options.hold ? { hold: options.hold } : {}),
 	});
 	return { ...bench, continuation };
 }
@@ -925,6 +926,44 @@ test("green: verdict returns promptly, a single deadline resumes merge without a
 	assert.equal(b.wakes.length, 1, "HELD PR WAITING still wakes");
 	assert.equal(b.relays.length, 1, "the landing only relays");
 });
+
+for (const hold of ["absent", "present", "unreadable"] as const) {
+	test(`HELD PR WAITING names deadline ownership and a ${hold} sampled hold, read once with no extra step`, async (t) => {
+		const home = createScratchHome(); t.after(() => home.cleanup());
+		const clock = deadlineClock("2026-10-07T10:00:00Z");
+		writeWindowPass(home.path, "cp-4wz", HEAD, clock.now().toISOString());
+		let reads = 0;
+		const long = `operator review ${"x".repeat(400)}`;
+		const b = continuationBench({
+			now: clock.now, schedule: clock.schedule, reviewWindow: (jobId, head) => readReviewMergeWindow(home.path, jobId, head, clock.now()),
+			hold: () => {
+				reads += 1;
+				if (hold === "unreadable") throw new Error("integration hold unreadable at /x: bad json\nstack");
+				return hold === "present" ? { reason: long } : undefined;
+			},
+		});
+		t.after(() => b.continuation.stop());
+		const verdict = { jobId: "cp-4wz", surface: "review" as const, attempt: 1, headSha: HEAD, content: "", details: { next: "proceed" } };
+		await b.continuation.onVerdict(verdict);
+		await b.continuation.onVerdict(verdict);
+		assert.deepEqual(b.advances, [], "no GitHub step for the notice");
+		assert.equal(clock.tasks.size, 1, "one deadline");
+		assert.equal(b.wakes.length, 1, "one WAITING wake");
+		assert.equal(reads, 1, "sampled once per emitted notice, not polled");
+		const content = b.notices[0]?.content ?? "";
+		assert.match(content, /review passed on .*merge waits until 2026-10-07T10:00:30/);
+		assert.match(content, /re-enters every gate at 2026-10-07T10:00:30.*by itself; no cp_integrate advance is needed/);
+		if (hold === "absent") assert.match(content, /Sampled hold: none recorded/);
+		if (hold === "present") {
+			assert.match(content, /Sampled hold \(not a fresh CI or permission read\): operator review x+… \(truncated, 416 chars\)\. It must be released/);
+			assert.ok(!content.includes("x".repeat(301)), "reason bounded");
+		}
+		if (hold === "unreadable") {
+			assert.match(content, /Hold state unconfirmed \(integration hold unreadable at \/x: bad json\); integration fails closed/);
+			assert.ok(!content.includes("stack"));
+		}
+	});
+}
 
 
 for (const guard of ["head", "missing_head", "generation", "phase", "closed", "drain", "disabled", "stop"]) {
