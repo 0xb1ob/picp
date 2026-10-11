@@ -82,6 +82,9 @@ export class ParentDelivery {
 	readonly #pending = new Map<string, object>();
 	/** The post-ready transcript read failed; retried on the next settle. */
 	#reconcilePending = false;
+	/** Wake-turn retry ladder (`retryWake`): attempts spent, and whether a nudge timer is pending. */
+	#wakeAttempts = 0;
+	#wakeTimer = false;
 	/**
 	 * Ids injected or landed by the current parent process. A reconcile never
 	 * requeues and a resume never nudges one of these: they did not cross a restart.
@@ -230,6 +233,39 @@ export class ParentDelivery {
 		if (!proc) return; // still `landed`: the relaunch's resume nudge answers it
 		const sent = await proc.send(frameBatch([{ id, text: RESUME_NUDGE }]), "prompt", PARENT_STREAMING);
 		if (sent.receipt === "failed" && this.#host.liveProc() === proc) this.#finish(id, { failed: true, reply: "", error: sent.error ?? error });
+	}
+
+	/**
+	 * A turn no send owns (a wake or escalation) that ended on a transient provider error is nudged to
+	 * resume on the same ladder as a send (the wake is already in its context, so nothing is re-delivered).
+	 * True = a resume is scheduled and the error relay waits; `giveUp` relays it once if the nudge cannot go.
+	 * shortcut: attempts live in memory, so a bridge restart mid-ladder drops the wake's budget; a stale turn never retries.
+	 */
+	retryWake(turn: LandedTurn, stale: boolean, giveUp: () => void): boolean {
+		const error = turn.error?.message;
+		if (!error) {
+			this.#wakeAttempts = 0;
+			return false;
+		}
+		if (turn.landed.length > 0 || stale || !isTransientProviderError(error)) return false;
+		if (this.#wakeTimer) return true; // one timer per ladder
+		if (this.#wakeAttempts >= MAX_OUTER_RETRIES) {
+			this.#host.journal("outer_retry_exhausted", { wake: true, attempts: this.#wakeAttempts, message: error });
+			this.#wakeAttempts = 0;
+			return false;
+		}
+		const attempt = ++this.#wakeAttempts;
+		this.#wakeTimer = true;
+		const delayMs = OUTER_RETRY_DELAYS_MS[attempt - 1] as number;
+		this.#host.journal("outer_retry_attempt", { wake: true, attempt, delayMs, message: error });
+		void this.#host.sleep(delayMs).then(async () => {
+			this.#wakeTimer = false;
+			const proc = this.#host.liveProc();
+			if (!proc) return giveUp();
+			const sent = await proc.send(RESUME_NUDGE, "prompt", PARENT_STREAMING);
+			if (sent.receipt === "failed" && this.#host.liveProc() === proc) giveUp();
+		});
+		return true;
 	}
 
 	/** "When the parent's turn ends": queued sends go in now, as one message. */

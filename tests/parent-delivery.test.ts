@@ -620,3 +620,64 @@ test("a landed send with no reply 24 h after landing ends undeliverable; stop re
 	assert.equal(ctx.box.get(stopped.id)?.error, "parent stopped before replying");
 	assert.ok(ctx.relays.some((relay) => relay.sendId === stopped.id));
 });
+
+test("a wake turn that ends on a transient error is nudged on the send ladder, then relays once when exhausted", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	const gaveUp: string[] = [];
+	const failed = () => {
+		const turn = ctx.turn();
+		turn.error = { message: "503 No available accounts" };
+		return delivery.retryWake(turn, false, () => gaveUp.push("relay"));
+	};
+	for (let attempt = 0; attempt < OUTER_RETRY_DELAYS_MS.length; attempt++) {
+		assert.equal(failed(), true, "relay waits while the ladder has budget");
+		assert.equal(failed(), true, "a second failure while the timer is pending spends nothing");
+		ctx.sleeps[attempt]?.release();
+		await flush();
+		assert.match(ctx.sent[attempt] as string, /previous turn failed/);
+		assert.doesNotMatch(ctx.sent[attempt] as string, /\[cp-send/, "a nudge carries no send marker");
+	}
+	assert.deepEqual(ctx.sleeps.map((sleep) => sleep.ms), [...OUTER_RETRY_DELAYS_MS], "same backoff as sends");
+	assert.equal(failed(), false, "spent: the caller relays the error once");
+	assert.deepEqual(ctx.journal.map((line) => line.event).slice(-1), ["outer_retry_exhausted"]);
+	assert.deepEqual(gaveUp, []);
+});
+
+test("a wake turn that recovers resets the ladder; stale, non-transient and send-owned turns are never nudged", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	const errored = (message: string) => {
+		const turn = ctx.turn();
+		turn.error = { message };
+		return turn;
+	};
+	assert.equal(delivery.retryWake(errored("503 unavailable"), false, () => undefined), true);
+	ctx.sleeps[0]?.release();
+	await flush();
+	assert.equal(ctx.sent.length, 1);
+	assert.equal(delivery.retryWake(ctx.turn(), false, () => undefined), false, "a clean settle is not retried");
+	assert.equal(delivery.retryWake(errored("503 unavailable"), false, () => undefined), true);
+	ctx.sleeps[1]?.release();
+	await flush();
+	assert.equal(ctx.sleeps[1]?.ms, OUTER_RETRY_DELAYS_MS[0], "the budget restarted after the clean turn");
+	assert.equal(delivery.retryWake(errored("503 unavailable"), true, () => undefined), false, "stale wake");
+	assert.equal(delivery.retryWake(errored("401 unauthorized"), false, () => undefined), false, "never-retry error");
+	const owned = errored("503 unavailable");
+	owned.landed.push({ id: ctx.entry.id, index: 0, assistants: 0 });
+	assert.equal(delivery.retryWake(owned, false, () => undefined), false, "a send owns its own error");
+	assert.equal(ctx.sleeps.length, 2);
+});
+
+test("a wake nudge that cannot be sent gives the error relay back to the caller", async () => {
+	const ctx = laddered();
+	const delivery = ctx.fresh();
+	(ctx.proc as unknown as { send: () => Promise<unknown> }).send = async () => ({ receipt: "failed", error: "pipe closed" });
+	const gaveUp: string[] = [];
+	const turn = ctx.turn();
+	turn.error = { message: "503 unavailable" };
+	assert.equal(delivery.retryWake(turn, false, () => gaveUp.push("relay")), true);
+	ctx.sleeps[0]?.release();
+	await flush();
+	assert.deepEqual(gaveUp, ["relay"]);
+});
