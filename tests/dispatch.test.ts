@@ -8,8 +8,9 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, type RunEvent, THINKING_LEVELS } from "../src/contracts.ts";
 import { DispatchQueue } from "../src/dispatch-queue.ts";
@@ -23,6 +24,7 @@ import {
 	type DispatchResult,
 	DispatchError,
 	type GitRunner,
+	readTask,
 } from "../src/dispatch.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
@@ -482,6 +484,29 @@ test(
 		assert.ok(events.includes("original_task_frozen"));
 	},
 );
+
+// S9 (N6): a relative taskFile is the parent's cwd, not the worker's; the
+// brief must carry the one absolute path existence/read used.
+test("readTask resolves a relative taskFile once: absolute pointer, same bytes, refusals keep the absolute path", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-read-task-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const absolute = join(dir, "task.md");
+	const body = "# Plan\n\nBump x to 2 in src/app.ts.\n";
+	writeFileSync(absolute, body);
+	const relativePath = relative(process.cwd(), absolute);
+	assert.ok(!relativePath.startsWith(sep), "the fixture really is relative to the test cwd");
+
+	const fromRelative = readTask({ jobId: "cp-s9", taskFile: relativePath });
+	assert.ok(fromRelative.forBrief.includes(`\`${absolute}\``), "the pointer names the absolute path a worker can read");
+	assert.ok(!fromRelative.forBrief.includes(body.trim()), "the body is never inlined");
+	assert.equal(fromRelative.forInference, body, "inference reads the original bytes");
+	assert.deepEqual(readTask({ jobId: "cp-s9", taskFile: absolute }), fromRelative, "absolute input resolves to the same task");
+
+	assert.throws(() => readTask({ jobId: "cp-s9", taskFile: relative(process.cwd(), join(dir, "missing.md")) }), new RegExp(`task file ${join(dir, "missing.md")} does not exist`));
+	writeFileSync(join(dir, "empty.md"), "  \n");
+	assert.throws(() => readTask({ jobId: "cp-s9", taskFile: relative(process.cwd(), join(dir, "empty.md")) }), new RegExp(`task file ${join(dir, "empty.md")} is empty`));
+	assert.throws(() => readTask({ jobId: "cp-s9", task: "a", taskFile: relativePath }), /pass task or taskFile, not both/);
+});
 
 test(
 	"cp-n7w: a real secret pasted directly into a hand-written task is still refused",
