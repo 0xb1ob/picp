@@ -170,6 +170,49 @@ test("a failed self_compact is recorded in the session and the next settle compa
 	assert.equal(f.compacts.length, 3, "persistent failure stops retrying");
 });
 
+test("S1: pi's benign compact skips never count as failures, release waiters and leave the next settle eligible", async (t) => {
+	const f = setup(t);
+	f.tokens(280000);
+	await f.emit("agent_settled");
+	for (let i = 0; i < 5; i++) {
+		await f.emit("agent_settled");
+		f.compacts[i]?.onError?.(new Error(i % 2 ? "Already compacted" : "Nothing to compact (session too small)"));
+	}
+	assert.equal(f.compacts.length, 5, "each later settle retries; no immediate retry, never exhausted");
+	assert.match(f.notices.join("\n"), /automatic compaction.*skipped: Nothing to compact \(session too small\)/);
+	assert.doesNotMatch(f.notices.join("\n"), /failed|completed/);
+	assert.equal(f.messages.length, 1, "only the threshold request; no failure record");
+	assert.doesNotMatch(f.statuses.join("\n"), /last self-compact: \d/, "a skip never stamps lastCompactAt");
+	const { registerOperatorCompact } = await import("../src/operator-compact.ts");
+	const handlers = new Map<string, Handler>();
+	const control = registerOperatorCompact({ on: (name: string, handler: Handler) => handlers.set(name, handler), registerTool: () => {}, sendMessage: () => {} } as unknown as ExtensionAPI, () => ({ home: f.home, mode: "multi" }));
+	const compacts: CompactOptions[] = [];
+	const ctx = { ...f.ctx, getContextUsage: () => ({ tokens: 300000 }), compact: (o: CompactOptions) => compacts.push(o) } as unknown as ExtensionContext;
+	await handlers.get("agent_settled")!({}, ctx);
+	await handlers.get("agent_settled")!({}, ctx);
+	const woke: string[] = [];
+	control.whenIdle(() => woke.push("queued"));
+	assert.equal(woke.length, 0);
+	compacts[0]?.onError?.(new Error("Already compacted"));
+	assert.deepEqual(woke, ["queued"], "queued whenIdle callbacks release on a skip");
+	let calls = 0;
+	const throwing = { ...ctx, compact: () => { calls++; throw new Error("Already compacted"); } } as unknown as ExtensionContext;
+	for (let i = 0; i < 4; i++) await handlers.get("agent_settled")!({}, throwing);
+	control.whenIdle(() => woke.push("idle"));
+	assert.equal(calls, 4, "a synchronous throw takes the same skip path, and stays eligible");
+	assert.deepEqual(woke, ["queued", "idle"], "nothing left running");
+});
+
+test("S1: a benign skip still spends the provider-rejection streak's one compaction", async (t) => {
+	const f = setup(t);
+	await f.emit("message_end", { message: REJECTED });
+	await f.emit("agent_settled");
+	f.compacts[0]?.onError?.(new Error("Nothing to compact (session too small)"));
+	await f.emit("agent_settled");
+	assert.equal(f.compacts.length, 1);
+	assert.match(f.notices.join("\n"), /not compacting again \(this failure streak already compacted\)/);
+});
+
 test("bridge wakes that arrive during a compaction wait for it to end", async (t) => {
 	const f = setup(t);
 	const { registerOperatorCompact } = await import("../src/operator-compact.ts");

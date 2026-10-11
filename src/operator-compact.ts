@@ -139,6 +139,11 @@ export function registerOperatorCompact(pi: ExtensionAPI, target: () => { home: 
 		if (streak) streak.compacted = true; // any compaction during a streak is the streak's one
 		const onError = (error: Error) => {
 			finish();
+			// Pi's own no-op refusals: nothing was attempted, so they are not failures and never retried here.
+			if (/^(?:Nothing to compact|Already compacted)\b/.test(error.message)) {
+				notify(ctx, `${label} skipped: ${error.message}`, "info");
+				return;
+			}
 			failures++;
 			const text = `${label} failed: ${error.message}; ${after?.failed ?? (failures < MAX_AUTO_FAILURES ? "the next settle over the threshold compacts automatically" : `automatic compaction stopped after ${failures} failures, run /compact`)}`;
 			notify(ctx, text, "error");
