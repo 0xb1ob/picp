@@ -179,13 +179,15 @@ export function resolveForgeRepository(cloneUrl: string, config?: ForgeConfig): 
 		}
 		if (!cleanPath(path)) return { ok: false, reason: "invalid", detail: "a GitLab project path is namespace/project" };
 	}
-	const tokenEnv = config?.token_env ?? (webUrl.host === "gitlab.com" ? GITLAB_COM_TOKEN_ENV : undefined);
+	const api = normalizeBaseUrl(config?.api_base_url ?? `${web}/api/v4`) as string;
+	// The default gitlab.com token goes only to the gitlab.com API, never to another configured API host.
+	const tokenEnv = config?.token_env ?? (urlOf(api)?.host === "gitlab.com" ? GITLAB_COM_TOKEN_ENV : undefined);
 	return {
 		ok: true,
 		repository: {
 			kind,
 			web_base_url: web,
-			api_base_url: normalizeBaseUrl(config?.api_base_url ?? `${web}/api/v4`) as string,
+			api_base_url: api,
 			path,
 			...(tokenEnv ? { token_env: tokenEnv } : {}),
 		},

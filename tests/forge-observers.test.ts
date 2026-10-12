@@ -228,16 +228,30 @@ test("gitlab network errors, timeouts and oversize bodies fail closed without ec
 	assert.ok(!JSON.stringify(timedOut).includes(CANARY));
 
 	const big = JSON.stringify(mr({ description: "x".repeat(2048) }));
-	const declared = await gitlabObserver(repo(), { fetch: fakeFetch(() => new Response(big, { status: 200, headers: { "content-length": String(big.length) } })).fetch, env: {}, maxBytes: 1024 }).readChangeRequest("7");
+	let declaredCancelled = false;
+	const declaredBody = new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(new TextEncoder().encode(big));
+		},
+		cancel() {
+			declaredCancelled = true;
+		},
+	});
+	const declared = await gitlabObserver(repo(), { fetch: fakeFetch(() => new Response(declaredBody, { status: 200, headers: { "content-length": String(big.length) } })).fetch, env: {}, maxBytes: 1024 }).readChangeRequest("7");
 	assert.match(failure(declared).detail, /exceeds the size limit/);
+	assert.equal(declaredCancelled, true, "a body refused on its declared length is cancelled, not left open");
+	let streamedCancelled = false;
 	const streamed = new ReadableStream<Uint8Array>({
 		start(controller) {
 			for (let i = 0; i < 4; i += 1) controller.enqueue(new TextEncoder().encode("x".repeat(512)));
-			controller.close();
+		},
+		cancel() {
+			streamedCancelled = true;
 		},
 	});
 	const undeclared = await gitlabObserver(repo(), { fetch: fakeFetch(() => new Response(streamed, { status: 200 })).fetch, env: {}, maxBytes: 1024 }).readChangeRequest("7");
 	assert.match(failure(undeclared).detail, /exceeds the size limit/, "a body without content-length is still capped while it streams");
+	assert.equal(streamedCancelled, true, "a body refused while streaming is cancelled");
 });
 
 test("a foreign or malformed MR reference makes zero requests", async () => {
