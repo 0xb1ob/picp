@@ -9,6 +9,8 @@ import { resolve } from "node:path";
 import { test } from "node:test";
 import { type DaemonConfig, type RawKill, type RuntimeRecord, restartDelay } from "../src/service/daemon-files.ts";
 import { type InnerEvent, type InnerOptions, type InnerPorts, innerKill, runInner } from "../src/service/daemon-runtime.ts";
+import type { TunnelIo } from "../src/service/daemon-tunnel.ts";
+import type { TunnelConfig, TunnelRuntime } from "../src/service/daemon-tunnel-files.ts";
 
 const T0 = Date.parse("2026-10-01T00:00:00.000Z");
 const config: DaemonConfig = { schema_version: 1, generated_by: "cp-install", backend: "detached", node: "/opt/node", app: "/srv/app", home: "/srv/home", path: "/usr/bin", port: 7300 };
@@ -21,7 +23,7 @@ interface Proc {
 	onExit?: (code: number | null, signal: string | null) => void;
 }
 
-function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason"]; foreign?: Record<number, string>; stubborn?: string[]; failSpawn?: string[]; raw?: RawKill; remote?: { on: boolean } } = {}) {
+function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason"]; foreign?: Record<number, string>; stubborn?: string[]; failSpawn?: string[]; raw?: RawKill; remote?: { on: boolean }; tunnel?: { config: TunnelConfig | null; runtime?: TunnelRuntime } } = {}) {
 	let now = T0;
 	const timers: Array<{ at: number; fn: () => void; dead: boolean }> = [];
 	const procs = new Map<number, Proc>();
@@ -78,6 +80,21 @@ function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason
 		send: (event) => void events.push(event),
 		log: (line) => void lines.push(line),
 		...(options.remote ? { remoteConfigured: () => options.remote!.on } : {}),
+		...(options.tunnel
+			? {
+					tunnel: {
+						spawn: (file, argv, _onOutput, onExit) => {
+							const pid = nextPid++;
+							procs.set(pid, { role: "cloudflared", args: [file, ...argv].join(" "), alive: true, onExit, stubborn: options.stubborn?.includes("cloudflared") });
+							spawns.push({ role: "cloudflared", pid, at: now, env: {}, argv: [file, ...argv] });
+							return pid;
+						},
+						readConfig: () => ({ ok: true, config: options.tunnel!.config }),
+						readRuntime: () => ({ ok: true, runtime: options.tunnel!.runtime ?? null }),
+						writeRuntime: (runtime) => void (options.tunnel!.runtime = structuredClone(runtime)),
+					} satisfies TunnelIo,
+				}
+			: {}),
 	};
 	const advance = (ms: number): void => {
 		const end = now + ms;
@@ -418,4 +435,59 @@ test("an orphaned sender of a crashed runtime is stopped before anything new is 
 	assert.deepEqual(h.spawns.map((spawn) => spawn.role), ["parent", "viewer", SENDER]);
 	const reused = harness({ prior: priorRecord({ [SENDER]: unit }), foreign: { 700: "bash" }, remote: { on: true } });
 	assert.deepEqual(reused.kills, []);
+});
+
+// Remote dashboard PR 2c: the cloudflared controller inside the inner (its own lifecycle: tests/daemon-tunnel.test.ts).
+const TUNNEL: TunnelConfig = { schema_version: 1, enabled: true, mode: "quick", port: 8767, binary: "/opt/cf/cloudflared", revision: 1 };
+
+test("cloudflared starts beside the others when data/tunnel.json enables it and never gates readiness; no config, nothing", () => {
+	const h = harness({ tunnel: { config: TUNNEL } });
+	assert.deepEqual(h.spawns.map((spawn) => spawn.role), ["parent", "viewer", "cloudflared"]);
+	assert.deepEqual(h.spawns[2]?.argv, ["/opt/cf/cloudflared", "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8767", "--http-host-header", "127.0.0.1:8767"]);
+	h.exit(h.live("cloudflared") as number, 1);
+	h.advance(5_000);
+	assert.deepEqual(h.events, [{ type: "ready" }], "a crashed tunnel is not a daemon failure");
+	assert.ok(h.live("cloudflared"), "restarted on its own backoff");
+	const none = { config: null } as { config: TunnelConfig | null; runtime?: TunnelRuntime };
+	const plain = harness({ tunnel: none });
+	plain.advance(60_000);
+	assert.deepEqual(plain.spawns.map((spawn) => spawn.role), ["parent", "viewer"]);
+	assert.equal(none.runtime, undefined, "a home without the feature gets no tunnel runtime record");
+});
+
+test("an update hold stops cloudflared with the viewer; no tick starts it while held; the release starts it again", () => {
+	const h = harness({ tunnel: { config: TUNNEL } });
+	const pid = h.live("cloudflared") as number;
+	h.inner.handle("hold");
+	assert.ok(h.kills.some(([p, signal]) => p === pid && signal === "SIGTERM"));
+	h.advance(60_000);
+	assert.equal(h.live("cloudflared"), undefined);
+	h.inner.handle("release");
+	assert.ok(h.live("cloudflared"));
+	assert.equal(h.spawns.filter((spawn) => spawn.role === "cloudflared").length, 2);
+});
+
+test("stop (and so a reload) waits for cloudflared's observed exit, SIGKILLing a stubborn one after 10 s, and restarts nothing", async () => {
+	const h = harness({ tunnel: { config: TUNNEL }, stubborn: ["cloudflared"] });
+	const pid = h.live("cloudflared") as number;
+	h.inner.stop();
+	let done = false;
+	void h.inner.done.then(() => (done = true));
+	await Promise.resolve();
+	assert.equal(done, false, "not settled while cloudflared lives");
+	h.advance(10_000);
+	assert.deepEqual(h.kills.filter(([p]) => p === pid), [[pid, "SIGTERM"], [pid, "SIGKILL"]]);
+	assert.equal(await h.inner.done, 0);
+	h.advance(600_000);
+	assert.equal(h.spawns.filter((spawn) => spawn.role === "cloudflared").length, 1);
+});
+
+test("a new inner stops the crashed inner's cloudflared by its recorded command line before starting its own", () => {
+	const argv = ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8767", "--http-host-header", "127.0.0.1:8767"];
+	const runtime: TunnelRuntime = { schema_version: 1, origin: "https://a.trycloudflare.com", generation: 1, revision: 1, state: "running", pid: 800, binary: "/opt/cf/cloudflared", argv, updated_at: "" };
+	const h = harness({ tunnel: { config: TUNNEL, runtime }, foreign: { 800: ["/opt/cf/cloudflared", ...argv].join(" ") }, reason: "restart" });
+	assert.deepEqual(h.kills, [[800, "SIGTERM"]]);
+	assert.equal(h.live("cloudflared"), undefined);
+	h.advance(1_000);
+	assert.ok(h.live("cloudflared"), "started once the orphan is gone");
 });

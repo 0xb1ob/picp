@@ -12,12 +12,16 @@
  *    signalled on stop or reload — the updater survives the reload it asked for;
  *  - the pairing-alert sender (`device-notify`, remote dashboard PR 2), only on
  *    a home with the remote feature: the supervisor's restart rules, held
- *    down with the viewer during an update, stopped with the others.
+ *    down with the viewer during an update, stopped with the others;
+ *  - cloudflared (remote dashboard PR 2c, `daemon-tunnel.ts`), while
+ *    `data/tunnel.json` enables it: stopped on an update hold, a reload and a
+ *    stop; never a readiness condition.
  *
  * Signals only pids it spawned, or recorded pids whose `ps` args still name
- * the role's script. Never a process group, never the parent host.
+ * the role's script (cloudflared: its exact recorded command line). Never a
+ * process group, never the parent host.
  *
- * Imports only `node:*`, `./daemon-files.ts` and `./daemon-tunnel-files.ts`.
+ * Imports only `node:*`, `./daemon-files.ts`, `./daemon-tunnel-files.ts` and `./daemon-tunnel.ts`.
  */
 import { spawn as spawnChild } from "node:child_process";
 import {
@@ -45,6 +49,7 @@ import {
 	sameProcess,
 	START_LIMIT_INTERVAL_MS,
 } from "./daemon-files.ts";
+import { type TunnelIo, tunnelController, tunnelIo } from "./daemon-tunnel.ts";
 import { remoteFeatureConfigured } from "./daemon-tunnel-files.ts";
 
 export const TICK_MS = 5_000;
@@ -82,6 +87,8 @@ export interface InnerPorts {
 	log(line: string): void;
 	/** Whether the home uses the remote feature (`remoteFeatureConfigured`): only then does the pairing-alert sender run. Absent: never. */
 	remoteConfigured?(): boolean;
+	/** The cloudflared controller's own I/O (`daemon-tunnel.ts`, remote dashboard PR 2c). Absent: no tunnel. */
+	tunnel?: TunnelIo;
 }
 
 /** The production `kill` port: guarded at its lowest level (`guardedKill`), so no invalid pid reaches `process.kill`. */
@@ -150,6 +157,11 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	let stopping = false;
 	let finish: (code: number) => void = () => {};
 	const done = new Promise<number>((resolve) => (finish = resolve));
+	const tunnel = ports.tunnel
+		? tunnelController({ ...ports.tunnel, now, setTimer: ports.setTimer, kill: ports.kill, alive: ports.alive, argsOf: ports.argsOf, log: (line) => ports.log(`tunnel: ${line}`) }, () => {
+				if (stopping) settle();
+			})
+		: undefined;
 
 	const startLong = (role: Long): void => {
 		const unit = record.units[role] as LongUnit;
@@ -246,6 +258,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		if (record.units.viewer.pid === undefined && !stopping) startLong("viewer");
 		else save();
 		startSender();
+		if (!stopping) tunnel?.reconcile();
 	};
 
 	const tickJob = (job: Job): void => {
@@ -282,6 +295,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		if (stopping) return;
 		if (record.hold && now() >= Date.parse(record.hold.until)) release("its 50-min deadline passed");
 		startSender();
+		if (!record.hold) tunnel?.reconcile();
 		tickJob("health");
 		tickJob("update");
 		later(tick, TICK_MS);
@@ -295,6 +309,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			save();
 		} else startLong("viewer");
 		startSender();
+		if (!record.hold) tunnel?.reconcile();
 		const initial = { parent: record.units.parent.pid, viewer: record.units.viewer.pid };
 		later(() => {
 			if (stopping) return;
@@ -328,7 +343,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 
 	let settled = false;
 	const settle = (): void => {
-		if (settled || LONGS.some((role) => record.units[role]?.pid !== undefined)) return;
+		if (settled || LONGS.some((role) => record.units[role]?.pid !== undefined) || tunnel?.busy()) return;
 		settled = true;
 		save();
 		ports.log("stopped (oneshots left running)");
@@ -339,6 +354,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		if (stopping) return;
 		stopping = true;
 		for (const cancel of cancels.splice(0)) cancel();
+		tunnel?.stop();
 		for (const role of LONGS) {
 			const unit = record.units[role];
 			if (unit && unit.pid === undefined && unit.state !== "failed") unit.state = "stopped";
@@ -367,6 +383,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 					if (unit?.pid !== undefined) terminate(role);
 					else if (unit) unit.state = "held";
 				}
+				tunnel?.stop();
 				ports.log(`viewer held until ${record.hold.until}`);
 				save();
 				return { ok: true };
@@ -443,6 +460,7 @@ if (import.meta.main) {
 			send,
 			log,
 			remoteConfigured: () => remoteFeatureConfigured(paths.dataDir),
+			tunnel: tunnelIo(paths, (config as DaemonConfig).home, { ...baseEnv(process.env), PATH: (config as DaemonConfig).path }, log),
 		},
 	);
 	process.on("message", (message: { type?: string; id?: string; op?: string }) => {

@@ -184,8 +184,12 @@ test("the outer and inner import only node:* and ./daemon-*.ts, statically, and 
 	};
 	visit("daemon.ts");
 	assert.deepEqual([...closure].sort(), [...OUTER_SOURCES].sort());
-	// Remote dashboard PR 2: the inner may also read the node-only tunnel layout, which imports nothing else.
-	for (const spec of importsOf("daemon-runtime.ts")) assert.ok(spec.startsWith("node:") || spec === "./daemon-files.ts" || spec === "./daemon-tunnel-files.ts", `daemon-runtime.ts imports ${spec}`);
+	// Remote dashboard PR 2: the inner may also read the node-only tunnel layout, which imports nothing else, and run the
+	// cloudflared controller (PR 2c), whose only other import is the provisioner's fixed argv (node-only too).
+	const inner = ["./daemon-files.ts", "./daemon-tunnel-files.ts", "./daemon-tunnel.ts"];
+	for (const spec of importsOf("daemon-runtime.ts")) assert.ok(spec.startsWith("node:") || inner.includes(spec), `daemon-runtime.ts imports ${spec}`);
+	for (const spec of importsOf("daemon-tunnel.ts")) assert.ok(spec.startsWith("node:") || spec === "./daemon-files.ts" || spec === "./daemon-tunnel-files.ts" || spec === "../tunnel/cloudflared.ts", `daemon-tunnel.ts imports ${spec}`);
+	for (const spec of importsOf("../tunnel/cloudflared.ts")) assert.ok(spec.startsWith("node:") || spec === "../service/daemon-files.ts", `cloudflared.ts imports ${spec}`);
 	for (const spec of importsOf("daemon-tunnel-files.ts")) assert.ok(spec.startsWith("node:"), `daemon-tunnel-files.ts imports ${spec}`);
 });
 

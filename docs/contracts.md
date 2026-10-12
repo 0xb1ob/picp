@@ -129,7 +129,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     push-deliveries.json            Web Push delivery ledger, once per id (Pier 1.1)
     device-notification-deliveries.json  pairing-alert delivery ledger, per event and recipient (remote dashboard PR 1d)
     device-notify.lock              the pairing-alert sender's one-per-home lease {pid, started_at}, 0600 (remote dashboard PR 2)
-    tunnel-runtime.json             the last published tunnel {schema_version, generation, origin} (remote dashboard PR 2)
+    tunnel-runtime.json             cloudflared controller state: binding {generation, origin}, revision, state, owned pid, 0600 (remote dashboard PR 2c)
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
     operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
@@ -6578,6 +6578,15 @@ both senders: an owned subscription of a device on another generation gets no ne
 every owned one closed. A revoke (`DeviceStore.revoke`) removes the device's own subscriptions only after the revoke is
 durable; a cleanup failure is returned as `cleanup_error` beside `audit_error` and never restores access. A remote
 device that finds an unreadable file at its endpoint's path refuses 403 on store as it already did on remove.
+
+**The cloudflared controller (PR 2c).** cp-daemon's inner owns the tunnel child (`src/service/daemon-tunnel.ts`): it
+applies `data/tunnel.json` at start, on every 5 s tick and on a hold's release, runs one attached cloudflared with the
+fixed argv, and publishes `state/tunnel-runtime.json` (pid and exact command line, applied revision, state, binding).
+The published origin is the named hostname or the first validated `https://<label>.trycloudflare.com` of a quick run,
+and only once a tunnel connection registered. A new origin is a new generation; the same named origin keeps its own.
+Disable, hold, reload and stop SIGTERM the child and SIGKILL it 10 s later if no exit was observed. A crashed inner's
+child is signalled only by its exact recorded command line, never by name or group. An unreadable config or runtime
+fails closed. Nothing writes the config until `cp-tunnel`, so the feature stays off.
 
 ## Reading the plan
 

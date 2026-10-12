@@ -109,7 +109,8 @@ export async function probeCloudflared(file: string, run: ProvisionPorts["run"])
 	for (const [args, flags] of needs) {
 		const help = await run(file, args);
 		const text = `${help.stdout}\n${help.stderr}`;
-		const missing = flags.filter((flag) => !new RegExp(`(^|[\\s,])${flag}\\b`).test(text));
+		// A flag ends at whitespace, a comma, `=` or the end: `--url-foo` is not `--url`.
+		const missing = flags.filter((flag) => !new RegExp(`(^|[\\s,])${flag}(?=[\\s,=]|$)`).test(text));
 		if (missing.length > 0) return { ok: false, reason: `${file} (cloudflared ${label}) lacks ${missing.join(", ")} in \`${args.join(" ")}\`` };
 	}
 	return { ok: true, version: label };
@@ -153,6 +154,7 @@ export async function provisionCloudflared(binDir: string, ports: ProvisionPorts
 		if (digest !== release.sha256) throw new Error(`checksum mismatch for ${release.asset}: got ${digest}, expected ${release.sha256}`);
 		const binary = release.archive ? extractCloudflared(bytes) : bytes;
 		mkdirSync(binDir, { recursive: true, mode: 0o700 });
+		chmodSync(binDir, 0o700); // an existing bin/ too: mkdir's mode applies only to a directory it creates
 		temp = join(binDir, `.cloudflared.${process.pid}.${Date.now()}.tmp`);
 		const fd = openSync(temp, "wx", 0o600);
 		try {
@@ -233,22 +235,37 @@ const field = (block: Buffer, start: number, length: number): string => {
 	return raw.subarray(0, end === -1 ? raw.length : end).toString("utf8");
 };
 
+/** A ustar size field: octal, or GNU base-256 (high bit set, big-endian, never negative). Anything else refuses. */
+function headerSize(header: Buffer): number {
+	const first = header[124] ?? 0;
+	if (first & 0x80) {
+		if (first & 0x40) throw new Error("archive entry has a negative size");
+		let size = first & 0x3f;
+		for (let i = 125; i < 136; i += 1) size = size * 256 + (header[i] ?? 0);
+		if (!Number.isSafeInteger(size)) throw new Error("archive entry has an unreadable size");
+		return size;
+	}
+	const text = field(header, 124, 12).trim();
+	if (!/^[0-7]+$/.test(text)) throw new Error("archive entry has an unreadable size");
+	return Number.parseInt(text, 8);
+}
+
 /**
  * The binary from a verified macOS release archive: gzip, then ustar/pax, holding exactly one regular file named
- * `cloudflared`. pax extended headers are read only for a path; a link, directory, global header, other entry or a
- * second copy refuses the whole archive.
+ * `cloudflared`. pax extended headers are read only for a path and a size (which overrides the next entry's); a link,
+ * directory, global header, other entry, unreadable size or a second copy refuses the whole archive.
  */
 export function extractCloudflared(archive: Buffer): Buffer {
 	const tar = gunzipSync(archive, { maxOutputLength: DOWNLOAD_MAX_BYTES });
 	let found: Buffer | undefined;
 	let paxPath: string | undefined;
+	let paxSize: number | undefined;
 	let offset = 0;
 	while (offset + 512 <= tar.length) {
 		const header = tar.subarray(offset, offset + 512);
 		if (header.every((byte) => byte === 0)) break;
-		const sizeField = field(header, 124, 12).trim();
-		if (!/^[0-7]+$/.test(sizeField)) throw new Error("archive entry has an unreadable size");
-		const size = Number.parseInt(sizeField, 8);
+		const size = paxSize ?? headerSize(header);
+		paxSize = undefined;
 		const body = tar.subarray(offset + 512, offset + 512 + size);
 		if (body.length !== size) throw new Error("archive is truncated");
 		offset += 512 + Math.ceil(size / 512) * 512;
@@ -258,6 +275,11 @@ export function extractCloudflared(archive: Buffer): Buffer {
 				const [key, ...value] = record.replace(/^\d+ /, "").split("=");
 				if (key === "linkpath") throw new Error("archive entry is a link");
 				if (key === "path") paxPath = value.join("=");
+				if (key === "size") {
+					const text = value.join("=");
+					if (!/^\d{1,15}$/.test(text)) throw new Error("archive pax header has an unreadable size");
+					paxSize = Number(text);
+				}
 			}
 			continue;
 		}
