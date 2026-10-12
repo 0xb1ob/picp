@@ -70,6 +70,17 @@ test("decideRestart: the viewer restarts after 10 s on any exit, never limited, 
 	assert.deepEqual(decideRestart("viewer", { starts: [], restarts: 0 }, { code: null, signal: "SIGTERM", requested: true }, 0), { action: "stopped" });
 });
 
+test("decideRestart: the pairing-alert sender follows the supervisor's rules, and stays down while held", () => {
+	const now = 10_000_000;
+	assert.deepEqual(decideRestart("device-notify", { starts: [now - 1000], restarts: 0 }, { code: 1, signal: null, requested: false }, now), { action: "restart", delayMs: 5000 });
+	assert.deepEqual(decideRestart("device-notify", { starts: [now], restarts: 0 }, { code: 78, signal: null, requested: false }, now), { action: "failed", result: "exit-code" });
+	const six = [0, 1, 2, 3, 4, 5].map((i) => now - i * 60_000);
+	assert.deepEqual(decideRestart("device-notify", { starts: six, restarts: 5 }, { code: 1, signal: null, requested: false }, now), { action: "failed", result: "start-limit-hit" });
+	assert.deepEqual(decideRestart("device-notify", { starts: [now], restarts: 0, held: true }, { code: null, signal: "SIGKILL", requested: false }, now), { action: "stopped" });
+	assert.deepEqual(decideRestart("device-notify", { starts: [now], restarts: 0 }, { code: null, signal: "SIGTERM", requested: true }, now), { action: "stopped" });
+	assert.deepEqual(decideRestart("parent", { starts: [now], restarts: 0, held: true }, { code: 1, signal: null, requested: false }, now), { action: "restart", delayMs: 5000 }, "a hold never holds the supervisor");
+});
+
 /** The `Environment=` pairs and `ExecStart=` words of a rendered unit, systemd escapes undone. */
 function parseUnit(text: string): { env: Record<string, string>; argv: string[] } {
 	const words = (line: string, exec: boolean): string[] =>
@@ -173,7 +184,9 @@ test("the outer and inner import only node:* and ./daemon-*.ts, statically, and 
 	};
 	visit("daemon.ts");
 	assert.deepEqual([...closure].sort(), [...OUTER_SOURCES].sort());
-	for (const spec of importsOf("daemon-runtime.ts")) assert.ok(spec.startsWith("node:") || spec === "./daemon-files.ts", `daemon-runtime.ts imports ${spec}`);
+	// Remote dashboard PR 2: the inner may also read the node-only tunnel layout, which imports nothing else.
+	for (const spec of importsOf("daemon-runtime.ts")) assert.ok(spec.startsWith("node:") || spec === "./daemon-files.ts" || spec === "./daemon-tunnel-files.ts", `daemon-runtime.ts imports ${spec}`);
+	for (const spec of importsOf("daemon-tunnel-files.ts")) assert.ok(spec.startsWith("node:"), `daemon-tunnel-files.ts imports ${spec}`);
 });
 
 test("outer_hash covers every outer source: changing any one of them changes it", () => {

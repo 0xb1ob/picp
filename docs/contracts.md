@@ -128,6 +128,8 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     escalations.json                structured ask-the-human records (autonomy-programme-cur.2.3)
     push-deliveries.json            Web Push delivery ledger, once per id (Pier 1.1)
     device-notification-deliveries.json  pairing-alert delivery ledger, per event and recipient (remote dashboard PR 1d)
+    device-notify.lock              the pairing-alert sender's one-per-home lease {pid, started_at}, 0600 (remote dashboard PR 2)
+    tunnel-runtime.json             the last published tunnel {schema_version, generation, origin} (remote dashboard PR 2)
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
     operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
@@ -6537,8 +6539,18 @@ overlap and hold no lock across a network call. `GET /api/devices/notices` (gate
 device sees only events naming it) returns the last 20 committed events, newest first, with each recipient's state
 (`pending` before the sender records it, `unknown` with `delivery_error` when the ledger is unreadable). The shell
 shows unread ones above every screen (polled every 2 s while visible, on each live refresh and on reconnect); Dismiss
-is a per-browser localStorage cursor, never a server acknowledgement. The daemon role, its lease and the 5 s loop are
-PR 2.
+is a per-browser localStorage cursor, never a server acknowledgement.
+
+**The sender role and revoke cleanup (PR 2a).** cp-daemon's inner runs the sender as its own `device-notify` child
+(`src/push/device-notify.ts`) only while `data/devices.json` or `data/tunnel.json` exists, independent of the parent:
+the parent's restart rules, held and released with the viewer by an update, stopped with the others, never a readiness
+condition, and absent from the runtime record on a home without the feature. It holds the one-per-home lease
+`state/device-notify.lock`, sweeps at start and 5 s after each sweep settles, and exits 0 on SIGTERM. The tunnel's last
+published `{origin, generation}` (`state/tunnel-runtime.json`, read by `src/service/daemon-tunnel-files.ts`) binds
+both senders: an owned subscription of a device on another generation gets no new push, and an unreadable runtime fails
+every owned one closed. A revoke (`DeviceStore.revoke`) removes the device's own subscriptions only after the revoke is
+durable; a cleanup failure is returned as `cleanup_error` beside `audit_error` and never restores access. A remote
+device that finds an unreadable file at its endpoint's path refuses 403 on store as it already did on remove.
 
 ## Reading the plan
 

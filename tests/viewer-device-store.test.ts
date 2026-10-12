@@ -145,6 +145,29 @@ test("sessions slide 30 days on touch only; revoke denies the next request and k
 	assert.ok(audit().some((line) => line.event === "signin_refused" && line.reason === "session_invalid"));
 });
 
+test("a revoke's push cleanup runs after the durable revoke, and its failure is reported, never undoes the revoke", (t) => {
+	const removed: string[] = [];
+	const { store, make } = scratch(t, { unsubscribe: (id) => void removed.push(id) });
+	const phone = pair(store, "Phone");
+	const revoked = store.revoke(phone.device.id);
+	assert.ok(revoked.ok);
+	assert.deepEqual([removed, revoked.cleanup_error], [[phone.device.id], null]);
+	let durable: string | null | undefined;
+	const failing = make({
+		unsubscribe: () => {
+			const listed = failing.list();
+			durable = listed.ok ? listed.devices.find((device) => device.id === tablet.device.id)?.revoked_at : undefined;
+			throw Object.assign(new Error("denied"), { code: "EACCES" });
+		},
+	});
+	const tablet = pair(failing, "Tablet");
+	const refused = failing.revoke("tablet");
+	assert.ok(refused.ok);
+	assert.ok(durable, "the revoke was already durable when cleanup ran");
+	assert.equal(refused.cleanup_error, "push subscription cleanup failed: EACCES");
+	assert.equal(failing.authenticate(tablet.cookie, BIND, { touch: true }).ok, false, "the revoke stands");
+});
+
 test("malformed storage fails closed for every operation and is never reset", (t) => {
 	const { store, dataDir } = scratch(t);
 	mkdirSync(dataDir, { recursive: true });

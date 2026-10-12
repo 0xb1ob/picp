@@ -58,7 +58,7 @@ export function deviceControlAnswer(routes: DeviceRoutes, op: unknown, args: Rec
 		const target = typeof args.target === "string" ? args.target : "";
 		if (Object.keys(args).length !== 1 || (!DEVICE_ID_RE.test(target) && deviceName(target) === undefined)) return fail(400, 'args must be {"target": "<device id or name>"}');
 		const revoked = routes.store.revoke(target, null);
-		return revoked.ok ? { ok: true, result: { id: revoked.device.id, name: revoked.device.name, revoked_at: revoked.device.revoked_at, audit_error: revoked.audit_error } } : refusal(revoked);
+		return revoked.ok ? { ok: true, result: { id: revoked.device.id, name: revoked.device.name, revoked_at: revoked.device.revoked_at, audit_error: revoked.audit_error, cleanup_error: revoked.cleanup_error } } : refusal(revoked);
 	}
 	return fail(400, `unknown op ${String(op).slice(0, 40)}`);
 }

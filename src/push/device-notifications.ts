@@ -15,8 +15,8 @@
  * service worker's per-pairing tag makes that a replacement rather than a second notification.
  *
  * Sweeps do not overlap (a sweep already running answers `busy`) and no lock is held across a network call: each
- * recipient's outcome is written as soon as it is known. The daemon role that runs this every
- * `DEVICE_NOTIFY_INTERVAL_MS` under a one-per-home lease is a later slice (PR 2).
+ * recipient's outcome is written as soon as it is known. The daemon's `device-notify` role (`./device-notify.ts`) runs
+ * this every `DEVICE_NOTIFY_INTERVAL_MS` under a one-per-home lease.
  */
 import { isoTimestamp } from "../contracts.ts";
 import { atomicWriteJson } from "../json-store.ts";

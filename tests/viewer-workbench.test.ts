@@ -217,7 +217,8 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
-			if (name === "device-store.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:control-audit|control-files|device-files)\.ts$/, `${name} imports ${match[2]}`);
+			// PR 2: a revoke removes the device's own push subscriptions through the subscription writer, nothing else from it.
+			if (name === "device-store.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:control-audit|control-files|device-files|push-subscriptions)\.ts$/, `${name} imports ${match[2]}`);
 			// The CLI's owner socket (PR 1c) writes only its own record and socket; the store work goes through the routes' store.
 			if (name === "device-control.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:device-files|devices-api|overview-health)\.ts$/, `${name} imports ${match[2]}`);
 		}

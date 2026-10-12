@@ -69,13 +69,14 @@ export function deviceEligible(device: DeviceRecord | DeviceView, now: Date, ori
 
 /**
  * Remote dashboard push eligibility, re-read on every call: an owned subscription (`device_id`/`origin`) may receive a
- * push only while its device is active, unrevoked, unexpired and still on that origin. An unreadable store makes every
- * owned one ineligible (fail closed); a legacy unowned (local/tailnet) subscription is never affected.
+ * push only while its device is active, unrevoked, unexpired, still on that origin and — given the tunnel's current
+ * `generation` (src/service/daemon-tunnel-files.ts) — on that generation. An unreadable store makes every owned one
+ * ineligible (fail closed); a legacy unowned (local/tailnet) subscription is never affected.
  */
-export function subscriptionEligibility(dataDir: string, now: Date): (subscription: { device_id?: string; origin?: string }) => boolean {
+export function subscriptionEligibility(dataDir: string, now: Date, generation?: number): (subscription: { device_id?: string; origin?: string }) => boolean {
 	const read = readDeviceState(dataDir);
 	return (subscription) => subscription.device_id === undefined
-		|| (read.state !== "invalid" && read.store.devices.some((device) => device.id === subscription.device_id && deviceEligible(device, now, subscription.origin)));
+		|| (read.state !== "invalid" && read.store.devices.some((device) => device.id === subscription.device_id && deviceEligible(device, now, subscription.origin, generation)));
 }
 
 export const projectDevice = ({ session_digest: _digest, ...view }: DeviceRecord): DeviceView => view;

@@ -19,7 +19,8 @@ export const EXIT_CONFIG = 78;
 export const OUTER_SOURCES = ["daemon.ts", "daemon-outer.ts", "daemon-files.ts", "daemon-control.ts", "daemon-backend.ts"] as const;
 export const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
-export type Role = "parent" | "viewer" | "health" | "update";
+/** `device-notify` (remote dashboard PR 2): the pairing-alert sender, run only on a home with the remote feature. */
+export type Role = "parent" | "viewer" | "device-notify" | "health" | "update";
 export type Backend = "systemd" | "detached";
 
 const RUNTIME_DIR = ".pi-command-post";
@@ -157,13 +158,15 @@ export function childEnv(config: DaemonConfig, role: Role, base: Record<string, 
 			return { ...base, ...core, ...port, ...host, ...(config.parent_model ? { CP_PARENT_MODEL: config.parent_model } : {}) };
 		case "viewer":
 			return { ...base, ...core, ...host, CP_DAEMON_ROLE: "viewer" };
+		case "device-notify":
+			return { ...base, ...core, CP_DAEMON_ROLE: "device-notify" };
 		case "health":
 		case "update":
 			return { ...base, ...core, ...port, ...host, CP_DAEMON_JOB: role };
 	}
 }
 
-const SCRIPTS: Record<Role, string> = { parent: "src/service/supervise.ts", viewer: "src/viewer/cli.ts", health: "src/service/health.ts", update: "src/service/update.ts" };
+const SCRIPTS: Record<Role, string> = { parent: "src/service/supervise.ts", viewer: "src/viewer/cli.ts", "device-notify": "src/push/device-notify.ts", health: "src/service/health.ts", update: "src/service/update.ts" };
 
 /** The script a role runs: also the `ps` needle that identifies a recorded pid as ours. */
 export function roleScript(config: Pick<DaemonConfig, "app">, role: Role): string {
@@ -193,7 +196,7 @@ export interface RestartHistory {
 	starts: number[];
 	/** Automatic restarts since the last manual start (reload/start reset it, uptime never does). */
 	restarts: number;
-	/** Viewer only: an update holds it down. */
+	/** Viewer and sender only: an update holds them down. */
 	held?: boolean;
 }
 
@@ -206,10 +209,11 @@ export interface ChildExit {
 
 export type RestartDecision = { action: "restart"; delayMs: number } | { action: "stopped" } | { action: "failed"; result: "exit-code" | "start-limit-hit" };
 
-export function decideRestart(role: "parent" | "viewer", history: RestartHistory, exit: ChildExit, now: number): RestartDecision {
+/** The sender (`device-notify`) follows the supervisor's rules, and like the viewer stays down while an update holds. */
+export function decideRestart(role: "parent" | "viewer" | "device-notify", history: RestartHistory, exit: ChildExit, now: number): RestartDecision {
 	if (exit.requested) return { action: "stopped" };
 	if (role === "viewer") return history.held ? { action: "stopped" } : { action: "restart", delayMs: VIEWER_RESTART_MS };
-	if (exit.code === 0) return { action: "stopped" };
+	if (exit.code === 0 || (role === "device-notify" && history.held)) return { action: "stopped" };
 	if (exit.code === EXIT_CONFIG) return { action: "failed", result: "exit-code" };
 	if (history.starts.filter((at) => now - at < START_LIMIT_INTERVAL_MS).length >= START_LIMIT_BURST) return { action: "failed", result: "start-limit-hit" };
 	return { action: "restart", delayMs: restartDelay(history.restarts + 1) };
@@ -274,7 +278,8 @@ export interface RuntimeRecord {
 	started_at: string;
 	/** The outer's start: timers carry over across reloads of the same outer only. */
 	daemon_started_at: string;
-	units: { parent: LongUnit; viewer: LongUnit; health: OneshotUnit; update: OneshotUnit };
+	/** `device-notify` is absent on a home without the remote feature, and in records written before it existed. */
+	units: { parent: LongUnit; viewer: LongUnit; "device-notify"?: LongUnit; health: OneshotUnit; update: OneshotUnit };
 	hold?: { until: string };
 }
 

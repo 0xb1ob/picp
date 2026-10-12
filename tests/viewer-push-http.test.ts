@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createECDH, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, relative } from "node:path";
@@ -165,6 +165,26 @@ test("remote subscriptions (PR 1d): either level stores its own from exactly its
 	assert.deepEqual((await sub(view.cookie, "DELETE", { endpoint: phone.endpoint })).body, { unsubscribed: true }, "its own: removed");
 	assert.deepEqual((await sub(view.cookie, "DELETE", { endpoint: phone.endpoint })).body, { unsubscribed: false });
 	assert.equal((await env.l("/api/push/subscription", { method: "DELETE", headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify({ endpoint: legacy.endpoint }) })).status, 200, "local keeps removing its own");
+});
+
+test("PR 2 carry-over: a remote device never overwrites a subscription file it cannot read, and a revoke removes only that device's own", async (t) => {
+	const env = await remoteRig(t, { localDevices: true });
+	initPush({ dataDir: env.dataDir, origin: ORIGIN });
+	const full = env.pair("Laptop"), view = env.pair("Phone", "view");
+	const sub = (cookie: string, body: unknown) => env.r("/api/push/subscription", { method: "POST", headers: { cookie, origin: REMOTE_ORIGIN, "content-type": "application/json" }, body: JSON.stringify(body) });
+	const torn = device();
+	mkdirSync(subscriptionsDir(env.dataDir), { recursive: true });
+	writeFileSync(subscriptionFile(env.dataDir, subscriptionId(torn.endpoint)), "{torn");
+	assert.deepEqual([(await sub(view.cookie, torn)).status, readFileSync(subscriptionFile(env.dataDir, subscriptionId(torn.endpoint)), "utf8")], [403, "{torn"], "unreadable: not its own, bytes untouched");
+
+	const phone = device(), tablet = device(), laptop = device(), legacy = device();
+	for (const [cookie, body] of [[view.cookie, phone], [view.cookie, tablet], [full.cookie, laptop]] as const) assert.equal((await sub(cookie, body)).status, 201);
+	assert.equal((await env.l("/api/push/subscription", { method: "POST", headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify(legacy) })).status, 201);
+	const revoked = env.store.revoke(view.id);
+	assert.ok(revoked.ok);
+	assert.equal(revoked.cleanup_error, null);
+	assert.deepEqual(listSubscriptions(env.dataDir).items.map((item) => item.device_id ?? "legacy").sort(), [full.id, "legacy"].sort(), "both of the phone's went; the laptop's and the legacy one stay");
+	assert.equal(existsSync(subscriptionFile(env.dataDir, subscriptionId(torn.endpoint))), true, "an unreadable file is never someone's to clean up");
 });
 
 test("service worker, manifest and icons: same-origin, standalone, opening Awaiting you, in the existing palette", async (t) => {
