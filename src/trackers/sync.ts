@@ -18,9 +18,9 @@ export const marker = (key: string): string => `[cp:${key.slice(0, 12)}]`;
 
 const intentKey = (parts: readonly string[]): string => createHash("sha256").update(parts.join("|")).digest("hex");
 
-/** The receipt proves this job's own PR merged: same job id, head branch = job id (the branch contract). */
+/** The receipt proves this job's own PR merged: same job id, head branch = job id (the branch contract) or a bound PR's head. */
 export const receiptMatches = (job: Job, receipt: MergeReceipt | undefined): receipt is MergeReceipt =>
-	receipt !== undefined && receipt.job_id === job.id && receipt.head_branch === job.id;
+	receipt !== undefined && receipt.job_id === job.id && (receipt.head_branch === job.id || receipt.bound === true);
 
 export function deriveIntents(
 	jobs: readonly Job[],

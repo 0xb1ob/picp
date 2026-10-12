@@ -119,6 +119,7 @@ test("a merged PR is recorded from what gh reports, and the pr receipt becomes m
 	assert.equal(result.receipt.head_sha.slice(0, 12), "b079433934c2");
 	assert.equal(result.receipt.head_branch_deleted, true, "gh's branch is gone from the remote");
 	assert.equal(result.receipt.strategy, "squash");
+	assert.equal(result.receipt.bound, undefined, "an unbound job's receipt carries no bound marker");
 	assert.match(formatMerge(result), /cp_teardown cp-m1 can now pass without force/);
 
 	// On disk, and readable by the gate's total reader.
@@ -140,6 +141,26 @@ test("a merged PR is recorded from what gh reports, and the pr receipt becomes m
 	const again = await store.record({ jobId: "cp-m1" });
 	assert.equal(again.recorded, false);
 	assert.equal(again.receipt.merge_commit_sha, result.receipt.merge_commit_sha);
+});
+
+test("picp-d0p: a bound job's receipt names the PR head branch and is marked bound", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-bound1", [PR_RECEIPT]);
+	await b.fleet.patch("cp-bound1", { branch: "cp-b55w", bound_pr: { number: 54, url: "https://github.com/o/r/pull/54", base: "main" } });
+	const store = b.store({
+		number: 54,
+		url: "https://github.com/o/r/pull/54",
+		state: "MERGED",
+		mergeCommit: { oid: "b59fc3a1b59fc3a1b59fc3a1b59fc3a1b59fc3a1" },
+		headRefName: "cp-b55w",
+		headRefOid: "b079433934c2b079433934c2b079433934c2b079",
+		baseRefName: "main",
+	});
+	const result = await store.record({ jobId: "cp-bound1" });
+	assert.equal(result.recorded, true);
+	assert.equal(result.receipt.head_branch, "cp-b55w");
+	assert.equal(result.receipt.bound, true);
+	assert.equal(readMergeReceipt(b.home, "cp-bound1")?.bound, true, "the marker survives the schema on disk");
 });
 
 test("nothing is recorded for a PR gh does not call merged", async (t) => {
