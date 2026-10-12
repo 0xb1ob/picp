@@ -1,6 +1,6 @@
 /**
  * Remote dashboard PR 1: who a request speaks for. The local listener keeps its existing guards untouched and
- * carries `LOCAL_ACCESS`; the remote listener (a later PR) attaches one frozen `remote` context built from the
+ * carries `LOCAL_ACCESS`; the remote listener (remote-server.ts) binds one frozen `remote` context built from the
  * authenticated device row, never from a header or body. Pure: no I/O, no clock.
  *
  * Decision es-6a78c3: a Full-control remote device is trusted like a terminal. These helpers only keep the
@@ -49,3 +49,17 @@ export function mintPeer(peer: string | undefined): boolean {
 
 /** Creating a pairing code from a browser: never remote, whatever its level; local only from a loopback/tailnet socket peer. */
 export const canMint = (access: AccessContext, peer: string | undefined): boolean => access.kind === "local" && mintPeer(peer);
+
+/**
+ * The per-request context: only the remote listener's gate binds one, after it authenticated the device; a request it
+ * never saw (every local-listener request) reads `LOCAL_ACCESS`, so local routes answer exactly as before.
+ */
+type Bound = { access: RemoteAccess; stillValid: () => boolean };
+const bound = new WeakMap<object, Bound>();
+export function bindAccess(req: object, access: RemoteAccess, stillValid: () => boolean): void {
+	if (bound.has(req)) throw new Error("access already bound to this request");
+	bound.set(req, Object.freeze({ access, stillValid }));
+}
+export const accessOf = (req: object): AccessContext => bound.get(req)?.access ?? LOCAL_ACCESS;
+/** A refresh stream's per-tick session check (remote only; a local stream has none). */
+export const streamValidity = (req: object): (() => boolean) | undefined => bound.get(req)?.stillValid;

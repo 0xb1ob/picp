@@ -17,6 +17,8 @@
  * its own bind Host; the operator's own Full transcript
  * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes, both answers routes,
  * both thread routes, the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
+ * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
+ * authenticated device context to the request (access.ts); with `devices` set, three device routes are added (devices-api.ts).
  */
 
 import { readFileSync } from "node:fs";
@@ -50,6 +52,8 @@ import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
 import { readVersion } from "./version-view.ts";
+import { accessOf, canRead, streamValidity } from "./access.ts";
+import { DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
 
 export interface ViewerOptions extends ViewerState {
 	app?: ViewerApp;
@@ -73,6 +77,8 @@ export interface ViewerOptions extends ViewerState {
 	operatorStart?: OperatorStart;
 	/** Where a skipped board is reported, once per (slug, reason). Default stderr. */
 	log?: (line: string) => void;
+	/** Remote dashboard: device management routes (devices-api.ts). Absent — the default — those paths answer 404 as before. */
+	devices?: DeviceRoutes;
 }
 
 /** `host:port` as a browser sends it in the Host header (IPv6 bracketed). */
@@ -99,14 +105,17 @@ const SECURITY_HEADERS = {
 	"cache-control": "no-store",
 };
 
-function send(res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}): void {
-	res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, ...extra });
+// A remote-listener response is never cached anywhere, whatever the route asked (an attachment's 7-day cache included).
+const REMOTE_NO_STORE = { "cache-control": "no-store" };
+
+export function send(res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}): void {
+	res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, ...extra, ...(accessOf(res.req).kind === "remote" ? REMOTE_NO_STORE : {}) });
 	res.end(body);
 }
 
 const JSON_CSP = { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" };
 
-function sendJson(res: ServerResponse, status: number, value: unknown, extra: Record<string, string> = {}): void {
+export function sendJson(res: ServerResponse, status: number, value: unknown, extra: Record<string, string> = {}): void {
 	send(res, status, "application/json; charset=utf-8", JSON.stringify(value), { ...JSON_CSP, ...extra });
 }
 
@@ -155,7 +164,21 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 		send(res, 421, "text/plain; charset=utf-8", `refused: Host must be ${hostHeaderFor(options.host, options.port)}\n`);
 		return;
 	}
+	dispatch(req, res, options, warn);
+}
+
+/** Every route, after the listener's own Host guard (the local one above, or the remote gate in remote-server.ts). */
+export function dispatch(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, warn: BoardWarn = () => {}): void {
 	const requestPath = (req.url ?? "/").split("?")[0];
+	const devices = options.devices;
+	if (devices && (requestPath === PAIR_CREATE_PATH || requestPath === DEVICES_REVOKE_PATH)) {
+		handleDevicesWrite(req, options, devices, requestPath === PAIR_CREATE_PATH ? "create" : "revoke")
+			.then((out) => sendJson(res, out.status, out.body, out.headers))
+			.catch(() => {
+				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
+			});
+		return;
+	}
 	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === THREAD_DONE_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
 		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === THREAD_DONE_PATH ? handleThreadDone(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
 			.then((out) => sendJson(res, out.status, out.body, out.headers))
@@ -183,8 +206,13 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 	// The operator's own full transcript can contain anything, so it is served only
 	// when this viewer was started under `--require-tailnet` (what bin/cp-operator
 	// passes); the Host guard above still runs first, for every route.
-	if (url.searchParams.get("transcript") === "1" && options.requireTailnet !== true) {
+	if (url.searchParams.get("transcript") === "1" && !canRead(accessOf(req), options.requireTailnet === true)) {
 		sendJson(res, 403, { error: "the operator transcript is served only under --require-tailnet" });
+		return;
+	}
+	if (devices && url.pathname === DEVICES_PATH) {
+		const out = handleDevicesList(req, devices);
+		sendJson(res, out.status, out.body);
 		return;
 	}
 	if (url.pathname.startsWith(OPERATOR_UPLOADS_PREFIX)) {
@@ -250,7 +278,7 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			return;
 		}
 		case SKILLS_PATH: {
-			const out = handleSkillsList(options);
+			const out = handleSkillsList(options, new Date(), accessOf(req));
 			sendJson(res, out.status, out.body);
 			return;
 		}
@@ -338,7 +366,7 @@ export function handle(req: IncomingMessage, res: ServerResponse, options: Viewe
 			return;
 		}
 		case "/api/stream": {
-			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res); return; }
+			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res, streamValidity(req)); return; }
 			send(res, 404, "text/plain; charset=utf-8", "no such view\n");
 			return;
 		}

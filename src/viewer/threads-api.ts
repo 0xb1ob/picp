@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { ThreadDoneResponse, ThreadsResponse } from "./api-types.ts";
 import { appendThreadLine } from "./control-audit.ts";
-import { type ControlRouteOptions, type ControlRouteResult, guarded, isoSeconds, tokenMatches } from "./control-api.ts";
+import { type ControlRouteOptions, type ControlRouteResult, guarded, isoSeconds, readAllowed, tokenFor, tokenMatches } from "./control-api.ts";
 import { operatorThreadsFile, readControlConfig, THREAD_ID_RE } from "./control-files.ts";
 import { threadsView } from "./threads-view.ts";
 
@@ -19,14 +19,14 @@ export const THREAD_DONE_PATH = "/api/threads/done";
 /** Mark done's CSRF token: per viewer process; a viewer restart rotates it (the page re-reads it with the list). */
 export const THREAD_TOKEN = randomBytes(32).toString("hex");
 
-export function handleThreadsStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "threads are served only under --require-tailnet" } };
+export function handleThreadsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "threads are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	const enabled = config.state === "on";
 	const view = threadsView(options);
 	const body: ThreadsResponse = {
 		generated_at: now.toISOString(), availability: view.availability, enabled, reason: enabled ? null : `Dashboard control is off: ${config.reason}`,
-		token: enabled ? THREAD_TOKEN : null, threads: view.threads, total: view.total, warning: view.warning,
+		token: enabled ? tokenFor(req, THREAD_TOKEN) : null, threads: view.threads, total: view.total, warning: view.warning,
 	};
 	return { status: 200, body };
 }

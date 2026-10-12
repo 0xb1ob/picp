@@ -7,6 +7,7 @@
 import { closeSync, lstatSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep, isAbsolute } from "node:path";
+import { type AccessContext, canRead, LOCAL_ACCESS } from "./access.ts";
 import type { SkillsResponse } from "./api-types.ts";
 import { mentionNames, parseSkillLines, SKILL_MENTION_MAX, SKILL_NAME_MAX, SKILL_NAME_RE, skillLine, stripSkillLines } from "./skill-mentions.ts";
 
@@ -204,7 +205,7 @@ export function relaySkillLines(text: string, names: readonly string[], roots: r
 export const SKILLS_PATH = "/api/skills";
 
 /** `GET /api/skills`: served only under `--require-tailnet`; names, descriptions and sources, never a body or a path. */
-export function handleSkillsList(options: { home: string; requireTailnet?: boolean; agentDir?: string }, now = new Date()): { status: number; body: SkillsResponse | { error: string } } {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "the skills list is served only under --require-tailnet" } };
+export function handleSkillsList(options: { home: string; requireTailnet?: boolean; agentDir?: string }, now = new Date(), access: AccessContext = LOCAL_ACCESS): { status: number; body: SkillsResponse | { error: string } } {
+	if (!canRead(access, options.requireTailnet === true)) return { status: 403, body: { error: "the skills list is served only under --require-tailnet" } };
 	return { status: 200, body: { generated_at: now.toISOString(), ...listSkills(skillRoots(options.home, options.agentDir ?? agentDirFor(process.env))) } };
 }

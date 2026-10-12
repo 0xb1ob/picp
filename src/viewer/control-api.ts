@@ -56,6 +56,7 @@ import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from ".
 import { restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
+import { accessOf, canControl, canRead } from "./access.ts";
 import { readPendingSends } from "./control-pending.ts";
 import { agentDirFor, skillRoots, withSkillLines } from "./skill-catalog.ts";
 import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
@@ -64,7 +65,7 @@ import { scheduleControlFieldError, type ScheduleControlFields } from "./control
 import { schedulePolicyView } from "./schedule-policy-view.ts";
 export const SCHEDULE_POLICY_PATH = "/api/schedules/policy";
 export function handleSchedulePolicy(req: IncomingMessage, options: ControlRouteOptions): ControlRouteResult {
- if (options.requireTailnet !== true) return {status:403,body:{error:"schedule policy is served only under --require-tailnet"}};
+ if (!readAllowed(req, options)) return {status:403,body:{error:"schedule policy is served only under --require-tailnet"}};
  const id = new URL(req.url ?? "/", "http://localhost").searchParams.get("schedule_id");
  if (!id || !SCHEDULE_ID.test(id)) return {status:400,body:{error:"schedule_id must be sch-<6 hex>"}};
  try { return {status:200,body:schedulePolicyView(options.stateDir,id)}; }
@@ -196,6 +197,11 @@ export const tokenMatches = (given: unknown, want: string): boolean => {
 	const b = Buffer.from(want);
 	return a.length === b.length && timingSafeEqual(a, b);
 };
+/** A protected status read: this listener's own --require-tailnet flag, or a device the remote gate authenticated (access.ts). */
+export const readAllowed = (req: IncomingMessage, options: { requireTailnet?: boolean }): boolean => canRead(accessOf(req), options.requireTailnet === true);
+/** Write tokens go only to a caller that may write: a View-only remote device reads every status with `token: null`. */
+export const mayWrite = (req: IncomingMessage): boolean => canControl(accessOf(req));
+export const tokenFor = (req: IncomingMessage, token: string | null): string | null => (mayWrite(req) ? token : null);
 
 const startEnv = (options: ControlRouteOptions): NodeJS.ProcessEnv => options.operatorStart?.env ?? process.env;
 
@@ -244,7 +250,7 @@ function statusBase(now: Date): ControlStatusResponse {
 }
 
 export async function handleControlStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "dashboard control is served only under --require-tailnet" } };
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "dashboard control is served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	if (config.state !== "on") return { status: 200, body: { ...statusBase(now), reason: `Dashboard control is off: ${config.reason}` } };
 	const can = await launchers(options, now.getTime());
@@ -255,7 +261,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	if (record.state !== "ok" || !session.running) {
 		const inbox = readInbox(options.stateDir);
 		const why = record.state === "absent" ? `no dashboard control record at ${controlRecordFile(options.stateDir)}` : session.reason;
-		return { status: 200, body: { ...base, enabled: true, offline: true, held: inbox.held.length, inbox_token: INBOX_TOKEN, start_unavailable: startUnavailable(options, can), reason: `Operator session offline: ${why}${inbox.error ? `; inbox unreadable: ${inbox.error}` : ""}` } };
+		return { status: 200, body: { ...base, enabled: true, offline: true, held: inbox.held.length, inbox_token: tokenFor(req, INBOX_TOKEN), start_unavailable: startUnavailable(options, can), reason: `Operator session offline: ${why}${inbox.error ? `; inbox unreadable: ${inbox.error}` : ""}` } };
 	}
 	const reply = await controlRequest(record.record, "status", {});
 	if (!reply.ok) return { status: 200, body: { ...base, enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
@@ -263,7 +269,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	return {
 		status: 200,
 		body: {
-			...base, enabled: true, running: true, token: record.record.csrf,
+			...base, enabled: true, running: true, token: tokenFor(req, record.record.csrf),
 			busy: typeof status.busy === "boolean" ? status.busy : null, pending: typeof status.pending === "boolean" ? status.pending : null,
 			session_file: typeof status.session_file === "string" ? status.session_file : null, recent: Array.isArray(status.recent) ? status.recent : [],
 			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
@@ -569,14 +575,14 @@ function requestView(request: ScheduleControlRequest, now: Date): ScheduleContro
 }
 
 /** `GET /api/schedules/control` (cp-hhuf P6): the opt-out, the schedule token while on, the parent, recent requests. */
-export function handleScheduleControlStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "schedule controls are served only under --require-tailnet" } };
+export function handleScheduleControlStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "schedule controls are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	const enabled = config.state === "on";
 	const parent = parentHolder(options.stateDir);
 	const journal = readScheduleControl(options.stateDir);
 	const body: ScheduleControlStatusResponse = {
-		generated_at: now.toISOString(), enabled, token: enabled ? SCHEDULE_TOKEN : null, parent,
+		generated_at: now.toISOString(), enabled, token: enabled ? tokenFor(req, SCHEDULE_TOKEN) : null, parent,
 		reason: !enabled ? `Dashboard control is off: ${config.reason}` : parent.running ? null : `Parent not running: ${parent.reason}`,
 		requests: journal.requests.slice(-20).map((request) => requestView(request, now)), error: journal.error,
 	};
@@ -621,11 +627,11 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 }
 
 /** `GET /api/answers/control` (cp-mxk4): the opt-out and the ack token while control is on (--require-tailnet only, never writes). */
-export function handleAnswersControlStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "answer acknowledgement is served only under --require-tailnet" } };
+export function handleAnswersControlStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): ControlRouteResult {
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "answer acknowledgement is served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	const enabled = config.state === "on";
-	const body: AnswersControlStatusResponse = { generated_at: now.toISOString(), enabled, reason: enabled ? null : `Dashboard control is off: ${config.reason}`, token: enabled ? ANSWER_TOKEN : null };
+	const body: AnswersControlStatusResponse = { generated_at: now.toISOString(), enabled, reason: enabled ? null : `Dashboard control is off: ${config.reason}`, token: enabled ? tokenFor(req, ANSWER_TOKEN) : null };
 	return { status: 200, body };
 }
 
