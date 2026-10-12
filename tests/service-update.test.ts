@@ -14,6 +14,11 @@ import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../src/parent-diagnostics
 import { serviceFindings } from "../src/service/status.ts";
 import { DOCTOR_PROBE_MS, type ParentProbe, probeDoctor, readUpdateConfig, readUpdateState, runUpdate, type UpdateState, updateStateFile, type VerifyResult, verifyRestart } from "../src/service/update.ts";
 import { advanceBase, createScratchRepo } from "./harness/scratch-repo.ts";
+import { atomicWrite, daemonPaths } from "../src/service/daemon-files.ts";
+import { tunnelConfigFile } from "../src/service/daemon-tunnel-files.ts";
+import { viewerDown } from "../src/service/health.ts";
+import type { DeviceControlReply } from "../src/viewer/device-control.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const GIT_ENV = { GIT_AUTHOR_NAME: "cp test", GIT_AUTHOR_EMAIL: "cp@test.invalid", GIT_COMMITTER_NAME: "cp test", GIT_COMMITTER_EMAIL: "cp@test.invalid", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
 
@@ -664,4 +669,29 @@ test("update.json quiet_min: a number >= 0 is valid, anything else is config_inv
 	}
 	const bad = bench(t, { enabled: true, quiet_min: -5 });
 	assert.equal((await bad.run())?.last_result, "config_invalid");
+});
+
+test("verifyRestart with the shared viewer probe, remote-only (no tailnet, cp-tunnel enabled): the owner socket's status passes; a dead socket fails", async (t) => {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const paths = daemonPaths(scratch.path);
+	mkdirSync(paths.dataDir, { recursive: true });
+	atomicWrite(tunnelConfigFile(paths.dataDir), { schema_version: 1, enabled: true, mode: "quick", port: 8767, binary: "/opt/cf/cloudflared", revision: 1 });
+	const fetchNever = async () => assert.fail("remote-only has no local listener to fetch");
+	const run = async (reply: DeviceControlReply) => {
+		let clock = 0;
+		const asked: string[] = [];
+		const control = async (stateDir: string, op: string) => (asked.push(`${stateDir} ${op}`), reply);
+		const result = await verifyRestart({
+			probeParent: async () => ({ busy: PARENT_UNSETTLED }),
+			viewerDown: () => viewerDown(scratch.path, {}, fetchNever, { tailnet: () => undefined, control }),
+			now: () => clock,
+			sleep: async (ms: number) => void (clock += ms),
+			log: () => undefined,
+		}, 120_000);
+		assert.ok(asked.length > 0 && asked.every((line) => line === `${paths.stateDir} status`), asked.join("\n"));
+		return result;
+	};
+	assert.deepEqual(await run({ ok: true, result: { pid: 1, running: false } }), { note: "doctor deferred: parent busy 420s" });
+	assert.match(String(await run({ ok: false, status: 503, error: "stale device control record: pid 7 is not running; start the viewer" })), /^not healthy within 120s: viewer: remote-only viewer \(no local listener\): stale device control record/);
 });

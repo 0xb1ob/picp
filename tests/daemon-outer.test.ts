@@ -355,3 +355,13 @@ test("a running inner that reports failed, or is not ready within 60 s, is not_r
 	assert.equal(s.state().inner.detail, undefined);
 	assert.equal(await stopped(s, outer), 0);
 });
+
+test("remote dashboard (T6): the outer's IPC is unchanged — tunnel, device and sender ops are unknown, never forwarded to the inner", async () => {
+	const s = setup();
+	const outer = await started(s);
+	for (const op of ["tunnel", "pair", "device-notify", "revoke"]) {
+		assert.deepEqual(await daemonRequest(s.home, op), { ok: false, error: `unknown op ${JSON.stringify(op)}` }, op);
+	}
+	assert.deepEqual(s.inners.flatMap((inner) => inner.sent.map((request) => request.op)), [], "nothing reached the inner");
+	assert.equal(await stopped(s, outer), 0);
+});

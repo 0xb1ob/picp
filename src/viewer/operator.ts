@@ -23,7 +23,7 @@ import { operatorModelSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
 import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
-import { viewerAddress } from "./cli.ts";
+import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -141,18 +141,22 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 		} else piArgs.push(arg);
 	}
 	const web = await operatorWeb(); // before the viewer starts: nothing to clean up if it were to fail
-	const address = viewerAddress({ ...process.env, ...(cli.host !== undefined ? { CP_VIEWER_HOST: cli.host } : {}), ...(cli.port !== undefined ? { CP_VIEWER_PORT: cli.port } : {}) }, options.viewer?.host === undefined);
+	const service = process.env.CP_OPERATOR_VIEWER === "service";
+	const home = options.viewer?.home ?? targetHome();
+	const viewerEnv = { ...process.env, ...(cli.host !== undefined ? { CP_VIEWER_HOST: cli.host } : {}), ...(cli.port !== undefined ? { CP_VIEWER_PORT: cli.port } : {}) };
+	const requireTailnet = options.viewer?.host === undefined;
+	// The service viewer may be remote-only (no tailnet, cp-tunnel enabled): then there is no local address to hand pi.
+	const address = service && home ? listenPlan(home, viewerEnv, requireTailnet) : { ...viewerAddress(viewerEnv, requireTailnet), local: true };
 	const host = options.viewer?.host ?? address.host;
 	const port = options.viewer?.port ?? address.port;
 	// cp-view.service serves this home's dashboard (the cp-operator wrapper sets it): no competing session viewer.
-	const viewer: OperatorViewer = process.env.CP_OPERATOR_VIEWER === "service"
+	const viewer: OperatorViewer = service
 		? { reused: true, stop() {} }
 		: await startViewer({ ...options.viewer, ...(options.viewer?.host !== undefined || cli.host !== undefined ? { host } : {}), port });
 	const stopViewer = () => viewer.stop();
 	process.on("exit", stopViewer);
 	// Restart session: pi gets the marker path; a marker naming the exited child relaunches it here (src/operator-relaunch.ts).
 	const relaunchFile = options.relaunchFile ?? defaultRelaunchFile();
-	const home = options.viewer?.home ?? targetHome();
 	const model = configuredOperatorModel(home);
 	const skills = operatorSkillPaths(home);
 	let current: ChildProcess | undefined;
@@ -167,7 +171,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 		return await superviseOperatorPi({
 			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, model), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), {
 				stdio: "inherit",
-				env: { ...process.env, ...env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
+				env: { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
 			}),
 			firstArgs: piArgs,
 			...(relaunchFile ? { relaunchFile } : {}),

@@ -407,7 +407,9 @@ function daemonFinding(run: FindRun, home: string, paths: DaemonPaths, config: D
 			: { check, severity: "warn", what: `cp-daemon: the parent supervisor is failed (${parent.result ?? "failed"})${parent.result === "start-limit-hit" ? " — a crash loop" : ""}`, fix: "cp-daemon log, then cp-daemon reload" };
 	}
 	const viewer = runtime?.units.viewer;
-	if (viewer && !["running", "starting", "held"].includes(viewer.state)) return { check, severity: "warn", what: `cp-daemon: the viewer is ${viewer.state}`, fix: "cp-daemon log (it binds CP_VIEWER_HOST, else `tailscale ip -4`); pin one with cp-install --viewer-host <ip> --force" };
+	if (viewer && !["running", "starting", "held"].includes(viewer.state)) return { check, severity: "warn", what: `cp-daemon: the viewer is ${viewer.state}`, fix: "cp-daemon log (it binds CP_VIEWER_HOST, else `tailscale ip -4`, else — remote-only — needs cp-tunnel up); pin one with cp-install --viewer-host <ip> --force" };
+	const sender = runtime?.units["device-notify"];
+	if (sender?.state === "failed") return { check, severity: "warn", what: `cp-daemon: the pairing-alert sender (device-notify) is failed${sender.result ? ` (${sender.result})` : ""}; new pairings still show on every dashboard, but no push goes out`, fix: "cp-daemon log, then cp-daemon reload" };
 	let onDisk: string | undefined;
 	try {
 		onDisk = outerHash(join(config.app, "src/service"));

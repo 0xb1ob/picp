@@ -186,6 +186,13 @@ the `cp-parent`/`cp-view` units moves to cp-daemon when you rerun the installer
    messages to the operator session from there and, with tmux or herdr,
    start one.
 
+   Away from your tailnet (opt-in): `cp-tunnel up` publishes the dashboard on
+   an HTTPS address through Cloudflare — a quick tunnel needs no account but its
+   hostname changes on restart; `--hostname H --token-file F` uses your named
+   tunnel. Only paired devices get in. A Full-control device is trusted like
+   your terminal; use View only for a less-trusted one. Setup, pairing and
+   revoke: [`docs/service.md`](docs/service.md) (Remote dashboard).
+
 4. **Answer when asked.** Questions arrive in the operator session and under
    **Awaiting you** on the dashboard. Reply in plain words. Everything else —
    plan approval within the mandate, review findings, test failures, merging

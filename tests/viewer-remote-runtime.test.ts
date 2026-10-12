@@ -13,6 +13,7 @@ import type { TunnelConfig, TunnelConfigRead, TunnelRuntime, TunnelRuntimeRead }
 import { appPage } from "../src/viewer/app-page.ts";
 import { deviceControlDir, deviceControlRequest } from "../src/viewer/device-control.ts";
 import { remoteRuntime, wantedListener } from "../src/viewer/remote-runtime.ts";
+import { createViewer } from "../src/viewer/server.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { call } from "./harness/remote.ts";
 
@@ -54,7 +55,7 @@ async function rig(t: import("node:test").TestContext, configured = true) {
 		assert.ok(reply.ok, JSON.stringify(reply));
 		return reply.result as Record<string, unknown>;
 	};
-	return { stateDir, port, files, runtime, lines, status, controls: () => controls, pair: () => call(port, "/pair") };
+	return { home: home.path, stateDir, port, files, runtime, lines, status, controls: () => controls, pair: () => call(port, "/pair") };
 }
 
 test("off by default: a home without the remote feature gets no store, no socket and no listener", async (t) => {
@@ -64,6 +65,7 @@ test("off by default: a home without the remote feature gets no store, no socket
 	assert.equal(r.controls(), 0, "the owner socket is never even attempted");
 	assert.equal(existsSync(deviceControlDir(r.stateDir)), false);
 	assert.equal(r.runtime.listening(), null);
+	assert.equal(r.runtime.routes(), undefined, "no device routes: the local listener answers 404 as before");
 	await assert.rejects(r.pair(), /ECONNREFUSED/);
 	assert.deepEqual(r.lines, []);
 });
@@ -88,6 +90,21 @@ test("the listener opens only for the controller's running, matching revision an
 	await r.runtime.check();
 	assert.equal((await r.status()).revision, 2);
 	assert.equal(r.lines.filter((line) => line.includes("listening on")).length, 1, "not reopened");
+});
+
+test("the local listener's device routes follow the store owner: 404 before, then the list with Add for a loopback peer", async (t) => {
+	const r = await rig(t);
+	const port = await freePort();
+	const local = createViewer({ home: r.home, stateDir: r.stateDir, host: "127.0.0.1", port, get devices() { return r.runtime.routes(); } });
+	await new Promise<void>((done) => local.listen(port, "127.0.0.1", done));
+	t.after(() => local.close());
+	const devices = () => fetch(`http://127.0.0.1:${port}/api/devices`);
+	assert.equal((await devices()).status, 404, "not the owner yet: exactly as before");
+	await r.runtime.check();
+	const listed = await devices();
+	assert.equal(listed.status, 200);
+	const body = await listed.json() as { can_create: boolean; can_revoke: boolean; origin: string | null; token: string | null };
+	assert.deepEqual([body.can_create, body.can_revoke, body.origin, typeof body.token], [true, true, ORIGIN, "string"]);
 });
 
 test("a new generation reopens the listener; a stopped tunnel, a disabled or unreadable config closes it", async (t) => {

@@ -227,6 +227,24 @@ test("named up: the token is stored 0600 and travels only as a path; without a t
 	assert.deepEqual(readFileSync(pushConfigFile(r.paths.dataDir)), pushBytes);
 });
 
+test("named up stores the token only with its config: a refused cloudflared or a held lock leaves neither", async (t) => {
+	const r = rig(t);
+	const tokenFile = join(r.home, "given-token");
+	writeFileSync(tokenFile, TOKEN);
+	const stored = join(r.paths.dataDir, "tunnel", "token");
+	r.ports.provision = async () => ({ ok: false, reason: "sha256 mismatch" });
+	assert.equal(await r.run("up", "--hostname", "cp.example.com", "--token-file", tokenFile), 1);
+	assert.equal(existsSync(stored), false, "no token before provisioning succeeded");
+	assert.deepEqual(r.config(), { ok: true, config: null });
+
+	const locked = rig(t);
+	writeFileSync(join(locked.home, "given-token"), TOKEN);
+	writeFileSync(join(locked.paths.dataDir, "tunnel.lock"), `${process.pid}\n`);
+	assert.equal(await locked.run("up", "--hostname", "cp.example.com", "--token-file", join(locked.home, "given-token")), 1);
+	assert.equal(existsSync(join(locked.paths.dataDir, "tunnel", "token")), false, "a racing up never stores a token outside the lock");
+	assert.deepEqual(locked.config(), { ok: true, config: null });
+});
+
 test("named push consent accept (flag or a typed y) moves push to the tunnel origin and never rotates the keys", async (t) => {
 	for (const how of ["flag", "typed"] as const) {
 		const r = rig(t, how === "typed" ? { answer: "y" } : {});

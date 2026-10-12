@@ -271,6 +271,14 @@ test("daemonFindings: nothing installed is silent; legacy files warn; not runnin
 	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "start-limit-hit" }, viewer: { state: "running" } } }));
 	assert.match(daemonFindings(run, home, unitDir, probe)[0]?.what ?? "", /parent supervisor is failed \(start-limit-hit\) — a crash loop/);
 
+	// Remote dashboard (T6): a failed pairing-alert sender warns; an old record without it, or a running one, does not.
+	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "running" }, viewer: { state: "running" }, "device-notify": { state: "failed", result: "start-limit-hit" } } }));
+	const sender = daemonFindings(run, home, unitDir, probe)[0];
+	assert.equal(sender?.severity, "warn");
+	assert.match(sender?.what ?? "", /pairing-alert sender \(device-notify\) is failed \(start-limit-hit\); new pairings still show on every dashboard, but no push goes out/);
+	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "running" }, viewer: { state: "running" }, "device-notify": { state: "running" } } }));
+	assert.deepEqual(daemonFindings(run, home, unitDir, probe).map((f) => f.severity), ["ok"]);
+
 	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "running" }, viewer: { state: "running" } } }));
 	writeFileSync(paths.state, JSON.stringify({ ...healthy, outer_hash: "0".repeat(64) }));
 	const stale = daemonFindings(run, home, unitDir, probe)[0];

@@ -149,12 +149,13 @@ function Field({field, value, source, error, set, disabled, models}: {field: Set
  return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{error && <small class="settings-warn" role="alert">{error}</small>}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
 }
 
-export function Settings({view}: {view: SettingsView}) {
+/** `children`: Devices and Notifications (remote dashboard PR 3), shown even while operator Settings are loading or unavailable. */
+export function Settings({view, children}: {view: SettingsView; children?: ComponentChildren}) {
  const [drafts, setDrafts] = useState<Drafts>({});
  const status = view.status;
  const header = <header class="settings-heading"><PageHeader title="Settings" context="This machine"/></header>;
- if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p></div>;
- if ("error" in status || !status.snapshot || !status.catalog) return <div class="settings-screen">{header}<p role="alert" class="overview-error">Settings unavailable: {"error" in status ? status.error : status.reason ?? "no snapshot"}</p></div>;
+ if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p>{children}</div>;
+ if ("error" in status || !status.snapshot || !status.catalog) return <div class="settings-screen">{header}<p role="alert" class="overview-error">Settings unavailable: {"error" in status ? status.error : status.reason ?? "no snapshot"}</p>{children}</div>;
  const data: SettingsResponse = status;
  const disabled = !data.writable || !view.token || view.busy;
  const set = (key: SettingKey, value: SettingValue) => setDrafts(current => ({...current, [key]: value}));
@@ -194,6 +195,7 @@ export function Settings({view}: {view: SettingsView}) {
   <Section title="Auto-compaction" help="A session compacts once its context reaches this many tokens; a change takes effect at the next compaction check. A whole number of at least 1: an invalid parent value turns parent auto-compaction off." keys={COMPACTION} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: COMPACTION}} restoreText="Restore the parent and operator compaction thresholds to their defaults?" disabled={disabled} invalid={invalid(COMPACTION)}>
    {COMPACTION.flatMap(key => [field(key), <Effective key={`${key}-effective`} field={view_(key)}/>])}
   </Section>
+  {children}
   <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>
  </div>;
 }

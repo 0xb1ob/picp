@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,9 @@ import { REPO_ROOT } from "./harness/index.ts";
 import { createViewer } from "../src/viewer/server.ts";
 import { saveOperatorTarget } from "../extensions/cp-bridge/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
+import { atomicWrite, daemonPaths } from "../src/service/daemon-files.ts";
+import { tunnelConfigFile } from "../src/service/daemon-tunnel-files.ts";
+import { listenPlan } from "../src/viewer/cli.ts";
 
 /** cp-fl8b: pi's built-in MCP, codemode and tool search follow the bridge on every operator run. */
 const BUILTINS = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
@@ -287,6 +290,50 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(hits));
 	assert.deepEqual(JSON.parse(readFileSync(report, "utf8")), [], "no session viewer was spawned");
 	assert.equal(existsSync(pidFile), false, "no session viewer was spawned");
 	assert.equal(await portInUse(port), false);
+});
+
+test("CP_OPERATOR_VIEWER=service, no tailnet: a remote-only home (cp-tunnel enabled) starts with no local address for pi; otherwise the tailnet refusal stands", async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-operator-remote-only-"));
+	const home = join(dir, "home");
+	const addressFile = join(dir, "address.json");
+	const previous = { PATH: process.env.PATH, CP_VIEWER_HOST: process.env.CP_VIEWER_HOST };
+	symlinkSync(process.execPath, join(dir, "node")); // the fake pi's `env node`
+	process.env.PATH = dir; // no tailscale
+	delete process.env.CP_VIEWER_HOST;
+	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0", CP_OPERATOR_VIEWER: "service" });
+	t.after(() => {
+		for (const key of ["PATH", "CP_VIEWER_HOST"] as const) {
+			if (previous[key] === undefined) delete process.env[key];
+			else process.env[key] = previous[key];
+		}
+		for (const key of ["FAKE_PI_EXIT_CODE", "FAKE_PI_ADDRESS_FILE", "CP_OPERATOR_WEB", "CP_OPERATOR_VIEWER"]) delete process.env[key];
+		rmSync(dir, { recursive: true, force: true });
+	});
+	await assert.rejects(runOperator([], { piBin: FAKE_PI, viewer: { home, port: 8766 } }), /require-tailnet/);
+	const { dataDir } = daemonPaths(home);
+	mkdirSync(dataDir, { recursive: true });
+	atomicWrite(tunnelConfigFile(dataDir), { schema_version: 1, enabled: true, mode: "quick", port: 8767, binary: "/opt/cf/cloudflared", revision: 1 });
+	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { home, port: 8766 } }), 0);
+	const seen = JSON.parse(readFileSync(addressFile, "utf8")) as { host?: string; port: string };
+	assert.deepEqual([seen.host, seen.port], [undefined, "8766"], "no local listener: pi gets no CP_VIEWER_HOST");
+});
+
+test("listenPlan: no tailnet is remote-only (no local listener) only under --require-tailnet with the tunnel enabled; a bad port still refuses", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-listen-plan-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const none = () => undefined;
+	assert.deepEqual(listenPlan(dir, {}, true, () => "100.64.0.9"), { host: "100.64.0.9", port: 8766, local: true });
+	assert.throws(() => listenPlan(dir, {}, true, none), /require-tailnet/, "no tunnel config: the refusal stands");
+	const { dataDir } = daemonPaths(dir);
+	mkdirSync(dataDir, { recursive: true });
+	const write = (enabled: boolean) => atomicWrite(tunnelConfigFile(dataDir), { schema_version: 1, enabled, mode: "quick", port: 8767, binary: "/opt/cf/cloudflared", revision: 1 });
+	write(false);
+	assert.throws(() => listenPlan(dir, {}, true, none), /require-tailnet/, "a disabled tunnel is not remote-only");
+	write(true);
+	assert.deepEqual(listenPlan(dir, {}, true, none), { host: "127.0.0.1", port: 8766, local: false });
+	assert.deepEqual(listenPlan(dir, {}, false, none), { host: "127.0.0.1", port: 8766, local: true }, "unflagged keeps its loopback default");
+	assert.deepEqual(listenPlan(dir, { CP_VIEWER_HOST: "100.64.0.1" }, true, none), { host: "100.64.0.1", port: 8766, local: true }, "a pinned host is always local");
+	assert.throws(() => listenPlan(dir, { CP_VIEWER_PORT: "0" }, true, none), /CP_VIEWER_PORT must be 1-65535/);
 });
 
 for (const signal of OPERATOR_SIGNALS) {

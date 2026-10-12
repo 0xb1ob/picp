@@ -289,6 +289,48 @@ it. Never run `systemctl --user stop|kill cp-parent.service` on a migrated home.
 To roll back M2: `git -C <app> checkout <previous tag/sha>`, then rerun the install from that checkout; it
 rewrites the legacy units.
 
+## Remote dashboard (opt-in): `cp-tunnel`
+
+Off by default: a home where `cp-tunnel up` never ran has no tunnel, no remote listener and no device routes, and
+the loopback/tailnet dashboard is unchanged. Turning it on publishes the dashboard on an HTTPS address through
+Cloudflare; only paired devices get past its gate. Contract: [`docs/contracts.md`](contracts.md) (Remote devices).
+
+> **A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote
+> devices from creating additional devices; this does not prevent shell actions requested through the operator agent.
+> Use View only for a less-trusted device.**
+
+Prerequisite: cp-install ran (the tunnel runs under cp-daemon; `cp-tunnel up` starts a stopped daemon, it never
+installs one). cloudflared comes from `PATH` when compatible, else a checksum-verified official binary is installed
+under `<home>/.pi-command-post/bin/`.
+
+**Quick tunnel** (no Cloudflare account): `cp-tunnel up`. stdout prints the `https://….trycloudflare.com` origin; a
+one-use pairing QR and link (five minutes) go to the controlling terminal only. Limits: the hostname changes whenever
+cloudflared restarts (`up`, a daemon restart or reload, a crash) and every device must then pair again; there is no
+uptime guarantee; Quick Tunnels carry no SSE, so the remote dashboard polls every 2 s while visible. Push stays where
+it was.
+
+**Named tunnel** (stable hostname): create a tunnel and a public hostname for it in the Cloudflare dashboard, save the
+tunnel token to a file, then `cp-tunnel up --hostname cp.example.com --token-file ~/tunnel-token`. The token is copied
+to `data/tunnel/token` (0600) once cloudflared is provisioned; your file is not needed afterwards. Web Push can move to the
+named origin only with consent: `--push-origin accept`, or "y" at the prompt (no terminal or no answer keeps the current
+push origin and keys). Optional: put Cloudflare Access in front of the hostname for a second sign-in; the device gate
+still applies behind it.
+
+**Pairing.** `cp-tunnel pair [--level full|view]` (terminal), or Settings → **Devices** → Add device on this machine's
+or a tailnet dashboard (it shows the QR in the page). Open the link on the new device and give it a name. Full control
+is the default; choose View only for anything you would not hand your terminal. A remote device can never add a device.
+Every new pairing shows "New device paired" on every paired dashboard and sends a push where push is set up and the
+device subscribed; each recipient's state (pending, delivered to push service, not subscribed, unavailable, retrying,
+failed, expired, revoked) is shown, never assumed.
+
+**Revoke and recovery.** `cp-tunnel devices` lists, `cp-tunnel revoke <name-or-id>` (or Revoke in Settings → Devices,
+Full control or local only) ends a device's session at its next request and closes its stream within 2 s. A lost phone:
+revoke it, then check the operator transcript for requests it sent (each is labelled with its device). `cp-tunnel
+status` shows the tunnel and the viewer's ack; `cp-tunnel down` stops the tunnel and closes the remote listener (pending
+pairing alerts still go out). On a machine without a tailnet address the viewer runs **remote-only** while the tunnel is
+enabled: no local listener, health probed through the device socket. `cp-daemon status` shows the `device-notify`
+sender; `/doctor` warns when it failed.
+
 ## Without systemd
 
 The detached backend has no outer watchdog: if the cp-daemon outer itself dies, nothing restarts it until

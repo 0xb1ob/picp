@@ -167,6 +167,11 @@ test("status exits 3 with the reboot command when not running, 0 with the childr
 		assert.match(s.text(), /running pid 4200 since t0 \(detached\), outer abcdef012345/);
 		assert.match(s.text(), /parent: running pid 4202, 1 restart/);
 		assert.match(s.text(), /update: running pid 4204, next t10/);
+		assert.doesNotMatch(s.text(), /device-notify/, "an old record or a home without the remote feature has no sender line");
+		writeFileSync(s.paths.runtime, JSON.stringify({ units: { parent: unit, viewer: { ...unit, pid: 4203 }, "device-notify": { ...unit, pid: 4205, restarts: 0 }, health: { next_due: "t5" }, update: { next_due: "t10" } } }));
+		s.out.length = 0;
+		assert.equal(await cli(["status"], s.ports), 0);
+		assert.match(s.text(), /viewer: running pid 4203, 1 restart\(s\)\ndevice-notify: running pid 4205, 0 restart\(s\)\nhealth: idle/);
 		assert.match(s.text(), /after a reboot: /);
 		const none = setup({ config: false });
 		assert.equal(await cli(["status"], none.ports), 3);

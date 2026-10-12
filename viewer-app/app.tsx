@@ -22,6 +22,9 @@ import { Overview } from "./screens/Overview.tsx";
 import { More } from "./screens/More.tsx";
 import { DependencyMap } from "./screens/DependencyMap.tsx";
 import { usePush } from "./use-push.ts";
+import { useDevices } from "./use-devices.ts";
+import { Devices } from "./components/Devices.tsx";
+import { PushControl } from "./components/PushControl.tsx";
 import { useAnswersControl } from "./use-answers-control.ts";
 import { useThreads } from "./use-threads.ts";
 export function DetailScreen({current:asked, workers}: {current:Route; workers?: OverviewResponse["in_flight"] | undefined}) {
@@ -73,8 +76,10 @@ function DecisionPage({current}: {current:Route}) {
 /** Settings (under More): its own GET and writes, no stream; once read it reloads only after a write, so the shell says stale, never live. */
 function SettingsPage({current}: {current:Route}) {
  const view = useSettingsControl();
+ const devices = useDevices();
+ const push = usePush(true);
  const data = view.status && !("error" in view.status) ? view.status : null;
- return <Shell current={current} awaiting={null} status={!view.status ? "connecting" : data ? "stale" : "offline"} updatedAt={data?.generated_at ?? null}><Settings view={view}/></Shell>;
+ return <Shell current={current} awaiting={null} status={!view.status ? "connecting" : data ? "stale" : "offline"} updatedAt={data?.generated_at ?? null}><Settings view={view}><Devices view={devices}/>{push && <PushControl view={push}/>}</Settings></Shell>;
 }
 /** Stats: the hash carries the filters; the browser's IANA zone rides only on the API query (optional, never in the hash). */
 export function StatsPage({current}: {current:Route}) {
