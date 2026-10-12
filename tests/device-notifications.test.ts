@@ -49,7 +49,7 @@ function bench(t: import("node:test").TestContext, configured = true) {
 		browsers.set(browser.endpoint, browser);
 		return browser;
 	};
-	const sweep = () => runDeviceNotifySweep({ stateDir, dataDir, fetch, now: () => clock, log: (line) => lines.push(line) });
+	const sweep = (binding?: () => { origin: string; generation: number } | null) => runDeviceNotifySweep({ stateDir, dataDir, fetch, now: () => clock, log: (line) => lines.push(line), ...(binding ? { binding } : {}) });
 	const ledger = (): DeviceDelivery[] => {
 		const read = readDeviceNotifications(stateDir);
 		assert.notEqual(read.state, "invalid");
@@ -195,4 +195,27 @@ test("a malformed ledger or device store stops the sender loudly and is never re
 	assert.deepEqual(await b.sweep(), { attempted: 0, delivered: 0, retrying: 0, failed: 0, waiting: 0, ended: 0, busy: true });
 	release(201);
 	assert.equal((await first).delivered, 1);
+});
+
+test("#243 carry-over: the sender honours the tunnel binding — another quick generation is expired, an unreadable runtime sends nothing", async (t) => {
+	const b = bench(t);
+	const laptop = b.pair("Laptop"); // paired on generation 1
+	b.subscribe(laptop.id, "laptop");
+
+	const unreadable = await b.sweep(() => {
+		throw new Error("the tunnel runtime is unreadable: state/tunnel-runtime.json: schema_version is not 1");
+	});
+	assert.match(unreadable.error ?? "", /tunnel runtime is unreadable/);
+	assert.deepEqual([unreadable.attempted, b.calls.length], [0, 0], "fail closed: no push on a guess");
+	assert.equal(b.record(laptop.pairing_id, laptop.id)?.state, "pending", "nothing settled while the binding is unknown");
+
+	const sameGeneration = await b.sweep(() => ({ origin: ORIGIN, generation: 1 }));
+	assert.deepEqual([sameGeneration.attempted, sameGeneration.delivered], [1, 1], "the current generation gets its alert");
+	assert.deepEqual(b.sent().map(([slug]) => slug), ["laptop"]);
+
+	const tablet = b.pair("Tablet"); // also generation 1; the tunnel then moves to generation 2 before the sweep
+	b.subscribe(tablet.id, "tablet");
+	const nextGeneration = await b.sweep(() => ({ origin: ORIGIN, generation: 2 }));
+	assert.deepEqual([nextGeneration.attempted, nextGeneration.ended, b.calls.length], [0, 2, 0]);
+	assert.deepEqual([b.record(tablet.pairing_id, laptop.id)?.state, b.record(tablet.pairing_id, tablet.id)?.state], ["expired", "expired"]);
 });
