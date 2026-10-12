@@ -2140,12 +2140,27 @@ test("forge PR 3: a GitLab MR merged into a non-main target records, tears down 
 	assert.equal(b.calls.filter((line) => line.startsWith("gh ")).length, 0);
 });
 
+test("#250 review: a GitLab merge-commit MR records the observed strategy, never the caller's, then tears down and closes", async (t) => {
+	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
+	const options = { observer: gitlabMr({ squash_commit_sha: undefined, merge_commit_sha: MERGE_COMMIT }) };
+	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR, strategy: "squash" });
+	assert.equal(done.next, "done", done.reason);
+	const receipt = done.merge?.receipt;
+	assert.equal(receipt?.merge_commit_sha, MERGE_COMMIT, "the merge commit is the landing commit");
+	assert.equal(receipt?.strategy, "unknown", "no squash evidence and the request's strategy is not an observation");
+	assert.equal(receipt?.base_branch, "develop");
+	assert.equal(b.teardowns.length, 1);
+	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${MR_URL}` }]);
+	assert.equal(b.calls.filter((line) => line.startsWith("gh ")).length, 0);
+});
+
 test("forge PR 3: open, closed, foreign, unreadable and held GitLab MRs stop with a named reason and touch nothing", async (t) => {
 	const cases: Array<[string, Parameters<typeof gitlabMr>[0], IntegrationNext, RegExp]> = [
 		["opened", { state: "open", squash_commit_sha: undefined, merged_at: undefined }, "surface", /merge it on GitLab, then re-run cp_integrate/],
 		["unknown", { state: "unknown", squash_commit_sha: undefined, merged_at: undefined }, "surface", /is unknown/],
 		["closed", { state: "closed", squash_commit_sha: undefined, merged_at: undefined }, "surface", /closed and was never merged/],
 		["another branch", { source_branch: "someone-else" }, "surface", /not this job's delivery/],
+		["merged, no target", { target_branch: undefined }, "surface", /merged, but GitLab named no target branch/],
 		["unavailable", { ok: false, reason: "unavailable", detail: "HTTP 503 (service unavailable)" }, "retry", /could not be read \(unavailable: HTTP 503/],
 		["fork", { ok: false, reason: "unsupported", detail: "fork (cross-project) merge requests are not supported in v1" }, "surface", /unsupported: fork/],
 	];

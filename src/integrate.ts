@@ -1075,7 +1075,7 @@ export class Integrator {
 			merge = await this.#options.merges.record({
 				jobId,
 				...(input.prUrl ? { pr: input.prUrl } : {}),
-				...(input.request.strategy || !input.gitlab ? { strategy: input.request.strategy ?? "squash" } : {}),
+				...(input.gitlab ? {} : { strategy: input.request.strategy ?? "squash" }),
 				cwd,
 				by: "cp_integrate",
 				...(priorAuthority ? { authority: priorAuthority } : {}),

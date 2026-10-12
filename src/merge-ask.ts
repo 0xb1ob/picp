@@ -114,6 +114,7 @@ import {
 	validate,
 } from "./contracts.ts";
 import { acceptedFinalFixHeads } from "./final-fix.ts";
+import { parseChangeRequestUrl } from "./forge-url.ts";
 import { isCompletePass } from "./review-subject.ts";
 
 /** One row of `gh run list --json conclusion,status,headSha,workflowName,databaseId,attempt`. */
@@ -469,8 +470,10 @@ export function readCiForHead(input: {
 // Which rows this gate governs
 // ---------------------------------------------------------------------------
 
-/** `PR #47`, `pr 47`, `pull request #47`, or a bare `#47` — same shape awaiting.ts keys on; forge PR 3 adds GitLab's `MR !7`, `merge request 7`, bare `!7`. */
-const PR_REFERENCE = /(?:\b(?:pull|merge) request\s*[#!]?\s*|\b(?:pr|mr)\s*[#!]?\s*|[#!])(\d+)/i;
+/** `PR #47`, `pr 47`, `pull request #47`, or a bare `#47` — same shape awaiting.ts keys on. */
+const PR_REFERENCE = /(?:\bpull request\s*#?\s*|\bpr\s*#?\s*|#)(\d+)/i;
+/** A GitLab job's row may also name its MR as `MR !7`, `merge request 7` or a bare `!7`; never read on a GitHub job. */
+const MR_REFERENCE = /(?:\b(?:pull|merge) request\s*[#!]?\s*|\b(?:pr|mr)\s*[#!]?\s*|[#!])(\d+)/i;
 const MERGE_VERB = /^\s*(?:please\s+)?merg(?:e|ing)\b/i;
 /** cp-1som: "ship" is the word the parent actually used on #117–#119. */
 const MERGE_WORD = /\b(?:merg(?:e|ed|ing)|ship(?:s|ped|ping)?)\b/i;
@@ -511,9 +514,9 @@ export function receiptPrNumber(evidence: MergeAskMergedEvidence): string | unde
 	return fromUrl && fromUrl.length > 0 ? fromUrl : undefined;
 }
 
-/** The PR number a merge ask names, when it names one (for the notice line). */
-export function mergeAskPrNumber(decision: string): string | undefined {
-	return decision.match(PR_REFERENCE)?.[1];
+/** The PR number a merge ask names, when it names one (for the notice line); `gitlab` also reads MR forms. */
+export function mergeAskPrNumber(decision: string, gitlab = false): string | undefined {
+	return decision.match(gitlab ? MR_REFERENCE : PR_REFERENCE)?.[1];
 }
 
 // ---------------------------------------------------------------------------
@@ -585,15 +588,17 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
 			// merge that already landed makes every CI question about it moot, and a
 			// row that has to wait for `gh` to learn that is a row that can raise itself
 			// into an ask nobody can act on in the meantime.
-			const asked = mergeAskPrNumber(`${input.subject ?? ""} ${input.decision}`);
 			const receipt = deps.merged ? await deps.merged(input.job_id) : undefined;
+			const unsupported = deps.unsupported?.(input.job_id);
+			// Bare `!N` / `MR N` name a change request only on a GitLab-project or GitLab-receipt job.
+			const gitlab = unsupported !== undefined || parseChangeRequestUrl(receipt?.pr_url ?? "")?.kind === "gitlab";
+			const asked = mergeAskPrNumber(`${input.subject ?? ""} ${input.decision}`, gitlab);
 			const alreadyMerged = evaluateAlreadyMerged({
 				jobId: input.job_id,
 				...(asked ? { prNumber: asked } : {}),
 				...(receipt ? { evidence: receipt } : {}),
 			});
 			if (alreadyMerged) return alreadyMerged;
-			const unsupported = deps.unsupported?.(input.job_id);
 			if (unsupported) return verdict({ action: "defer", ci: "unknown", reason: unsupported });
 			const head = await deps.head(branch, input.job_id);
 			if (!head.sha) return evaluateMergeAskCi({ branch, head, runs: [] });

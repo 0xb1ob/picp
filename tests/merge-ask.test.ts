@@ -294,11 +294,28 @@ test("forge PR 3: a GitLab job's ask defers as unknown CI with no query, and onl
 	assert.deepEqual(queried, ["head", "runs"]);
 });
 
-test("forge PR 3: MR references read as PR numbers, and GitHub references are unchanged", () => {
+test("#250 review: on a GitHub job a bare !N is not a PR reference, so its own receipt still withdraws the ask", async () => {
+	const probe = createMergeAskProbe({
+		head: async () => ({ sha: HEAD }),
+		runs: async () => [run()],
+		merged: () => ({ merge_commit_sha: "e".repeat(40), pr_url: "https://github.com/o/r/pull/5", head_sha: HEAD }),
+		unsupported: () => undefined,
+	});
+	const verdict = await probe({ type: "approval", decision: "Merge cp-gh (ship !3)?", job_id: "cp-gh" });
+	assert.deepEqual([verdict.action, verdict.ci], ["resolved", "already_merged"]);
+});
+
+test("forge PR 3: MR references read as PR numbers only on a GitLab job, and GitHub references are unchanged", () => {
 	for (const [text, number] of [["Merge MR !7", "7"], ["merge request 12 is green", "12"], ["ship !3", "3"], ["Merge PR #44", "44"], ["pull request #5", "5"], ["#9 ready", "9"]] as const) {
+		assert.equal(mergeAskPrNumber(text, true), number, text);
+	}
+	for (const [text, number] of [["Merge PR #44", "44"], ["pull request #5", "5"], ["#9 ready", "9"], ["pr 12", "12"]] as const) {
 		assert.equal(mergeAskPrNumber(text), number, text);
 		assert.equal(isMergeAsk({ type: "approval", decision: `${text} — merge it?` }), true, text);
 	}
+	// #250 review: GitHub ask parsing is byte-for-byte what it was before GitLab.
+	for (const text of ["ship !3", "Merge MR !7", "merge request 12 is green", "mr 4"]) assert.equal(mergeAskPrNumber(text), undefined, text);
+	assert.equal(isMergeAsk({ type: "approval", decision: "ship !3" }), false);
 	const evidence = { merge_commit_sha: "a".repeat(40), pr_url: "https://gitlab.example.com/g/r/-/merge_requests/7" };
 	assert.equal(evaluateAlreadyMerged({ jobId: "cp-x", prNumber: "7", evidence })?.action, "resolved", "an MR url's IID is the receipt's number");
 	assert.equal(evaluateAlreadyMerged({ jobId: "cp-x", prNumber: "8", evidence }), undefined, "and another MR's ask is not resolved by it");
