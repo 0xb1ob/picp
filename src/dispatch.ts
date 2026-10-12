@@ -71,6 +71,7 @@ import { ScriptDispatcher, type ScriptDispatchResult, type ScriptPreview } from 
 import { cleanupCreatedJobBranch, lastLine } from "./job-branch-cleanup.ts";
 import { resolveJobSkills, skillsBriefNote } from "./job-skills.ts";
 import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
+import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
 
 /** A git invocation, injectable so the branch paths are testable without a repo. */
@@ -308,6 +309,8 @@ export interface DispatchRequest {
 	/** cp-wlhu S5: the foreign-CI line `CommandPost.dispatch`'s reviewer gate computed; snapshotted into the brief, never stored. */ foreignCi?: string;
 	/** Installed skill names the operator mentioned for THIS worker (src/job-skills.ts); never paths. */
 	skills?: string[];
+	/** Bind to an existing PR (cp_dispatch pr, picp-d0p): a number or url; ship/pr jobs only. */
+	pr?: string;
 }
 export interface DispatchResult {
 	job_id: string;
@@ -413,6 +416,8 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	makeRoom?: (jobId: string, role: Role) => Promise<(() => void) | undefined>;
 	/** pi's agent dir for skill resolution; tests pass a scratch dir. Defaults to `agentDirFor(process.env)`. */
 	skillAgentDir?: string;
+	/** Reads and gates a `pr` ref; tests inject it. Defaults to `gh pr view` against the project's GitHub origin. */
+	bindPr?: (input: BindPrInput) => Promise<BoundPrFacts>;
 }
 
 export class Dispatcher {
@@ -431,6 +436,7 @@ export class Dispatcher {
 
 	async dispatchScript(request: DispatchRequest): Promise<ScriptDispatchResult> {
 		if (request.skills?.length) throw new DispatchError(`${request.jobId}: skills apply to pi workers; a script job runs no pi`);
+		if (request.pr) throw new DispatchError(`${request.jobId}: pr binds a ship/delivery:pr pi worker to a PR; a script job pushes no branch — dispatch without pr`);
 		return this.#script().dispatch(request);
 	}
 
@@ -532,6 +538,8 @@ export class Dispatcher {
 		if (blockers.length > 0) {
 			throw new BlockedDispatchError(`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`, blockers);
 		}
+		// picp-d0p: only a ship/pr job binds, and it takes its base from the PR.
+		if (request.pr && (kind !== "ship" || delivery !== "pr" || request.base)) throw new DispatchError(`${issue.id}: pr binds only a kind:ship delivery:pr job and takes its base from the PR — this is kind:${kind} delivery:${delivery}${request.base ? ` with base ${request.base}` : ""}; drop pr (or base)`);
 
 		// --- 2. profile + model, both before anything is taken ---------------
 		const profile: WorkerProfile = selectProfile(options.profilesDir, request, { kind, delivery });
@@ -596,6 +604,13 @@ export class Dispatcher {
 		}
 		const clone = pre.clone as string;
 		const base = pre.base as string;
+		// picp-d0p: read and gate the bound PR before any lease; a bound job's re-dispatch names the same PR.
+		const before = options.fleet.get(issue.id)?.bound_pr;
+		if (before && !request.pr) throw new DispatchError(`${issue.id} was bound to ${before.url}; re-dispatch it with pr ${before.number}`);
+		const bound = request.pr ? await (options.bindPr ?? bindFromOrigin((p) => options.registry.originUrl(p)))({ ref: request.pr, project: labels.project, clone, base }) : undefined;
+		if (bound && before && bound.number !== before.number) throw new DispatchError(`${issue.id} was bound to ${before.url}, not ${bound.url}; re-dispatch it with pr ${before.number}`);
+		if (bound) assertBranchFree(options.fleet.read().jobs, issue.id, bound.head);
+		const branch = bound?.head ?? issue.id;
 
 		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs);
 		let mandateId: string | undefined, startedBy: string | undefined;
@@ -617,9 +632,14 @@ export class Dispatcher {
 		// leftover branch from an older failure (or from a human) is somebody
 		// else's state and is refused loudly by `#createJobBranch` instead.
 		let branchCreatedHere = false;
+		let boundCheckedOut = false; // picp-d0p: a bound branch is never this call's to delete; the error path only detaches.
 		try {
-			await this.#createJobBranch(lease.path, issue.id, base);
-			branchCreatedHere = true;
+			boundCheckedOut = bound !== undefined; // set first: a half-done checkout is detached too
+			const salvaged = bound ? (await checkoutBoundBranch({ git: options.git ?? defaultGit, worktree: lease.path, jobId: issue.id, head: bound.head, headSha: bound.headSha, now: now() })).salvaged : undefined;
+			if (!bound) {
+				await this.#createJobBranch(lease.path, issue.id, base);
+				branchCreatedHere = true;
+			}
 
 			const post = await options.preflight.check({
 				project: labels.project,
@@ -646,7 +666,8 @@ export class Dispatcher {
 			const beadsDb = options.ledger.beadsDb(labels.project);
 			const references = await referencedMaterial({ task: task.forInference, externalRef: issue.external_ref, prefix: options.ledger.read().prefix,
 				clone, worktree: lease.path, home: options.home, exec: options.referenceExec, ...(beadsDb ? { beadsDb } : {}), ...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
-			const originalTask = task.forInference + references;
+			const boundNote = bound ? `\n\n> ${boundPrNote(bound)}\n` : "";
+			const originalTask = task.forInference + references + boundNote;
 			const runDir = join(options.home, paths.runDir(issue.id));
 			mkdirSync(runDir, { recursive: true });
 			const artifactPath = join(options.home, paths.artifactDir(issue.id), delivery === "board" ? "board.json" : "report.md");
@@ -655,7 +676,7 @@ export class Dispatcher {
 				template: readBriefTemplate(options.briefsDir, profile.frontmatter.briefTemplate),
 				values: {
 					job_id: issue.id,
-					branch: issue.id,
+					branch,
 					base,
 					worktree: lease.path,
 					project: labels.project,
@@ -664,7 +685,7 @@ export class Dispatcher {
 					task: task.forBrief + references,
 					artifact_path: artifactPath,
 				},
-			}) + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
+			}) + boundNote + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
 			// Freeze parent input for reviewer coverage, never worker-authored text.
 			// taskFile stays out of the brief; both receive the reference snapshot.
@@ -710,6 +731,7 @@ export class Dispatcher {
 				});
 			}
 			recorder.cp("checkpoint_captured", checkpoint);
+			if (bound) recorder.cp("pr_bound", { number: bound.number, url: bound.url, head: bound.head, head_sha: bound.headSha, ...(salvaged ? { salvaged } : {}) });
 			recorder.cp("deps_prepared", { outcome: deps.outcome, detail: deps.detail });
 			recorder.cp("original_task_frozen", {
 				path: paths.originalTaskFile(issue.id),
@@ -773,7 +795,8 @@ export class Dispatcher {
 				...(lease.lease_id ? { lease_id: lease.lease_id } : {}),
 				...("ref" in checkpoint ? { checkpoint_ref: checkpoint.ref } : {}),
 				...scheduleRecord(issue.labels),
-				branch: issue.id,
+				branch,
+				...(bound ? { bound_pr: { number: bound.number, url: bound.url, base: bound.base } } : {}),
 				dispatched_at: isoTimestamp(now()),
 				usage: EMPTY_USAGE,
 				budget: managed.plan.budget,
@@ -799,7 +822,7 @@ export class Dispatcher {
 				...(mandateId ? { mandate_id: mandateId } : {}),
 				worker: issue.id,
 				worktree: lease.path,
-				branch: issue.id,
+				branch,
 				state: "dispatched",
 				receipt: "accepted",
 				model: routing.model,
@@ -847,7 +870,8 @@ export class Dispatcher {
 				});
 			}
 			if (recorder) this.#runs.close(issue.id);
-			if (branchCreatedHere) await deleteCheckpoint(options.git ?? defaultGit, lease.path, checkpointRef(issue.id));
+			if (boundCheckedOut) await safely(() => (options.git ?? defaultGit)(lease.path, ["switch", "--detach"])); // never `branch -D` a bound branch
+			if (branchCreatedHere || boundCheckedOut) await deleteCheckpoint(options.git ?? defaultGit, lease.path, checkpointRef(issue.id));
 			await safely(() => options.leases.release(lease, { ignoreErrors: true }));
 			throw error;
 		}
@@ -855,8 +879,9 @@ export class Dispatcher {
 
 	/**
 	 * Ported `createJobBranch`: fetch, verify `origin/<base>`, then cut the job
-	 * branch from it. The branch is always the job id — that is how a worktree,
-	 * a run directory and a PR are tied to one job.
+	 * branch from it. The branch is the job id — that is how a worktree,
+	 * a run directory and a PR are tied to one job — except for a `cp_dispatch pr`
+	 * job, which checks out the bound PR's head instead (`checkoutBoundBranch`).
 	 */
 	async #createJobBranch(worktree: string, branch: string, base: string): Promise<void> {
 		const git = this.#options.git ?? defaultGit;

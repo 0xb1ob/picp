@@ -219,7 +219,7 @@ export function jobRow(state: ViewerState, entry: UsageJob, title: string | unde
 		dispatched_at: str(job.dispatched_at),
 		closed_at: str(job.closed_at),
 		branch: str(job.branch),
-		pr_url: str(pr?.url),
+		pr_url: str(pr?.url) ?? [str(obj(job.bound_pr)?.url)].find((url) => PR_URL.test(url ?? "")), // a bound PR shows before its envelope
 		pr_status: str(pr?.status),
 		live: (runPhase === "working" || runPhase === "starting") && entry.phase !== "done" && entry.phase !== "failed",
 	};

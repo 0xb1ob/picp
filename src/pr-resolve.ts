@@ -92,6 +92,8 @@ export interface PrResolveInput {
 	cwd: string;
 	/** The worker's `pr_url`, when the envelope carried one. */
 	given?: string;
+	/** `cp_dispatch pr` bound this job to that PR: resolve it by number (`gh pr view`), never by `--head` listing. */
+	bound?: { number: number; url: string };
 }
 
 export interface PrResolveOptions {
@@ -154,6 +156,7 @@ export async function resolvePr(input: PrResolveInput, options: PrResolveOptions
 	}
 
 	const exec = options.exec ?? runCommand;
+	if (input.bound) return resolveBound(input, input.bound, ownerRepo, given, exec, options.timeoutMs);
 	let stdout: string;
 	try {
 		stdout = await exec("gh", ghPrListArgs(input.branch, ownerRepo), {
@@ -186,5 +189,54 @@ export async function resolvePr(input: PrResolveInput, options: PrResolveOptions
 		url: row.url,
 		...(row.number !== undefined ? { number: row.number } : {}),
 		...(given && given !== row.url ? { correction: `pr_url corrected: ${given} -> ${row.url}` } : {}),
+	};
+}
+
+/**
+ * picp-d0p: a job `cp_dispatch pr` bound to an existing PR. Its branch may carry several
+ * historical PRs, so the PR is read by number and must still be on the job's branch; a
+ * worker url naming another PR or repo is refused.
+ */
+async function resolveBound(
+	input: PrResolveInput,
+	bound: { number: number; url: string },
+	ownerRepo: string,
+	given: string | undefined,
+	exec: CommandRunner,
+	timeoutMs: number | undefined,
+): Promise<PrResolution> {
+	const target = given ? parsePrUrl(given) : undefined;
+	if (target && (target.number !== bound.number || `${target.owner}/${target.repo}`.toLowerCase() !== ownerRepo.toLowerCase())) {
+		return { status: "refused", reason: `pr_url ${given} is not the bound PR ${bound.url} (${ownerRepo}#${bound.number}) — report the bound PR's url` };
+	}
+	let stdout: string;
+	try {
+		stdout = await exec("gh", ["pr", "view", String(bound.number), "--repo", ownerRepo, "--json", "url,number,headRefName"], {
+			cwd: input.cwd,
+			timeoutMs: timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS,
+		});
+	} catch (error) {
+		return fallback(input, ownerRepo, given, error instanceof Error ? error.message : String(error));
+	}
+	let row: Record<string, unknown> | undefined;
+	try {
+		const parsed: unknown = JSON.parse(stdout.trim());
+		row = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+	} catch {
+		row = undefined;
+	}
+	const url = typeof row?.url === "string" ? row.url.trim() : "";
+	if (!row || url.length === 0) return fallback(input, ownerRepo, given, "gh returned output that is not a PR");
+	if (row.headRefName !== input.branch) {
+		return {
+			status: "refused",
+			reason: `bound PR ${url} is on branch "${String(row.headRefName)}", not this job's branch "${input.branch}" — the PR's head moved; re-dispatch or have a human finish it`,
+		};
+	}
+	return {
+		status: "verified",
+		url,
+		number: bound.number,
+		...(given && given !== url ? { correction: `pr_url corrected: ${given} -> ${url}` } : {}),
 	};
 }

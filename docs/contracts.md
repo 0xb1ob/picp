@@ -1714,7 +1714,7 @@ Every line of `events.jsonl` is a `RunEvent`:
 - `source: "cp"` — a manager marker: `spawned`, `prompt_sent`, `steer_sent`,
   `follow_up_sent`, `envelope_received`, `envelope_superseded`,
   `envelope_rejected`, `budget_warning`, `budget_exceeded`, `budget_clamped`,
-  `deps_prepared`, `failure`, `shutdown_requested`, `process_exit`.
+  `deps_prepared`, `pr_bound`, `failure`, `shutdown_requested`, `process_exit`.
 
 `seq` is monotonic per run and is the ordering key (timestamps have second
 precision and can tie).
@@ -2664,7 +2664,7 @@ policy lives in the modules it calls. The order is the contract:
 ledger check (labels, not closed, not blocked)
   -> profile (kind -> role) -> routing decision      <- model probed HERE
   -> preflight (no worktree yet: clone, git, leftover branch, occupancy)
-  -> lease -> branch = job id, cut from origin/<base>
+  -> lease -> branch = job id, cut from origin/<base>  (or, with `pr`, the bound PR's head)
   -> preflight again, on the leased worktree
   -> brief (pure) -> state/runs/<job-id>/brief.md
   -> spawn (trust policy) -> RPC prompt              <- receipt is a fact
@@ -3701,7 +3701,7 @@ tree, no local commits), because that gate is keyed on kind. `JOB_KINDS`,
 | next, at intake | `teardown` | only `delivery === "pr"` holds |
 
 **The br issue stays.** Every dispatch precondition keys on a job id
-(`ledger.show`, the claim, `branch = job id`, `state/runs/<id>`,
+(`ledger.show`, the claim, `branch = job id` unless `cp_dispatch pr` binds a PR, `state/runs/<id>`,
 `state/artifacts/<id>`, the lease holder, the fleet record), and so does the
 whole observation stack (settle recovery, revive, `/watch`, wake-up staleness).
 A "lighter id" would fork all of that to save one `br create` and one
@@ -8084,7 +8084,7 @@ Each tick derives intents from facts — the ledger and `readMergeReceipt` — f
 jobs whose `tracker` link names an **active, `write_enabled`** connection; write
 off, a disconnected connection or an unlinked job derives nothing. A tracker-linked
 `kind:ship` `delivery:pr` job whose receipt matches (`job_id` and
-`head_branch` equal the job id), and which was not dropped, closes its bead once
+`head_branch` equal the job id, or the receipt is `bound`), and which was not dropped, closes its bead once
 with `CP <job> merged: <full pr_url> merge <merge_commit_sha> head <head_sha>`.
 Every other closed, undropped job — research, local, board, answer, pipeline — closes its bead once
 with `CP <job> done: <close_reason>`; a dropped job, or a `kind:ship` `delivery:pr` job with no
@@ -9807,7 +9807,40 @@ spends the live generation's budget.
 - Timestamps: `YYYY-MM-DDTHH:MM:SSZ` (UTC, second precision) everywhere, via
   `isoTimestamp()`. No local time, no millisecond variants, no `Date.now()`
   numbers in persisted files.
-- Branch name for a job is the job id (dispatch sets `branch = job_id`).
+- Branch name for a job is the job id (dispatch sets `branch = job_id`), except
+  a bound PR's head branch (see [Bound PR dispatch](#bound-pr-dispatch-cp_dispatch-pr)).
+
+### Bound PR dispatch (`cp_dispatch pr`)
+
+`cp_dispatch job_id=<id> pr=<number|url>` (picp-d0p, [`src/pr-bind.ts`](../src/pr-bind.ts))
+finishes an existing PR instead of cutting `<job-id>` from `origin/<base>`. After
+preflight and before any lease, `gh pr view <n> --repo <origin owner/repo>` is read
+and the dispatch is refused, naming cause and fix, when: the job is not
+`kind:ship delivery:pr` (or is a script job, or also passes `base`); the project has
+no GitHub origin or gh cannot be read (fail closed); a url names another repo; the PR
+is `MERGED` or `CLOSED`; it comes from a fork (`isCrossRepository`); its base is not
+the project's default base; another job whose phase is not `done` holds the head
+branch, or another worktree has it checked out; or a re-dispatch of a bound job
+names no `pr` or a different PR. Draft PRs bind; `cp_integrate` marks them ready
+after a passing review as for any draft.
+
+In the leased worktree the head branch is checked out losslessly: absent locally,
+it is created tracking `origin/<head>`; behind origin, it is fast-forwarded;
+diverged, its tip is kept at `refs/cp-salvage/<job-id>/<utc>` and the branch reset
+to `origin/<head>`. HEAD must then equal the PR's `headRefOid`. The fleet record
+carries `branch: <head>` and `bound_pr: {number, url, base}`; the brief's
+`${branch}`/`${base}` are the PR's, and a bound note (also appended to the frozen
+original task, so the reviewer knows the reviewed diff is the whole PR) tells the
+worker to push to the head, open no PR, and **never rewrite history**: update by
+merging `origin/<base>` (never rebase), push fast-forward only, never drop commits.
+
+**Never deleted.** A failed dispatch only detaches the worktree (no `branch -D`), and
+`cp_integrate` never runs `git push origin --delete` on a bound branch (it records
+`origin/<branch> kept`). Intake resolves a bound job's PR by number (`gh pr view`,
+whose `headRefName` must equal the job's branch), never by `gh pr list --head`, and
+refuses a `pr_url` naming another PR. Every gate is unchanged: exact reviewed head,
+green CI, review pass, merge policy; teardown, the merge receipt (`bound: true`) and
+tracker write-back key on the job id. `dry_run` ignores `pr`.
 
 ### Job id (renamed from br id)
 
