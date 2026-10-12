@@ -38,6 +38,7 @@ import { type BridgeRelay, CpBridge, CpBridgeError, type ParentStartOptions } fr
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "./operator-outbox.ts";
 import { OperatorAsks } from "./operator-asks.ts";
 import { EscalationStore } from "./escalation.ts";
+import type { DrainCause } from "./drain.ts";
 import { EscalationRelayLedger, escalationRelayLedgerFile } from "./escalation-backstop.ts";
 import { runEscalationRelayWatch } from "./escalation-relay-watch.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
@@ -304,7 +305,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		sendReceipt: (args) => bridge.sendReceipt(String(args[0])) ?? null,
 		confirmObserved: (args) => bridge.confirmObserved(String(args[0])),
 		// Outside the queue: a drain waits minutes, and sends must still reach the parent meanwhile.
-		drain: (args) => bridge.drain(typeof args[0] === "number" ? args[0] : undefined),
+		drain: (args) => bridge.drain(typeof args[0] === "number" ? args[0] : undefined, (args[1] ?? undefined) as DrainCause | undefined),
 		drainCancel: () => bridge.drainCancel(),
 	};
 	const queued: Record<string, (args: unknown[]) => Promise<unknown>> = {

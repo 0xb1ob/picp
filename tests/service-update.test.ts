@@ -12,12 +12,12 @@ import { CpBridgeError } from "../src/cp-bridge.ts";
 import type { DrainRecord } from "../src/drain.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../src/parent-diagnostics.ts";
 import { serviceFindings } from "../src/service/status.ts";
-import { DOCTOR_PROBE_MS, type ParentProbe, probeDoctor, readUpdateState, runUpdate, type UpdateState, updateStateFile, type VerifyResult, verifyRestart } from "../src/service/update.ts";
+import { DOCTOR_PROBE_MS, type ParentProbe, probeDoctor, readUpdateConfig, readUpdateState, runUpdate, type UpdateState, updateStateFile, type VerifyResult, verifyRestart } from "../src/service/update.ts";
 import { advanceBase, createScratchRepo } from "./harness/scratch-repo.ts";
 
 const GIT_ENV = { GIT_AUTHOR_NAME: "cp test", GIT_AUTHOR_EMAIL: "cp@test.invalid", GIT_COMMITTER_NAME: "cp test", GIT_COMMITTER_EMAIL: "cp@test.invalid", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
 
-function bench(t: import("node:test").TestContext, config: unknown = { enabled: true, interval_min: 15 }) {
+function bench(t: import("node:test").TestContext, config: unknown = { enabled: true, interval_min: 15, quiet_min: 0 }) {
 	const repo = createScratchRepo({ files: { ".gitignore": ".pi-command-post/\n", "package-lock.json": "{\"v\":1}\n", "README.md": "app\n" } });
 	t.after(() => repo.cleanup());
 	const layout = layoutForHome("multi", repo.path);
@@ -29,7 +29,7 @@ function bench(t: import("node:test").TestContext, config: unknown = { enabled: 
 	let clock = Date.parse("2026-09-28T10:00:00Z");
 	const calls: string[] = [];
 	const lines: string[] = [];
-	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, verify: [] as Array<VerifyResult | (() => VerifyResult)>, failing: new Set<string>(), hostOps: {} as Record<string, () => unknown> };
+	const fake = { busy: [] as string[], working: [] as string[], scripts: [] as string[], drains: [] as Array<DrainRecord["state"] | undefined>, drainCauses: [] as unknown[], verify: [] as Array<VerifyResult | (() => VerifyResult)>, failing: new Set<string>(), hostOps: {} as Record<string, () => unknown> };
 	// cp-daemon's control socket: each op is recorded as `daemon <op>`; a failing one answers like daemonControl.
 	const daemonCall = (op: string): string | undefined => {
 		calls.push(`daemon ${op}`);
@@ -46,7 +46,10 @@ function bench(t: import("node:test").TestContext, config: unknown = { enabled: 
 			return { status: fake.failing.has(line) ? 1 : 0, stdout: "", stderr: fake.failing.has(line) ? "refused" : "" };
 		},
 		host: async (op: string, ...args: unknown[]) => {
-			calls.push(`host ${op}${args.length ? ` ${JSON.stringify(args)}` : ""}`);
+			// The drain cause is asserted on its own (`fake.drainCauses`); the call log keeps the timeout only.
+			const shown = args.filter((arg) => !(typeof arg === "object" && arg !== null && "reason" in arg));
+			if (shown.length < args.length) fake.drainCauses.push(args.at(-1));
+			calls.push(`host ${op}${shown.length ? ` ${JSON.stringify(shown)}` : ""}`);
 			if (fake.failing.has(`host ${op}`)) throw new Error(`${op} refused`);
 			if (fake.hostOps[op]) return fake.hostOps[op]();
 			return { text: `DRAIN: ${op}`, level: "info" };
@@ -576,4 +579,89 @@ test("verifyRestart: an absent parent, or busy then down, fails at the base dead
 	const broken = verifyBench(() => ({ error: "DOCTOR broken" }));
 	assert.match(String(await broken.verify()), /reports an error: DOCTOR broken/);
 	assert.equal(broken.probes.length, 1);
+});
+
+test("drain cause: every drain the updater asks for is an auto-update naming the target sha (forward, and the rollback's)", async (t) => {
+	const b = bench(t);
+	const to = advanceBase(b.repo, "cause.txt", "cause\n");
+	assert.equal((await b.run())?.last_result, "updated", b.lines.join("\n"));
+	assert.deepEqual(b.fake.drainCauses, [{ reason: "auto-update", target_sha: to }]);
+
+	const r = bench(t);
+	const from = r.repo.head();
+	const bad = advanceBase(r.repo, "bad.txt", "bad\n");
+	r.repo.git("fetch", "--quiet", "origin");
+	r.repo.git("merge", "--ff-only", "--quiet", bad);
+	writeFileSync(updateStateFile(r.stateDir), JSON.stringify({ schema_version: 1, phase: "verifying", from, to: bad, lock: false, fetch_failures: 0 }));
+	assert.equal((await r.run())?.last_result, "rolled_back");
+	assert.deepEqual(r.fake.drainCauses, [{ reason: "auto-update", target_sha: from }]);
+});
+
+test("quiet period: a moving tip keeps waiting, a stable tip drains after quiet_min (first seen, not commit time)", async (t) => {
+	const b = bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
+	const first = advanceBase(b.repo, "a.txt", "a\n");
+	const head = b.repo.head();
+	const a = await b.run(5);
+	assert.equal(a?.last_result, "skipped_settling");
+	assert.deepEqual({ sha: a?.first_seen_sha, at: a?.first_seen_at }, { sha: first, at: "2026-09-28T10:05:00Z" });
+	assert.match(a?.detail ?? "", new RegExp(`origin/main ${first.slice(0, 12)} first seen 2026-09-28T10:05:00Z; waiting for 10 min.*eligible 2026-09-28T10:15:00Z`));
+	assert.deepEqual(b.hostCalls(), [], "nothing drained while settling");
+
+	assert.equal((await b.run(5))?.first_seen_at, "2026-09-28T10:05:00Z", "the same tip keeps its first-seen clock");
+	const second = advanceBase(b.repo, "b.txt", "b\n"); // a merge lands 5 min in: the clock restarts
+	const moved = await b.run(5);
+	assert.equal(moved?.last_result, "skipped_settling");
+	assert.deepEqual({ sha: moved?.first_seen_sha, at: moved?.first_seen_at }, { sha: second, at: "2026-09-28T10:15:00Z" });
+	assert.equal((await b.run(5))?.last_result, "skipped_settling", "5 of 10 quiet minutes");
+	assert.equal(b.repo.head(), head);
+	assert.deepEqual(b.hostCalls(), []);
+
+	const done = await b.run(5); // 10 min on the same tip
+	assert.equal(done?.last_result, "updated", b.lines.join("\n"));
+	assert.equal(b.repo.head(), second);
+	assert.deepEqual(b.fake.drainCauses, [{ reason: "auto-update", target_sha: second }]);
+});
+
+test("quiet period: quiet_min 0 drains at once and records no first-seen; an absent quiet_min is 10", async (t) => {
+	const zero = bench(t, { enabled: true, interval_min: 5, quiet_min: 0 });
+	advanceBase(zero.repo, "z.txt", "z\n");
+	const state = await zero.run(5);
+	assert.equal(state?.last_result, "updated", zero.lines.join("\n"));
+	assert.equal(state?.first_seen_sha, undefined);
+
+	const absent = bench(t, { enabled: true, interval_min: 5 });
+	advanceBase(absent.repo, "d.txt", "d\n");
+	assert.equal((await absent.run(5))?.last_result, "skipped_settling");
+	assert.equal((await absent.run(5))?.last_result, "skipped_settling");
+	assert.equal((await absent.run(5))?.last_result, "updated", "10 minutes after first seen");
+});
+
+test("quiet period never blocks a rollback or a run resuming after drained", async (t) => {
+	const cfg = { enabled: true, interval_min: 5, quiet_min: 10 };
+	const r = bench(t, cfg);
+	const from = r.repo.head();
+	const to = advanceBase(r.repo, "r.txt", "r\n");
+	r.repo.git("fetch", "--quiet", "origin");
+	r.repo.git("merge", "--ff-only", "--quiet", to);
+	writeFileSync(updateStateFile(r.stateDir), JSON.stringify({ schema_version: 1, phase: "verifying", from, to, lock: false, fetch_failures: 0 }));
+	const rolled = await r.run(5);
+	assert.equal(rolled?.last_result, "rolled_back");
+	assert.equal(r.repo.head(), from);
+
+	const d = bench(t, cfg);
+	writeFileSync(updateStateFile(d.stateDir), JSON.stringify({ schema_version: 1, phase: "draining", from: d.repo.head(), to: "f".repeat(40), lock: false, fetch_failures: 0 }));
+	d.fake.drains = ["drained"];
+	assert.equal((await d.run(5))?.last_result, "failed");
+	assert.deepEqual(d.calls, ["host stop [{}]", "daemon hold", "daemon reload", "daemon health"], "the drained parent is restarted without a quiet wait");
+});
+
+test("update.json quiet_min: a number >= 0 is valid, anything else is config_invalid", async (t) => {
+	assert.deepEqual(readUpdateConfig(join(bench(t, { enabled: true, quiet_min: 3 }).dataDir)), { enabled: true, interval_min: 15, quiet_min: 3 });
+	assert.deepEqual(readUpdateConfig(join(bench(t, { enabled: true }).dataDir)), { enabled: true, interval_min: 15 });
+	for (const quiet of [-1, "10", null, Number.NaN]) {
+		const b = bench(t, { enabled: true, quiet_min: quiet });
+		assert.match(String(readUpdateConfig(b.dataDir)), /"quiet_min": N >= 0/, String(quiet));
+	}
+	const bad = bench(t, { enabled: true, quiet_min: -5 });
+	assert.equal((await bad.run())?.last_result, "config_invalid");
 });

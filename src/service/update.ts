@@ -12,7 +12,8 @@
  *             `fetch_failed` (counted); ahead of origin/main → `skipped_ahead`; nothing new → `up_to_date`;
  *             origin/main is the `bad_sha` → `skipped_bad_sha`; a live script pid, or a mid-turn worker (an idle
  *             held/waiting one does not block) → `skipped_busy`; after 4× interval_min of that, only a script
- *             still skips: the drain decides
+ *             still skips: the drain decides. A tip not yet unchanged for `quiet_min` (data/update.json,
+ *             default 10, 0 = off) since this updater first saw it → `skipped_settling`: a burst of merges is one restart
  *   drain     host `drain 600`, wait ≤ 660 s for `drained`; a timeout → host `drainCancel` → `drain_timeout`;
  *             refused during parent control (PARENT_CONTROL_BUSY) → `skipped_busy`; gone before `drained` → `drain_timeout`
  *   update    host `stop`, cp-daemon `hold` (the viewer), `git merge --ff-only <to>`, `npm ci` only when
@@ -48,7 +49,7 @@ import { UPDATE_FAILURES, viewerDown } from "./health.ts";
 import { type DaemonControl, daemonControl } from "./daemon-control.ts";
 import type { RunResult } from "./install.ts";
 
-export type UpdateResult = "updated" | "up_to_date" | "skipped_disabled" | "skipped_dirty" | "skipped_branch" | "skipped_ahead" | "skipped_bad_sha" | "skipped_busy" | "fetch_failed" | "failed" | "drain_timeout" | "rolled_back" | "rollback_failed" | "config_invalid" | "migration_required";
+export type UpdateResult = "updated" | "up_to_date" | "skipped_disabled" | "skipped_dirty" | "skipped_branch" | "skipped_ahead" | "skipped_bad_sha" | "skipped_busy" | "skipped_settling" | "fetch_failed" | "failed" | "drain_timeout" | "rolled_back" | "rollback_failed" | "config_invalid" | "migration_required";
 export type UpdatePhase = "idle" | "draining" | "updating" | "verifying" | "rolling_back";
 
 export interface UpdateState {
@@ -70,6 +71,9 @@ export interface UpdateState {
 	behind?: number;
 	/** A rollback live workers held back: no run in flight, so cp-health keeps watching the parent and viewer. */
 	held?: boolean;
+	/** The origin/main tip this updater first saw and when (the quiet period's clock); a different tip restarts it. */
+	first_seen_sha?: string;
+	first_seen_at?: string;
 	updated_at?: string;
 }
 
@@ -102,15 +106,19 @@ export function readUpdateState(stateDir: string): UpdateState | undefined {
 	return value;
 }
 
-/** `data/update.json`: absent is off; anything but `{enabled: boolean, interval_min?: N > 0}` is why it is invalid. */
-export function readUpdateConfig(dataDir: string): { enabled: boolean; interval_min: number } | string {
+/** Minutes origin/main must stay unchanged before a drain starts, unless `quiet_min` says otherwise. */
+export const QUIET_MIN_DEFAULT = 10;
+
+/** `data/update.json`: absent is off; anything but `{enabled: boolean, interval_min?: N > 0, quiet_min?: N >= 0}` is why it is invalid. `quiet_min` is returned only when the file sets it. */
+export function readUpdateConfig(dataDir: string): { enabled: boolean; interval_min: number; quiet_min?: number } | string {
 	const file = join(dataDir, "update.json");
 	if (!existsSync(file)) return { enabled: false, interval_min: 15 };
 	try {
-		const raw = JSON.parse(readFileSync(file, "utf8")) as { enabled?: unknown; interval_min?: unknown } | null;
+		const raw = JSON.parse(readFileSync(file, "utf8")) as { enabled?: unknown; interval_min?: unknown; quiet_min?: unknown } | null;
 		const interval = raw?.interval_min ?? 15;
-		if (typeof raw?.enabled === "boolean" && typeof interval === "number" && interval > 0) return { enabled: raw.enabled, interval_min: interval };
-		return `${file} must be {"enabled": true|false, "interval_min": N > 0}`;
+		const quiet = raw?.quiet_min;
+		if (typeof raw?.enabled === "boolean" && typeof interval === "number" && interval > 0 && (quiet === undefined || (typeof quiet === "number" && Number.isFinite(quiet) && quiet >= 0))) return { enabled: raw.enabled, interval_min: interval, ...(quiet === undefined ? {} : { quiet_min: quiet as number }) };
+		return `${file} must be {"enabled": true|false, "interval_min": N > 0, "quiet_min": N >= 0}`;
 	} catch (error) {
 		return `${file} is not JSON: ${(error as Error).message}`;
 	}
@@ -223,8 +231,8 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 	/** The host's answer to the last `drain`: names why a drain that never reached disk is `gone` (cp-35d0 S6). */
 	let drainAnswer = "no answer";
 	/** Host `drain`, then ≤ 660 s for `drained`; still draining or timed out → `drainCancel`. Throws when no host drains. */
-	const drainFleet = async (): Promise<"drained" | "timeout" | "gone"> => {
-		drainAnswer = (((await ports.host("drain", DRAIN_TIMEOUT_S)) as { text?: string } | null)?.text) ?? "no answer";
+	const drainFleet = async (target: string): Promise<"drained" | "timeout" | "gone"> => {
+		drainAnswer = (((await ports.host("drain", DRAIN_TIMEOUT_S, { reason: "auto-update", target_sha: target })) as { text?: string } | null)?.text) ?? "no answer";
 		const deadline = ports.now().getTime() + DRAIN_WAIT_MS;
 		for (let drain = ports.drain(); drain !== "drained"; drain = ports.drain()) {
 			if (drain === undefined) return "gone";
@@ -245,10 +253,10 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 	 * before it is stopped. With no host to drain nothing runs under it, unless `busy` says otherwise. Why the
 	 * fleet cannot be stopped without killing a live worker, or undefined when it can.
 	 */
-	const holdFleet = async (): Promise<string | undefined> => {
+	const holdFleet = async (target: string): Promise<string | undefined> => {
 		let outcome: string;
 		try {
-			outcome = await drainFleet();
+			outcome = await drainFleet(target);
 		} catch (error) {
 			const busy = ports.busy();
 			return busy.length > 0 ? `no drain (${(error as Error).message}) and live worker(s) ${busy.join(", ")}` : undefined;
@@ -261,7 +269,7 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		ports.log(`rolling back to ${short(from)}: ${why}`);
 		// Not `held` while this run works: the watchdog stands down through the stop/restart window.
 		save({ phase: "rolling_back", detail: clip(why), held: undefined });
-		const held = await holdFleet();
+		const held = await holdFleet(from);
 		// Stays `rolling_back`: the next run (after 4× interval_min) drains and retries; no live worker is killed.
 		if (held) return finish("rollback_failed", `${why}; ${held}; nothing stopped, ${short(to)} still runs; the rollback is retried`, { ...patch, phase: "rolling_back", held: true });
 		const stop = await stopFleet();
@@ -325,6 +333,13 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		to = must("rev-parse", "origin/main");
 		if (from === to) return finish("up_to_date", `at ${short(to)}`, { from, to });
 		if (to === prior.bad_sha) return finish("skipped_bad_sha", `origin/main ${short(to)} rolled back before; waiting for a newer commit`, { to, behind: behind() });
+		// A burst of merges is one restart: the tip must stay unchanged for quiet_min since this updater first saw it. Never reached by a rollback or a run resuming after `drained` (handled above).
+		const quietMin = config.quiet_min ?? QUIET_MIN_DEFAULT;
+		if (quietMin > 0) {
+			const firstSeen = prior.first_seen_sha === to && prior.first_seen_at ? prior.first_seen_at : at;
+			const eligible = Date.parse(firstSeen) + quietMin * 60_000;
+			if (Date.parse(at) < eligible) return finish("skipped_settling", `origin/main ${short(to)} first seen ${firstSeen}; waiting for ${quietMin} min without a newer commit, eligible ${isoTimestamp(new Date(eligible))}; nothing drained`, { to, behind: behind(), first_seen_sha: to, first_seen_at: firstSeen });
+		}
 		const { working, scripts } = ports.activity();
 		if (scripts.length > 0) return finish("skipped_busy", `live script job(s): ${scripts.join(", ")} (a drain never waits for a script); nothing drained`, { behind: behind() });
 		const starved = prior.last_result === "skipped_busy" && prior.since !== undefined && since(prior.since) >= BUSY_FORCE_FACTOR * interval;
@@ -338,7 +353,7 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 
 	save({ phase: "draining", from, to, lock });
 	try {
-		const drained = await drainFleet();
+		const drained = await drainFleet(to);
 		// Retryable like a timeout (4× interval_min): a refused drain (the parent's compact hold) never reaches disk either.
 		if (drained === "gone") {
 			await cancelDrain();

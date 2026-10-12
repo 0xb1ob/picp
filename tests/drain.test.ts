@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, type RunPhase, SCHEMA_VERSION } from "../src/contracts.ts";
 import { CommandPost } from "../src/command-post.ts";
-import { assertNotDraining, DrainControl, drainFile, DrainError, formatDrain, liveWorkerJobs, readDrain, restartActivity, restartNotice } from "../src/drain.ts";
+import { assertNotDraining, DrainControl, drainArgs, drainFile, DrainError, formatDrain, liveWorkerJobs, parseDrainArgs, readDrain, restartActivity, restartNotice } from "../src/drain.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { IntegrationHolds } from "../src/integration-hold.ts";
@@ -559,4 +559,49 @@ test("unload-parent PR2: the live continuation takes no step while drain.json is
 	assert.equal((await post.continuation.trigger({ jobId: "cp-held", event: "startup" })).action, "draining", "an unreadable drain fails closed");
 	rmSync(drainFile(home.path));
 	assert.equal((await post.continuation.trigger({ jobId: "cp-held", event: "startup" })).action, "stale", "after the restart the same trigger reaches the step gates");
+});
+
+test("drain cause: the refusal, /cp-drain status text and notice name an auto-update, a manual drain, or nothing for a legacy record", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const refusal = () => { try { assertNotDraining(home.path, "dispatch"); } catch (error) { return (error as Error).message; } return ""; };
+	const base = { state: "draining", started_at: "2026-09-27T12:00:00Z", deadline: "2026-09-27T12:10:00Z", timeout_s: 600, jobs: [] } as const;
+
+	atomicWriteJson(drainFile(home.path), { ...base, cause: { reason: "auto-update", target_sha: "0123456789abcdef0123456789abcdef01234567" } });
+	assert.match(refusal(), /^refused: the parent is draining for a restart \(since 2026-09-27T12:00:00Z, draining; auto-update to 0123456789ab in progress, drain timeout 2026-09-27T12:10:00Z; it restarts the parent by itself, a manual restart does not apply it\); no dispatch starts/);
+	assert.match(formatDrain(readDrain(home.path)!, home.path), /\n {2}cause: auto-update to 0123456789ab in progress, drain timeout 2026-09-27T12:10:00Z; it restarts the parent by itself/);
+
+	atomicWriteJson(drainFile(home.path), { ...base, cause: { reason: "manual" } });
+	assert.match(refusal(), /draining for a restart \(since 2026-09-27T12:00:00Z, draining; manual \/cp-drain\); no dispatch/);
+
+	atomicWriteJson(drainFile(home.path), base); // a record written before the field existed reads as before
+	assert.match(refusal(), /draining for a restart \(since 2026-09-27T12:00:00Z, draining\); no dispatch/);
+	assert.doesNotMatch(formatDrain(readDrain(home.path)!, home.path), /cause:/);
+
+	atomicWriteJson(drainFile(home.path), { ...base, cause: { reason: "bogus" } }); // unrecognised: ignored, never thrown
+	assert.match(refusal(), /draining for a restart \(since 2026-09-27T12:00:00Z, draining\); no dispatch/);
+});
+
+test("drain cause: start records manual by default and the given cause otherwise", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	await fleet.add(record("cp-busy"));
+	const c = control(home.path, fleet);
+	c.setBusy(["cp-busy"]);
+	assert.deepEqual(c.drain.start(300).cause, { reason: "manual" });
+	c.drain.cancel();
+	assert.deepEqual(c.drain.start(300, { reason: "auto-update", target_sha: "abcdef0" }).cause, { reason: "auto-update", target_sha: "abcdef0" });
+	assert.deepEqual(readDrain(home.path)?.cause, { reason: "auto-update", target_sha: "abcdef0" });
+});
+
+test("drain cause: /cp-drain arguments round-trip, and malformed ones are refused", () => {
+	assert.deepEqual(parseDrainArgs(""), { timeoutS: undefined });
+	assert.deepEqual(parseDrainArgs("30"), { timeoutS: 30 });
+	assert.deepEqual(parseDrainArgs("cancel"), { cancel: true });
+	assert.deepEqual(parseDrainArgs("status"), { status: true });
+	assert.deepEqual(parseDrainArgs(drainArgs(600, { reason: "auto-update", target_sha: "abcdef0123" })), { timeoutS: 600, cause: { reason: "auto-update", target_sha: "abcdef0123" } });
+	assert.equal(drainArgs(600), "600");
+	assert.equal(drainArgs(600, { reason: "manual" }), "600");
+	for (const bad of ["abc", "-1", "30 junk", "30 auto-update xyz", "30 auto-update abcdef0 extra", "cancel now"]) assert.equal(parseDrainArgs(bad), undefined, bad);
 });

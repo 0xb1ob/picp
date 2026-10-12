@@ -436,7 +436,9 @@ cp-daemon's update job (`CP_HOME=<home> node <app>/src/service/update.ts --dry-r
 nothing; a run that is not cp-daemon's job, `CP_DAEMON_JOB=update`, is refused) applies a
 moved `origin/main` of the app checkout when the fleet is drained. A detached oneshot, so reloading the
 inner never kills it mid-step. `data/update.json` `{"enabled": false}` (or no file) turns it
-off; `interval_min` (default 15) spaces the attempts, 4× after a drain timeout. Each run records
+off; `interval_min` (default 15) spaces the attempts, 4× after a drain timeout; `quiet_min` (default 10, a number
+≥ 0, anything else is `config_invalid`; 0 keeps the old drain-at-once behaviour) is how long `origin/main` must
+stay unchanged before a drain starts, so a burst of merges is one restart. Each run records
 one result in `state/update.json` (its only writer):
 
 - **legacy:** a legacy `cp-update.service` (no `data/daemon.json`) records `migration_required` and changes
@@ -450,7 +452,12 @@ one result in `state/update.json` (its only writer):
   it acts on the `cp-recovery` wake and runs `cp_revive` for each held worker the wake lists.
   After 4× `interval_min` of `skipped_busy`, only a script still skips: the run drains anyway
   and the drain decides (`drained`, or `drain_timeout`);
-- **drain:** host `drain 600`, then up to 660 s for `drained`. Still draining or timed out → host
+- **settling:** `skipped_settling` while the `origin/main` tip is not yet `quiet_min` old, measured from when the
+  updater first saw it (`first_seen_sha`/`first_seen_at` in `state/update.json`; a different tip restarts the
+  clock); the detail names the tip and when it is eligible. Nothing is drained, and it never delays a
+  rollback or a run resuming after `drained`;
+- **drain:** host `drain 600` with cause `auto-update` and the target sha (so the refusal and notices say it is
+  an update that restarts the parent by itself), then up to 660 s for `drained`. Still draining or timed out → host
   `drainCancel` (`/cp-drain cancel`: dispatch reopens) → `drain_timeout`; nothing is stopped;
 - **update:** host `stop` (unlanded sends stay queued; the stop marker keeps the supervisor from
   respawning), cp-daemon `hold` (the viewer stops and stays down), `git merge --ff-only <to>`, `npm ci` only
