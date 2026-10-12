@@ -241,7 +241,7 @@ export class Teardown {
 		// a job whose worktree vanished must still be closable.
 		let outcome: GateOutcome | undefined;
 		if (!options.force) {
-			outcome = await this.checkGates(record.worktree, record.branch, record.kind);
+			outcome = await this.checkGates(record.worktree, record.branch, record.kind, record.job_id);
 			if (outcome.ok && record.kind === "ship" && !isScriptFleetRecord(record) &&
 				(record.phase === "failed" || record.phase === "waiting")) {
 				const head = (await this.#git(record.worktree, ["rev-parse", "HEAD"])).stdout.trim();
@@ -343,7 +343,7 @@ export class Teardown {
 	 * `projects/<name>` is a disposable cache, so committed work must be pushed.
 	 * See docs/contracts.md §Teardown.
 	 */
-	async checkGates(worktree: string, branch: string, kind: JobKind): Promise<GateOutcome> {
+	async checkGates(worktree: string, branch: string, kind: JobKind, jobId = branch): Promise<GateOutcome> {
 		if (!isDirectory(worktree)) {
 			return {
 				ok: false,
@@ -367,12 +367,12 @@ export class Teardown {
 		}
 		const base = await this.#defaultBase(worktree);
 		const outcome =
-			kind === "research" ? await this.#researchGate(worktree, branch, base) : await this.#shipGate(worktree, branch, base);
+			kind === "research" ? await this.#researchGate(worktree, branch, base) : await this.#shipGate(worktree, branch, base, jobId);
 		if (!outcome.ok || kind !== "ship") return outcome;
 		// The git facts hold. Only now, and only for a job that opted in, is there a
 		// second question: has the diff a human will merge actually been reviewed?
 		// It is a separate step on purpose — `#shipGate` stays a question about git.
-		return (await this.#reviewGate(worktree, branch)) ?? outcome;
+		return (await this.#reviewGate(worktree, jobId)) ?? outcome;
 	}
 
 	// -- gates --------------------------------------------------------------
@@ -398,8 +398,8 @@ export class Teardown {
 	 * picp-9g8: delivery:local with zero commits ahead of the base has nothing
 	 * to publish, so teardown does not require the job branch on origin.
 	 */
-	async #localNothingToPush(worktree: string, branch: string, base: string): Promise<boolean> {
-		if (this.#options.fleet.get(branch)?.delivery !== "local") return false;
+	async #localNothingToPush(worktree: string, base: string, jobId: string): Promise<boolean> {
+		if (this.#options.fleet.get(jobId)?.delivery !== "local") return false;
 		const remote = await this.#remoteTip(worktree, base);
 		// Remote base sha first. A missing object falls through to the local
 		// tracking ref — ponytail: a forged origin/<base> could hide commits;
@@ -415,7 +415,7 @@ export class Teardown {
 		return false;
 	}
 
-	async #shipGate(worktree: string, branch: string, base: string): Promise<GateOutcome> {
+	async #shipGate(worktree: string, branch: string, base: string, jobId: string): Promise<GateOutcome> {
 		const head = (await this.#git(worktree, ["rev-parse", "HEAD"])).stdout.trim();
 		if (head.length === 0) {
 			return {
@@ -462,13 +462,13 @@ export class Teardown {
 		const upstreamOutcome = await this.#upstreamGate(worktree, branch, head);
 		if (upstreamOutcome) return upstreamOutcome;
 
-		if (await this.#localNothingToPush(worktree, branch, base)) return { ok: true, reason: "nothing_to_push" };
+		if (await this.#localNothingToPush(worktree, base, jobId)) return { ok: true, reason: "nothing_to_push" };
 		// Nothing is on origin. Two ways that is still fine, in order of strength.
 		//
 		// 1. A merge receipt: `gh pr view` said MERGED, with a merge commit, for this
 		//    exact head. That is true for squash, rebase and merge commits alike,
 		//    which is exactly what ancestry can never be.
-		const receipt = readMergeReceipt(this.#options.home, branch);
+		const receipt = readMergeReceipt(this.#options.home, jobId);
 		if (receipt) {
 			if (receipt.head_sha === head) return { ok: true, reason: "merged" };
 			return {
@@ -504,7 +504,7 @@ export class Teardown {
 					stale.length > 0
 						? `${worktree} branch ${branch} is not on origin (origin/${branch} survives here only as a stale remote-tracking ref at ${stale.slice(0, 12)}), and origin/${base} does not contain its content`
 						: `${worktree} branch ${branch} has no upstream, is not on origin, and origin/${base} does not contain its content`,
-				fix: `keep the lease; push the branch — or, if its PR merged, record it with cp_merged ${branch} (gh confirms the merge) — then retry teardown`,
+				fix: `keep the lease; push the branch — or, if its PR merged, record it with cp_merged ${jobId} (gh confirms the merge) — then retry teardown`,
 			},
 		};
 	}
@@ -611,8 +611,8 @@ export class Teardown {
 	 * down exactly as it did before this gate existed — verdict on disk or not.
 	 * That is what keeps the gate from becoming a blocker nobody asked for.
 	 *
-	 * No new parameter is needed to find the record: `branch === job_id` by contract
-	 * (docs/contracts.md, "Branch name for a job is the job id"), and `PipelineStore`
+	 * The review record is keyed by job id, passed in: a bound PR job's branch is
+	 * the PR head, not its job id (`FleetRecord.bound_pr`), and `PipelineStore`
 	 * needs only the home this `Teardown` already holds.
 	 *
 	 * Teardown proceeds when the latest `review-<n>.json` is `pass`, or is

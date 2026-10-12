@@ -1241,6 +1241,19 @@ test("--admin, --auto and --delete-branch are never issued, across every path in
 	}
 });
 
+test("picp-d0p: a bound PR's head branch is never deleted — kept, said so, and the job still closes", async (t) => {
+	const b = await benchOf(t, { bound_pr: { number: 61, url: PR_URL, base: "main" } });
+	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	assert.equal(done.step, "done");
+	assert.equal(done.next, "done");
+	assert.equal(b.teardowns.length, 1);
+	assert.ok(done.record.facts.includes(`origin/${BR} kept: bound PR branch, not created by ${BR}`), done.record.facts.join("\n"));
+	assert.ok(!b.calls.some((line) => line.startsWith("git push origin --delete")), "a bound PR's branch is not this job's to delete");
+	assert.equal(done.merge?.receipt.bound, true);
+	assert.match(done.record.reason ?? "", /head kept \(bound PR\)/);
+	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+});
+
 // ---------------------------------------------------------------------------
 // 2 + 3. idempotence and resumability
 // ---------------------------------------------------------------------------

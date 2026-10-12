@@ -1443,6 +1443,27 @@ test("a pass verdict on this HEAD lets teardown proceed exactly as today", { tim
 	assert.equal(b.fleet.require(jobId).closed_reason, "gated");
 });
 
+test("picp-d0p: a bound job's gates read review state by job id, not by the PR head branch", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-bound1";
+	const worktree = b.worktree("cp-b55w");
+	await b.addJob(jobId, worktree, "ship", "pr");
+	await b.fleet.patch(jobId, { branch: "cp-b55w", bound_pr: { number: 169, url: "https://github.com/o/r/pull/169", base: "main" } });
+	writeFileSync(join(worktree, "src/app.ts"), "export const x = 169;\n");
+	git(worktree, "add", "-A");
+	git(worktree, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "bound work");
+	git(worktree, "push", "--quiet", "-u", "origin", "cp-b55w");
+	const head = git(worktree, "rev-parse", "HEAD");
+	writePipeline(b.home, jobId, { enabled: true });
+
+	const missing = await b.teardown.teardown(jobId);
+	assert.equal(missing.failure?.code, "review_missing", "the job's own opt-in applies though its branch is not its id");
+	writeReview(b.home, jobId, { verdict: "pass", head_sha: head });
+	const torn = await b.teardown.teardown(jobId);
+	assert.equal(torn.torn_down, true, formatTeardown(torn));
+	assert.equal(torn.reason, "pushed");
+});
+
 test("a truncated subject never clears teardown: not a historical pass, not an approved flag", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
 	const jobId = "cp-review-partial";

@@ -217,6 +217,17 @@ export const FleetRecordSchema = Type.Object(
 		/** Dispatch-time HEAD kept at this ref outside refs/heads (src/checkpoint-ref.ts): never pushed, never restored, deleted by teardown. */
 		checkpoint_ref: Type.Optional(Type.String({ pattern: "^refs/cp-checkpoints/[^\\s]+$", maxLength: 300 })),
 		branch: Type.String({ minLength: 1 }),
+		/** Set only by `cp_dispatch pr`: `branch` is this PR's head branch, which the job did not create; integrate never deletes it. */
+		bound_pr: Type.Optional(
+			Type.Object(
+				{
+					number: Type.Integer({ minimum: 1 }),
+					url: Type.String({ minLength: 1, maxLength: 500 }),
+					base: Type.String({ minLength: 1, maxLength: 200 }),
+				},
+				{ additionalProperties: false },
+			),
+		),
 		dispatched_at: IsoTimestampSchema,
 		/**
 		 * When the CURRENT envelope generation was accepted. Stamped once per

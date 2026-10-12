@@ -1130,8 +1130,11 @@ export class Integrator {
 			this.#event(jobId, "integration_advanced", { step: "teardown", reason: teardown.reason ?? null });
 		}
 
-		// 4. delete the head — only now, and only if it is still there.
-		const onRemote = await this.#branchOnRemote(cwd, branch);
+		// 4. delete the head — only now, only if it is still there, and never a
+		//    bound PR's branch: the job did not create it (record.bound_pr).
+		const bound = record?.bound_pr !== undefined;
+		if (bound) facts.push(`origin/${branch} kept: bound PR branch, not created by ${jobId}`);
+		const onRemote = bound ? undefined : await this.#branchOnRemote(cwd, branch);
 		if (onRemote === true) {
 			const deleted = await this.#run(cwd, "git", ["push", "origin", "--delete", branch]);
 			if (deleted.status !== 0) {
@@ -1175,7 +1178,7 @@ export class Integrator {
 				merge,
 				...(teardown ? { teardown } : {}),
 				reason:
-					`${jobId}: merged, torn down and the head deleted, but the job is still open ` +
+					`${jobId}: merged, torn down and the head ${bound ? "kept (bound PR)" : "deleted"}, but the job is still open ` +
 					`(${(error as Error).message.split("\n")[0]}). Retry, or close it by hand with a reason.`,
 			});
 		}
@@ -1202,7 +1205,7 @@ export class Integrator {
 			endState,
 			reason:
 				`${jobId} integrated: ${merge.receipt.pr_url} merged as ${merge.receipt.merge_commit_sha.slice(0, 12)}, ` +
-				"receipt recorded, lease returned, head deleted, job closed.",
+				`receipt recorded, lease returned, ${bound ? "head kept (bound PR)" : "head deleted"}, job closed.`,
 		});
 	}
 

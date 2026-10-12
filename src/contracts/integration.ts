@@ -122,7 +122,7 @@ export type MergeAuthority = Replace<Static<typeof MergeAuthoritySchema>, { kind
 export const MergeReceiptSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
-		/** The job whose delivery landed. `branch === job_id` by contract. */
+		/** The job whose delivery landed. `branch === job_id` unless `bound`. */
 		job_id: JobIdSchema,
 		pr_url: Type.String({ minLength: 1, maxLength: 500 }),
 		pr_number: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -131,6 +131,8 @@ export const MergeReceiptSchema = Type.Object(
 		/** The PR head commit that was merged: what the local tip must still be. */
 		head_sha: CommitShaSchema,
 		head_branch: Type.String({ minLength: 1, maxLength: 200 }),
+		/** The head branch belongs to a bound PR, not `job_id`. */
+		bound: Type.Optional(Type.Literal(true)),
 		/** Whether the head branch is gone from the remote (GitHub's auto-delete). */
 		head_branch_deleted: Type.Optional(Type.Boolean()),
 		base_branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),

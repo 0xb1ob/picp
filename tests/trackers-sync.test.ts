@@ -61,6 +61,15 @@ test("a ship/pr job with a matching merge receipt closes its bead once with the 
 	assert.deepEqual((await runSync({ home, ledger, trackers: { list: () => [conn()] }, writer: () => fake.writer, readReceipt })).attempted, [], "done is done");
 });
 
+test("a bound PR's receipt (head branch is the PR's, not the job id) closes the bead; the same receipt unbound does not", async (t) => {
+	const { ledger, receipts, link, readReceipt } = await bench(t);
+	const job = await link("b-1", "ship", "pr");
+	receipts.set(job.id, { ...receiptFor(job.id, "cp-other"), bound: true });
+	assert.deepEqual(deriveIntents(ledger.read().jobs, [conn()], readReceipt).map((intent) => intent.op), ["close"]);
+	receipts.set(job.id, receiptFor(job.id, "cp-other"));
+	assert.deepEqual(deriveIntents(ledger.read().jobs, [conn()], readReceipt), [], "unbound, a foreign head branch is not this job's delivery");
+});
+
 test("a mismatched receipt never closes: the closed job only comments", async (t) => {
 	const { home, ledger, receipts, link, readReceipt } = await bench(t);
 	const job = await link("b-1", "ship", "pr");

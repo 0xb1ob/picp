@@ -155,6 +155,14 @@ test("schedlater S3: a fleet record's schedule_id is a schedule id or absent", (
 	for (const bad of ["sch-XYZ", "sch-abc12", "abc123", ""]) assert.equal(validateFleetFile(file(makeRecord({ schedule_id: bad }))).ok, false, bad);
 });
 
+test("picp-d0p: bound_pr is {number,url,base} or absent, with no extra keys", () => {
+	const file = (job: unknown) => ({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), jobs: [job] });
+	const bound = { number: 169, url: "https://github.com/o/r/pull/169", base: "main" };
+	assert.equal(validateFleetFile(file(makeRecord({ branch: "cp-b55w", bound_pr: bound }))).ok, true);
+	assert.equal(validateFleetFile(file(makeRecord({ bound_pr: { ...bound, extra: 1 } as typeof bound }))).ok, false);
+	assert.equal(validateFleetFile(file(makeRecord({ bound_pr: { ...bound, number: 0 } }))).ok, false);
+});
+
 test("script reconcile intakes durable result before probing pid and never revives an unknown exit", async (t) => {
 	const home = withHome(t);
 	const store = new FleetStore({ home: home.path });

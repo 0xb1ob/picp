@@ -220,9 +220,9 @@ FailureClass	type	56ae13662dfb3b19	-
 FailureClassSchema	value	1b2489a58baf391f	13b4201f71b01c43
 FailureSchema	value	e4525f3a26734172	19b2ab35e005c745
 FleetFile	type	296e2f8058552d67	-
-FleetFileSchema	value	392f27c9bf875f52	3cc1fa5303ff2f49
+FleetFileSchema	value	392f27c9bf875f52	2b5d85bf94f4cb3f
 FleetRecord	type	bba4eea4f16bb7f2	-
-FleetRecordSchema	value	35c4e6f1ff9f3eb0	37aa41a86529e0d6
+FleetRecordSchema	value	08bb740ffdd489e7	78cd9f0d7bd11634
 ForeignCiEvent	type	8d1b00c8be47fc57	-
 ForeignCiWatchFile	type	565f7401ba125830	-
 ForeignCiWatchFileSchema	value	826ca6f687cfcec6	618ebc9ab0a49b46
@@ -336,7 +336,7 @@ MergeAuthorityKindSchema	value	7c795457954fe693	2ce96a49e7a2ad68
 MergeAuthoritySchema	value	7c809a03719a1bf5	a005f946854df404
 MergePolicy	type	7e22d7f78b01b916	-
 MergeReceipt	type	e2e9da140f63e5f2	-
-MergeReceiptSchema	value	bb28380be28124cb	f2ff2c3a68ed90a5
+MergeReceiptSchema	value	9ee210155a980899	7f2f97bbd3f564fd
 MergeStrategy	type	cdc17c15173e8f33	-
 MergeStrategySchema	value	18b18a4afe32f539	c8b8f9b5a9f6778b
 Mode	type	be28dfe7da5fcb7d	-

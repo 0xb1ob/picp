@@ -202,6 +202,7 @@ export class MergeStore {
 			merge_commit_sha: mergeCommit,
 			head_sha: headSha,
 			head_branch: headBranch,
+			...(record.bound_pr ? { bound: true as const } : {}),
 			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
 			...(view.baseRefName ? { base_branch: view.baseRefName } : {}),
 			...(request.strategy ? { strategy: request.strategy } : {}),
