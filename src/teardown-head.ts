@@ -75,13 +75,15 @@ export function leaseReturnFailed(jobId: string, error: string): GateFailure {
 // to keep teardown.ts under the 800-line per-module cap (tests/structure.test.ts)
 // without raising it; teardown.ts imports the one and re-exports the other, so
 // no caller changed. Pure moves — behaviour is identical.
-/** Teardown's git runner when no `git` port is injected; never throws, the status says. */
-export function defaultGit(cwd: string, args: readonly string[]) {
+/** Teardown's git runner when no `git` port is injected; never throws, the status says. Past `timeoutMs` the child is killed: status null. */
+export function defaultGit(cwd: string, args: readonly string[], options: { timeoutMs?: number } = {}) {
 	return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolvePromise) => {
-		execFile("git", [...args], { cwd, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+		execFile("git", [...args], { cwd, maxBuffer: 8 * 1024 * 1024, ...(options.timeoutMs ? { timeout: options.timeoutMs, killSignal: "SIGKILL" as const } : {}) }, (error, stdout, stderr) => {
 			const code = (error as NodeJS.ErrnoException | null)?.code;
-			const status = typeof code === "number" ? code : error ? 1 : 0;
-			resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+			// A maxBuffer kill carries a string code; only the timeout kill is a timeout.
+			const timedOut = Boolean(options.timeoutMs) && (error as { killed?: boolean } | null)?.killed === true && typeof code !== "string";
+			const status = timedOut ? null : typeof code === "number" ? code : error ? 1 : 0;
+			resolvePromise({ status, stdout: String(stdout ?? ""), stderr: timedOut ? `git ${args[0]} timed out after ${options.timeoutMs} ms` : String(stderr ?? "") });
 		});
 	});
 }

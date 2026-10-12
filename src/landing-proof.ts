@@ -22,7 +22,8 @@
  * that found nothing is `not_proven`.
  */
 
-export type GitRun = (cwd: string, args: readonly string[]) => Promise<{ status: number | null; stdout: string; stderr: string }>;
+/** `timeoutMs`: kill the child on expiry and answer status null; the proof also stops waiting on its own timer. */
+export type GitRun = (cwd: string, args: readonly string[], options?: { timeoutMs?: number }) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
 /** Named bounds; tests inject smaller ones. Engineering limits, not measured promises. */
 export const LANDING_LIMITS = {
@@ -92,15 +93,27 @@ export async function haveCommit(git: GitRun, cwd: string, sha: string): Promise
 
 class Unknown extends Error {}
 
+/** One git call bounded by `ms`: the runner is asked to kill its child, and a runner that never answers still ends here. */
+function timed(git: GitRun, ms: number): GitRun {
+	return (cwd, args) => {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const expired = new Promise<{ status: null; stdout: string; stderr: string }>((resolve) => {
+			timer = setTimeout(() => resolve({ status: null, stdout: "", stderr: `timed out after ${ms} ms` }), ms);
+		});
+		return Promise.race([git(cwd, args, { timeoutMs: ms }), expired]).finally(() => clearTimeout(timer));
+	};
+}
+
 export async function readLandingProof(git: GitRun, worktree: string, head: string, base: string, options: LandingOptions = {}): Promise<LandingProof> {
 	const limits = { ...LANDING_LIMITS, ...options.limits };
 	const clock = options.clock ?? Date.now;
-	const started = clock();
+	const remote = timed(git, limits.fetchMs);
+	let started = 0; // the local budget starts once the remote phase (ls-remote, fetch) is over
 	let output = 0;
-	// shortcut: budgets are checked between commands, so one hung git call is not interrupted; add a runner timeout if that ever bites.
 	const run = async (args: readonly string[], allowed: readonly number[] = [0]) => {
-		if (clock() - started > limits.commandMs) throw new Unknown(`the proof exceeded its ${limits.commandMs} ms budget`);
-		const result = await git(worktree, args);
+		const elapsed = clock() - started;
+		if (elapsed > limits.commandMs) throw new Unknown(`the proof exceeded its ${limits.commandMs} ms budget`);
+		const result = await timed(git, limits.commandMs - elapsed)(worktree, args);
 		output += result.stdout.length;
 		if (output > limits.outputBytes) throw new Unknown(`git output exceeded the ${limits.outputBytes}-byte budget`);
 		if (result.status === null || !allowed.includes(result.status)) {
@@ -109,13 +122,14 @@ export async function readLandingProof(git: GitRun, worktree: string, head: stri
 		return result;
 	};
 	try {
-		const tip = await remoteTip(git, worktree, base);
+		const tip = await remoteTip(remote, worktree, base);
 		if (!tip.ok) return { result: "unknown", detail: `origin could not be asked about ${base} (${tip.error})` };
 		if (!tip.sha || !SHA.test(tip.sha)) return { result: "unknown", detail: `origin advertises no ${base} branch to compare with` };
 		const baseSha = tip.sha;
 		const fetchStarted = clock();
-		if (!(await haveCommit(git, worktree, baseSha))) return { result: "unknown", detail: `origin/${base} tip ${baseSha.slice(0, 12)} is not available locally and could not be fetched` };
+		if (!(await haveCommit(remote, worktree, baseSha))) return { result: "unknown", detail: `origin/${base} tip ${baseSha.slice(0, 12)} is not available locally and could not be fetched within ${limits.fetchMs} ms` };
 		if (clock() - fetchStarted > limits.fetchMs) return { result: "unknown", detail: `fetching origin/${base} exceeded its ${limits.fetchMs} ms budget` };
+		started = clock();
 		const landed = (method: LandingMethod, witness: string, extra: Partial<LandingEvidence> = {}): LandingProof => ({
 			result: "landed",
 			evidence: { method, head, base_branch: base, base_sha: baseSha, witness, ...extra, observed_at: (options.now ?? (() => new Date()))().toISOString() },

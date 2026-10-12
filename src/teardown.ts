@@ -185,7 +185,7 @@ export interface TeardownOptions {
 	projectBase?: (project: string) => string | undefined;
 }
 
-export type GitRunner = (cwd: string, args: readonly string[]) => Promise<{ status: number | null; stdout: string; stderr: string }>;
+export type GitRunner = (cwd: string, args: readonly string[], options?: { timeoutMs?: number }) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
 export class Teardown {
 	readonly #options: TeardownOptions;
@@ -460,7 +460,7 @@ export class Teardown {
 		}
 		const record = this.#options.fleet.get(jobId);
 		const landing = (remoteSha?: string) => landingGate({
-			home: this.#options.home, git: (c, args) => this.#git(c, args), worktree, head,
+			home: this.#options.home, git: (c, args, options) => this.#git(c, args, options), worktree, head,
 			base: (record && (this.#options.projectBase ?? ((p) => projectBaseBranch(this.#options.home, p)))(record.project)) || base,
 			record: record ?? { job_id: jobId, branch },
 			...(remoteSha ? { remoteSha } : {}), ...(this.#options.now ? { now: this.#options.now } : {}),
@@ -688,10 +688,10 @@ export class Teardown {
 		return resolveDefaultBase((c, args) => this.#git(c, args), cwd);
 	}
 
-	async #git(cwd: string, args: readonly string[]) {
+	async #git(cwd: string, args: readonly string[], options?: { timeoutMs?: number }) {
 		const custom = this.#options.git;
-		if (custom) return custom(cwd, args);
-		return defaultGit(cwd, args);
+		if (custom) return custom(cwd, args, options);
+		return defaultGit(cwd, args, options);
 	}
 
 	/** Startup retry (CommandPost.reconcile) of research ledger closes a crash or a failure left open; never throws. */
