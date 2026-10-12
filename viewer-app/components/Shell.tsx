@@ -11,6 +11,7 @@ import { useControl } from "../use-control.ts";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { PageHeader, routeTitle } from "./PageHeader.tsx";
 import { useVersion, type VersionState } from "../use-version.ts";
+import { DeviceNotices } from "./DeviceNotices.tsx";
 function Brand() { return <div class="shell-brand"><code>command-post</code></div>; }
 /** What a screen with its own top bar (Sessions on mobile) and every desktop page header need from the shell: the live state, search and the ⋮ menu's inputs. */
 export const ShellContext = createContext<{status:string;openSearch:() => void;control?:ControlView | undefined;version?:VersionState;updatedAt?:string | null}>({status:"unknown",openSearch:() => {}});
@@ -73,7 +74,7 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
   <div class="shell-header-right">{plain ? live : when}<button type="button" aria-label="Search navigation and in-flight jobs" aria-haspopup="dialog" title="Search" onClick={openSearch} class="shell-search"><Icon name="search"/></button><MoreMenu control={control} version={version} updatedAt={updatedAt}/></div>
  </header>
   <aside class="shell-sidebar"><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/><div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div></aside>
-  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt}}><HeaderSlot.Provider value={headerSlot.current}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
+  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><DeviceNotices updatedAt={updatedAt}/><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt}}><HeaderSlot.Provider value={headerSlot.current}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
   {searchOpen && <SearchDialog jobs={search.jobs} landed={search.landed} error={search.error} onClose={() => setSearchOpen(false)}/>}
  </div>;
 }

@@ -1,0 +1,49 @@
+/* Remote dashboard PR 1d: the global pairing notice. Wraps at 390 px; long device names break; one row of actions at 1440 px. */
+.device-notices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--blue);
+  background: var(--surface);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.device-notices-list {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.device-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.device-notice + .device-notice {
+  margin-top: 8px;
+}
+.device-notice-push,
+.device-notices-more {
+  margin: 0;
+  font-size: 0.85em;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+.device-notices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.device-notices-error {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}

@@ -7,6 +7,7 @@
  * - `POST /api/pair/create` `{level?}`: issue one pairing code. Local only, from a loopback/tailnet socket peer
  *   (`canMint`); every remote context refuses 403 whatever its level, token or Origin (Decision es-6a78c3: the API half).
  * - `POST /api/devices/revoke` `{id}`: an eligible local screen or a Full-control remote device.
+ * - `GET /api/devices/notices` (PR 1d): pairing notices with per-recipient alert delivery states (`handleDeviceNotices`).
  *
  * Writes refuse in order: method, authority, Origin (local: the control route's origins; remote: exactly its tunnel
  * origin), Sec-Fetch-Site, JSON type, 1 KiB body, the management token, the body shape, then the store (the one writer,
@@ -17,7 +18,9 @@ import type { IncomingMessage } from "node:http";
 import { accessOf, canMint, canRevoke, mintPeer } from "./access.ts";
 import { tokenMatches } from "./control-api.ts";
 import { controlOrigin } from "./control-files.ts";
+import type { DeviceNoticesResponse } from "./api-types.ts";
 import { DEVICE_ID_RE, isDeviceLevel } from "./device-files.ts";
+import { readDeviceNotifications } from "./device-notification-files.ts";
 import type { DeviceFailure, DeviceStore } from "./device-store.ts";
 import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
 
@@ -25,6 +28,8 @@ export const DEVICES_PATH = "/api/devices";
 export const PAIR_CREATE_PATH = "/api/pair/create";
 export const DEVICES_REVOKE_PATH = "/api/devices/revoke";
 export const DEVICES_BODY_MAX_BYTES = 1024;
+export const DEVICE_NOTICES_PATH = "/api/devices/notices";
+export const DEVICE_NOTICES_LIMIT = 20;
 /** The management CSRF token: per viewer process, independent of every control token. */
 export const DEVICES_TOKEN = randomBytes(32).toString("hex");
 /** Decision es-6a78c3, verbatim: shown wherever devices are managed. */
@@ -70,6 +75,38 @@ export function handleDevicesList(req: IncomingMessage, routes: DeviceRoutes, no
 			token: revoke ? DEVICES_TOKEN : null, can_create: canMint(access, peerOf(req)), can_revoke: revoke, trust: DEVICE_TRUST,
 		},
 	};
+}
+
+/**
+ * `GET /api/devices/notices` (PR 1d): the latest committed pairing events, newest first, each with every recipient's
+ * pairing-alert delivery state from the sender's ledger (a recipient it has not recorded yet is `pending`). Read-only:
+ * dismissal is a per-browser cursor, never a server acknowledgement. Local: the `/api/devices` peers; a remote device
+ * sees only the events naming it as a recipient. An unreadable ledger is reported, never shown as delivered.
+ */
+export function handleDeviceNotices(req: IncomingMessage, routes: DeviceRoutes, stateDir: string, now = new Date()): DevicesRouteResult {
+	const access = accessOf(req);
+	if (access.kind === "local" && !mintPeer(peerOf(req))) return { status: 403, body: { error: "device notices are shown only to a loopback or tailnet peer" } };
+	const listed = routes.store.list();
+	if (!listed.ok) return storeRefusal(listed);
+	const ledger = readDeviceNotifications(stateDir);
+	const deliveries = new Map(ledger.state === "invalid" ? [] : ledger.ledger.items.map((item) => [`${item.pairing_id}:${item.device_id}`, item]));
+	const names = new Map(listed.devices.map((device) => [device.id, device.name]));
+	const events = listed.events
+		.filter((event) => access.kind !== "remote" || event.recipients.includes(access.device_id))
+		.reverse() // appended in commit order: newest first
+		.slice(0, DEVICE_NOTICES_LIMIT);
+	const body: DeviceNoticesResponse = {
+		generated_at: now.toISOString(),
+		delivery_error: ledger.state === "invalid" ? "the pairing-alert delivery ledger is unreadable" : null,
+		notices: events.map((event) => ({
+			id: event.id, at: event.at, device_id: event.device_id, name: event.name, level: event.level, route: event.route,
+			recipients: event.recipients.map((id) => {
+				const item = deliveries.get(`${event.id}:${id}`);
+				return { device_id: id, name: names.get(id) ?? null, state: ledger.state === "invalid" ? "unknown" : (item?.state ?? "pending"), attempts: item?.attempts ?? 0, updated_at: item?.updated_at ?? null, last_error: item?.last_error ?? null };
+			}),
+		})),
+	};
+	return { status: 200, body };
 }
 
 export async function handleDevicesWrite(req: IncomingMessage, options: DevicesRouteOptions, routes: DeviceRoutes, op: "create" | "revoke"): Promise<DevicesRouteResult> {

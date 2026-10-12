@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { isoTimestamp } from "../contracts.ts";
 import { type OperatorAsk, OperatorAsks } from "../operator-asks.ts";
 import { UNKNOWN_PROJECT } from "../project-report.ts";
+import { subscriptionEligibility } from "../viewer/device-files.ts";
 import { listSubscriptions, pushDataDir, pushServiceAllowed, type StoredSubscription, subscriptionFile } from "../viewer/push-files.ts";
 import { PUSH_LAST_ERROR_MAX_CHARS, PUSH_MAX_ATTEMPTS, type PushLedger, PushDeliveryStore, type PushRecord, pushBackoffSeconds, pushRecordKey } from "./deliveries.ts";
 import { readVapidKeys, type VapidKeys } from "./keys.ts";
@@ -178,9 +179,12 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 				skip(record, "no longer open before delivery");
 				continue;
 			}
+			// Remote dashboard: re-read device eligibility before each send or retry, so a revoked or expired device's
+			// subscription gets no newly started push; legacy unowned subscriptions are unaffected.
+			const eligible = subscriptionEligibility(dataDir, now);
 			const targets = (record.targets ?? subscriptions.map((subscription) => subscription.id))
 				.map((id) => byId.get(id))
-				.filter((subscription): subscription is StoredSubscription => subscription !== undefined);
+				.filter((subscription): subscription is StoredSubscription => subscription !== undefined && eligible(subscription));
 			if (targets.length === 0) {
 				skip(record, "no subscribed device");
 				continue;
@@ -233,7 +237,8 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 	});
 }
 
-async function sendOne(target: StoredSubscription, payload: string, authorizationFor: (endpoint: string) => string, fetch: PushFetch | undefined): Promise<PushOutcome> {
+/** One encrypted send to one subscription; never throws (the pairing-alert sender reuses it). */
+export async function sendOne(target: StoredSubscription, payload: string, authorizationFor: (endpoint: string) => string, fetch: PushFetch | undefined): Promise<PushOutcome> {
 	if (!pushServiceAllowed(target.endpoint)) return { kind: "rejected", reason: "endpoint is not on the push-service allowlist; never fetched" };
 	try {
 		const body = encryptPayload(payload, target.keys);

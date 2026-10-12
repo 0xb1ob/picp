@@ -28,6 +28,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 export const deviceControlDir = (stateDir: string): string => join(stateDir, "devices");
 export const deviceControlSocket = (stateDir: string): string => join(deviceControlDir(stateDir), "control.sock");
 export const deviceControlRecordFile = (stateDir: string): string => join(deviceControlDir(stateDir), "control.json");
+export const deviceControlLockFile = (stateDir: string): string => join(deviceControlDir(stateDir), "control.lock");
 
 export type DeviceControlReply = { ok: true; result: unknown } | { ok: false; status: number; error: string };
 type OwnerRecord = { version: 1; pid: number; socket: string; token: string; started_at: string };
@@ -99,7 +100,7 @@ export async function startDeviceControl(stateDir: string, routes: DeviceRoutes,
 			for (let index = buffer.indexOf("\n"); index >= 0 && !socket.destroyed; index = buffer.indexOf("\n")) {
 				const line = buffer.slice(0, index);
 				buffer = buffer.slice(index + 1);
-				if (line.length > DEVICE_FRAME_MAX) { socket.end(reply(fail(413, `frame is larger than ${DEVICE_FRAME_MAX} characters`))); return; }
+				if (Buffer.byteLength(line) > DEVICE_FRAME_MAX) { socket.end(reply(fail(413, `frame is larger than ${DEVICE_FRAME_MAX} bytes`))); return; }
 				let frame: Record<string, unknown>;
 				try {
 					const parsed: unknown = JSON.parse(line);
@@ -120,7 +121,7 @@ export async function startDeviceControl(stateDir: string, routes: DeviceRoutes,
 				try { out = deviceControlAnswer(routes, frame.op, args); } catch (error) { out = fail(500, (error as Error).message); }
 				socket.write(reply({ ...out, id: frame.id ?? null }));
 			}
-			if (buffer.length > DEVICE_FRAME_MAX) socket.end(reply(fail(413, `frame is larger than ${DEVICE_FRAME_MAX} characters`)));
+			if (Buffer.byteLength(buffer) > DEVICE_FRAME_MAX) socket.end(reply(fail(413, `frame is larger than ${DEVICE_FRAME_MAX} bytes`)));
 		});
 	});
 	const listen = () => new Promise<void>((done, failed) => {
@@ -141,11 +142,24 @@ export async function startDeviceControl(stateDir: string, routes: DeviceRoutes,
 			const other = readOwnerRecord(stateDir);
 			return { state: "refused", reason: `device control already served by pid ${"record" in other ? other.record.pid : "unknown"} on ${socketPath}` };
 		}
-		// Stale: nothing answers. Unlink only the inode that was probed, so a racing starter's fresh socket survives.
-		// shortcut: lstat→unlink is not atomic; two starters replacing one stale socket within microseconds could both bind; a lock file if that ever shows up.
-		if (seen === null || inodeOf(socketPath) !== seen) return { state: "refused", reason: `${socketPath} changed while it was checked; another viewer is starting` };
-		rmSync(socketPath, { force: true });
-		try { await listen(); } catch (retry) { return { state: "refused", reason: `cannot bind ${socketPath}: ${(retry as Error).message}` }; }
+		// Stale: nothing answered. Replace it only under `control.lock` (O_EXCL), and probe again under the lock: a racer
+		// that saw the winner's socket between its bind and its listen re-probes after the winner listens, and refuses.
+		const lockFile = deviceControlLockFile(stateDir);
+		let lock: number;
+		try { lock = openSync(lockFile, "wx", 0o600); } catch (locked) {
+			if ((locked as NodeJS.ErrnoException).code !== "EEXIST") return { state: "refused", reason: `cannot lock ${lockFile}: ${(locked as Error).message}` };
+			const holder = Number.parseInt((() => { try { return readFileSync(lockFile, "utf8"); } catch { return ""; } })(), 10);
+			return { state: "refused", reason: pidAlive(holder) ? `pid ${holder} is replacing a stale ${socketPath}; another viewer is starting` : `${lockFile} is held by no running viewer${Number.isNaN(holder) ? "" : ` (pid ${holder})`}: if no viewer is starting, remove it and start again` };
+		}
+		try {
+			writeSync(lock, `${process.pid}\n`);
+			if (seen === null || inodeOf(socketPath) !== seen || await answers(socketPath)) return { state: "refused", reason: `${socketPath} changed while it was checked; another viewer is starting` };
+			rmSync(socketPath, { force: true });
+			try { await listen(); } catch (retry) { return { state: "refused", reason: `cannot bind ${socketPath}: ${(retry as Error).message}` }; }
+		} finally {
+			closeSync(lock);
+			rmSync(lockFile, { force: true });
+		}
 	}
 	chmodSync(socketPath, 0o600);
 	const mine = inodeOf(socketPath);

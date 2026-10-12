@@ -107,7 +107,15 @@ export interface StoredSubscription {
 	endpoint: string;
 	keys: PushSubscriptionKeys;
 	created_at: string;
+	/** Remote dashboard: the paired device and tunnel origin that stored it, always server-derived. Absent on a legacy (local/tailnet) record. */
+	device_id?: string;
+	origin?: string;
 }
+/** Who stores or removes a subscription: a remote device (its id and origin), or `undefined` for the local listener. */
+export type SubscriptionOwner = { device_id: string; origin: string } | undefined;
+/** Whether `owner` may overwrite or remove `item`: a device only its own, the local listener only unowned (legacy) ones. */
+export const ownsSubscription = (item: StoredSubscription, owner: SubscriptionOwner): boolean =>
+	owner ? item.device_id === owner.device_id && item.origin === owner.origin : item.device_id === undefined;
 
 /** Valid subscription files (sorted by id) and how many were not. A missing directory is zero devices. */
 export function listSubscriptions(dataDir: string): { items: StoredSubscription[]; invalid: number } {
@@ -123,11 +131,15 @@ export function listSubscriptions(dataDir: string): { items: StoredSubscription[
 		const raw = readObject(join(subscriptionsDir(dataDir), name));
 		const parsed = parseSubscription(raw, "subscribe");
 		const createdAt = str(raw?.created_at);
-		if (!parsed.ok || !parsed.value.keys || !createdAt || `${subscriptionId(parsed.value.endpoint)}.json` !== name || raw?.id !== name.slice(0, -5)) {
+		// Ownership is both fields or neither; a half-owned or malformed owner is invalid, never read as unowned.
+		// DEVICE_ID_RE inlined: device-files.ts imports this module through control-files.ts.
+		const owned = raw?.device_id !== undefined || raw?.origin !== undefined;
+		const ownerOk = !owned || (typeof raw?.device_id === "string" && /^dev-[0-9a-f]{16}$/.test(raw.device_id) && typeof raw.origin === "string" && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(raw.origin));
+		if (!parsed.ok || !parsed.value.keys || !createdAt || !ownerOk || `${subscriptionId(parsed.value.endpoint)}.json` !== name || raw?.id !== name.slice(0, -5)) {
 			invalid += 1;
 			continue;
 		}
-		items.push({ id: name.slice(0, -5), endpoint: parsed.value.endpoint, keys: parsed.value.keys, created_at: createdAt });
+		items.push({ id: name.slice(0, -5), endpoint: parsed.value.endpoint, keys: parsed.value.keys, created_at: createdAt, ...(owned ? { device_id: raw!.device_id as string, origin: raw!.origin as string } : {}) });
 	}
 	return { items, invalid: invalid + Math.max(0, names.length - SUBSCRIPTION_SCAN_LIMIT) };
 }

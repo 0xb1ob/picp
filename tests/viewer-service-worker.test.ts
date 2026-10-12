@@ -76,6 +76,20 @@ test("service worker: a click navigates and focuses an open dashboard window; a 
 	assert.equal(failing.warnings.length, 1);
 });
 
+test("service worker: a pairing payload shows New device paired, tagged per pairing, bounded, and its click opens Settings", async () => {
+	const sw = worker([{ url: "https://cp.example.com/#jobs" }]);
+	await sw.fire("push", pushEvent(() => ({ type: "pairing", id: "pair-0123456789abcdef", name: `Phone ${"x".repeat(200)}`, level: "view", at: "2026-09-27T00:00:00.000Z", project: "ignored" })));
+	await sw.fire("push", pushEvent(() => ({ type: "pairing", level: "full" })));
+	const shown = JSON.parse(JSON.stringify(sw.calls));
+	assert.deepEqual(shown[0], ["showNotification", `New device paired: Phone ${"x".repeat(74)}`, { body: "View-only · 2026-09-27T00:00:00.000Z · open Settings to review", tag: "pairing-pair-0123456789abcdef", data: { url: "/#settings" } }]);
+	assert.deepEqual(shown[1], ["showNotification", "New device paired: a device", { body: "Full control · open Settings to review", tag: "pairing-", data: { url: "/#settings" } }]);
+	await sw.fire("notificationclick", { notification: { close: () => {}, data: { url: "/#settings" } } });
+	assert.deepEqual(sw.calls.slice(2).map((call) => call.slice(0, 2)).filter((call) => call[0] !== "matchAll"), [["navigate", "https://cp.example.com/#settings"], ["focus", "https://cp.example.com/#jobs"]]);
+	const other = worker();
+	await other.fire("notificationclick", { notification: { close: () => {}, data: { url: "https://evil.example/" } } });
+	assert.deepEqual(other.calls.slice(1), [["openWindow", "https://cp.example.com/#awaiting"]], "only the fixed Settings destination is honoured");
+});
+
 test("service worker: install and activate take over at once", async () => {
 	const sw = worker();
 	await sw.fire("install");
