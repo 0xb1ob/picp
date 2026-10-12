@@ -265,6 +265,38 @@ on Decisions show it.
   address as Host; the subscription route checks `Origin` against the configured
   origin (`npm run push:init -- --origin https://cp.example.com`).
 
+## Remote Dashboard And Settings → Devices
+
+Opt-in (`cp-tunnel up`, walkthrough in [`docs/service.md`](service.md)); off by default, and the local listener's
+routes, CSP and cache headers are unchanged. Contract: [`docs/contracts.md`](contracts.md) (Remote devices).
+
+> **A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote
+> devices from creating additional devices; this does not prevent shell actions requested through the operator agent.
+> Use View only for a less-trusted device.**
+
+- Access: the remote listener (`127.0.0.1:<remote port>` behind cloudflared) serves only `GET /pair` and
+  `POST /api/pair/claim` to strangers; everything else needs the `__Host-cp_device` cookie of an active device
+  (401 otherwise). Both levels read everything; View only gets no write token. Remote responses are no-store.
+- Refresh: a quick tunnel's page carries `<meta name="cp-refresh" content="poll">` and the app polls every 2 s
+  while visible (Quick Tunnels carry no SSE); named and local keep SSE.
+- Settings → **Devices** (`components/Devices.tsx`, `use-devices.ts`, `devices-control.ts`) loads `GET /api/devices`
+  on its own, so it works while operator Settings are offline, and shows the statement above verbatim. Each device:
+  name (text, never markup), level, when and how it was paired, last use, revoked/expired. **Add device** (only on
+  this machine's or a tailnet dashboard: `can_create`) posts `POST /api/pair/create {level}` and shows the one-use
+  link as a QR drawn in the page (`src/qr/`, no external service); the link stays in memory only and disappears at
+  its five-minute expiry, on Hide link, or when you leave the screen. **Revoke** (`can_revoke`: local, or a
+  Full-control device) asks first, then posts `POST /api/devices/revoke {id}`. A remote device never sees Add; View
+  only sees no write control. Off (404), an unreadable store or a refused write is shown, never silent.
+- Settings also carries **Notifications** (the same control as More → Notifications; iPhone/iPad still need Add to
+  Home Screen first).
+- Pairing notices: every screen shows "New device paired: <name> · <level> · <time>" with each recipient's push state
+  and a Devices link (polled every 2 s while visible); Dismiss is per browser. A push accepted by the push service is
+  not proof a phone showed it.
+- Provenance: a remote message reaches the operator labelled with its device (`[cp-remote — …]`), and the operator is
+  told never to pair devices on a remote request — defence in depth, not a sandbox.
+- Layout: device rows, the QR block and Add wrap at 390 px (flex-wrap, `min-width: 0`, the QR shrinks to the
+  column); at 1440 px each device is one row. Controls are at least 44 px.
+
 ## Dashboard control
 
 **risk:high, on by default.** In Sessions → Operator ↔ you → **Full transcript**

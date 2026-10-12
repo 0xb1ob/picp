@@ -6561,9 +6561,10 @@ trust boundary is the dashboard control one: a same-user local process can alrea
 
 ### Remote devices (remote dashboard PR 1)
 
-**Status.** **Off by default**: nothing starts the remote listener yet (the tunnel wiring is a later PR), and the
-loopback/tailnet listener answers exactly as before — without `devices` routes configured it has no device route.
-Later PRs add the tunnel (which also starts the device CLI socket), pairing alerts and the Devices screen.
+**Status.** **Off by default**: on a home where `cp-tunnel up` never ran, nothing starts the remote listener, the device
+socket or the device routes, and the loopback/tailnet listener answers exactly as before (the device routes 404).
+`cp-tunnel up` turns it on (PR 2d, below); the Devices screen is PR 3 (below). User walkthrough: [`docs/service.md`](service.md)
+(Remote dashboard); app behaviour: [`docs/viewer-app.md`](viewer-app.md) (Settings → Devices).
 
 **Trust (Decision es-6a78c3).** A Full-control remote device is trusted like your terminal. The dashboard's pairing and
 device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested
@@ -6712,7 +6713,27 @@ listener. `pair`, `devices`, `revoke` and `status` use the owner socket. Push co
 tunnel origin only with `--push-origin accept` or a typed "y" (`initPush`, keys never rotated); anything else, including no
 terminal, leaves the push config and key bytes unchanged. A quick tunnel never touches push. The quick listener's page
 carries `<meta name="cp-refresh" content="poll">` and the app polls every 2 s while visible instead of opening SSE.
-Still to come: the no-tailnet remote-only mode and its owner-socket health/updater probe.
+
+**Remote-only mode and the Devices screen (PR 3).** A `--require-tailnet` viewer (cp-view.service, `bin/cp-operator`)
+that finds no tailnet address normally exits non-zero; when `data/tunnel.json` is `enabled` it instead runs
+**remote-only** (`listenPlan`, `src/viewer/cli.ts`): no local listener at all, only the remote runtime, and the operator
+session gets no `CP_VIEWER_HOST`. Without the tunnel config the refusal stands — never a loopback fallback. cp-health and
+the updater's restart check probe a remote-only viewer through the owner socket's `status` (3 s) instead of HTTP.
+`cp-tunnel up --token-file` stores the named token only after cloudflared provisioning succeeds, inside the config lock.
+cp-daemon status prints the `device-notify` unit, and a failed sender is a doctor finding (notices still show; no push
+goes out). On the local listener the device routes exist only while that viewer owns the device store (its remote
+runtime started the socket); otherwise they 404 exactly as before. Settings → Devices (`viewer-app/components/Devices.tsx`)
+reads `GET /api/devices` on its own — operator Settings may be offline — and shows the trust statement above verbatim
+(`DEVICE_TRUST`, `src/viewer/api-types.ts`). Add (local `canMint` only) draws the one-use link as a QR in the page and
+keeps it in memory until its expiry, Hide or leaving the screen — never in browser storage; Revoke needs
+`can_revoke` and a confirm. A remote device never sees Add; a View-only device sees no write control.
+
+**Limits, stated plainly.** The pairing and device APIs stop a remote device from minting codes or devices; they do
+not stop a Full-control device asking the shell-capable operator to run `cp-tunnel pair`, which is why such a device is
+trusted like your terminal. The operator instruction is defence in depth, not a sandbox. Pairing alerts are the one
+approved exception to the ask-only push rule; a push reaching the push service is not proof a phone showed it, and
+permission, absent push setup or a push-service outage is reported as such, never as delivered. The durable pairing
+event and its dashboard notice are the guarantee.
 
 ## Reading the plan
 
