@@ -446,6 +446,22 @@ test("cp_parent drain path: parentDiagnostic sends /cp-drain <seconds> and retur
 	assert.deepEqual(prompts, ["/cp-drain 30", "/cp-drain cancel"]);
 });
 
+test("cp_parent version path: parentDiagnostic accepts the new picp line and the pre-rename pi-command-post line", async () => {
+	for (const message of ["picp 0.1.0 (root: /app)", "pi-command-post 0.1.0 (root: /app)"]) {
+		const listeners = new Set<(event: Record<string, unknown>) => void>();
+		const proc = {
+			onEvent: (listener: (event: Record<string, unknown>) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
+			request: async (type: string) => {
+				if (type === "get_commands") return { success: true, data: { commands: [{ name: "cp-version", source: "extension" }] } };
+				for (const listener of listeners) listener({ type: "extension_ui_request", method: "notify", notifyType: "info", message });
+				return { success: true };
+			},
+		} as unknown as WorkerProcess;
+		const result = await parentDiagnostic(proc, "version", 5_000);
+		assert.equal(result.text, message);
+	}
+});
+
 test("restartActivity: idle live workers are not blockers; mid-turn, unknown-status and script pids are (cp-ccm0)", () => {
 	const live = (jobId: string, overrides: Partial<FleetRecord> = {}) => record(jobId, { ...overrides, worker: { ...record(jobId).worker, pid: process.pid, ...overrides.worker } });
 	const script = (jobId: string, exited_at?: string) => ({ ...record(jobId, { phase: "held" }), executor: "script", worker: undefined, script_path: "scripts/x.sh", script_process: { pid: process.pid, started_at: "2026-09-27T12:00:00Z", ...(exited_at ? { exited_at } : {}) } }) as unknown as FleetRecord;

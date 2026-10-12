@@ -13,7 +13,8 @@ export const PARENT_CONTROL_BUSY = "refused: parent control (compaction, rotatio
 /** Invoke only registered diagnostic commands: an unknown slash command would become an LLM prompt. */
 export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "version" | "drain", timeoutMs = 120_000, args = ""): Promise<ParentDiagnostic> {
 	const command = action === "doctor" ? "doctor" : action === "drain" ? "cp-drain" : "cp-version";
-	const prefix = action === "doctor" ? "DOCTOR " : action === "drain" ? "DRAIN: " : "picp ";
+	// "pi-command-post " is the pre-rename /cp-version line, accepted while a restart leaves versions mixed.
+	const prefixes = action === "doctor" ? ["DOCTOR "] : action === "drain" ? ["DRAIN: "] : ["picp ", "pi-command-post "];
 	const response = await proc.request("get_commands", {}, timeoutMs);
 	if (response.success === false) throw new Error(`parent diagnostics unavailable: ${response.error ?? "get_commands failed"}`);
 	const commands = (response.data as { commands?: Array<{ name: string; source: string }> } | undefined)?.commands;
@@ -24,7 +25,7 @@ export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "
 	let failure: string | undefined;
 	const unsubscribe = proc.onEvent((event) => {
 		if (event.type === "extension_error" && event.extensionPath === `command:${command}`) failure = String(event.error);
-		if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && event.message.startsWith(prefix)) {
+		if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && prefixes.some((prefix) => (event.message as string).startsWith(prefix))) {
 			result = { text: event.message, level: event.notifyType === "error" ? "error" : "info" };
 		}
 	});
