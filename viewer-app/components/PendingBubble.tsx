@@ -37,6 +37,8 @@ export function PendingBubble({send,position,total,control}: {send:PendingSend;p
    {changeable && draft === null && <div class="session-pending-actions"><button type="button" class="session-pending-edit" disabled={busy} onClick={()=>{setNote(null);setDraft(send.body.text);}}>Edit</button><button type="button" class="session-pending-cancel" disabled={busy} onClick={remove}>Cancel send</button></div>}
    {/* cp-y43c addendum 2: Send again is the only way a failed or lost message is sent again — a new message, on this click only. */}
    {failed && <div class="session-pending-actions"><button type="button" class="session-pending-again" disabled={!controlReady(control.status) || control.starting?.state === "starting" || restartInFlight(control.restarting)} onClick={()=>control.retry?.(send.key)}>Send again</button><button type="button" onClick={()=>control.discard?.(send.key)}>Discard</button></div>}
+   {/* picp-cc0: a delivered bubble whose transcript entry never loads (older than the window) must still go away on request. */}
+   {send.state === "delivered" && <div class="session-pending-actions"><button type="button" class="session-pending-dismiss" onClick={()=>control.discard?.(send.key)}>Dismiss</button></div>}
   </div>
  </article>;
 }

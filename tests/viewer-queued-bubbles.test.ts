@@ -3,17 +3,18 @@ import { build } from "esbuild";
 import { test, type TestContext } from "node:test";
 import { parseHTML } from "linkedom";
 import type { ControlStatusResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
-import type { ControlView } from "../viewer-app/control.ts";
+import type { ControlView, PendingSend } from "../viewer-app/control.ts";
+import { PENDING_KEY, reconcilePending } from "../viewer-app/pending-sends.ts";
 import { REPO_ROOT } from "./harness/index.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const bundle = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {useControl} from "./viewer-app/use-control.ts"; export {act}; export const html=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); function Stage({data,fetcher,onControl}) { const control=useControl(true,data.generated_at,data.entries,fetcher,true); onControl(control); return h(Sessions,{data,control}); } export const mount=(root,data,fetcher,onControl)=>render(h(Stage,{data,fetcher,onControl}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+const bundle = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import ssr from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {useControl} from "./viewer-app/use-control.ts"; export {act}; export const html=(data,control,threads)=>ssr(h(Sessions,{data,control,threads})); function Stage({data,fetcher,onControl}) { const control=useControl(true,data.generated_at,data.entries,fetcher,true,data.truncated); onControl(control); return h(Sessions,{data,control}); } export const mount=(root,data,fetcher,onControl)=>render(h(Stage,{data,fetcher,onControl}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {html,act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`);
 const at="2026-10-04T14:00:00Z";
 const status: ControlStatusResponse = {generated_at:at,enabled:true,running:true,reason:null,token:"fixture-only",busy:true,pending:true,session_file:"fixture.jsonl",recent:[],offline:false,held:0,inbox_token:null,start_unavailable:null,launchers:{tmux:false,herdr:false},resume:{tmux:false,herdr:false}};
 const entry=(id:string,extra:Partial<SessionEntry>={}):SessionEntry=>({id,at,kind:"say",who:"Assistant",text:id,name:null,send_id:null,tag:null,failed:false,trace:[],...extra});
-const view=(entries:SessionEntry[],generated_at=at)=>({generated_at,selected:"you",session_id:null,parent:{id:"cp-parent",live:false},workers:[],entries,title:"Operator ↔ you",subtitle:"Full transcript",warnings:[],truncated:false,transcript:true} as unknown as SessionsResponse);
+const view=(entries:SessionEntry[],generated_at=at,truncated=false)=>({generated_at,selected:"you",session_id:null,parent:{id:"cp-parent",live:false},workers:[],entries,title:"Operator ↔ you",subtitle:"Full transcript",warnings:[],truncated,transcript:true} as unknown as SessionsResponse);
 const pending=(key:string,extra:object={})=>({key,id:`dc-${key}`,at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:`queued ${key}`,thread:"layout"},...extra});
 
 test("queued bubbles: FIFO after newest transcript, state and time, attachment chips, failures and thread filtering",()=>{
@@ -60,7 +61,7 @@ async function stage(t:TestContext, store=new Map<string,string>()) {
   return new Response(JSON.stringify(current));
  };
  const flush=()=>act(async()=>{for(let i=0;i<5;i++) await new Promise(resolve=>setImmediate(resolve));});
- const show=async (entries:SessionEntry[]=[],version=Math.random().toString())=>{await act(()=>mount(root,view(entries,version),fetcher,(value:ControlView)=>{control=value;}));await flush();};
+ const show=async (entries:SessionEntry[]=[],version=Math.random().toString(),truncated=false)=>{await act(()=>mount(root,view(entries,version,truncated),fetcher,(value:ControlView)=>{control=value;}));await flush();};
  t.after(async()=>{await act(()=>unmount(root));for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
  const bubbleTexts=()=>[...root.querySelectorAll(".session-pending .md")].map(el=>el.textContent);
  return {root,store,posted,show,flush,bubbleTexts,get control(){return control!;},status:(value:ControlStatusResponse)=>{current=value;},
@@ -346,4 +347,41 @@ test("cp-y43c review 1: Edit, Cancel send, Save, Cancel and Send again are 44 px
  assert.match(phone,/\.session-pending-actions > button \{[^}]*min-height: 44px;/,"base (phone) rule: every width below 900 px, so 390 and 430");
  assert.doesNotMatch(css.slice(css.indexOf("@media")),/session-pending/,"no media block resizes them");
  for (const sheet of ["styles/shell.css","components/control.css","styles/tokens.css"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT,"viewer-app",sheet),"utf8"),/session-pending/,sheet);
+});
+
+test("picp-cc0: a delivered send clears once a truncated transcript window or the status grace passes it; queued, held and failed stay",()=>{
+ const later="2026-10-04T14:10:00Z";
+ const window=[entry("window start",{at:"2026-10-04T14:05:00Z"})];
+ const items=[pending("old",{state:"delivered"}),pending("queued"),pending("held",{state:"held"}),pending("failed",{state:"failed",reason:"refused"})] as PendingSend[];
+ const out=reconcilePending({items,dismissed:[]},null,window,true);
+ assert.deepEqual(out.items.map(item=>item.key),["queued","held","failed"],"only the delivered send older than the loaded window clears");
+ assert.deepEqual(out.dismissed,["dc-old"],"its id is dismissed so no status read resurrects it");
+ assert.equal(reconcilePending({items,dismissed:[]},null,window,false).items.length,4,"a complete transcript still waits for the entry itself");
+ const fresh=[pending("fresh",{state:"queued",at:later})] as PendingSend[];
+ const recent=(seconds:number):ControlStatusResponse=>({...status,generated_at:new Date(Date.parse(later)+seconds*1000).toISOString(),recent:[{id:"dc-fresh",kind:"message",state:"delivered",at:later,reason:null,ask_id:null}]});
+ const inGrace=reconcilePending({items:fresh,dismissed:[]},recent(30),window,true);
+ assert.deepEqual(inGrace.items.map(item=>item.state),["delivered"],"inside the window and within the grace period it waits for the transcript");
+ assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},recent(61),window,true).items,[],"delivered for longer than the grace period clears");
+ const journal:ControlStatusResponse={...status,generated_at:"2026-10-04T14:11:01Z",sends:[{id:"dc-fresh",at:later,state:"delivered",reason:null,ask_id:null,body:{kind:"message",text:"queued fresh"}}]};
+ assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},journal,[],false).items,[],"the journal's delivered state clears it too when recent rows are gone");
+ const queued:ControlStatusResponse={...journal,sends:[{...journal.sends![0]!,state:"queued"}]};
+ assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},queued,window,true).items.map(item=>item.state),["queued"],"a queued send is never cleared by age");
+});
+
+test("picp-cc0: a stuck stored delivered bubble clears on load; a delivered one inside the window has a 44 px Dismiss that persists",async t=>{
+ const later="2026-10-04T14:10:00Z";
+ const store=new Map([[PENDING_KEY,JSON.stringify({items:[pending("stuck",{state:"delivered"}),pending("fresh",{state:"delivered",at:later}),pending("waiting")],dismissed:[]})]]);
+ const s=await stage(t,store);
+ await s.show([entry("window start",{at:"2026-10-04T14:05:00Z"})],"v1",true);
+ assert.deepEqual(s.bubbleTexts(),["queued waiting","queued fresh"],"the existing stuck item clears without a storage edit; the queued one stays");
+ assert.ok((JSON.parse(store.get(PENDING_KEY)!) as {dismissed:string[]}).dismissed.includes("dc-stuck"));
+ const dismiss=[...s.root.querySelectorAll(".session-pending-dismiss")];
+ assert.equal(dismiss.length,1,"only the delivered bubble gets Dismiss; queued is unchanged");
+ assert.equal(dismiss[0]!.textContent,"Dismiss");
+ assert.equal(dismiss[0]!.parentElement?.className,"session-pending-actions","the shared 44 px phone rule covers it");
+ assert.match(dismiss[0]!.closest(".session-pending")!.textContent!,/Delivered · waiting for transcript/);
+ await s.click(".session-pending-dismiss");
+ assert.deepEqual(s.bubbleTexts(),["queued waiting"]);
+ await s.remount();
+ assert.deepEqual(s.bubbleTexts(),["queued waiting"],"a dismissed bubble stays gone after reload");
 });
