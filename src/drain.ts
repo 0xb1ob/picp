@@ -76,7 +76,7 @@ export function readDrain(home: string): DrainRecord | undefined {
 /** The one refusal every process start shares while a drain is on disk; it names the drain. */
 export function assertNotDraining(home: string, what: string): void {
 	const drain = readDrain(home);
-	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}); no ${what} starts until the parent restarts (${drainFile(home)})`);
+	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
 }
 
 export function inFlightJobs(records: readonly FleetRecord[], head: (jobId: string) => string | undefined): DrainJob[] {
@@ -216,7 +216,7 @@ export class DrainControl {
 		};
 		atomicWriteJson(drainFile(this.#deps.home), record);
 		// Idle already: this answer is the report, so it is written `reported` and no wake follows.
-		return this.#survivors().length === 0 ? this.#finish(record, [], true) : record;
+		return this.#survivors().length === 0 ? (this.#finish(record, [], true) ?? record) : record;
 	}
 
 	/**
@@ -236,17 +236,32 @@ export class DrainControl {
 			const left = this.#survivors();
 			if (left.length > 0 && this.#now().getTime() < Date.parse(record.deadline)) return record;
 			// Written before the wake: a re-entrant tick from the journal sees the outcome, never `draining`.
-			record = this.#finish(record, left, false);
+			const done = this.#finish(record, left, false);
+			if (!done) return undefined;
+			record = done;
 		}
 		if (record.reported !== false) return record;
 		// The outbox dedups by id, so a re-entrant or retried journal still delivers one wake.
 		this.#deps.journal({ id: outcomeWakeId(record, record.state as "drained" | "timeout"), content: formatDrain(record, this.#deps.home) });
 		const reported = { ...record, reported: true };
-		atomicWriteJson(drainFile(this.#deps.home), reported);
-		return reported;
+		// The journal can re-enter or outlive a startup, cancel or operator rm: never write a removed drain back.
+		return this.#writeIfCurrent(reported) ? reported : undefined;
 	}
 
-	#finish(record: DrainRecord, left: string[], reported: boolean): DrainRecord {
+	/** Write `record` only while the same drain (same started_at) is still on disk; a removed or replaced drain is never resurrected. */
+	#writeIfCurrent(record: DrainRecord): boolean {
+		let live: DrainRecord | undefined;
+		try {
+			live = readDrain(this.#deps.home);
+		} catch {
+			return false; // Unreadable: every gate stays closed, and startup reports and clears it.
+		}
+		if (live?.started_at !== record.started_at) return false;
+		atomicWriteJson(drainFile(this.#deps.home), record);
+		return true;
+	}
+
+	#finish(record: DrainRecord, left: string[], reported: boolean): DrainRecord | undefined {
 		const done: DrainRecord = {
 			...record,
 			state: left.length > 0 ? "timeout" : "drained",
@@ -255,8 +270,7 @@ export class DrainControl {
 			reported,
 			jobs: inFlightJobs(this.#deps.fleet.list(), this.#deps.head),
 		};
-		atomicWriteJson(drainFile(this.#deps.home), done);
-		return done;
+		return this.#writeIfCurrent(done) ? done : undefined;
 	}
 
 	/** `session_shutdown`: the workers are gone, so the next session's startup may report and clear. */
@@ -265,14 +279,15 @@ export class DrainControl {
 	}
 
 	/**
-	 * `/cp-drain cancel` (cp-update's drain timeout). Owner-only: withdraws a `draining` or `timeout` drain
-	 * — never a `drained` one, which is the restart already prepared — and journals one wake saying so.
+	 * `/cp-drain cancel` (cp-update's drain timeout). Owner-only: withdraws a `draining` or `timeout` drain,
+	 * or a `drained` record an earlier parent left behind — never this process's own `drained` one, which is
+	 * the restart already prepared — and journals one wake saying so.
 	 */
 	cancel(): string {
 		if (this.#deps.owns?.() === false) throw new DrainError(`refused: this session does not hold the parent lock for ${this.#deps.home}; run /cp-drain cancel in the parent that does`);
 		const record = readDrain(this.#deps.home);
 		if (!record) throw new DrainError("refused: no drain to cancel");
-		if (record.state === "drained") throw new DrainError(`refused: the drain started ${record.started_at} finished drained; that restart is prepared (the next parent startup clears it)`);
+		if (record.state === "drained" && this.#owned) throw new DrainError(`refused: this parent drained (started ${record.started_at}); that restart is prepared — restart the parent (cp_parent stop + start), whose startup clears it`);
 		const content = `${DRAIN_PREFIX}cancelled \u2014 the drain started ${record.started_at} (${record.state}) is withdrawn; dispatch, promotion, revive, review and merge steps are open again`;
 		// Journaled before the file goes: a failed journal leaves the drain (and every gate) in place.
 		this.#deps.journal({ id: `drain:${record.started_at}:cancelled`, content });
@@ -285,13 +300,15 @@ export class DrainControl {
 	/** Startup only: report the recorded jobs through `cp-recovery`, then clear draining. Never while this process drains. */
 	startup(): DrainRecord | undefined {
 		if (this.#owned) return undefined;
-		// Reported before the file is removed: a failed journal leaves the drain for the next startup to report.
-		const record = consumeDrain(this.#deps.home, (found) => {
-			this.#deps.discard?.([outcomeWakeId(found, "drained"), outcomeWakeId(found, "timeout")]);
-			this.#deps.journal({ id: `recovery:drain:${found.started_at}`, content: formatDrainRecovery(found), keys: found.jobs.map((job) => job.job_id) });
+		// The file goes even when the notice cannot be journaled (a lost notice costs a line; a kept file refuses every start).
+		return consumeDrain(this.#deps.home, (found) => {
+			try {
+				this.#deps.discard?.([outcomeWakeId(found, "drained"), outcomeWakeId(found, "timeout")]);
+				this.#deps.journal({ id: `recovery:drain:${found.started_at}`, content: formatDrainRecovery(found), keys: found.jobs.map((job) => job.job_id) });
+			} catch (error) {
+				process.stderr.write(`drain: the RESTART AFTER DRAIN notice for the drain started ${found.started_at} was not journaled (${(error as Error).message}); ${drainFile(this.#deps.home)} is cleared anyway\n`);
+			}
 		});
-		if (!record) return undefined;
-		return record;
 	}
 }
 
@@ -362,7 +379,7 @@ export function restartActivity(records: readonly FleetRecord[], runPhase: (jobI
 
 /**
  * Report, then remove, the drain record. An unreadable file is reported and removed, never left to
- * block a fresh parent; a `report` that throws leaves the file for the next startup.
+ * block a fresh parent; a `report` that throws still removes the file, then rethrows.
  */
 export function consumeDrain(home: string, report?: (record: DrainRecord) => void): DrainRecord | undefined {
 	let record: DrainRecord | undefined;
@@ -372,8 +389,11 @@ export function consumeDrain(home: string, report?: (record: DrainRecord) => voi
 		record = { state: "draining", started_at: "unknown", deadline: "unknown", timeout_s: 0, survivors: [(error as Error).message], jobs: [] };
 	}
 	if (!record) return undefined;
-	report?.(record);
-	rmSync(drainFile(home), { force: true });
+	try {
+		report?.(record);
+	} finally {
+		rmSync(drainFile(home), { force: true });
+	}
 	return record;
 }
 

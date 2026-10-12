@@ -225,8 +225,54 @@ test("drain cancel (cp-update's drain timeout): owner-only, withdraws draining o
 	assert.throws(() => owner.drain.cancel(), /no drain to cancel/);
 	owner.setBusy([]);
 	assert.equal(owner.drain.start().state, "drained");
-	assert.throws(() => owner.drain.cancel(), /finished drained; that restart is prepared/, "a drained drain is the restart already prepared");
+	assert.throws(() => owner.drain.cancel(), /this parent drained .*that restart is prepared/, "this parent's own drained drain is the restart already prepared");
 	assert.equal(readDrain(home.path)?.state, "drained");
+});
+
+test("cp-drain-stale-record: /cp-drain cancel clears a drained record an earlier parent left, and the gates open", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const earlier = control(home.path, fleet);
+	const started = earlier.drain.start(); // idle: drained + reported at once
+	assert.equal(readDrain(home.path)?.reported, true);
+	const next = control(home.path, fleet); // the live lock holder, which never drained
+	assert.match(next.drain.cancel(), /^DRAIN: cancelled \u2014 the drain started .* \(drained\) is withdrawn/);
+	assert.deepEqual(next.wakes.map((wake) => wake.id), [`drain:${started.started_at}:cancelled`]);
+	assert.equal(existsSync(drainFile(home.path)), false);
+	assertNotDraining(home.path, "dispatch");
+});
+
+test("cp-drain-stale-record: startup removes a drained+reported record even when the journal throws, a duplicate id included", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const clean = control(home.path, fleet);
+	const first = clean.drain.start();
+	assert.equal(control(home.path, fleet).drain.startup()?.started_at, first.started_at);
+	assert.equal(existsSync(drainFile(home.path)), false, "a drained+reported record is removed");
+
+	for (const cause of ["disk full", `duplicate id recovery:drain:${first.started_at}`]) {
+		control(home.path, fleet).drain.start();
+		const next = control(home.path, fleet, { journal: () => { throw new Error(cause); } });
+		assert.equal(next.drain.startup()?.state, "drained", "never thrown into reconcile");
+		assert.equal(existsSync(drainFile(home.path)), false, `cleared despite: ${cause}`);
+		assertNotDraining(home.path, "dispatch");
+	}
+});
+
+test("cp-drain-stale-record: a check whose journal outlives an external delete never writes the drain back", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	const c = control(home.path, fleet, { journal: () => rmSync(drainFile(home.path), { force: true }) });
+	c.setBusy(["cp-busy"]);
+	c.drain.start();
+	c.setBusy([]);
+	assert.equal(c.drain.check(), undefined);
+	assert.equal(existsSync(drainFile(home.path)), false, "the removed drain stays removed");
+	assert.equal(c.drain.check(), undefined);
+	assert.equal(existsSync(drainFile(home.path)), false);
 });
 
 test("drain cancel retracts this drain's undelivered outcome wake; plain timeout and restart retraction are unchanged", async (t) => {
@@ -397,6 +443,25 @@ test("drain: reconcile never clears this process's drain; the next parent's star
 	assert.match(restart[0]!.content, /cp-held held, lease \/wt\/cp-held, head none/);
 	await next.reconcile();
 	assert.equal(next.durableWakeups.pending().filter((entry) => entry.content.startsWith("RESTART AFTER DRAIN")).length, 1, "reported once");
+});
+
+test("cp-drain-stale-record: a fresh parent clears the drain even when an earlier reconcile step throws", async (t) => {
+	const home = createScratchHome();
+	const first = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	const next = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => {
+		await first.shutdown();
+		await next.shutdown();
+		home.cleanup();
+	});
+	first.drain.start();
+	assert.equal(readDrain(home.path)?.state, "drained");
+	next.fleet.reconcile = async () => {
+		throw new Error("fleet.json unreadable");
+	};
+	await assert.rejects(next.reconcile(), /fleet\.json unreadable/, "the earlier failure still reaches the caller");
+	assert.equal(existsSync(drainFile(home.path)), false, "draining is cleared anyway");
+	assert.doesNotThrow(() => assertNotDraining(home.path, "dispatch"));
 });
 
 test("reconcile: a parent startup closes the ledger row of a research job torn down just before a crash", async (t) => {

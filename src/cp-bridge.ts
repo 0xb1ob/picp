@@ -436,7 +436,7 @@ export class CpBridge {
 		if (timeoutS !== "cancel" && (this.#controlBusy || this.#autoControl)) throw new CpBridgeError(PARENT_CONTROL_BUSY);
 		return parentDiagnostic(proc, "drain", this.#options?.requestTimeoutMs, String(timeoutS));
 	}
-	/** `/cp-drain cancel` (cp-update's drain timeout): withdraws a draining or timed-out drain, never a drained one. */
+	/** `/cp-drain cancel` (cp-update's drain timeout): withdraws a draining or timed-out drain, or a drained record an earlier parent left; never the live parent's own drained one. */
 	drainCancel(): Promise<ParentDiagnostic> {
 		return this.drain("cancel");
 	}
