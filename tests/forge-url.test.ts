@@ -144,6 +144,26 @@ test("change-request links: GitHub /pull/N on github.com, GitLab /-/merge_reques
 	}
 });
 
+test("#252 review: a leading-dot repo name is a segment; exactly . or .. (plain or encoded) never is", () => {
+	assert.deepEqual(parseChangeRequestUrl("https://github.com/o/.github/pull/1"), { kind: "github", origin: "https://github.com", path: "o/.github", number: 1 });
+	assert.deepEqual(parseChangeRequestUrl("https://gitlab.com/group/.dotrepo/-/merge_requests/3"), { kind: "gitlab", origin: "https://gitlab.com", path: "group/.dotrepo", number: 3 });
+	assert.equal(parseRemote("git@github.com:o/.github.git")?.path, "o/.github");
+	for (const bad of [
+		"https://github.com/o/./pull/1",
+		"https://github.com/o/../pull/1",
+		"https://gitlab.com/group/../-/merge_requests/3",
+		"https://gitlab.com/group/./app/-/merge_requests/3",
+		"https://gitlab.com/group/%2e%2e/app/-/merge_requests/3",
+		"https://gitlab.com/group/.%2E/app/-/merge_requests/3",
+		"https://github.com/o/%2e/pull/1",
+	]) {
+		assert.equal(isSafeChangeRequestUrl(bad), false, bad);
+	}
+	for (const remote of ["git@gitlab.com:group/../app.git", "git@gitlab.com:group/./app.git", "ssh://git@gitlab.com/group/../app.git", "git@gitlab.com:../app.git"]) {
+		assert.equal(parseRemote(remote), undefined, remote);
+	}
+});
+
 test("a change request belongs only to its exact host, prefix and whole project path", () => {
 	const resolved = resolveForgeRepository("git@ssh-alias:team/sub/app.git", { kind: "gitlab", web_base_url: "https://code.example.com/gitlab" });
 	assert.ok(resolved.ok);
