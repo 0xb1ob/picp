@@ -19,6 +19,8 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, SCH
 import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake, formatIntake, type IntakeResult } from "../src/intake.ts";
 import type { ChangeRequestObservation, ForgeObserver, ObservationOutcome } from "../src/forges/adapter.ts";
+import { resolveForgeRepository } from "../src/forge-url.ts";
+import { gitlabObserver } from "../src/forges/gitlab.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
 import { resolvePr } from "../src/pr-resolve.ts";
 import { RunRegistry } from "../src/runs.ts";
@@ -295,6 +297,15 @@ test("forge PR 3: a GitLab MR from the job's branch is verified by its IID, and 
 	}
 	const bound = await resolvePr({ branch: BRANCH, cwd: "/tmp", bound: { number: 12, url: MR_URL } }, { exec: GH_NEVER, gitlab: gitlabAnswering({}) });
 	assert.equal(bound.status, "verified", "a bound MR resolves from its bound url");
+
+	// A plausible same IID on another host is refused by the real observer before any request is made.
+	const repository = resolveForgeRepository("https://gitlab.example.com/group/sub/repo.git", { kind: "gitlab", web_base_url: "https://gitlab.example.com" });
+	assert.ok(repository.ok, repository.ok ? "" : repository.detail);
+	const fetched: string[] = [];
+	const real = gitlabObserver(repository.repository, { env: {}, fetch: async (url) => (fetched.push(url), assert.fail("no request for a foreign url")) });
+	const wrongHost = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: "https://gitlab.attacker.example/group/sub/repo/-/merge_requests/12" }, { exec: GH_NEVER, gitlab: real });
+	assert.match(reason(wrongHost), /not this project's merge request \(mismatch: /);
+	assert.deepEqual(fetched, [], "a foreign url causes zero requests");
 });
 
 test("forge PR 3: intake holds a GitLab job on its verified MR receipt and keeps the report slot open on a refusal", async (t) => {
