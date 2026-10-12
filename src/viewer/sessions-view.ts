@@ -141,6 +141,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
     if (dashboard.images) e.images=dashboard.images;
     if (dashboard.files) e.files=dashboard.files;
     if (dashboard.askId) e.ask_id=dashboard.askId;
+    if (dashboard.remote) e.remote=dashboard.remote;
     entries.push(e); continue;
    }
    // Read delivery markers without importing the mutable parent outbox or its policy dependencies.

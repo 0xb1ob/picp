@@ -9,8 +9,10 @@
  * commits before the answer. Only then is a frozen remote context bound to the request (access.ts) and the shared
  * dispatcher runs — so an unpaired caller reaches no route, asset, stream timer or 404 of the dispatcher.
  *
- * Writes in this slice: device revoke (Full-control, devices-api.ts) only. Every other remote write refuses 403 before
- * any handler — View-only always; Full-control until its operator messages carry device provenance (a later slice).
+ * Writes: View-only refuses 403 before any handler (device revoke aside, which devices-api.ts refuses itself). A
+ * Full-control device reaches the ordinary write routes, whose shared chain (`guarded`, control-api.ts) pins the tunnel
+ * origin and stamps every operator message or edit with the device (PR 1c provenance); push subscription writes stay
+ * 403 until subscriptions are owned per device.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { bindAccess, remoteAccess } from "./access.ts";
@@ -20,6 +22,7 @@ import { sessionCookie } from "./device-store.ts";
 import { DEVICES_REVOKE_PATH, type DeviceRoutes, PAIR_CREATE_PATH, storeRefusal } from "./devices-api.ts";
 import { AttemptLimiter, clientAddress, handlePairClaim, PAIR_CLAIM_PATH } from "./pair-api.ts";
 import { PAIR_CSP, PAIR_HTML, PAIR_PAGE_PATH } from "./pair-page.ts";
+import { PUSH_SUBSCRIPTION_PATH } from "./push-api.ts";
 import { dispatch, hostAllowed, hostHeaderFor, send, sendJson, type ViewerOptions } from "./server.ts";
 
 export const REMOTE_HOST = "127.0.0.1";
@@ -97,8 +100,15 @@ export function remoteHandle(req: IncomingMessage, res: ServerResponse, options:
 	res.setHeader("set-cookie", sessionCookie(cookie));
 	const path = (req.url ?? "/").split("?")[0];
 	if (req.method !== "GET" && req.method !== "HEAD" && path !== DEVICES_REVOKE_PATH && path !== PAIR_CREATE_PATH) {
-		sendJson(res, 403, { error: access.level === "view" ? "View-only device: dashboard writes are refused" : "remote dashboard controls are not enabled yet: only reading and device revoke work remotely" });
-		return;
+		if (access.level === "view") {
+			sendJson(res, 403, { error: "View-only device: dashboard writes are refused" });
+			return;
+		}
+		// Subscription ownership per device is a later slice: until then no remote browser stores or removes one.
+		if (path === PUSH_SUBSCRIPTION_PATH) {
+			sendJson(res, 403, { error: "remote push subscriptions are not enabled yet" });
+			return;
+		}
 	}
 	dispatch(req, res, options, warn);
 }

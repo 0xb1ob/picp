@@ -296,6 +296,10 @@ test("operator Full transcript: each cp_parent ask is followed by its decision c
  put(join(stateDir,"operator/dashboard.jsonl"),{type:"upload",id:fileId,mime:"text/plain",bytes:24,name:"original.html"}); appendFileSync(join(stateDir,"operator/dashboard.jsonl"),"\n");
  const next=await (await fetch(`http://127.0.0.1:${options.port}/api/sessions?view=you&transcript=1`)).json();
  const fileEntry=next.entries.at(-1); assert.equal(fileEntry.tag,"dashboard"); assert.deepEqual(fileEntry.files,[fileId]); assert.deepEqual(fileEntry.file_metadata,{[fileId]:{name:"original.html",bytes:24}}); assert.ok(fileEntry.text.includes("<script>literal</script>"));
+ // Remote dashboard PR 1c: the device line above a `; remote` marker is read into `remote`, never shown as body text.
+ appendFileSync(file,message({role:"user",content:[{type:"text",text:'from the phone\n\n[cp-remote — through a paired remote device, not this terminal: sent by dev-0123456789abcdef "Phone"]\n[cp-dashboard dc-20260927082900-0123abcd — from the dashboard; remote]'}]})+"\n");
+ const remote=(await (await fetch(`http://127.0.0.1:${options.port}/api/sessions?view=you&transcript=1`)).json()).entries.at(-1);
+ assert.deepEqual([remote.tag,remote.text,remote.dashboard_id,remote.remote],["dashboard","from the phone","dc-20260927082900-0123abcd",{sender:{device_id:"dev-0123456789abcdef",name:"Phone"},editors:[]}]);
 });
 
 test("operator Full transcript: the 300-entry window never drops an open decision card", async t => {
