@@ -20,7 +20,8 @@ function scratch(t: import("node:test").TestContext, mode: string, sessionExists
 	const dir = mkdtempSync(join(tmpdir(), "cp-relaunch-"));
 	const session = join(dir, "2026-01-01T00-00-00-000Z_0123abcd.jsonl");
 	if (sessionExists) writeFileSync(session, "");
-	const env = { CP_OPERATOR_VIEWER: "service", CP_OPERATOR_WEB: "0", CP_OPERATOR_MODEL: "test-model", FAKE_RELAUNCH_LOG: join(dir, "argv.log"), FAKE_RELAUNCH_MODE: mode, FAKE_RELAUNCH_SESSION: session };
+	// PI_CODING_AGENT_DIR: an agent dir without skills, so no operator `--skill` from this machine's install.
+	const env = { CP_OPERATOR_VIEWER: "service", CP_OPERATOR_WEB: "0", CP_OPERATOR_MODEL: "test-model", FAKE_RELAUNCH_LOG: join(dir, "argv.log"), FAKE_RELAUNCH_MODE: mode, FAKE_RELAUNCH_SESSION: session, PI_CODING_AGENT_DIR: dir };
 	const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
 	Object.assign(process.env, env);
 	t.after(() => {

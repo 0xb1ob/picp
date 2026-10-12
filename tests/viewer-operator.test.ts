@@ -180,8 +180,14 @@ test("explicit --host/--port reach the parent at the viewer's address", async (t
 	const port = await freePort();
 	const dir = mkdtempSync(join(tmpdir(), "cp-operator-address-"));
 	const addressFile = join(dir, "address.json");
-	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0" });
+	// An agent dir holding one allowlisted skill: only that one is attached, under --no-skills.
+	mkdirSync(join(dir, "skills/brainstorming"), { recursive: true });
+	writeFileSync(join(dir, "skills/brainstorming/SKILL.md"), "---\nname: brainstorming\n---\n");
+	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0", PI_CODING_AGENT_DIR: dir });
 	t.after(() => {
+		if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
 		delete process.env.CP_OPERATOR_WEB;
 		delete process.env.FAKE_PI_EXIT_CODE;
 		delete process.env.FAKE_PI_ADDRESS_FILE;
@@ -189,7 +195,7 @@ test("explicit --host/--port reach the parent at the viewer's address", async (t
 	});
 	assert.equal(await runOperator(["--host", "127.0.0.1", "--port", String(port), "--model", "test"], { piBin: FAKE_PI, viewer: { command: [process.execPath, FAKE_VIEWER, String(port)] } }), 0);
 	assert.deepEqual(JSON.parse(readFileSync(addressFile, "utf8")), {
-		host: "127.0.0.1", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS, "--model", "test"],
+		host: "127.0.0.1", port: String(port), args: ["--no-extensions", "--no-skills", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS, "--skill", join(dir, "skills/brainstorming"), "--model", "test"],
 	});
 });
 
@@ -203,12 +209,15 @@ test("without --host, the operator uses the tailnet address for parent board lin
 	const previous = { PATH: process.env.PATH, CP_VIEWER_HOST: process.env.CP_VIEWER_HOST };
 	process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
 	delete process.env.CP_VIEWER_HOST;
-	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0" });
+	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+	Object.assign(process.env, { FAKE_PI_EXIT_CODE: "0", FAKE_PI_ADDRESS_FILE: addressFile, CP_OPERATOR_WEB: "0", PI_CODING_AGENT_DIR: dir });
 	t.after(() => {
 		for (const key of ["PATH", "CP_VIEWER_HOST"] as const) {
 			if (previous[key] === undefined) delete process.env[key];
 			else process.env[key] = previous[key];
 		}
+		if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
 		delete process.env.CP_OPERATOR_WEB;
 		delete process.env.FAKE_PI_EXIT_CODE;
 		delete process.env.FAKE_PI_ADDRESS_FILE;
@@ -216,7 +225,7 @@ test("without --host, the operator uses the tailnet address for parent board lin
 	});
 	assert.equal(await runOperator([], { piBin: FAKE_PI, viewer: { port, command: [process.execPath, FAKE_VIEWER, String(port)] } }), 0);
 	assert.deepEqual(JSON.parse(readFileSync(addressFile, "utf8")), {
-		host: "100.101.102.103", port: String(port), args: ["--no-extensions", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS],
+		host: "100.101.102.103", port: String(port), args: ["--no-extensions", "--no-skills", "-e", join(REPO_ROOT, "extensions/cp-bridge/index.ts"), ...BUILTINS],
 	});
 	rmSync(tailscale);
 	process.env.PATH = dir;
