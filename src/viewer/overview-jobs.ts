@@ -1,7 +1,8 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BlockedJob, FailedJob, FlightJob, ShippedJob } from "./api-types.ts";
-import { type JobRow, PR_URL } from "./fleet-view.ts";
+import type { JobRow } from "./fleet-view.ts";
+import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { SHA } from "./git-read.ts";
 import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
 import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
@@ -46,7 +47,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
 export function mergeReceipt(state: ViewerState, id: string): Json | undefined {
  const receipt = readObject(join(state.stateDir,"runs",id,"merge.json"));
- return receipt?.job_id === id && timestamp(receipt.merged_at) && PR_URL.test(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "") ? receipt : undefined;
+ return receipt?.job_id === id && timestamp(receipt.merged_at) && isSafeChangeRequestUrl(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "") ? receipt : undefined;
 }
 /** Merged today, newest first; `cost_usd` is the Jobs list's (the same `rows`, every finished one included), null when no row (audit P3 #20). */
 export function shipped(state: ViewerState, jobs: Json[], ledger: Json[], now: number, rows: readonly JobRow[]): ShippedJob[] {

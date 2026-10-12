@@ -62,8 +62,8 @@ export const GITLAB_COM_TOKEN_ENV = "GITLAB_TOKEN";
 export const TOKEN_ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
 const KNOWN_HOSTS: Readonly<Record<string, ForgeKind>> = { "github.com": "github", "gitlab.com": "gitlab" };
-// A leading letter, digit or underscore also excludes "." and ".." (path traversal).
-const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+// A leading dot is a real repo name (`.github`); exactly "." or ".." is path traversal and never a segment.
+const SEGMENT = /^(?!\.\.?$)[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
 const HOSTNAME = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
 const POSITIVE = /^[1-9][0-9]{0,9}$/;
 const SCP = /^(?:[^@/:\s]+@)?([^@/:\s]+):(?!\/)(\S+)$/;

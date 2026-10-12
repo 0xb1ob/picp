@@ -47,6 +47,9 @@ export async function observeGitlabMr(input: { jobId: string; branch: string; pr
 		return { merged: false, next: "surface", facts: [fact], ...seen, reason: `${mr.url} merges ${mr.source_branch ?? "an unknown branch"}, but ${jobId}'s branch is ${branch} — that MR is not this job's delivery, so nothing was touched.` };
 	}
 	if (mr.state === "merged" && mr.target_branch) return { merged: true, prUrl: mr.url, base: mr.target_branch, ...(head ? { head } : {}), fact };
+	if (mr.state === "merged") {
+		return { merged: false, next: "surface", facts: [fact], ...seen, reason: `${mr.url} is merged, but GitLab named no target branch, so there is no base to record, sync or tear down against. Nothing was recorded and nothing was touched; re-run cp_integrate once GitLab reports its target branch.` };
+	}
 	if (mr.state === "closed") {
 		return { merged: false, next: "surface", facts: [fact], ...seen, reason: `${mr.url} is closed and was never merged. Nothing was recorded and nothing was torn down — reopen it, or decide with the operator whether this job is dropped.` };
 	}

@@ -16,9 +16,9 @@ import { worktreeRoot } from "./explorer.ts";
 import { readScheduleFile } from "./schedule-core.ts";
 import { SHA } from "./git-read.ts";
 import { fleetJobs, isSafeId, type Json, num, obj, readLedger, readObject, readStatus, str, type ViewerState } from "./sessions.ts";
+// The only PR/MR URL shape that reaches the page; everything else is dropped server-side.
+import { isSafeChangeRequestUrl } from "../forge-url.ts";
 
-/** The only URL shape that reaches the page; everything else is dropped server-side. */
-export const PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/;
 const REVIEWER_RUN_DIR = /^(?:gate|review|quality)-[a-z0-9_-]+$/;
 const FINISHED_SHOWN = 10;
 const OTHER_MANDATES_SHOWN = 5;
@@ -199,7 +199,7 @@ export function jobRow(state: ViewerState, entry: UsageJob, title: string | unde
 	const { job } = entry;
 	const status = readStatus(state, entry.job_id);
 	const routing = obj(job.routing);
-	const pr = (Array.isArray(job.receipts) ? job.receipts : []).map(obj).find((r) => r?.kind === "pr" && PR_URL.test(str(r.url) ?? ""));
+	const pr = (Array.isArray(job.receipts) ? job.receipts : []).map(obj).find((r) => r?.kind === "pr" && isSafeChangeRequestUrl(str(r.url) ?? ""));
 	const runPhase = str(status?.phase);
 	return {
 		job_id: entry.job_id,
@@ -219,7 +219,7 @@ export function jobRow(state: ViewerState, entry: UsageJob, title: string | unde
 		dispatched_at: str(job.dispatched_at),
 		closed_at: str(job.closed_at),
 		branch: str(job.branch),
-		pr_url: str(pr?.url) ?? [str(obj(job.bound_pr)?.url)].find((url) => PR_URL.test(url ?? "")), // a bound PR shows before its envelope
+		pr_url: str(pr?.url) ?? [str(obj(job.bound_pr)?.url)].find((url) => isSafeChangeRequestUrl(url ?? "")), // a bound PR shows before its envelope
 		pr_status: str(pr?.status),
 		live: (runPhase === "working" || runPhase === "starting") && entry.phase !== "done" && entry.phase !== "failed",
 	};

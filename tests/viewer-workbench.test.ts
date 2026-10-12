@@ -213,8 +213,9 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
+			if (match[2] === "../forge-url.ts") assert.doesNotMatch(readFileSync(join(VIEWER, "..", "forge-url.ts"), "utf8"), /^\s*import\b|\bimport\s*\(|\brequire\s*\(/m, "forge-url.ts may cross the viewer boundary only while it imports nothing");
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
 			// PR 2: a revoke removes the device's own push subscriptions through the subscription writer, nothing else from it.

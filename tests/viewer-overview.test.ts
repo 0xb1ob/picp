@@ -87,6 +87,20 @@ test("audit P2 #12: Landed today is merged plus closed without PR, the same tota
  put(LAYOUT.fleetFile, "{broken"); assert.equal(overview(state, now).closed_today, null);
 });
 
+test("forge PR 4: an observed GitLab merge ships today; git-content-only and malformed receipts are closed, never merged", t => {
+ const {state, put} = fixture(t); const sha = "e".repeat(40); const at = "2026-09-26T10:00:00Z";
+ const mr = "https://git.example.test:8443/code/group/sub/repo/-/merge_requests/12";
+ const ids = ["cp-gl", "cp-git-only", "cp-cred", "cp-http"];
+ put(LAYOUT.fleetFile, {jobs:ids.map(job_id => ({job_id, project:"demo", phase:"done", dispatched_at:at, closed_at:at}))});
+ put(join(LAYOUT.runs, "cp-gl/merge.json"), {job_id:"cp-gl", pr_url:mr, merge_commit_sha:sha, merged_at:at, forge:{provider:"gitlab"}});
+ put(join(LAYOUT.runs, "cp-cred/merge.json"), {job_id:"cp-cred", pr_url:"https://user:secret@git.example.test/g/r/-/merge_requests/1", merge_commit_sha:sha, merged_at:at});
+ put(join(LAYOUT.runs, "cp-http/merge.json"), {job_id:"cp-http", pr_url:"http://git.example.test/g/r/-/merge_requests/1", merge_commit_sha:sha, merged_at:at});
+ const data = overview(state, now);
+ assert.deepEqual(data.shipped_today.map(j => [j.id, j.pr_url]), [["cp-gl", mr]], "a custom-host, nested-group MR receipt is a merge");
+ assert.equal(data.closed_today, 3, "a teardown proven by git content alone, and receipts with unsafe urls, are closed work, not observed merges");
+ assert.ok(!JSON.stringify(data).includes("secret"), "a credential-bearing url never reaches the page");
+});
+
 test("audit P3 #17 #19 #20: failed jobs with a one-line cause, the main-ci latch as MainCiStore writes it, and merged cost", t => {
  const {state, put} = fixture(t); const sha = "d".repeat(40); const at = "2026-09-26T10:00:00Z";
  put(".pi-command-post/jobs.json", {jobs:[{id:"cp-dead",title:"Died",status:"in_progress",labels:[]}]});

@@ -1,7 +1,8 @@
 import { realpathSync, statSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import type { BoardResponse, JobResponse, JobsResponse, ViewerJob, JobPhase } from "./api-types.ts";
-import { dashboard, readMandates, PR_URL } from "./fleet-view.ts";
+import { dashboard, readMandates } from "./fleet-view.ts";
+import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { jobRoot, listOrRead } from "./explorer.ts";
 import { overview } from "./overview-view.ts";
 import { decisions } from "./overview-decisions.ts";
@@ -57,7 +58,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const labels=strings(job?.labels); const project=str(entry?.project) ?? labels.find(l=>l.startsWith("project:"))?.slice(8) ?? "Unassigned";
   const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
   const status=readStatus(state,id); const receipt=readObject(join(state.stateDir,"runs",id,"merge.json"));
-  const merged=receipt?.job_id===id && timestamp(receipt.merged_at) && PR_URL.test(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "");
+  const merged=receipt?.job_id===id && timestamp(receipt.merged_at) && isSafeChangeRequestUrl(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "");
   const failureAt=phase==="failed" ? [obj(entry?.failure)?.at,obj(status?.failure)?.at].find(timestamp) : undefined;
   const finished=merged ? String(receipt.merged_at) : [failureAt,entry?.closed_at,status?.exited_at,job?.closed_at].find(timestamp) ?? null;
   const started=[status?.started_at,entry?.dispatched_at].find(timestamp);

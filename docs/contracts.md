@@ -970,9 +970,16 @@ derived from the PR URL, with no extra query and its key unchanged.
   coming, `× CI_WATCH_IDLE_MULTIPLIER` once this head's verdict is known and only
   the merge question is left, and `60s → 2m → 4m → 8m` capped at
   `CI_WATCH_MAX_BACKOFF_MS` after a query error (reset on the first success).
-  A missing `gh` (it is not in `REQUIRED_TOOLS`) disables the watch for the
-  session and says so **once** — an alarm that fires every tick is an alarm
-  nobody reads.
+  A missing `gh` (it is not in `REQUIRED_TOOLS`) stops the GitHub jobs' reads
+  for the session and says so **once** — an alarm that fires every tick is an
+  alarm nobody reads. GitLab jobs need no `gh` and keep being watched.
+- **A GitLab MR (forge PR 3) is watched for its terminal state only.** Its PR
+  read goes through the project's forge observer and is mapped onto the same
+  shape, so `pr_merged`/`pr_closed` come from the same rule, key and delivery
+  as GitHub's. Its run read returns nothing: GitLab CI is not read in v1. That
+  is unknown, never green and never "no CI configured", so a GitLab job never
+  gets `ci_green` or `ci_failed`. A failed MR read is that job's own error and
+  backoff, and one provider failing never stops the other's jobs.
 - **A tick never overlaps itself** (the `EnvelopeIntake.#inFlight` shape).
 
 **Delivery is at-least-once, keyed on `(job_id, head_sha, event)`.** cp-nx7's
@@ -2794,7 +2801,7 @@ Kind-aware gates, ported from `cmdp teardown`. **Delivery does not appear here**
 
 | kind | gate | pass reasons |
 |---|---|---|
-| ship | clean porcelain, work on the job branch, **and** pushed; for failed/waiting non-script jobs, the current HEAD must also match an accepted current-generation ship/done report or an exact landed merge receipt | `pushed` (the branch **on origin** == HEAD), `upstream` (the branch its upstream names, on the remote, == HEAD), `merged` (a merge receipt for this head), `merged_head_deleted`, `nothing_to_push` (delivery:local, clean, zero commits ahead of the base — the job branch need not exist on origin) |
+| ship | clean porcelain, work on the job branch, **and** pushed; for failed/waiting non-script jobs, the current HEAD must also match an accepted current-generation ship/done report, an exact landed merge receipt, or this call's own git landing proof for that exact HEAD | `pushed` (the branch **on origin** == HEAD), `upstream` (the branch its upstream names, on the remote, == HEAD), `merged` (a merge receipt for this head), `merged_head_deleted`, `landed_by_git` (HEAD's content is in the base's reachable history; no merge is claimed — see [Landed content without a forge](#landed-content-without-a-forge-forge-pr-2)), `nothing_to_push` (delivery:local, clean, zero commits ahead of the base — the job branch need not exist on origin) |
 | research | clean porcelain **and** no local commits past `origin/<base>` | `clean_research` |
 
 ### Where the work lives, and why delivery does not relax the gate
@@ -2930,6 +2937,23 @@ is this HEAD ⇒ pass reason `merged`, whatever the merge strategy was. A receip
 for a *different* head is a refusal, not a pass — commits made after the merge
 are in no PR and on no remote, and the message names the sha that did land.
 
+**GitLab receipts (forge PR 2).** For a GitLab project, `cp_merged` and
+`cp_integrate` read the MR through the project's forge observer (see [Forge
+identity and observation](#forge-identity-and-observation-forge-v1-pr-1)), never
+`gh`. They write the same `MergeReceiptSchema` receipt, and only for state
+`merged`. The landing commit is `merge_commit_sha`, else `squash_commit_sha`,
+else the MR head when git shows it reachable from the actual target (a
+fast-forward). It is never the current target tip. `base_branch` is the MR's
+actual target. The receipt also carries an optional `forge` block (provider and
+project url), and `recorded_by` names the observer that read it. With no
+strategy stated to `cp_merged`, `strategy` is `squash` only when GitLab reports
+a squash commit, otherwise `unknown`; `cp_integrate` never puts its caller's
+strategy on a GitLab receipt. Existing
+GitHub receipts have no `forge` block and are read unchanged. A stored receipt
+that names another job or branch discharges nothing. Re-recording an existing
+receipt repairs a fleet `pr` receipt still marked `open` (a crash between the
+two writes) and emits no second event.
+
 **The false pass.** Earlier the same session two jobs tore down reporting
 `(pushed)` **after** their remote branches had been deleted, because their
 worktrees still held `refs/remotes/origin/<branch>` equal to the local tip.
@@ -2948,15 +2972,59 @@ the same stale ref by another name — and this one gates a **pass**, so a
 tracking ref that happens to match HEAD's tree would tear a job down as merged
 when nothing merged. The base is now resolved with `ls-remote` (the same
 `#remoteTip` used for the branch) and the diff runs against that **sha**. It
-fails closed: origin unaskable, or no such branch on origin, ⇒ `false`, and the
-gate falls through to its existing `unpushed` refusal. A sha origin names but
-this clone does not have makes `git diff` exit non-zero, which is the same
-`false`; no fetch is issued to repair it, because a false negative here is safe
-and fetching is a side effect this gate does not own.
+fails closed: origin unaskable, or no such branch on origin, ⇒ no pass. Until
+forge PR 2 a sha origin named but this clone lacked was also a plain `false`,
+with no fetch; the git landing proof below now fetches that one exact sha (no
+ref destination, nothing else) and calls a fetch it cannot complete `unknown`,
+never "unpushed".
 
 `force` is untouched by all of this. It is still operator authorization for the
 genuinely unprovable case, it still claims no pass reason, and it is still
 recorded as `closed_reason: "forced"`.
+
+### Landed content without a forge (forge PR 2)
+
+A squash or rebase rewrites the job's commits, and a later base commit moves
+the tree, so neither ancestry nor whole-tree equality recognises most landed
+work. Before the gate says `unpushed` — the job branch is absent from origin, or
+origin's tip differs from HEAD — it now asks, in order:
+
+1. **An exact merge receipt** for this job, its branch and this HEAD ⇒ `merged`.
+   A receipt for another head is not proof on its own.
+2. **The git landing proof** ([`src/landing-proof.ts`](../src/landing-proof.ts),
+   called by `landingGate` in [`src/teardown-head.ts`](../src/teardown-head.ts))
+   against the actual target: the receipt's `base_branch`, then the bound PR's
+   base, then the project's configured base, then the clone's default. The base
+   tip is pinned from `git ls-remote`; a remote-tracking ref never authorizes a
+   pass. Cheapest first: HEAD is an ancestor of that tip; HEAD's tree equals it;
+   then the historical search. Take the single merge base of HEAD and the tip
+   and HEAD's complete changed-path set since that fork (NUL-delimited, no
+   renames, no textconv, no external diff). Then find one commit on the ancestry
+   path `fork..tip`, tip first, whose blobs, modes, deletions and gitlinks equal
+   HEAD's on **all** of those paths at once. Separate witnesses for separate paths
+   are never combined. Unrelated base changes before or after the landing, and a
+   later edit of a touched file, do not hide an earlier witness.
+
+A pass is `landed_by_git` with the evidence on the result: HEAD, base branch,
+pinned base sha, witness, fork, method and the counts. The evidence is also
+journalled as `teardown_landing_proven`. A whole-tree match with no receipt and
+no branch on origin keeps its older name `merged_head_deleted`. The proof says
+the content is in the base. It does **not** say a PR or MR merged, so it writes
+no `merge.json`, sets no `merged` receipt status and closes no tracker item as
+merged. After an API outage the recovery is `cp_teardown`, then `cp_job close`
+with that factual reason.
+
+It fails closed, and it keeps the lease. A command failure, missing objects the
+exact-sha fetch cannot supply, shallow or ambiguous history, an empty aggregate
+diff, or a budget hit is `unknown`. The budgets are 1,024 candidates, 512 paths,
+16 MiB of git output, 10 s for the local proof and 30 s for the fetch. `unknown` refuses
+as `landing_unverified`, naming the missing proof; it is never called unpushed
+and never advised to force. A complete search that found nothing keeps the
+`unpushed` refusal, and so does extra local work past a merged receipt. HEAD and
+porcelain are re-read just before the lease is returned, and a moved HEAD or a
+dirty tree is `landing_unverified`. For a failed or waiting job, only this call's
+own proof for this exact HEAD clears `unreported_head`. The live-worker,
+ownership, dirty and review gates are unchanged, and so is `force`.
 
 A research or `delivery:answer` job is closed in the ledger with a reason
 derived from its filed envelope (`answered: <headline>`, `researched: <artifact
@@ -3560,8 +3628,40 @@ the `PRIVATE-TOKEN` header, `redirect: manual` (refused, never followed), a
 before any request; a fork MR, a conflicting head, a malformed sha or an answer
 naming another MR is a named failure (`unsupported`/`mismatch`/`unavailable`/
 `invalid`) carrying provider, host, status and a static cause — never a body, a
-header or an exception message. Nothing in PR 1 calls the GitLab observer yet:
-merge recording, teardown, intake and watch stay GitHub-only and unchanged.
+header or an exception message.
+
+What uses it (forge PRs 2–4), and where v1 stops:
+
+- **Merge receipts:** `cp_merged`/`cp_integrate` record an observed GitLab merge
+  ([GitLab receipts](#landing-is-a-pr-fact-and-on-origin-is-a-question-for-origin)).
+  Teardown also accepts a git-only content proof that claims no merge ([Landed
+  content without a forge](#landed-content-without-a-forge-forge-pr-2)).
+- **Intake:** a GitLab job's envelope must name its MR url. Intake reads that
+  MR and checks its project and source branch, then stores the canonical url.
+  It never searches for an MR by branch. A same-project url it cannot read is
+  stored marked unverified, as for GitHub.
+- **Watch:** merged/closed MRs wake the parent through the existing `cp-ci`
+  events; GitLab CI is never read ([The CI/PR watch](#the-cipr-watch)).
+- **Integration:** `cp_integrate` honours holds first. A merged MR goes into the
+  same record → sync → teardown → delete-head → close tail as a merged GitHub
+  PR, against the MR's actual target branch. Every other state stops with a
+  named reason and runs no `gh`: open, closed, unknown, a merged MR with no
+  target branch, another branch, or an unreadable MR. That also means no CI
+  read, no ready, no rebase, no merge and no merge-approval fallback. A GitLab
+  merge ask defers as unknown CI until a receipt for its own MR withdraws it.
+  Bare `!N` and `MR N` count as PR references only on a GitLab job, so GitHub
+  ask parsing is unchanged.
+- **Dashboard:** every PR/MR link the viewer serves passes
+  `isSafeChangeRequestUrl` (`src/forge-url.ts`). It accepts a github.com
+  `/pull/<n>` or any HTTPS `/<namespace>/-/merge_requests/<iid>`, nested groups
+  and an installation prefix included. It refuses credentials, a query, a
+  fragment, plain http and a non-positive number. A link is shape only, never
+  trust in an endpoint. Shipped still needs a real receipt with `merged_at` and
+  a full merge sha, so a git-only teardown counts as closed, never merged.
+- **Not in v1:** creating an MR, binding a dispatch to an open MR
+  (`src/pr-bind.ts` still refuses GitLab before a lease), GitLab CI, merge
+  permission, ready/rebase/merge, fork MRs, GitHub Enterprise, and a GitLab
+  issue tracker. Worker briefs and delivery stay GitHub-only.
 
 ### The two-writer boundary
 

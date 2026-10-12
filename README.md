@@ -47,6 +47,37 @@ objective, and caps from the home's defaults). Anything outside it — a risky
 change, more scope, an exhausted budget, a merge the repository refuses —
 comes back to you as one question.
 
+### GitHub delivery, GitLab recovery
+
+Automated delivery is **GitHub only**: workers open draft pull requests with
+`gh`, and the parent reads CI, reviews, and merges through `gh`. GitLab
+support is **landed-work recovery**, not delivery. The parent can read a
+merge request you name, record its merge, notice when it merges or closes,
+and finish a job whose MR is already merged. It never creates, rebases,
+approves or merges an MR, and it never reads GitLab CI.
+
+gitlab.com is recognised from the remote. A self-managed GitLab needs a
+`forge` block on its project, because a hostname does not say which software
+serves it:
+
+```text
+cp_project forge name=app forge={"kind":"gitlab","web_base_url":"https://git.example.test","token_env":"APP_GITLAB_TOKEN"}
+```
+
+`token_env` is the **name** of an environment variable. The token itself never
+goes into a config value, a tool argument, a log or a receipt. It is sent only
+in the `PRIVATE-TOKEN` header of the one read request. gitlab.com uses
+`GITLAB_TOKEN` by default. With no token, the parent tries an anonymous read,
+and a private project answers with a named failure.
+
+A job can also be torn down when no forge API can be reached. Teardown then
+checks git itself: every file the job changed must appear, with the same
+content, in one commit reachable from the remote base. This covers squash,
+rebase and a deleted source branch. The proof says the work is in the base, not
+that an MR merged, so it writes no merge receipt. Close the job yourself
+afterwards with `cp_job close` and that reason. When the proof cannot be
+completed, the lease stays and teardown names what is missing.
+
 ## Requirements
 
 | What | Needed? | Notes |
@@ -56,7 +87,7 @@ comes back to you as one question.
 | `pi` | yes | the installer runs `npm install -g @earendil-works/pi-coding-agent` when it is missing |
 | a model login for pi | yes, by you | run `pi`, then `/login`; the installer never handles credentials |
 | `treehouse` | yes | every job runs in a treehouse worktree; the installer fetches it |
-| [`gh`](https://cli.github.com), logged in | yes, for pull requests | reading PRs, CI and merging go through `gh`; on Linux install it yourself, then `gh auth login` |
+| [`gh`](https://cli.github.com), logged in | yes, for pull requests | reading PRs, CI and merging go through `gh`; on Linux install it yourself, then `gh auth login`. GitLab needs no CLI ([recovery only](#github-delivery-gitlab-recovery)) |
 | `systemd --user` (Linux) | optional | cp-daemon keeps the parent and dashboard running everywhere; with `systemd --user` it also comes back after a reboot by itself, without it you run the printed start command (or `--crontab`) |
 | [Tailscale](https://tailscale.com) | recommended | the dashboard binds to one address of this machine; the Tailscale one keeps it to your tailnet |
 | `tmux` or herdr | optional | lets the dashboard's **Start session** button open an operator session |

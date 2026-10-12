@@ -29,6 +29,21 @@ npm run e2e:phase2                              # dispatch → envelope → prom
 npm run e2e:phase3                              # pipeline: research → gate → checkpoint → implement
 ```
 
+The forge (GitHub/GitLab) and landing-proof work is covered by focused files.
+They need no live forge, token or network. GitLab is a fake HTTP transport that
+throws on an unexpected request, `gh` is an injected runner, and the git proof
+runs on real scratch repositories (a bare remote plus a linked job worktree):
+
+```bash
+npm run test:one -- tests/forge-url.test.ts         # remotes, nested groups, custom hosts, safe PR/MR links
+npm run test:one -- tests/forge-observers.test.ts   # fake gh and fake GitLab answers, failures, canary token
+npm run test:one -- tests/landing-proof.test.ts     # merge, squash, rebase, deleted branch; negatives and budgets
+npm run test:one -- tests/teardown.test.ts          # the ship gate with receipts and the git proof
+npm run test:one -- tests/merges.test.ts            # GitHub and GitLab merge receipts
+npm run test:one -- tests/integrate.test.ts         # a merged MR's tail; open/closed MRs run no gh
+npm run test:one -- tests/viewer-jobs.test.ts       # GitLab links in the dashboard
+```
+
 Worker-prompt evals are a separate axis: `npm run eval` scores the assembled
 prompt text against a checked-in corpus; the model-quality half runs only
 under `CP_EVAL_LIVE=1` ([evals.md](evals.md)).
