@@ -206,8 +206,8 @@ const VIEWER = join(REPO_ROOT, "src", "viewer");
 // operator.ts, doctor-check.ts and model-list.ts (the cp-install `pi --list-models` parser, reused rather than copied) may import outside the viewer.
 const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts" && name !== "model-list.ts");
 
-test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines", () => {
-	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts"]);
+test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines, device-store.ts writes data/devices.json", () => {
+	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts", "device-store.ts"]);
 	for (const name of standalone()) {
 		const text = readFileSync(join(VIEWER, name), "utf8");
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
@@ -217,13 +217,16 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
+			if (name === "device-store.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:control-audit|control-files|device-files)\.ts$/, `${name} imports ${match[2]}`);
 		}
 		for (const match of text.matchAll(/import\s*\(\s*"([^"]+)"\s*\)/g)) {
 			assert.match(match[1] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$/, `${name} dynamically imports ${match[1]}`);
 		}
 		if (!writers.has(name)) assert.doesNotMatch(text, /writeFileSync|appendFileSync|mkdirSync|rmSync|renameSync|unlinkSync|createWriteStream|\bwriteSync\(|\b(?:writeFile|appendFile|mkdir|rename|unlink)\s*\(/, name);
-		// The dashboard-control writer is imported by the three write routes (control, image upload, thread done) and nothing else in the viewer.
-		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
+		// The dashboard-control writer is imported by the three write routes (control, image upload, thread done) and the device store (its secret-free device events), nothing else in the viewer.
+		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts" && name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
+		// data/devices.json has one writer: nothing else in the viewer constructs or imports the device store yet.
+		if (name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);
 		// The image store is written only through uploads.ts, and only the upload route stores (the message route and the GET only read).
 		if (name !== "operator-upload-api.ts" && name !== "uploads.ts") assert.doesNotMatch(text, /\bwriteUpload\b/, `${name} stores an upload`);
 		if (name === "control-api.ts" || name === "control-files.ts") assert.doesNotMatch(text, /parent-host|OperatorAsks|operator-asks/, `${name} reaches the parent or the ask journal`);

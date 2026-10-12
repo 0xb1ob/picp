@@ -388,6 +388,8 @@ export type ControlAuditLine =
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
 	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string; queue_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }
+	/** Remote dashboard: secret-free device events from `device-store.ts`; `id` stays null so the composer readers skip them. */
+	| { type: "device"; by: "viewer"; id: null; at: string; peer: string | null; event: "code_issued" | "paired" | "claim_refused" | "signin_refused" | "revoked"; reason: string | null; pairing_id?: string; device_id?: string; name?: string; level?: "full" | "view"; route?: "cli-up" | "cli-pair" | "loopback-dashboard" | "tailnet-dashboard" }
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
 
 type UploadMetadata = { name: string; bytes: number };

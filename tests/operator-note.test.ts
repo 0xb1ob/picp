@@ -9,7 +9,9 @@ import {
 	OPERATOR_DECIDE_LIST,
 	OPERATOR_NOTE,
 	OPERATOR_NOTE_MAX_LINES,
+	OPERATOR_REMOTE_DEVICE_RULE,
 } from "../src/operator-note.ts";
+import bridgeExtension from "../extensions/cp-bridge/index.ts";
 
 test("the operator note is at or under its line cap", () => {
 	const lines = OPERATOR_NOTE.split("\n").filter((line, i, all) => i < all.length - 1 || line !== "");
@@ -89,4 +91,26 @@ test("the note routes preferences to standing orders and lessons to a capture: l
 test("the operator note carries exactly one verbatim dashboard thread instruction", () => {
 	const sentence = "A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.";
 	assert.equal(OPERATOR_NOTE.split("\n").filter(line => line === sentence).length, 1);
+});
+
+// Remote dashboard (Decision es-6a78c3): the note carries the remote device-management prohibition once, inside the cap,
+// and the bridge still injects that exact note. This proves the instruction is delivered, not that a model obeys it.
+test("the operator note forbids device pairing and device-list edits on a remote-originated request", async () => {
+	const sentence = "On a remote-originated request, never pair devices, run `cp-tunnel pair`, or edit the device list, including through delegated or equivalent shell/file operations.";
+	assert.equal(OPERATOR_REMOTE_DEVICE_RULE, sentence);
+	const capped = OPERATOR_NOTE.split("\n").slice(0, OPERATOR_NOTE_MAX_LINES);
+	assert.equal(capped.filter((line) => line === sentence).length, 1);
+	assert.equal(OPERATOR_NOTE.split(sentence).length, 2, "exactly once");
+	const handlers: Array<(event: unknown) => unknown> = [];
+	bridgeExtension({
+		registerTool: () => {},
+		registerCommand: () => {},
+		on: (event: string, handler: (event: unknown) => unknown) => { if (event === "before_agent_start") handlers.push(handler); },
+		sendMessage: () => {},
+		sendUserMessage: () => {},
+	} as never);
+	const event = { systemPromptOptions: { sections: {} as Record<string, string> } };
+	for (const handler of handlers) await handler(event);
+	assert.equal(event.systemPromptOptions.sections.operator_note, OPERATOR_NOTE);
+	assert.ok(event.systemPromptOptions.sections.operator_note?.includes(sentence));
 });
