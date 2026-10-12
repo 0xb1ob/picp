@@ -6427,7 +6427,7 @@ trust boundary is the dashboard control one: a same-user local process can alrea
 
 **Status.** **Off by default**: nothing starts the remote listener yet (the tunnel wiring is a later PR), and the
 loopback/tailnet listener answers exactly as before — without `devices` routes configured it has no device route.
-Later PRs add the tunnel, remote controls with message provenance, pairing alerts and the Devices screen.
+Later PRs add the tunnel (which also starts the device CLI socket), pairing alerts and the Devices screen.
 
 **Trust (Decision es-6a78c3).** A Full-control remote device is trusted like your terminal. The dashboard's pairing and
 device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested
@@ -6479,8 +6479,38 @@ pairing events, live-code count, the trust statement; local only to a loopback/t
 `POST /api/pair/create` `{level?}` (local only, `canMint`; every remote context refuses 403 whatever its level,
 token or Origin; the link carries the code in its fragment) and `POST /api/devices/revoke` `{id}` (`canRevoke`).
 Writes need the per-process management token, an exact Origin (remote: the tunnel origin; local: the control
-route's origins), same-origin Sec-Fetch-Site, JSON and at most 1 KiB. In this slice every other remote write refuses
-403 at the gate — View-only always, Full-control until remote controls carry device provenance.
+route's origins), same-origin Sec-Fetch-Site, JSON and at most 1 KiB. Every other remote write refuses 403 at the gate
+for View-only; a Full-control device reaches the ordinary write routes (below), and push subscription writes stay 403
+for both levels until subscriptions are owned per device.
+
+**Remote controls and provenance (PR 1c).** The shared write chain (`guarded`, `src/viewer/control-api.ts`) keeps
+the local listener's `--require-tailnet` rule exactly and, for a remote context, demands `canControl` and an `Origin`
+equal to that device's tunnel origin (never the local origin list). The device id and name come only from the gate's
+context (`remoteOf`); a body field naming a device is refused as unknown. A remote send, card click, steer, abort or
+queue edit carries `remote: {device_id, name}` in its socket args, but only after the running bridge's `status`
+answers `remote_provenance` ≥ 1 (`REMOTE_PROVENANCE_VERSION`, `src/viewer/control-files.ts`): an older bridge would
+inject the text unlabelled, so the viewer refuses 409 restart-required and sends nothing. The bridge
+(`src/dashboard-control.ts`) journals `remote` on the `request`/`edited` line, refuses a malformed one 400 after the
+request line, keeps the sender and every remote editor (first-edit order, one per device; a local edit never clears
+them) through the queue and a restart reload (`src/viewer/control-queue.ts`), and injects one line directly above the
+marker — `[cp-remote — through a paired remote device, not this terminal: sent by dev-… "Name"; edited by dev-… "Name"]`,
+names JSON-quoted — with a trailing `; remote` field on the marker. A held offline message keeps `remote` on its
+`held` line (`src/viewer/control-inbox.ts`), and each replayed remote message gets its own line and marker, threaded
+or not. `parseDashboardText` reads the line into `remote: {sender, editors}` (the transcript's `SessionEntry.remote`)
+and never into the body; a `; remote` marker without a well-formed line above it is not a marker, and since the
+bridge appends its own marker after the user's text, typed text can neither forge nor strip the label. Local
+messages and journals without `remote` keep their exact bytes.
+
+**Device CLI owner socket (PR 1c, `src/viewer/device-control.ts`).** The viewer process that owns the store serves
+`state/devices/control.sock` (0600, bound under umask 077) beside `state/devices/control.json` (0600: version, pid,
+socket, 32-byte token, started_at) in a 0700 directory. Frames are newline JSON `{v: 1, token, op, args}` of at most
+4 KiB, one reply each; a wrong token closes the connection unanswered. Ops: `status`; `pair {level?, route?}` (route
+`cli-pair` or `cli-up` only; 409 while no origin is bound; the code travels back over the socket only); `list`;
+`revoke {target}` (public id or name). Every op is the store's, so its audit lines and single-winner claims hold: one
+viewer owns the socket (a starter finding a live socket refuses; a socket nothing answers is stale and replaced, only
+the inode it probed), and claims from any number of processes go through that one owner. The client
+(`deviceControlRequest`) refuses a record that is not an owner-only regular file of this user or whose pid is gone.
+Nothing starts it yet: `cp-tunnel` wiring is the tunnel PR.
 
 ## Reading the plan
 

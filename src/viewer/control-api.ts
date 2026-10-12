@@ -50,6 +50,7 @@ import { appendAnswerLine, appendControlAudit, appendInboxLine, appendScheduleCo
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
 	controlInboxFile, controlOrigin, controlRecordFile, DASHBOARD_ID_RE, INBOX_MAX_HELD, isAnswerId, isAskId, normalizeThreadTag, operatorAnswersFile, readAnswers, readControlConfig, readControlRecord,
+	REMOTE_PROVENANCE_VERSION, type RemoteDevice,
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
@@ -355,9 +356,15 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		log(options)(`viewer: dashboard control refused 405: ${req.method} (${peer ?? "unknown peer"})\n`);
 		return { status: 405, body: { error: "POST only" }, headers: { allow: "POST" } };
 	}
-	if (options.requireTailnet !== true) {
+	const access = accessOf(req);
+	if (access.kind === "local" && options.requireTailnet !== true) {
 		log(options)(`viewer: dashboard control refused 403: not under --require-tailnet (${peer ?? "unknown peer"})\n`);
 		return { status: 403, body: { error: "dashboard control is served only under --require-tailnet" } };
+	}
+	// Remote dashboard PR 1c: a paired device writes only at Full control (remote-server.ts refuses View-only first).
+	if (!canControl(access)) {
+		log(options)(`viewer: dashboard control refused 403: View-only device (${peer ?? "unknown peer"})\n`);
+		return { status: 403, body: { error: "View-only device: dashboard writes are refused" } };
 	}
 	let parsed: Parsed = { kind, text: null, ask_id: null };
 	const refuse: Refuse = (status, reason, headers, extra = {}) => {
@@ -380,9 +387,10 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		const config = readControlConfig(options.stateDir);
 		if (config.state === "invalid") return refuse(503, `dashboard control config is invalid: ${config.reason}`);
 		if (config.state === "off") return refuse(403, `dashboard control is off (${config.reason})`);
-		const origin = controlOrigin(options.stateDir);
+		const origin = access.kind === "remote" ? access.origin : controlOrigin(options.stateDir);
 		// No HTTPS origin configured: same-origin with this bind (the plain-HTTP origin the Host guard already pinned).
-		const origins = origin ? allowedOrigins(options, origin) : [bindOrigin(options)];
+		// A remote device: exactly the tunnel origin it paired through, never the local listener's list.
+		const origins = access.kind === "remote" ? [access.origin] : origin ? allowedOrigins(options, origin) : [bindOrigin(options)];
 		if (!origins.includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${origin ?? `${bindOrigin(options)} (no HTTPS origin is configured; npm run push:init -- --origin https://<dashboard host> to use one)`}`);
 		const site = req.headers["sec-fetch-site"];
 		if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
@@ -445,12 +453,16 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 			}
 			if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `${files ? "attachments" : "images"} total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
 		}
-		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse, peer, shape.thread);
+		const remote = remoteOf(req);
+		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse, peer, shape.thread, remote);
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
+		const provenance = await remoteProvenance(record.record, remote);
+		if (!provenance.ok) return refuse(provenance.status, provenance.reason);
+		const args = { ...shape.body, peer, ...provenance.args };
 		const reply = files
-			? await controlRequest(record.record, "send_files", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
-			: images ? await controlRequest(record.record, "send_images", { ...shape.body, peer }, UPLOAD_SEND_TIMEOUT_MS)
-			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", { ...shape.body, peer });
+			? await controlRequest(record.record, "send_files", args, UPLOAD_SEND_TIMEOUT_MS)
+			: images ? await controlRequest(record.record, "send_images", args, UPLOAD_SEND_TIMEOUT_MS)
+			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", args);
 		if (reply.ok) return { status: 202, body: threaded(options, reply.result as ControlSendResponse, shape.thread, peer, now) };
 		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
 		if (reply.status === 503 || (reply.status === 504 && reply.error.startsWith("session "))) return refuse(reply.status, reply.error);
@@ -460,8 +472,27 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 	});
 }
 
+/** Remote dashboard PR 1c: the paired device behind a remote request, from the gate's context only (never the body). */
+export const remoteOf = (req: IncomingMessage): RemoteDevice | undefined => {
+	const access = accessOf(req);
+	return access.kind === "remote" ? { device_id: access.device_id, name: access.name } : undefined;
+};
+
+/**
+ * The socket args a remote write adds. A running bridge must say it keeps provenance (`remote_provenance` in its
+ * status): an older one would inject the text unlabelled, so the write is refused with restart-required instead.
+ */
+export async function remoteProvenance(record: ControlRecord, remote: RemoteDevice | undefined): Promise<{ ok: true; args: { remote?: RemoteDevice } } | { ok: false; status: number; reason: string }> {
+	if (!remote) return { ok: true, args: {} };
+	const status = await controlRequest(record, "status", {});
+	if (!status.ok) return { ok: false, status: status.status, reason: status.error };
+	const version = (status.result as { remote_provenance?: unknown } | null)?.remote_provenance;
+	if (!(typeof version === "number" && version >= REMOTE_PROVENANCE_VERSION)) return { ok: false, status: 409, reason: "unsupported: this session's cp-bridge predates remote-device provenance; restart the session (⋮ → Restart session) and send again" };
+	return { ok: true, args: { remote } };
+}
+
 /** No live operator session: hold the message in the inbox for the next session to deliver (filed under its thread, if any). */
-function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknown, refuse: Refuse, peer: string | null, thread: string | null): ControlRouteResult {
+function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknown, refuse: Refuse, peer: string | null, thread: string | null, remote: RemoteDevice | undefined): ControlRouteResult {
 	if (!tokenMatches(token, INBOX_TOKEN)) return refuse(403, "inbox token missing or stale; reload the page");
 	if (body.kind === "abort") return refuse(409, "nothing to abort; the operator session is offline");
 	const inbox = readInbox(options.stateDir);
@@ -469,7 +500,7 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
 	const id = body.kind === "message" && body.client_id ? body.client_id : heldId(now);
 	if (inbox.held.some(message=>message.id === id)) return refuse(409, "client_id was already used; check the transcript before retrying");
-	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(thread ? { thread } : {}) });
+	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(thread ? { thread } : {}), ...(remote ? { remote } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
 	return { status: 202, body: threaded(options, { id, state: "held", deliver: "prompt" }, thread, peer, now) };
 }

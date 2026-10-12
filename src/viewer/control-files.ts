@@ -42,7 +42,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; thread?: string }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; thread?: string; remote?: RemoteDevice }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -358,17 +358,74 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The trailing marker keeps ask/thread/images ordering; files is an additive final field. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null, files?: readonly string[]): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}]`;
+/** The trailing marker keeps ask/thread/images ordering; files and then `; remote` are additive final fields. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null, files?: readonly string[], remote = false): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
 }
 
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?\\]\\s*$`);
+/**
+ * Remote dashboard PR 1c: who on a paired remote device sent or edited a message — only ever the remote gate's
+ * authenticated context (access.ts), never a request body. The id and name rules are device-files.ts's (which imports
+ * this module, so they are restated here, not imported).
+ */
+export type RemoteDevice = { device_id: string; name: string };
+export type RemoteInvolvement = { sender: RemoteDevice | null; editors: RemoteDevice[] };
+/** The bridge's `status` reply carries this; a viewer forwards a remote send only to a bridge that keeps provenance. */
+export const REMOTE_PROVENANCE_VERSION = 1;
+const REMOTE_ID_RE = /^dev-[0-9a-f]{16}$/;
+const REMOTE_NAME_BAD = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+export function remoteDevice(value: unknown): RemoteDevice | undefined {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const { device_id, name, ...rest } = value as Record<string, unknown>;
+	if (Object.keys(rest).length || typeof device_id !== "string" || !REMOTE_ID_RE.test(device_id) || typeof name !== "string") return undefined;
+	return name.length >= 1 && name.length <= 80 && name === name.trim() && !REMOTE_NAME_BAD.test(name) ? { device_id, name } : undefined;
+}
+/** Editors in first-edit order, one entry per device. */
+export const withEditor = (editors: readonly RemoteDevice[] | undefined, editor: RemoteDevice): RemoteDevice[] =>
+	editors?.some((item) => item.device_id === editor.device_id) ? [...editors] : [...(editors ?? []), editor];
 
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[]; files?: string[] } | undefined {
+const REMOTE_PREFIX = "[cp-remote — through a paired remote device, not this terminal: ";
+const REMOTE_WHO = String.raw`dev-[0-9a-f]{16} "(?:[^"\\\n]|\\.)*"`;
+const REMOTE_LINE_RE = new RegExp(String.raw`^\[cp-remote — through a paired remote device, not this terminal: (?:sent|edited) by ${REMOTE_WHO}(?:; edited by ${REMOTE_WHO})*\]$`);
+const REMOTE_PART = String.raw`(sent|edited) by (dev-[0-9a-f]{16}) ("(?:[^"\\\n]|\\.)*")`;
+/** The human-readable line injected right above the marker (names JSON-quoted: data, never instructions); null when local. */
+export function remoteLine(involvement: { remote?: RemoteDevice; editors?: readonly RemoteDevice[] }): string | null {
+	const parts = [...(involvement.remote ? [["sent", involvement.remote] as const] : []), ...(involvement.editors ?? []).map((editor) => ["edited", editor] as const)];
+	return parts.length ? `${REMOTE_PREFIX}${parts.map(([role, device]) => `${role} by ${device.device_id} ${JSON.stringify(device.name)}`).join("; ")}]` : null;
+}
+function parseRemoteLine(line: string): RemoteInvolvement | undefined {
+	if (!REMOTE_LINE_RE.test(line)) return undefined;
+	const out: RemoteInvolvement = { sender: null, editors: [] };
+	for (const [, role, device_id, quoted] of line.matchAll(new RegExp(REMOTE_PART, "g"))) {
+		let name: unknown;
+		try { name = JSON.parse(quoted!); } catch { return undefined; }
+		const device = remoteDevice({ device_id, name });
+		if (!device) return undefined;
+		if (role === "sent") out.sender = device;
+		else out.editors.push(device);
+	}
+	return out;
+}
+
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
+
+/**
+ * A marker with `; remote` is a remote message: its line directly above the marker names the devices (`remote`) and is
+ * not part of the body. Only the bridge writes that flag, after the user's text, so typed text can neither forge nor
+ * remove it; a flagged marker without a well-formed line is not a marker.
+ */
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[]; files?: string[]; remote?: RemoteInvolvement } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
-	return { body: text.slice(0, match.index).trimEnd(), id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}), ...(match[5] ? { files: match[5].split(",") } : {}) };
+	let body = text.slice(0, match.index).trimEnd();
+	let remote: RemoteInvolvement | undefined;
+	if (match[6]) {
+		const cut = body.lastIndexOf("\n");
+		remote = parseRemoteLine(body.slice(cut + 1));
+		if (!remote) return undefined;
+		body = body.slice(0, Math.max(cut, 0)).trimEnd();
+	}
+	return { body, id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}), ...(match[5] ? { files: match[5].split(",") } : {}), ...(remote ? { remote } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
@@ -381,10 +438,10 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; thread?: string; session_started_at?: string; session_file?: string }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; thread?: string; session_started_at?: string; session_file?: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
-	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string }
+	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
 	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string; queue_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }

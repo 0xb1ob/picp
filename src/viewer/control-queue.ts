@@ -9,7 +9,7 @@
  * `injected` preceded. Its text is the request's, replaced by each `edited` line in journal order. Read-only.
  */
 import { readFileSync, statSync } from "node:fs";
-import { controlJournalFile, DASHBOARD_ID_RE } from "./control-files.ts";
+import { controlJournalFile, DASHBOARD_ID_RE, type RemoteDevice, remoteDevice, withEditor } from "./control-files.ts";
 
 export interface QueuedMessage {
 	id: string;
@@ -22,6 +22,9 @@ export interface QueuedMessage {
 	images?: string[];
 	files?: string[];
 	thread?: string;
+	/** Remote dashboard PR 1c: the paired device that sent it, and every remote device that edited it (first-edit order). */
+	remote?: RemoteDevice;
+	editors?: RemoteDevice[];
 	/** The latest outcome, or `requested` before the first one. */
 	state: string;
 	/** True once a handoff (`injected`) line exists: never queued, edited or handed over again. */
@@ -53,11 +56,11 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 		if (!line || typeof line.id !== "string" || !DASHBOARD_ID_RE.test(line.id)) continue;
 		if (line.type === "request") {
 			if (line.kind !== "message" || messages.has(line.id) || typeof line.at !== "string") continue;
-			const images = strings(line.images), files = strings(line.files);
+			const images = strings(line.images), files = strings(line.files), remote = remoteDevice(line.remote);
 			messages.set(line.id, {
 				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "", ask_id: typeof line.ask_id === "string" ? line.ask_id : null,
 				deliver: typeof line.deliver === "string" ? line.deliver : "prompt", ...(images ? { images } : {}), ...(files ? { files } : {}),
-				...(typeof line.thread === "string" ? { thread: line.thread } : {}), state: "requested", injected: false, edits: 0,
+				...(typeof line.thread === "string" ? { thread: line.thread } : {}), ...(remote ? { remote } : {}), state: "requested", injected: false, edits: 0,
 			});
 			continue;
 		}
@@ -65,7 +68,12 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 		if (!message) continue;
 		if (line.type === "edited" && typeof line.text === "string") {
 			// Only the bridge writes these, and only while it holds the message; anything later is ignored, not applied.
-			if (dashboardHeld(message)) { message.text = line.text; message.edits += 1; }
+			if (dashboardHeld(message)) {
+				message.text = line.text;
+				message.edits += 1;
+				const editor = remoteDevice(line.remote);
+				if (editor) message.editors = withEditor(message.editors, editor);
+			}
 		} else if (line.type === "outcome" && typeof line.state === "string") {
 			message.state = line.state;
 			if (line.state === "injected") message.injected = true;

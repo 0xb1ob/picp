@@ -11,7 +11,7 @@
  */
 import type { IncomingMessage } from "node:http";
 import type { OperatorQueueResponse } from "./api-types.ts";
-import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, tokenMatches, withMentionedSkills } from "./control-api.ts";
+import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, remoteOf, remoteProvenance, tokenMatches, withMentionedSkills } from "./control-api.ts";
 import { CONTROL_TEXT_MAX, DASHBOARD_ID_RE, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
 import { stripSkillLines } from "./skill-mentions.ts";
@@ -33,7 +33,10 @@ export function handleOperatorQueue(req: IncomingMessage, options: ControlRouteO
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
 		const skilled = op === "edit" ? withMentionedSkills(text ?? "", options) : undefined;
 		if (skilled && !skilled.ok) return refuse(400, skilled.reason);
-		const reply = await controlRequest(record.record, op === "edit" ? "queue_edit" : "queue_cancel", { id, peer, ...(skilled?.ok ? { text: skilled.text } : {}) });
+		// PR 1c: a remote edit names its device to a bridge that keeps it; a cancel carries no text, so no provenance.
+		const provenance = op === "edit" ? await remoteProvenance(record.record, remoteOf(req)) : { ok: true as const, args: {} };
+		if (!provenance.ok) return refuse(provenance.status, provenance.reason);
+		const reply = await controlRequest(record.record, op === "edit" ? "queue_edit" : "queue_cancel", { id, peer, ...(skilled?.ok ? { text: skilled.text } : {}), ...provenance.args });
 		// The bridge's text (committed, or the text pi was given) carries the skill lines; the dashboard compares against what was typed.
 		const result = reply.result && typeof reply.result === "object" ? (reply.result as Record<string, unknown>) : {};
 		const shown = typeof result.text === "string" ? { ...result, text: stripSkillLines(result.text) } : result;

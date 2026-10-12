@@ -115,7 +115,7 @@ test("both levels read every protected route, sliding the cookie; remote answers
 	assert.match(String(devices.trust), /trusted like your terminal/);
 });
 
-test("remote writes: View-only refuses before any effect, Full-control controls wait for provenance, no remote device mints, Full-control revokes", async (t) => {
+test("remote writes: View-only refuses before any effect, Full-control reaches the handlers (push subscriptions aside), no remote device mints, Full-control revokes", async (t) => {
 	const { r, pair, store } = await rig(t);
 	const full = pair("Laptop"), view = pair("Phone", "view");
 	const json = (cookie: string, extra: Record<string, string> = {}) => ({ cookie, origin: ORIGIN, "content-type": "application/json", "x-cp-control-token": DEVICES_TOKEN, ...extra });
@@ -124,8 +124,13 @@ test("remote writes: View-only refuses before any effect, Full-control controls 
 		assert.equal(viewed.status, 403, path);
 		assert.match(String(viewed.body.error), /View-only/);
 		const fulled = await r(path, { method: "POST", headers: json(full.cookie), body: '{"kind":"message","text":"hi"}' });
-		assert.equal(fulled.status, 403, path);
-		assert.match(String(fulled.body.error), /not enabled yet/);
+		if (path === "/api/push/subscription") {
+			assert.deepEqual([fulled.status, fulled.body.error], [403, "remote push subscriptions are not enabled yet"], "subscription ownership is a later slice");
+			continue;
+		}
+		assert.doesNotMatch(String(fulled.body.error ?? ""), /View-only|not enabled yet|require-tailnet/, `${path} reaches its handler (PR 1c lifted the blanket 403)`);
+		const crossed = await r(path, { method: "POST", headers: json(full.cookie, { origin: "https://evil.example" }), body: '{"kind":"message","text":"hi"}' });
+		assert.deepEqual([crossed.status, crossed.body.error], [403, `Origin must be ${ORIGIN}`], `${path}: exact tunnel Origin`);
 	}
 	for (const device of [full, view]) {
 		const minted = await r("/api/pair/create", { method: "POST", headers: json(device.cookie), body: '{"level":"full"}' });

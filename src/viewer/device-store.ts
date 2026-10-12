@@ -2,7 +2,7 @@
  * Remote dashboard PR 1: the one writer of `data/devices.json` (0600, dir 0700). Every operation is synchronous
  * read → change → atomic replace (exclusive temp, fsync, rename, directory fsync), so inside the viewer process
  * they serialize and two concurrent claims of one code have exactly one winner. The CLI reaches it through the
- * viewer's owner socket (a later PR), never by writing the file itself.
+ * viewer's owner socket (device-control.ts), never by writing the file itself.
  *
  * A successful pairing is three commits: (1) consume the code and store the device and its pairing event as
  * `pending`; (2) append the secret-free `paired` audit line carrying the event id; (3) mark both `active` and only

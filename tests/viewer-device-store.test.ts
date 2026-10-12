@@ -89,7 +89,7 @@ test("a code is single-use, expires at five minutes and at most three live codes
 });
 
 // In-process ordering only: the store's synchronous read-change-replace serializes claims inside one viewer process.
-// Cross-process single-winner (the CLI) comes with the owner socket in part 1b; this test does not prove it.
+// The cross-process single winner (one owner, its socket, one claim winner) is tests/viewer-device-control.test.ts.
 test("in-process concurrent claims of one code have exactly one winner", async (t) => {
 	const { store, make } = scratch(t);
 	const issued = store.issueCode({ ...BIND, route: "cli-up" });

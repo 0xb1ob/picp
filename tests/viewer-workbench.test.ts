@@ -206,8 +206,8 @@ const VIEWER = join(REPO_ROOT, "src", "viewer");
 // operator.ts, doctor-check.ts and model-list.ts (the cp-install `pi --list-models` parser, reused rather than copied) may import outside the viewer.
 const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts" && name !== "model-list.ts");
 
-test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines, device-store.ts writes data/devices.json", () => {
-	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts", "device-store.ts"]);
+test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines, device-store.ts writes data/devices.json, device-control.ts owns the device CLI socket", () => {
+	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts", "device-store.ts", "device-control.ts"]);
 	for (const name of standalone()) {
 		const text = readFileSync(join(VIEWER, name), "utf8");
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
@@ -218,6 +218,8 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "device-store.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:control-audit|control-files|device-files)\.ts$/, `${name} imports ${match[2]}`);
+			// The CLI's owner socket (PR 1c) writes only its own record and socket; the store work goes through the routes' store.
+			if (name === "device-control.ts") assert.match(match[2] ?? "", /^node:|^\.\/(?:device-files|devices-api|overview-health)\.ts$/, `${name} imports ${match[2]}`);
 		}
 		for (const match of text.matchAll(/import\s*\(\s*"([^"]+)"\s*\)/g)) {
 			assert.match(match[1] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$/, `${name} dynamically imports ${match[1]}`);
