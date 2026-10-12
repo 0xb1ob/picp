@@ -28,7 +28,8 @@ import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
 import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
 import { hostHeaderFor } from "../viewer/server.ts";
-import { viewerAddress } from "../viewer/cli.ts";
+import { listenPlan } from "../viewer/cli.ts";
+import { deviceControlRequest } from "../viewer/device-control.ts";
 import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
@@ -242,13 +243,26 @@ export function ghLoggedIn(ok: (...args: string[]) => boolean): boolean {
 	return ok("auth", "status", "--active") || ok("api", "user", "--jq", ".login");
 }
 
-/** Why this home's viewer does not answer `/api/identity` for it within 3 s; undefined when it does. */
-export async function viewerDown(home: string, env: NodeJS.ProcessEnv, fetcher: NonNullable<HostProbeOptions["fetch"]> = (url, init) => fetch(url, init)): Promise<string | undefined> {
-	let address: { host: string; port: number };
+/** Test seams for `viewerDown`: the tailnet lookup and the viewer's owner-socket request. */
+export interface ViewerProbeSeams {
+	tailnet?: () => string | undefined;
+	control?: typeof deviceControlRequest;
+}
+
+/**
+ * Why this home's viewer does not answer for it within 3 s; undefined when it does. Its `/api/identity`, or — remote-only
+ * (no tailnet, cp-tunnel enabled: no local listener) — the `status` of the owner socket under this home's state.
+ */
+export async function viewerDown(home: string, env: NodeJS.ProcessEnv, fetcher: NonNullable<HostProbeOptions["fetch"]> = (url, init) => fetch(url, init), seams: ViewerProbeSeams = {}): Promise<string | undefined> {
+	let address: { host: string; port: number; local: boolean };
 	try {
-		address = viewerAddress(env, true);
+		address = listenPlan(home, env, true, seams.tailnet);
 	} catch (error) {
 		return (error as Error).message;
+	}
+	if (!address.local) {
+		const reply = await (seams.control ?? deviceControlRequest)(daemonPaths(home).stateDir, "status", {}, 3_000);
+		return reply.ok ? undefined : `remote-only viewer (no local listener): ${reply.error}`;
 	}
 	const url = `http://${hostHeaderFor(address.host, address.port)}/api/identity`;
 	try {

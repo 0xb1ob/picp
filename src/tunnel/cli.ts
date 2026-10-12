@@ -167,6 +167,21 @@ function withConfigLock(dataDir: string, change: (current: TunnelConfig | null) 
 	}
 }
 
+/** The named token into the 0600 `<dir>/token` (dir 0700); a failure is the reason, nothing half-written stays. */
+function storeToken(dir: string, token: string): string | undefined {
+	const file = join(dir, "token");
+	const tmp = `${file}.${process.pid}.tmp`;
+	try {
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(tmp, token, { mode: 0o600, flag: "wx" });
+		renameSync(tmp, file);
+		return undefined;
+	} catch (error) {
+		rmSync(tmp, { force: true });
+		return `cannot store the token in ${dir}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`;
+	}
+}
+
 /** Poll until `check` answers a value or the deadline passes; the last reason is the failure. */
 async function until<T>(ports: TunnelCliPorts, ms: number, check: () => Promise<T | string>): Promise<T | string> {
 	let last: T | string = "not checked";
@@ -197,32 +212,29 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 	if (port === daemon.port) return fail(`--remote-port ${port} is the local dashboard's port; pick another`);
 
 	let tokenFile = mode === "named" ? before?.token_file : undefined;
+	let token: string | undefined;
 	if (mode === "named" && args.tokenFile !== undefined) {
-		let token: string;
 		try {
 			token = readFileSync(resolve(args.tokenFile), "utf8").trim();
 		} catch (error) {
 			return fail(`cannot read --token-file: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`);
 		}
 		if (token.length === 0 || Buffer.byteLength(token) > TOKEN_MAX_BYTES || /\s/.test(token)) return fail(`--token-file must hold one tunnel token (no spaces, at most ${TOKEN_MAX_BYTES} bytes)`);
-		const dir = join(paths.dataDir, "tunnel");
-		tokenFile = join(dir, "token");
-		mkdirSync(dir, { recursive: true, mode: 0o700 });
-		const tmp = `${tokenFile}.${process.pid}.tmp`;
-		try {
-			writeFileSync(tmp, token, { mode: 0o600, flag: "wx" });
-			renameSync(tmp, tokenFile);
-		} catch (error) {
-			rmSync(tmp, { force: true });
-			return fail(`cannot store the token in ${dir}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`);
-		}
+		tokenFile = join(paths.dataDir, "tunnel", "token");
 	}
-	if (mode === "named" && (!tokenFile || !existsSync(tokenFile))) return fail("a named tunnel needs --token-file FILE (the token Cloudflare shows for the tunnel)");
+	if (mode === "named" && (!tokenFile || (token === undefined && !existsSync(tokenFile)))) return fail("a named tunnel needs --token-file FILE (the token Cloudflare shows for the tunnel)");
 
 	const binary = await ports.provision(cloudflaredBinDir(home));
 	if (!binary.ok) return fail(`no usable cloudflared: ${binary.reason}`);
 	ports.err(`cp-tunnel: cloudflared ${binary.version} (${binary.source}: ${binary.path})`);
-	const written = withConfigLock(paths.dataDir, (current) => ({ schema_version: 1, enabled: true, mode, port, binary: binary.path, ...(mode === "named" ? { hostname, token_file: tokenFile } : {}), revision: (current?.revision ?? 0) + 1 }) as TunnelConfig);
+	// The token is stored under the config lock, after provisioning: a failed or racing up never leaves token and config disagreeing.
+	const written = withConfigLock(paths.dataDir, (current) => {
+		if (token !== undefined) {
+			const stored = storeToken(join(paths.dataDir, "tunnel"), token);
+			if (stored) return stored;
+		}
+		return { schema_version: 1, enabled: true, mode, port, binary: binary.path, ...(mode === "named" ? { hostname, token_file: tokenFile } : {}), revision: (current?.revision ?? 0) + 1 } as TunnelConfig;
+	});
 	if (typeof written === "string") return fail(written);
 
 	if (!ports.daemonRunning(home)) {
