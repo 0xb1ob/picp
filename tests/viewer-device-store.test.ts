@@ -11,7 +11,7 @@ import { LAYOUT } from "../src/contracts.ts";
 import { canControl, canMint, canRead, canRevoke, LOCAL_ACCESS, mintPeer, remoteAccess } from "../src/viewer/access.ts";
 import { appendControlAudit } from "../src/viewer/control-audit.ts";
 import { controlJournalFile } from "../src/viewer/control-files.ts";
-import { auditedPairings, DEVICE_CODE_TTL_MS, DEVICE_SESSION_TTL_MS, devicesFile, readDeviceState } from "../src/viewer/device-files.ts";
+import { auditedPairings, DEVICE_CODE_TTL_MS, DEVICE_SESSION_TTL_MS, devicesFile, readDeviceState, subscriptionEligibility } from "../src/viewer/device-files.ts";
 import { type DeviceAuditLine, DeviceStore, type DeviceStorePorts, sessionCookie } from "../src/viewer/device-store.ts";
 
 const ORIGIN = "https://cp.example.test";
@@ -166,6 +166,13 @@ test("a revoke's push cleanup runs after the durable revoke, and its failure is 
 	assert.ok(durable, "the revoke was already durable when cleanup ran");
 	assert.equal(refused.cleanup_error, "push subscription cleanup failed: EACCES");
 	assert.equal(failing.authenticate(tablet.cookie, BIND, { touch: true }).ok, false, "the revoke stands");
+});
+
+test("push eligibility's generation argument is the tunnel generation the device was paired on", (t) => {
+	const { store, dataDir } = scratch(t);
+	const phone = pair(store, "Phone");
+	const eligible = (generation?: number) => subscriptionEligibility(dataDir, new Date(T0), generation)({ device_id: phone.device.id, origin: ORIGIN });
+	assert.deepEqual([eligible(), eligible(BIND.generation), eligible(BIND.generation + 1)], [true, true, false]);
 });
 
 test("malformed storage fails closed for every operation and is never reset", (t) => {

@@ -55,15 +55,18 @@ export function acquireSenderLease(stateDir: string, pid: number, isSender: (pid
 	}
 }
 
-/** Run `sweep` now, then `intervalMs` after each one settles; `stop` cancels the next and waits out the current one. */
-export function startDeviceNotifyLoop(sweep: () => Promise<unknown>, intervalMs = DEVICE_NOTIFY_INTERVAL_MS): { stop(): Promise<void> } {
+/**
+ * Run `sweep` now, then `intervalMs` after each one settles; `stop` cancels the next and waits out the current one.
+ * A sweep that throws is handed to `onError` and the loop goes on: a refusal (an unreadable runtime) is retried, not fatal.
+ */
+export function startDeviceNotifyLoop(sweep: () => Promise<unknown>, intervalMs = DEVICE_NOTIFY_INTERVAL_MS, onError: (error: unknown) => void = () => {}): { stop(): Promise<void> } {
 	let stopped = false;
 	let timer: NodeJS.Timeout | undefined;
 	let current: Promise<unknown> = Promise.resolve();
 	const run = (): void => {
 		if (stopped) return;
 		current = sweep()
-			.catch(() => {})
+			.catch(onError)
 			.finally(() => {
 				if (!stopped) timer = setTimeout(run, intervalMs);
 			});
@@ -105,6 +108,10 @@ if (import.meta.main) {
 	const loop = startDeviceNotifyLoop(async () => {
 		const report = await runDeviceNotifySweep({ stateDir: paths.stateDir, dataDir: paths.dataDir, log, binding });
 		if (report.attempted > 0 || report.ended > 0) log(`swept: ${report.attempted} attempted, ${report.delivered} delivered, ${report.retrying} retrying, ${report.failed} failed, ${report.ended} ended, ${report.waiting} waiting`);
+	}, DEVICE_NOTIFY_INTERVAL_MS, (error) => {
+		// One bounded line of the error's own message: never a stack, payload, endpoint or response body.
+		const message = error instanceof Error ? error.message : "non-Error thrown";
+		log(`sweep failed, retrying next round: ${message.replace(/\s+/g, " ").slice(0, 200)}`);
 	});
 	const shutdown = (): void => {
 		void loop.stop().then(() => {

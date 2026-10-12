@@ -41,6 +41,7 @@ test("the lease: one holder per home; a dead, reused or torn holder is replaced;
 test("the loop sweeps at once, then only after each sweep settles (never overlapping), and stop waits out the current one", async () => {
 	let running = 0, overlap = false, count = 0;
 	let release: () => void = () => {};
+	const errors: string[] = [];
 	const loop = startDeviceNotifyLoop(async () => {
 		count += 1;
 		overlap ||= running > 0;
@@ -48,13 +49,18 @@ test("the loop sweeps at once, then only after each sweep settles (never overlap
 		if (count === 2) await new Promise<void>((done) => (release = done)); // a slow sweep
 		running -= 1;
 		if (count === 3) throw new Error("a throwing sweep does not stop the loop");
-	}, 5);
+	}, 5, (error) => errors.push((error as Error).message));
 	assert.equal(count, 1, "the first sweep starts immediately");
+	// Wait on conditions, not fixed sleeps: a loaded CI runner may be slow to fire 5 ms timers.
+	const until = async (ok: () => boolean, why: string): Promise<void> => {
+		for (const deadline = Date.now() + 4_000; !ok(); await new Promise((done) => setTimeout(done, 5))) assert.ok(Date.now() < deadline, why);
+	};
+	await until(() => count === 2, "the second sweep starts after the first settles");
 	await new Promise((done) => setTimeout(done, 40));
 	assert.equal(count, 2, "nothing starts while a sweep is in flight");
 	release();
-	await new Promise((done) => setTimeout(done, 40));
-	assert.ok(count >= 4, `the loop survives a throw (${count})`);
+	await until(() => count >= 4, `the loop survives a throw (${count})`);
+	assert.deepEqual(errors, ["a throwing sweep does not stop the loop"], "and reports it, never swallows it");
 	await loop.stop();
 	const after = count;
 	await new Promise((done) => setTimeout(done, 30));
