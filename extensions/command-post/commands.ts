@@ -168,7 +168,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 
 	// Graceful drain before a restart (src/drain.ts); the operator's `cp_parent drain` runs this same command.
 	pi.registerCommand("cp-drain", {
-		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain cancel withdraws a draining or timed-out drain`,
+		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain cancel withdraws a draining or timed-out drain, or a drained record an earlier parent left`,
 		handler: async (args, ctx) => {
 			setLive(ctx);
 			const trimmed = args.trim();

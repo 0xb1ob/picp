@@ -649,12 +649,17 @@ failed journal leaves the outcome `reported: false` and is retried on the next t
 Only the parent-lock owner may start a drain or decide its outcome. A drain already idle
 answers `drained` directly and no wake follows. Only a fresh parent's startup
 reconcile reports the record (job, phase, lease, head) and removes the file — never
-the process that is draining. `cp_parent stop` and `rotate` say whether the parent
+the process that is draining. That startup step runs even when an earlier reconcile
+step throws, and the file is removed even when the `RESTART AFTER DRAIN` notice cannot
+be journaled (a duplicate id included; the failure goes to stderr). The tick never writes
+a drain back that was removed or replaced while its outcome wake was journaling (it re-reads
+`started_at` before every write). `cp_parent stop` and `rotate` say whether the parent
 was drained, or warn how many live workers they will kill. **Cancel:** `/cp-drain cancel`
 (the host's `drainCancel` op, used by cp-update on a drain timeout) is owner-only too; it
-removes a `draining` or `timeout` record — never a `drained` one, the restart already
-prepared — and journals one wake `DRAIN: cancelled — … open again` (id
-`drain:<started>:cancelled`), after which every gate is open.
+removes a `draining` or `timeout` record, or a `drained` record an earlier parent left
+behind — never the live parent's own `drained` one, the restart already prepared — and
+journals one wake `DRAIN: cancelled — … open again` (id `drain:<started>:cancelled`),
+after which every gate is open; no manual `rm` of `state/drain.json` is ever needed.
 **Parent control gate** (cp-35d0 S6): a new drain is refused with `PARENT_CONTROL_BUSY`
 ([`src/parent-diagnostics.ts`](../src/parent-diagnostics.ts)) before any RPC or write while the
 bridge runs parent control (compact, rotate, a diagnostic, automatic control) or the parent's

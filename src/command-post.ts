@@ -691,6 +691,15 @@ export class CommandPost {
 	 * a `failure` on its job without taking the rest of the pass down.
 	 */
 	async reconcile(options: ReconcileOptions = {}): Promise<{ report: ReconcileReport; intake: IntakeResult[] }> {
+		// The drain record is cleared even when an earlier step throws: a kept file refuses every start (cp-drain-stale-record).
+		try {
+			return await this.#reconcileSteps(options);
+		} finally {
+			this.drain.startup();
+		}
+	}
+
+	async #reconcileSteps(options: ReconcileOptions): Promise<{ report: ReconcileReport; intake: IntakeResult[] }> {
 		const report = await this.fleet.reconcile(options);
 		const results: IntakeResult[] = [];
 		for (const jobId of report.needs_intake) {
@@ -716,7 +725,6 @@ export class CommandPost {
 		}
 		this.#journalRecovery(report);
 		await this.teardown.retryLedgerCloses();
-		this.drain.startup();
 		return { report, intake: results };
 	}
 
@@ -1631,13 +1639,17 @@ export class CommandPost {
 
 	/** session_shutdown: never leave orphaned children behind. */
 	async shutdown(): Promise<void> {
-		this.continuation.stop();
-		// Nothing announces a verdict during teardown: the reviewers die with the
-		// manager below, and the chains that resolve after that would otherwise be
-		// sending wake-ups into a session that is closing (spec 2026-09-05).
-		this.reviewRuns.wakeupPort = () => false;
-		await this.manager.shutdownAll();
-		this.drain.released();
+		try {
+			this.continuation.stop();
+			// Nothing announces a verdict during teardown: the reviewers die with the
+			// manager below, and the chains that resolve after that would otherwise be
+			// sending wake-ups into a session that is closing (spec 2026-09-05).
+			this.reviewRuns.wakeupPort = () => false;
+			await this.manager.shutdownAll();
+		} finally {
+			// Even on a failed stop: a same-process session_start (rotate, reload) must still clear the drain.
+			this.drain.released();
+		}
 		this.runs.closeAll();
 	}
 }
