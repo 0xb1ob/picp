@@ -26,7 +26,7 @@ export const UPSTREAM_FRESH_MS = 30 * 60_000;
 const DETAIL_MAX = 160;
 const COUNT_MAX_BYTES = 64 * 1024;
 /** Results a run records only after its `git fetch origin main` succeeded (src/service/update.ts). */
-const FETCHED = new Set(["updated", "up_to_date", "skipped_ahead", "skipped_bad_sha", "skipped_busy", "drain_timeout"]);
+const FETCHED = new Set(["updated", "up_to_date", "skipped_ahead", "skipped_bad_sha", "skipped_busy", "skipped_settling", "drain_timeout"]);
 /** `UPDATE_FAILURES` (src/service/health.ts), which records them; not imported, health.ts imports the viewer server. */
 const ALERT_RESULTS = new Set(["failed", "rolled_back", "rollback_failed", "drain_timeout", "migration_required", "config_invalid"]);
 export const FIXES: Record<ProcessRole, string> = {

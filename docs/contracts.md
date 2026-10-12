@@ -663,6 +663,12 @@ removes a `draining` or `timeout` record, or a `drained` record an earlier paren
 behind — never the live parent's own `drained` one, the restart already prepared — and
 journals one wake `DRAIN: cancelled — … open again` (id `drain:<started>:cancelled`),
 after which every gate is open; no manual `rm` of `state/drain.json` is ever needed.
+**Drain cause:** the record's optional `cause` is `{reason: "manual"}` for a `/cp-drain` and
+`{reason: "auto-update", target_sha}` when cp-daemon's updater drains (`/cp-drain <s> auto-update <sha>`
+through the host's `drain` op); a record without it (written before the field) reads as before. The
+dispatch refusal, `DRAIN:` notices and `/cp-drain status` (read-only: shows the running drain, starts
+nothing) name it, e.g. `auto-update to <sha> in progress, drain timeout <t>; it restarts the parent by
+itself, a manual restart does not apply it`.
 **Parent control gate** (cp-35d0 S6): a new drain is refused with `PARENT_CONTROL_BUSY`
 ([`src/parent-diagnostics.ts`](../src/parent-diagnostics.ts)) before any RPC or write while the
 bridge runs parent control (compact, rotate, a diagnostic, automatic control) or the parent's

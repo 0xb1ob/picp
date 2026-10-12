@@ -17,7 +17,7 @@ import { formatStatusJson, formatStatusTable } from "../../src/status.ts";
 import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
 import { formatMandateDefaults, loadMandateDefaults, setMandateDefault } from "../../src/mandate-defaults.ts";
 import { formatRunView } from "../../src/watch.ts";
-import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_PREFIX, formatDrain } from "../../src/drain.ts";
+import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_PREFIX, formatDrain, parseDrainArgs, readDrain } from "../../src/drain.ts";
 import { openPlanViewer } from "./plan-viewer.ts";
 import { runtimeOrRefusal, formatCommitLine, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
@@ -168,25 +168,28 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 
 	// Graceful drain before a restart (src/drain.ts); the operator's `cp_parent drain` runs this same command.
 	pi.registerCommand("cp-drain", {
-		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain cancel withdraws a draining or timed-out drain, or a drained record an earlier parent left`,
+		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain status shows the running drain and why; /cp-drain cancel withdraws a draining or timed-out drain, or a drained record an earlier parent left`,
 		handler: async (args, ctx) => {
 			setLive(ctx);
 			const trimmed = args.trim();
-			const cancel = trimmed === "cancel";
-			const timeoutS = trimmed === "" || cancel ? undefined : Number(trimmed);
+			const parsed = parseDrainArgs(trimmed);
 			let text: string;
 			let level: "info" | "error" = "error";
-			if (timeoutS !== undefined && !(Number.isFinite(timeoutS) && timeoutS >= 0)) {
-				text = `${DRAIN_PREFIX}refused: ${JSON.stringify(trimmed)} is not a timeout in seconds \u2014 usage: /cp-drain [seconds|cancel]`;
+			if (!parsed) {
+				text = `${DRAIN_PREFIX}refused: ${JSON.stringify(trimmed)} is not a timeout in seconds \u2014 usage: /cp-drain [seconds|status|cancel]`;
 			} else {
 				// Returns at once: the outcome is one cp-recovery wake from the ordinary tick (DrainControl.check).
 				try {
 					const post = commandPost(ctx.modelRegistry);
-					if (cancel) {
+					if (parsed.cancel) {
 						text = post.drain.cancel();
 						level = "info";
+					} else if (parsed.status) {
+						const record = readDrain(post.home);
+						text = record ? formatDrain(record, post.home) : `${DRAIN_PREFIX}no drain is running`;
+						level = "info";
 					} else {
-						const record = post.drain.start(timeoutS);
+						const record = post.drain.start(parsed.timeoutS, parsed.cause);
 						text = formatDrain(record, post.home);
 						if (record.state !== "timeout") level = "info";
 					}

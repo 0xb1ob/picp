@@ -35,7 +35,14 @@ export interface DrainJob {
 	head: string | null;
 }
 
+/** Why a drain runs: cp-daemon's updater (`auto-update`, restarts the parent itself) or an operator's `/cp-drain` (`manual`). Absent on records older than this field. */
+export interface DrainCause {
+	reason: "auto-update" | "manual";
+	target_sha?: string;
+}
+
 export interface DrainRecord {
+	cause?: DrainCause;
 	state: "draining" | "drained" | "timeout";
 	started_at: string;
 	deadline: string;
@@ -73,10 +80,38 @@ export function readDrain(home: string): DrainRecord | undefined {
 	throw new DrainError(`${file} is not a drain record; the home stays draining until it is removed`);
 }
 
-/** The one refusal every process start shares while a drain is on disk; it names the drain. */
+/** What a drain is for, in a clause; undefined for a legacy record (no cause) or an unrecognised one, which read as before. */
+export function describeCause(record: Pick<DrainRecord, "cause" | "deadline">): string | undefined {
+	const cause = record.cause;
+	if (cause?.reason === "auto-update") {
+		const target = typeof cause.target_sha === "string" && cause.target_sha ? ` to ${cause.target_sha.slice(0, 12)}` : "";
+		return `auto-update${target} in progress, drain timeout ${record.deadline}; it restarts the parent by itself, a manual restart does not apply it`;
+	}
+	return cause?.reason === "manual" ? "manual /cp-drain" : undefined;
+}
+
+/** `/cp-drain`'s arguments: `[seconds] [auto-update [sha]]`, `cancel` or `status`; undefined when malformed. */
+export function parseDrainArgs(text: string): { timeoutS?: number; cancel?: boolean; status?: boolean; cause?: DrainCause } | undefined {
+	const [first = "", ...rest] = text.trim().split(/\s+/).filter(Boolean);
+	if (first === "cancel" || first === "status") return rest.length === 0 ? (first === "cancel" ? { cancel: true } : { status: true }) : undefined;
+	const timeoutS = first === "" ? undefined : Number(first);
+	if (timeoutS !== undefined && !(Number.isFinite(timeoutS) && timeoutS >= 0)) return undefined;
+	if (rest.length === 0) return { timeoutS };
+	const [reason, sha, ...extra] = rest;
+	if (reason !== "auto-update" || extra.length > 0 || (sha !== undefined && !/^[0-9a-f]{7,64}$/i.test(sha))) return undefined;
+	return { timeoutS, cause: { reason, ...(sha ? { target_sha: sha } : {}) } };
+}
+
+/** The inverse of `parseDrainArgs` for a drain started with a cause. */
+export function drainArgs(timeoutS: number, cause?: DrainCause): string {
+	return cause?.reason === "auto-update" ? [timeoutS, "auto-update", cause.target_sha].filter((word) => word !== undefined).join(" ") : String(timeoutS);
+}
+
+/** The one refusal every process start shares while a drain is on disk; it names the drain and, when recorded, why. */
 export function assertNotDraining(home: string, what: string): void {
 	const drain = readDrain(home);
-	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
+	const why = drain && describeCause(drain);
+	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}${why ? `; ${why}` : ""}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
 }
 
 export function inFlightJobs(records: readonly FleetRecord[], head: (jobId: string) => string | undefined): DrainJob[] {
@@ -197,7 +232,7 @@ export class DrainControl {
 	 * is. When nothing is mid-turn right now, the answer is `drained` and this
 	 * answer is the one report: no wake follows it.
 	 */
-	start(timeoutS: number = DRAIN_DEFAULT_TIMEOUT_S): DrainRecord {
+	start(timeoutS: number = DRAIN_DEFAULT_TIMEOUT_S, cause: DrainCause = { reason: "manual" }): DrainRecord {
 		// Only the lock owner sees the workers a drain waits for: anywhere else an empty manager would say "drained".
 		if (this.#deps.owns?.() === false) throw new DrainError(`refused: this session does not hold the parent lock for ${this.#deps.home}; run /cp-drain (or cp_parent drain) in the parent that does`);
 		const existing = readDrain(this.#deps.home);
@@ -212,6 +247,7 @@ export class DrainControl {
 			started_at: isoTimestamp(started),
 			deadline: isoTimestamp(new Date(started.getTime() + bounded * 1000)),
 			timeout_s: bounded,
+			cause,
 			jobs: inFlightJobs(this.#deps.fleet.list(), this.#deps.head),
 		};
 		atomicWriteJson(drainFile(this.#deps.home), record);
@@ -323,9 +359,11 @@ export function formatDrain(record: DrainRecord, home: string): string {
 		: record.state === "timeout"
 			? `${DRAIN_PREFIX}drain timed out after ${record.timeout_s}s: still busy ${record.survivors?.join(", ") ?? "unknown"}; a restart now kills them`
 			: `${DRAIN_PREFIX}draining since ${record.started_at}: waiting for live workers and reviewers to settle; one wake follows when drained, or at ${record.deadline} naming the survivors`;
+	const why = describeCause(record);
 	return [
 		head,
 		`  ${record.jobs.length} job(s) in flight (drain started_at ${record.started_at}) recorded in ${drainFile(home)}`,
+		...(why ? [`  cause: ${why}`] : []),
 		...jobLines(record),
 		"  every new process (dispatch, promotion, revive, review) and every new merge step stays refused until the parent restarts.",
 	].join("\n");
