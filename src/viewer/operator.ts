@@ -18,7 +18,7 @@ import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { layoutForHome } from "../contracts.ts";
-import { operatorPiArgs } from "../cp-bridge.ts";
+import { operatorPiArgs, operatorSkillPaths } from "../cp-bridge.ts";
 import { operatorModelSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
 import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
@@ -152,7 +152,9 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	process.on("exit", stopViewer);
 	// Restart session: pi gets the marker path; a marker naming the exited child relaunches it here (src/operator-relaunch.ts).
 	const relaunchFile = options.relaunchFile ?? defaultRelaunchFile();
-	const model = configuredOperatorModel(options.viewer?.home ?? targetHome());
+	const home = options.viewer?.home ?? targetHome();
+	const model = configuredOperatorModel(home);
+	const skills = operatorSkillPaths(home);
 	let current: ChildProcess | undefined;
 	let signalled = false;
 	const onSignal = (signal: NodeJS.Signals) => {
@@ -163,7 +165,7 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
 	try {
 		return await superviseOperatorPi({
-			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, model), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions]), {
+			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, model), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), {
 				stdio: "inherit",
 				env: { ...process.env, ...env, CP_VIEWER_HOST: host, CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
 			}),

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Stand-in for the operator's `pi` under Restart session (tests/viewer-operator-relaunch.test.ts): appends its argv
- * (after the bridge's `--no-extensions -e <bridge>`) to FAKE_RELAUNCH_LOG, then, per FAKE_RELAUNCH_MODE, writes the
+ * (after the bridge's `--no-extensions --no-skills -e <bridge>`) to FAKE_RELAUNCH_LOG, then, per FAKE_RELAUNCH_MODE, writes the
  * relaunch marker at CP_OPERATOR_RELAUNCH_FILE the way the bridge does and exits 0 — `once` on the first run only,
  * `always` every run, `other` naming another pid — else exits with the run count.
  */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const log = process.env.FAKE_RELAUNCH_LOG;
-appendFileSync(log, `${JSON.stringify(process.argv.slice(5))}\n`);
+appendFileSync(log, `${JSON.stringify(process.argv.slice(6))}\n`);
 const runs = readFileSync(log, "utf8").trim().split("\n").length;
 const mode = process.env.FAKE_RELAUNCH_MODE;
 const file = process.env.CP_OPERATOR_RELAUNCH_FILE;

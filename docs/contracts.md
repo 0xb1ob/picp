@@ -1123,6 +1123,11 @@ message):
 The main session does not load `extensions/command-post`. `bin/cp-operator`
 starts pi with `--no-extensions -e extensions/cp-bridge`. Fleet tools
 (`cp_dispatch`, `cp_integrate`, the rest) stay on the headless parent.
+It also passes `--no-skills` plus one `--skill` per `OPERATOR_SKILLS` entry
+(`improving-projects`, `brainstorming`; `operatorSkillPaths`): `<home>/skills/<name>`
+when it holds a `SKILL.md`, else `<agent dir>/skills/<name>` (`PI_CODING_AGENT_DIR`,
+else `~/.pi/agent`); a skill in neither is skipped and never blocks the launch.
+Every other installed skill stays off in the operator session.
 
 `cp_parent start` takes a home (mode is always `multi` and may be omitted; `single` is refused), and an optional model.
 Omitted model resolves, in order: `CP_PARENT_MODEL` env, the operator session's

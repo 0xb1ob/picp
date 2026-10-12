@@ -29,6 +29,7 @@ import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
 import { cleanSegmentEnd, wakeSpans } from "./bridge-segments.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
 import { PACKAGE_ROOT } from "./home.ts";
+import { agentDirFor } from "./viewer/skill-catalog.ts";
 import { parentGatewayKey } from "./gateway-key.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { atomicWriteJson } from "./json-store.ts";
@@ -154,9 +155,17 @@ function climb(receipt: BridgeReceipt, level: BridgeReceiptLevel): BridgeReceipt
 	return { ...receipt, level, reached };
 }
 
-/** `webExtensions`: extra `-e` entries after the bridge (the operator's pi built-ins and pi-web-access). */
-export function operatorPiArgs(packageRoot: string, extra: readonly string[] = [], webExtensions: readonly string[] = []): string[] {
-	return ["--no-extensions", "-e", join(packageRoot, "extensions/cp-bridge/index.ts"), ...webExtensions.flatMap((path) => ["-e", path]), ...extra];
+/** `webExtensions`: extra `-e` entries after the bridge (the operator's pi built-ins and pi-web-access); `skills`: `--skill` paths under `--no-skills` (`operatorSkillPaths`). */
+export function operatorPiArgs(packageRoot: string, extra: readonly string[] = [], webExtensions: readonly string[] = [], skills: readonly string[] = []): string[] {
+	return ["--no-extensions", "--no-skills", "-e", join(packageRoot, "extensions/cp-bridge/index.ts"), ...webExtensions.flatMap((path) => ["-e", path]), ...skills.flatMap((path) => ["--skill", path]), ...extra];
+}
+
+/** The operator session's skill allowlist; every other installed skill stays off (`--no-skills`). */
+export const OPERATOR_SKILLS = ["improving-projects", "brainstorming"] as const;
+/** Each `<home>/skills/<name>` when present, else `<agentDir>/skills/<name>`; a skill in neither is skipped, never fatal. */
+export function operatorSkillPaths(home: string | undefined, agentDir: string = agentDirFor()): string[] {
+	const roots = [...(home ? [join(home, "skills")] : []), join(agentDir, "skills")];
+	return OPERATOR_SKILLS.flatMap((name) => roots.map((root) => join(root, name)).find((dir) => existsSync(join(dir, "SKILL.md"))) ?? []);
 }
 
 /** The parent's skills, each `<home>/skills/<name>` when present, else the copy shipped in the package root (a managed home holds state, not the package). */

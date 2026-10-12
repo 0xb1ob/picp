@@ -19,7 +19,9 @@ import {
 	buildParentArgv,
 	CpBridge,
 	CpBridgeError,
+	OPERATOR_SKILLS,
 	operatorPiArgs,
+	operatorSkillPaths,
 	parentEnv,
 	PARENT_SKILLS,
 	parentSkillPaths,
@@ -214,7 +216,8 @@ test("operator launcher loads the bridge, pi's built-in MCP extensions and the w
 	assert.match(script, /exec node "\$ROOT\/src\/viewer\/operator\.ts" "\$@"/);
 	const launcher = readFileSync(join(PACKAGE_ROOT, "src/viewer/operator.ts"), "utf8");
 	// The supervise loop (src/operator-relaunch.ts) hands each run its args: the CLI's first, `--session <file>` on a relaunch.
-	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args, process\.env, model\), \[\.\.\.OPERATOR_BUILTIN_EXTENSIONS, \.\.\.web\.extensions\]\)/);
+	assert.match(launcher, /spawn\(options\.piBin \?\? "pi", operatorPiArgs\(PACKAGE_ROOT, operatorModelArgs\(args, process\.env, model\), \[\.\.\.OPERATOR_BUILTIN_EXTENSIONS, \.\.\.web\.extensions\], skills\)/);
+	assert.match(launcher, /const skills = operatorSkillPaths\(home\);/);
 	assert.deepEqual(OPERATOR_BUILTIN_EXTENSIONS, ["builtin:mcp", "builtin:codemode", "builtin:tool-search"]);
 	assert.match(launcher, /firstArgs: piArgs/);
 	assert.equal(script.includes("extensions/command-post") || launcher.includes("extensions/command-post"), false);
@@ -225,10 +228,41 @@ test("operator launcher loads the bridge, pi's built-in MCP extensions and the w
 	assert.equal(BRIDGE_TOOL, "cp_parent");
 });
 
-test("operator argv adds only the resolved web extension, after the bridge", () => {
+test("operator argv adds only the resolved web extension, after the bridge, and only the allowlisted skills", () => {
 	const bridge = join(PACKAGE_ROOT, "extensions/cp-bridge/index.ts");
-	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"]), ["--no-extensions", "-e", bridge, "--x"]);
-	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"], ["/pkg/web/index.ts"]), ["--no-extensions", "-e", bridge, "-e", "/pkg/web/index.ts", "--x"]);
+	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"]), ["--no-extensions", "--no-skills", "-e", bridge, "--x"]);
+	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"], ["/pkg/web/index.ts"]), ["--no-extensions", "--no-skills", "-e", bridge, "-e", "/pkg/web/index.ts", "--x"]);
+	assert.deepEqual(operatorPiArgs(PACKAGE_ROOT, ["--x"], [], ["/a/skills/improving-projects", "/h/skills/brainstorming"]), ["--no-extensions", "--no-skills", "-e", bridge, "--skill", "/a/skills/improving-projects", "--skill", "/h/skills/brainstorming", "--x"]);
+});
+
+test("operator skills: <home>/skills/<name> wins, else <agentDir>/skills/<name>, a missing one is skipped", (t) => {
+	assert.deepEqual([...OPERATOR_SKILLS], ["improving-projects", "brainstorming"]);
+	const home = scratch();
+	const agentDir = scratch();
+	const install = (root: string, name: string) => {
+		mkdirSync(join(root, "skills", name), { recursive: true });
+		writeFileSync(join(root, "skills", name, "SKILL.md"), `---\nname: ${name}\n---\n`, "utf8");
+	};
+	// Neither installed: no skill, no throw.
+	assert.deepEqual(operatorSkillPaths(home, agentDir), []);
+	install(agentDir, "improving-projects");
+	install(agentDir, "brainstorming");
+	install(agentDir, "unlisted");
+	assert.deepEqual(operatorSkillPaths(home, agentDir), [join(agentDir, "skills/improving-projects"), join(agentDir, "skills/brainstorming")]);
+	assert.deepEqual(operatorSkillPaths(undefined, agentDir), [join(agentDir, "skills/improving-projects"), join(agentDir, "skills/brainstorming")]);
+	install(home, "brainstorming");
+	assert.deepEqual(operatorSkillPaths(home, agentDir), [join(agentDir, "skills/improving-projects"), join(home, "skills/brainstorming")]);
+	// A directory without SKILL.md is not a skill.
+	rmSync(join(agentDir, "skills/improving-projects/SKILL.md"));
+	assert.deepEqual(operatorSkillPaths(home, agentDir), [join(home, "skills/brainstorming")]);
+	const args = operatorPiArgs(PACKAGE_ROOT, [], [], operatorSkillPaths(home, agentDir));
+	assert.deepEqual(args.flatMap((arg, i) => (arg === "--skill" ? [args[i + 1]] : [])), [join(home, "skills/brainstorming")]);
+	assert.ok(args.includes("--no-skills"));
+	// The default agent dir is pi's: PI_CODING_AGENT_DIR when set.
+	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+	t.after(() => { if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir; });
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	assert.deepEqual(operatorSkillPaths(undefined), [join(agentDir, "skills/brainstorming")]);
 });
 
 test("parent starts with --no-skills plus --skill <home>/skills/<name> for each PARENT_SKILLS entry, and nothing else skill-wise", () => {
