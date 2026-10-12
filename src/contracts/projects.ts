@@ -6,6 +6,7 @@ import { type Delivery, DeliverySchema, IsoTimestampSchema, PROJECT_NAME_PATTERN
 import { type MandateAction, MandateActionSchema, type MandateAskOn, MandateAskOnSchema } from "./mandates.ts";
 import type { Narrow, Replace } from "./internal.ts";
 import { ReviewerModelSchema } from "./routing.ts";
+import { type ForgeConfig, forgeConfigErrors, TOKEN_ENV_PATTERN } from "../forge-url.ts";
 
 export const ProjectSchema = Type.Object(
 	{
@@ -23,6 +24,22 @@ export const ProjectSchema = Type.Object(
 		/** Who lands a reviewed, green PR: absent or `repo` means cp_integrate merges when the repo permits; `human_handoff` hands it to a human on GitHub and never merges. */
 		merge_policy: Type.Optional(StringEnum(["repo", "human_handoff"])),
 		reviewer_model: Type.Optional(ReviewerModelSchema),
+		/**
+		 * Which forge hosts the remote (forge PR 1). Absent: github.com and
+		 * gitlab.com are recognised from the remote, any other host is unsupported.
+		 * `token_env` is an environment variable NAME; a token value has no field.
+		 */
+		forge: Type.Optional(
+			Type.Object(
+				{
+					kind: StringEnum(["github", "gitlab"]),
+					web_base_url: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+					api_base_url: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+					token_env: Type.Optional(Type.String({ pattern: TOKEN_ENV_PATTERN.source })),
+				},
+				{ additionalProperties: false },
+			),
+		),
 		/**
 		 * Per-project mandate defaults (autonomy-programme-cur.2.5): overrides
 		 * `data/mandate-defaults.json` field-by-field, absent means "use the home
@@ -59,7 +76,7 @@ export type ProjectMandateOverride = {
 export type MergePolicy = "repo" | "human_handoff";
 export type Project = Replace<
 	Narrow<Static<typeof ProjectSchema>, "delivery", Delivery>,
-	{ mandate?: ProjectMandateOverride; merge_policy?: MergePolicy }
+	{ mandate?: ProjectMandateOverride; merge_policy?: MergePolicy; forge?: ForgeConfig }
 >;
 
 export const ProjectRegistrySchema = Type.Object(
@@ -96,6 +113,7 @@ export function validateProjectRegistry(value: unknown): ValidationResult<Projec
 			);
 		}
 		urls.set(project.clone_url, project.name);
+		if (project.forge) errors.push(...forgeConfigErrors(project.forge).map((error) => `/projects/${project.name}: ${error}`));
 	}
 	return errors.length === 0 ? result : { ok: false, errors };
 }

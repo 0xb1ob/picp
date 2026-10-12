@@ -8,7 +8,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMemoryStatus } from "../../src/memory.ts";
 import { formatCurationAudit, formatCurationPlan, formatMemoryReport, PROMOTABLE_TIERS, REJECT_CAUSES } from "../../src/curation.ts";
-import { formatEnsured, formatProjects } from "../../src/projects.ts";
+import type { ForgeConfig } from "../../src/forge-url.ts";
+import { formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -29,10 +30,28 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 			"Use cp_project add before the first dispatch into a repository this home has never worked in.",
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
 			"reviewer_model sets the exact model for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
+			"forge declares a self-managed GitLab (kind gitlab, web_base_url, optional api_base_url, token_env = the variable NAME); null clears. Never pass a token value.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, or set/clear reviewer_model" }),
+			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model", "forge"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, set/clear reviewer_model, or set/clear its forge" }),
 			name: Type.Optional(Type.String({ description: "Project name; required except for list" })),
+			forge: Type.Optional(
+				Type.Union(
+					[
+						Type.Object(
+							{
+								kind: StringEnum(["github", "gitlab"]),
+								web_base_url: Type.Optional(Type.String({ description: "GitLab only: HTTPS installation root (port and path prefix allowed)" })),
+								api_base_url: Type.Optional(Type.String({ description: "GitLab only: HTTPS API root; default <web_base_url>/api/v4" })),
+								token_env: Type.Optional(Type.String({ description: "GitLab only: NAME of the environment variable holding the token — never the token itself" })),
+							},
+							{ additionalProperties: false },
+						),
+						Type.Null(),
+					],
+					{ description: "add/forge: which forge hosts the remote; null clears. github.com and gitlab.com need none; a self-managed GitLab needs kind gitlab and web_base_url." },
+				),
+			),
 			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "reviewer_model: exact provider/model for plan gates and diff reviews; null clears. Eligible mandate preference takes precedence; unusable models refuse." })),
 			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy: repo (default; cp_integrate merges when the repository permits) or human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post)" })),
 			clone_url: Type.Optional(Type.String({ description: "git remote to clone/fetch from; required for add" })),
@@ -78,6 +97,12 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 					details: { project } as unknown as Record<string, unknown>,
 				};
 			}
+			if (params.action === "forge") {
+				if (params.forge === undefined) throw new Error("cp_project forge needs forge ({kind, web_base_url?, api_base_url?, token_env?} or null)");
+				// kind is re-validated by the registry; the schema's StringEnum types it as string.
+				const project = await registry.setForge(params.name, params.forge as ForgeConfig | null);
+				return { content: [{ type: "text", text: `${project.name} forge: ${project.forge ? formatForge(project.forge) : "unset (detected from the remote)"}` }], details: { project } as unknown as Record<string, unknown> };
+			}
 			if (params.action === "reviewer_model") {
 				if (params.reviewer_model === undefined) throw new Error("cp_project reviewer_model needs reviewer_model (provider/model or null)");
 				const project = await registry.setReviewerModel(params.name, params.reviewer_model);
@@ -100,6 +125,7 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 				delivery: (params.delivery ?? "pr") as "pr" | "local",
 				...(params.base_branch ? { base_branch: params.base_branch } : {}),
 				...(params.notes ? { notes: params.notes } : {}),
+				...(params.forge ? { forge: params.forge as ForgeConfig } : {}),
 			});
 			return {
 				content: [{ type: "text", text: formatEnsured(result) }],

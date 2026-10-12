@@ -33,6 +33,7 @@ import {
 	SCHEMA_VERSION,
 	validateProjectRegistry,
 } from "./contracts.ts";
+import { type ForgeConfig, forgeConfigErrors, normalizeBaseUrl, resolveForgeRepository } from "./forge-url.ts";
 import { atomicWriteJson, atomicWriteText, canonicalDir, queued } from "./json-store.ts";
 
 export class ProjectError extends Error {}
@@ -53,6 +54,28 @@ export interface RegisterInput {
 	delivery?: Delivery;
 	notes?: string;
 	base_branch?: string;
+	forge?: ForgeConfig;
+}
+
+/**
+ * A `forge` block, trimmed, with base urls normalized, that resolves the
+ * project's own clone url — or a ProjectError naming why not. Never echoes a value.
+ */
+function checkedForge(name: string, cloneUrl: string, forge: ForgeConfig): ForgeConfig {
+	const trimmed: ForgeConfig = { kind: forge.kind };
+	for (const key of ["web_base_url", "api_base_url", "token_env"] as const) {
+		const value = forge[key];
+		if (value === undefined || value === null) continue;
+		if (typeof value !== "string") throw new ProjectError(`project ${name}: forge.${key} must be a string`);
+		trimmed[key] = key === "token_env" ? value.trim() : (normalizeBaseUrl(value) ?? value.trim());
+	}
+	const extra = Object.keys(forge).filter((key) => !["kind", "web_base_url", "api_base_url", "token_env"].includes(key));
+	if (extra.length > 0) throw new ProjectError(`project ${name}: forge takes kind, web_base_url, api_base_url and token_env only (refused: ${extra.join(", ")}); a token value is never stored`);
+	const errors = forgeConfigErrors(trimmed);
+	if (errors.length > 0) throw new ProjectError(`project ${name}: ${errors.join("; ")}`);
+	const resolved = resolveForgeRepository(cloneUrl, trimmed);
+	if (!resolved.ok) throw new ProjectError(`project ${name}: forge does not fit the clone url — ${resolved.detail}`);
+	return trimmed;
 }
 
 export interface EnsureCloneResult {
@@ -241,6 +264,17 @@ export class ProjectRegistry {
 		return this.require(name);
 	}
 
+	/** Set the project's forge block (validated against its clone url); null clears it. */
+	async setForge(name: string, forge: ForgeConfig | null): Promise<Project> {
+		await this.mutate((projects) => {
+			const index = projects.findIndex((entry) => entry.name === name);
+			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
+			const { forge: _drop, ...rest } = projects[index] as Project;
+			projects[index] = forge === null ? rest : { ...rest, forge: checkedForge(name, rest.clone_url, forge) };
+		});
+		return this.require(name);
+	}
+
 	/** Absolute path of the canonical clone (whether or not it exists yet). */
 	pathOf(name: string): string {
 		return join(this.home, paths.projectDir(name));
@@ -301,6 +335,7 @@ export class ProjectRegistry {
 			registered_at: isoTimestamp(this.#now()),
 			...(input.notes !== undefined ? { notes: input.notes } : {}),
 			...(input.base_branch !== undefined ? { base_branch: input.base_branch } : {}),
+			...(input.forge ? { forge: checkedForge(input.name, cloneUrl, input.forge) } : {}),
 		};
 		await this.mutate((projects) => {
 			const existing = projects.find((entry) => entry.name === input.name);
@@ -499,9 +534,20 @@ export function formatProjects(
 			`  ${project.name}${project.archived ? " [archived]" : ""}  delivery:${project.delivery}${project.merge_policy === "human_handoff" ? " merge:human_handoff" : ""}  ${options.pathOf?.(project) ?? paths.projectDir(project.name)}${clone ? ` (${clone})` : ""}`,
 			`    ${project.clone_url}${project.base_branch ? `  base=${project.base_branch}` : ""}`,
 			...(project.reviewer_model ? [`    reviewer model: ${project.reviewer_model}`] : []),
+			...(project.forge ? [`    forge: ${formatForge(project.forge)}`] : []),
 		);
 	}
 	return lines.join("\n");
+}
+
+/** Non-secret forge settings: the kind, the roots, and the token variable's NAME. */
+export function formatForge(forge: ForgeConfig): string {
+	return [
+		forge.kind,
+		...(forge.web_base_url ? [`web=${forge.web_base_url}`] : []),
+		...(forge.api_base_url ? [`api=${forge.api_base_url}`] : []),
+		...(forge.token_env ? [`token env=${forge.token_env}`] : []),
+	].join("  ");
 }
 
 /** The result of registering (or adopting) one project, as one line. */

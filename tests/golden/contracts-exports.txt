@@ -382,11 +382,11 @@ PlannerBlocker	type	08e5796a23cb7faa	-
 PlannerBlockerSchema	value	ecb4bc1049897eaf	b417417c98a01569
 ProfileFrontmatter	type	cbec462ee5fdaa6f	-
 ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
-Project	type	8c0e88cc1e4401c8	-
+Project	type	7e05ebef591d0321	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
-ProjectRegistrySchema	value	1cc8877e8fc45666	51708bce8e52c879
-ProjectSchema	value	1c7f6f5659dcfd4d	146ea61c63512052
+ProjectRegistrySchema	value	1cc8877e8fc45666	afc4ca351cd62eb2
+ProjectSchema	value	60cb7d7b03857f2c	ebc6a323a86b8b12
 QUALITY_LENSES	value	9d9728612bd80e96	da1ad1cd9d71c6cc
 QUALITY_PANEL_SLOT	value	9dac97ccd7bc9dfb	e80fdef4566bcfb0
 QUESTION_ANSWER_MAX_CHARS	value	72be5ce6a6f549aa	40510175845988f1
@@ -675,7 +675,7 @@ validateJobsDocument	value	036ead313eaf0730	c93595774409dc08
 validateModeSettings	value	5b546bd44c3d30ab	54bc82f8f0ea6131
 validatePendingReview	value	abb72efb1e248a53	bb7e6da3ca004b8c
 validateProfile	value	5424d6763f57252c	898566305939dd12
-validateProjectRegistry	value	f57c73e76fda073a	296b70514fd40150
+validateProjectRegistry	value	b5b44b859c0695d5	296b70514fd40150
 validateQuestionRecord	value	810d0c383284cd9e	00fe3e4ae0b3e3c8
 validateReviewApproval	value	edd1cf4926c9898f	f2c461fb81590581
 validateRunStatus	value	b42a6ed06716763c	4451d6982d7be179

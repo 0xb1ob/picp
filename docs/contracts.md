@@ -3530,6 +3530,33 @@ head, never a new job or branch. Until then the row still names the old head.
 GitHub review events are not polled, and an approval on GitHub never triggers a
 merge by the command post.
 
+### Forge identity and observation (`forge`, v1 PR 1)
+
+A project may carry an optional `forge` block: `{kind: github|gitlab,
+web_base_url?, api_base_url?, token_env?}` (`cp_project action:forge`, or `forge`
+on `add`; `null` clears; absent in every legacy registry). github.com and
+gitlab.com are recognised from the remote; any other host is `unsupported`
+until it declares `kind: gitlab` and its `web_base_url` — a hostname never
+reveals its forge. `src/forge-url.ts` parses https, scp-style and `ssh://`
+remotes into a whole namespace path (nested groups intact, an installation
+prefix stripped from an https remote, an https remote on another host than the
+configured web root refused) and recognises safe PR/MR links (HTTPS, no
+credentials, query or fragment, positive number). `github` takes `kind` only
+(no GitHub Enterprise). `token_env` is an environment variable **name**; no
+field, parameter, message or receipt holds a token value, and gitlab.com alone
+defaults to `GITLAB_TOKEN`.
+
+`src/forges/` is observation only: `observerFor()` returns a `gh pr view`
+observer (the exact command MergeStore already ran, now shared) or a GitLab
+observer making one GET of `/projects/:id/merge_requests/:iid` — token only in
+the `PRIVATE-TOKEN` header, `redirect: manual` (refused, never followed), a
+10 s abort and a 1 MiB body cap. A url for another host or project is refused
+before any request; a fork MR, a conflicting head, a malformed sha or an answer
+naming another MR is a named failure (`unsupported`/`mismatch`/`unavailable`/
+`invalid`) carrying provider, host, status and a static cause — never a body, a
+header or an exception message. Nothing in PR 1 calls the GitLab observer yet:
+merge recording, teardown, intake and watch stay GitHub-only and unchanged.
+
 ### The two-writer boundary
 
 The branch has exactly one writer at any moment, and the boundaries are code:
