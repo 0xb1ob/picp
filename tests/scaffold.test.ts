@@ -23,10 +23,10 @@ test("readPackageIdentity reads name and version from the manifest", () => {
 		name: string;
 		version: string;
 	};
-	assert.equal(identity.name, "pi-command-post");
+	assert.equal(identity.name, "picp");
 	assert.equal(identity.version, manifest.version);
 	assert.equal(identity.root, REPO_ROOT);
-	assert.match(formatVersionLine(identity), /^pi-command-post \d+\.\d+\.\d+ \(root: \//);
+	assert.match(formatVersionLine(identity), /^picp \d+\.\d+\.\d+ \(root: \//);
 });
 
 test("readPackageIdentity fails closed on a missing manifest", () => {

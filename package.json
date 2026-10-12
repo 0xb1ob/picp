@@ -1,8 +1,9 @@
 {
-	"name": "pi-command-post",
+	"name": "picp",
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Agentic fleet control for pi: headless RPC workers, structured envelopes, leases, gates.",
+	"description": "You give the orders in plain words; a parent agent plans and coordinates; workers ship reviewed PRs.",
+	"homepage": "https://picp.ai",
 	"keywords": [
 		"pi-package"
 	],
