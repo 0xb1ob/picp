@@ -4,6 +4,7 @@ import type { Schedule } from "./schedule-core.ts";
 import type { SchedulePolicy } from "./schedule-policy.ts";
 import type { ScheduleRun } from "./schedule-run-core.ts";
 import type { SettingField, SettingKey, SettingsSnapshot, SettingValue } from "../contracts.ts";
+import type { DeviceLevel, DeviceView, PairingEvent } from "./device-files.ts";
 
 export type SessionTier = "you" | "parent" | "workers";
 /**
@@ -435,6 +436,15 @@ export interface PushStatusResponse {
  generated_at: string; configured: boolean; origin: string | null; public_key: string | null;
  devices: number | null; last_sent_at: string | null; undelivered_24h: number | null; last_error: string | null;
 }
+/** Decision es-6a78c3, verbatim: wherever devices are managed (Settings → Devices, `GET /api/devices`, the docs). */
+export const DEVICE_TRUST = "A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested through the operator agent. Use View only for a less-trusted device.";
+/** Remote dashboard PR 3, `GET /api/devices`: the list (no digest), committed pairings and the caller's management rights. `token` only for a caller that may revoke. */
+export interface DevicesResponse {
+ generated_at: string; origin: string | null; devices: DeviceView[]; events: PairingEvent[]; pending_codes: number;
+ token: string | null; can_create: boolean; can_revoke: boolean; trust: string;
+}
+/** `POST /api/pair/create` (201): the one-use pairing link; its secret lives only in the fragment and in memory. */
+export interface PairCodeResponse { level: DeviceLevel; expires_at: string; link: string }
 /** Remote dashboard PR 1d, `/api/devices/notices`: one pairing-alert recipient. `unknown`: the delivery ledger is unreadable. */
 export interface DeviceNoticeRecipient {
  device_id: string; name: string | null;

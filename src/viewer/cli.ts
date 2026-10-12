@@ -20,11 +20,9 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { describeHome } from "../home.ts";
 import { resolveStateDir } from "./sessions.ts";
-import { remoteRuntime } from "./remote-runtime.ts";
+import { remoteOnly, remoteRuntime } from "./remote-runtime.ts";
 import { REMOTE_HOST } from "./remote-server.ts";
-import { daemonPaths } from "../service/daemon-files.ts";
-import { readTunnelConfig } from "../service/daemon-tunnel-files.ts";
-import { createViewer, hostHeaderFor } from "./server.ts";
+import { createViewer, hostHeaderFor, type ViewerOptions } from "./server.ts";
 
 export const DEFAULT_PORT = 8766;
 
@@ -47,15 +45,6 @@ export function viewerAddress(env: NodeJS.ProcessEnv = process.env, requireTailn
 }
 
 /**
- * No-tailnet remote-only mode: cp-tunnel enabled this home's remote dashboard (`data/tunnel.json` `enabled`). Only then
- * may a `--require-tailnet` viewer that found no tailnet address run without its local listener.
- */
-export function remoteOnly(home: string): boolean {
-	const read = readTunnelConfig(daemonPaths(home).dataDir);
-	return read.ok && read.config?.enabled === true;
-}
-
-/**
  * The viewer's address, `local: false` in remote-only mode: `--require-tailnet` found no tailnet address and cp-tunnel
  * enabled the remote dashboard. Otherwise the refusal stands — never a loopback fallback.
  */
@@ -63,7 +52,7 @@ export function listenPlan(home: string, env: NodeJS.ProcessEnv, requireTailnet:
 	try {
 		return { ...viewerAddress(env, requireTailnet, run), local: true };
 	} catch (error) {
-		if (!requireTailnet || !remoteOnly(home)) throw error;
+		if (!requireTailnet || !remoteOnly(resolveStateDir(home))) throw error;
 		return { ...viewerAddress({ ...env, CP_VIEWER_HOST: REMOTE_HOST }), local: false }; // a bad CP_VIEWER_PORT still refuses
 	}
 }
@@ -103,16 +92,20 @@ export async function main(argv: readonly string[]): Promise<void> {
 		process.stderr.write(`cp-view: startup build failed; / returns 503; health and APIs remain available: ${error instanceof Error ? error.message : "unknown build error"}\n`);
 	}
 	const options = { home, stateDir, host, port, requireTailnet, ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) };
+	const remote = remoteRuntime(options);
 	if (!address.local) {
 		process.stdout.write(`cp-view: remote-only (no tailnet address; cp-tunnel enabled the remote dashboard): no local listener, state ${stateDir}\n`);
-		remoteRuntime(options).start();
+		remote.start();
 		setInterval(() => undefined, 1 << 30); // the runtime's own timer is unref'd: this keeps the process serving
 		return;
 	}
-	createViewer(options).listen(port, host, () => {
+	// The device routes (Devices: list, local-only Add, revoke; pairing notices) appear on the local listener only while
+	// this viewer owns the device store; until then, and on a home without the remote feature, they answer 404 as before.
+	const local: ViewerOptions = { ...options, get devices() { return remote.routes(); } };
+	createViewer(local).listen(port, host, () => {
 		process.stdout.write(`cp-view: http://${hostHeaderFor(host, port)}/ (read-only, state ${stateDir})\n`);
-		// Remote dashboard: inert until cp-tunnel configures this home (remote-runtime.ts); the local listener is unchanged.
-		remoteRuntime(options).start();
+		// Remote dashboard: inert until cp-tunnel configures this home (remote-runtime.ts).
+		remote.start();
 	});
 }
 

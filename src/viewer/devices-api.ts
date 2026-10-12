@@ -18,7 +18,7 @@ import type { IncomingMessage } from "node:http";
 import { accessOf, canMint, canRevoke, mintPeer } from "./access.ts";
 import { tokenMatches } from "./control-api.ts";
 import { controlOrigin } from "./control-files.ts";
-import type { DeviceNoticesResponse } from "./api-types.ts";
+import { DEVICE_TRUST, type DeviceNoticesResponse, type DevicesResponse, type PairCodeResponse } from "./api-types.ts";
 import { DEVICE_ID_RE, isDeviceLevel } from "./device-files.ts";
 import { readDeviceNotifications } from "./device-notification-files.ts";
 import type { DeviceFailure, DeviceStore } from "./device-store.ts";
@@ -32,8 +32,8 @@ export const DEVICE_NOTICES_PATH = "/api/devices/notices";
 export const DEVICE_NOTICES_LIMIT = 20;
 /** The management CSRF token: per viewer process, independent of every control token. */
 export const DEVICES_TOKEN = randomBytes(32).toString("hex");
-/** Decision es-6a78c3, verbatim: shown wherever devices are managed. */
-export const DEVICE_TRUST = "A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested through the operator agent. Use View only for a less-trusted device.";
+/** Decision es-6a78c3, verbatim: shown wherever devices are managed (api-types.ts, so the browser bundle shares it). */
+export { DEVICE_TRUST };
 
 /** The tunnel's current origin and generation, or null while no remote listener is running. */
 export type DeviceBinding = { origin: string; generation: number };
@@ -75,7 +75,7 @@ export function handleDevicesList(req: IncomingMessage, routes: DeviceRoutes, no
 		body: {
 			generated_at: now.toISOString(), origin: routes.binding()?.origin ?? null, devices: listed.devices, events: listed.events, pending_codes: listed.pending_codes,
 			token: revoke ? DEVICES_TOKEN : null, can_create: canMint(access, peerOf(req)), can_revoke: revoke, trust: DEVICE_TRUST,
-		},
+		} satisfies DevicesResponse,
 	};
 }
 
@@ -149,5 +149,5 @@ export async function handleDevicesWrite(req: IncomingMessage, options: DevicesR
 	const route = /^(?:127\.|::1$|::ffff:127\.)/.test(peer ?? "") ? "loopback-dashboard" : "tailnet-dashboard";
 	const issued = routes.store.issueCode({ ...binding, route, ...(body.level ? { level: body.level as "full" | "view" } : {}), peer: peer ?? null });
 	if (!issued.ok) return storeRefusal(issued);
-	return { status: 201, body: { level: issued.level, expires_at: issued.expires_at, link: `${binding.origin}/pair#${issued.code}` } };
+	return { status: 201, body: { level: issued.level, expires_at: issued.expires_at, link: `${binding.origin}/pair#${issued.code}` } satisfies PairCodeResponse };
 }

@@ -38,6 +38,15 @@ export function wantedListener(config: TunnelConfigRead, runtime: TunnelRuntimeR
 	return { origin: live.origin, generation: live.generation, revision, port, mode };
 }
 
+/**
+ * No-tailnet remote-only mode: cp-tunnel enabled this home's remote dashboard (`data/tunnel.json` `enabled`). Only then
+ * may a `--require-tailnet` viewer that found no tailnet address run without its local listener (cli.ts `listenPlan`).
+ */
+export function remoteOnly(stateDir: string): boolean {
+	const read = readTunnelConfig(join(dirname(stateDir), "data"));
+	return read.ok && read.config?.enabled === true;
+}
+
 export interface RemoteRuntimePorts {
 	configured(): boolean;
 	readConfig(): TunnelConfigRead;
@@ -49,6 +58,8 @@ export interface RemoteRuntimePorts {
 export interface RemoteRuntime {
 	check(): Promise<void>;
 	listening(): RemoteListening | null;
+	/** The device routes while this viewer owns the device store (its socket started); else undefined. */
+	routes(): DeviceRoutes | undefined;
 	/** The interval, unref'd. */
 	start(): void;
 	stop(): void;
@@ -130,6 +141,7 @@ export function remoteRuntime(options: ViewerOptions, overrides: Partial<RemoteR
 	return {
 		check,
 		listening: () => open?.listening ?? null,
+		routes: () => (control ? routes : undefined),
 		start() {
 			void check();
 			timer ??= setInterval(() => void check(), REMOTE_CHECK_MS);

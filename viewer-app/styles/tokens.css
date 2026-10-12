@@ -21,6 +21,9 @@
  --coral: #f2917f;
  --error-border: #5a2f28;
  --hover: #ffffff;
+ /* Pairing QR (Settings → Devices): dark modules on light, as scanners expect, whatever the theme. */
+ --qr-light: #ffffff;
+ --qr-dark: #0b0b0a;
  --button: #20201d;
  --empty-background: #131613;
  --empty-border: #243027;
