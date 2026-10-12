@@ -598,7 +598,7 @@ export function createWakeupSurfaces(
 				}
 				if (tick.disabled && !s.ciWatchDisabledShown) {
 					s.ciWatchDisabledShown = true;
-					const text = `pi-command-post: the CI/PR watch is off for this session (${tick.disabled}). Held PRs will not wake you; check them with /status.`;
+					const text = `pi-command-post: the GitHub CI/PR watch is off for this session (${tick.disabled}). Held GitHub PRs will not wake you; check them with /status. GitLab merge requests are still watched.`;
 					operatorNotify(s.live, text, "warning");
 				}
 				// k52: with gh gone (watch disabled) the main half would only fail each tick.

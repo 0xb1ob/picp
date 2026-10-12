@@ -100,6 +100,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ciRunRef, failedRunOn, formatRunRef } from "./ci-run-ref.ts";
+import { parseChangeRequestUrl } from "./forge-url.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import {
 	type CiRun,
@@ -655,10 +656,8 @@ export class CiWatch {
 
 	async #run(): Promise<CiWatchTick> {
 		const result: CiWatchTick = { observations: [], checked: [], skipped: [], errors: [] };
-		if (this.#disabled) {
-			result.disabled = this.#disabled;
-			return result;
-		}
+		// Forge PR 3: without gh, GitHub jobs stop being asked; a GitLab MR needs no gh and is still watched.
+		if (this.#disabled) result.disabled = this.#disabled;
 		let watched: WatchableRecord[];
 		try {
 			watched = this.#deps.jobs().filter((record) => isWatched(record));
@@ -673,6 +672,8 @@ export class CiWatch {
 		}
 		const now = this.#now();
 		for (const record of watched) {
+			const gitlab = parseChangeRequestUrl(prReceiptOf(record)?.url ?? "")?.kind === "gitlab";
+			if (this.#disabled && !gitlab) continue;
 			if (!this.#due(record.job_id, now)) {
 				result.skipped.push(record.job_id);
 				continue;
@@ -682,10 +683,10 @@ export class CiWatch {
 				result.observations.push(...(await this.#check(record, now)));
 			} catch (error) {
 				const message = (error as Error).message;
-				if (MISSING_GH.test(message)) {
+				if (MISSING_GH.test(message) && !gitlab) {
 					this.#disable(`gh is not available: ${message.slice(0, 200)}`);
 					result.disabled = this.#disabled as string;
-					return result;
+					continue;
 				}
 				result.errors.push({ job_id: record.job_id, message });
 				this.#fail(record.job_id, message, now);

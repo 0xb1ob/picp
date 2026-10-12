@@ -7,7 +7,7 @@
  * never in a render path.
  */
 
-import type { PrObservation } from "./ci-watch.ts";
+import { type PrObservation, prReceiptOf, type WatchableRecord } from "./ci-watch.ts";
 import { type ForgeResolution, parseChangeRequestUrl, resolveForgeRepository } from "./forge-url.ts";
 import { type ForgeObserver, type ObserverPorts, observerFor } from "./forges/adapter.ts";
 import { githubObserver } from "./forges/github.ts";
@@ -58,22 +58,24 @@ export function changeRequestObserver(home: string, project: string, ref: string
 	return observerFor(resolution ?? { ok: false, reason: "unsupported", detail: `project ${project} is not registered, so its GitLab forge is unknown` }, ports);
 }
 
-/** A GitLab change request: a GitLab MR link, or any ref of a project whose forge resolves to GitLab. */
-export function isGitlabChange(home: string, project: string | undefined, ref?: string): boolean {
-	if (ref && parseChangeRequestUrl(ref)?.kind === "gitlab") return true;
-	const resolution = project ? projectForge(home, project) : undefined;
-	return resolution?.ok === true && resolution.repository.kind === "gitlab";
-}
-
 /** The project's GitLab observer (intake), or undefined: a GitHub or unresolvable project keeps its gh resolution. */
 export function projectGitlabObserver(home: string, project: string, transport?: GitlabTransport): ForgeObserver | undefined {
 	const resolution = projectForge(home, project);
 	return resolution?.ok && resolution.repository.kind === "gitlab" ? gitlabObserver(resolution.repository, transport) : undefined;
 }
 
+/**
+ * A GitLab job: its PR receipt is a GitLab MR link. Intake stores only a verified
+ * project MR there for a GitLab project, so the receipt decides with no registry
+ * read — this runs per watch tick and on the merge-ask render path.
+ */
+export function isGitlabJob(record: WatchableRecord | undefined): boolean {
+	return parseChangeRequestUrl(record ? (prReceiptOf(record)?.url ?? "") : "")?.kind === "gitlab";
+}
+
 /** v1 reads no GitLab CI: why a GitLab job's merge ask stays deferred as unknown — never "no CI configured", never green. */
-export function gitlabCiUnsupported(home: string, project: string | undefined, ref?: string): string | undefined {
-	return isGitlabChange(home, project, ref) ? "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask" : undefined;
+export function gitlabCiUnsupported(record: WatchableRecord | undefined): string | undefined {
+	return isGitlabJob(record) ? "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask" : undefined;
 }
 
 const NO_GH: ObserverPorts["run"] = async () => ({ status: 1, stdout: "", stderr: "gh is never asked about a GitLab merge request" });
@@ -83,10 +85,11 @@ const NO_GH: ObserverPorts["run"] = async () => ({ status: 1, stdout: "", stderr
  * through its observer for its terminal state, mapped onto the REST shape
  * (`merged`, or `state: closed`) the event rule already reads. A failed read
  * throws its named detail, so it is that one job's failure and backoff.
+ * `observer` is injected in tests; production asks the project's forge.
  */
-export async function watchChangeRequest(home: string, project: string, prUrl: string, github: () => Promise<PrObservation | undefined>, transport?: GitlabTransport): Promise<PrObservation | undefined> {
-	if (!isGitlabChange(home, project, prUrl)) return github();
-	const read = await changeRequestObserver(home, project, prUrl, { run: NO_GH, cwd: home, ...(transport ? { gitlab: transport } : {}) }).readChangeRequest(prUrl);
+export async function watchChangeRequest(home: string, project: string, prUrl: string, github: () => Promise<PrObservation | undefined>, observer?: ForgeObserver): Promise<PrObservation | undefined> {
+	if (parseChangeRequestUrl(prUrl)?.kind !== "gitlab") return github();
+	const read = await (observer ?? changeRequestObserver(home, project, prUrl, { run: NO_GH, cwd: home })).readChangeRequest(prUrl);
 	if (!read.ok) throw new Error(`${read.reason}: ${read.detail}`);
 	const mr = read.observation;
 	const landing = mr.merge_commit_sha ?? mr.squash_commit_sha;

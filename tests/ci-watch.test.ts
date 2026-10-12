@@ -61,6 +61,8 @@ import {
 import { ghCiRuns, type CiRun } from "../src/merge-ask.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
+import { isGitlabJob, watchChangeRequest } from "../src/forge-runtime.ts";
+import type { ForgeObserver } from "../src/forges/adapter.ts";
 
 const HEAD = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
 const NEW_HEAD = "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00";
@@ -579,6 +581,67 @@ test("a missing gh disables the watch, says so once, and emits nothing", async (
 	assert.deepEqual(second.observations, []);
 	assert.equal(bench.disabled.length, 1, "an alarm that fires every tick is an alarm nobody reads");
 	assert.equal(bench.queries.pr, 1, "a disabled watch stops querying");
+});
+
+test("forge PR 3: missing gh stops only the GitHub job; a GitLab MR is still observed, claims no CI while open and wakes once on merge", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const MR = "https://gitlab.example.com/group/sub/repo/-/merge_requests/7";
+	const gitlab = record({ job_id: "cp-gl", branch: "cp-gl", project: "gl", receipts: [{ kind: "pr", status: "open", title: "MR for cp-gl", url: MR }] as Receipt[] });
+	let state: "open" | "merged" = "open";
+	const observer: ForgeObserver = {
+		provider: "gitlab",
+		readChangeRequest: async () => ({
+			ok: true,
+			observation: { provider: "gitlab", url: MR, number: 7, state, source_branch: "cp-gl", target_branch: "develop", head_sha: HEAD, ...(state === "merged" ? { squash_commit_sha: NEW_HEAD, merged_at: "2026-08-31T18:30:00Z" } : {}) },
+		}),
+	};
+	let clock = NOW;
+	const ghCalls: string[] = [];
+	const disabled: string[] = [];
+	const watchOf = () =>
+		new CiWatch({
+			home: home.path,
+			jobs: () => [record(), gitlab],
+			pr: (job, prUrl) =>
+				watchChangeRequest(home.path, job.project, prUrl, async () => {
+					ghCalls.push(job.job_id);
+					throw new Error("spawn gh ENOENT");
+				}, observer),
+			runs: async (job) => (isGitlabJob(job) ? [] : assert.fail("runs is never asked once gh is gone")),
+			now: () => clock,
+			onDisabled: (reason) => disabled.push(reason),
+		});
+	const watch = watchOf();
+
+	const first = await watch.tick();
+	assert.match(first.disabled ?? "", /gh is not available/);
+	assert.deepEqual(first.checked, ["cp-4wz", "cp-gl"], "the GitLab job is checked in the same tick gh went missing");
+	assert.deepEqual(first.observations, [], "an open MR with no CI read is neither green nor a no-CI claim");
+
+	state = "merged";
+	clock = new Date(clock.getTime() + CI_WATCH_MAX_BACKOFF_MS);
+	const second = await watch.tick();
+	assert.deepEqual(second.checked, ["cp-gl"]);
+	assert.deepEqual(second.observations.map((o) => [o.job_id, o.event, o.merge_commit_sha, o.pr_url, o.pr_number]), [["cp-gl", "pr_merged", NEW_HEAD, MR, 7]]);
+	assert.deepEqual(ghCalls, ["cp-4wz"], "gh was asked once, then the GitHub job stopped being queried");
+	assert.equal(disabled.length, 1);
+
+	clock = new Date(clock.getTime() + CI_WATCH_MAX_BACKOFF_MS * 10);
+	const restarted = await watchOf().tick();
+	assert.deepEqual(restarted.observations.map((o) => o.key), second.observations.map((o) => o.key), "a restart re-derives the same event identity");
+});
+
+test("forge PR 3: a GitLab MR maps onto the watch's terminal shape, a failed read is that job's error, and GitHub urls never reach the observer", async () => {
+	const MR = "https://gitlab.example.com/group/sub/repo/-/merge_requests/7";
+	const answer = (outcome: Awaited<ReturnType<ForgeObserver["readChangeRequest"]>>): ForgeObserver => ({ provider: "gitlab", readChangeRequest: async () => outcome });
+	const never = async () => assert.fail("gh is never asked about an MR");
+	const closed = await watchChangeRequest("/nowhere", "gl", MR, never, answer({ ok: true, observation: { provider: "gitlab", url: MR, number: 7, state: "closed", source_branch: "cp-gl", target_branch: "main" } }));
+	assert.deepEqual(closed, { merged: false, state: "closed", number: 7, url: MR, head_ref: "cp-gl" });
+	assert.equal(deriveCiEvents({ jobId: "cp-gl", branch: "cp-gl", ...(closed ? { pr: closed } : {}), head: { reason: "none" }, runs: [] })[0]?.event, "pr_closed");
+	await assert.rejects(() => watchChangeRequest("/nowhere", "gl", MR, never, answer({ ok: false, reason: "unavailable", detail: "HTTP 503 (service unavailable)" })), /^Error: unavailable: HTTP 503/);
+	const viaGh = await watchChangeRequest("/nowhere", "gl", PR, async () => pr(), answer({ ok: false, reason: "mismatch", detail: "never asked" }));
+	assert.equal(viaGh?.url, PR);
 });
 
 test("an announced verdict on an open PR is re-checked at the idle multiplier", async (t) => {

@@ -16,6 +16,7 @@ import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./await
 import { ghCiConfigured } from "./ci-configured.ts";
 import { CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
 import { ForeignCiWatch, type ForeignCiTick, ghForeignRuns } from "./foreign-ci-watch.ts";
+import { gitlabCiUnsupported, isGitlabJob, watchChangeRequest } from "./forge-runtime.ts";
 import {
 	buildDecisionContext,
 	type BuildDecisionContextOptions,
@@ -645,8 +646,8 @@ export class CommandPost {
 		this.ciWatch = new CiWatch({
 			home: options.home,
 			jobs: () => this.fleet.list() as WatchableRecord[],
-			pr: async (job, prUrl) => ghPrRest({ cwd: this.#clonePath(job.job_id) })(prUrl),
-			runs: async (job) => ghCiRuns({ cwd: this.#clonePath(job.job_id) })(job.branch),
+			pr: async (job, prUrl) => watchChangeRequest(options.home, job.project, prUrl, () => ghPrRest({ cwd: this.#clonePath(job.job_id) })(prUrl)),
+			runs: async (job) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id) })(job.branch)),
 			head: async (job) =>
 				gitRemoteHead({ cwd: this.#clonePath(job.job_id), fallback: (id) => this.reportedHeadSha(id) })(
 					job.branch,
@@ -818,6 +819,7 @@ export class CommandPost {
 			head: async (branch, jobId) =>
 				gitRemoteHead({ cwd: dirFor(jobId), fallback: (id) => this.reportedHeadSha(id) })(branch, jobId),
 			runs: async (branch, jobId) => ghCiRuns({ cwd: dirFor(jobId) })(branch),
+			unsupported: (jobId) => gitlabCiUnsupported(this.fleet.get(jobId) as WatchableRecord | undefined),
 			// cp-no-ci-repo-derived: asked only when the branch has no runs at all, and
 			// only ever able to *unblock* a row — an unreadable answer defers exactly as
 			// zero runs always did. Without it a project with no CI defers its ship row
