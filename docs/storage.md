@@ -154,6 +154,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `<home>/.pi-command-post/projects/<name>/` | `src/projects.ts` (clone on demand) | canonical clones | H | code only |
 | `<home>/.pi-command-post/operator/{tasks,handoffs,reports/<topic>,scratch}/` | nothing in code | the operator workspace | H | the **operator session** and the human only |
 | `<home>/.pi-command-post/jobs.json`, `jobs-legacy-fields.jsonl`, `settings.json` | `src/ledger.ts`; `settings.json` is read-only in code (`src/mode.ts`) | ledger, mode preference | H | code (`cp_job`); settings.json: operator |
+| `<home>/.pi-command-post/bin/cloudflared` (0755, dir 0700) | `src/tunnel/cloudflared.ts` `provisionCloudflared` (remote dashboard PR 2; nothing calls it until `cp-tunnel` lands) | the pinned official cloudflared, used only when no compatible one is on PATH: SHA256-verified, probed in an exclusive temp file beside it, then renamed into place; a failure leaves neither | H | code only |
 | `<home>/.beads/` | br only; code reads it (`src/doctor.ts`, `src/ledger-import.ts`) | frozen br archive / read-only tracker DB | H | nobody through command-post |
 | `<package-root>/USER.md` | the operator, by hand | optional context (gitignored) | H | the operator only |
 
