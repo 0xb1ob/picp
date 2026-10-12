@@ -187,11 +187,11 @@ test("a code whose audit or write fails is never stored, so it can never be clai
 	if (process.getuid?.() === 0) return; // root ignores the read-only directory below
 	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 	const store = make({ audit: (line) => { if (line.event === "code_issued") chmodSync(dataDir, 0o500); return appendControlAudit(stateDir, line); } });
-	const failed = store.issueCode({ ...BIND, route: "cli-pair" });
+	let failed: ReturnType<DeviceStore["issueCode"]>;
+	try { failed = store.issueCode({ ...BIND, route: "cli-pair" }); } finally { chmodSync(dataDir, 0o700); } // restored even if issueCode throws
 	assert.equal(failed.ok, false);
 	assert.equal((failed as { reason: string }).reason, "write_failed");
 	assert.equal("code" in failed, false, "no code is handed out");
-	chmodSync(dataDir, 0o700);
 	const after = readDeviceState(dataDir);
 	assert.equal(after.state === "absent" || (after.state === "ok" && after.store.codes.length === 0), true, "the failed write left no claimable code");
 });

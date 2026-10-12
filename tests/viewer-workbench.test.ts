@@ -225,8 +225,9 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		if (!writers.has(name)) assert.doesNotMatch(text, /writeFileSync|appendFileSync|mkdirSync|rmSync|renameSync|unlinkSync|createWriteStream|\bwriteSync\(|\b(?:writeFile|appendFile|mkdir|rename|unlink)\s*\(/, name);
 		// The dashboard-control writer is imported by the three write routes (control, image upload, thread done) and the device store (its secret-free device events), nothing else in the viewer.
 		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts" && name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
-		// data/devices.json has one writer: nothing else in the viewer constructs or imports the device store yet.
-		if (name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);
+		// data/devices.json has one writer: only the device routes and the remote gate reach the store (devices-api.ts for its type), never another module.
+		if (!["device-store.ts", "devices-api.ts", "pair-api.ts", "remote-server.ts"].includes(name)) assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);
+		if (name === "devices-api.ts") assert.match(text, /^import type \{[^}]*\} from "\.\/device-store\.ts";$/m, "devices-api.ts takes the store as a type only");
 		// The image store is written only through uploads.ts, and only the upload route stores (the message route and the GET only read).
 		if (name !== "operator-upload-api.ts" && name !== "uploads.ts") assert.doesNotMatch(text, /\bwriteUpload\b/, `${name} stores an upload`);
 		if (name === "control-api.ts" || name === "control-files.ts") assert.doesNotMatch(text, /parent-host|OperatorAsks|operator-asks/, `${name} reaches the parent or the ask journal`);

@@ -12,7 +12,7 @@
  */
 import type { IncomingMessage } from "node:http";
 import type { SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
-import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, tokenMatches } from "./control-api.ts";
+import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
 import { availableModels, type ModelList } from "./model-list.ts";
@@ -92,8 +92,8 @@ function settingsBase(now: Date): SettingsResponse {
 	return { generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null, snapshot: null, catalog: null, audit: [] };
 }
 
-export async function handleSettingsStatus(_req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => ModelList = availableModels): Promise<ControlRouteResult> {
-	if (options.requireTailnet !== true) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
+export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => ModelList = availableModels): Promise<ControlRouteResult> {
+	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
 	if (config.state !== "on") return { status: 200, body: { ...settingsBase(now), reason: `Dashboard control is off: ${config.reason}` } };
 	const record = readControlRecord(options.stateDir);
@@ -111,7 +111,7 @@ export async function handleSettingsStatus(_req: IncomingMessage, options: Contr
 	return {
 		status: 200,
 		body: {
-			...settingsBase(now), enabled: true, running: true, supported: true, writable: true,
+			...settingsBase(now), enabled: true, running: true, supported: true, writable: mayWrite(req),
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],

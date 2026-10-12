@@ -6425,8 +6425,9 @@ trust boundary is the dashboard control one: a same-user local process can alrea
 
 ### Remote devices (remote dashboard PR 1)
 
-**Status.** Foundation only, **off by default**: no listener, route or CLI uses it yet, so the loopback/tailnet
-listener answers exactly as before. Later PRs add the remote listener, the tunnel and the Devices screen.
+**Status.** **Off by default**: nothing starts the remote listener yet (the tunnel wiring is a later PR), and the
+loopback/tailnet listener answers exactly as before — without `devices` routes configured it has no device route.
+Later PRs add the tunnel, remote controls with message provenance, pairing alerts and the Devices screen.
 
 **Trust (Decision es-6a78c3).** A Full-control remote device is trusted like your terminal. The dashboard's pairing and
 device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested
@@ -6454,7 +6455,32 @@ cookie and leaves nothing active; the code stays consumed. `recover()` scans the
 the line only when that `pairing_id` is missing and activates: one logical pairing, never a second device or a revived
 code; an unreadable journal refuses rather than risk a duplicate. The event's recipients snapshot every active device
 (full and view) plus the new one. Code issue, refused claims, refused sign-ins and revokes append typed lines with
-fixed reasons — never a code, secret, digest or raw input.
+fixed reasons — never a code, secret, digest or raw input. A `code_issued` line records an issue *attempt* (it is
+written before the code is stored, and a failed write stores none): no audit consumer may treat it as a live code.
+
+**Remote gate (PR 1b, `src/viewer/remote-server.ts`).** A second listener on `127.0.0.1` at its own port; the tunnel
+rewrites Host to that address and the gate demands it exactly (421 otherwise). Only exact `GET|HEAD /pair` (the
+self-contained page, `src/viewer/pair-page.ts`: CSP admits only its own inline script and style by hash, no storage,
+the fragment code read and scrubbed first) and exact `POST /api/pair/claim` (`src/viewer/pair-api.ts`) are public.
+Every other path and method — app, assets, boards, PWA files, identity, health, version, projections, SSE, push,
+control, unknown routes and unsupported methods — needs the `__Host-cp_device` cookie of an active, unrevoked,
+unexpired device bound to the current origin generation, or answers 401 (503 while no origin is bound) before the
+dispatcher runs: no data, no stream timer, no 404/405. The claim takes exactly `{code, name, level?}` with `Origin`
+equal to the tunnel origin, and answers only the HttpOnly cookie and a redirect target. Claims and presented bad
+cookies have separate limiters, 10 per 10 minutes per client address; the address is a well-formed single
+`CF-Connecting-IP` or one shared `unknown` bucket, used for accounting and audit only — no header confers
+authority. Each authenticated request slides the session before it is answered, binds a frozen remote context to
+the request (`bindAccess`) and sets no-store on every response (attachments included). Both levels read every
+protected route, the full operator transcript and control statuses included; a View-only device gets every write
+token as `null`. An open stream re-checks its session every 2 s regardless of backpressure and closes on revoke.
+
+**Device routes (`src/viewer/devices-api.ts`, opt-in).** `GET /api/devices` (devices without digests, committed
+pairing events, live-code count, the trust statement; local only to a loopback/tailnet socket peer),
+`POST /api/pair/create` `{level?}` (local only, `canMint`; every remote context refuses 403 whatever its level,
+token or Origin; the link carries the code in its fragment) and `POST /api/devices/revoke` `{id}` (`canRevoke`).
+Writes need the per-process management token, an exact Origin (remote: the tunnel origin; local: the control
+route's origins), same-origin Sec-Fetch-Site, JSON and at most 1 KiB. In this slice every other remote write refuses
+403 at the gate — View-only always, Full-control until remote controls carry device provenance.
 
 ## Reading the plan
 

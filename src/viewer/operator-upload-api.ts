@@ -11,7 +11,7 @@
 import type { IncomingMessage } from "node:http";
 import type { OperatorUploadResponse } from "./api-types.ts";
 import { appendControlAudit } from "./control-audit.ts";
-import { type ControlRouteOptions, type ControlRouteResult, guarded, tokenMatches } from "./control-api.ts";
+import { type ControlRouteOptions, type ControlRouteResult, guarded, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
 import { ensureUploadDir, isUploadId, isTextUploadId, newUploadId, readUpload, sanitizeUploadName, sniffImage, sweepUploads, textExtension, TEXT_UPLOAD_MAX_BYTES, UPLOAD_DIR_MAX_BYTES, UPLOAD_MAX_AGE_MS, UPLOAD_MAX_BYTES, uploadRoot, validateText, writeUpload } from "./uploads.ts";
@@ -67,7 +67,7 @@ const json = (status: number, error: string) => ({ status, type: "application/js
 
 /** `GET|HEAD /api/operator/uploads/<id>`: tailnet-only like the full transcript; same-origin; gone or expired is 404. */
 export function serveOperatorUpload(req: IncomingMessage, options: { requireTailnet?: boolean; uploadRoot?: string }, rawId: string, now = new Date()): { status: number; type: string; body: string | Buffer; headers: Record<string, string> } {
-	if (options.requireTailnet !== true) return json(403, "uploads are served only under --require-tailnet");
+	if (!readAllowed(req, options)) return json(403, "uploads are served only under --require-tailnet");
 	const site = req.headers["sec-fetch-site"];
 	if (site !== undefined && site !== "same-origin" && site !== "none") return json(403, "cross-site request refused");
 	if (!isUploadId(rawId)) return json(400, "not an upload id");
