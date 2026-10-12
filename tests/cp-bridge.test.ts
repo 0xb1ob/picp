@@ -1677,7 +1677,7 @@ test("operator diagnostics use the live parent's commands without creating work"
 	assert.deepEqual((await tool.execute("closed-asks", { action: "status" })).details.asks, []);
 	assert.deepEqual(snapshot(), before, "ask bookkeeping does not create authority or send to the parent");
 	const version = await tool.execute("version", { action: "version" });
-	assert.match(version.content[0]!.text, /^pi-command-post \S+ \(root: /);
+	assert.match(version.content[0]!.text, /^picp \S+ \(root: /);
 	assert.ok(version.content[0]!.text.includes(`multi-project mode, home ${ctx.home}`));
 	assert.equal(version.details.text, version.content[0]!.text);
 	assert.equal(version.details.level, "info");

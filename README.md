@@ -1,4 +1,8 @@
-# pi-command-post
+# picp: pi command post
+
+You give the orders in plain words; a parent agent plans and coordinates; workers ship reviewed PRs.
+
+Homepage: https://picp.ai
 
 Command post runs a small team of [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 coding agents for you, across as many git repositories as you like. You say
