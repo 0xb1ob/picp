@@ -192,11 +192,12 @@ test("A10: redirects are followed only over https to the GitHub release hosts, a
 });
 
 /** One ustar entry (the parser reads name, size, type, magic and prefix; the checksum is the SHA256's job). */
-function tarEntry(name: string, body: Buffer, type = "0"): Buffer {
+function tarEntry(name: string, body: Buffer, type = "0", size?: Buffer): Buffer {
 	const header = Buffer.alloc(512);
 	header.write(name, 0, 100, "utf8");
 	header.write("0000755\0", 100);
-	header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
+	if (size) size.copy(header, 124);
+	else header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
 	header.write(type, 156);
 	header.write("ustar\0", 257);
 	header.write("00", 263);
@@ -246,6 +247,40 @@ test("A10: a verified macOS archive yields only its one regular cloudflared; lin
 	const result = await provisionCloudflared(b.binDir, { platform: "darwin", arch: "arm64", pathEnv: "", fetch: fakeFetch({ [url]: { status: 200, body: good } }), run: fakeRun({ ".cloudflared.": "2026.10.0" }) }, { "darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: sha(good), archive: true } });
 	assert.equal(result.ok, true);
 	assert.deepEqual(readFileSync(join(b.binDir, "cloudflared")), BINARY);
+});
+
+/** A 12-byte GNU base-256 size field: the high bit set, then the value big-endian. */
+const base256 = (value: number, first = 0x80): Buffer => {
+	const out = Buffer.alloc(12);
+	out[0] = first;
+	out.writeUIntBE(value, 6, 6);
+	return out;
+};
+
+test("#248 review: a pax size overrides the next entry's, GNU base-256 sizes read, and unreadable sizes still refuse", () => {
+	const zeros = Buffer.from("00000000000\0");
+	assert.deepEqual(extractCloudflared(tgz(tarEntry("PaxHeader", pax({ size: String(BINARY.length) }), "x"), tarEntry("cloudflared", BINARY, "0", zeros))), BINARY);
+	assert.deepEqual(extractCloudflared(tgz(tarEntry("cloudflared", BINARY, "0", base256(BINARY.length)))), BINARY);
+	const refused: Array<[string, Buffer, RegExp]> = [
+		["pax size not a number", tgz(tarEntry("PaxHeader", pax({ size: "12k" }), "x"), tarEntry("cloudflared", BINARY)), /pax header has an unreadable size/],
+		["negative base-256", tgz(tarEntry("cloudflared", BINARY, "0", base256(BINARY.length, 0xff))), /negative size/],
+		["size field garbage", tgz(tarEntry("cloudflared", BINARY, "0", Buffer.from("zz\0"))), /unreadable size/],
+		["pax size past the end", tgz(tarEntry("PaxHeader", pax({ size: "999999" }), "x"), tarEntry("cloudflared", BINARY, "0", zeros)), /truncated/],
+	];
+	for (const [label, archive, reason] of refused) assert.throws(() => extractCloudflared(archive), reason, label);
+});
+
+test("#248 review: a flag is matched whole (`--url-foo` is not `--url`), and an existing bin/ is narrowed to 0700", async (t) => {
+	const b = bench(t);
+	const fake = b.place(join(b.home, "fake"));
+	const probe = await probeCloudflared(fake, fakeRun({ [fake]: "2026.10.0" }, [], { ...HELP, tunnel: "   --no-autoupdate  --url-foo value  --http-host-header value" }));
+	assert.deepEqual(probe, { ok: false, reason: `${fake} (cloudflared 2026.10.0) lacks --url in \`tunnel --help\`` });
+	assert.deepEqual(await probeCloudflared(fake, fakeRun({ [fake]: "2026.10.0" }, [], { ...HELP, tunnel: "--no-autoupdate, --url=value, --http-host-header" })), { ok: true, version: "2026.10.0" });
+	mkdirSync(b.binDir, { recursive: true, mode: 0o755 });
+	chmodSync(b.binDir, 0o755);
+	const result = await provisionCloudflared(b.binDir, { platform: "linux", arch: "x64", pathEnv: "", fetch: fakeFetch({ [URL_LINUX]: { status: 200, body: BINARY } }), run: fakeRun({ ".cloudflared.": "2026.10.0" }) }, linuxRelease(BINARY));
+	assert.equal(result.ok, true);
+	assert.equal(statSync(b.binDir).mode & 0o777, 0o700);
 });
 
 test("the production runner probes a real executable with a fixed argv and no shell", async (t) => {

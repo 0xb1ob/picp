@@ -10,13 +10,14 @@ terminal, and runs the health watchdog and the auto-updater. It is the only runt
 | `detached` | anything else (a container, WSL without systemd, a VM with no user manager) | `cp-daemon start`: a `setsid` child; after a reboot, the printed reboot command (§Without systemd) |
 
 Inside, an outer process (`daemon-outer.ts`: the lock, the control socket `state/daemon.sock`, the log) runs an
-inner runtime (`daemon-runtime.ts`) that owns four roles, plus a fifth on a home that uses the remote dashboard:
+inner runtime (`daemon-runtime.ts`) that owns four roles, plus two more on a home that uses the remote dashboard:
 
 | Role | Runs | Restart |
 |---|---|---|
 | parent | `node <app>/src/service/supervise.ts` — the attach-first supervisor | on a crash, 5 s growing to 300 s; exit 78 → `failed`; a 7th start in 30 min → `failed` (`start-limit-hit`) |
 | viewer | `node <app>/src/viewer/cli.ts --home <home> --require-tailnet --port <port>` | 10 s after any exit, unless the updater holds it |
 | device-notify (remote dashboard) | `node <app>/src/push/device-notify.ts` — the pairing-alert sender, only while `data/devices.json` or `data/tunnel.json` exists (started at the daemon's start or the first 5 s tick after one appears) | the parent's rules; held down and released with the viewer during an update; never a readiness condition |
+| cloudflared (remote dashboard) | the cloudflared `data/tunnel.json` names, with a fixed argv (`src/service/daemon-tunnel.ts`): quick `tunnel --no-autoupdate --url http://127.0.0.1:<port> --http-host-header 127.0.0.1:<port>`, named `tunnel --no-autoupdate run --token-file <file>`; only while that config is enabled | 5 s growing to 300 s after an unexpected exit (reset once a run registers); stopped by `enabled: false`, an update hold, a reload and a stop; never a readiness condition |
 | health (P3) | `node <app>/src/service/health.ts`, a oneshot, 3 min after the daemon starts then every 5 min | the schedule repeats it |
 | update (P4) | `node <app>/src/service/update.ts`, a oneshot, 10 min after the daemon starts then every 5 min | the schedule repeats it; it survives the `reload` it asks for |
 
@@ -25,6 +26,19 @@ running. It runs no agent and holds no parent lock: it sweeps at start and 5 s a
 one-per-home lease `state/device-notify.lock` (a second sender exits 1 while the holder's pid is alive and still this
 script), writes only `state/device-notification-deliveries.json`, and exits 0 on SIGTERM, releasing its lease. Its
 env is `CP_HOME`, `CP_MODE`, `PATH` and `CP_DAEMON_ROLE=device-notify` plus the base above — no port, host or model.
+
+The cloudflared controller (remote dashboard PR 2c) reconciles `data/tunnel.json` at the inner's start, on every 5 s
+tick and on a hold's release. It runs one attached child, never through a shell, with an env of `PATH` and the base
+above (no credential: a named token is only a file path). It publishes `state/tunnel-runtime.json`: the child's pid
+and exact command line, the config revision it applied, its state (`starting`, `running`, `restarting`, `stopped`,
+`failed`) and the binding. The child is `running` once it logs a registered tunnel connection on its origin. That
+origin is `https://<hostname>` for a named tunnel, or the first `https://<label>.trycloudflare.com` a quick one printed.
+A new origin bumps the generation and so ends the sessions bound to the old one. Stopping sends SIGTERM, then SIGKILL
+after 10 s if no exit was observed. A child recorded by a crashed inner is signalled only while `ps` still shows its
+exact recorded command line, and nothing new starts until it is gone. An unreadable config stops the child (`failed`,
+with the reason). An unreadable runtime record starts nothing. Child output reaches the daemon log only sanitized
+(escapes and control bytes removed, long token-like runs redacted, 300 characters per line, 200 lines per run).
+`cp-tunnel`, which writes the config, is a later slice; until then nothing enables a tunnel.
 
 No operator unit (cp-rrye): the dashboard's Start session / Resume last session in tmux runs `tmux new-session
 -d -s cp-operator ~/.local/bin/cp-operator` (`-c` to resume) from the cp-daemon-run viewer; cp-install removes
