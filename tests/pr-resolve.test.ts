@@ -18,6 +18,7 @@ import { CiWatch, parsePrUrl, prReceiptOf } from "../src/ci-watch.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, SCHEMA_VERSION } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake, formatIntake, type IntakeResult } from "../src/intake.ts";
+import type { ChangeRequestObservation, ForgeObserver, ObservationOutcome } from "../src/forges/adapter.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
 import { resolvePr } from "../src/pr-resolve.ts";
 import { RunRegistry } from "../src/runs.ts";
@@ -40,7 +41,7 @@ interface Bench {
 	calls: string[][];
 }
 
-function benchOf(t: { after(fn: () => void | Promise<void>): void }, gh: CommandRunner): Bench {
+function benchOf(t: { after(fn: () => void | Promise<void>): void }, gh: CommandRunner, gitlab?: ForgeObserver): Bench {
 	const home = createScratchHome();
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
@@ -56,6 +57,7 @@ function benchOf(t: { after(fn: () => void | Promise<void>): void }, gh: Command
 			calls.push([command, ...args]);
 			return gh(command, args, options);
 		},
+		...(gitlab ? { gitlabObserver: () => gitlab } : {}),
 		fail: (jobId, failure) => fleet.markFailed(jobId, failure),
 		onReported: (result) => reported.push(result),
 	});
@@ -251,4 +253,66 @@ test("a bound job's report_result with the bound pr_url is accepted and held (pi
 	assert.equal(result.receipts?.find((receipt) => receipt.kind === "pr")?.url, BOUND_URL);
 	assert.equal(result.pr_url_note, undefined, "verified, not unverified or corrected");
 	assert.ok(b.calls.every((call) => call[2] === "view"), "resolved by number");
+});
+
+// Forge PR 3: a GitLab project's MR is read through its observer by IID — never gh, never a branch search.
+const MR_URL = "https://gitlab.example.com/group/sub/repo/-/merge_requests/12";
+const GH_NEVER: CommandRunner = async () => assert.fail("a GitLab project never asks gh");
+
+function gitlabAnswering(outcome: Partial<ChangeRequestObservation> | Exclude<ObservationOutcome, { ok: true }>, asked: string[] = []): ForgeObserver {
+	return {
+		provider: "gitlab",
+		readChangeRequest: async (ref) => {
+			asked.push(ref);
+			if ("ok" in outcome) return outcome;
+			return { ok: true, observation: { provider: "gitlab", url: MR_URL, number: 12, state: "open", source_branch: BRANCH, target_branch: "main", head_sha: HEAD, ...outcome } };
+		},
+	};
+}
+
+test("forge PR 3: a GitLab MR from the job's branch is verified by its IID, and every other answer is refused or unverified by name", async () => {
+	const asked: string[] = [];
+	const verified = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: MR_URL }, { exec: GH_NEVER, gitlab: gitlabAnswering({}, asked) });
+	assert.deepEqual(verified, { status: "verified", url: MR_URL, number: 12 });
+	assert.deepEqual(asked, [MR_URL], "the reported url is read, nothing else");
+
+	const reason = (result: Awaited<ReturnType<typeof resolvePr>>) => (result.status === "refused" ? result.reason : `not refused: ${result.status}`);
+	const none = await resolvePr({ branch: BRANCH, cwd: "/tmp" }, { exec: GH_NEVER, gitlab: gitlabAnswering({}) });
+	assert.match(reason(none), /never searched for: open the merge request from branch "cp-typo"/);
+	const github = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: CANONICAL }, { exec: GH_NEVER, gitlab: gitlabAnswering({}) });
+	assert.match(reason(github), /not a GitLab merge request url/);
+	const otherBranch = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: MR_URL }, { exec: GH_NEVER, gitlab: gitlabAnswering({ source_branch: "someone-else" }) });
+	assert.match(reason(otherBranch), /is from branch "someone-else", not this job's branch "cp-typo"/);
+	const mismatch = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: MR_URL }, { exec: GH_NEVER, gitlab: gitlabAnswering({ ok: false, reason: "mismatch", detail: "not this project's merge request url" }) });
+	assert.match(reason(mismatch), /not this project's merge request \(mismatch: /);
+	const fork = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: MR_URL }, { exec: GH_NEVER, gitlab: gitlabAnswering({ ok: false, reason: "unsupported", detail: "fork (cross-project) merge requests are not supported in v1" }) });
+	assert.match(reason(fork), /unsupported: fork/);
+
+	for (const failure of ["unavailable", "invalid"] as const) {
+		const down = await resolvePr({ branch: BRANCH, cwd: "/tmp", given: MR_URL }, { exec: GH_NEVER, gitlab: gitlabAnswering({ ok: false, reason: failure, detail: "HTTP 503" }) });
+		assert.equal(down.status, "unverified", `${failure} is unverified, never verified and never a refusal`);
+		assert.match(down.status === "unverified" ? down.message : "", /GitLab gave no usable answer \(HTTP 503\)/);
+	}
+	const bound = await resolvePr({ branch: BRANCH, cwd: "/tmp", bound: { number: 12, url: MR_URL } }, { exec: GH_NEVER, gitlab: gitlabAnswering({}) });
+	assert.equal(bound.status, "verified", "a bound MR resolves from its bound url");
+});
+
+test("forge PR 3: intake holds a GitLab job on its verified MR receipt and keeps the report slot open on a refusal", async (t) => {
+	const b = benchOf(t, GH_NEVER, gitlabAnswering({}));
+	await addJob(b, BRANCH);
+	writeShipEnvelope(b.home.path, BRANCH, MR_URL);
+	const result = await b.intake.intake(BRANCH);
+	assert.equal(result.accepted, true, formatIntake(result));
+	assert.equal(result.next, "hold");
+	assert.equal(result.receipts?.find((receipt) => receipt.kind === "pr")?.url, MR_URL);
+	assert.equal(result.pr_url_note, undefined);
+	assert.deepEqual(b.calls, [], "gh is never asked");
+
+	const refused = benchOf(t, GH_NEVER, gitlabAnswering({ source_branch: "someone-else" }));
+	await addJob(refused, BRANCH);
+	writeShipEnvelope(refused.home.path, BRANCH, MR_URL);
+	const answer = await refused.intake.intake(BRANCH);
+	assert.equal(answer.accepted, false);
+	assert.match(answer.correction?.reason ?? "", /not this job's branch/);
+	assert.equal(readFleet(refused.home.path).jobs[0]?.phase, "waiting");
 });

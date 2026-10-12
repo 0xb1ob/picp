@@ -63,6 +63,8 @@ import type { WorkerEvent, WorkerProcess } from "./worker-process.ts";
 import { githubRepoFromCloneUrl } from "./mandate.ts";
 import type { CommandRunner } from "./merge-ask.ts";
 import { type PrResolution, resolvePr } from "./pr-resolve.ts";
+import { projectGitlabObserver } from "./forge-runtime.ts";
+import type { ForgeObserver } from "./forges/adapter.ts";
 
 export class IntakeError extends Error {}
 
@@ -136,6 +138,8 @@ export interface IntakeOptions {
 	originUrl?: (project: string) => string | undefined;
 	/** The `gh` runner envelope PR resolution uses. Injected in tests, `runCommand` in production. */
 	prExec?: CommandRunner;
+	/** Forge PR 3: a project's GitLab observer, undefined for any other project. Injected in tests; the registry in production. */
+	gitlabObserver?: (project: string) => ForgeObserver | undefined;
 	now?: () => Date;
 	/** Called once per accepted envelope (notify, widget, relay). */
 	onReported?: (result: IntakeResult) => void;
@@ -436,6 +440,7 @@ export class EnvelopeIntake {
 		if (record.kind !== "ship" || record.delivery !== "pr" || envelope.status !== "done") return undefined;
 		const origin = this.#options.originUrl?.(record.project);
 		const ownerRepo = origin ? githubRepoFromCloneUrl(origin) : undefined;
+		const gitlab = (this.#options.gitlabObserver ?? ((project) => projectGitlabObserver(this.#options.home, project)))(record.project);
 		return resolvePr(
 			{
 				branch: record.branch,
@@ -446,6 +451,7 @@ export class EnvelopeIntake {
 			{
 				...(ownerRepo ? { ownerRepo } : {}),
 				...(this.#options.prExec ? { exec: this.#options.prExec } : {}),
+				...(gitlab ? { gitlab } : {}),
 			},
 		);
 	}
