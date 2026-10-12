@@ -58,6 +58,70 @@ test("cp_project reviewer_model dispatches set/clear and displays the saved pref
 	await run({ action: "reviewer_model", name: "demo", reviewer_model: null });
 	assert.equal(registry.get("demo")?.reviewer_model, undefined);
 });
+
+test("forge: legacy registries read unchanged; set/show/clear stores only non-secret settings; refusals write nothing", async (t) => {
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "git@code.example.com:team/sub/app.git" });
+	assert.ok(!("forge" in registry.require("demo")), "absent means detect from the remote");
+	const before = readFileSync(registry.file, "utf8");
+	const canary = "glpat-CANARY-never-stored";
+	for (const bad of [
+		{ kind: "gitlab", web_base_url: "http://code.example.com" },
+		{ kind: "gitlab", web_base_url: `https://u:${canary}@code.example.com` },
+		{ kind: "gitlab", token_env: canary },
+		{ kind: "gitlab", token: canary },
+		{ kind: "github", token_env: "GH_TOKEN" },
+	]) {
+		const error = await registry.setForge("demo", bad as never).then(() => undefined, (caught: Error) => caught);
+		assert.ok(error instanceof ProjectError, JSON.stringify(Object.keys(bad)));
+		assert.ok(!error.message.includes(canary), "a refusal never echoes the value");
+	}
+	await assert.rejects(registry.setForge("absent", { kind: "gitlab" }), /unknown project/);
+	assert.equal(readFileSync(registry.file, "utf8"), before, "a refusal writes nothing");
+
+	const set = await registry.setForge("demo", { kind: "gitlab", web_base_url: " https://Code.Example.com/gitlab/ ", token_env: "EXAMPLE_GL_TOKEN" });
+	assert.deepEqual(set.forge, { kind: "gitlab", web_base_url: "https://code.example.com/gitlab", token_env: "EXAMPLE_GL_TOKEN" });
+	assert.deepEqual(new ProjectRegistry({ home: home.path }).require("demo").forge, set.forge, "persisted");
+	assert.match(formatProjects(registry.list()), /forge: gitlab {2}web=https:\/\/code\.example\.com\/gitlab {2}token env=EXAMPLE_GL_TOKEN/);
+	await registry.setForge("demo", null);
+	assert.ok(!("forge" in registry.require("demo")), "null clears");
+	assert.doesNotMatch(formatProjects(registry.list()), /forge:/);
+
+	const file = JSON.parse(readFileSync(registry.file, "utf8")) as { projects: Array<Record<string, unknown>> };
+	(file.projects[0] as Record<string, unknown>).forge = { kind: "gitlab", token: canary };
+	writeFileSync(registry.file, JSON.stringify(file));
+	assert.throws(() => registry.read(), /violates the registry contract/, "a hand-written token field is refused on read");
+});
+
+test("forge at registration must fit the clone url; an https remote on another host is refused", async (t) => {
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	await assert.rejects(
+		registry.register({ name: "demo", clone_url: "https://code.example.com/team/app.git", forge: { kind: "gitlab", web_base_url: "https://other.example.com" } }),
+		/forge does not fit the clone url/,
+	);
+	assert.equal(registry.exists, false, "nothing written");
+	const added = await registry.register({ name: "demo", clone_url: "https://code.example.com/gitlab/team/app.git", forge: { kind: "gitlab", web_base_url: "https://code.example.com/gitlab" } });
+	assert.equal(added.forge?.web_base_url, "https://code.example.com/gitlab");
+});
+
+test("cp_project forge sets and clears through the tool; a token value has no parameter", async (t) => {
+	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "git@code.example.com:team/app.git" });
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown>; parameters: { properties: Record<string, unknown> } }>();
+	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown>; parameters: { properties: Record<string, unknown> } }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never);
+	const tool = tools.get("cp_project")!;
+	assert.ok(!JSON.stringify(tool.parameters).includes('"token"'), "no token-valued parameter");
+	const run = (params: Record<string, unknown>) => tool.execute("c", params, undefined, undefined, {}) as Promise<{ content: Array<{ text: string }> }>;
+	const set = await run({ action: "forge", name: "demo", forge: { kind: "gitlab", web_base_url: "https://code.example.com", token_env: "EXAMPLE_GL_TOKEN" } });
+	assert.match(set.content[0]!.text, /demo forge: gitlab {2}web=https:\/\/code\.example\.com {2}token env=EXAMPLE_GL_TOKEN/);
+	assert.equal(registry.get("demo")?.forge?.token_env, "EXAMPLE_GL_TOKEN");
+	await assert.rejects(run({ action: "forge", name: "demo" }), /needs forge/);
+	const cleared = await run({ action: "forge", name: "demo", forge: null });
+	assert.match(cleared.content[0]!.text, /unset/);
+	assert.equal(registry.get("demo")?.forge, undefined);
+});
 function withHome(t: { after(fn: () => void): void }): ScratchHome {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
