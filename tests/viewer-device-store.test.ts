@@ -3,7 +3,7 @@
  * three-commit pairing transaction and its crash recovery, and the access helpers that keep remote callers from minting.
  */
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -88,7 +88,9 @@ test("a code is single-use, expires at five minutes and at most three live codes
 	assert.ok(store.issueCode({ ...BIND, route: "cli-pair" }).ok, "expired codes free their slots");
 });
 
-test("concurrent claims of one code have exactly one winner", async (t) => {
+// In-process ordering only: the store's synchronous read-change-replace serializes claims inside one viewer process.
+// Cross-process single-winner (the CLI) comes with the owner socket in part 1b; this test does not prove it.
+test("in-process concurrent claims of one code have exactly one winner", async (t) => {
 	const { store, make } = scratch(t);
 	const issued = store.issueCode({ ...BIND, route: "cli-up" });
 	assert.ok(issued.ok);
@@ -158,8 +160,11 @@ test("malformed storage fails closed for every operation and is never reset", (t
 	}
 });
 
-test("a pairing event snapshots every active device (full and view) plus the new one; revoked devices are not recipients", (t) => {
+test("a pairing event snapshots every active device (full and view) plus the new one; revoked and stale-generation devices are not recipients", (t) => {
 	const { store } = scratch(t);
+	const stale = store.issueCode({ ...BIND, generation: 0, route: "cli-up" });
+	assert.ok(stale.ok);
+	assert.ok(store.claim({ ...BIND, generation: 0, code: stale.code, name: "Stale" }).ok);
 	const full = pair(store, "Full");
 	const view = pair(store, "View", "view");
 	const gone = pair(store, "Gone");
@@ -170,7 +175,25 @@ test("a pairing event snapshots every active device (full and view) plus the new
 	const event = listed.events.find((item) => item.id === fresh.pairing_id);
 	assert.deepEqual(event?.recipients, [full.device.id, view.device.id, fresh.device.id]);
 	assert.equal(event?.route, "cli-pair");
-	assert.equal(listed.events.length, 4, "one event per successful pairing");
+	assert.equal(listed.events.length, 5, "one event per successful pairing");
+});
+
+test("a code whose audit or write fails is never stored, so it can never be claimed", (t) => {
+	const { make, dataDir, stateDir } = scratch(t);
+	const noAudit = make({ audit: (line) => (line.event === "code_issued" ? { ok: false, error: "ENOSPC" } : appendControlAudit(stateDir, line)) });
+	assert.deepEqual(noAudit.issueCode({ ...BIND, route: "cli-pair" }), { ok: false, reason: "audit_failed" });
+	const read = readDeviceState(dataDir);
+	assert.equal(read.state === "absent" || (read.state === "ok" && read.store.codes.length === 0), true, "no unaudited code on disk");
+	if (process.getuid?.() === 0) return; // root ignores the read-only directory below
+	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+	const store = make({ audit: (line) => { if (line.event === "code_issued") chmodSync(dataDir, 0o500); return appendControlAudit(stateDir, line); } });
+	const failed = store.issueCode({ ...BIND, route: "cli-pair" });
+	assert.equal(failed.ok, false);
+	assert.equal((failed as { reason: string }).reason, "write_failed");
+	assert.equal("code" in failed, false, "no code is handed out");
+	chmodSync(dataDir, 0o700);
+	const after = readDeviceState(dataDir);
+	assert.equal(after.state === "absent" || (after.state === "ok" && after.store.codes.length === 0), true, "the failed write left no claimable code");
 });
 
 test("failed and replayed claims leave a failure audit only, never a pairing event", (t) => {

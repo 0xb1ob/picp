@@ -68,16 +68,15 @@ export class DeviceStore {
 		if (store.codes.length >= DEVICE_MAX_PENDING_CODES) return { ok: false, reason: "too_many_codes" };
 		const code = this.random(DEVICE_SECRET_BYTES).toString("base64url");
 		const expires_at = new Date(now.getTime() + DEVICE_CODE_TTL_MS).toISOString();
-		const before = store.codes;
-		store.codes = [...before, { digest: secretDigest("code", code), origin: input.origin, generation: input.generation, level, route: input.route, issued_at: now.toISOString(), expires_at }];
+		store.codes = [...store.codes, { digest: secretDigest("code", code), origin: input.origin, generation: input.generation, level, route: input.route, issued_at: now.toISOString(), expires_at }];
+		const problem = deviceStateProblem(store);
+		if (problem) return { ok: false, reason: "bad_input", detail: problem };
+		// Audit before the code exists on disk: an unaudited code is never claimable, and a failed write leaves no code
+		// behind (the audit line then records an issue that never took effect), so no rollback write can fail.
+		const audited = this.audit({ ...this.line("code_issued", input.peer, null), level, route: input.route });
+		if (!audited.ok) return { ok: false, reason: "audit_failed" };
 		const saved = this.save(store);
 		if (!saved.ok) return saved;
-		const audited = this.audit({ ...this.line("code_issued", input.peer, null), level, route: input.route });
-		if (!audited.ok) {
-			store.codes = before; // an unaudited code must not stay claimable
-			this.save(store);
-			return { ok: false, reason: "audit_failed" };
-		}
 		return { ok: true, code, level, expires_at };
 	}
 
@@ -113,7 +112,8 @@ export class DeviceStore {
 			id, name, level: code.level, origin: code.origin, generation: code.generation, session_digest: secretDigest("session", secret), state: "pending",
 			created_at: at, last_seen_at: at, expires_at: new Date(now.getTime() + DEVICE_SESSION_TTL_MS).toISOString(), revoked_at: null, pairing_id,
 		};
-		const recipients = [...store.devices.filter((other) => deviceEligible(other, now)).map((other) => other.id), id];
+		// Only devices whose sessions still work on this code's origin generation: a stale quick generation is not a recipient.
+		const recipients = [...store.devices.filter((other) => deviceEligible(other, now, code.origin, code.generation)).map((other) => other.id), id];
 		const event: PairingEvent = { id: pairing_id, at, device_id: id, name, level: code.level, route: code.route, recipients, state: "pending" };
 		store.codes.splice(index, 1);
 		store.devices.push(device);
