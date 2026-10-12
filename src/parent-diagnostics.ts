@@ -13,7 +13,7 @@ export const PARENT_CONTROL_BUSY = "refused: parent control (compaction, rotatio
 /** Invoke only registered diagnostic commands: an unknown slash command would become an LLM prompt. */
 export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "version" | "drain", timeoutMs = 120_000, args = ""): Promise<ParentDiagnostic> {
 	const command = action === "doctor" ? "doctor" : action === "drain" ? "cp-drain" : "cp-version";
-	const prefix = action === "doctor" ? "DOCTOR " : action === "drain" ? "DRAIN: " : "pi-command-post ";
+	const prefix = action === "doctor" ? "DOCTOR " : action === "drain" ? "DRAIN: " : "picp ";
 	const response = await proc.request("get_commands", {}, timeoutMs);
 	if (response.success === false) throw new Error(`parent diagnostics unavailable: ${response.error ?? "get_commands failed"}`);
 	const commands = (response.data as { commands?: Array<{ name: string; source: string }> } | undefined)?.commands;

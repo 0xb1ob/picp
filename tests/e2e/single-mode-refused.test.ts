@@ -132,7 +132,7 @@ test("a refused mode: /cp-version reports the refusal instead of throwing", { ti
 			r.type === "extension_ui_request" &&
 			r.method === "notify" &&
 			typeof r.message === "string" &&
-			(r.message as string).startsWith("pi-command-post "),
+			(r.message as string).startsWith("picp "),
 	);
 	// The command answers with the refusal in place of the mode line; it does not
 	// raise the ModeError out of the handler.

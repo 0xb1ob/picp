@@ -26,7 +26,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, setLive, emit, refreshWidget, planViewerDeps, askQuestion } = deps;
 
 	pi.registerCommand("cp-version", {
-		description: "Show the pi-command-post package version, package root and home",
+		description: "Show the picp package version, package root and home",
 		handler: async (_args, ctx) => {
 			// A refused mode has no runtime to describe; saying so here is the whole
 			// point of the command, so it reports rather than throws.
