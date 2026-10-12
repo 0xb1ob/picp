@@ -3,6 +3,7 @@
  * MergeStore unchanged: the same command, the same fields, the same runner.
  */
 
+import { parseChangeRequestUrl } from "../forge-url.ts";
 import type { CommandRunner } from "../merges.ts";
 import type { ChangeRequestState, ForgeObserver } from "./adapter.ts";
 
@@ -48,7 +49,10 @@ export function githubObserver(run: CommandRunner, cwd: string): ForgeObserver {
 					: { ok: false, reason: "invalid", detail: `github: ${read.detail}` };
 			}
 			const view = read.view;
-			if (typeof view !== "object" || view === null || typeof view.number !== "number" || typeof view.url !== "string") {
+			// gh may leave out the url or number; the asked-for PR url supplies them, as MergeStore always allowed.
+			const url = typeof view?.url === "string" ? view.url : parseChangeRequestUrl(ref)?.kind === "github" ? ref.trim() : undefined;
+			const number = typeof view?.number === "number" ? view.number : url ? parseChangeRequestUrl(url)?.number : undefined;
+			if (typeof view !== "object" || view === null || number === undefined || url === undefined) {
 				return { ok: false, reason: "invalid", detail: "github: gh pr view named no PR number or url" };
 			}
 			const mergeCommit = view.mergeCommit?.oid?.trim();
@@ -56,8 +60,8 @@ export function githubObserver(run: CommandRunner, cwd: string): ForgeObserver {
 				ok: true,
 				observation: {
 					provider: "github",
-					url: view.url,
-					number: view.number,
+					url,
+					number,
 					state: STATES[view.state ?? ""] ?? "unknown",
 					...(view.headRefName ? { source_branch: view.headRefName } : {}),
 					...(view.baseRefName ? { target_branch: view.baseRefName } : {}),

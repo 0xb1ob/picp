@@ -172,6 +172,8 @@ export const CP_EVENT_KINDS = [
 	 * would otherwise have been the only trace.
 	 */
 	"merge_recorded",
+	/** Forge PR 2: teardown passed on a git landing proof (witness and base, no merge claimed). */
+	"teardown_landing_proven",
 	/** A dead worker was relaunched on its own session file (cp-8km). */
 	"worker_revived",
 	/** `cp_revive` refused to relaunch a worker; nothing changed. */

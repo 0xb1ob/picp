@@ -11,19 +11,20 @@
  * exit was `force`, which by contract records that **nothing was proven** — a
  * weaker claim than the evidence supported, written into the audit trail.
  *
- * So: when the parent merges, it records what GitHub says.
+ * So: when the parent merges, it records what the forge says.
  *
- *  - `gh pr view` is the observer, not the caller: a receipt is only written
- *    for a PR whose state GitHub itself reports as `MERGED`, with a merge
- *    commit and a head oid. An assertion by a human or a model is not enough,
+ *  - The forge is the observer, not the caller (`gh pr view`, or the GitLab MR
+ *    API through src/forge-runtime.ts): a receipt is only written for a change
+ *    request the forge itself reports merged, with a landing commit and a head
+ *    oid. An assertion by a human or a model is not enough,
  *    because the whole point is that the gate can then *read evidence* instead
  *    of taking a claim.
  *  - The receipt records the **head oid that was merged**, so the gate can tell
  *    "this branch landed" from "this branch landed and then someone committed
  *    more on it" — the second is still unpushed work and is still refused.
- *  - `force` survives untouched, for the genuinely unprovable case (the
- *    worktree is gone, `gh` is unavailable, the PR was merged somewhere this
- *    machine cannot see), and still claims no pass reason.
+ *  - With no forge to ask, teardown's git landing proof (src/landing-proof.ts)
+ *    can still pass on content found in the base — it writes no receipt here.
+ *    `force` survives untouched as the last resort, and still claims nothing.
  *
  * Nothing here is a second writer of anything: the receipt is a new file, and
  * the one existing record it touches is the job's `pr` receipt status, moved
@@ -46,7 +47,10 @@ import {
 	validate,
 } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
-import { type GhPrView, readGhPr } from "./forges/github.ts";
+import { changeRequestObserver } from "./forge-runtime.ts";
+import { parseChangeRequestUrl } from "./forge-url.ts";
+import type { ForgeObserver } from "./forges/adapter.ts";
+import { haveCommit, remoteTip } from "./landing-proof.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { RunRegistry } from "./runs.ts";
 
@@ -73,6 +77,8 @@ export interface MergeStoreOptions {
 	runs?: RunRegistry;
 	/** Injected so tests never shell out to a real `gh`. */
 	run?: CommandRunner;
+	/** The forge observer for a PR/MR ref; defaults to the job project's forge (src/forge-runtime.ts), gh when unresolvable. */
+	observer?: (ref: string, cwd: string) => ForgeObserver;
 	now?: () => Date;
 }
 
@@ -155,7 +161,11 @@ export class MergeStore {
 
 		const existing = this.get(jobId);
 		if (existing) {
-			return { receipt: existing, recorded: false, receipt_status_updated: false };
+			if (existing.job_id !== jobId || existing.head_branch !== record.branch) {
+				throw new MergeError(`${jobId}: the stored merge receipt names ${existing.job_id} on ${existing.head_branch}, not this job's ${record.branch} — it discharges nothing here`);
+			}
+			// A crash between the receipt write and the fleet patch is repaired here, with no second event.
+			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
 		}
 
 		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts);
@@ -167,50 +177,65 @@ export class MergeStore {
 		}
 
 		const cwd = request.cwd ?? this.#defaultCwd(record.worktree, record.project);
-		const view = await this.#viewPr(cwd, pr, jobId);
-
-		if (view.state !== "MERGED") {
+		const run: CommandRunner = (dir, bin, args) => this.#run(dir, bin, args);
+		const observer = (this.#options.observer ?? ((ref, at) => changeRequestObserver(this.#options.home, record.project, ref, { run, cwd: at })))(pr, cwd);
+		const read = await observer.readChangeRequest(pr);
+		if (!read.ok) {
 			throw new MergeError(
-				`${jobId}: gh reports PR ${view.url ?? pr} as ${view.state ?? "unknown"}, not MERGED — nothing is recorded. ` +
+				`${jobId}: could not read PR ${pr} in ${cwd} (${read.reason}: ${read.detail}). Nothing is recorded. ` +
+					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
+			);
+		}
+		const view = read.observation;
+		const label = view.provider === "gitlab" ? "GitLab" : "gh";
+
+		if (view.state !== "merged") {
+			throw new MergeError(
+				`${jobId}: ${label} reports ${view.url} as ${view.state}, not MERGED — nothing is recorded. ` +
 					"A merge receipt is an observation, never a claim.",
 			);
 		}
-		const mergeCommit = view.mergeCommit?.oid?.trim();
+		const headSha = view.head_sha?.trim();
+		if (!headSha) {
+			throw new MergeError(`${jobId}: ${label} reports ${view.url} with no head commit — nothing is recorded.`);
+		}
+		// GitLab names no merge or squash commit for a fast-forward: the head itself landed, if git sees it on the target.
+		const mergeCommit = view.merge_commit_sha ?? view.squash_commit_sha ??
+			(view.provider === "gitlab" && view.target_branch && (await this.#reachable(cwd, headSha, view.target_branch)) ? headSha : undefined);
 		if (!mergeCommit) {
 			throw new MergeError(
-				`${jobId}: gh reports PR ${view.url ?? pr} merged but names no merge commit — nothing is recorded. ` +
-					`Re-run once GitHub reports one, or use cp_teardown ${jobId} force if it never will (force proves nothing, and says so).`,
+				`${jobId}: ${label} reports ${view.url} merged but names no merge commit — nothing is recorded. ` +
+					`Re-run once the forge reports one; cp_teardown ${jobId} may still pass on git evidence that the content is in the base.`,
 			);
 		}
-		const headSha = view.headRefOid?.trim();
-		if (!headSha) {
-			throw new MergeError(`${jobId}: gh reports PR ${view.url ?? pr} with no head commit — nothing is recorded.`);
-		}
-		const headBranch = view.headRefName?.trim() || record.branch;
+		const headBranch = view.source_branch?.trim() || record.branch;
 		if (headBranch !== record.branch) {
 			throw new MergeError(
-				`${jobId}: PR ${view.url ?? pr} merged branch ${headBranch}, but this job's branch is ${record.branch} — ` +
+				`${jobId}: PR ${view.url} merged branch ${headBranch}, but this job's branch is ${record.branch} — ` +
 					"that PR is not this job's delivery, so nothing is recorded.",
 			);
 		}
 
 		const onRemote = await this.#branchOnRemote(cwd, headBranch);
+		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
+		const project = parseChangeRequestUrl(view.url);
 		const receipt: MergeReceipt = {
 			schema_version: SCHEMA_VERSION,
 			job_id: jobId,
-			pr_url: view.url ?? pr,
-			...(typeof view.number === "number" ? { pr_number: view.number } : {}),
+			pr_url: view.url,
+			pr_number: view.number,
 			merge_commit_sha: mergeCommit,
 			head_sha: headSha,
 			head_branch: headBranch,
 			...(record.bound_pr ? { bound: true as const } : {}),
 			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
-			...(view.baseRefName ? { base_branch: view.baseRefName } : {}),
-			...(request.strategy ? { strategy: request.strategy } : {}),
-			...(view.mergedAt ? { merged_at: view.mergedAt } : {}),
+			...(view.target_branch ? { base_branch: view.target_branch } : {}),
+			...(strategy ? { strategy } : {}),
+			...(view.merged_at ? { merged_at: Number.isNaN(Date.parse(view.merged_at)) ? view.merged_at : isoTimestamp(new Date(view.merged_at)) } : {}),
 			recorded_at: isoTimestamp(this.#now()),
-			recorded_by: request.by?.trim() || "gh pr view",
+			recorded_by: request.by?.trim() || (view.provider === "gitlab" ? "gitlab api" : "gh pr view"),
 			...(request.authority ? { authority: request.authority } : {}),
+			...(project ? { forge: { provider: view.provider, project_url: `${project.origin}/${project.path}` } } : {}),
 		};
 		const parsed = validate<MergeReceipt>(MergeReceiptSchema, receipt);
 		if (!parsed.ok) {
@@ -218,14 +243,16 @@ export class MergeStore {
 		}
 		atomicWriteJson(this.file(jobId), parsed.value);
 
-		const statusUpdated = await this.#markReceiptMerged(jobId, parsed.value);
 		this.#options.runs?.open(jobId).cp("merge_recorded", {
 			job_id: jobId,
 			pr_url: parsed.value.pr_url,
 			merge_commit_sha: parsed.value.merge_commit_sha,
 			head_sha: parsed.value.head_sha,
 			head_branch_deleted: parsed.value.head_branch_deleted ?? null,
+			provider: parsed.value.forge?.provider ?? "github",
 		});
+		// Journaled with the receipt, before the fleet patch: a crash here is repaired by the next call, not re-announced.
+		const statusUpdated = await this.#markReceiptMerged(jobId, parsed.value);
 		return { receipt: parsed.value, recorded: true, receipt_status_updated: statusUpdated };
 	}
 
@@ -251,14 +278,12 @@ export class MergeStore {
 		return true;
 	}
 
-	async #viewPr(cwd: string, pr: string, jobId: string): Promise<GhPrView> {
-		const read = await readGhPr((dir, bin, args) => this.#run(dir, bin, args), cwd, pr);
-		if (read.ok) return read.view;
-		if (read.reason === "json") throw new MergeError(`${jobId}: gh returned output that is not JSON for PR ${pr} — nothing is recorded.`);
-		throw new MergeError(
-			`${jobId}: could not read PR ${pr} with gh in ${cwd} (${read.detail}). Nothing is recorded. ` +
-				`If the merge cannot be observed from this machine, cp_teardown ${jobId} force is the honest exit — it proves nothing, and records that.`,
-		);
+	/** Fast-forward evidence: origin's `target` tip has `head` in its history (the tip object fetched by sha if missing). */
+	async #reachable(cwd: string, head: string, target: string): Promise<boolean> {
+		const git = (dir: string, args: readonly string[]) => this.#run(dir, "git", args);
+		const tip = await remoteTip(git, cwd, target);
+		if (!tip.ok || !tip.sha || !(await haveCommit(git, cwd, tip.sha))) return false;
+		return (await git(cwd, ["merge-base", "--is-ancestor", head, tip.sha])).status === 0;
 	}
 
 	/**
