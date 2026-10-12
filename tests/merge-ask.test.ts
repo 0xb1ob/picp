@@ -20,6 +20,7 @@ import {
 	mergeAwaiting,
 } from "../src/awaiting.ts";
 import { CommandPost } from "../src/command-post.ts";
+import { gitlabCiUnsupported } from "../src/forge-runtime.ts";
 import {
 	type CiRun,
 	createMergeAskProbe,
@@ -31,6 +32,7 @@ import {
 	ghCiRuns,
 	gitRemoteHead,
 	isMergeAsk,
+	mergeAskPrNumber,
 	parseCiRuns,
 	readReviewPassHeads,
 	readReviewPassVerdict,
@@ -261,6 +263,45 @@ test("a probe passes its job's reviewed heads to the rule (cp-1som)", async () =
 	const unreviewed = await probe({ type: "approval", decision: "Ship cp-x (PR 120), drop it, or open a follow-up?", job_id: "cp-x" });
 	assert.equal(unreviewed.action, "defer");
 	assert.equal(unreviewed.ci, "unreviewed");
+});
+
+test("forge PR 3: a GitLab job's ask defers as unknown CI with no query, and only its own MR's receipt withdraws it", async () => {
+	const MR = "https://gitlab.example.com/group/sub/repo/-/merge_requests/7";
+	const queried: string[] = [];
+	const gitlabJob = { job_id: "cp-gl", project: "gl", branch: "cp-gl", phase: "held" as const, delivery: "pr" as const, receipts: [{ kind: "pr" as const, status: "open", title: "MR", url: MR }] };
+	const receipts: Record<string, MergeAskMergedEvidence> = {};
+	const probe = createMergeAskProbe({
+		head: async () => (queried.push("head"), { sha: HEAD }),
+		runs: async () => (queried.push("runs"), [run()]),
+		ciConfigured: () => (queried.push("ciConfigured"), "none"),
+		merged: (jobId) => receipts[jobId],
+		unsupported: (jobId) => gitlabCiUnsupported(jobId === "cp-gl" ? gitlabJob : undefined),
+	});
+	const deferred = await probe({ type: "approval", decision: "Merge MR !7 for cp-gl?", job_id: "cp-gl" });
+	assert.deepEqual([deferred.action, deferred.ci], ["defer", "unknown"], "never green, never 'no CI configured'");
+	assert.match(deferred.reason, /GitLab CI is not read in v1/);
+	assert.deepEqual(queried, [], "no head, run or gh query for a GitLab job");
+
+	receipts["cp-gl"] = { merge_commit_sha: "f".repeat(40), pr_url: MR, head_sha: HEAD };
+	const other = await probe({ type: "approval", decision: "Merge MR !8 for cp-gl?", job_id: "cp-gl" });
+	assert.equal(other.action, "defer", "a receipt for MR 7 says nothing about an ask for MR 8");
+	const withdrawn = await probe({ type: "approval", decision: "Merge MR !7 for cp-gl?", job_id: "cp-gl" });
+	assert.deepEqual([withdrawn.action, withdrawn.ci], ["resolved", "already_merged"]);
+	assert.match(withdrawn.reason, /PR #7 already merged as f+ /);
+
+	const github = await probe({ type: "approval", decision: "Merge PR #9?", job_id: "cp-gh" });
+	assert.equal(github.action, "raise", "a GitHub job keeps its exact-head CI path");
+	assert.deepEqual(queried, ["head", "runs"]);
+});
+
+test("forge PR 3: MR references read as PR numbers, and GitHub references are unchanged", () => {
+	for (const [text, number] of [["Merge MR !7", "7"], ["merge request 12 is green", "12"], ["ship !3", "3"], ["Merge PR #44", "44"], ["pull request #5", "5"], ["#9 ready", "9"]] as const) {
+		assert.equal(mergeAskPrNumber(text), number, text);
+		assert.equal(isMergeAsk({ type: "approval", decision: `${text} — merge it?` }), true, text);
+	}
+	const evidence = { merge_commit_sha: "a".repeat(40), pr_url: "https://gitlab.example.com/g/r/-/merge_requests/7" };
+	assert.equal(evaluateAlreadyMerged({ jobId: "cp-x", prNumber: "7", evidence })?.action, "resolved", "an MR url's IID is the receipt's number");
+	assert.equal(evaluateAlreadyMerged({ jobId: "cp-x", prNumber: "8", evidence }), undefined, "and another MR's ask is not resolved by it");
 });
 
 test("isMergeAsk recognises a merge ask and only a merge ask", () => {

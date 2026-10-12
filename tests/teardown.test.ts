@@ -309,6 +309,41 @@ test("ship: a squash-merged PR passes on its merge receipt, after the base has m
 	assert.equal(b.fleet.require(jobId).closed_reason, "gated", "proven, not forced");
 });
 
+test("forge PR 3: a GitLab MR receipt tears down after the source branch is deleted and later base commits land", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const jobId = "cp-gl-squashed";
+	const worktree = b.worktree(jobId);
+	const mr = "https://gitlab.example.com/group/sub/repo/-/merge_requests/9";
+	await b.addJob(jobId, worktree);
+	writeFileSync(join(worktree, "src/app.ts"), "export const x = 9;\n");
+	git(worktree, "add", "-A");
+	git(worktree, "commit", "--quiet", "-m", "bump x to 9");
+	git(worktree, "push", "--quiet", "-u", "origin", jobId);
+	const head = git(worktree, "rev-parse", "HEAD");
+	const squash = squashMergeAndDeleteHead(b.repo, jobId);
+	advanceBase(b.repo, "docs/other.md", "# a later merge\n");
+	advanceBase(b.repo, "src/app.ts", "export const x = 10;\n");
+
+	const merges = new MergeStore({
+		home: b.home,
+		fleet: b.fleet,
+		runs: b.runs,
+		observer: () => ({
+			provider: "gitlab",
+			readChangeRequest: async () => ({ ok: true, observation: { provider: "gitlab", url: mr, number: 9, state: "merged", source_branch: jobId, target_branch: "main", head_sha: head, squash_commit_sha: squash, merged_at: "2026-08-31T15:55:07Z" } }),
+		}),
+	});
+	const recorded = await merges.record({ jobId, pr: mr });
+	assert.equal(recorded.receipt.head_branch_deleted, true, "git, not the forge, saw the source branch gone");
+	assert.equal(recorded.receipt.forge?.provider, "gitlab");
+
+	assert.deepEqual(await b.teardown.checkGates(worktree, jobId, "ship"), { ok: true, reason: "merged" });
+	const torn = await b.teardown.teardown(jobId);
+	assert.equal(torn.torn_down, true, formatTeardown(torn));
+	assert.equal(torn.reason, "merged");
+	assert.equal(b.fleet.require(jobId).closed_reason, "gated", "proven by the MR receipt, not forced");
+});
+
 test("ship: a rebase-merged PR is recognised the same way", { timeout: 60_000 }, async (t) => {
 	// Rebase rewrites the commit exactly as squash does: the head oid is not an
 	// ancestor of the base afterwards, so the receipt is what carries the fact.

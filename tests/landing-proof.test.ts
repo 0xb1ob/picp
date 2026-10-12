@@ -36,11 +36,11 @@ function benchOf(t: { after(fn: () => void): void }): Bench {
 			git(repo.path, "worktree", "add", "--quiet", "--no-track", "-b", id, path, "origin/main");
 			return path;
 		},
-		run: async (cwd, args) => {
+		run: async (cwd, args, options) => {
 			calls.push([...args]);
 			assert.ok(!MUTATING.has(args[0] as string), `the proof never runs git ${args[0]}`);
 			if (args[0] === "fetch") assert.ok(args.slice(1).every((arg) => !arg.includes(":")), "a fetch names an exact sha, never a ref destination");
-			return defaultGit(cwd, args);
+			return defaultGit(cwd, args, options);
 		},
 	};
 }
@@ -211,7 +211,20 @@ test("unknown: missing inputs, broken commands, odd history and every budget kee
 	await unknown("candidate cap", readLandingProof(b.run, job, head, "main", { limits: { candidates: 2 } }), /search limit/);
 	await unknown("output cap", readLandingProof(b.run, job, head, "main", { limits: { outputBytes: 10 } }), /output exceeded/);
 	let now = 0;
-	await unknown("time cap", readLandingProof(b.run, job, head, "main", { limits: { commandMs: 2_500 }, clock: () => (now += 1_000) }), /ms budget/);
+	// Ticks of 10 s against a 25 s local budget: the third local command is over it. The remote phase does not count.
+	await unknown("time cap", readLandingProof(b.run, job, head, "main", { limits: { commandMs: 25_000 }, clock: () => (now += 10_000) }), /25000 ms budget/);
+	// A hung command is cut off by the runner timeout, remote and local alike, and reads as unknown.
+	const hung = (verb: string): GitRun => async (cwd, args, options) => (args[0] === verb ? new Promise(() => {}) : b.run(cwd, args, options));
+	await unknown("hung ls-remote", readLandingProof(hung("ls-remote"), job, head, "main", { limits: { fetchMs: 50 } }), /timed out after 50 ms/);
+	await unknown("hung local command", readLandingProof(hung("merge-base"), job, head, "main", { limits: { commandMs: 200 } }), /git merge-base failed \(timed out after \d+ ms\)/);
+	const asked: Array<number | undefined> = [];
+	const recorded: GitRun = async (cwd, args, options) => {
+		asked.push(options?.timeoutMs);
+		return b.run(cwd, args, options);
+	};
+	await readLandingProof(recorded, job, head, "main");
+	assert.equal(asked[0], 30_000, "ls-remote runs under the 30 s remote timeout");
+	assert.ok(asked.slice(1).every((ms) => ms !== undefined && ms <= 30_000), "every command carries a timeout for its runner to kill on");
 	assert.equal(landed(await readLandingProof(b.run, job, head, "main")).method, "path_tree", "the same job lands with the default limits");
 
 	// A job whose commits cancel out has no content to find.
@@ -220,6 +233,15 @@ test("unknown: missing inputs, broken commands, odd history and every budget kee
 	const noopHead = commit(noop, { "src/a.ts": "later\n" });
 	advanceBase(b.repo, "docs/y.md", "# y\n");
 	await unknown("zero aggregate diff", readLandingProof(b.run, noop, noopHead, "main"), /changes nothing/);
+});
+
+test("defaultGit kills a git that outlives its timeout and answers status null", async () => {
+	const started = Date.now();
+	// The alias's sleep writes nowhere, so the killed git's pipes close at once.
+	const result = await defaultGit(tmpdir(), ["-c", "alias.hang=!sleep 2 >/dev/null 2>&1 </dev/null", "hang"], { timeoutMs: 100 });
+	assert.equal(result.status, null);
+	assert.match(result.stderr, /git -c timed out after 100 ms/);
+	assert.ok(Date.now() - started < 1_500, "the caller is not held for the child's whole life");
 });
 
 test("the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty", { timeout: 60_000 }, async (t) => {

@@ -23,6 +23,8 @@
  */
 
 import { parsePrUrl } from "./ci-watch.ts";
+import { parseChangeRequestUrl } from "./forge-url.ts";
+import type { ForgeObserver } from "./forges/adapter.ts";
 import { type CommandRunner, MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
 
 /** One row of `gh pr list --json url,number,headRefOid`. */
@@ -106,6 +108,12 @@ export interface PrResolveOptions {
 	/** Injected in tests; `runCommand` in production. */
 	exec?: CommandRunner;
 	timeoutMs?: number;
+	/**
+	 * Forge PR 3: the project's GitLab observer (src/forge-runtime.ts). Present means a
+	 * GitLab project: the supplied MR url is read and checked, never a branch listing,
+	 * and neither `gh` nor `ownerRepo` is consulted.
+	 */
+	gitlab?: ForgeObserver;
 }
 
 function unverified(url: string, why: string): PrResolution {
@@ -143,6 +151,7 @@ function fallback(input: PrResolveInput, ownerRepo: string, given: string | unde
 }
 
 export async function resolvePr(input: PrResolveInput, options: PrResolveOptions = {}): Promise<PrResolution> {
+	if (options.gitlab) return resolveGitlab(input, options.gitlab);
 	const ownerRepo = options.ownerRepo?.trim() || undefined;
 	const given = input.given?.trim() || undefined;
 	if (!ownerRepo) {
@@ -239,4 +248,31 @@ async function resolveBound(
 		number: bound.number,
 		...(given && given !== url ? { correction: `pr_url corrected: ${given} -> ${url}` } : {}),
 	};
+}
+
+/**
+ * Forge PR 3: a GitLab project's MR, from the url the worker reported (or the bound
+ * reference), read by its IID through the project's observer. Verified only when the
+ * forge itself names this project and this job's branch; a forge that cannot be asked
+ * leaves a same-project url explicitly unverified. v1 never searches branches for an MR.
+ */
+async function resolveGitlab(input: PrResolveInput, observer: ForgeObserver): Promise<PrResolution> {
+	const given = input.given?.trim() || input.bound?.url.trim() || undefined;
+	if (!given) {
+		return { status: "refused", reason: `a GitLab project's MR is never searched for: open the merge request from branch "${input.branch}" and report its url as pr_url` };
+	}
+	if (parseChangeRequestUrl(given)?.kind !== "gitlab") {
+		return { status: "refused", reason: `pr_url ${given} is not a GitLab merge request url (https://<host>/<namespace>/-/merge_requests/<iid>), and this project lives on GitLab` };
+	}
+	const read = await observer.readChangeRequest(given);
+	if (!read.ok) {
+		// The observer refuses another project's url as "mismatch" before asking; these two mean the url is this project's but the answer was not usable.
+		if (read.reason === "unavailable" || read.reason === "invalid") return unverified(given, `GitLab gave no usable answer (${read.detail}), so the MR itself was not read; ${given} names this project`);
+		return { status: "refused", reason: `pr_url ${given} is not this project's merge request (${read.reason}: ${read.detail}); report the MR from branch "${input.branch}"` };
+	}
+	const mr = read.observation;
+	if (mr.source_branch !== input.branch) {
+		return { status: "refused", reason: `MR ${mr.url} is from branch "${mr.source_branch ?? "unknown"}", not this job's branch "${input.branch}" — report the MR opened from "${input.branch}"` };
+	}
+	return { status: "verified", url: mr.url, number: mr.number, ...(given !== mr.url ? { correction: `pr_url corrected: ${given} -> ${mr.url}` } : {}) };
 }

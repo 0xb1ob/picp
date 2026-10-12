@@ -469,8 +469,8 @@ export function readCiForHead(input: {
 // Which rows this gate governs
 // ---------------------------------------------------------------------------
 
-/** `PR #47`, `pr 47`, `pull request #47`, or a bare `#47` — same shape awaiting.ts keys on. */
-const PR_REFERENCE = /(?:\bpull request\s*#?\s*|\bpr\s*#?\s*|#)(\d+)/i;
+/** `PR #47`, `pr 47`, `pull request #47`, or a bare `#47` — same shape awaiting.ts keys on; forge PR 3 adds GitLab's `MR !7`, `merge request 7`, bare `!7`. */
+const PR_REFERENCE = /(?:\b(?:pull|merge) request\s*[#!]?\s*|\b(?:pr|mr)\s*[#!]?\s*|[#!])(\d+)/i;
 const MERGE_VERB = /^\s*(?:please\s+)?merg(?:e|ing)\b/i;
 /** cp-1som: "ship" is the word the parent actually used on #117–#119. */
 const MERGE_WORD = /\b(?:merg(?:e|ed|ing)|ship(?:s|ped|ping)?)\b/i;
@@ -507,7 +507,7 @@ export function isMergeAsk(input: MergeAskSubject): boolean {
  */
 export function receiptPrNumber(evidence: MergeAskMergedEvidence): string | undefined {
 	if (typeof evidence.pr_number === "number" && Number.isFinite(evidence.pr_number)) return String(evidence.pr_number);
-	const fromUrl = evidence.pr_url?.match(/\/pull\/(\d+)/)?.[1];
+	const fromUrl = evidence.pr_url?.match(/\/(?:pull|-\/merge_requests)\/(\d+)/)?.[1];
 	return fromUrl && fromUrl.length > 0 ? fromUrl : undefined;
 }
 
@@ -546,6 +546,8 @@ export interface MergeAskProbeDeps {
 	 * zero runs defers.
 	 */
 	ciConfigured?: (jobId: string) => Promise<CiConfiguredState> | CiConfiguredState;
+	/** Forge PR 3: why this job's CI cannot be read at all (a GitLab MR in v1). Set means defer as unknown before any head, run or gh query. */
+	unsupported?: (jobId: string) => string | undefined;
 	/** Branch for a job. The contract is `branch === job id` (the default) unless the fleet record binds a PR. */
 	branch?: (jobId: string) => string;
 }
@@ -591,6 +593,8 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
 				...(receipt ? { evidence: receipt } : {}),
 			});
 			if (alreadyMerged) return alreadyMerged;
+			const unsupported = deps.unsupported?.(input.job_id);
+			if (unsupported) return verdict({ action: "defer", ci: "unknown", reason: unsupported });
 			const head = await deps.head(branch, input.job_id);
 			if (!head.sha) return evaluateMergeAskCi({ branch, head, runs: [] });
 			const runs = await deps.runs(branch, input.job_id);

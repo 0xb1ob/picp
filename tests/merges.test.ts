@@ -276,6 +276,24 @@ test("forge PR 2: a GitLab squash MR is recorded with its squash commit, provide
 	assert.equal((event?.payload as { provider?: string } | undefined)?.provider, "gitlab");
 });
 
+test("forge PR 3: a GitLab normal merge records its merge commit, never infers a strategy, and asks git nothing about reachability", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const { store, asked } = gitlabStore(b, { merge_commit_sha: "a".repeat(40), squash_commit_sha: "f".repeat(40) });
+	const result = await store.record({ jobId: "cp-gl" });
+	assert.equal(result.receipt.merge_commit_sha, "a".repeat(40), "the merge commit wins over a squash commit");
+	assert.equal(result.receipt.head_sha, "e".repeat(40), "the head stays the source head, separate from the landing commit");
+	assert.equal(result.receipt.base_branch, "main");
+	assert.equal(result.receipt.strategy, "squash", "squash evidence is recorded as observed");
+	assert.deepEqual(asked.filter((args) => args[0] !== "ls-remote"), [], "no fast-forward question is asked when the forge names a landing commit");
+
+	const plain = benchOf(t);
+	await plain.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const merged = await gitlabStore(plain, { merge_commit_sha: "a".repeat(40) }).store.record({ jobId: "cp-gl" });
+	assert.equal(merged.receipt.merge_commit_sha, "a".repeat(40));
+	assert.equal(merged.receipt.strategy, "unknown", "a merge commit alone does not say how the MR was merged");
+});
+
 test("forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target", async (t) => {
 	const b = benchOf(t);
 	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);

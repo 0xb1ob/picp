@@ -1,13 +1,17 @@
 /**
- * Project-scoped forge composition (forge PR 2): which observer reads a job's
- * change request, and which base a project lands on. Nonsecret helpers over the
- * existing registry — no store, no token; `token_env` stays a variable name
- * until the GitLab transport reads it.
+ * Project-scoped forge composition (forge PR 2, PR 3): which observer reads a
+ * job's change request, which base a project lands on, and where a GitLab job
+ * leaves the gh-only paths (intake listing, CI reads, merge asks). Nonsecret
+ * helpers over the existing registry — no store, no token; `token_env` stays a
+ * variable name until the GitLab transport reads it. Provider checks live here,
+ * never in a render path.
  */
 
+import { type PrObservation, prReceiptOf, type WatchableRecord } from "./ci-watch.ts";
 import { type ForgeResolution, parseChangeRequestUrl, resolveForgeRepository } from "./forge-url.ts";
 import { type ForgeObserver, type ObserverPorts, observerFor } from "./forges/adapter.ts";
 import { githubObserver } from "./forges/github.ts";
+import { type GitlabTransport, gitlabObserver } from "./forges/gitlab.ts";
 import { ProjectRegistry } from "./projects.ts";
 
 function registryEntry(home: string, project: string) {
@@ -52,4 +56,51 @@ export function changeRequestObserver(home: string, project: string, ref: string
 	if (resolution?.ok) return observerFor(resolution, ports);
 	if (parseChangeRequestUrl(ref)?.kind !== "gitlab") return githubObserver(ports.run, ports.cwd);
 	return observerFor(resolution ?? { ok: false, reason: "unsupported", detail: `project ${project} is not registered, so its GitLab forge is unknown` }, ports);
+}
+
+/** The project's GitLab observer (intake), or undefined: a GitHub or unresolvable project keeps its gh resolution. */
+export function projectGitlabObserver(home: string, project: string, transport?: GitlabTransport): ForgeObserver | undefined {
+	const resolution = projectForge(home, project);
+	return resolution?.ok && resolution.repository.kind === "gitlab" ? gitlabObserver(resolution.repository, transport) : undefined;
+}
+
+/**
+ * A GitLab job: its PR receipt is a GitLab MR link. Intake stores only a verified
+ * project MR there for a GitLab project, so the receipt decides with no registry
+ * read — this runs per watch tick and on the merge-ask render path.
+ */
+export function isGitlabJob(record: WatchableRecord | undefined): boolean {
+	return parseChangeRequestUrl(record ? (prReceiptOf(record)?.url ?? "") : "")?.kind === "gitlab";
+}
+
+/** v1 reads no GitLab CI: why a GitLab job's merge ask stays deferred as unknown — never "no CI configured", never green. */
+export function gitlabCiUnsupported(record: WatchableRecord | undefined): string | undefined {
+	return isGitlabJob(record) ? "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask" : undefined;
+}
+
+const NO_GH: ObserverPorts["run"] = async () => ({ status: 1, stdout: "", stderr: "gh is never asked about a GitLab merge request" });
+
+/**
+ * The CI watch's PR read. GitHub keeps its REST call; a GitLab MR is read
+ * through its observer for its terminal state, mapped onto the REST shape
+ * (`merged`, or `state: closed`) the event rule already reads. A failed read
+ * throws its named detail, so it is that one job's failure and backoff.
+ * `observer` is injected in tests; production asks the project's forge.
+ */
+export async function watchChangeRequest(home: string, project: string, prUrl: string, github: () => Promise<PrObservation | undefined>, observer?: ForgeObserver): Promise<PrObservation | undefined> {
+	if (parseChangeRequestUrl(prUrl)?.kind !== "gitlab") return github();
+	const read = await (observer ?? changeRequestObserver(home, project, prUrl, { run: NO_GH, cwd: home })).readChangeRequest(prUrl);
+	if (!read.ok) throw new Error(`${read.reason}: ${read.detail}`);
+	const mr = read.observation;
+	const landing = mr.merge_commit_sha ?? mr.squash_commit_sha;
+	return {
+		merged: mr.state === "merged",
+		state: mr.state === "open" || mr.state === "unknown" ? mr.state : "closed",
+		number: mr.number,
+		url: mr.url,
+		...(mr.head_sha ? { head_sha: mr.head_sha } : {}),
+		...(mr.source_branch ? { head_ref: mr.source_branch } : {}),
+		...(landing ? { merge_commit_sha: landing } : {}),
+		...(mr.merged_at ? { merged_at: mr.merged_at } : {}),
+	};
 }
