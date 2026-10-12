@@ -71,6 +71,10 @@ import { finalFixMessage, recordFinalFixPromotion, resolveFinalFix } from "./fin
 import { atomicWriteJson } from "./json-store.ts";
 import { IntegrationHolds } from "./integration-hold.ts";
 import { advanceHeld } from "./integrate-held.ts";
+import { GITLAB_HELD_LEAD, observeGitlabMr } from "./integrate-gitlab.ts";
+import { changeRequestObserver, projectForge } from "./forge-runtime.ts";
+import { parseChangeRequestUrl } from "./forge-url.ts";
+import type { ForgeObserver } from "./forges/adapter.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
 import { ghRunListArgs, parseCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
@@ -169,6 +173,8 @@ export interface IntegratorOptions {
 	send?: IntegrateSender;
 	/** Injected so tests never touch a real `gh` or `git`. */
 	run?: CommandRunner;
+	/** Forge PR 3: the observer for a GitLab MR ref (tests); defaults to the job project's forge. */
+	observer?: (ref: string, cwd: string) => ForgeObserver;
 	now?: () => Date;
 	/**
 	 * The "merge pending" reminder (cp-e0c). A thunk because the composition root
@@ -294,7 +300,11 @@ export class Integrator {
 		const facts: string[] = [];
 		// Held entry admits only the existing bounded CI repair; all integration stays paused.
 		const hold = this.#readHold(jobId);
-		if (hold) return advanceHeld({ jobId, record, cwd, pr: request.pr?.trim() || prUrlFromReceipts(record.receipts) || branch, hold }, {
+		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || branch;
+		const forge = projectForge(this.#options.home, record.project);
+		const gitlab = parseChangeRequestUrl(pr)?.kind === "gitlab" || (forge?.ok === true && forge.repository.kind === "gitlab");
+		if (hold && gitlab) return this.#heldResult(jobId, branch, hold, { facts, prUrl: pr, lead: GITLAB_HELD_LEAD });
+		if (hold) return advanceHeld({ jobId, record, cwd, pr, hold }, {
 			view: (pr) => this.#viewPr(cwd, pr), run: (dir, bin, args) => this.#run(dir, bin, args),
 			merged: () => this.#options.merges.get(jobId), hold: () => this.#readHold(jobId),
 			fleet: () => fleet.get(jobId), promoting: () => this.promoting(jobId),
@@ -310,13 +320,22 @@ export class Integrator {
 		const receipt = this.#options.merges.get(jobId);
 		if (receipt) {
 			facts.push(`merge receipt: ${receipt.pr_url} merged as ${receipt.merge_commit_sha.slice(0, 12)}`);
-			// No `gh pr view` on this path, so no `baseRefName` to carry: `#finish`
-			// falls back to the request's base, then `main`.
-			return this.#finish({ jobId, branch, cwd, facts, prUrl: receipt.pr_url, headSha: receipt.head_sha, request });
+			// A base that contradicts the receipt would aim the sync proof at the wrong branch: stop before anything moves.
+			if (request.base?.trim() && receipt.base_branch && request.base.trim() !== receipt.base_branch) {
+				return this.#write({ jobId, branch, step: "start", next: "surface", facts, prUrl: receipt.pr_url, reason: `${jobId}: the merge receipt says ${receipt.pr_url} landed on ${receipt.base_branch}, not ${request.base.trim()}. Nothing was touched; re-run without base.` });
+			}
+			// No forge read on this path: the receipt's own base, then the request's, then `main`.
+			return this.#finish({ jobId, branch, cwd, facts, prUrl: receipt.pr_url, headSha: receipt.head_sha, ...(receipt.base_branch ? { base: receipt.base_branch } : {}), gitlab, request });
+		}
+
+		// Forge PR 3: a GitLab MR is observed, never merged; only a merged MR reaches the tail.
+		if (gitlab) {
+			const mr = await observeGitlabMr({ jobId, branch, pr, observer: (this.#options.observer ?? ((ref, at) => changeRequestObserver(this.#options.home, record.project, ref, { run: (dir, bin, args) => this.#run(dir, bin, args), cwd: at })))(pr, cwd) });
+			if (mr.merged) return this.#finish({ jobId, branch, cwd, facts: [...facts, mr.fact], prUrl: mr.prUrl, ...(mr.head ? { headSha: mr.head } : {}), base: mr.base, gitlab, request });
+			return this.#write({ jobId, branch, step: "start", next: mr.next, facts: [...facts, ...mr.facts], ...(mr.prUrl ? { prUrl: mr.prUrl } : {}), ...(mr.head ? { headSha: mr.head } : {}), reason: mr.reason });
 		}
 
 		// --- the PR, as GitHub reports it --------------------------------------
-		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || branch;
 		const view = await this.#viewPr(cwd, pr);
 		if (!view.ok) {
 			return this.#write({
@@ -1031,6 +1050,8 @@ export class Integrator {
 		headSha?: string;
 		/** The PR's own base, when GitHub was asked on this call. */
 		base?: string;
+		/** A GitLab MR: its strategy is what the forge observed, never assumed squash. */
+		gitlab?: boolean;
 		request: IntegrateRequest;
 	}): Promise<IntegrateResult> {
 		const { jobId, branch, cwd, facts } = input;
@@ -1054,7 +1075,7 @@ export class Integrator {
 			merge = await this.#options.merges.record({
 				jobId,
 				...(input.prUrl ? { pr: input.prUrl } : {}),
-				strategy: input.request.strategy ?? "squash",
+				...(input.request.strategy || !input.gitlab ? { strategy: input.request.strategy ?? "squash" } : {}),
 				cwd,
 				by: "cp_integrate",
 				...(priorAuthority ? { authority: priorAuthority } : {}),

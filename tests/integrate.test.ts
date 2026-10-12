@@ -47,6 +47,8 @@ import {
 	validate,
 	WORKER_FORBIDDEN_TOOLS,
 } from "../src/contracts.ts";
+import type { IntegrationNext } from "../src/contracts.ts";
+import type { ChangeRequestObservation, ObservationOutcome } from "../src/forges/adapter.ts";
 import { drainFile } from "../src/drain.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { readFinalFixRecord, requestFinalFix, resolveFinalFix } from "../src/final-fix.ts";
@@ -506,6 +508,8 @@ interface BenchOptions {
 	infraRerun?: IntegratorOptions["infraRerun"];
 	/** k52/cp-oc0m: whether a main-CI latch is enforced, as CommandPost wires it. */
 	mainCiScope?: IntegratorOptions["mainCiScope"];
+	/** Forge PR 3: the GitLab observer, wired into both the MergeStore and the Integrator. */
+	observer?: IntegratorOptions["observer"];
 }
 
 async function benchOf(
@@ -594,7 +598,7 @@ async function benchOf(
 		integrator(worldPatch = {}, options = {}) {
 			const world = defaultWorld(worldPatch);
 			const run = options.run ?? runnerFor(world, calls, worktree);
-			const merges = new MergeStore({ home: home.path, fleet, runs, run });
+			const merges = new MergeStore({ home: home.path, fleet, runs, run, ...(options.observer ? { observer: options.observer } : {}) });
 			return new Integrator({
 				home: home.path,
 				fleet,
@@ -613,6 +617,7 @@ async function benchOf(
 				...(options.noAwaiting ? {} : { awaiting: () => new AwaitingStore({ home: home.path }) }),
 				...(options.infraRerun ? { infraRerun: options.infraRerun } : {}),
 				...(options.mainCiScope ? { mainCiScope: options.mainCiScope } : {}),
+				...(options.observer ? { observer: options.observer } : {}),
 				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs }) } : {}),
 				...(options.noSender
 					? {}
@@ -2093,6 +2098,92 @@ test("a PR closed unmerged surfaces and writes no receipt", async (t) => {
 	assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))));
 	assert.equal(b.teardowns.length, 0);
 	assert.equal(b.closed.length, 0);
+});
+
+// Forge PR 3: a GitLab MR is observed, never merged. Every case runs zero gh commands.
+const MR_URL = "https://gitlab.example.com/group/sub/repo/-/merge_requests/7";
+const MR_RECEIPT = { ...PR_RECEIPT, url: MR_URL };
+
+function gitlabMr(observation: Partial<ChangeRequestObservation> | Exclude<ObservationOutcome, { ok: true }>, asked: string[] = []): IntegratorOptions["observer"] {
+	return (ref) => ({
+		provider: "gitlab",
+		readChangeRequest: async () => {
+			asked.push(ref);
+			if ("ok" in observation) return observation;
+			return { ok: true, observation: { provider: "gitlab", url: MR_URL, number: 7, state: "merged", source_branch: BR, target_branch: "develop", head_sha: HEAD_A, squash_commit_sha: MERGE_COMMIT, merged_at: "2026-10-07T10:00:00Z", ...observation } };
+		},
+	});
+}
+
+test("forge PR 3: a GitLab MR merged into a non-main target records, tears down and closes, idempotently, with no gh", async (t) => {
+	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
+	const asked: string[] = [];
+	const options = { observer: gitlabMr({}, asked) };
+	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR });
+	assert.equal(done.next, "done", done.reason);
+	assert.deepEqual(asked, [MR_URL, MR_URL], "integrate and the merge store each read the MR once");
+	const receipt = done.merge?.receipt;
+	assert.equal(receipt?.forge?.provider, "gitlab");
+	assert.equal(receipt?.base_branch, "develop");
+	assert.equal(receipt?.merge_commit_sha, MERGE_COMMIT);
+	assert.equal(receipt?.strategy, "squash", "squash evidence is what the forge observed");
+	assert.equal(receipt?.head_branch_deleted, true, "the source branch was already gone on origin");
+	assert.ok(!b.calls.some((line) => line.startsWith("git push origin --delete")), "a deleted source branch is not deleted again");
+	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${MR_URL}` }]);
+	assert.equal(b.teardowns.length, 1);
+
+	const again = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR });
+	assert.equal(again.next, "done");
+	assert.equal(again.merge?.recorded, false, "the receipt is not rewritten");
+	assert.equal(b.closed.length, 1, "the job is not closed twice");
+	assert.deepEqual(asked, [MR_URL, MR_URL], "the receipt fast path asks the forge nothing");
+	assert.equal(b.calls.filter((line) => line.startsWith("gh ")).length, 0);
+});
+
+test("forge PR 3: open, closed, foreign, unreadable and held GitLab MRs stop with a named reason and touch nothing", async (t) => {
+	const cases: Array<[string, Parameters<typeof gitlabMr>[0], IntegrationNext, RegExp]> = [
+		["opened", { state: "open", squash_commit_sha: undefined, merged_at: undefined }, "surface", /merge it on GitLab, then re-run cp_integrate/],
+		["unknown", { state: "unknown", squash_commit_sha: undefined, merged_at: undefined }, "surface", /is unknown/],
+		["closed", { state: "closed", squash_commit_sha: undefined, merged_at: undefined }, "surface", /closed and was never merged/],
+		["another branch", { source_branch: "someone-else" }, "surface", /not this job's delivery/],
+		["unavailable", { ok: false, reason: "unavailable", detail: "HTTP 503 (service unavailable)" }, "retry", /could not be read \(unavailable: HTTP 503/],
+		["fork", { ok: false, reason: "unsupported", detail: "fork (cross-project) merge requests are not supported in v1" }, "surface", /unsupported: fork/],
+	];
+	for (const [name, observation, next, reason] of cases) {
+		const b = await benchOf(t, { receipts: [MR_RECEIPT] });
+		const result = await b.integrator({}, { observer: gitlabMr(observation) }).advance({ jobId: BR });
+		assert.equal(result.next, next, `${name}: ${result.reason}`);
+		assert.match(result.reason, reason, name);
+		assert.deepEqual(b.calls, [], `${name}: no gh ready/CI/merge/rebase and no git`);
+		assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))), `${name}: no receipt`);
+		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `${name}: no merge approval fallback`);
+		assert.equal(b.teardowns.length + b.closed.length + b.sent.length, 0, name);
+	}
+
+	const held = await benchOf(t, { receipts: [MR_RECEIPT] });
+	new IntegrationHolds(held.home).hold(BR, "operator pause");
+	const waiting = await held.integrator({}, { observer: () => assert.fail("a held job reads nothing") }).advance({ jobId: BR });
+	assert.equal(waiting.next, "wait");
+	assert.match(waiting.reason, /GitLab CI is not read in v1.*integration held: operator pause/);
+	assert.deepEqual(held.calls, []);
+});
+
+test("forge PR 3: a base that contradicts the merge receipt surfaces before anything moves, and a bound source is kept", async (t) => {
+	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
+	const observer = gitlabMr({});
+	await b.integrator({ branchOnRemote: false }, { observer, teardown: { teardown: async () => assert.fail("no teardown yet") } as TeardownLike }).advance({ jobId: BR }).catch(() => undefined);
+	assert.ok(existsSync(join(b.home, paths.mergeFile(BR))), "the receipt landed before the teardown refused");
+	const calls = b.calls.length;
+	const wrong = await b.integrator({}, { observer }).advance({ jobId: BR, base: "main" });
+	assert.equal(wrong.next, "surface");
+	assert.match(wrong.reason, /landed on develop, not main\. Nothing was touched; re-run without base/);
+	assert.equal(b.calls.length, calls, "no git ran against the wrong base");
+	assert.equal(b.closed.length, 0);
+
+	const bound = await benchOf(t, { receipts: [MR_RECEIPT], bound_pr: { number: 7, url: MR_URL, base: "develop" } });
+	const kept = await bound.integrator({}, { observer: gitlabMr({}) }).advance({ jobId: BR });
+	assert.equal(kept.next, "done", kept.reason);
+	assert.ok(!bound.calls.some((line) => line.startsWith("git push origin --delete")), "a bound MR's source is not this job's to delete");
 });
 
 test("a PR whose head branch is not this job's branch is refused, untouched", async (t) => {

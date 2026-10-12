@@ -64,11 +64,11 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		name: "cp_merged",
 		label: "Merged",
 		description:
-			"Record that a job's PR landed, from what `gh pr view` reports: state MERGED, the merge commit and the " +
-			"head oid. Writes state/runs/<job-id>/merge.json and moves the job's pr receipt to `merged`. " +
+			"Record that a job's PR landed, from what its forge reports (`gh pr view`, or the GitLab MR API for a GitLab project): " +
+			"state merged, the merge commit and the head oid. Writes state/runs/<job-id>/merge.json and moves the job's pr receipt to `merged`. " +
 			"This is the mechanism behind 'confirm the PR merged': the teardown gate reads the receipt, so a " +
 			"squash- or rebase-merged PR with a deleted head branch tears down without force. " +
-			"Refuses (and writes nothing) unless gh itself says the PR is merged.",
+			"Refuses (and writes nothing) unless the forge itself says the PR or MR is merged.",
 		promptSnippet: "Record an observed PR merge so teardown can confirm it (cp_merged)",
 		promptGuidelines: [
 			"After merging a delivery:pr job's PR, run cp_merged <job-id> before cp_teardown: it is what lets the gate confirm a squash merge.",
@@ -118,7 +118,8 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			"Awaiting-you and nothing is retried automatically; where this home cannot read the verdict at all, the " +
 			"fallback is a human answering state/checkpoints/<job-id>.merge-<head>.json, per PR and per head sha. There " +
 			"is no standing or blanket merge authority a human can grant anywhere in this tool. " +
-			"hold records a durable per-job integration pause with a reason; release removes it without bypassing any merge gate.",
+			"hold records a durable per-job integration pause with a reason; release removes it without bypassing any merge gate. " +
+			"A GitLab MR (v1) is only observed: a merged MR records, tears down and closes; open, closed or unreadable surfaces — no CI read, no merge.",
 		promptSnippet: "Advance one PR's merge by one verified step (cp_integrate)",
 		promptGuidelines: [
 			"Call cp_integrate advance for the next PR to merge; it does one step and returns `next`. Call it again while next is `advance`.",
