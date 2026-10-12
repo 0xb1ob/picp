@@ -138,7 +138,7 @@ export async function handleDevicesWrite(req: IncomingMessage, options: DevicesR
 		if (!body || Object.keys(body).length !== 1 || typeof body.id !== "string" || !DEVICE_ID_RE.test(body.id)) return refuse(400, 'body must be {"id": "dev-<16 hex>"}');
 		const revoked = routes.store.revoke(body.id, peer ?? null);
 		if (!revoked.ok) return storeRefusal(revoked);
-		return { status: 200, body: { id: revoked.device.id, revoked_at: revoked.device.revoked_at, audit_error: revoked.audit_error } };
+		return { status: 200, body: { id: revoked.device.id, revoked_at: revoked.device.revoked_at, audit_error: revoked.audit_error, cleanup_error: revoked.cleanup_error } };
 	}
 	if (!body || Object.keys(body).some((key) => key !== "level") || (body.level !== undefined && !isDeviceLevel(body.level))) return refuse(400, 'body must be {"level"?: "full" | "view"}');
 	const binding = routes.binding();

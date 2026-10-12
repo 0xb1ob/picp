@@ -19,12 +19,15 @@ import {
 	DEVICE_SESSION_TTL_MS, deviceEligible, deviceName, type DeviceLevel, type DeviceRecord, type DeviceState, deviceStateProblem,
 	devicesFile, type DeviceView, digestEquals, isDeviceLevel, type IssuanceRoute, type PairingEvent, projectDevice, readDeviceState, secretDigest,
 } from "./device-files.ts";
+import { deleteDeviceSubscriptions } from "./push-subscriptions.ts";
 
 export type DeviceAuditLine = Extract<ControlAuditLine, { type: "device" }>;
 export type DeviceStorePorts = {
 	now?: () => Date;
 	random?: (bytes: number) => Buffer;
 	audit?: (line: DeviceAuditLine) => { ok: true } | { ok: false; error: string };
+	/** A revoke's push cleanup (default: remove the device's own subscriptions); a throw is reported, never undoes the revoke. */
+	unsubscribe?: (deviceId: string) => void;
 	/** Test seam: throws here simulate a crash right after that commit. */
 	crash?: (stage: "pending_written" | "audited") => void;
 };
@@ -47,6 +50,7 @@ export class DeviceStore {
 	private readonly random: (bytes: number) => Buffer;
 	private readonly audit: (line: DeviceAuditLine) => { ok: true } | { ok: false; error: string };
 	private readonly crash: (stage: "pending_written" | "audited") => void;
+	private readonly unsubscribe: (deviceId: string) => void;
 
 	constructor(dataDir: string, stateDir: string, ports: DeviceStorePorts = {}) {
 		this.dataDir = dataDir;
@@ -55,6 +59,7 @@ export class DeviceStore {
 		this.random = ports.random ?? randomBytes;
 		this.audit = ports.audit ?? ((line) => appendControlAudit(stateDir, line));
 		this.crash = ports.crash ?? (() => {});
+		this.unsubscribe = ports.unsubscribe ?? ((deviceId) => void deleteDeviceSubscriptions(dataDir, deviceId));
 	}
 
 	/** Issue one pairing code (terminal or eligible local browser only — the caller's gate). The secret is returned once, never stored or audited. */
@@ -157,8 +162,12 @@ export class DeviceStore {
 		return { ok: true, device: projectDevice(device) };
 	}
 
-	/** Revoke by public id or (case-insensitive) name. The row stays, marked; the revocation stands even if its audit line fails. */
-	revoke(target: string, peer?: string | null): { ok: true; device: DeviceView; audit_error: string | null } | DeviceFailure {
+	/**
+	 * Revoke by public id or (case-insensitive) name. The row stays, marked; the revocation stands even if its audit line
+	 * or its push cleanup fails: the cleanup runs only after the durable revoke, so a failure leaves an ineligible
+	 * subscription behind (reported in `cleanup_error`), never access.
+	 */
+	revoke(target: string, peer?: string | null): { ok: true; device: DeviceView; audit_error: string | null; cleanup_error: string | null } | DeviceFailure {
 		const loaded = this.load();
 		if (!loaded.ok) return loaded;
 		const live = loaded.store.devices.filter((device) => device.revoked_at === null);
@@ -171,7 +180,13 @@ export class DeviceStore {
 		const saved = this.save(loaded.store);
 		if (!saved.ok) return saved;
 		const audited = this.audit({ ...this.line("revoked", peer, null), device_id: device.id, name: device.name, level: device.level });
-		return { ok: true, device: projectDevice(device), audit_error: audited.ok ? null : audited.error };
+		let cleanup_error: string | null = null;
+		try {
+			this.unsubscribe(device.id);
+		} catch (error) {
+			cleanup_error = `push subscription cleanup failed: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`;
+		}
+		return { ok: true, device: projectDevice(device), audit_error: audited.ok ? null : audited.error, cleanup_error };
 	}
 
 	/** The read model: devices without digests, committed (active) pairing events, live code count. */

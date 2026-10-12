@@ -15,6 +15,7 @@ import { decisions } from "../src/viewer/overview-decisions.ts";
 import { pushDeliveriesFile, subscriptionFile, subscriptionId } from "../src/viewer/push-files.ts";
 import { devicesFile } from "../src/viewer/device-files.ts";
 import { DeviceStore } from "../src/viewer/device-store.ts";
+import { tunnelRuntimeFile } from "../src/service/daemon-tunnel-files.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { type TestDevice, testDevice } from "./harness/push.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -282,6 +283,33 @@ test("remote dashboard: before each ask send or retry an owned subscription's de
 	b.asks.open({ ...ASK, question: "Third?" });
 	await b.sweep();
 	assert.deepEqual(urls(), ["device-a"], "an unreadable device store fails closed for owned subscriptions only");
+});
+
+test("remote dashboard PR 2: a newer quick-tunnel generation, or an unreadable tunnel runtime, gets an owned subscription no ask push; legacy ones still go", async (t) => {
+	const b = bench(t);
+	const store = new DeviceStore(b.dataDir, b.stateDir, { now: () => new Date("2026-09-27T00:00:00Z") });
+	const issued = store.issueCode({ origin: "https://cp.example.test", generation: 1, route: "cli-pair" });
+	assert.ok(issued.ok);
+	const claimed = store.claim({ origin: "https://cp.example.test", generation: 1, code: issued.code, name: "Phone" });
+	assert.ok(claimed.ok);
+	b.subscribe(FCM);
+	b.subscribe(MOZ);
+	const file = subscriptionFile(b.dataDir, subscriptionId(MOZ));
+	writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), device_id: claimed.device.id, origin: "https://cp.example.test" }));
+	await b.sweep();
+	const urls = () => b.calls.splice(0).map((call) => call.url.split("/").pop()).sort();
+	const runtime = (value: unknown) => writeFileSync(tunnelRuntimeFile(b.stateDir), typeof value === "string" ? value : JSON.stringify(value));
+	const cases: Array<[unknown, string[], string]> = [
+		[{ schema_version: 1, generation: 1, origin: "https://cp.example.test" }, ["device-a", "device-b"], "its own generation"],
+		[{ schema_version: 1, generation: 2, origin: "https://new.trycloudflare.com" }, ["device-a"], "a newer generation ends it"],
+		["{torn", ["device-a"], "an unreadable runtime fails owned ones closed"],
+	];
+	for (const [value, expected, why] of cases) {
+		runtime(value);
+		b.asks.open({ ...ASK, question: `${why}?` });
+		await b.sweep();
+		assert.deepEqual(urls(), expected, why);
+	}
 });
 
 test("a corrupt asks file is reported and changes nothing", async (t) => {

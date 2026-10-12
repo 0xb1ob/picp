@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { isoTimestamp } from "../contracts.ts";
 import { type OperatorAsk, OperatorAsks } from "../operator-asks.ts";
 import { UNKNOWN_PROJECT } from "../project-report.ts";
+import { readTunnelBinding } from "../service/daemon-tunnel-files.ts";
 import { subscriptionEligibility } from "../viewer/device-files.ts";
 import { listSubscriptions, pushDataDir, pushServiceAllowed, type StoredSubscription, subscriptionFile } from "../viewer/push-files.ts";
 import { PUSH_LAST_ERROR_MAX_CHARS, PUSH_MAX_ATTEMPTS, type PushLedger, PushDeliveryStore, type PushRecord, pushBackoffSeconds, pushRecordKey } from "./deliveries.ts";
@@ -181,7 +182,9 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 			}
 			// Remote dashboard: re-read device eligibility before each send or retry, so a revoked or expired device's
 			// subscription gets no newly started push; legacy unowned subscriptions are unaffected.
-			const eligible = subscriptionEligibility(dataDir, now);
+			// A superseded quick-tunnel generation is ineligible too; an unreadable tunnel runtime fails every owned one closed.
+			const tunnel = readTunnelBinding(ports.stateDir);
+			const eligible = tunnel.ok ? subscriptionEligibility(dataDir, now, tunnel.binding?.generation) : (subscription: StoredSubscription) => subscription.device_id === undefined;
 			const targets = (record.targets ?? subscriptions.map((subscription) => subscription.id))
 				.map((id) => byId.get(id))
 				.filter((subscription): subscription is StoredSubscription => subscription !== undefined && eligible(subscription));

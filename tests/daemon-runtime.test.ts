@@ -21,7 +21,7 @@ interface Proc {
 	onExit?: (code: number | null, signal: string | null) => void;
 }
 
-function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason"]; foreign?: Record<number, string>; stubborn?: string[]; failSpawn?: string[]; raw?: RawKill } = {}) {
+function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason"]; foreign?: Record<number, string>; stubborn?: string[]; failSpawn?: string[]; raw?: RawKill; remote?: { on: boolean } } = {}) {
 	let now = T0;
 	const timers: Array<{ at: number; fn: () => void; dead: boolean }> = [];
 	const procs = new Map<number, Proc>();
@@ -77,6 +77,7 @@ function harness(options: { prior?: RuntimeRecord; reason?: InnerOptions["reason
 		writeRuntime: (next) => void (record = structuredClone(next)),
 		send: (event) => void events.push(event),
 		log: (line) => void lines.push(line),
+		...(options.remote ? { remoteConfigured: () => options.remote!.on } : {}),
 	};
 	const advance = (ms: number): void => {
 		const end = now + ms;
@@ -337,4 +338,84 @@ test("a failed oneshot spawn records no pid; a supervisor that does start is sti
 	h.inner.stop();
 	assert.equal(await h.inner.done, 0);
 	assert.deepEqual(raw, [[h.spawns[0]?.pid as number, "SIGTERM"]]);
+});
+
+// Remote dashboard PR 2: the pairing-alert sender role.
+const SENDER = "device-notify";
+
+test("the sender runs only on a home with the remote feature: never without the port or the config, and old records parse", () => {
+	for (const h of [harness(), harness({ remote: { on: false } }), harness({ prior: priorRecord({}), remote: { on: false } })]) {
+		h.advance(60_000);
+		assert.equal(h.spawns.some((spawn) => spawn.role === SENDER), false);
+		assert.equal(h.record().units[SENDER], undefined, "no unit recorded: the runtime record stays as before");
+		assert.deepEqual(h.events, [{ type: "ready" }]);
+	}
+});
+
+test("the sender starts beside the parent and viewer with its own argv and env, or on the first tick after the feature appears", () => {
+	const h = harness({ remote: { on: true } });
+	assert.deepEqual(h.spawns.map((spawn) => spawn.role), ["parent", "viewer", SENDER]);
+	const sender = h.spawns[2]!;
+	assert.deepEqual(sender.argv, ["/opt/node", "/srv/app/src/push/device-notify.ts"]);
+	assert.deepEqual(sender.env, { HOME: "/home/u", CP_HOME: "/srv/home", CP_MODE: "multi", PATH: "/usr/bin", CP_DAEMON_ROLE: SENDER });
+	assert.equal(h.record().units[SENDER]?.state, "running");
+	const later = { on: false };
+	const g = harness({ remote: later });
+	g.advance(10_000);
+	assert.equal(g.live(SENDER), undefined);
+	later.on = true;
+	g.advance(5_000);
+	assert.ok(g.live(SENDER), "the next tick starts it");
+	assert.equal(g.spawns.filter((spawn) => spawn.role === SENDER).length, 1);
+});
+
+test("a crashed sender restarts on the supervisor's backoff, never twice, and never gates readiness", () => {
+	const h = harness({ remote: { on: true } });
+	h.exit(h.live(SENDER) as number, 1);
+	h.advance(5_000);
+	assert.deepEqual(h.events, [{ type: "ready" }], "the sender is not a readiness condition");
+	assert.equal(h.record().units[SENDER]?.restarts, 1);
+	assert.equal(h.spawns.filter((spawn) => spawn.role === SENDER).length, 2, "one restart after 5 s, the tick does not add another");
+	h.exit(h.live(SENDER) as number, 78);
+	h.advance(60_000);
+	assert.equal(h.record().units[SENDER]?.state, "failed", "a config failure stays failed until a reload");
+	assert.equal(h.spawns.filter((spawn) => spawn.role === SENDER).length, 2);
+});
+
+test("an update hold stops the sender with the viewer, and the release starts it again", () => {
+	const h = harness({ remote: { on: true } });
+	const pid = h.live(SENDER) as number;
+	h.inner.handle("hold");
+	assert.ok(h.kills.some(([p, signal]) => p === pid && signal === "SIGTERM"));
+	assert.equal(h.record().units[SENDER]?.state, "held");
+	h.advance(30_000);
+	assert.equal(h.live(SENDER), undefined, "no tick restarts it while held");
+	h.inner.handle("release");
+	assert.ok(h.live(SENDER));
+	assert.equal(h.record().units[SENDER]?.state, "running");
+});
+
+test("stop SIGTERMs the sender too and waits for its exit; a stubborn one is SIGKILLed after 10 s", async () => {
+	const h = harness({ remote: { on: true }, stubborn: [SENDER] });
+	const pid = h.live(SENDER) as number;
+	h.inner.stop();
+	let done = false;
+	void h.inner.done.then(() => (done = true));
+	await Promise.resolve();
+	assert.equal(done, false, "not settled while the sender lives");
+	h.advance(10_000);
+	assert.deepEqual(h.kills.filter(([p]) => p === pid), [[pid, "SIGTERM"], [pid, "SIGKILL"]]);
+	assert.equal(await h.inner.done, 0);
+	assert.equal(h.record().units[SENDER]?.state, "stopped");
+});
+
+test("an orphaned sender of a crashed runtime is stopped before anything new is spawned; a reused pid is left alone", () => {
+	const unit = { state: "running" as const, pid: 700, starts: [], restarts: 0, since: "" };
+	const h = harness({ prior: priorRecord({ [SENDER]: unit }), foreign: { 700: "/opt/node /srv/app/src/push/device-notify.ts" }, remote: { on: true } });
+	assert.deepEqual(h.kills, [[700, "SIGTERM"]]);
+	assert.equal(h.spawns.length, 0);
+	h.advance(1_000);
+	assert.deepEqual(h.spawns.map((spawn) => spawn.role), ["parent", "viewer", SENDER]);
+	const reused = harness({ prior: priorRecord({ [SENDER]: unit }), foreign: { 700: "bash" }, remote: { on: true } });
+	assert.deepEqual(reused.kills, []);
 });

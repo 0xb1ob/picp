@@ -20,6 +20,8 @@ export function saveSubscription(dataDir: string, subscription: { endpoint: stri
 	const devices = listSubscriptions(dataDir).items;
 	const known = devices.find((item) => item.id === id);
 	if (known && !ownsSubscription(known, owner)) return { ok: false, devices: devices.length, owned: true };
+	// As deleteSubscription: a remote device never overwrites a file it cannot read as its own.
+	if (!known && owner !== undefined && existsSync(subscriptionFile(dataDir, id))) return { ok: false, devices: devices.length, owned: true };
 	if (!known && devices.length >= PUSH_MAX_SUBSCRIPTIONS) return { ok: false, devices: devices.length };
 	mkdirSync(subscriptionsDir(dataDir), { recursive: true, mode: 0o700 });
 	const file = subscriptionFile(dataDir, id);
@@ -42,4 +44,11 @@ export function deleteSubscription(dataDir: string, endpoint: string, owner?: Su
 	const existed = existsSync(file);
 	rmSync(file, { force: true });
 	return existed;
+}
+
+/** A revoked device's cleanup: remove every subscription `deviceId` stored, returning how many. Throws on a remove error. */
+export function deleteDeviceSubscriptions(dataDir: string, deviceId: string): number {
+	const owned = listSubscriptions(dataDir).items.filter((item) => item.device_id === deviceId);
+	for (const item of owned) rmSync(subscriptionFile(dataDir, item.id), { force: true });
+	return owned.length;
 }

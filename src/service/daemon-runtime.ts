@@ -9,12 +9,15 @@
  *  - the viewer (cp-view.service): restarted 10 s after any exit, unless held;
  *  - health and update (the timers): detached oneshots every 5 min, first at
  *    +3/+10 min from the daemon's start, each with its own timeout, and never
- *    signalled on stop or reload — the updater survives the reload it asked for.
+ *    signalled on stop or reload — the updater survives the reload it asked for;
+ *  - the pairing-alert sender (`device-notify`, remote dashboard PR 2), only on
+ *    a home with the remote feature: the supervisor's restart rules, held
+ *    down with the viewer during an update, stopped with the others.
  *
  * Signals only pids it spawned, or recorded pids whose `ps` args still name
  * the role's script. Never a process group, never the parent host.
  *
- * Imports only `node:*` and `./daemon-files.ts`.
+ * Imports only `node:*`, `./daemon-files.ts` and `./daemon-tunnel-files.ts`.
  */
 import { spawn as spawnChild } from "node:child_process";
 import {
@@ -42,6 +45,7 @@ import {
 	sameProcess,
 	START_LIMIT_INTERVAL_MS,
 } from "./daemon-files.ts";
+import { remoteFeatureConfigured } from "./daemon-tunnel-files.ts";
 
 export const TICK_MS = 5_000;
 export const READY_AFTER_MS = 5_000;
@@ -52,7 +56,9 @@ export const KILL_GRACE_MS = 10_000;
 /** Longer than the 45-min update timeout: a hold never outlives a dead updater for long. */
 export const HOLD_MAX_MS = 50 * 60_000;
 
-type Long = "parent" | "viewer";
+type Long = "parent" | "viewer" | "device-notify";
+const SENDER = "device-notify";
+const LONGS = ["parent", "viewer", SENDER] as const;
 type Job = "health" | "update";
 
 export type InnerSignal = "SIGTERM" | "SIGKILL";
@@ -74,6 +80,8 @@ export interface InnerPorts {
 	writeRuntime(record: RuntimeRecord): void;
 	send(event: InnerEvent): void;
 	log(line: string): void;
+	/** Whether the home uses the remote feature (`remoteFeatureConfigured`): only then does the pairing-alert sender run. Absent: never. */
+	remoteConfigured?(): boolean;
 }
 
 /** The production `kill` port: guarded at its lowest level (`guardedKill`), so no invalid pid reaches `process.kill`. */
@@ -144,7 +152,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	const done = new Promise<number>((resolve) => (finish = resolve));
 
 	const startLong = (role: Long): void => {
-		const unit = record.units[role];
+		const unit = record.units[role] as LongUnit;
 		unit.starts = [...unit.starts.filter((start) => now() - Date.parse(start) < START_LIMIT_INTERVAL_MS), at()];
 		const pid = ports.spawn(role, childArgv(config, role), childEnv(config, role, options.base), (code, signal) => onLongExit(role, pid, code, signal));
 		Object.assign(unit, { pid, state: "running", since: at() });
@@ -153,9 +161,29 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		save();
 	};
 
+	/**
+	 * The pairing-alert sender: started at begin, on every tick and on a hold's release while the home uses the remote
+	 * feature and it is idle (never started here, stopped or held). A crash restarts on its own backoff timer; a failed
+	 * one waits for a reload. It holds no fleet authority and never gates readiness.
+	 */
+	const startSender = (): void => {
+		if (stopping || record.hold) return;
+		const unit = record.units[SENDER];
+		if (unit && (unit.pid !== undefined || (unit.state !== "stopped" && unit.state !== "held"))) return;
+		let wanted = false;
+		try {
+			wanted = ports.remoteConfigured?.() ?? false;
+		} catch (error) {
+			ports.log(`cannot tell whether the remote feature is configured: ${(error as Error).message}`);
+		}
+		if (!wanted) return;
+		record.units[SENDER] ??= long(prior?.units?.[SENDER]);
+		startLong(SENDER);
+	};
+
 	const onLongExit = (role: Long, pid: number | undefined, code: number | null, signal: string | null): void => {
 		const unit = record.units[role];
-		if (unit.pid !== pid) return;
+		if (!unit || unit.pid !== pid) return;
 		delete unit.pid;
 		unit.last_exit = { code, signal, at: at() };
 		unit.since = at();
@@ -165,7 +193,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			save();
 			return settle();
 		}
-		const held = role === "viewer" && record.hold !== undefined;
+		const held = role !== "parent" && record.hold !== undefined;
 		const decision = decideRestart(role, { starts: unit.starts.map(Date.parse), restarts: unit.restarts, held }, { code, signal, requested: wasRequested }, now());
 		if (decision.action === "restart") {
 			unit.state = "restarting";
@@ -186,7 +214,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	};
 
 	const terminate = (role: Long): void => {
-		const pid = record.units[role].pid;
+		const pid = record.units[role]?.pid;
 		if (pid === undefined) return;
 		requested.add(pid);
 		ports.kill(pid, "SIGTERM");
@@ -217,6 +245,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		ports.log(`viewer hold released (${why})`);
 		if (record.units.viewer.pid === undefined && !stopping) startLong("viewer");
 		else save();
+		startSender();
 	};
 
 	const tickJob = (job: Job): void => {
@@ -252,6 +281,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	const tick = (): void => {
 		if (stopping) return;
 		if (record.hold && now() >= Date.parse(record.hold.until)) release("its 50-min deadline passed");
+		startSender();
 		tickJob("health");
 		tickJob("update");
 		later(tick, TICK_MS);
@@ -264,6 +294,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			record.units.viewer.state = "held";
 			save();
 		} else startLong("viewer");
+		startSender();
 		const initial = { parent: record.units.parent.pid, viewer: record.units.viewer.pid };
 		later(() => {
 			if (stopping) return;
@@ -275,7 +306,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	};
 
 	// Orphans of a crashed inner (attached children do not die with their parent): stop them before spawning anew.
-	const orphans = (["parent", "viewer"] as const).map((role) => ({ pid: prior?.units?.[role]?.pid, script: roleScript(config, role) })).filter((orphan): orphan is { pid: number; script: string } => sameProcess(orphan.pid, orphan.script, ports));
+	const orphans = LONGS.map((role) => ({ pid: prior?.units?.[role]?.pid, script: roleScript(config, role) })).filter((orphan): orphan is { pid: number; script: string } => sameProcess(orphan.pid, orphan.script, ports));
 	const orphanAlive = (): number[] => orphans.filter((orphan) => sameProcess(orphan.pid, orphan.script, ports)).map((orphan) => orphan.pid);
 	save();
 	if (orphans.length === 0) begin();
@@ -297,7 +328,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 
 	let settled = false;
 	const settle = (): void => {
-		if (settled || record.units.parent.pid !== undefined || record.units.viewer.pid !== undefined) return;
+		if (settled || LONGS.some((role) => record.units[role]?.pid !== undefined)) return;
 		settled = true;
 		save();
 		ports.log("stopped (oneshots left running)");
@@ -308,13 +339,14 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 		if (stopping) return;
 		stopping = true;
 		for (const cancel of cancels.splice(0)) cancel();
-		for (const role of ["parent", "viewer"] as const) {
-			if (record.units[role].pid === undefined && record.units[role].state !== "failed") record.units[role].state = "stopped";
+		for (const role of LONGS) {
+			const unit = record.units[role];
+			if (unit && unit.pid === undefined && unit.state !== "failed") unit.state = "stopped";
 			terminate(role);
 		}
 		ports.setTimer(() => {
-			for (const role of ["parent", "viewer"] as const) {
-				const pid = record.units[role].pid;
+			for (const role of LONGS) {
+				const pid = record.units[role]?.pid;
 				if (pid === undefined) continue;
 				ports.kill(pid, "SIGKILL");
 				ports.log(`${role} pid ${pid} ignored SIGTERM: SIGKILL`);
@@ -330,8 +362,11 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 				return { ok: true };
 			case "hold":
 				record.hold = { until: iso(now() + HOLD_MAX_MS) };
-				if (record.units.viewer.pid !== undefined) terminate("viewer");
-				else record.units.viewer.state = "held";
+				for (const role of ["viewer", SENDER] as const) {
+					const unit = record.units[role];
+					if (unit?.pid !== undefined) terminate(role);
+					else if (unit) unit.state = "held";
+				}
 				ports.log(`viewer held until ${record.hold.until}`);
 				save();
 				return { ok: true };
@@ -407,6 +442,7 @@ if (import.meta.main) {
 			writeRuntime: (record) => atomicWrite(paths.runtime, record, 0o644),
 			send,
 			log,
+			remoteConfigured: () => remoteFeatureConfigured(paths.dataDir),
 		},
 	);
 	process.on("message", (message: { type?: string; id?: string; op?: string }) => {
