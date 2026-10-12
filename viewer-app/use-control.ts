@@ -11,7 +11,7 @@ import { fetchSkills, type SkillCatalog } from "./skills.ts";
  * transcript (`refreshKey`). Composer messages keep a persisted FIFO; their POSTs serialize with clicks and aborts.
  * Start session: one `POST /api/operator/start` `{via}`, then the status every 2 s until a session serves (≤ 60 s).
  */
-export function useControl(active: boolean, refreshKey: string | null, entries: SessionEntry[], fetcher: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init), composer = false): ControlView | undefined {
+export function useControl(active: boolean, refreshKey: string | null, entries: SessionEntry[], fetcher: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init), composer = false, truncated = false): ControlView | undefined {
  const [status, setStatus] = useState<ControlStatus | null>(null);
  const [delivery, setDelivery] = useState<Delivery | null>(null);
  const [generation, setGeneration] = useState(0);
@@ -23,8 +23,8 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const transcriptKey = entries.map(e=>`${e.id}:${e.dashboard_id ?? ""}`).join("|");
  useEffect(()=>{
   if (!composer || !active) return;
-  setPending(value=>{const next=reconcilePending(value,status,entries); return JSON.stringify(next) === JSON.stringify(value) ? value : rememberPending(next);});
- },[active,composer,status,transcriptKey,refreshKey]);
+  setPending(value=>{const next=reconcilePending(value,status,entries,truncated); return JSON.stringify(next) === JSON.stringify(value) ? value : rememberPending(next);});
+ },[active,composer,status,transcriptKey,refreshKey,truncated]);
  useEffect(() => {
   if (!active) return;
   const controller = new AbortController();
@@ -93,9 +93,10 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  };
  // Only while the running bridge takes attachments; never held offline.
  const upload = (controlImages(status) || controlFiles(status)) && controlReady(status) ? (file: File) => uploadImage(fetcher, controlToken(status), file) : undefined;
- const visible = composer ? reconcilePending(pending,status,entries).items : undefined;
+ const visible = composer ? reconcilePending(pending,status,entries,truncated).items : undefined;
  const retry = (key: string) => { const item=pending.items.find(item=>item.key === key && item.state === "failed"); if(item) enqueue(item.body,item.ask_id ?? undefined,key); };
- const discard = (key: string) => updatePending(value=>{const found=value.items.find(item=>item.key === key && item.state === "failed"); return found ? {...value,items:value.items.filter(item=>item !== found),dismissed:found.id ? [...value.dismissed,found.id] : value.dismissed} : value;});
+ // Discard (failed) and Dismiss (delivered): the shown state decides, since status may have moved it since the last persist.
+ const discard = (key: string) => { const shownItem=visible?.find(item=>item.key === key && (item.state === "failed" || item.state === "delivered")); if(shownItem) updatePending(value=>({...value,items:value.items.filter(item=>item.key !== key),dismissed:shownItem.id ? [...value.dismissed,shownItem.id] : value.dismissed})); };
  // cp-y43c: Edit/Cancel a dashboard-queued message; serialized with sends (one POST at a time per address).
  const queueOp = (key: string, text?: string): Promise<QueueOutcome> => {
   const item = visible?.find(item=>item.key === key);

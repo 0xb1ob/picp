@@ -38,7 +38,7 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
  // Restart session lives in the shell's ⋮ menu: the composer stays held while that restart runs, and re-reads its token once the state moves.
  const shell=useContext(ShellContext);
  const restarting=shell.control?.restarting ?? null;
- const own=useControl(transcript,`${data?.generated_at ?? ""}|${restarting?.state ?? ""}`,data?.entries ?? [],undefined,true);
+ const own=useControl(transcript,`${data?.generated_at ?? ""}|${restarting?.state ?? ""}`,data?.entries ?? [],undefined,true,data?.truncated === true);
  const control=own && restarting ? {...own,restarting} : own;
  const threads=useThreads(transcript,data?.generated_at ?? null);
  if (current.defaulted && resource.code === 403) return <p role="status">Loading</p>;

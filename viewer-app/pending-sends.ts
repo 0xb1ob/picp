@@ -45,12 +45,16 @@ export function transcriptHasSend(entries: SessionEntry[], id: string | null): b
  return !!id && entries.some(e=>e.dashboard_id === id || (e.who === "Operator" && e.text.startsWith("[cp-dashboard inbox — ") && e.text.includes(`(${id}):`)));
 }
 
-export function reconcilePending(value: PendingState, status: ControlStatus | null, entries: SessionEntry[]): PendingState {
+/** How long a delivered send may wait for its transcript entry before status alone retires it (picp-cc0). */
+export const DELIVERED_GRACE_MS = 60_000;
+
+export function reconcilePending(value: PendingState, status: ControlStatus | null, entries: SessionEntry[], truncated = false): PendingState {
  const removed = value.items.filter(item=>transcriptHasSend(entries,item.id));
  const dismissed = [...new Set([...value.dismissed,...removed.flatMap(item=>item.id ? [item.id] : [])])];
- const items = value.items.filter(item=>!removed.includes(item)).map(item=>({...item}));
- if (status && !("error" in status)) {
-  for (const send of status.sends ?? []) {
+ let items = value.items.filter(item=>!removed.includes(item)).map(item=>({...item}));
+ const live = status && !("error" in status) ? status : null;
+ if (live) {
+  for (const send of live.sends ?? []) {
    if (dismissed.includes(send.id) || transcriptHasSend(entries,send.id)) continue;
    const index = items.findIndex(item=>item.id === send.id);
    if (send.state === "dropped") { if (index >= 0) items.splice(index,1); dismissed.push(send.id); continue; }
@@ -64,11 +68,23 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
    }
   }
   for (const item of items) {
-   const recent = status.recent.find(row=>row.id === item.id);
+   const recent = live.recent.find(row=>row.id === item.id);
    if (recent?.state === "failed" || recent?.state === "refused") { item.state = "failed"; item.reason = recent.reason ?? "Delivery failed"; }
    else if (recent?.state === "delivered") item.state = "delivered";
   }
  }
+ // picp-cc0: the transcript is a window; a delivered send it can no longer show must not wait for it forever.
+ const times = truncated ? entries.map(e=>Date.parse(e.at)).filter(Number.isFinite) : [];
+ const oldest = times.length ? Math.min(...times) : NaN;
+ const now = live ? Date.parse(live.generated_at) : NaN; // server clock, the same one that stamped the delivery
+ const settled = (item: PendingSend) => {
+  if (item.state !== "delivered") return false;
+  if (Date.parse(item.at) < oldest) return true;
+  const row = live?.recent.find(row=>row.id === item.id && row.state === "delivered") ?? live?.sends?.find(send=>send.id === item.id && send.state === "delivered");
+  return !!row && now - Date.parse(row.at) > DELIVERED_GRACE_MS;
+ };
+ const stale = items.filter(settled);
+ if (stale.length) { items = items.filter(item=>!stale.includes(item)); dismissed.push(...stale.flatMap(item=>item.id ? [item.id] : [])); }
  items.sort((a,b)=>a.at.localeCompare(b.at));
  return {...value,items,dismissed};
 }
