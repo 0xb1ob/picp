@@ -429,14 +429,20 @@ export class EnvelopeIntake {
 	 *
 	 * Only a completed `ship`/`delivery:pr` envelope names a PR: a blocked one may not have
 	 * opened a PR yet, and research never has one. The branch is the job's own — the one
-	 * the dispatch cut — so a wrong branch in the envelope cannot steer the lookup.
+	 * the dispatch cut, or the bound PR's head (picp-d0p, resolved by that PR's number) — so
+	 * a wrong branch in the envelope cannot steer the lookup.
 	 */
 	async #resolvePr(record: FleetRecord, envelope: Envelope): Promise<PrResolution | undefined> {
 		if (record.kind !== "ship" || record.delivery !== "pr" || envelope.status !== "done") return undefined;
 		const origin = this.#options.originUrl?.(record.project);
 		const ownerRepo = origin ? githubRepoFromCloneUrl(origin) : undefined;
 		return resolvePr(
-			{ branch: record.branch, cwd: record.worktree, ...(envelope.pr_url ? { given: envelope.pr_url } : {}) },
+			{
+				branch: record.branch,
+				cwd: record.worktree,
+				...(envelope.pr_url ? { given: envelope.pr_url } : {}),
+				...(record.bound_pr ? { bound: { number: record.bound_pr.number, url: record.bound_pr.url } } : {}),
+			},
 			{
 				...(ownerRepo ? { ownerRepo } : {}),
 				...(this.#options.prExec ? { exec: this.#options.prExec } : {}),

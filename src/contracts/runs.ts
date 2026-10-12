@@ -195,6 +195,8 @@ export const CP_EVENT_KINDS = [
 	"deps_prepared",
 	/** Dispatch held the worktree's HEAD at its hidden checkpoint ref (`{ ref, sha }`), or could not (`{ error }`); t3code adoption 7. */
 	"checkpoint_captured",
+	/** `cp_dispatch pr` (picp-d0p) checked out a bound PR's head branch: `{ number, url, head, head_sha, salvaged? }`. */
+	"pr_bound",
 	/**
 	 * The CI/PR watcher observed a new fact about a held job's PR (cp-e2d): CI
 	 * finished for the branch's current pushed head, or the PR merged or closed.

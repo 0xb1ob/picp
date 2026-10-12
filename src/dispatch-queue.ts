@@ -62,6 +62,7 @@ export function toDispatchRequest(entry: Pick<DispatchQueueEntry, "job_id" | "re
 		...(r.wall_clock_seconds !== undefined ? { wallClockSeconds: r.wall_clock_seconds } : {}),
 		...(r.tool_call_cap !== undefined ? { toolCallCap: r.tool_call_cap } : {}),
 		...(r.skills ? { skills: [...r.skills] } : {}),
+		...(r.pr ? { pr: r.pr } : {}),
 	};
 }
 

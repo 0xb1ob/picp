@@ -20,6 +20,8 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		wall_clock_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
 		tool_call_cap: Type.Optional(Type.Integer({ minimum: 1 })),
 		skills: Type.Optional(Type.Array(SkillNameSchema, { minItems: 1, maxItems: 8, uniqueItems: true })),
+		/** `cp_dispatch pr` (picp-d0p): a queued/armed bound dispatch replays bound. */
+		pr: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
 	},
 	{ additionalProperties: false },
 );

@@ -19,6 +19,7 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths, SCH
 import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake, formatIntake, type IntakeResult } from "../src/intake.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
+import { resolvePr } from "../src/pr-resolve.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { createScratchHome, readFleet, readRunEvents, type ScratchHome } from "./harness/index.ts";
 
@@ -62,7 +63,7 @@ function benchOf(t: { after(fn: () => void | Promise<void>): void }, gh: Command
 	return { home, fleet, intake, reported, calls };
 }
 
-async function addJob(b: Bench, jobId: string): Promise<void> {
+async function addJob(b: Bench, jobId: string, extra: Partial<FleetRecord> = {}): Promise<void> {
 	await b.fleet.add({
 		job_id: jobId,
 		project: "demo",
@@ -81,6 +82,7 @@ async function addJob(b: Bench, jobId: string): Promise<void> {
 		},
 		worktree: join(b.home.path, "wt"),
 		branch: jobId,
+		...extra,
 		dispatched_at: isoTimestamp(),
 		usage: EMPTY_USAGE,
 	});
@@ -203,4 +205,50 @@ test("the CI watch reads the corrected url, not the worker's typo (pi-command-po
 	await watch.tick();
 	assert.deepEqual(seen, [CANONICAL], "the watch's one REST read is keyed on the corrected url");
 	assert.equal(parsePrUrl(seen[0] as string)?.owner, "0xb1ob");
+});
+
+// picp-d0p: a job `cp_dispatch pr` bound to an existing PR resolves it by number.
+const BOUND_JOB = "cp-pr169-fix";
+const BOUND_BRANCH = "cp-b55w";
+const BOUND_URL = "https://github.com/0xb1ob/pi-command-post/pull/169";
+const BOUND = { number: 169, url: BOUND_URL };
+
+/** `gh pr view <n> --json url,number,headRefName`; every call is recorded. */
+function ghView(headRefName: string, calls: string[][]): CommandRunner {
+	return async (command, args) => {
+		calls.push([command, ...args]);
+		return JSON.stringify({ url: BOUND_URL, number: 169, headRefName });
+	};
+}
+
+test("a bound job resolves its PR by number with gh pr view, never gh pr list (picp-d0p)", async () => {
+	const calls: string[][] = [];
+	const result = await resolvePr({ branch: BOUND_BRANCH, cwd: "/tmp", given: BOUND_URL, bound: BOUND }, { ownerRepo: OWNER_REPO, exec: ghView(BOUND_BRANCH, calls) });
+	assert.deepEqual(result, { status: "verified", url: BOUND_URL, number: 169 });
+	assert.deepEqual(calls[0]?.slice(0, 6), ["gh", "pr", "view", "169", "--repo", OWNER_REPO]);
+	assert.ok(!calls.some((call) => call.includes("list")), "the bound path never lists PRs by --head");
+});
+
+test("a bound job refuses a pr_url naming another PR, and a head branch that moved (picp-d0p)", async () => {
+	const calls: string[][] = [];
+	const other = await resolvePr({ branch: BOUND_BRANCH, cwd: "/tmp", given: "https://github.com/0xb1ob/pi-command-post/pull/170", bound: BOUND }, { ownerRepo: OWNER_REPO, exec: ghView(BOUND_BRANCH, calls) });
+	assert.equal(other.status, "refused");
+	assert.match(other.status === "refused" ? other.reason : "", /not the bound PR/);
+	const moved = await resolvePr({ branch: BOUND_BRANCH, cwd: "/tmp", given: BOUND_URL, bound: BOUND }, { ownerRepo: OWNER_REPO, exec: ghView("someone-else", calls) });
+	assert.equal(moved.status, "refused");
+	assert.match(moved.status === "refused" ? moved.reason : "", /"someone-else", not this job's branch "cp-b55w"/);
+	assert.ok(!calls.some((call) => call.includes("list")));
+});
+
+test("a bound job's report_result with the bound pr_url is accepted and held (picp-d0p)", async (t) => {
+	const calls: string[][] = [];
+	const b = benchOf(t, ghView(BOUND_BRANCH, calls));
+	await addJob(b, BOUND_JOB, { branch: BOUND_BRANCH, bound_pr: { number: 169, url: BOUND_URL, base: "main" } });
+	writeEnvelopeFile(b.home.path, BOUND_JOB, { job_id: BOUND_JOB, kind: "ship", status: "done", summary: "Pushed.", branch: BOUND_BRANCH, pr_url: BOUND_URL, head_sha: HEAD });
+	const result = await b.intake.intake(BOUND_JOB);
+	assert.equal(result.accepted, true);
+	assert.equal(result.next, "hold");
+	assert.equal(result.receipts?.find((receipt) => receipt.kind === "pr")?.url, BOUND_URL);
+	assert.equal(result.pr_url_note, undefined, "verified, not unverified or corrected");
+	assert.ok(b.calls.every((call) => call[2] === "view"), "resolved by number");
 });

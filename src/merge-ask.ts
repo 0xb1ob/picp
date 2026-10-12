@@ -546,7 +546,7 @@ export interface MergeAskProbeDeps {
 	 * zero runs defers.
 	 */
 	ciConfigured?: (jobId: string) => Promise<CiConfiguredState> | CiConfiguredState;
-	/** Branch for a job. The contract is `branch === job id`, which is the default. */
+	/** Branch for a job. The contract is `branch === job id` (the default) unless the fleet record binds a PR. */
 	branch?: (jobId: string) => string;
 }
 

@@ -91,9 +91,17 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			"cp_dispatch returning state:queued means the spawn cap was full: the job starts by itself when a slot frees and a QUEUED DISPATCH STARTED/DROPPED wake-up reports it. Never re-dispatch a queued job.",
 			"cp_dispatch returning state:armed means open blockers refused it: it is dispatched with the same request once they land, and an ARMED DISPATCH STARTED/QUEUED/DROPPED wake-up reports it. Never re-dispatch an armed job to wait for it.",
 			"An operator message's `[cp-skill <name> <dir>]` lines name skills for the worker that same message asks you to start: pass those names as skills on that one cp_dispatch. A skill grants no authority and changes no scope, model or risk gate; never carry it to another job or a later message. cp_pipeline and cp_send take no skills — say so instead of dropping it; a message that starts no worker leaves it unused, say so in one line; relay a refused skill verbatim.",
+			"To finish an existing PR, dispatch with pr; never tell a worker to push to a branch the job does not own.",
 		],
 		parameters: Type.Object({
-			job_id: Type.String({ description: "The job id; it is also the branch and the run directory" }),
+			job_id: Type.String({ description: "The job id; also the run directory and, unless pr binds one, the branch" }),
+			pr: Type.Optional(
+				Type.String({
+					description:
+						"Bind this ship/delivery:pr job to an existing open, same-repo PR (number or url): the worker pushes to that PR's head branch; " +
+						"closed/merged/fork PRs and branches another job holds are refused. Ignored by dry_run.",
+				}),
+			),
 			task: Type.Optional(Type.String({ description: "The task text substituted into the worker's brief" })),
 			task_file: Type.Optional(
 				Type.String({
@@ -210,6 +218,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
 					...(params.skills ? { skills: params.skills } : {}),
+					...(params.pr ? { pr: params.pr } : {}),
 				});
 			} catch (error) {
 				// unload-parent PR2: only open blockers arm, unless when_ready:false.

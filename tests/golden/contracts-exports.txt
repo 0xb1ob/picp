@@ -44,9 +44,9 @@ AnsweredOutboxFileSchema	value	6753f4d50b9d4732	d77f8618d750f456
 AnsweredSend	type	23de0cd9f3485dce	-
 AnsweredSendSchema	value	67afda8c43fc54f6	13862f3e18c830be
 ArmedDispatchEntry	type	597e2e5bf8d6060f	-
-ArmedDispatchEntrySchema	value	6cc115eac0cef6bd	35a8e5b13921f7e1
+ArmedDispatchEntrySchema	value	6cc115eac0cef6bd	ffe2e5a0ef649d34
 ArmedDispatchFile	type	69f2df726c30de2b	-
-ArmedDispatchFileSchema	value	50fcc829d1aa9b76	fc3fab263bcc3dab
+ArmedDispatchFileSchema	value	50fcc829d1aa9b76	1501c29370cbc29d
 AwaitingDeclaredType	type	51c8a15e8c9398f2	-
 AwaitingDeclaredTypeSchema	value	23d550656cf58e23	883abdaaaf466dbc
 AwaitingFile	type	f2854410f34ae97c	-
@@ -80,7 +80,7 @@ CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
 CI_WATCH_INTERVAL_MS	value	7167448c735abb91	d55d01d0341ed0ba
 CI_WATCH_KEEP_ANNOUNCED	value	565599989d7b8406	1a6562590ef19d10
 CI_WATCH_MAX_BACKOFF_MS	value	6ecd5f312ec3ee6a	d1d282f04815e254
-CP_EVENT_KINDS	value	73731ba0cc1fcba8	9b192774f36d4f46
+CP_EVENT_KINDS	value	57d90390f0f0006c	f3a188234654cdb4
 Checkpoint	type	d1c462e0c6aa9937	-
 CheckpointDecision	type	1a7bb07fade60614	-
 CheckpointDecisionSchema	value	e4ce39719c2509de	fc45a9911b41c900
@@ -101,7 +101,7 @@ CiWatchJobSchema	value	bdb72f0e135d76ef	898debb712735da7
 Confidence	type	b626807470740910	-
 ContractError	class	e6cbe92ed1ab171c	e200d9d8db2fc02b
 CpEventKind	type	d73f96cfd2161fd9	-
-CpEventKindSchema	value	28b4ba70f9a2809b	cb31c0ebe1954d25
+CpEventKindSchema	value	28b4ba70f9a2809b	7ae4973c3b0ebc62
 CurrentToolSchema	value	8ac5ec202fe7c032	cbcc4590e0baed94
 DEATH_MESSAGE_TYPE	value	0bd493782cc0def1	210bdf086fd1826b
 DECISION_CONTEXT_LINE_MAX_CHARS	value	5a616797cd2968ab	a512db2741cd2069
@@ -146,9 +146,9 @@ DiffReviewConfigSchema	value	653bd2f8a3e802a6	45f7df13f61b505a
 DiffVerdict	type	3d9db624a1d998e8	-
 DiffVerdictSchema	value	6a3f1fe754dba070	6ddeb0af39bd4960
 DispatchQueueEntry	type	dad77fe22fd82e46	-
-DispatchQueueEntrySchema	value	6f0de259b7870358	70f19095f18502c0
+DispatchQueueEntrySchema	value	6f0de259b7870358	2dcd73db506bc780
 DispatchQueueFile	type	0c6a3a55f0e3d4f5	-
-DispatchQueueFileSchema	value	e1beebd2806e727a	cd781d8dd6bc419d
+DispatchQueueFileSchema	value	e1beebd2806e727a	8ee641a5e0887059
 DoctorFinding	type	aa5d891425255f72	-
 DoctorFindingSchema	value	b23a9c4cfbf50684	b2d0cec94426cf21
 DoctorReport	type	83d41069de768ae9	-
@@ -412,7 +412,7 @@ QuestionOutcomeSchema	value	c3199453b6a724ac	43966f50a0eebe2f
 QuestionRecord	type	4668237b72099107	-
 QuestionRecordSchema	value	0ba928388defb908	1d775a6f1359f568
 QueuedDispatchRequest	type	d9245ef57b68b970	-
-QueuedDispatchRequestSchema	value	be4136a0b680d07d	0f7f6062e0192e20
+QueuedDispatchRequestSchema	value	0b3580a563c02fd1	a7fb98fd6fc2aefe
 RECOVERY_ATTEMPT_BOUND	value	b111130ecf9f46e0	6b86b273ff34fce1
 RECOVERY_MESSAGE_TYPE	value	dd36d3e3b011b067	ab7c77b7ea6048e4
 RECOVERY_POLICY	value	db3d391a46df1fc2	8e3b80a11ed3404f

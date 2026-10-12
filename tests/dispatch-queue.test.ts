@@ -71,6 +71,13 @@ test("skill mentions PR2: a queued request keeps skill names, refuses a path-sha
 	assert.deepEqual(toDispatchRequest({ job_id: "cp-sk2", request: { task: "x" } }), { jobId: "cp-sk2", task: "x" }, "no skills, no key");
 });
 
+test("picp-d0p: a queued/armed bound dispatch keeps pr and replays bound", async (t) => {
+	const b = queueBench(t);
+	b.queue.enqueue("cp-pr1", { task: "x", pr: "169" });
+	assert.deepEqual(toDispatchRequest({ job_id: "cp-pr1", request: { task: "x", pr: "169" } }), { jobId: "cp-pr1", task: "x", pr: "169" });
+	assert.throws(() => b.queue.enqueue("cp-bad", { pr: "" }), /refusing to write an invalid/);
+});
+
 test("4B2-T1: spawn_cap and parallelism_full keep the head untouched and stop the drain", async (t) => {
 	for (const error of [new SpawnSafetyError("spawn cap reached (2/2 workers)", { code: "spawn_cap" }), new MandateError("dispatch-parallelism 1 is full", { code: "parallelism_full" })]) {
 		const b = queueBench(t, { dispatch: async () => Promise.reject(error) });
