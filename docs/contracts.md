@@ -6423,6 +6423,39 @@ is `unavailable` with a warning, done answers 500 and composer binds fail with `
 delivers; nothing is truncated — move the file aside (deleting it clears all grouping and loses nothing else). The
 trust boundary is the dashboard control one: a same-user local process can already write `state/`.
 
+### Remote devices (remote dashboard PR 1)
+
+**Status.** Foundation only, **off by default**: no listener, route or CLI uses it yet, so the loopback/tailnet
+listener answers exactly as before. Later PRs add the remote listener, the tunnel and the Devices screen.
+
+**Trust (Decision es-6a78c3).** A Full-control remote device is trusted like your terminal. The dashboard's pairing and
+device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested
+through the operator agent. Use View only for a less-trusted device. `src/viewer/access.ts` encodes the API half:
+`canMint` is false for every remote context and true locally only for a loopback/tailnet **socket peer** (never a
+forwarded header; a private-LAN peer is not eligible); `canControl` is false for View-only; `canRead` keeps each local
+flag's meaning and admits an authenticated remote device of either level. The operator note
+(`OPERATOR_REMOTE_DEVICE_RULE`, `src/operator-note.ts`) tells the main session never to pair devices, run
+`cp-tunnel pair` or edit the device list on a remote-originated request — behavioural defence in depth; tests prove
+the instruction is delivered, not obeyed.
+
+**Store.** `data/devices.json` (0600, dir 0700), one writer: `src/viewer/device-store.ts`. Codes and session secrets
+are 32 random bytes; only domain-separated SHA-256 digests persist. A code is single-use, expires at five minutes, at
+most three are live, its level (full by default) is fixed at issue and a claim naming another level refuses. A device
+name is required (trimmed 1–80 characters, no control characters) and unique case-insensitively among unrevoked
+devices. Codes and sessions are bound to the tunnel origin and its generation; a new quick generation invalidates both.
+The session cookie is `__Host-cp_device`, Secure, HttpOnly, SameSite=Strict, Path=/, no Domain, Max-Age 30 days,
+sliding on each authenticated request (committed before the response). Revoke marks the row, never deletes it.
+Malformed storage refuses every operation and is never reset.
+
+**Loud pairing record.** A successful pairing is three commits: consume the code and store the device and its pairing
+event `pending`; append the secret-free `paired` line (`type: "device"`, `id: null`, `pairing_id`) to
+`state/operator/dashboard.jsonl`; then activate both and only then return the cookie. A failed audit returns no
+cookie and leaves nothing active; the code stays consumed. `recover()` scans the journal in bounded chunks, appends
+the line only when that `pairing_id` is missing and activates: one logical pairing, never a second device or a revived
+code; an unreadable journal refuses rather than risk a duplicate. The event's recipients snapshot every active device
+(full and view) plus the new one. Code issue, refused claims, refused sign-ins and revokes append typed lines with
+fixed reasons — never a code, secret, digest or raw input.
+
 ## Reading the plan
 
 [`src/plan-view.ts`](../src/plan-view.ts) resolves a job id to a viewable research

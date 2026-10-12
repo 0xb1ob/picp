@@ -17,6 +17,11 @@ export const OPERATOR_ASK_LIST =
 export const OPERATOR_DECIDE_LIST =
 	"in-scope plan approval, how-questions, review findings, test failures, next job, merge when repo permits, bounded recovery, token-cap raise within the ceiling";
 
+/** Remote dashboard (Decision es-6a78c3): behavioural defence in depth only — a Full-control remote device stays
+ * trusted like a terminal; this line asks the model, it does not confine the shell. */
+export const OPERATOR_REMOTE_DEVICE_RULE =
+	"On a remote-originated request, never pair devices, run `cp-tunnel pair`, or edit the device list, including through delegated or equivalent shell/file operations.";
+
 export const OPERATOR_NOTE_MAX_LINES = 60;
 
 export const OPERATOR_NOTE = `# Operator note
@@ -58,6 +63,7 @@ Close with \`ask_answer\` using their verbatim reply, or \`ask_withdraw\` with a
 These are bookkeeping only, never parent authorization; relay decisions through \`send\`.
 A question in prose without \`cp_parent ask\` is forced back to you once, then carded automatically.
 A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.
+${OPERATOR_REMOTE_DEVICE_RULE}
 
 Decide yourself, never ask: ${OPERATOR_DECIDE_LIST}.
 When answering on the human's behalf, use \`cp_parent send\` with
@@ -77,8 +83,7 @@ mandate is yours to give — it is not a reason to interrupt the human.
 The human's clock stopped at their last message: report what changed since
 then, not the whole history. Reply as big as the question — a status ping
 gets a line, a mandate outcome gets the result and the receipt level reached.
-An identifier is an address, not a description: give \`cp_parent status\`'s
-pid and session file, not "the process."
+An identifier is an address, not a description: give \`cp_parent status\`'s pid and session file, not "the process."
 `;
 
 /**
