@@ -120,6 +120,32 @@ test("a merged job's CI fact follows its recorded CI event once ci-watch has pru
  assert.equal(jobView(state,"cp-stale")?.job.ci,null,"a green run on another head is not this head's CI");
 });
 
+test("forge PR 4: a GitLab receipt links its MR with merged status, merge sha and head; credential-bearing and non-HTTPS urls never link",t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
+ const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};
+ const at="2026-09-26T12:00:00Z";const head="c".repeat(40);const sha="e".repeat(40);
+ const mr="https://gitlab.com/group/sub/repo/-/merge_requests/7";const open="https://git.example.test/code/team/app/-/merge_requests/3";
+ const ids=["cp-gl","cp-open","cp-cred","cp-http","cp-gh"];
+ put(".pi-command-post/jobs.json",{jobs:ids.map(id=>({id,title:id,status:"closed",closed_at:at,labels:["project:demo","kind:ship"]}))});
+ const receipt=(url:string)=>[{kind:"pr",status:"open",title:"MR",url}];
+ put(LAYOUT.fleetFile,{jobs:[
+  {job_id:"cp-gl",project:"demo",kind:"ship",phase:"done",dispatched_at:at,closed_at:at,receipts:receipt(mr)},
+  {job_id:"cp-open",project:"demo",kind:"ship",phase:"held",dispatched_at:at,receipts:receipt(open)},
+  {job_id:"cp-cred",project:"demo",kind:"ship",phase:"held",dispatched_at:at,receipts:receipt("https://user:token@gitlab.com/g/r/-/merge_requests/1")},
+  {job_id:"cp-http",project:"demo",kind:"ship",phase:"held",dispatched_at:at,receipts:receipt("http://gitlab.com/g/r/-/merge_requests/1")},
+  {job_id:"cp-gh",project:"demo",kind:"ship",phase:"held",dispatched_at:at,receipts:receipt("https://github.com/acme/repo/pull/9")}]});
+ put(join(LAYOUT.runs,"cp-gl/envelope.json"),{envelope:{head_sha:head}});
+ put(join(LAYOUT.runs,"cp-gl/merge.json"),{job_id:"cp-gl",pr_url:mr,merge_commit_sha:sha,head_sha:head,merged_at:at,forge:{provider:"gitlab"}});
+ put(join(LAYOUT.runs,"cp-cred/merge.json"),{job_id:"cp-cred",pr_url:"https://user:token@gitlab.com/g/r/-/merge_requests/1",merge_commit_sha:sha,merged_at:at});
+ const jobs=jobsView(state,Date.parse(at)).jobs;const job=(id:string)=>jobs.find(j=>j.id===id);
+ assert.deepEqual([job("cp-gl")?.pr_url,job("cp-gl")?.pr_status,job("cp-gl")?.merge_sha,job("cp-gl")?.head],[mr,"merged",sha,head]);
+ assert.equal(jobView(state,"cp-gl",Date.parse(at))?.job.pr_url,mr);
+ assert.deepEqual([job("cp-open")?.pr_url,job("cp-open")?.pr_status],[open,"open"],"a custom-host MR link shows before it merges");
+ for(const id of ["cp-cred","cp-http"]) assert.deepEqual([job(id)?.pr_url,job(id)?.pr_status,job(id)?.merge_sha],[null,null,null],id);
+ assert.equal(job("cp-gh")?.pr_url,"https://github.com/acme/repo/pull/9","GitHub links are unchanged");
+ assert.doesNotMatch(JSON.stringify(jobs),/token@/);
+});
+
 test("a fleet record's operator-named skills reach the job as names; a job without them has no skills key",t=>{
  const home=createScratchHome();t.after(()=>home.cleanup());const state={home:home.path,stateDir:join(home.path, LAYOUT.state)};
  const put=(file:string,value:unknown)=>{const path=join(home.path,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value));};

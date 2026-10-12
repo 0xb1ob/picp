@@ -12,7 +12,8 @@ import { nextCronSlot, operatorStop, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, 
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "./api-types.ts";
 import { groupScheduleRuns, scheduleLands, type RunJobFacts } from "./schedule-run-groups.ts";
 import { listBoards, type BoardWarn } from "./boards.ts";
-import { PR_URL, readMandates } from "./fleet-view.ts";
+import { readMandates } from "./fleet-view.ts";
+import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { objectList, strings } from "./overview-read.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 
@@ -75,7 +76,7 @@ function runNowClearance(grants: Json[], schedule: Schedule): ScheduleItem["run_
 function prUrl(state: ViewerState, id: string, envelope: Json | undefined): string | null {
 	if (!isSafeId(id)) return null;
 	const receipt = str(readObject(join(state.stateDir, "runs", id, "merge.json"))?.pr_url);
-	return [receipt, str(envelope?.pr_url)].find((url): url is string => !!url && PR_URL.test(url)) ?? null;
+	return [receipt, str(envelope?.pr_url)].find((url): url is string => !!url && isSafeChangeRequestUrl(url)) ?? null;
 }
 
 /** Mirrors `ANSWER_MAX_BYTES` (src/contracts); tests/viewer-schedules.test.ts pins it. */

@@ -179,6 +179,21 @@ test("schedules view: cron and watch schedules with next fire, mandate state and
 	assert.deepEqual(w?.history, []);
 });
 
+test("forge PR 4: a schedule run links a GitLab MR on a custom host and nested namespace; an unsafe url never links", (t) => {
+	const state = fixture(t, file(cron));
+	const envelope = (pr_url: string) => writeFileSync(join(state.stateDir, "runs", "cp-fire1", "envelope.json"), JSON.stringify({ received_at: "2026-09-14T04:05:00Z", envelope: { pr_url, summary: "done" } }));
+	const link = () => schedulesView(state, () => {}, NOW).schedules[0]?.history.find((j) => j.id === "cp-fire1")?.pr_url;
+	const mr = "https://git.example.test/code/group/sub/repo/-/merge_requests/4";
+	envelope(mr);
+	assert.equal(link(), mr);
+	for (const unsafe of ["https://user:token@git.example.test/g/r/-/merge_requests/4", "http://gitlab.com/g/r/-/merge_requests/4", "https://gitlab.com/g/r/-/merge_requests/0"]) {
+		envelope(unsafe);
+		assert.equal(link(), null, unsafe);
+	}
+	writeFileSync(join(state.stateDir, "runs", "cp-fire1", "merge.json"), JSON.stringify({ job_id: "cp-fire1", pr_url: mr }));
+	assert.equal(link(), mr, "the merge receipt's MR link wins over an unsafe envelope url");
+});
+
 test("a manual skill schedule: schema accepts it, the view has no next fire, the page says it fires only on Run now", async (t) => {
 	const manual = {
 		id: "sch-cccccc", name: "self-review", project: "demo", mandate_id: "md-live1",

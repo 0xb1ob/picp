@@ -160,10 +160,10 @@ Gate verdicts branch on **`cause`**, never reason prose. One revise per artifact
 
 ## Teardown
 
-`cp_teardown <job-id>` when delivery has landed: ship needs a clean tree and pushed commits (or a merged, head-deleted branch); research needs a clean tree, no local commits. It closes the worker with an observed close, returns the lease, marks the job `done`. A refused teardown is the gate working — fix the cause. `delivery:pr` jobs tear down only after the hold ends, not when the envelope first arrives.
+`cp_teardown <job-id>` when delivery has landed: ship needs a clean tree and pushed commits (or a merged, head-deleted branch, or HEAD's content proven in the base by git: `landed_by_git`, no merge claimed; `landing_unverified` keeps the lease); research needs a clean tree, no local commits. It closes the worker with an observed close, returns the lease, marks the job `done`. A refused teardown is the gate working — fix the cause. `delivery:pr` jobs tear down only after the hold ends, not when the envelope first arrives.
 
-`cp_merged <job-id>` after a merge: reads `gh pr view`, writes a merge
-receipt only if GitHub says `MERGED`. Merge, then tear down, then delete the head
+`cp_merged <job-id>` after a merge: reads the forge (`gh pr view`, or the GitLab MR), writes a merge
+receipt only if the forge says merged; with no forge reachable, `cp_teardown` then `cp_job close` with the git-proof reason. Merge, then tear down, then delete the head
 — in that order, so the gate can read `origin/<branch>` before it's gone.
 
 ## Integration
