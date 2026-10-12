@@ -13,6 +13,8 @@ import type { PushFetch, PushRequestInit } from "../src/push/webpush.ts";
 import type { ViewerState } from "../src/viewer/sessions.ts";
 import { decisions } from "../src/viewer/overview-decisions.ts";
 import { pushDeliveriesFile, subscriptionFile, subscriptionId } from "../src/viewer/push-files.ts";
+import { devicesFile } from "../src/viewer/device-files.ts";
+import { DeviceStore } from "../src/viewer/device-store.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { type TestDevice, testDevice } from "./harness/push.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -235,6 +237,51 @@ test("with no subscribed device a new item is skipped, so a later subscriber get
 	assert.equal(b.calls.length, 0);
 	const record = b.ledger()?.items.find((item) => item.id === raised.id);
 	assert.deepEqual([record?.status, record?.last_error], ["skipped", "no subscribed device"]);
+});
+
+test("remote dashboard: before each ask send or retry an owned subscription's device is rechecked — revoked, expired or an unreadable device store get no new push; legacy ones are unaffected", async (t) => {
+	const b = bench(t);
+	const at = new Date("2026-09-27T00:00:00Z");
+	const store = new DeviceStore(b.dataDir, b.stateDir, { now: () => at });
+	const pair = (name: string) => {
+		const issued = store.issueCode({ origin: "https://cp.example.test", generation: 1, route: "cli-pair" });
+		assert.ok(issued.ok);
+		const claimed = store.claim({ origin: "https://cp.example.test", generation: 1, code: issued.code, name });
+		assert.ok(claimed.ok);
+		return claimed.device.id;
+	};
+	const own = (endpoint: string, device_id: string, origin = "https://cp.example.test") => {
+		b.subscribe(endpoint);
+		const file = subscriptionFile(b.dataDir, subscriptionId(endpoint));
+		writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), device_id, origin }));
+	};
+	const phone = pair("Phone"), tablet = pair("Tablet");
+	b.subscribe(FCM);
+	own(MOZ, phone);
+	own("https://fcm.googleapis.com/fcm/send/tablet", tablet);
+	own("https://fcm.googleapis.com/fcm/send/old-origin", tablet, "https://old.trycloudflare.com");
+	await b.sweep();
+	const urls = () => b.calls.splice(0).map((call) => call.url.split("/").pop()).sort();
+
+	b.respondWith(() => 500);
+	b.asks.open({ ...ASK, question: "First?" });
+	await b.sweep();
+	assert.deepEqual(urls(), ["device-a", "device-b", "tablet"], "active devices on their own origin, plus the legacy one");
+	assert.ok(store.revoke(phone).ok);
+	b.respondWith(() => 201);
+	b.advance(30);
+	await b.sweep();
+	assert.deepEqual(urls(), ["device-a", "tablet"], "the retry skips the device revoked since the first attempt");
+
+	b.asks.open({ ...ASK, question: "Second?" });
+	b.advance(31 * 24 * 3600);
+	await b.sweep();
+	assert.deepEqual(urls(), ["device-a"], "an expired device gets no new push");
+
+	writeFileSync(devicesFile(b.dataDir), "{ not json");
+	b.asks.open({ ...ASK, question: "Third?" });
+	await b.sweep();
+	assert.deepEqual(urls(), ["device-a"], "an unreadable device store fails closed for owned subscriptions only");
 });
 
 test("a corrupt asks file is reported and changes nothing", async (t) => {

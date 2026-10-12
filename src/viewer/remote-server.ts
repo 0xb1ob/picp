@@ -9,10 +9,10 @@
  * commits before the answer. Only then is a frozen remote context bound to the request (access.ts) and the shared
  * dispatcher runs — so an unpaired caller reaches no route, asset, stream timer or 404 of the dispatcher.
  *
- * Writes: View-only refuses 403 before any handler (device revoke aside, which devices-api.ts refuses itself). A
- * Full-control device reaches the ordinary write routes, whose shared chain (`guarded`, control-api.ts) pins the tunnel
- * origin and stamps every operator message or edit with the device (PR 1c provenance); push subscription writes stay
- * 403 until subscriptions are owned per device.
+ * Writes: View-only refuses 403 before any handler (device revoke aside, which devices-api.ts refuses itself, and its
+ * own push subscription, a browser preference). A Full-control device reaches the ordinary write routes, whose shared
+ * chain (`guarded`, control-api.ts) pins the tunnel origin and stamps every operator message or edit with the device
+ * (PR 1c provenance); push subscriptions are owned per device (PR 1d, push-api.ts).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { bindAccess, remoteAccess } from "./access.ts";
@@ -99,16 +99,10 @@ export function remoteHandle(req: IncomingMessage, res: ServerResponse, options:
 	});
 	res.setHeader("set-cookie", sessionCookie(cookie));
 	const path = (req.url ?? "/").split("?")[0];
-	if (req.method !== "GET" && req.method !== "HEAD" && path !== DEVICES_REVOKE_PATH && path !== PAIR_CREATE_PATH) {
-		if (access.level === "view") {
-			sendJson(res, 403, { error: "View-only device: dashboard writes are refused" });
-			return;
-		}
-		// Subscription ownership per device is a later slice: until then no remote browser stores or removes one.
-		if (path === PUSH_SUBSCRIPTION_PATH) {
-			sendJson(res, 403, { error: "remote push subscriptions are not enabled yet" });
-			return;
-		}
+	// Device revoke refuses View-only itself; the push subscription is this browser's own preference (push-api.ts owns it per device).
+	if (req.method !== "GET" && req.method !== "HEAD" && path !== DEVICES_REVOKE_PATH && path !== PAIR_CREATE_PATH && path !== PUSH_SUBSCRIPTION_PATH && access.level === "view") {
+		sendJson(res, 403, { error: "View-only device: dashboard writes are refused" });
+		return;
 	}
 	dispatch(req, res, options, warn);
 }

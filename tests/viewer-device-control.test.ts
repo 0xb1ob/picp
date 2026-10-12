@@ -5,14 +5,14 @@
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { LAYOUT } from "../src/contracts.ts";
 import { controlJournalFile } from "../src/viewer/control-files.ts";
-import { DEVICE_FRAME_MAX, deviceControlDir, deviceControlRecordFile, deviceControlRequest, deviceControlSocket, startDeviceControl } from "../src/viewer/device-control.ts";
+import { DEVICE_FRAME_MAX, deviceControlDir, deviceControlLockFile, deviceControlRecordFile, deviceControlRequest, deviceControlSocket, startDeviceControl } from "../src/viewer/device-control.ts";
 import { DeviceStore } from "../src/viewer/device-store.ts";
 import type { DeviceBinding } from "../src/viewer/devices-api.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -103,6 +103,10 @@ test("frames: a bad token closes unanswered; oversized, non-JSON and wrong-versi
 	const reply = async (data: string) => JSON.parse((await raw(socket, data)).trim()) as { ok: boolean; status: number };
 	assert.equal((await reply("x".repeat(DEVICE_FRAME_MAX + 1))).status, 413, "no newline yet, already too big");
 	assert.equal((await reply(`${"y".repeat(DEVICE_FRAME_MAX + 1)}\n`)).status, 413);
+	const wide = "é".repeat(DEVICE_FRAME_MAX / 2 + 1);
+	assert.ok(wide.length < DEVICE_FRAME_MAX, "fewer characters than the cap, more bytes");
+	assert.equal((await reply(`${wide}\n`)).status, 413, "the cap counts bytes, not characters");
+	assert.equal((await reply(wide)).status, 413, "also before the newline");
 	assert.equal((await reply("not json\n")).status, 400);
 	assert.equal((await reply(`${JSON.stringify({ v: 2, op: "status" })}\n`)).status, 502);
 });
@@ -129,6 +133,36 @@ test("stale owners: a live owner refuses a second; a socket nothing answers is r
 	const loose = await deviceControlRequest(env.stateDir, "status");
 	assert.equal(loose.ok, false);
 	assert.match((loose as { error: string }).error, /is not an owner-only file of this user/);
+});
+
+test("stale takeover is locked: a held control.lock refuses (live holder or a crashed one, named), and the winner leaves no lock behind", async (t) => {
+	const env = scratch(t);
+	mkdirSync(deviceControlDir(env.stateDir), { recursive: true, mode: 0o700 });
+	writeFileSync(deviceControlSocket(env.stateDir), "left by a crash");
+	const lock = deviceControlLockFile(env.stateDir);
+	writeFileSync(lock, `${process.pid}\n`);
+	const live = await startDeviceControl(env.stateDir, env.routes, () => {});
+	assert.deepEqual(live, { state: "refused", reason: `pid ${process.pid} is replacing a stale ${deviceControlSocket(env.stateDir)}; another viewer is starting` });
+	writeFileSync(lock, "999999999\n");
+	const crashed = await startDeviceControl(env.stateDir, env.routes, () => {});
+	assert.deepEqual(crashed, { state: "refused", reason: `${lock} is held by no running viewer (pid 999999999): if no viewer is starting, remove it and start again` });
+	assert.equal(readFileSync(deviceControlSocket(env.stateDir), "utf8"), "left by a crash", "a refused starter touches nothing");
+	rmSync(lock);
+	await own(t, env);
+	assert.throws(() => statSync(lock), /ENOENT/, "the lock is released once the new owner listens");
+});
+
+test("across processes: five viewers racing to replace one stale socket — exactly one owns it", async (t) => {
+	const env = scratch(t);
+	mkdirSync(deviceControlDir(env.stateDir), { recursive: true, mode: 0o700 });
+	writeFileSync(deviceControlSocket(env.stateDir), "left by a crash");
+	const module = pathToFileURL(resolve("src/viewer/device-control.ts")).href;
+	const racers = Array.from({ length: 5 }, () => child(OWNER_CHILD, { CP_DC_MODULE: module, CP_DC_STATE: env.stateDir }));
+	t.after(async () => { await Promise.all(racers.map((racer) => racer.close())); });
+	const results = await Promise.all(racers.map((racer) => racer.first));
+	assert.equal(results.filter((state) => state === "listening").length, 1, results.join(", "));
+	const status = ok(await deviceControlRequest(env.stateDir, "status"));
+	assert.equal(status.pid, racers[results.indexOf("listening")]!.proc.pid);
 });
 
 const OWNER_CHILD = `

@@ -9,9 +9,11 @@ import { inflateSync } from "node:zlib";
 import { initPush } from "../src/push/keys.ts";
 import { APP_COLORS } from "../src/viewer/app-manifest.ts";
 import { APP_CSP } from "../src/viewer/app-page.ts";
-import { pushDataDir, subscriptionsDir } from "../src/viewer/push-files.ts";
+import { listSubscriptions, pushDataDir, subscriptionFile, subscriptionId, subscriptionsDir } from "../src/viewer/push-files.ts";
+import { bindOrigin } from "../src/viewer/push-api.ts";
 import { createViewer } from "../src/viewer/server.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
+import { REMOTE_ORIGIN, remoteRig } from "./harness/remote.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
 const ORIGIN = "https://cp.example.com";
@@ -130,6 +132,39 @@ test("the loopback bind's own origin may subscribe; a foreign Host is still refu
 	assert.equal((await call("/api/push/subscription", post(device(), { "content-type": "application/json", origin: `http://127.0.0.1:${options.port}` }))).status, 201);
 	assert.equal((await call("/api/push/subscription", { ...post(device()), headers: { ...json, host: "cp.example.com" } })).status, 421);
 	assert.equal((await call("/healthz", { headers: { host: "cp.example.com" } })).status, 421);
+});
+
+test("remote subscriptions (PR 1d): either level stores its own from exactly its tunnel origin; nobody overwrites or removes another device's, or a legacy local one", async (t) => {
+	const env = await remoteRig(t, { localDevices: true });
+	initPush({ dataDir: env.dataDir, origin: ORIGIN });
+	const full = env.pair("Laptop"), view = env.pair("Phone", "view");
+	const remoteJson = (cookie: string, extra: Record<string, string> = {}) => ({ cookie, origin: REMOTE_ORIGIN, "content-type": "application/json", ...extra });
+	const sub = (cookie: string, method: "POST" | "DELETE", body: unknown, extra: Record<string, string> = {}) => env.r("/api/push/subscription", { method, headers: remoteJson(cookie, extra), body: JSON.stringify(body) });
+	const stored = (endpoint: string) => JSON.parse(readFileSync(subscriptionFile(env.dataDir, subscriptionId(endpoint)), "utf8")) as Record<string, unknown>;
+
+	const phone = device();
+	assert.equal((await sub(view.cookie, "POST", phone, { origin: ORIGIN })).status, 403, "the push config origin is not the tunnel's");
+	assert.equal((await sub(view.cookie, "POST", { ...phone, device_id: full.id, origin: "https://evil.example" })).status, 201, "View-only may store its own subscription");
+	assert.deepEqual([stored(phone.endpoint).device_id, stored(phone.endpoint).origin], [view.id, REMOTE_ORIGIN], "ownership is the session's, never the body's");
+	assert.equal((await sub(view.cookie, "POST", phone)).status, 201, "its own: refreshed");
+	const before = readFileSync(subscriptionFile(env.dataDir, subscriptionId(phone.endpoint)), "utf8");
+	for (const method of ["POST", "DELETE"] as const) {
+		const other = await sub(full.cookie, method, phone);
+		assert.deepEqual([other.status, other.body.error], [403, "this subscription belongs to another device"], `another device: ${method}`);
+		const local = await env.l("/api/push/subscription", { method, headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify(phone) });
+		assert.deepEqual([local.status, local.body.error], [403, "this subscription belongs to another device"], `the local listener: ${method}`);
+	}
+	assert.equal(readFileSync(subscriptionFile(env.dataDir, subscriptionId(phone.endpoint)), "utf8"), before, "untouched");
+
+	const legacy = device();
+	assert.equal((await env.l("/api/push/subscription", { method: "POST", headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify(legacy) })).status, 201);
+	assert.equal(stored(legacy.endpoint).device_id, undefined, "a local subscription stays unowned, its bytes as before");
+	for (const method of ["POST", "DELETE"] as const) assert.equal((await sub(full.cookie, method, legacy)).status, 403, `a remote device never takes a legacy one: ${method}`);
+	assert.deepEqual(listSubscriptions(env.dataDir).items.map((item) => item.device_id ?? "legacy").sort(), [view.id, "legacy"].sort());
+
+	assert.deepEqual((await sub(view.cookie, "DELETE", { endpoint: phone.endpoint })).body, { unsubscribed: true }, "its own: removed");
+	assert.deepEqual((await sub(view.cookie, "DELETE", { endpoint: phone.endpoint })).body, { unsubscribed: false });
+	assert.equal((await env.l("/api/push/subscription", { method: "DELETE", headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify({ endpoint: legacy.endpoint }) })).status, 200, "local keeps removing its own");
 });
 
 test("service worker, manifest and icons: same-origin, standalone, opening Awaiting you, in the existing palette", async (t) => {

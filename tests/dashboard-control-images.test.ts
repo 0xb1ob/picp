@@ -203,6 +203,30 @@ test("send_files: text-only capability, bounded UTF-8 inline with paths, metadat
  const invalid = await controlRequest(record, "send_files", {kind: "message", text: "", files: [ids[0]]}); assert.equal(invalid.ok ? null : invalid.status, 400); assert.equal(state.injected.length, 1);
 });
 
+test("remote attachments: send_images and send_files from a paired device carry its device line right above the marker", async (t) => {
+	const { stateDir, uploadRoot } = scratch(t);
+	const { state, ports } = fakePorts();
+	const record = await listening(t, stateDir, ports, { uploadRoot });
+	const phone = { device_id: "dev-0123456789abcdef", name: "Phone" };
+	const deviceLine = `[cp-remote — through a paired remote device, not this terminal: sent by ${phone.device_id} "Phone"]`;
+	const [image] = stored(uploadRoot, 1);
+	assert.ok((await controlRequest(record, "send_images", { kind: "message", text: "look", images: [image], remote: phone })).ok);
+	const file = newUploadId("md", new Date());
+	writeUpload(uploadRoot, file, Buffer.from("notes\n"));
+	assert.ok((await controlRequest(record, "send_files", { kind: "message", text: "read", files: [file], remote: phone })).ok);
+	for (const [index, kind] of [[0, "images"], [1, "files"]] as const) {
+		const lines = state.injected[index]!.text.split("\n");
+		assert.equal(lines.at(-2), deviceLine, `${kind}: the device line sits above the marker`);
+		assert.match(lines.at(-1)!, new RegExp(`^\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard; ${kind}=[^;]+; remote\\]$`));
+		const parsed = parseDashboardText(state.injected[index]!.text);
+		assert.deepEqual(parsed?.remote, { sender: phone, editors: [] }, kind);
+		assert.deepEqual(parsed?.[kind], [index === 0 ? image : file], `${kind}: the attachment ids still parse`);
+		assert.equal(parsed?.body.includes("cp-remote"), false, `${kind}: never part of the body`);
+	}
+	assert.equal(state.injected[0]!.images?.length, 1, "the image still goes inline");
+	assert.deepEqual(journal(stateDir).filter((row) => row.type === "request").map((row) => row.remote), [phone, phone]);
+});
+
 test("cp-y43c review 1: while a queued image message is prepared for its handoff, an edit or cancel is 503 being handed over (not already sent); after the claim it is 409 sent", async (t) => {
 	const { stateDir, uploadRoot } = scratch(t);
 	let release: (() => void) | undefined;

@@ -45,6 +45,8 @@ test("shell search filters navigation and recorded in-flight jobs with keyboard 
  Object.defineProperty(globalThis,"fetch",{configurable:true,value:(url:string,init:{signal:AbortSignal}) => {
   // The shell's version badge reads /api/version on mount (cp-kz20); it is not search's request.
   if (url === "/api/version") return new Promise<Response>(() => {});
+  // So do the shell's pairing notices (remote dashboard PR 1d); a local viewer without device routes answers 404.
+  if (url === "/api/devices/notices") return Promise.resolve(new Response("{}", {status:404}));
   assert.equal(url,"/api/overview");
   return new Promise<Response>(resolve => requests.push({signal:init.signal,resolve}));
  }});

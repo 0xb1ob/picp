@@ -127,6 +127,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     mandates/<id>.json              operator-issued bounded authority
     escalations.json                structured ask-the-human records (autonomy-programme-cur.2.3)
     push-deliveries.json            Web Push delivery ledger, once per id (Pier 1.1)
+    device-notification-deliveries.json  pairing-alert delivery ledger, per event and recipient (remote dashboard PR 1d)
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
     operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
@@ -6480,8 +6481,8 @@ pairing events, live-code count, the trust statement; local only to a loopback/t
 token or Origin; the link carries the code in its fragment) and `POST /api/devices/revoke` `{id}` (`canRevoke`).
 Writes need the per-process management token, an exact Origin (remote: the tunnel origin; local: the control
 route's origins), same-origin Sec-Fetch-Site, JSON and at most 1 KiB. Every other remote write refuses 403 at the gate
-for View-only; a Full-control device reaches the ordinary write routes (below), and push subscription writes stay 403
-for both levels until subscriptions are owned per device.
+for View-only; a Full-control device reaches the ordinary write routes (below). Push subscriptions are owned per
+device (PR 1d, below), so either level may store and remove its own.
 
 **Remote controls and provenance (PR 1c).** The shared write chain (`guarded`, `src/viewer/control-api.ts`) keeps
 the local listener's `--require-tailnet` rule exactly and, for a remote context, demands `canControl` and an `Origin`
@@ -6510,7 +6511,34 @@ socket, 32-byte token, started_at) in a 0700 directory. Frames are newline JSON 
 viewer owns the socket (a starter finding a live socket refuses; a socket nothing answers is stale and replaced, only
 the inode it probed), and claims from any number of processes go through that one owner. The client
 (`deviceControlRequest`) refuses a record that is not an owner-only regular file of this user or whose pid is gone.
-Nothing starts it yet: `cp-tunnel` wiring is the tunnel PR.
+Nothing starts it yet: `cp-tunnel` wiring is the tunnel PR. A stale-socket takeover runs under
+`state/devices/control.lock` (O_EXCL, holder pid, re-probing the inode and answer under the lock), so concurrent
+starters replace a stale socket once; a lock held by a live pid refuses "another viewer is starting", one left by a
+dead pid refuses by name for a human to remove. Frame limits count bytes, not characters.
+
+**Subscription ownership and pairing alerts (PR 1d).** A remote `POST`/`DELETE /api/push/subscription` needs an Origin
+equal to the device's tunnel origin (not the push config origin); the record (`data/push/subscriptions/<id>.json`)
+gains `device_id` and `origin` taken from the gate's context, never the body. A device overwrites or removes only its
+own record; another device's, or a legacy unowned (local/tailnet) one, refuses 403 untouched, and the local listener
+likewise cannot overwrite or remove a device-owned one. Both fields or neither: a half-owned record reads as invalid.
+Before each ask push and retry the sweep re-reads the device store: an owned subscription whose device is revoked,
+expired or on another origin (or any owned one while the store is unreadable) gets no newly started push; legacy
+unowned subscriptions are unaffected. Pairing alerts are not asks: `src/push/device-notifications.ts` reads committed
+pairing events and device-owned subscriptions and is the sole writer of `state/device-notification-deliveries.json`
+(schema `src/viewer/device-notification-files.ts`), one record per event and recipient. Each recipient is re-checked
+just before every attempt (revoked/expired settle with no new send; a send already in flight cannot be recalled);
+push not set up is `unavailable` and no usable subscription `unsubscribed`, both open until the session ends, so a
+browser enabling push later still gets its alert (no baseline). Retries reuse the ask sweep's classification and
+30 s doubling backoff, five attempts; gone marks the subscription unusable in this ledger and never deletes it. The
+payload is `{type: "pairing", id, name, level, at}`; the service worker shows "New device paired: <name>" tagged
+`pairing-<id>` (a resend after a crash replaces, not stacks) and opens `/#settings`; the ask payload is unchanged.
+Exactly-once network delivery is not guaranteed — the durable event and its dashboard notice are. Sweeps never
+overlap and hold no lock across a network call. `GET /api/devices/notices` (gated like `/api/devices`; a remote
+device sees only events naming it) returns the last 20 committed events, newest first, with each recipient's state
+(`pending` before the sender records it, `unknown` with `delivery_error` when the ledger is unreadable). The shell
+shows unread ones above every screen (polled every 2 s while visible, on each live refresh and on reconnect); Dismiss
+is a per-browser localStorage cursor, never a server acknowledgement. The daemon role, its lease and the 5 s loop are
+PR 2.
 
 ## Reading the plan
 

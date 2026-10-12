@@ -53,7 +53,7 @@ import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
 import { readVersion } from "./version-view.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
-import { DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
+import { DEVICE_NOTICES_PATH, DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDeviceNotices, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
 
 export interface ViewerOptions extends ViewerState {
 	app?: ViewerApp;
@@ -212,6 +212,11 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 	}
 	if (devices && url.pathname === DEVICES_PATH) {
 		const out = handleDevicesList(req, devices);
+		sendJson(res, out.status, out.body);
+		return;
+	}
+	if (devices && url.pathname === DEVICE_NOTICES_PATH) {
+		const out = handleDeviceNotices(req, devices, options.stateDir);
 		sendJson(res, out.status, out.body);
 		return;
 	}

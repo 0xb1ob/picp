@@ -8,9 +8,13 @@
  * same-origin `Sec-Fetch-Site` when sent, JSON content (which forces a CORS preflight nothing answers), a
  * body of at most 4 KiB, a well-formed subscription on the push-service allowlist, and room for the device.
  * The Host guard in server.ts is unchanged and runs first: the HTTPS proxy sends the bind address as Host.
+ * Remote dashboard (PR 1d): through the remote gate, either level may write its own subscription (a browser preference,
+ * not an operational control), from exactly its tunnel origin; the record is owned by that device and origin, and an
+ * endpoint stored by another device — or by the local listener — is refused 403, never overwritten or removed.
  */
 
 import type { IncomingMessage } from "node:http";
+import { accessOf } from "./access.ts";
 import type { PushStatusResponse } from "./api-types.ts";
 import { listSubscriptions, parseSubscription, pushDataDir, pushServiceAllowed, readDeliverySummary, readPushConfig } from "./push-files.ts";
 import { deleteSubscription, saveSubscription } from "./push-subscriptions.ts";
@@ -98,7 +102,10 @@ export async function handlePushSubscription(req: IncomingMessage, options: Push
 	const dataDir = pushDataDir(options.stateDir);
 	const config = readPushConfig(dataDir);
 	if (!config) return refuse(409, "push is not set up on this home: npm run push:init -- --origin https://<dashboard host>");
-	if (!allowedOrigins(options, config.origin).includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${config.origin}`);
+	// Remote dashboard: a paired device writes from exactly its tunnel origin and owns what it stores (server-derived, never the body's).
+	const access = accessOf(req);
+	const owner = access.kind === "remote" ? { device_id: access.device_id, origin: access.origin } : undefined;
+	if (owner ? req.headers.origin !== owner.origin : !allowedOrigins(options, config.origin).includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${owner?.origin ?? config.origin}`);
 	const site = req.headers["sec-fetch-site"];
 	if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
 	if (!/^application\/json\s*(?:;|$)/i.test(req.headers["content-type"] ?? "")) return refuse(415, "Content-Type must be application/json");
@@ -114,11 +121,14 @@ export async function handlePushSubscription(req: IncomingMessage, options: Push
 	if (!parsed.ok) return refuse(400, parsed.reason);
 	if (!pushServiceAllowed(parsed.value.endpoint)) return refuse(400, "endpoint is not on a known push service");
 	try {
-		if (method === "DELETE") return { status: 200, body: { unsubscribed: deleteSubscription(dataDir, parsed.value.endpoint) } };
+		if (method === "DELETE") {
+			const removed = deleteSubscription(dataDir, parsed.value.endpoint, owner);
+			return removed === "owned" ? refuse(403, "this subscription belongs to another device") : { status: 200, body: { unsubscribed: removed } };
+		}
 		const keys = parsed.value.keys;
 		if (!keys) return refuse(400, "keys are missing");
-		const saved = saveSubscription(dataDir, { endpoint: parsed.value.endpoint, keys }, now);
-		if (!saved.ok) return refuse(409, `already ${saved.devices} subscribed devices; turn one off first`);
+		const saved = saveSubscription(dataDir, { endpoint: parsed.value.endpoint, keys }, now, owner);
+		if (!saved.ok) return saved.owned ? refuse(403, "this subscription belongs to another device") : refuse(409, `already ${saved.devices} subscribed devices; turn one off first`);
 		return { status: 201, body: { subscribed: true, devices: saved.devices } };
 	} catch (error) {
 		(options.log ?? ((line) => process.stderr.write(line)))(`viewer: push subscription ${method === "POST" ? "save" : "removal"} failed: ${(error as NodeJS.ErrnoException).code ?? "error"}\n`);

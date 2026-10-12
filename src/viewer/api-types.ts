@@ -435,6 +435,18 @@ export interface PushStatusResponse {
  generated_at: string; configured: boolean; origin: string | null; public_key: string | null;
  devices: number | null; last_sent_at: string | null; undelivered_24h: number | null; last_error: string | null;
 }
+/** Remote dashboard PR 1d, `/api/devices/notices`: one pairing-alert recipient. `unknown`: the delivery ledger is unreadable. */
+export interface DeviceNoticeRecipient {
+ device_id: string; name: string | null;
+ state: "pending" | "unsubscribed" | "unavailable" | "retrying" | "delivered" | "failed" | "expired" | "revoked" | "unknown";
+ attempts: number; updated_at: string | null; last_error: string | null;
+}
+/** A committed "new device paired" event, newest first; never a code, digest or secret. */
+export interface DeviceNotice {
+ id: string; at: string; device_id: string; name: string; level: "full" | "view"; route: "cli-up" | "cli-pair" | "loopback-dashboard" | "tailnet-dashboard";
+ recipients: DeviceNoticeRecipient[];
+}
+export interface DeviceNoticesResponse { generated_at: string; delivery_error: string | null; notices: DeviceNotice[] }
 /** The version badge (cp-kz20): ok green, warn amber, alert red, unknown grey. */
 export type VersionLevel = "ok" | "warn" | "alert" | "unknown";
 export type ProcessRole = "viewer" | "host" | "parent" | "operator";

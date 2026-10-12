@@ -67,6 +67,17 @@ export function deviceEligible(device: DeviceRecord | DeviceView, now: Date, ori
 		&& (origin === undefined || device.origin === origin) && (generation === undefined || device.generation === generation);
 }
 
+/**
+ * Remote dashboard push eligibility, re-read on every call: an owned subscription (`device_id`/`origin`) may receive a
+ * push only while its device is active, unrevoked, unexpired and still on that origin. An unreadable store makes every
+ * owned one ineligible (fail closed); a legacy unowned (local/tailnet) subscription is never affected.
+ */
+export function subscriptionEligibility(dataDir: string, now: Date): (subscription: { device_id?: string; origin?: string }) => boolean {
+	const read = readDeviceState(dataDir);
+	return (subscription) => subscription.device_id === undefined
+		|| (read.state !== "invalid" && read.store.devices.some((device) => device.id === subscription.device_id && deviceEligible(device, now, subscription.origin)));
+}
+
 export const projectDevice = ({ session_digest: _digest, ...view }: DeviceRecord): DeviceView => view;
 
 export type DeviceRead = { state: "absent"; store: DeviceState } | { state: "invalid"; reason: string } | { state: "ok"; store: DeviceState };
