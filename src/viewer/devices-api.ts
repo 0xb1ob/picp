@@ -40,6 +40,8 @@ export type DeviceBinding = { origin: string; generation: number };
 export interface DeviceRoutes {
 	store: DeviceStore;
 	binding: () => DeviceBinding | null;
+	/** Remote dashboard PR 2: the remote listener's config revision and port, the viewer's readiness ack (owner-socket `status`). */
+	listening?: () => { revision: number; port: number } | null;
 }
 export interface DevicesRouteOptions {
 	stateDir: string;

@@ -58,7 +58,7 @@ test("owner-only files; status, pair, list and revoke go through the one store a
 	assert.equal(mode(deviceControlRecordFile(env.stateDir)), 0o600);
 	assert.equal(mode(deviceControlSocket(env.stateDir)), 0o600);
 
-	assert.deepEqual(ok(await deviceControlRequest(env.stateDir, "status")), { pid: process.pid, running: true, origin: REMOTE_ORIGIN });
+	assert.deepEqual(ok(await deviceControlRequest(env.stateDir, "status")), { pid: process.pid, running: true, origin: REMOTE_ORIGIN, generation: 1, revision: null, port: null });
 	const paired = ok(await deviceControlRequest(env.stateDir, "pair", { level: "view" }));
 	assert.match(String(paired.link), /^https:\/\/cp\.example\.test\/pair#[A-Za-z0-9_-]{43}$/);
 	assert.equal(paired.level, "view");

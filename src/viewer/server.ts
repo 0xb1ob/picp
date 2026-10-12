@@ -79,6 +79,8 @@ export interface ViewerOptions extends ViewerState {
 	log?: (line: string) => void;
 	/** Remote dashboard: device management routes (devices-api.ts). Absent — the default — those paths answer 404 as before. */
 	devices?: DeviceRoutes;
+	/** Remote dashboard PR 2: the quick tunnel's listener (no SSE through it) tells the app to poll. Absent: SSE, as before. */
+	refreshTransport?: "poll";
 }
 
 /** `host:port` as a browser sends it in the Host header (IPv6 bracketed). */
@@ -230,7 +232,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			send(res, 302, "text/plain; charset=utf-8", "", { location: "/#reports" });
 			return;
 		case "/":
-			send(res, options.app ? 200 : 503, "text/html; charset=utf-8", appPage(options.app), { "content-security-policy": APP_CSP });
+			send(res, options.app ? 200 : 503, "text/html; charset=utf-8", appPage(options.app, options.refreshTransport), { "content-security-policy": APP_CSP });
 			return;
 		case "/api/identity":
 			sendJson(res, 200, { viewer: "command-post", home: resolve(options.home) });

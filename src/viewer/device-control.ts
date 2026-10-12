@@ -40,7 +40,9 @@ const refusal = (failure: Parameters<typeof storeRefusal>[0]): DeviceControlRepl
 export function deviceControlAnswer(routes: DeviceRoutes, op: unknown, args: Record<string, unknown>): DeviceControlReply {
 	if (op === "status") {
 		const binding = routes.binding();
-		return { ok: true, result: { pid: process.pid, running: binding !== null, origin: binding?.origin ?? null } };
+		const listening = binding ? (routes.listening?.() ?? null) : null;
+		// The readiness ack: cp-tunnel waits until this listener's revision, origin and generation match the controller's.
+		return { ok: true, result: { pid: process.pid, running: binding !== null, origin: binding?.origin ?? null, generation: binding?.generation ?? null, revision: listening?.revision ?? null, port: listening?.port ?? null } };
 	}
 	if (op === "list") {
 		const listed = routes.store.list();

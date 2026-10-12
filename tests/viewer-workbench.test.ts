@@ -213,9 +213,11 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
 			if (match[2] === "../forge-url.ts") assert.doesNotMatch(readFileSync(join(VIEWER, "..", "forge-url.ts"), "utf8"), /^\s*import\b|\bimport\s*\(|\brequire\s*\(/m, "forge-url.ts may cross the viewer boundary only while it imports nothing");
+			// PR 2d: the remote runtime reads the tunnel's node-only config/runtime schema, shared with the daemon; nothing else does.
+			if (match[2] === "../service/daemon-tunnel-files.ts") assert.equal(name, "remote-runtime.ts", "only the remote runtime reads the tunnel schema");
 			if (name === "push-subscriptions.ts") assert.match(match[2] ?? "", /^node:|^\.\/push-files\.ts$/, `${name} imports ${match[2]}`);
 			if (name === "control-audit.ts") assert.match(match[2] ?? "", /^node:|^\.\/control-files\.ts$/, `${name} imports ${match[2]}`);
 			// PR 2: a revoke removes the device's own push subscriptions through the subscription writer, nothing else from it.
@@ -229,8 +231,8 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		if (!writers.has(name)) assert.doesNotMatch(text, /writeFileSync|appendFileSync|mkdirSync|rmSync|renameSync|unlinkSync|createWriteStream|\bwriteSync\(|\b(?:writeFile|appendFile|mkdir|rename|unlink)\s*\(/, name);
 		// The dashboard-control writer is imported by the three write routes (control, image upload, thread done) and the device store (its secret-free device events), nothing else in the viewer.
 		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts" && name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
-		// data/devices.json has one writer: only the device routes and the remote gate reach the store (devices-api.ts for its type), never another module.
-		if (!["device-store.ts", "devices-api.ts", "pair-api.ts", "remote-server.ts"].includes(name)) assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);
+		// data/devices.json has one writer: only the device routes, the remote gate and the remote runtime (which composes them) reach the store (devices-api.ts for its type), never another module.
+		if (!["device-store.ts", "devices-api.ts", "pair-api.ts", "remote-server.ts", "remote-runtime.ts"].includes(name)) assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);
 		if (name === "devices-api.ts") assert.match(text, /^import type \{[^}]*\} from "\.\/device-store\.ts";$/m, "devices-api.ts takes the store as a type only");
 		// The image store is written only through uploads.ts, and only the upload route stores (the message route and the GET only read).
 		if (name !== "operator-upload-api.ts" && name !== "uploads.ts") assert.doesNotMatch(text, /\bwriteUpload\b/, `${name} stores an upload`);

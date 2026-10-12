@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
-import { createResource, type Stream } from "../viewer-app/resource.ts";
+import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 
 class Events extends EventTarget implements Stream { closed = false; close() { this.closed = true; } }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -31,6 +31,22 @@ test("refreshes coalesce, failed GETs preserve stale data, hidden requests canno
  t.mock.timers.tick(5001); assert.equal(resource.snapshot().status,"stale","a stalled GET must not leave an old success live forever");
  streams[1]!.dispatchEvent(new Event("error")); assert.equal(resource.snapshot().status, "stale");
  resource.dispose(); assert.equal(streams[1]!.closed, true);
+});
+
+test("quick-mode pollStream: a two-second refresh clock while visible, no requests while hidden, cleared on dispose", async t => {
+ t.mock.timers.enable({apis:["setTimeout","setInterval"]});
+ let gets = 0, status = 200;
+ const resource = createResource<{n:number}>("/api/overview", "/api/stream?view=overview", {fetch: () => (gets++, Promise.resolve(new Response(`{"n":${gets}}`, {status}))), stream: pollStream});
+ resource.setVisible(true); await tick(); assert.equal(gets, 1);
+ t.mock.timers.tick(0); await tick(); assert.equal(gets, 2, "the poll clock opens like a stream: one refresh");
+ assert.equal(resource.snapshot().status, "live");
+ t.mock.timers.tick(POLL_MS); await tick(); assert.equal(gets, 3);
+ resource.setVisible(false); t.mock.timers.tick(POLL_MS * 5); await tick(); assert.equal(gets, 3, "a hidden tab never polls");
+ resource.setVisible(true); t.mock.timers.tick(0); await tick(); assert.equal(gets, 5);
+ t.mock.timers.tick(POLL_MS); await tick(); assert.equal(gets, 6);
+ status = 503; t.mock.timers.tick(POLL_MS); await tick(); assert.equal(resource.snapshot().data?.n, 6, "a failed poll keeps stale data");
+ status = 401; t.mock.timers.tick(POLL_MS); await tick(); assert.equal(resource.snapshot().data, null, "a revoked device's 401 drops the protected data");
+ resource.dispose(); t.mock.timers.tick(POLL_MS * 5); await tick(); assert.equal(gets, 8);
 });
 
 test("view SSE emits immediately without a transcript, respects backpressure, and clears its clock once", t => {

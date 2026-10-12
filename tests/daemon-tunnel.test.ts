@@ -22,7 +22,8 @@ const REGISTERED = "INF Registered tunnel connection connIndex=0 connection=0f0e
 
 type Proc = { args: string; alive: boolean; stubborn?: boolean; onOutput?: (chunk: string) => void; onExit?: (code: number | null, signal: string | null) => void };
 
-function bench(options: { config?: TunnelConfig | TunnelConfigRead | null; runtime?: TunnelRuntime | { ok: false; reason: string }; foreign?: Record<number, string>; stubborn?: boolean; failSpawn?: boolean } = {}) {
+type BenchOptions = { config?: TunnelConfig | TunnelConfigRead | null; runtime?: TunnelRuntime | { ok: false; reason: string }; foreign?: Record<number, string>; stubborn?: boolean; failSpawn?: boolean; deaf?: boolean };
+function bench(options: BenchOptions = {}) {
 	let now = T0;
 	const timers: Array<{ at: number; fn: () => void; dead: boolean }> = [];
 	const procs = new Map<number, Proc>();
@@ -56,6 +57,7 @@ function bench(options: { config?: TunnelConfig | TunnelConfigRead | null; runti
 		},
 		kill: (pid, signal) => {
 			kills.push([pid, signal]);
+			if (options.deaf) return; // its exit is never reported, whatever the signal
 			const proc = procs.get(pid);
 			if (proc?.alive && !(signal === "SIGTERM" && proc.stubborn)) exit(pid, null, signal);
 		},
@@ -267,6 +269,50 @@ test("stop (daemon stop, reload, update hold): no restart, busy until the exit, 
 	assert.equal(b.last()?.state, "stopped");
 	b.controller.reconcile();
 	assert.equal(b.spawns.length, 3);
+});
+
+test("an unreadable runtime record is re-read on every reconcile: fixed, the tunnel starts without a daemon restart", () => {
+	const options: BenchOptions = { runtime: { ok: false, reason: "state/tunnel-runtime.json: not JSON" } };
+	const b = bench(options);
+	b.controller.reconcile();
+	b.controller.reconcile();
+	assert.deepEqual(b.spawns, []);
+	assert.deepEqual(b.writes, []);
+	options.runtime = { schema_version: 1, origin: "https://a.trycloudflare.com", generation: 3, revision: 1, state: "stopped", updated_at: "" };
+	b.controller.reconcile();
+	assert.equal(b.spawns.length, 1);
+	assert.match(b.lines.join("\n"), /runtime record is readable again/);
+	b.say(BANNER);
+	b.say(REGISTERED);
+	assert.equal(b.last()?.generation, 4, "the re-read generation is kept, so older sessions stay ended");
+});
+
+test("a re-read record naming a live recorded child stops that child first", () => {
+	const recorded: TunnelRuntime = { schema_version: 1, origin: "https://a.trycloudflare.com", generation: 2, revision: 1, state: "running", mode: "quick", port: 8767, pid: 900, binary: BIN, argv: QUICK_ARGS.split(" ").slice(1), updated_at: "" };
+	const options: BenchOptions = { runtime: { ok: false, reason: "state/tunnel-runtime.json: EACCES" }, foreign: { 900: QUICK_ARGS } };
+	const b = bench(options);
+	options.runtime = recorded;
+	b.controller.reconcile();
+	assert.deepEqual(b.kills, [[900, "SIGTERM"]]);
+	assert.deepEqual(b.spawns, [], "nothing new while the recorded child lives");
+});
+
+test("stop settles even when a SIGKILLed child never reports its exit: logged, then no longer tracked", () => {
+	const b = bench({ deaf: true });
+	b.controller.reconcile();
+	const pid = b.live() as number;
+	b.controller.stop();
+	b.advance(10_000);
+	assert.deepEqual(b.kills, [[pid, "SIGTERM"], [pid, "SIGKILL"]]);
+	assert.equal(b.controller.busy(), true, "still waiting for the exit report");
+	b.advance(9_999);
+	assert.equal(b.controller.busy(), true);
+	b.advance(1);
+	assert.equal(b.controller.busy(), false);
+	assert.equal(b.idle(), 1, "the inner's stop settles");
+	assert.deepEqual([b.last()?.state, b.last()?.pid], ["stopped", undefined]);
+	assert.match(b.lines.join("\n"), new RegExp(`cloudflared pid ${pid} did not report its exit 10s after SIGKILL`));
+	assert.equal(b.kills.length, 2, "no further signal");
 });
 
 test("the published file reads back through both readers, and a malformed one is refused", (t) => {

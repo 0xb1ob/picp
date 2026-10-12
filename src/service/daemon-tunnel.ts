@@ -14,9 +14,11 @@
  *
  * An unexpected exit restarts on the supervisor's backoff (5 s growing to 5 min, reset once a run registers). `stop()`
  * (the daemon's stop, reload and update hold) cancels that timer and SIGTERMs the child, SIGKILL after 10 s if its
- * exit was not observed. A child recorded by a crashed inner is signalled only while `ps` still shows its exact
+ * exit was not observed, and after 10 s more it stops tracking a child whose exit was never reported (logged), so a
+ * stop always settles. A child recorded by a crashed inner is signalled only while `ps` still shows its exact
  * recorded command line, and nothing new starts until it is gone: never a kill by name or group, never an adoption.
- * An unreadable runtime record starts nothing (its generation is unknown, so publishing could revive old sessions).
+ * An unreadable runtime record starts nothing (its generation is unknown, so publishing could revive old sessions);
+ * every reconcile re-reads it, so fixing or removing it takes effect without a daemon restart.
  */
 import { spawn as spawnChild } from "node:child_process";
 import { namedArgv, quickArgv } from "../tunnel/cloudflared.ts";
@@ -110,7 +112,7 @@ function specOf(config: TunnelConfig): Spec {
 
 export function tunnelController(ports: TunnelPorts, onIdle: () => void): TunnelController {
 	const now = (): string => iso(ports.now());
-	const read = ports.readRuntime();
+	let read = ports.readRuntime();
 	if (!read.ok) ports.log(`the runtime record is unreadable, so no tunnel starts until it is fixed or removed: ${read.reason}`);
 	let runtime: TunnelRuntime | null = read.ok ? read.runtime : null;
 	let child: Child | undefined;
@@ -145,6 +147,12 @@ export function tunnelController(ports: TunnelPorts, onIdle: () => void): Tunnel
 			if (child !== target) return;
 			ports.kill(target.pid, "SIGKILL");
 			ports.log(`cloudflared pid ${target.pid} ignored SIGTERM: SIGKILL`);
+			// SIGKILL cannot be ignored, but its exit report can still be lost: bounded, so a stop always settles.
+			ports.setTimer(() => {
+				if (child !== target) return;
+				ports.log(`cloudflared pid ${target.pid} did not report its exit ${TUNNEL_KILL_GRACE_MS / 1000}s after SIGKILL; it is no longer tracked`);
+				onExit(target, null, "SIGKILL");
+			}, TUNNEL_KILL_GRACE_MS);
 		}, TUNNEL_KILL_GRACE_MS);
 	};
 
@@ -221,7 +229,15 @@ export function tunnelController(ports: TunnelPorts, onIdle: () => void): Tunnel
 
 	const reconcile = (): void => {
 		halted = false;
-		if (!read.ok || orphan) return;
+		if (!read.ok) {
+			// Re-read every tick: a fixed or removed record takes effect without a daemon restart.
+			read = ports.readRuntime();
+			if (!read.ok) return;
+			runtime = read.runtime;
+			ports.log("the runtime record is readable again");
+			recover();
+		}
+		if (orphan) return;
 		const config = ports.readConfig();
 		if (!config.ok) return quiesce("failed", runtime?.revision ?? null, `config refused: ${config.reason}`);
 		if (!config.config?.enabled) return quiesce("stopped", config.config?.revision ?? runtime?.revision ?? null);
@@ -246,28 +262,29 @@ export function tunnelController(ports: TunnelPorts, onIdle: () => void): Tunnel
 	};
 
 	// A child recorded by a crashed inner: signalled only while it still shows its exact recorded command line.
-	const prior = runtime;
-	if (prior?.pid !== undefined && prior.binary && prior.argv) {
+	const recover = (): void => {
+		const prior = runtime;
+		if (prior?.pid === undefined || !prior.binary || !prior.argv) return;
 		const needle = commandLine(prior.binary, prior.argv);
-		if (sameProcess(prior.pid, needle, ports)) {
-			orphan = { pid: prior.pid, needle, deadline: ports.now() + TUNNEL_KILL_GRACE_MS };
-			ports.kill(prior.pid, "SIGTERM");
-			ports.log(`stopping cloudflared pid ${prior.pid} of a previous runtime`);
-			const wait = (): void => {
-				if (!orphan) return;
-				if (sameProcess(orphan.pid, orphan.needle, ports)) {
-					if (ports.now() < orphan.deadline) return void ports.setTimer(wait, TUNNEL_ORPHAN_POLL_MS);
-					ports.kill(orphan.pid, "SIGKILL");
-					ports.log(`cloudflared pid ${orphan.pid} of a previous runtime ignored SIGTERM: SIGKILL`);
-				}
-				orphan = undefined;
-				publish({ state: "stopped" }, CHILD_FIELDS);
-				if (halted) onIdle();
-				else reconcile();
-			};
-			ports.setTimer(wait, TUNNEL_ORPHAN_POLL_MS);
-		} else publish({ state: "stopped" }, CHILD_FIELDS);
-	}
+		if (!sameProcess(prior.pid, needle, ports)) return publish({ state: "stopped" }, CHILD_FIELDS);
+		orphan = { pid: prior.pid, needle, deadline: ports.now() + TUNNEL_KILL_GRACE_MS };
+		ports.kill(prior.pid, "SIGTERM");
+		ports.log(`stopping cloudflared pid ${prior.pid} of a previous runtime`);
+		const wait = (): void => {
+			if (!orphan) return;
+			if (sameProcess(orphan.pid, orphan.needle, ports)) {
+				if (ports.now() < orphan.deadline) return void ports.setTimer(wait, TUNNEL_ORPHAN_POLL_MS);
+				ports.kill(orphan.pid, "SIGKILL");
+				ports.log(`cloudflared pid ${orphan.pid} of a previous runtime ignored SIGTERM: SIGKILL`);
+			}
+			orphan = undefined;
+			publish({ state: "stopped" }, CHILD_FIELDS);
+			if (halted) onIdle();
+			else reconcile();
+		};
+		ports.setTimer(wait, TUNNEL_ORPHAN_POLL_MS);
+	};
+	if (read.ok) recover();
 
 	return {
 		reconcile,

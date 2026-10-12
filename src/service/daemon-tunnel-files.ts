@@ -74,7 +74,7 @@ export interface TunnelConfig {
 }
 export type TunnelConfigRead = { ok: true; config: TunnelConfig | null } | { ok: false; reason: string };
 
-const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+export const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const absolutePath = (value: unknown): value is string => typeof value === "string" && value.startsWith("/") && !/[\0-\x1f\x7f]/.test(value);
 const validPort = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 1024 && (value as number) <= 65535;
 
