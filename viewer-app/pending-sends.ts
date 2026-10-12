@@ -80,7 +80,8 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
  const settled = (item: PendingSend) => {
   if (item.state !== "delivered") return false;
   if (Date.parse(item.at) < oldest) return true;
-  const row = live?.recent.find(row=>row.id === item.id && row.state === "delivered") ?? live?.sends?.find(send=>send.id === item.id && send.state === "delivered");
+  // The grace runs from delivery (the recent row's time), never from the send time a journal row carries.
+  const row = live?.recent.find(row=>row.id === item.id && row.state === "delivered");
   return !!row && now - Date.parse(row.at) > DELIVERED_GRACE_MS;
  };
  const stale = items.filter(settled);

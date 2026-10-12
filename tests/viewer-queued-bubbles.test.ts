@@ -363,7 +363,12 @@ test("picp-cc0: a delivered send clears once a truncated transcript window or th
  assert.deepEqual(inGrace.items.map(item=>item.state),["delivered"],"inside the window and within the grace period it waits for the transcript");
  assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},recent(61),window,true).items,[],"delivered for longer than the grace period clears");
  const journal:ControlStatusResponse={...status,generated_at:"2026-10-04T14:11:01Z",sends:[{id:"dc-fresh",at:later,state:"delivered",reason:null,ask_id:null,body:{kind:"message",text:"queued fresh"}}]};
- assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},journal,[],false).items,[],"the journal's delivered state clears it too when recent rows are gone");
+ assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},journal,[],false).items.map(item=>item.state),["delivered"],"the journal row's time is the send time, not delivery: with no delivery time known it waits");
+ // Queued at 14:00 behind a busy session, delivered at 14:10: the grace runs from 14:10, not from the send.
+ const slow=[pending("slow",{state:"queued"})] as PendingSend[];
+ const delivered=(seconds:number):ControlStatusResponse=>({...status,generated_at:new Date(Date.parse(later)+seconds*1000).toISOString(),recent:[{id:"dc-slow",kind:"message",state:"delivered",at:later,reason:null,ask_id:null}],sends:[{id:"dc-slow",at,state:"delivered",reason:null,ask_id:null,body:{kind:"message",text:"queued slow"}}]});
+ assert.deepEqual(reconcilePending({items:slow,dismissed:[]},delivered(5),[],false).items.map(item=>item.state),["delivered"],"queued for ten minutes and delivered just now: it stays");
+ assert.deepEqual(reconcilePending({items:slow,dismissed:[]},delivered(61),[],false).items,[],"delivered more than 60 s ago: it clears");
  const queued:ControlStatusResponse={...journal,sends:[{...journal.sends![0]!,state:"queued"}]};
  assert.deepEqual(reconcilePending({items:fresh,dismissed:[]},queued,window,true).items.map(item=>item.state),["queued"],"a queued send is never cleared by age");
 });
