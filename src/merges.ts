@@ -46,6 +46,7 @@ import {
 	validate,
 } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
+import { type GhPrView, readGhPr } from "./forges/github.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { RunRegistry } from "./runs.ts";
 
@@ -63,8 +64,8 @@ export type CommandRunner = (
 	options?: { stdin?: string },
 ) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
-/** The `gh pr view --json` fields this module asks for, and nothing else. */
-export const GH_PR_FIELDS = ["number", "url", "state", "mergedAt", "mergeCommit", "headRefName", "headRefOid", "baseRefName"] as const;
+/** The `gh pr view --json` fields, now owned by the GitHub observer; re-exported for existing callers. */
+export { GH_PR_FIELDS } from "./forges/github.ts";
 
 export interface MergeStoreOptions {
 	home: string;
@@ -251,19 +252,13 @@ export class MergeStore {
 	}
 
 	async #viewPr(cwd: string, pr: string, jobId: string): Promise<GhPrView> {
-		const result = await this.#run(cwd, "gh", ["pr", "view", pr, "--json", GH_PR_FIELDS.join(",")]);
-		if (result.status !== 0) {
-			const detail = (result.stderr || result.stdout).trim().split("\n")[0] ?? "no output";
-			throw new MergeError(
-				`${jobId}: could not read PR ${pr} with gh in ${cwd} (${detail}). Nothing is recorded. ` +
-					`If the merge cannot be observed from this machine, cp_teardown ${jobId} force is the honest exit — it proves nothing, and records that.`,
-			);
-		}
-		try {
-			return JSON.parse(result.stdout) as GhPrView;
-		} catch {
-			throw new MergeError(`${jobId}: gh returned output that is not JSON for PR ${pr} — nothing is recorded.`);
-		}
+		const read = await readGhPr((dir, bin, args) => this.#run(dir, bin, args), cwd, pr);
+		if (read.ok) return read.view;
+		if (read.reason === "json") throw new MergeError(`${jobId}: gh returned output that is not JSON for PR ${pr} — nothing is recorded.`);
+		throw new MergeError(
+			`${jobId}: could not read PR ${pr} with gh in ${cwd} (${read.detail}). Nothing is recorded. ` +
+				`If the merge cannot be observed from this machine, cp_teardown ${jobId} force is the honest exit — it proves nothing, and records that.`,
+		);
 	}
 
 	/**
@@ -293,17 +288,6 @@ export class MergeStore {
 		if (custom) return custom(cwd, bin, args);
 		return defaultRun(cwd, bin, args);
 	}
-}
-
-interface GhPrView {
-	number?: number;
-	url?: string;
-	state?: string;
-	mergedAt?: string;
-	mergeCommit?: { oid?: string } | null;
-	headRefName?: string;
-	headRefOid?: string;
-	baseRefName?: string;
 }
 
 function prUrlFromReceipts(receipts: readonly Receipt[] | undefined): string | undefined {
