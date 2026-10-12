@@ -9,11 +9,12 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, paths, type Receipt } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
+import type { ChangeRequestObservation } from "../src/forges/adapter.ts";
 import { type CommandRunner, formatMerge, MergeError, MergeStore, readMergeReceipt } from "../src/merges.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { createScratchHome, readRunEvents } from "./harness/index.ts";
@@ -201,6 +202,7 @@ test("an unreachable gh refuses and names force as the honest exit", async (t) =
 	await assert.rejects(() => store.record({ jobId: "cp-m3" }), (error: Error) => {
 		assert.match(error.message, /could not read PR/);
 		assert.match(error.message, /cp_teardown cp-m3 force/, "force stays the exit for the unprovable case");
+		assert.ok(error.message.indexOf("git evidence") < error.message.indexOf("force"), "git evidence is offered first, force last (forge PR 2)");
 		return true;
 	});
 	assert.equal(readMergeReceipt(b.home, "cp-m3"), undefined);
@@ -230,4 +232,96 @@ test("an unreadable receipt is no receipt, never an exception out of a gate", as
 	const b = benchOf(t);
 	assert.equal(readMergeReceipt(b.home, "cp-none"), undefined);
 	assert.equal(readMergeReceipt(b.home, "../escape"), undefined, "an unsafe id is not a path");
+});
+
+/** Forge PR 2: a GitLab MR observed through an injected observer (no network), and git asked about fast-forward reachability. */
+function gitlabStore(b: Bench, observation: Partial<ChangeRequestObservation>, git: { tip?: string; ancestor?: boolean } = {}): { store: MergeStore; asked: string[][] } {
+	const asked: string[][] = [];
+	const run: CommandRunner = async (_cwd, bin, args) => {
+		assert.equal(bin, "git", "GitLab is never asked through gh");
+		asked.push([...args]);
+		if (args[0] === "ls-remote") return { status: 0, stdout: args[3] === "refs/heads/main" && git.tip ? `${git.tip}\trefs/heads/main\n` : "", stderr: "" };
+		if (args[0] === "cat-file") return { status: 0, stdout: "", stderr: "" };
+		if (args[0] === "merge-base") return { status: git.ancestor ? 0 : 1, stdout: "", stderr: "" };
+		return assert.fail(`unexpected git ${args.join(" ")}`);
+	};
+	const view: ChangeRequestObservation = {
+		provider: "gitlab",
+		url: "https://gitlab.com/group/sub/repo/-/merge_requests/7",
+		number: 7,
+		state: "merged",
+		source_branch: "cp-gl",
+		target_branch: "main",
+		head_sha: "e".repeat(40),
+		merged_at: "2026-08-31T15:55:07.123Z",
+		...observation,
+	};
+	const store = new MergeStore({ home: b.home, fleet: b.fleet, runs: b.runs, run, observer: () => ({ provider: "gitlab", readChangeRequest: async () => ({ ok: true, observation: view }) }) });
+	return { store, asked };
+}
+
+test("forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const { store } = gitlabStore(b, { merge_commit_sha: undefined, squash_commit_sha: "f".repeat(40) });
+	const result = await store.record({ jobId: "cp-gl" });
+	assert.equal(result.receipt.merge_commit_sha, "f".repeat(40));
+	assert.equal(result.receipt.strategy, "squash");
+	assert.equal(result.receipt.pr_number, 7, "pr_number carries the MR IID");
+	assert.equal(result.receipt.merged_at, "2026-08-31T15:55:07Z", "a millisecond timestamp is normalised");
+	assert.equal(result.receipt.recorded_by, "gitlab api");
+	assert.deepEqual(result.receipt.forge, { provider: "gitlab", project_url: "https://gitlab.com/group/sub/repo" });
+	assert.equal(result.receipt.head_branch_deleted, true);
+	const event = readRunEvents(b.home, "cp-gl").find((entry) => entry.type === "merge_recorded");
+	assert.equal((event?.payload as { provider?: string } | undefined)?.provider, "gitlab");
+});
+
+test("forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const unseen = gitlabStore(b, {}, { tip: "1".repeat(40), ancestor: false });
+	await assert.rejects(() => unseen.store.record({ jobId: "cp-gl" }), /names no merge commit/);
+	assert.equal(readMergeReceipt(b.home, "cp-gl"), undefined, "an MR with no landing commit git can see writes nothing");
+
+	const seen = gitlabStore(b, {}, { tip: "1".repeat(40), ancestor: true });
+	const result = await seen.store.record({ jobId: "cp-gl" });
+	assert.equal(result.receipt.merge_commit_sha, "e".repeat(40), "the fast-forwarded head is the landing commit");
+	assert.equal(result.receipt.strategy, "unknown");
+	assert.ok(seen.asked.some((args) => args[0] === "merge-base" && args.includes("e".repeat(40)) && args.includes("1".repeat(40))));
+	assert.equal(b.fleet.require("cp-gl").receipts?.[0]?.status, "merged");
+});
+
+test("forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const { store } = gitlabStore(b, { squash_commit_sha: "f".repeat(40) });
+	const first = await store.record({ jobId: "cp-gl" });
+	// Simulate the crash window: the receipt is on disk, the fleet still says open.
+	await b.fleet.patch("cp-gl", { receipts: [{ ...PR_RECEIPT, url: first.receipt.pr_url }] });
+	const again = await store.record({ jobId: "cp-gl" });
+	assert.equal(again.recorded, false);
+	assert.equal(again.receipt_status_updated, true);
+	assert.equal(b.fleet.require("cp-gl").receipts?.[0]?.status, "merged");
+	assert.equal(readRunEvents(b.home, "cp-gl").filter((event) => event.type === "merge_recorded").length, 1, "no second event");
+
+	await b.fleet.patch("cp-gl", { branch: "cp-other" });
+	await assert.rejects(() => store.record({ jobId: "cp-gl" }), /discharges nothing here/);
+});
+
+test("forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-gl", [{ ...PR_RECEIPT, url: "https://gitlab.com/group/sub/repo/-/merge_requests/7" }]);
+	const mismatch = new MergeStore({ home: b.home, fleet: b.fleet, runs: b.runs, run: async () => assert.fail("nothing runs"), observer: () => ({ provider: "gitlab", readChangeRequest: async () => ({ ok: false, reason: "mismatch", detail: "the answer names another project" }) }) });
+	await assert.rejects(() => mismatch.record({ jobId: "cp-gl" }), (error: Error) => {
+		assert.match(error.message, /mismatch: the answer names another project/);
+		return true;
+	});
+	assert.equal(readMergeReceipt(b.home, "cp-gl"), undefined);
+
+	await b.addJob("cp-m1", [PR_RECEIPT]);
+	const legacy = await b.store({ number: 54, url: PR_RECEIPT.url, state: "MERGED", mergeCommit: { oid: "b".repeat(40) }, headRefName: "cp-m1", headRefOid: "a".repeat(40) }).record({ jobId: "cp-m1" });
+	assert.equal(legacy.receipt.forge?.provider, "github");
+	const { forge: _forge, ...withoutForge } = legacy.receipt;
+	writeFileSync(join(b.home, paths.mergeFile("cp-m1")), JSON.stringify(withoutForge));
+	assert.equal(readMergeReceipt(b.home, "cp-m1")?.head_sha, "a".repeat(40), "a pre-forge receipt is still valid");
 });

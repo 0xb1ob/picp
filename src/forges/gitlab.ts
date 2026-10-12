@@ -102,7 +102,10 @@ function requestedIid(ref: string, repository: ForgeRepository): number | string
 
 async function readBounded(response: Response, maxBytes: number): Promise<string | "too_large" | undefined> {
 	const declared = Number(response.headers.get("content-length") ?? "");
-	if (Number.isFinite(declared) && declared > maxBytes) return "too_large";
+	if (Number.isFinite(declared) && declared > maxBytes) {
+		await response.body?.cancel().catch(() => undefined);
+		return "too_large";
+	}
 	if (!response.body) return "";
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];

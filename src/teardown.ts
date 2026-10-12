@@ -33,8 +33,10 @@
  * the head branch is gone from origin: main already holds this exact content.
  *
  * cp-vk1: "on origin?" is `git ls-remote`, never a remote-tracking ref, and a
- * landing is a merge receipt (`merged`), not ancestry. The two-dot tree diff
- * stays a receipt-free fallback; `force` still claims no pass reason.
+ * landing is a merge receipt (`merged`), not ancestry. Forge PR 2: with no
+ * exact receipt, the git landing proof (src/landing-proof.ts) looks for HEAD's
+ * content in the base's reachable history — `landed_by_git`, never a merge
+ * claim; an unknown proof is `landing_unverified`. `force` still claims nothing.
  *
  * Order matters: gates → graceful worker shutdown with an **observed** close →
  * lease return → fleet `done` → ledger close for research/answer → artifact cleanup.
@@ -66,11 +68,12 @@ import { resolveFinalFix } from "./final-fix.ts";
 import { readReviewPassVerdict } from "./merge-ask.ts";
 import { type JobClaims, type JobOwner, withJobClaim } from "./job-claims.ts";
 import { type Lease, leaseFromRecord, type LeaseManager } from "./leases.ts";
-import { readMergeReceipt } from "./merges.ts";
+import { projectBaseBranch } from "./forge-runtime.ts";
+import { type LandingEvidence, remoteTip } from "./landing-proof.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
-	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, jobInFlight, killedUnreportedWakeup, leaseReturnFailed, type LedgerCloseOutcome,
+	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, jobInFlight, killedUnreportedWakeup, landingGate, landingMoved, leaseReturnFailed, type LedgerCloseOutcome,
 	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker, withdrawHumanReview,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -110,6 +113,8 @@ export const GATE_CODES = [
 	 * stale-ref false pass this code exists to prevent.
 	 */
 	"remote_unverified",
+	/** Forge PR 2: no receipt matches and the git landing proof could not be completed (missing history, objects or a budget). */
+	"landing_unverified",
 	/** cp-a9fq: automatic recovery (or another teardown) owns this job right now. */
 	"job_in_flight",
 	/** cp-a9fq: treehouse did not confirm the return; the lease is kept and the job is not done. */
@@ -123,14 +128,16 @@ export interface GateFailure {
 	fix: string;
 }
 
-export type GateOutcome = { ok: true; reason: GatePassReason } | { ok: false; failure: GateFailure };
+export type GateOutcome = { ok: true; reason: GatePassReason; landing?: LandingEvidence } | { ok: false; failure: GateFailure };
 
 export type GatePassReason =
 	| "pushed"
 	| "upstream"
-	/** A merge receipt (cp_merged) says GitHub merged this exact head. */
+	/** A merge receipt (cp_merged) says the forge merged this exact head. */
 	| "merged"
 	| "merged_head_deleted"
+	/** Forge PR 2: HEAD's content is in the base's reachable history (src/landing-proof.ts); no merge is claimed. */
+	| "landed_by_git"
 	/** delivery:local, clean tree, zero commits ahead of the base (picp-9g8). */
 	| "nothing_to_push"
 	| "clean_research";
@@ -139,6 +146,8 @@ export interface TeardownResult {
 	job_id: string;
 	torn_down: boolean;
 	reason?: GatePassReason;
+	/** The git proof behind a `landed_by_git` pass. */
+	landing?: LandingEvidence;
 	worktree: string;
 	branch: string;
 	/** The observed exit of the worker, when there was one to shut down. */
@@ -172,6 +181,8 @@ export interface TeardownOptions {
 	journal?: (input: DurableWakeupInput) => void;
 	/** cp-a9fq: shared with BoundedRecovery so a teardown and a revive never interleave on one job. */
 	claims?: JobClaims;
+	/** The project's configured base branch; defaults to the registry's `base_branch`. */
+	projectBase?: (project: string) => string | undefined;
 }
 
 export type GitRunner = (cwd: string, args: readonly string[]) => Promise<{ status: number | null; stdout: string; stderr: string }>;
@@ -245,7 +256,7 @@ export class Teardown {
 			if (outcome.ok && record.kind === "ship" && !isScriptFleetRecord(record) &&
 				(record.phase === "failed" || record.phase === "waiting")) {
 				const head = (await this.#git(record.worktree, ["rev-parse", "HEAD"])).stdout.trim();
-				const failure = acceptedHeadFailure(this.#options.home, record, head);
+				const failure = acceptedHeadFailure(this.#options.home, record, head, outcome.landing);
 				if (failure) outcome = { ok: false, failure };
 			}
 			if (!outcome.ok) {
@@ -280,14 +291,16 @@ export class Teardown {
 			project: record.project,
 			...(record.lease_id ? { lease_id: record.lease_id } : {}),
 		});
-		if (record.checkpoint_ref) await deleteCheckpoint((c, args) => this.#git(c, args), record.worktree, record.checkpoint_ref); // missing ref: not a failure
+		const moved = outcome?.ok && outcome.landing ? await landingMoved((c, args) => this.#git(c, args), record.worktree, outcome.landing) : undefined;
+		if (record.checkpoint_ref && !moved) await deleteCheckpoint((c, args) => this.#git(c, args), record.worktree, record.checkpoint_ref); // missing ref: not a failure
 		// cp-a9fq: lease_returned is what treehouse confirmed, never assumed; a failed return (forced or not) keeps the job open.
-		const released = await leases.release(lease, { ignoreErrors: true });
+		const released = moved ? { ok: false as const, error: moved.message } : await leases.release(lease, { ignoreErrors: true });
 		if (!released.ok) {
-			const failure = leaseReturnFailed(jobId, released.error);
+			const failure = moved ?? leaseReturnFailed(jobId, released.error);
 			runs.open(jobId).cp("teardown_refused", { ...failure });
 			return { ...base, failure, ...(exitCode !== undefined ? { exit_code: exitCode } : {}) };
 		}
+		if (outcome?.ok && outcome.landing) runs.open(jobId).cp("teardown_landing_proven", { job_id: jobId, ...outcome.landing });
 
 		// --- state last -----------------------------------------------------
 		const closedAt = isoTimestamp(now());
@@ -325,7 +338,7 @@ export class Teardown {
 		return {
 			...base,
 			torn_down: true,
-			...(outcome?.ok ? { reason: outcome.reason } : {}),
+			...(outcome?.ok ? { reason: outcome.reason, ...(outcome.landing ? { landing: outcome.landing } : {}) } : {}),
 			...(unreported ? { killed_unreported: true as const } : {}),
 			...(!isScriptFleetRecord(record) && record.reported_at === undefined ? { unreported: true as const } : {}),
 			...(ledgerClose.failed[0] ? { ledger_close_error: ledgerClose.failed[0].error } : {}),
@@ -400,7 +413,7 @@ export class Teardown {
 	 */
 	async #localNothingToPush(worktree: string, base: string, jobId: string): Promise<boolean> {
 		if (this.#options.fleet.get(jobId)?.delivery !== "local") return false;
-		const remote = await this.#remoteTip(worktree, base);
+		const remote = await remoteTip((c, args) => this.#git(c, args), worktree, base);
 		// Remote base sha first. A missing object falls through to the local
 		// tracking ref — ponytail: a forged origin/<base> could hide commits;
 		// fetch that sha before counting if this pass ever loses work.
@@ -434,7 +447,7 @@ export class Teardown {
 		// worktree is its own clone, its remote-tracking refs go stale on their own,
 		// and a ref left behind by a branch GitHub already deleted is what made two
 		// jobs tear down as "(pushed)" with nothing on origin at all.
-		const remote = await this.#remoteTip(worktree, branch);
+		const remote = await remoteTip((c, args) => this.#git(c, args), worktree, branch);
 		if (!remote.ok) {
 			return {
 				ok: false,
@@ -445,16 +458,16 @@ export class Teardown {
 				},
 			};
 		}
+		const record = this.#options.fleet.get(jobId);
+		const landing = (remoteSha?: string) => landingGate({
+			home: this.#options.home, git: (c, args) => this.#git(c, args), worktree, head,
+			base: (record && (this.#options.projectBase ?? ((p) => projectBaseBranch(this.#options.home, p)))(record.project)) || base,
+			record: record ?? { job_id: jobId, branch },
+			...(remoteSha ? { remoteSha } : {}), ...(this.#options.now ? { now: this.#options.now } : {}),
+		});
 		if (remote.sha) {
 			if (remote.sha === head) return { ok: true, reason: "pushed" };
-			return {
-				ok: false,
-				failure: {
-					code: "unpushed",
-					message: `${worktree} on ${branch}: local tip ${head.slice(0, 12)} != origin/${branch} (${remote.sha.slice(0, 12)})`,
-					fix: "keep the lease; push the branch, then retry teardown",
-				},
-			};
+			return landing(remote.sha);
 		}
 
 		// A branch pushed under another name still counts, but the same rule applies:
@@ -463,50 +476,8 @@ export class Teardown {
 		if (upstreamOutcome) return upstreamOutcome;
 
 		if (await this.#localNothingToPush(worktree, base, jobId)) return { ok: true, reason: "nothing_to_push" };
-		// Nothing is on origin. Two ways that is still fine, in order of strength.
-		//
-		// 1. A merge receipt: `gh pr view` said MERGED, with a merge commit, for this
-		//    exact head. That is true for squash, rebase and merge commits alike,
-		//    which is exactly what ancestry can never be.
-		const receipt = readMergeReceipt(this.#options.home, jobId);
-		if (receipt) {
-			if (receipt.head_sha === head) return { ok: true, reason: "merged" };
-			return {
-				ok: false,
-				failure: {
-					code: "unpushed",
-					message:
-						`${worktree} on ${branch}: PR ${receipt.pr_url} merged head ${receipt.head_sha.slice(0, 12)}, ` +
-						`but the local tip is ${head.slice(0, 12)} — those commits landed nowhere`,
-					fix: "keep the lease; push the extra commits (they are not in the merged PR), then retry teardown",
-				},
-			};
-		}
-
-		// 2. The receipt-free fallback: the head branch is gone from origin AND the
-		//    two-dot tree diff against the base is empty, so the base already holds
-		//    this exact content. True only while the base has not moved on, which is
-		//    why it is the fallback and the receipt is the mechanism.
-		if (await this.#mergedAndAbsorbed(worktree, base)) {
-			return { ok: true, reason: "merged_head_deleted" };
-		}
-
-		// Naming the stale ref is the whole point of the third case: it is the exact
-		// condition that used to pass as "(pushed)", so the refusal says so out loud.
-		// Reading it for a *message* is not reading it as evidence.
-		const staleRef = await this.#git(worktree, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
-		const stale = staleRef.status === 0 ? staleRef.stdout.trim() : "";
-		return {
-			ok: false,
-			failure: {
-				code: "unpushed",
-				message:
-					stale.length > 0
-						? `${worktree} branch ${branch} is not on origin (origin/${branch} survives here only as a stale remote-tracking ref at ${stale.slice(0, 12)}), and origin/${base} does not contain its content`
-						: `${worktree} branch ${branch} has no upstream, is not on origin, and origin/${base} does not contain its content`,
-				fix: `keep the lease; push the branch — or, if its PR merged, record it with cp_merged ${jobId} (gh confirms the merge) — then retry teardown`,
-			},
-		};
+		// Nothing is on origin: an exact merge receipt, then the git landing proof (src/teardown-head.ts landingGate).
+		return landing();
 	}
 
 	/**
@@ -527,7 +498,7 @@ export class Teardown {
 		const remoteBranch = name.slice(slash + 1);
 		// `origin/<branch>` was already asked and answered above.
 		if (remoteName === "origin" && remoteBranch === branch) return undefined;
-		const tip = await this.#remoteTip(worktree, remoteBranch, remoteName);
+		const tip = await remoteTip((c, args) => this.#git(c, args), worktree, remoteBranch, remoteName);
 		if (!tip.ok || !tip.sha) return undefined;
 		if (tip.sha === head) return { ok: true, reason: "upstream" };
 		return {
@@ -540,29 +511,6 @@ export class Teardown {
 		};
 	}
 
-	/**
-	 * What the remote itself says the branch's tip is: `sha` when it exists there,
-	 * `sha: undefined` when the remote answered and does not have it, and
-	 * `ok: false` when the remote could not be asked (which is never treated as
-	 * absence, and never falls back to a remote-tracking ref).
-	 */
-	async #remoteTip(
-		worktree: string,
-		branch: string,
-		remote = "origin",
-	): Promise<{ ok: true; sha?: string } | { ok: false; error: string }> {
-		const result = await this.#git(worktree, ["ls-remote", "--heads", remote, `refs/heads/${branch}`]);
-		if (result.status !== 0) {
-			const detail = (result.stderr || result.stdout).trim().split("\n")[0] ?? "git ls-remote failed";
-			return { ok: false, error: detail };
-		}
-		const line = result.stdout
-			.split("\n")
-			.map((entry) => entry.trim())
-			.find((entry) => entry.endsWith(`refs/heads/${branch}`));
-		const sha = line?.split(/\s+/)[0];
-		return sha ? { ok: true, sha } : { ok: true };
-	}
 
 	/**
 	 * Is HEAD the tip of the job branch? Returns a **failure** when it is not, and
@@ -735,36 +683,6 @@ export class Teardown {
 		}
 	}
 
-	/**
-	 * Merged-and-absorbed, by the ported rules — now the **fallback** behind the
-	 * merge receipt, reached only once the caller has established (from the remote
-	 * itself) that the head branch is gone:
-	 *
-	 *  - the **two-dot tree diff** `git diff HEAD <base sha from origin>` is empty,
-	 *    so the base already holds this exact content.
-	 *
-	 * The base sha comes from origin itself (`git ls-remote`, via `#remoteTip`),
-	 * never from `refs/remotes/origin/<base>` (cp-vk1): this is a **pass**
-	 * decision, and a stale tracking ref that happens to match HEAD's tree would
-	 * tear a job down as "merged" when nothing merged. It fails closed — if origin
-	 * cannot be asked, or the base is not there, the answer is `false` and the
-	 * caller falls through to its `unpushed` refusal. A sha origin names but this
-	 * clone does not have makes `git diff` exit non-zero, which is the same `false`;
-	 * no fetch is issued to repair that, because a false negative here is safe and
-	 * fetching is a side effect this gate does not own.
-	 *
-	 * A three-dot diff is deliberately not used: after a squash merge it still
-	 * shows the branch's own changes and would read as "not merged". Note the
-	 * limit that made cp-vk1 necessary: this is only true while the base has not
-	 * moved on since the merge, which for a repo that squash-merges everything is
-	 * a narrow window. The receipt is what covers the rest.
-	 */
-	async #mergedAndAbsorbed(worktree: string, base: string): Promise<boolean> {
-		const tip = await this.#remoteTip(worktree, base);
-		if (!tip.ok || !tip.sha) return false;
-		const diff = await this.#git(worktree, ["diff", "--name-only", "HEAD", tip.sha]);
-		return diff.status === 0 && diff.stdout.trim().length === 0;
-	}
 
 	async #defaultBase(cwd: string): Promise<string> {
 		return resolveDefaultBase((c, args) => this.#git(c, args), cwd);

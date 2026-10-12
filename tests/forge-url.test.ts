@@ -89,6 +89,13 @@ test("self-managed GitLab: explicit config, ssh alias with a port, installation 
 	assert.ok(noToken.ok && noToken.repository.token_env === undefined, "a custom host never inherits GITLAB_TOKEN");
 	const api = resolveForgeRepository("git@code.example.com:team/app.git", { kind: "gitlab", api_base_url: "https://api.example.com/v4/" });
 	assert.ok(api.ok && api.repository.api_base_url === "https://api.example.com/v4");
+	// The default GITLAB_TOKEN follows the API host, not the web host.
+	const elsewhere = resolveForgeRepository("git@gitlab.com:g/app.git", { kind: "gitlab", api_base_url: "https://api.example.com/v4" });
+	assert.ok(elsewhere.ok && elsewhere.repository.token_env === undefined, "the gitlab.com token is never sent to another API host");
+	const ownToken = resolveForgeRepository("git@gitlab.com:g/app.git", { kind: "gitlab", api_base_url: "https://api.example.com/v4", token_env: "PROXY_TOKEN" });
+	assert.ok(ownToken.ok && ownToken.repository.token_env === "PROXY_TOKEN", "another API host uses its own token_env");
+	const proxied = resolveForgeRepository("git@code.example.com:g/app.git", { kind: "gitlab", api_base_url: "https://gitlab.com/api/v4" });
+	assert.ok(proxied.ok && proxied.repository.token_env === "GITLAB_TOKEN", "the gitlab.com API host gets the default variable");
 	assert.equal(resolveForgeRepository("git@github.com:o/r.git", { kind: "gitlab", web_base_url: "https://gitlab.example.com" }).ok, true, "explicit config wins over host detection");
 	assert.equal(resolveForgeRepository("git@ghe.example.com:o/r.git", { kind: "github" }).ok, false, "no GitHub Enterprise");
 });

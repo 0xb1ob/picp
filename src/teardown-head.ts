@@ -20,7 +20,8 @@ import { HUMAN_REVIEW_SUBJECT } from "./human-handoff.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
 import type { JobOwner } from "./job-claims.ts";
-import type { GateFailure, TeardownResult } from "./teardown.ts";
+import { type GitRun, type LandingEvidence, readLandingProof } from "./landing-proof.ts";
+import type { GateFailure, GateOutcome, TeardownResult } from "./teardown.ts";
 import { boundedWakeupId, type DurableWakeupInput, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 
 export interface TeardownCallOptions {
@@ -91,7 +92,10 @@ export function formatTeardown(result: TeardownResult): string {
 		const why = result.killed_unreported ? "killed_unreported" : result.reason ?? "forced";
 		const note = result.unreported ? ` — no report was filed for ${result.job_id}: relay "no report", never a result` : "";
 		const ledger = result.ledger_close_error ? ` — ledger close failed (${result.ledger_close_error}); re-run cp_teardown ${result.job_id} to retry` : "";
-		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${note}${ledger}`;
+		const landing = result.landing
+			? ` — git proof: HEAD ${result.landing.head.slice(0, 12)} content found in origin/${result.landing.base_branch} at ${result.landing.witness.slice(0, 12)} (${result.landing.method}); no PR/MR merge is claimed, so close the job with cp_job close ${result.job_id} and that reason`
+			: "";
+		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${landing}${note}${ledger}`;
 	}
 	if (result.failure) {
 		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
@@ -271,9 +275,71 @@ function readFiledEnvelopeRecord(home: string, jobId: string): EnvelopeRecord | 
 	}
 }
 
-/** A pushed head is durable, but an unreported head is not finished work. */
-export function acceptedHeadFailure(home: string, record: FleetRecord, head: string): GateFailure | undefined {
+export interface LandingGateInput {
+	home: string;
+	git: GitRun;
+	record: Pick<FleetRecord, "job_id" | "branch" | "bound_pr">;
+	worktree: string;
+	head: string;
+	/** origin's tip of the job branch when it exists there but differs from HEAD. */
+	remoteSha?: string;
+	/** Configured project base, then the clone's default: used when no receipt or bound PR names a target. */
+	base: string;
+	now?: () => Date;
+}
+
+/**
+ * Nothing on origin matches HEAD. Before saying "unpushed": an exact merge
+ * receipt for this head, then the git-only landing proof against the actual
+ * target (receipt base, bound PR base, project base). A git pass is content in
+ * the base, never a merged PR/MR; an unknown proof keeps the lease as
+ * `landing_unverified`, naming what is missing — it is not unpushed work.
+ */
+export async function landingGate(input: LandingGateInput): Promise<GateOutcome> {
+	const { home, git, record, worktree, head } = input;
+	const { job_id: jobId, branch } = record;
+	const found = readMergeReceipt(home, jobId);
+	const receipt = found?.job_id === jobId && found.head_branch === branch ? found : undefined;
+	if (receipt?.head_sha === head) return { ok: true, reason: "merged" };
+	const base = receipt?.base_branch ?? record.bound_pr?.base ?? input.base;
+	const proof = await readLandingProof(git, worktree, head, base, { ...(input.now ? { now: input.now } : {}) });
+	if (proof.result === "landed") {
+		// The receipt-free whole-tree pass keeps its pre-forge-PR-2 name and shape.
+		if (!input.remoteSha && !receipt && proof.evidence.method === "tree") return { ok: true, reason: "merged_head_deleted" };
+		return { ok: true, reason: "landed_by_git", landing: proof.evidence };
+	}
+	const where = input.remoteSha ? `${worktree} on ${branch}: local tip ${head.slice(0, 12)} != origin/${branch} (${input.remoteSha.slice(0, 12)})` : `${worktree} branch ${branch} is not on origin`;
+	if (proof.result === "unknown") {
+		return { ok: false, failure: { code: "landing_unverified", message: `${where}, and whether HEAD ${head.slice(0, 12)} landed on origin/${base} is unknown: ${proof.detail}`,
+			fix: `keep the lease; this is unproven, not unpushed — restore what the proof needs (${proof.detail}) and retry teardown, or record the merge with cp_merged ${jobId} if the forge can observe it` } };
+	}
+	if (receipt) {
+		return { ok: false, failure: { code: "unpushed", message: `${worktree} on ${branch}: PR ${receipt.pr_url} merged head ${receipt.head_sha.slice(0, 12)}, but the local tip is ${head.slice(0, 12)} — those commits landed nowhere`,
+			fix: "keep the lease; push the extra commits (they are not in the merged PR), then retry teardown" } };
+	}
+	if (input.remoteSha) return { ok: false, failure: { code: "unpushed", message: where, fix: "keep the lease; push the branch, then retry teardown" } };
+	// Naming a stale tracking ref is the point: it is what used to pass as "(pushed)". Read for a message, never as evidence.
+	const staleRef = await git(worktree, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
+	const stale = staleRef.status === 0 ? staleRef.stdout.trim() : "";
+	return { ok: false, failure: { code: "unpushed",
+		message: stale.length > 0
+			? `${worktree} branch ${branch} is not on origin (origin/${branch} survives here only as a stale remote-tracking ref at ${stale.slice(0, 12)}), and origin/${base} does not contain its content`
+			: `${worktree} branch ${branch} has no upstream, is not on origin, and origin/${base} does not contain its content`,
+		fix: `keep the lease; push the branch — or, if its PR merged, record it with cp_merged ${jobId} (the forge confirms the merge) — then retry teardown` } };
+}
+
+/** Re-read just before the lease goes: a git proof is about one HEAD in one clean tree. */
+export async function landingMoved(git: GitRun, worktree: string, landing: LandingEvidence): Promise<GateFailure | undefined> {
+	const head = (await git(worktree, ["rev-parse", "HEAD"])).stdout.trim();
+	const dirty = await git(worktree, ["status", "--porcelain"]);
+	if (head === landing.head && dirty.status === 0 && dirty.stdout.trim() === "") return undefined;
+	return { code: "landing_unverified", message: `${worktree}: HEAD or the tree changed after the landing proof for ${landing.head.slice(0, 12)}`, fix: "keep the lease; the proof no longer describes this worktree — retry teardown" };
+}
+
+/** A pushed head is durable, but an unreported head is not finished work. `landing` is this call's own fresh git proof. */
+export function acceptedHeadFailure(home: string, record: FleetRecord, head: string, landing?: LandingEvidence): GateFailure | undefined {
 	const jobId = record.job_id;
+	if (landing?.head === head) return undefined;
 	const envelopeRecord = readFiledEnvelopeRecord(home, jobId);
 	const envelope = envelopeRecord?.envelope as Envelope | undefined;
 	const receipt = readMergeReceipt(home, jobId);

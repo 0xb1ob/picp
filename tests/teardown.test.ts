@@ -284,10 +284,13 @@ test("ship: a squash-merged PR passes on its merge receipt, after the base has m
 	advanceBase(b.repo, "docs/other.md", "# a later merge, from another job\n");
 	git(worktree, "fetch", "--quiet", "--prune", "origin");
 
-	// Without a receipt the gate refuses — correctly, on the evidence it has.
+	// Forge PR 2: without a receipt the git landing proof now finds the squashed
+	// content in origin's base history (it used to refuse here) — a content pass,
+	// never a merge claim, so no merge.json is written by it.
 	const before = await b.teardown.checkGates(worktree, jobId, "ship");
-	assert.equal(before.ok, false, "a squash merge is not visible in ancestry, and the gate does not guess");
-	assert.match(before.ok === false ? before.failure.fix : "", /cp_merged/, "the fix names a real mechanism");
+	assert.equal(before.ok && before.reason, "landed_by_git", "a squash merge is not in ancestry, but its content is in the base");
+	assert.equal(before.ok && before.landing?.head, head);
+	assert.equal(existsSync(join(b.home, paths.mergeFile(jobId))), false, "a git proof invents no merge receipt");
 
 	// Record what gh says, which is the mechanism "confirm the PR merged" lacked.
 	const merges = new MergeStore({
@@ -354,9 +357,10 @@ test("ship: a branch that only LOOKS pushed via a stale remote-tracking ref is r
 	git(worktree, "push", "--quiet", "-u", "origin", jobId);
 	const head = git(worktree, "rev-parse", "HEAD");
 
-	// Deleted from the remote by someone else's clone, and deliberately NOT pruned
-	// here: this worktree still holds origin/<branch> at exactly the local tip.
-	squashMergeAndDeleteHead(b.repo, jobId);
+	// Deleted from the remote by someone else, and deliberately NOT pruned here:
+	// this worktree still holds origin/<branch> at exactly the local tip. Deleted
+	// unmerged (forge PR 2), so the git landing proof cannot find it in the base either.
+	git(b.repo.remote as string, "branch", "-D", jobId);
 	advanceBase(b.repo, "docs/after.md", "# main moved on\n");
 	assert.equal(
 		git(worktree, "rev-parse", `refs/remotes/origin/${jobId}`),
@@ -455,7 +459,10 @@ test("ship: a stale origin/<base> that matches HEAD's tree no longer passes tear
 	const trackingRef = git(worktree, "rev-parse", "refs/remotes/origin/main");
 	assert.equal(git(worktree, "diff", "--name-only", "HEAD", "origin/main"), "", "the stale ref's tree equals HEAD — the false-pass condition");
 
-	// origin advances, and nobody fetches: the tracking ref keeps its old answer.
+	// origin's main is rewound past the squash and advances, and nobody fetches:
+	// the tracking ref keeps its old answer. (Forge PR 2: a plain advance would
+	// keep the squash in origin's history, which the git landing proof rightly accepts.)
+	git(b.repo.remote as string, "update-ref", "refs/heads/main", `${trackingRef}^`);
 	const advanced = advanceBase(b.repo, "docs/after.md", "# main moved on\n");
 	assert.notEqual(advanced, trackingRef, "origin's main is not what the tracking ref says");
 	assert.equal(git(worktree, "rev-parse", "refs/remotes/origin/main"), trackingRef, "and it is still stale");
@@ -490,7 +497,9 @@ test("ship: an unanswerable origin fails the merged-and-absorbed fallback closed
 		)
 		.checkGates(worktree, jobId, "ship");
 	assert.equal(gate.ok, false, "origin could not be asked, so nothing is proven");
-	assert.equal(gate.ok === false && gate.failure.code, "unpushed");
+	// Forge PR 2: an unanswerable base is a named unknown, not "unpushed", and the fix never suggests force.
+	assert.equal(gate.ok === false && gate.failure.code, "landing_unverified");
+	assert.doesNotMatch(gate.ok === false ? gate.failure.fix : "", /force/);
 	assert.equal(asked(calls, readsBaseTrackingRef("main")), false, "and it does not fall back to the tracking ref");
 });
 
@@ -1309,9 +1318,16 @@ test("ship + delivery:local: no commits of its own tears down without an origin 
 	const prTree = b.worktree(prId);
 	await b.addJob(prId, prTree, "ship", "pr");
 	advanceBase(b.repo, "src/moved-again.ts", "export const movedAgain = 1;\n");
-	const refused = await b.teardown.teardown(prId);
-	assert.equal(refused.torn_down, false, "delivery:pr with no commits still needs a push");
-	assert.equal(refused.failure?.code, "unpushed");
+	// Forge PR 2: a pr job's HEAD that is already in origin's base history has
+	// nothing to lose; it passes on the git proof (ancestry), never as "pushed" or merged.
+	const empty = await b.teardown.teardown(prId);
+	assert.equal(empty.torn_down, true, formatTeardown(empty));
+	assert.equal(empty.reason, "landed_by_git");
+	assert.equal(empty.landing?.method, "ancestry");
+	const journaled = readRunEvents(b.home, prId).find((event) => event.type === "teardown_landing_proven");
+	assert.equal((journaled?.payload as { head?: string } | undefined)?.head, empty.landing?.head, "the proof is journaled with its evidence");
+	assert.match(formatTeardown(empty), /no PR\/MR merge is claimed/i);
+	assert.equal(existsSync(join(b.home, paths.mergeFile(prId))), false, "and no merge receipt is invented");
 });
 
 test("ship: work on a detached HEAD is refused as unreachable, not as unpushed", { timeout: 60_000 }, async (t) => {

@@ -107,7 +107,7 @@ export const MergeAuthoritySchema = Type.Object(
 export type MergeAuthority = Replace<Static<typeof MergeAuthoritySchema>, { kind: MergeAuthorityKind }>;
 
 /**
- * state/runs/<job-id>/merge.json — the observed fact that this job's PR landed.
+ * state/runs/<job-id>/merge.json — the observed fact that this job's PR/MR landed.
  *
  * The mechanism behind "confirm the PR merged" (cp-vk1). Before it existed the
  * teardown gate could only ask git whether the branch content was an ancestor
@@ -115,9 +115,11 @@ export type MergeAuthority = Replace<Static<typeof MergeAuthoritySchema>, { kind
  * only exit from a landed-but-unprovable job was `force` — a weaker claim than
  * the evidence supported.
  *
- * Written from what `gh pr view` reported, never from an assertion: a receipt
- * exists only for a PR GitHub itself called `MERGED` with a merge commit, so
- * reading one back is reading an observation.
+ * Written from what the forge reported (`gh pr view`, or the GitLab MR API),
+ * never from an assertion: a receipt exists only for a change request the forge
+ * itself called merged with a landing commit, so reading one back is reading an
+ * observation. A git-only landing proof never writes one. For GitLab,
+ * `pr_number` is the project-local MR IID.
  */
 export const MergeReceiptSchema = Type.Object(
 	{
@@ -126,27 +128,37 @@ export const MergeReceiptSchema = Type.Object(
 		job_id: JobIdSchema,
 		pr_url: Type.String({ minLength: 1, maxLength: 500 }),
 		pr_number: Type.Optional(Type.Integer({ minimum: 1 })),
-		/** The commit the merge produced on the base — squash, rebase or merge. */
+		/** The commit the merge produced on the base — merge, squash, or (fast-forward/rebase) the landed head. */
 		merge_commit_sha: CommitShaSchema,
 		/** The PR head commit that was merged: what the local tip must still be. */
 		head_sha: CommitShaSchema,
 		head_branch: Type.String({ minLength: 1, maxLength: 200 }),
 		/** The head branch belongs to a bound PR, not `job_id`. */
 		bound: Type.Optional(Type.Literal(true)),
-		/** Whether the head branch is gone from the remote (GitHub's auto-delete). */
+		/** Whether the head branch is gone from the remote (auto-delete on merge). */
 		head_branch_deleted: Type.Optional(Type.Boolean()),
 		base_branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 		strategy: Type.Optional(MergeStrategySchema),
 		merged_at: Type.Optional(IsoTimestampSchema),
 		recorded_at: IsoTimestampSchema,
-		/** The channel that observed the merge (`gh pr view`, an operator command). */
+		/** The channel that observed the merge (`gh pr view`, `gitlab api`, an operator command). */
 		recorded_by: Type.String({ minLength: 1, maxLength: 120 }),
 		/** Which rule permitted this merge (cp-e0c). Absent: not observed by this tool. */
 		authority: Type.Optional(MergeAuthoritySchema),
+		/** Forge PR 2: which forge observed it and the project's web url. Absent on legacy (pre-forge) receipts, which are GitHub. */
+		forge: Type.Optional(
+			Type.Object(
+				{
+					provider: StringEnum(["github", "gitlab"]),
+					project_url: Type.String({ minLength: 1, maxLength: 500 }),
+				},
+				{ additionalProperties: false },
+			),
+		),
 	},
 	{ additionalProperties: false },
 );
-export type MergeReceipt = Replace<Static<typeof MergeReceiptSchema>, { strategy?: MergeStrategy; authority?: MergeAuthority }>;
+export type MergeReceipt = Replace<Static<typeof MergeReceiptSchema>, { strategy?: MergeStrategy; authority?: MergeAuthority; forge?: { provider: "github" | "gitlab"; project_url: string } }>;
 
 // ---------------------------------------------------------------------------
 // Integration (cp-uug) — state/runs/<job-id>/integration.json
