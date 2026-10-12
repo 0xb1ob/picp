@@ -53,7 +53,7 @@ test("the loop sweeps at once, then only after each sweep settles (never overlap
 	assert.equal(count, 1, "the first sweep starts immediately");
 	// Wait on conditions, not fixed sleeps: a loaded CI runner may be slow to fire 5 ms timers.
 	const until = async (ok: () => boolean, why: string): Promise<void> => {
-		for (const deadline = Date.now() + 4_000; !ok(); await new Promise((done) => setTimeout(done, 5))) assert.ok(Date.now() < deadline, why);
+		for (const deadline = Date.now() + 5_000; !ok(); await new Promise((done) => setTimeout(done, 5))) assert.ok(Date.now() < deadline, why);
 	};
 	await until(() => count === 2, "the second sweep starts after the first settles");
 	await new Promise((done) => setTimeout(done, 40));
