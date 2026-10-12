@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { describeHome } from "../home.ts";
 import { resolveStateDir } from "./sessions.ts";
+import { remoteRuntime } from "./remote-runtime.ts";
 import { createViewer, hostHeaderFor } from "./server.ts";
 
 export const DEFAULT_PORT = 8766;
@@ -75,8 +76,11 @@ export async function main(argv: readonly string[]): Promise<void> {
 		appBuildError = "Viewer build unavailable";
 		process.stderr.write(`cp-view: startup build failed; / returns 503; health and APIs remain available: ${error instanceof Error ? error.message : "unknown build error"}\n`);
 	}
-	createViewer({ home, stateDir, host, port, requireTailnet: values["require-tailnet"] === true, ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) }).listen(port, host, () => {
+	const options = { home, stateDir, host, port, requireTailnet: values["require-tailnet"] === true, ...(app ? { app } : {}), ...(appBuildError ? { appBuildError } : {}) };
+	createViewer(options).listen(port, host, () => {
 		process.stdout.write(`cp-view: http://${hostHeaderFor(host, port)}/ (read-only, state ${stateDir})\n`);
+		// Remote dashboard: inert until cp-tunnel configures this home (remote-runtime.ts); the local listener is unchanged.
+		remoteRuntime(options).start();
 	});
 }
 

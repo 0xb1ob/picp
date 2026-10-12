@@ -38,7 +38,10 @@ after 10 s if no exit was observed. A child recorded by a crashed inner is signa
 exact recorded command line, and nothing new starts until it is gone. An unreadable config stops the child (`failed`,
 with the reason). An unreadable runtime record starts nothing. Child output reaches the daemon log only sanitized
 (escapes and control bytes removed, long token-like runs redacted, 300 characters per line, 200 lines per run).
-`cp-tunnel`, which writes the config, is a later slice; until then nothing enables a tunnel.
+An unreadable runtime record is re-read on every reconcile; a child that never reports its exit 10 s after SIGKILL is
+dropped from tracking with a log line. Nothing enables a tunnel until `cp-tunnel up` (PR 2d) writes the config;
+`cp-tunnel down` disables it. `cp-install` writes only the `~/.local/bin/cp-tunnel` wrapper (removed by `--uninstall`),
+never a tunnel config.
 
 No operator unit (cp-rrye): the dashboard's Start session / Resume last session in tmux runs `tmux new-session
 -d -s cp-operator ~/.local/bin/cp-operator` (`-c` to resume) from the cp-daemon-run viewer; cp-install removes

@@ -54,7 +54,7 @@ import { ROLE_PACKAGES } from "../worker-packages.ts";
 import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
 import { ghLoggedIn } from "./health.ts";
 import { herdrPiIntegrated, onPath } from "../viewer/launchers.ts";
-import { DAEMON_UNIT, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, OPERATOR_WRAPPER, PARENT_UNIT, renderDaemonUnit, renderOperatorWrapper, renderUnits, type UnitInput, unitParentModel, unitPath, unitViewerHost, VIEW_UNIT, wrapperModels, wrapperViewerHost } from "./units.ts";
+import { DAEMON_UNIT, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, OPERATOR_WRAPPER, PARENT_UNIT, renderDaemonUnit, renderOperatorWrapper, renderTunnelWrapper, renderUnits, TUNNEL_WRAPPER, type UnitInput, unitParentModel, unitPath, unitViewerHost, VIEW_UNIT, wrapperModels, wrapperViewerHost } from "./units.ts";
 import { activate, type BackendContext, deactivate, detectBackend, legacyPreflight, legacyPresent, linger } from "./daemon-backend.ts";
 import { type DaemonConfig, daemonPaths, validateDaemonConfig } from "./daemon-files.ts";
 import { chooseModels } from "./models.ts";
@@ -190,7 +190,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (flags.uninstall) {
 		// Never stop cp-operator.service: its ExecStop kills the live tmux operator session. It was never
 		// enabled, so there is nothing to disable; a running session keeps running after its unit file goes.
-		for (const path of [...operatorUnits.map((name) => join(unitDir, name)), join(binDir, OPERATOR_WRAPPER)]) {
+		for (const path of [...operatorUnits.map((name) => join(unitDir, name)), join(binDir, OPERATOR_WRAPPER), join(binDir, TUNNEL_WRAPPER)]) {
 			const text = ports.read(path);
 			if (text === undefined) step("skip", "uninstall", `${path} absent`);
 			else if (!text.includes(GENERATED)) step("skip", "uninstall", `${path} was not written by cp-install; left in place`);
@@ -289,6 +289,8 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 		...(holdLegacy ? [] : [{ path: paths.config, text: `${JSON.stringify(ctx.config, null, 2)}\n`, mode: 0o600, kind: "daemon" as const }]),
 		...(systemd && !holdLegacy ? [{ path: join(unitDir, DAEMON_UNIT), text: daemonUnit, mode: 0o644, kind: "unit" as const }] : []),
 		{ path: join(binDir, OPERATOR_WRAPPER), text: renderOperatorWrapper({ app, home, viewerHost: viewerHost || undefined, parentModel: wrapperParent, operatorModel: models.operator }), mode: 0o755, kind: "wrapper" },
+		// Only the command: no tunnel config is written, so the remote dashboard stays off until `cp-tunnel up`.
+		{ path: join(binDir, TUNNEL_WRAPPER), text: renderTunnelWrapper({ app, home }), mode: 0o755, kind: "wrapper" },
 	];
 	// Every refusal before any write: a refused wrapper must not leave a new data/daemon.json beside running legacy
 	// units (their cp-update would then refuse instead of recording migration_required).
@@ -543,7 +545,7 @@ export async function waitForParentDoctor(home: string, timeoutMs: number): Prom
 }
 
 /** One line from /dev/tty (so `curl | sh` still asks); undefined when there is no terminal. */
-function askTty(question: string): string | undefined {
+export function askTty(question: string): string | undefined {
 	let fd: number;
 	try {
 		fd = openSync("/dev/tty", "r+");

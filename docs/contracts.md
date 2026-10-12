@@ -6646,7 +6646,7 @@ socket, 32-byte token, started_at) in a 0700 directory. Frames are newline JSON 
 viewer owns the socket (a starter finding a live socket refuses; a socket nothing answers is stale and replaced, only
 the inode it probed), and claims from any number of processes go through that one owner. The client
 (`deviceControlRequest`) refuses a record that is not an owner-only regular file of this user or whose pid is gone.
-Nothing starts it yet: `cp-tunnel` wiring is the tunnel PR. A stale-socket takeover runs under
+The viewer starts it once the remote feature is configured (PR 2d, below). A stale-socket takeover runs under
 `state/devices/control.lock` (O_EXCL, holder pid, re-probing the inode and answer under the lock), so concurrent
 starters replace a stale socket once; a lock held by a live pid refuses "another viewer is starting", one left by a
 dead pid refuses by name for a human to remove. Frame limits count bytes, not characters.
@@ -6692,7 +6692,27 @@ The published origin is the named hostname or the first validated `https://<labe
 and only once a tunnel connection registered. A new origin is a new generation; the same named origin keeps its own.
 Disable, hold, reload and stop SIGTERM the child and SIGKILL it 10 s later if no exit was observed. A crashed inner's
 child is signalled only by its exact recorded command line, never by name or group. An unreadable config or runtime
-fails closed. Nothing writes the config until `cp-tunnel`, so the feature stays off.
+fails closed. An unreadable runtime record is re-read on every reconcile (its recovery then runs); a child that never
+reports its exit 10 s after SIGKILL is dropped from tracking with a log line, so stop and reload always settle.
+
+**The viewer's remote runtime and `cp-tunnel` (PR 2d).** Off by default: nothing changes on a home until `cp-tunnel up`
+writes `data/tunnel.json`, and the local loopback/tailnet listener is never touched. The viewer
+(`src/viewer/remote-runtime.ts`, every 2 s) does nothing while `remoteFeatureConfigured` is false; once true it owns the
+device socket and opens the remote listener on `127.0.0.1:<port>` only for an enabled config whose revision, mode and
+port the controller's `running` record matches with an origin. A revision-only change is acknowledged in place; any
+other change (port, mode, origin, generation), a disable, a stop or an unreadable file closes it and drops its
+connections. The owner socket's `status` answers `{pid, running, origin, generation, revision, port}`: the readiness ack.
+`cp-tunnel up` (`src/tunnel/cli.ts`, `bin/cp-tunnel`, the generated `~/.local/bin/cp-tunnel`) validates, provisions
+cloudflared, copies a named token to the 0600 `data/tunnel/token`, writes the next revision under the O_EXCL
+`data/tunnel.lock`, starts a stopped cp-daemon, and reports success only when the runtime record runs that revision with
+an origin and the viewer's ack names the same revision, origin and generation (else it fails by name after 120 s, the
+config left enabled). stdout is the origin only; the pairing link and QR go to `/dev/tty` only, and a missing terminal
+refuses before any code is issued. `down` writes a disabled revision and waits for cloudflared's exit and the closed
+listener. `pair`, `devices`, `revoke` and `status` use the owner socket. Push consent is named-only: Web Push moves to the
+tunnel origin only with `--push-origin accept` or a typed "y" (`initPush`, keys never rotated); anything else, including no
+terminal, leaves the push config and key bytes unchanged. A quick tunnel never touches push. The quick listener's page
+carries `<meta name="cp-refresh" content="poll">` and the app polls every 2 s while visible instead of opening SSE.
+Still to come: the no-tailnet remote-only mode and its owner-socket health/updater probe.
 
 ## Reading the plan
 

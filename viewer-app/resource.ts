@@ -5,6 +5,17 @@ interface Dependencies {
  fetch(url: string, init: {signal: AbortSignal}): Promise<Response>;
  stream(url: string): Stream;
 }
+export const POLL_MS = 2000;
+/**
+ * Quick Tunnels carry no SSE, so the quick listener's app polls: a two-second clock speaking the stream's events.
+ * `createResource` keeps doing the rest — it opens this only while visible, coalesces overlapping refreshes and closes it on hide/dispose.
+ */
+export function pollStream(): Stream {
+ const target = new EventTarget();
+ const opened = setTimeout(() => target.dispatchEvent(new Event("open")), 0);
+ const clock = setInterval(() => target.dispatchEvent(new Event("refresh")), POLL_MS);
+ return Object.assign(target, { close() { clearTimeout(opened); clearInterval(clock); } });
+}
 export function createResource<T>(url: string, streamUrl: string, deps: Dependencies = {fetch: (u,i) => fetch(u,i), stream:u => new EventSource(u)}) {
  let state: Snapshot<T> = {data:null,status:"connecting",error:null};
  let generation = 0, visible = false, connected = false, trailing = false, disposed = false;
@@ -27,6 +38,8 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
    state = {data, status:connected ? "live" : "stale", error:null}; publish();
   } catch {
    if (generation !== current || disposed) return;
+   // A remote 401 is a revoked or expired device: protected data goes, never shown stale (the local listener never answers 401).
+   if (code === 401) state.data = null;
    clearTimeout(freshness); state.status = state.data ? "stale" : "offline"; state.error = "Refresh failed";
    if (code === undefined) delete state.code; else state.code = code;
    publish();

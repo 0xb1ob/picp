@@ -114,7 +114,8 @@ test("install: a first run writes data/daemon.json, cp-daemon.service and the wr
 	const f = fake(user);
 	assert.equal(await install(flags(user), f.ports), 0, f.lines.join("\n"));
 	const { unitDir, binDir } = installTargets(f.ports.env);
-	for (const file of [thinUnit(f), join(binDir, "cp-operator")]) assert.ok(f.files.has(file), file);
+	for (const file of [thinUnit(f), join(binDir, "cp-operator"), join(binDir, "cp-tunnel")]) assert.ok(f.files.has(file), file);
+	assert.ok(![...f.files.keys()].some((path) => /tunnel\.json$|\/tunnel\//.test(path)), "cp-install never enables a tunnel: no tunnel config is written");
 	assert.match(f.files.get(thinUnit(f))!, /^ExecStart="\/opt\/node\/bin\/node" ".*\/src\/service\/daemon\.ts" "run"$/m);
 	assert.deepEqual({ ...configOf(f) }, { schema_version: 1, generated_by: "cp-install", backend: "systemd", node: "/opt/node/bin/node", app: join(user, ".pi-command-post/app"), home: homeOf(f), path: `/opt/node/bin:${join(user, ".local/bin")}`, port: 8766 });
 	assert.equal(f.modes.get(configFile(f)), 0o600);
@@ -246,6 +247,7 @@ test("install --uninstall stops cp-daemon, removes only what it wrote (data/daem
 	assert.ok(!f.files.has(thinUnit(f)));
 	assert.ok(!f.files.has(configFile(f)), "data/daemon.json removed");
 	assert.ok(f.files.has(join(binDir, "cp-operator")), "a wrapper cp-install did not write stays");
+	assert.ok(!f.files.has(join(binDir, "cp-tunnel")), "the generated cp-tunnel wrapper goes");
 	assert.deepEqual([...f.files.keys()].filter((path) => path.startsWith(join(user, ".pi-command-post"))), before);
 	assert.ok(f.lines.some((line) => line.startsWith("ok: uninstall: home ") && line.includes("kept (data/daemon.json removed)")), f.lines.join("\n"));
 

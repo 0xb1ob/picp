@@ -95,8 +95,8 @@ test("this package ships no CLI at all (T30)", () => {
 		// cp-view is the read-only web session viewer: it reads state/ and drives nothing. cp-install
 		// (cp-daemon P2) installs the always-on units and the wrapper; cp-bootstrap (P2i) fetches the
 		// code and runs cp-install. cp-daemon (cp-wfo4) supervises those same units without systemd. None
-		// of them touches the fleet.
-		assert.deepEqual(readdirSync(binDir).sort(), ["cp-bootstrap", "cp-daemon", "cp-install", "cp-operator", "cp-view"], "bin/ may hold only the installer, the service daemon, the operator launcher and the read-only viewer, not a fleet CLI");
+		// of them touches the fleet. cp-tunnel (remote dashboard PR 2d) switches the remote dashboard on and off.
+		assert.deepEqual(readdirSync(binDir).sort(), ["cp-bootstrap", "cp-daemon", "cp-install", "cp-operator", "cp-tunnel", "cp-view"], "bin/ may hold only the installer, the service daemon, the operator launcher, the remote-dashboard switch and the read-only viewer, not a fleet CLI");
 	}
 	// Explaining that the CLI is gone is fine; *inviting* someone to run it is
 	// not, so the ban is on invocations rather than on the word.

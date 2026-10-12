@@ -1,0 +1,11 @@
+#!/bin/sh
+# cp-tunnel: the remote dashboard's switch (up, pair, devices, revoke, status,
+# down). See src/tunnel/cli.ts. Nothing is exposed until `up` runs.
+# CP_HOME unset and this checkout sits in an installed home (<home>/app, beside
+# <home>/data/daemon.json): that enclosing home. --home still wins in cli.ts.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ -z "${CP_HOME:-}" ] && [ -f "$ROOT/../data/daemon.json" ]; then
+	CP_HOME=$(CDPATH= cd -- "$ROOT/.." && pwd)
+	export CP_HOME
+fi
+exec node "$ROOT/src/tunnel/cli.ts" "$@"

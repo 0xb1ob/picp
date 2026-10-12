@@ -18,9 +18,12 @@ export interface ViewerApp {
  * `viewer-app/viewport-fit.ts` follows).
  */
 export const APP_VIEWPORT = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content";
-export function appPage(app?: ViewerApp): string {
+/** The app reads this meta (viewer-app/use-screen-data.ts); only the quick tunnel's listener renders it. */
+export const REFRESH_META = "cp-refresh";
+export function appPage(app?: ViewerApp, refresh?: "poll"): string {
  const content = app
   ? `<link rel="stylesheet" href="${escapeHtml(app.stylesheet)}"></head><body><div id="app"></div><script type="module" src="${escapeHtml(app.script)}"></script>`
   : '</head><body><h1>Viewer build unavailable</h1><p>The app could not be built. See the viewer startup diagnostic.</p>';
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="${APP_VIEWPORT}"><title>Command post</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/apple-touch-icon.png">${content}</body></html>`;
+ const meta = refresh ? `<meta name="${REFRESH_META}" content="${refresh}">` : "";
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="${APP_VIEWPORT}">${meta}<title>Command post</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/apple-touch-icon.png">${content}</body></html>`;
 }
