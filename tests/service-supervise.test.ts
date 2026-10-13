@@ -6,9 +6,10 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import type { DrainRecord } from "../src/drain.ts";
 import { isPidAlive } from "../src/fleet.ts";
 import { currentHost, type HostRecord, ParentHostClient, parentHostPaths, readStopMarker } from "../src/parent-host.ts";
-import { EXIT_NO_MODEL, type HostClient, hostPorts, supervise, type SupervisePorts } from "../src/service/supervise.ts";
+import { EXIT_NO_MODEL, type HostClient, hostPorts, STALE_DRAIN_MS, supervise, type SupervisePorts } from "../src/service/supervise.ts";
 import { createScratchHome, waitFor } from "./harness/index.ts";
 import "./harness/fake-parent-tracker.ts";
 
@@ -33,6 +34,10 @@ function ports(overrides: Partial<SupervisePorts> = {}): SupervisePorts & { line
 		current: () => ({ gen: 1 }),
 		stoppedGen: () => undefined,
 		draining: () => false,
+		drainRecord: () => undefined,
+		updateInFlight: () => false,
+		head: async () => undefined,
+		now: () => Date.now(),
 		savedModel: () => undefined,
 		configuredModel: () => undefined,
 		alive: () => false,
@@ -126,6 +131,56 @@ test("host lost: a drain file or a stop marker for the watched generation waits 
 		p.alive = () => false;
 		second.close();
 		assert.equal(await run, 1, "lost again with no hold: exit 1");
+	}
+});
+
+// cp-drain-stale-record-3: a drained record with no parent behind it must not hold the supervisor forever.
+const drainRecord = (over: Partial<DrainRecord> = {}): DrainRecord => ({ state: "drained", started_at: "s", deadline: "d", timeout_s: 600, finished_at: new Date().toISOString(), jobs: [], ...over });
+
+async function lostHost(over: Partial<SupervisePorts>): Promise<{ p: ReturnType<typeof ports>; code: number | undefined }> {
+	const first = fakeClient(300);
+	let code: number | undefined;
+	const p = ports({
+		attach: async () => first,
+		draining: () => true,
+		sleep: async (ms) => { p.sleeps.push(ms); if (p.sleeps.length === 3) p.draining = () => false; await new Promise((done) => setImmediate(done)); },
+		...over,
+	});
+	const run = supervise({ home: "/h" }, p).then((c) => (code = c));
+	await new Promise((done) => setImmediate(done));
+	first.close();
+	await run;
+	return { p, code };
+}
+
+test("host lost with a stale drained record and no update in flight: stops waiting when it is old or its target is HEAD", async () => {
+	const old = new Date(Date.now() - STALE_DRAIN_MS - 60_000).toISOString();
+	const cases = [
+		{ name: "old", record: drainRecord({ finished_at: old }), head: undefined },
+		{ name: "timeout", record: drainRecord({ state: "timeout", finished_at: old }), head: undefined },
+		{ name: "target is HEAD", record: drainRecord({ cause: { reason: "auto-update", target_sha: "5487011ab472" } }), head: "5487011ab47272c39ea19f973d2fe5c12ae6893c" },
+	];
+	for (const { name, record, head } of cases) {
+		const { p, code } = await lostHost({ drainRecord: () => record, head: async () => head });
+		assert.equal(code, 1, name);
+		assert.deepEqual(p.sleeps, [], `${name}: no wait`);
+		assert.ok(p.lines.some((line) => line.includes("stopped holding the supervisor") && line.includes("no update run is in flight")), `${name}: ${p.lines.join("\n")}`);
+		assert.ok(p.lines.some((line) => line.includes("exiting 1")), name);
+	}
+});
+
+test("host lost: a draining record, an update in flight, or a fresh drained record keeps waiting", async () => {
+	const old = new Date(Date.now() - STALE_DRAIN_MS - 60_000).toISOString();
+	const target = { cause: { reason: "auto-update" as const, target_sha: "5487011ab472" } };
+	const cases = [
+		{ name: "draining", record: drainRecord({ state: "draining", finished_at: old }), inFlight: false, head: "5487011ab472" },
+		{ name: "update in flight", record: drainRecord({ finished_at: old, ...target }), inFlight: true, head: "5487011ab472" },
+		{ name: "fresh, other target", record: drainRecord(target), inFlight: false, head: "0123456789ab" },
+	];
+	for (const { name, record, inFlight, head } of cases) {
+		const { p } = await lostHost({ drainRecord: () => record, updateInFlight: () => inFlight, head: async () => head });
+		assert.deepEqual(p.sleeps, [10_000, 10_000, 10_000], name);
+		assert.ok(!p.lines.some((line) => line.includes("stopped holding")), `${name}: ${p.lines.join("\n")}`);
 	}
 });
 

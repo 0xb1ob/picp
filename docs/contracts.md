@@ -669,6 +669,11 @@ or return early; reconcile's pass stays the backstop; one stderr line says what 
 gates also self-heal: a `drained` record this process did not write is cleared, with one `RESTART AFTER DRAIN` notice,
 when it finished before this process started or its auto-update target is the running checkout HEAD — never a
 `draining` one, never a record this process wrote.
+**Supervisor:** cp-daemon's parent supervisor, after losing its host, stops waiting on a `drained` or `timeout`
+record when no update run is in flight (live updater pid in `daemon-runtime.json`, or `state/update.json` phase
+not idle unless `held`) and either `finished_at` is over 15 min old or its auto-update `target_sha` is the app
+checkout's HEAD. It logs one line saying why and exits 1, so the respawned parent's startup clears the record; the
+supervisor never deletes the file. `draining`, a live update run, or an operator stop marker keeps it waiting.
 **Drain cause:** the record's optional `cause` is `{reason: "manual"}` for a `/cp-drain` and
 `{reason: "auto-update", target_sha}` when cp-daemon's updater drains (`/cp-drain <s> auto-update <sha>`
 through the host's `drain` op); a record without it (written before the field) reads as before. The

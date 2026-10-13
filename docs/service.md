@@ -430,6 +430,13 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 - While `state/drain.json` exists, a host loss also waits without spawning.
   A boot starts regardless: the boot is the restart the drain prepared, and
   the parent's `session_start` reports and clears it.
+- A `drained` or `timeout` record does not wait forever (cp-drain-stale-record-3): with no update run in flight
+  (a live updater in `daemon-runtime.json`, or `state/update.json` mid-run) the supervisor stops waiting once
+  `finished_at` is over 15 min old or the record's auto-update target is the checkout HEAD, logs why, and exits 1
+  so cp-daemon respawns the host and parent; the new parent's startup clears the record. It never deletes the
+  file, and a `draining` record or a stop marker keeps the wait. If the updater's own restart fails after a
+  drain (`drain_timeout` with a failed `drainCancel`, a `rollback_failed` after the rollback's drain), this
+  rule is what covers the leftover record; `update.ts` is unchanged.
 - `cp-daemon stop` / `start` / `restart` (`--home H`, else `CP_HOME`, else — `bin/cp-daemon` run from an installed
   home's `<home>/app` with `<home>/data/daemon.json` present — that enclosing home; on the systemd backend they run
   `systemctl --user stop|start|restart cp-daemon.service`) stop and start the **daemon** only: it SIGTERMs the
