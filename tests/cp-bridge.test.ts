@@ -1689,6 +1689,16 @@ test("operator diagnostics use the live parent's commands without creating work"
 	assert.equal(doctor.details.text, doctor.content[0]!.text);
 	assert.equal(doctor.isError, doctor.details.level === "error");
 	assert.deepEqual(snapshot(), before, "no job, worker, mandate, decision or durable send created");
+	// cp-drain-stale-record-2: a drained record an earlier parent left is withdrawn by drain_cancel, with its one wake.
+	const foreignFile = join(ctx.home, LAYOUT.state, "drain.json");
+	mkdirSync(dirname(foreignFile), { recursive: true });
+	writeFileSync(foreignFile, JSON.stringify({ state: "drained", started_at: "2020-01-01T00:00:00.000Z", finished_at: "2020-01-01T00:00:01.000Z", deadline: "x", timeout_s: 1, reported: true, jobs: [] }));
+	const foreign = await tool.execute("drain-cancel-foreign", { action: "drain_cancel" });
+	assert.equal(foreign.isError, false, foreign.content[0]!.text);
+	assert.match(foreign.content[0]!.text, /^DRAIN: cancelled \u2014 the drain started 2020-01-01T00:00:00\.000Z \(drained\) is withdrawn/);
+	assert.equal(existsSync(foreignFile), false, "the foreign record is gone");
+	const wakes = readFileSync(join(ctx.home, LAYOUT.state, "wakeups.json"), "utf8");
+	assert.ok(wakes.includes("drain:2020-01-01T00:00:00.000Z:cancelled"), "the cancel wake is journaled");
 	// Graceful drain through the real host and parent: /cp-drain writes the flag and answers at once.
 	const drainStarted = Date.now();
 	const drained = await tool.execute("drain", { action: "drain", timeout_s: 0 });

@@ -352,7 +352,15 @@ export class DrainControl {
 
 	/** Startup only: report the recorded jobs through `cp-recovery`, then clear draining. Never while this process drains. */
 	startup(): DrainRecord | undefined {
-		if (this.#owned) return undefined;
+		if (this.#owned) {
+			try {
+				const kept = readDrain(this.#deps.home);
+				if (kept) process.stderr.write(`drain: kept the ${kept.state} drain started ${kept.started_at} at startup: this process owns it\n`);
+			} catch (error) {
+				process.stderr.write(`drain: kept ${drainFile(this.#deps.home)} at startup: this process owns it (${(error as Error).message})\n`);
+			}
+			return undefined;
+		}
 		return this.#clear("at startup");
 	}
 

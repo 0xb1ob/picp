@@ -210,8 +210,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// (reconcile stays the backstop); held off like reconcile so its notice never races the first prompt.
 		s.reconcileInProgress = true;
 		try {
+			setRunningVersion((await LOADED_COMMIT.catch(() => null))?.sha);
 			commandPost().drain.startup();
-			setRunningVersion((await LOADED_COMMIT)?.sha);
 		} catch (error) {
 			process.stderr.write(`pi-command-post: drain record not cleared at session start: ${(error as Error).message}\n`);
 		} finally {

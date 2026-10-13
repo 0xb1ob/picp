@@ -78,7 +78,8 @@ test("after an external rm the next dispatch gate in the same process is open", 
 	assert.doesNotThrow(() => assertNotDraining(home.path, "dispatch"));
 });
 
-test("session_start clears a foreign drained record first, even when a later startup step ends the session early", async (t) => {
+/** Real session hooks over a scratch home whose broken schedules file ends every session_start before reconcile. */
+function sessionHarness(t: { after(fn: () => unknown): void }) {
 	const home = createScratchHome();
 	const previous = { home: process.env.CP_HOME, mode: process.env.CP_MODE };
 	process.env.CP_HOME = home.path;
@@ -89,26 +90,47 @@ test("session_start clears a foreign drained record first, even when a later sta
 		registerEntryRenderer() {}, registerTool() {}, getAllTools: () => [], sendMessage() {},
 	} as unknown as ExtensionAPI;
 	const state = createSessionState();
-	state.post = new CommandPost({ home: home.path, packageRoot: PACKAGE_ROOT, holdsParentLock: () => true });
+	const made = new CommandPost({ home: home.path, packageRoot: PACKAGE_ROOT, holdsParentLock: () => true });
+	state.post = made;
 	state.parentLock = { release() {} } as never;
 	state.installNudgeShown = state.piVersionNudgeShown = state.routingNudgeShown = true;
-	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => state.post!, repaintWidget: () => {} });
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => made, repaintWidget: () => {} });
 	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
 	let reconciled = false;
-	const reconcile = state.post.reconcile.bind(state.post);
-	state.post.reconcile = async (...args) => { reconciled = true; return reconcile(...args); };
+	const reconcile = made.reconcile.bind(made);
+	made.reconcile = async (...args) => { reconciled = true; return reconcile(...args); };
+	const fire = async (name: string) => {
+		for (const handler of handlers.get(name) ?? []) await handler({}, { hasUI: false, cwd: home.path, sessionManager: { getSessionId: () => "A", getBranch: () => [] } });
+	};
 	t.after(async () => {
-		for (const handler of handlers.get("session_shutdown") ?? []) await handler({}, undefined);
+		await fire("session_shutdown");
 		for (const [key, value] of [["CP_HOME", previous.home], ["CP_MODE", previous.mode]] as const) {
 			if (value === undefined) delete process.env[key];
 			else process.env[key] = value;
 		}
 		home.cleanup();
 	});
-	writeDrain(home.path);
-	// An unreadable schedules file ends session_start at the template migration, before reconcile.
+	mkdirSync(`${home.path}/${LAYOUT.state}`, { recursive: true });
 	writeFileSync(`${home.path}/${LAYOUT.state}/schedules.json`, "{");
-	for (const handler of handlers.get("session_start") ?? []) await handler({}, { hasUI: false, cwd: home.path, sessionManager: { getSessionId: () => "A", getBranch: () => [] } });
-	assert.equal(reconciled, false, "the startup ended before reconcile, so only the first-step clear can have run");
-	assert.equal(existsSync(drainFile(home.path)), false);
+	return { home: home.path, made, fire, reconciled: () => reconciled };
+}
+
+test("session_start clears a foreign drained record first, even when a later startup step ends the session early", async (t) => {
+	const h = sessionHarness(t);
+	writeDrain(h.home);
+	await h.fire("session_start");
+	assert.equal(h.reconciled(), false, "the startup ended before reconcile, so only the first-step clear can have run");
+	assert.equal(existsSync(drainFile(h.home)), false);
+});
+
+test("a second session_start in the same process clears the drain the first session's parent wrote", async (t) => {
+	const h = sessionHarness(t);
+	await h.fire("session_start");
+	h.made.drain.start(); // idle: drained; this process owns it until the session shuts down
+	await h.fire("session_start");
+	assert.equal(existsSync(drainFile(h.home)), true, "the owning session keeps its own drain");
+	await h.fire("session_shutdown");
+	await h.fire("session_start");
+	assert.equal(h.reconciled(), false);
+	assert.equal(existsSync(drainFile(h.home)), false, "the relaunched session is not an owner any more");
 });
