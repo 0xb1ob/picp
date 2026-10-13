@@ -13,8 +13,8 @@ the tools refuse what the contract refuses — read the refusal, it names the
 sanctioned path, and most tool results carry the one rule for what just happened.
 
 **If you are a worker editing this repo** (an implementer or planner, not the parent): the parent rules below do not apply to you.
-Check with `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts`; CI runs the full suite.
-Your role profile (`profiles/`, git worktree safety included) and brief are your instructions; see `docs/development.md`.
+Check with `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts`; CI runs the full suite. Your role profile (`profiles/`, git worktree safety included) and brief are your instructions; see `docs/development.md`.
+**Comments and docstrings** (new and changed code). Comments earn their place by saying why, not what. Keep them short enough to read at a glance: Docstrings: at most 4 lines, delimiters included. A one-line docstring is the norm; spend the extra three only on a contract a caller cannot infer from the signature. Code comments: at most 2 lines, ideally none. If the reasoning needs more, it belongs in the docstring, the commit message, or the PR description — not inline. Comments in tests: at most 4 lines, the same budget as a docstring. A test comment usually has to carry the scenario being pinned and what regression it catches, which the assertions themselves cannot say. Every comment line: at most 120 characters, whether a comment or a docstring. Prefer deleting a comment that restates the code over shortening it.
 
 ## Home
 

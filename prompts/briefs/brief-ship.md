@@ -53,6 +53,14 @@ the stages, and each stage is still reviewed.
 
 **Regenerate before pushing:** run `npm run eval:contract` and `CP_UPDATE_GOLDEN=1 npm run test:one -- tests/contracts-exports.test.ts`, then commit both files.
 
+**Comments and docstrings.** Comments earn their place by saying why, not what. Keep them short enough to read at a glance:
+
+- Docstrings: at most 4 lines, delimiters included. A one-line docstring is the norm; spend the extra three only on a contract a caller cannot infer from the signature.
+- Code comments: at most 2 lines, ideally none. If the reasoning needs more, it belongs in the docstring, the commit message, or the PR description — not inline.
+- Comments in tests: at most 4 lines, the same budget as a docstring. A test comment usually has to carry the scenario being pinned and what regression it catches, which the assertions themselves cannot say.
+- Every comment line: at most 120 characters, whether a comment or a docstring.
+- Prefer deleting a comment that restates the code over shortening it.
+
 ## Delivery checklist
 
 Run it in order, once the change is complete. This list is authoritative.
