@@ -13,7 +13,9 @@
  *  - a live parent lock with no responsive host is retried every 60 s, logged once;
  *  - host lost: a blip reconnects, a newer generation is joined; while
  *    `state/drain.json` exists or the stop marker names the watched generation
- *    it waits without spawning; otherwise it exits 1 and cp-daemon restarts it
+ *    it waits without spawning, except a `drained`/`timeout` record with no update run in flight that is
+ *    over 15 min old or whose auto-update target is the checkout HEAD (never deleted here: the next
+ *    parent's startup clears it); otherwise it exits 1 and cp-daemon restarts it
  *    with backoff (6 starts in 30 min make a crash loop `failed`);
  *  - SIGTERM disconnects and exits 0 (`KillMode=process`: host, parent and
  *    workers stay up). Stopping the fleet stays `cp_parent drain` + `stop`.
@@ -23,15 +25,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configureLayout, LAYOUT } from "../contracts.ts";
-import { drainFile } from "../drain.ts";
+import { type DrainRecord, drainFile, readDrain } from "../drain.ts";
 import { isPidAlive } from "../fleet.ts";
-import { resolveHome } from "../home.ts";
+import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { attachParentHost, currentHost, type HostRecord, ParentHostClient, parentHostPaths, readStopMarker } from "../parent-host.ts";
 import { parentModelSetting } from "../parent-context.ts";
+import { headCommit } from "../viewer/loaded-commit.ts";
+import { daemonPaths, psArgs, readDaemonRuntime, readJson, roleScript, sameProcess } from "./daemon-files.ts";
 
 export const EXIT_NO_MODEL = 78;
 export const FOREIGN_LOCK_RETRY_MS = 60_000;
 export const WAIT_POLL_MS = 10_000;
+/** A `drained`/`timeout` record this old, with no update run in flight, no longer holds the supervisor. */
+export const STALE_DRAIN_MS = 15 * 60_000;
 
 /** The slice of `ParentHostClient` the supervisor uses. */
 export interface HostClient {
@@ -49,6 +55,13 @@ export interface SupervisePorts {
 	/** The generation the last completed operator stop closed. */
 	stoppedGen(): number | undefined;
 	draining(): boolean;
+	/** `state/drain.json` when readable; absent or unreadable is undefined (an unreadable one keeps the wait). */
+	drainRecord(): DrainRecord | undefined;
+	/** An updater run is live, or `state/update.json` is mid-run; unreadable counts as in flight. */
+	updateInFlight(): boolean;
+	/** The app checkout's HEAD now. */
+	head(): Promise<string | undefined>;
+	now(): number;
 	savedModel(): string | undefined;
 	/** `data/parent.json` `model` (dashboard Settings). */
 	configuredModel(): string | undefined;
@@ -108,6 +121,7 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 /** After a host loss: reconnect, join a newer generation, wait out a drain or stop, or give up (undefined). */
 async function reattach(watched: number, ports: SupervisePorts): Promise<{ client: HostClient; gen: number } | undefined> {
 	let waitingFor: string | undefined;
+	let staleLogged = false;
 	for (;;) {
 		const { gen, record } = ports.current();
 		if (record && gen >= watched && ports.alive(record.pid)) {
@@ -117,7 +131,10 @@ async function reattach(watched: number, ports: SupervisePorts): Promise<{ clien
 				return { client, gen };
 			}
 		}
-		const hold = ports.draining() ? "state/drain.json is present" : ports.stoppedGen() === watched ? `an operator stop closed generation ${watched}` : undefined;
+		const stale = ports.draining() ? await staleDrain(ports) : undefined;
+		if (stale && !staleLogged) ports.log(`state/drain.json stopped holding the supervisor: ${stale}; it is left for the next parent's startup to clear`);
+		staleLogged = stale !== undefined;
+		const hold = ports.draining() && !stale ? "state/drain.json is present" : ports.stoppedGen() === watched ? `an operator stop closed generation ${watched}` : undefined;
 		if (!hold) {
 			ports.log(`host generation ${watched} is gone; exiting 1 so cp-daemon restarts the supervisor and it respawns the host`);
 			return undefined;
@@ -126,6 +143,18 @@ async function reattach(watched: number, ports: SupervisePorts): Promise<{ clien
 		waitingFor = hold;
 		await ports.sleep(WAIT_POLL_MS);
 	}
+}
+
+/** Why a `drained`/`timeout` record no longer holds the supervisor: no update run in flight and it is old or spent. */
+async function staleDrain(ports: SupervisePorts): Promise<string | undefined> {
+	const drain = ports.drainRecord();
+	if (!drain || (drain.state !== "drained" && drain.state !== "timeout") || ports.updateInFlight()) return undefined;
+	const age = drain.finished_at ? ports.now() - Date.parse(drain.finished_at) : Number.NaN;
+	if (age >= STALE_DRAIN_MS) return `the ${drain.state} drain finished ${drain.finished_at} (over ${STALE_DRAIN_MS / 60_000} min ago) and no update run is in flight`;
+	const target = drain.cause?.target_sha;
+	const head = target ? await ports.head() : undefined;
+	if (target && head && (head.startsWith(target) || target.startsWith(head))) return `the ${drain.state} drain's auto-update target ${target.slice(0, 12)} is the checkout HEAD and no update run is in flight`;
+	return undefined;
 }
 
 /** The production ports for `home` (multi mode, layout configured). */
@@ -139,6 +168,26 @@ export function hostPorts(home: string, overrides: Partial<SupervisePorts> = {})
 		current: () => currentHost(paths),
 		stoppedGen: () => readStopMarker(paths)?.gen,
 		draining: () => existsSync(drainFile(home)),
+		drainRecord: () => {
+			try {
+				return readDrain(home);
+			} catch {
+				return undefined;
+			}
+		},
+		updateInFlight: () => {
+			try {
+				const paths = daemonPaths(home);
+				const pid = readDaemonRuntime(paths)?.units?.update?.pid;
+				if (sameProcess(pid, roleScript({ app: PACKAGE_ROOT }, "update"), { alive: isPidAlive, argsOf: psArgs })) return true;
+				const update = readJson<{ phase?: unknown; held?: unknown }>(paths.update);
+				return update !== undefined && update?.phase !== "idle" && update?.held !== true;
+			} catch {
+				return true;
+			}
+		},
+		head: async () => (await headCommit(PACKAGE_ROOT))?.sha,
+		now: () => Date.now(),
 		savedModel: () => {
 			if (!existsSync(controlFile)) return undefined;
 			let model: unknown;
