@@ -1696,6 +1696,9 @@ test("operator diagnostics use the live parent's commands without creating work"
 	assert.ok(Date.now() - drainStarted < 30_000, "the drain handler never waits out its timeout");
 	assert.equal(existsSync(join(ctx.home, LAYOUT.state, "drain.json")), true);
 	assert.equal(drained.isError, false);
+	const cancelled = await tool.execute("drain-cancel", { action: "drain_cancel" });
+	assert.match(cancelled.content[0]!.text, /^DRAIN: failed: refused: this parent drained .*that restart is prepared/, "drain_cancel reaches /cp-drain cancel, which keeps the live parent's own drained record");
+	assert.equal(existsSync(join(ctx.home, LAYOUT.state, "drain.json")), true);
 	assert.equal((await client.request("status") as { pid: number }).pid, started.pid);
 	const targetFile = operatorTargetFile(ctx.home);
 	const savedTarget = readFileSync(targetFile, "utf8");

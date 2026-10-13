@@ -522,6 +522,8 @@ one result in `state/update.json` (its only writer):
   respawning), cp-daemon `hold` (the viewer stops and stays down), `git merge --ff-only <to>`, `npm ci` only
   when `package-lock.json` changed, cp-daemon `reload` (a new inner on the new code: the supervisor starts a
   fresh host, the viewer restarts, the hold is released);
+  the new parent clears the drained record at session start (and any start gate clears a spent one); a record that
+  still survives is withdrawn with `cp_parent drain_cancel`, never by hand;
 - **verify** (≤ 120 s): a host running a parent whose `/doctor` is not an error, and the viewer's
   `/api/identity` → `updated`; + ≤ 300 s while the parent is alive but busy (`#settledProc`'s
   "parent must be settled with no pending send", or a doctor queued behind the host's serial queue while
