@@ -15,6 +15,7 @@ import { ciWatchIntervalMs } from "../../src/ci-watch.ts";
 import { keepUserTail } from "../../src/context-tail.ts";
 import { ANSWER_ENTRY_TYPE, ANSWER_MAX_BYTES, FLEET_MUTATING_TOOLS, type Runtime } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
+import { setRunningVersion } from "../../src/drain.ts";
 import { summarizeReconcile } from "../../src/fleet.ts";
 import { formatGuardDecision } from "../../src/guards.ts";
 import { pendingNotice } from "../../src/curation.ts";
@@ -203,6 +204,18 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 				if (ctx.hasUI) ctx.ui.notify(message, "warning");
 				else process.stderr.write(`${message}\n`);
 			}
+		}
+
+		// cp-drain-stale-record-2: clear a drain this process did not write before any step that can throw or return early
+		// (reconcile stays the backstop); held off like reconcile so its notice never races the first prompt.
+		s.reconcileInProgress = true;
+		try {
+			setRunningVersion((await LOADED_COMMIT.catch(() => null))?.sha);
+			commandPost().drain.startup();
+		} catch (error) {
+			process.stderr.write(`pi-command-post: drain record not cleared at session start: ${(error as Error).message}\n`);
+		} finally {
+			s.reconcileInProgress = false;
 		}
 
 		// spec 2026-09-05 D4: reviewers died with the previous parent. Finish their

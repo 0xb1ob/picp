@@ -27,6 +27,20 @@ export const DRAIN_MAX_TIMEOUT_S = 3600;
 export const DRAIN_PREFIX = "DRAIN: ";
 const IN_FLIGHT = ["launching", "waiting", "held"];
 
+/** Drains this process wrote (`home` + `started_at`): the gate self-heal never touches them. */
+const created = new Set<string>();
+/** The newest control per home: the gates' `assertNotDraining` has only a home to find it by. */
+const healers = new Map<string, DrainControl>();
+const PROCESS_STARTED_MS = Date.now() - process.uptime() * 1000;
+let runningSha: string | undefined;
+
+const createdKey = (home: string, record: Pick<DrainRecord, "started_at">): string => `${home}\0${record.started_at}`;
+
+/** The checkout HEAD this parent loaded; a drained auto-update record for it is spent. */
+export function setRunningVersion(sha: string | undefined): void {
+	runningSha = sha;
+}
+
 export interface DrainJob {
 	job_id: string;
 	phase: string;
@@ -109,7 +123,8 @@ export function drainArgs(timeoutS: number, cause?: DrainCause): string {
 
 /** The one refusal every process start shares while a drain is on disk; it names the drain and, when recorded, why. */
 export function assertNotDraining(home: string, what: string): void {
-	const drain = readDrain(home);
+	let drain = readDrain(home);
+	if (drain && healers.get(home)?.healStale(drain)) drain = readDrain(home);
 	const why = drain && describeCause(drain);
 	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}${why ? `; ${why}` : ""}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
 }
@@ -202,6 +217,7 @@ export class DrainControl {
 
 	constructor(deps: DrainControlDeps) {
 		this.#deps = deps;
+		healers.set(deps.home, this);
 	}
 
 	/** Integration steps running now: a drain waits for them, and the drain's hold makes the next one wait. */
@@ -251,6 +267,7 @@ export class DrainControl {
 			jobs: inFlightJobs(this.#deps.fleet.list(), this.#deps.head),
 		};
 		atomicWriteJson(drainFile(this.#deps.home), record);
+		created.add(createdKey(this.#deps.home, record));
 		// Idle already: this answer is the report, so it is written `reported` and no wake follows.
 		return this.#survivors().length === 0 ? (this.#finish(record, [], true) ?? record) : record;
 	}
@@ -335,16 +352,46 @@ export class DrainControl {
 
 	/** Startup only: report the recorded jobs through `cp-recovery`, then clear draining. Never while this process drains. */
 	startup(): DrainRecord | undefined {
-		if (this.#owned) return undefined;
-		// The file goes even when the notice cannot be journaled (a lost notice costs a line; a kept file refuses every start).
-		return consumeDrain(this.#deps.home, (found) => {
+		if (this.#owned) {
 			try {
-				this.#deps.discard?.([outcomeWakeId(found, "drained"), outcomeWakeId(found, "timeout")]);
-				this.#deps.journal({ id: `recovery:drain:${found.started_at}`, content: formatDrainRecovery(found), keys: found.jobs.map((job) => job.job_id) });
+				const kept = readDrain(this.#deps.home);
+				if (kept) process.stderr.write(`drain: kept the ${kept.state} drain started ${kept.started_at} at startup: this process owns it\n`);
 			} catch (error) {
-				process.stderr.write(`drain: the RESTART AFTER DRAIN notice for the drain started ${found.started_at} was not journaled (${(error as Error).message}); ${drainFile(this.#deps.home)} is cleared anyway\n`);
+				process.stderr.write(`drain: kept ${drainFile(this.#deps.home)} at startup: this process owns it (${(error as Error).message})\n`);
 			}
-		});
+			return undefined;
+		}
+		return this.#clear("at startup");
+	}
+
+	/** Gate self-heal: clears a spent `drained` record this process did not write; never a `draining` one. */
+	healStale(record: DrainRecord): boolean {
+		if (record.state !== "drained" || this.#owned || this.#deps.owns?.() === false || created.has(createdKey(this.#deps.home, record))) return false;
+		const target = record.cause?.target_sha;
+		const spent = record.finished_at !== undefined && Date.parse(record.finished_at) < PROCESS_STARTED_MS
+			? `it finished ${record.finished_at}, before this parent started`
+			: target && runningSha && (runningSha.startsWith(target) || target.startsWith(runningSha)) ? `its auto-update target ${target.slice(0, 12)} is the running version` : undefined;
+		return spent !== undefined && this.#clear(`at a start gate (${spent})`) !== undefined;
+	}
+
+	#clear(when: string): DrainRecord | undefined {
+		const file = drainFile(this.#deps.home);
+		try {
+			// The file goes even when the notice cannot be journaled (a lost notice costs a line; a kept file refuses every start).
+			const cleared = consumeDrain(this.#deps.home, (found) => {
+				try {
+					this.#deps.discard?.([outcomeWakeId(found, "drained"), outcomeWakeId(found, "timeout")]);
+					this.#deps.journal({ id: `recovery:drain:${found.started_at}`, content: formatDrainRecovery(found), keys: found.jobs.map((job) => job.job_id) });
+				} catch (error) {
+					process.stderr.write(`drain: the RESTART AFTER DRAIN notice for the drain started ${found.started_at} was not journaled (${(error as Error).message}); ${file} is cleared anyway\n`);
+				}
+			});
+			if (cleared) process.stderr.write(`drain: cleared the ${cleared.state} drain started ${cleared.started_at} ${when} (${file})\n`);
+			return cleared;
+		} catch (error) {
+			process.stderr.write(`drain: could not clear ${file} ${when} (${(error as Error).message}); every start stays refused until it is removed\n`);
+			return undefined;
+		}
 	}
 }
 

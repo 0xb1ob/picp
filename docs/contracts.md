@@ -662,7 +662,13 @@ was drained, or warn how many live workers they will kill. **Cancel:** `/cp-drai
 removes a `draining` or `timeout` record, or a `drained` record an earlier parent left
 behind — never the live parent's own `drained` one, the restart already prepared — and
 journals one wake `DRAIN: cancelled — … open again` (id `drain:<started>:cancelled`),
-after which every gate is open; no manual `rm` of `state/drain.json` is ever needed.
+after which every gate is open; no manual `rm` of `state/drain.json` is ever needed. `cp_parent drain_cancel`
+runs the same cancel from the operator session (no parent console needed). A fresh session clears a record it
+did not write as its first step after taking the parent lock (`DrainControl.startup`, before any step that can throw
+or return early; reconcile's pass stays the backstop; one stderr line says what was cleared or why not). The start
+gates also self-heal: a `drained` record this process did not write is cleared, with one `RESTART AFTER DRAIN` notice,
+when it finished before this process started or its auto-update target is the running checkout HEAD — never a
+`draining` one, never a record this process wrote.
 **Drain cause:** the record's optional `cause` is `{reason: "manual"}` for a `/cp-drain` and
 `{reason: "auto-update", target_sha}` when cp-daemon's updater drains (`/cp-drain <s> auto-update <sha>`
 through the host's `drain` op); a record without it (written before the field) reads as before. The

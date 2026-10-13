@@ -571,13 +571,13 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Own the CP parent over RPC. start spawns it, send delivers prose and returns a receipt level " +
 			"(injected, turn_settled, http_accepted, owner_observed — never 'accepted') plus the reply when the turn settles, " +
-			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart; compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
+			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart; drain_cancel withdraws a draining or timed-out drain or a drained record an earlier parent left (never this parent's own); compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. " +
 			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
 			"thread_bind files job_ids under a dashboard thread on the operator side; bookkeeping only, no authorization, scope assignment, dispatch or decision effect. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
-		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/thread_bind/doctor/version/drain/compact/rotate/model/stop)",
+		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/thread_bind/doctor/version/drain/drain_cancel/compact/rotate/model/stop)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
@@ -596,7 +596,7 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "thread_bind", "integration_hold", "integration_release", "doctor", "version", "drain", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent; thread_bind files jobs on the operator side only" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "thread_bind", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent; thread_bind files jobs on the operator side only" }),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
@@ -750,9 +750,9 @@ export default function (pi: ExtensionAPI): void {
 					consumer.replied(receipt.reply);
 					return textResult(lines.join("\n"), { ...receipt });
 				}
-				if (params.action === "doctor" || params.action === "version" || params.action === "drain") {
+				if (params.action === "doctor" || params.action === "version" || params.action === "drain" || params.action === "drain_cancel") {
 					const activeClient = await ensureClient(undefined, undefined, true);
-					const result = await activeClient.request(params.action, ...(params.action === "drain" && params.timeout_s !== undefined ? [params.timeout_s] : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
+					const result = await activeClient.request(params.action === "drain_cancel" ? "drainCancel" : params.action, ...(params.action === "drain" && params.timeout_s !== undefined ? [params.timeout_s] : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
 					return { ...textResult(result.text, { ...result }), isError: result.level === "error" };
 				}
 				if (params.action === "model") {
