@@ -685,8 +685,8 @@ export class MandateStore {
 	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean; readOnly?: boolean }, risk: Risk | undefined, jobs: readonly MandateUsageJob[] = []): boolean {
 		if (risk !== "high") return false;
 		const run = runAuthority(this.runContext(), job.jobId);
-		if (run.source === "schedule-run") return run.snapshot.ask_on.includes("risk:high") && !runRiskPreapproval(run.run, job, this.jobCreatedAt(job.jobId));
 		if (riskGateExempt(job)) return false;
+		if (run.source === "schedule-run") return run.snapshot.ask_on.includes("risk:high") && !runRiskPreapproval(run.run, job, this.jobCreatedAt(job.jobId));
 		const selected = this.selection("dispatch", job, jobs);
 		const asking = selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant] : [];
 		return asking.length > 0 && !riskPreapproval(asking, job, this.jobCreatedAt(job.jobId)).covered;

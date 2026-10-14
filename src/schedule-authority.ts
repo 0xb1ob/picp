@@ -4,6 +4,7 @@ import { EscalationStore, raiseRiskHigh } from "./escalation.ts";
 import { parseJobLabels, type Job } from "./ledger.ts";
 import { scheduleIdOf, reviewerUsage, type MandateUsageJob } from "./mandate-accounting.ts";
 import { inFlightRecord, type GrantUse } from "./mandate-permission.ts";
+import { riskGateExempt } from "./dispatch-authority.ts";
 import { actionForKind, evaluateAuthority, hitsNeedle, type AuthorityDecision, type MandateSubject } from "./mandate.ts";
 import { hardStops, preapprovalRecordCovers, quoteSha } from "./risk-preapproval.ts";
 import { runSpend, type ScheduleRunStore } from "./schedule-runs.ts";
@@ -16,6 +17,8 @@ export interface RunAuthorityJob {
 	jobId: string; project: string; kind?: JobKind; risk?: "high" | "low"; pathHints?: readonly string[];
 	subsystem?: string; text?: string; script?: boolean; evidence?: readonly string[]; advice?: boolean;
 	gateFlags?: MandateSubject["gateFlags"]; checkpoint?: MandateSubject["kind"];
+	/** From the resolved profile (dispatch.ts); with `promotion`, feeds `riskGateExempt`. */
+	readOnly?: boolean; promotion?: boolean;
 }
 export type ScheduleAuthorityCode = "not_member" | "policy_missing" | "policy_corrupt" | "run_closed" | "run_usd_cap" | "run_token_cap" | "child_cap" | "parallelism_full" | "deadline_passed" | "action_not_allowed" | "kind_excluded" | "path_excluded" | "subsystem_excluded" | "risk_high" | "hard_stop";
 export class ScheduleAuthorityError extends Error {
@@ -102,7 +105,7 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 	const kind = job.kind ?? labels.kind;
 	job = { ...job, kind, risk, text: job.text ?? ledger?.description, script: job.script === true || ledger?.script !== undefined };
 	const stops = hardStops([...(job.pathHints ?? []), job.text ?? ledger?.description ?? ""].join("\n"));
-	if (stops.length || (risk === "high" && policy.ask_on.includes("risk:high"))) {
+	if (!riskGateExempt(job) && (stops.length || (risk === "high" && policy.ask_on.includes("risk:high")))) {
 		const escalations = new EscalationStore({ home: ctx.home });
 		const approved = !job.checkpoint && escalations.list({ jobId: job.jobId, kind: "risk_high_irreversible" }).some((row) => row.status === "answered" && (row.answered_by === "operator-quote" || row.answered_by === "operator-delegated") && row.basis && "operator_quote" in row.basis && /^(approve|approved|yes)$/i.test((row.answer ?? "").trim()) && row.question.includes(run.id));
 		// A verified operator start covers every use of its members (the operator triggers and runs it); hard stops never.
