@@ -4323,6 +4323,12 @@ leaves the job refused. `cp_dispatch dry_run` reports `mandate_gate: "would ask:
 risk:high"` from the same predicate (`MandateStore.wouldAskRiskHigh`), with
 nothing escalated.
 
+Read-only planning (research with a readOnly profile) is never gated: planners cannot edit code; the ship
+job that implements a plan is. A fresh `cp_dispatch` of a `kind:research` job whose resolved profile
+frontmatter says `readOnly: true` (planner, qa) skips this gate and `wouldAskRiskHigh` whatever `ask_on`
+says (`riskGateExempt`, `src/dispatch-authority.ts`); a ship, script or promotion dispatch, or a research job
+with a writing profile, is gated as above. Schedule-run authority and checkpoint decides are unchanged.
+
 **Operator risk pre-approval** (`cp_mandate preapprove_risk`, `src/risk-preapproval.ts`, unload-parent PR0). The
 operator can pre-approve a grant's risk:high work once instead of per job: `cp_mandate preapprove_risk mandate_id
 operator_quote [job_ids]` (or `risk_preapproval: { operator_quote, job_ids? }` on `cp_mandate issue`) verifies the

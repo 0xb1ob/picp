@@ -517,7 +517,7 @@ export class Dispatcher {
 				...(request.taskFile === undefined ? {} : { path: request.taskFile }),
 			},
 			...(blockers.length > 0 ? { blockers } : {}),
-			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference] }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], readOnly: profile.frontmatter.readOnly === true }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
 			...(skills.length ? { skills } : {}),
 		};
 	}
@@ -612,11 +612,12 @@ export class Dispatcher {
 		if (bound) assertBranchFree(options.fleet.read().jobs, issue.id, bound.head);
 		const branch = bound?.head ?? issue.id;
 
-		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs);
+		const readOnly = profile.frontmatter.readOnly === true;
+		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, readOnly }, inputs, options.fleet.read().jobs);
 		let mandateId: string | undefined, startedBy: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(
-				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
+				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, readOnly, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
 				options.fleet.read().jobs,
 			);
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
