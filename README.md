@@ -188,8 +188,9 @@ the `cp-parent`/`cp-view` units moves to cp-daemon when you rerun the installer
 
    Away from your tailnet (opt-in): `cp-tunnel up` publishes the dashboard on
    an HTTPS address through Cloudflare — a quick tunnel needs no account but its
-   hostname changes on restart; `--hostname H --token-file F` uses your named
-   tunnel. Only paired devices get in. A Full-control device is trusted like
+   hostname changes on restart; `--hostname H --api-token-file F` sets up a
+   named tunnel with a scoped Cloudflare API token (`--token-file F` uses one
+   you made by hand). Only paired devices get in. A Full-control device is trusted like
    your terminal; use View only for a less-trusted one. Setup, pairing and
    revoke: [`docs/service.md`](docs/service.md) (Remote dashboard).
 

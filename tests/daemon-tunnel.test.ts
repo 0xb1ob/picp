@@ -334,7 +334,9 @@ test("the published file reads back through both readers, and a malformed one is
 		return readTunnelConfig(dataDir);
 	};
 	assert.deepEqual(config(NAMED), { ok: true, config: NAMED });
-	for (const [field, bad] of [["port", { ...QUICK, port: 80 }], ["binary", { ...QUICK, binary: "cloudflared" }], ["hostname", { ...NAMED, hostname: "localhost" }], ["hostname", { ...QUICK, hostname: "a.b" }], ["token_file", { ...NAMED, token_file: "token" }], ["revision", { ...QUICK, revision: 0 }], ["mode", { ...QUICK, mode: "x" }]] as const) {
+	const ids = { tunnel_id: "f70ff985-a4ef-4643-bbbc-4a0ed4fc8415", zone_id: "023e105f4ecef8ad9ca31a8372d0c353", account_id: "699d98642c564d2e855e9661899b7252" };
+	assert.deepEqual(config({ ...NAMED, ...ids }), { ok: true, config: { ...NAMED, ...ids } });
+	for (const [field, bad] of [["port", { ...QUICK, port: 80 }], ["binary", { ...QUICK, binary: "cloudflared" }], ["hostname", { ...NAMED, hostname: "localhost" }], ["hostname", { ...QUICK, hostname: "a.b" }], ["token_file", { ...NAMED, token_file: "token" }], ["revision", { ...QUICK, revision: 0 }], ["mode", { ...QUICK, mode: "x" }], ["tunnel_id", { ...NAMED, tunnel_id: "../zones" }], ["zone_id", { ...QUICK, zone_id: ids.zone_id }]] as const) {
 		const read = config(bad);
 		assert.equal(read.ok, false, field);
 		assert.match(read.ok ? "" : read.reason, new RegExp(`${field}$`));

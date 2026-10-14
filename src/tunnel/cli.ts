@@ -1,7 +1,8 @@
 /**
  * `cp-tunnel` (remote dashboard PR 2d): the remote dashboard's switch. Nothing is exposed until `up` runs.
  *
- *   up [--quick | --hostname HOST --token-file FILE] [--remote-port N] [--level full|view] [--push-origin accept|keep]
+ *   up [--quick | --hostname HOST (--api-token-file FILE | --token-file FILE)] [--remote-port N] [--level full|view]
+ *      [--push-origin accept|keep]
  *   pair [--level full|view]   devices   revoke <name-or-id>   status   down          (all take --home DIR, else CP_HOME)
  *
  * `up` writes `data/tunnel.json` (a new revision, under `data/tunnel.lock`); cp-daemon's controller runs cloudflared
@@ -27,6 +28,7 @@ import { HOSTNAME_RE, readTunnelConfig, readTunnelRuntime, type TunnelConfig, ty
 import { askTty } from "../service/install.ts";
 import { type DeviceControlReply, deviceControlRequest } from "../viewer/device-control.ts";
 import { readPushConfig } from "../viewer/push-files.ts";
+import { type CfFetch, defaultCfFetch, setupNamedTunnel, tunnelNameFor } from "./cloudflare-api.ts";
 import { cloudflaredBinDir, defaultProvisionPorts, type Provisioned, provisionCloudflared } from "./cloudflared.ts";
 import { type ShowResult, showPairingOnTty } from "./qr.ts";
 
@@ -37,7 +39,7 @@ export const UP_WAIT_MS = 120_000;
 export const DOWN_WAIT_MS = 45_000;
 export const POLL_MS = 500;
 const TOKEN_MAX_BYTES = 4096;
-const USAGE = "usage: cp-tunnel up [--quick | --hostname HOST --token-file FILE] [--remote-port N] [--level full|view] [--push-origin accept|keep] | pair [--level full|view] | devices | revoke <name-or-id> | status | down   [--home DIR]";
+const USAGE = "usage: cp-tunnel up [--quick | --hostname HOST (--api-token-file FILE | --token-file FILE)] [--remote-port N] [--level full|view] [--push-origin accept|keep] | pair [--level full|view] | devices | revoke <name-or-id> | status | down   [--home DIR]";
 
 export interface TunnelCliPorts {
 	env: NodeJS.ProcessEnv;
@@ -46,6 +48,8 @@ export interface TunnelCliPorts {
 	now(): number;
 	sleep(ms: number): Promise<void>;
 	provision(binDir: string): Promise<Provisioned>;
+	/** The Cloudflare API, for `up --api-token-file` only. */
+	cfFetch: CfFetch;
 	control(stateDir: string, op: string, args?: Record<string, unknown>): Promise<DeviceControlReply>;
 	daemonRunning(home: string): boolean;
 	/** `cp-daemon start`: its exit code. */
@@ -56,23 +60,23 @@ export interface TunnelCliPorts {
 	ask(question: string): string | undefined;
 }
 
-type Args = { verb: string; target?: string; home?: string; quick: boolean; hostname?: string; tokenFile?: string; port?: string; level?: string; push?: string };
+type Args = { verb: string; target?: string; home?: string; quick: boolean; hostname?: string; tokenFile?: string; apiTokenFile?: string; port?: string; level?: string; push?: string };
 
 function parse(argv: string[]): Args | string {
 	try {
 		const { values, positionals } = parseArgs({
 			args: argv,
 			allowPositionals: true,
-			options: { home: { type: "string" }, quick: { type: "boolean" }, hostname: { type: "string" }, "token-file": { type: "string" }, "remote-port": { type: "string" }, level: { type: "string" }, "push-origin": { type: "string" } },
+			options: { home: { type: "string" }, quick: { type: "boolean" }, hostname: { type: "string" }, "token-file": { type: "string" }, "api-token-file": { type: "string" }, "remote-port": { type: "string" }, level: { type: "string" }, "push-origin": { type: "string" } },
 		});
 		const [verb = "", target, ...rest] = positionals;
 		if (rest.length > 0 || (target !== undefined && verb !== "revoke") || (verb === "revoke" && target === undefined)) return "wrong arguments";
 		if (values.level !== undefined && values.level !== "full" && values.level !== "view") return "--level must be full or view";
 		if (values["push-origin"] !== undefined && values["push-origin"] !== "accept" && values["push-origin"] !== "keep") return "--push-origin must be accept or keep";
-		const upOnly = values.quick || values.hostname !== undefined || values["token-file"] !== undefined || values["remote-port"] !== undefined || values["push-origin"] !== undefined;
-		if (upOnly && verb !== "up") return "--quick, --hostname, --token-file, --remote-port and --push-origin belong to up";
+		const upOnly = values.quick || values.hostname !== undefined || values["token-file"] !== undefined || values["api-token-file"] !== undefined || values["remote-port"] !== undefined || values["push-origin"] !== undefined;
+		if (upOnly && verb !== "up") return "--quick, --hostname, --token-file, --api-token-file, --remote-port and --push-origin belong to up";
 		if (values.level !== undefined && verb !== "up" && verb !== "pair") return "--level belongs to up and pair";
-		return { verb, ...(target !== undefined ? { target } : {}), home: values.home, quick: values.quick === true, hostname: values.hostname, tokenFile: values["token-file"], port: values["remote-port"], level: values.level, push: values["push-origin"] };
+		return { verb, ...(target !== undefined ? { target } : {}), home: values.home, quick: values.quick === true, hostname: values.hostname, tokenFile: values["token-file"], apiTokenFile: values["api-token-file"], port: values["remote-port"], level: values.level, push: values["push-origin"] };
 	} catch (error) {
 		return (error as Error).message;
 	}
@@ -203,7 +207,9 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 	if (!saved.ok) return fail(`the saved config is unreadable (${saved.reason}); fix or remove it`);
 	const before = saved.config;
 	if (args.quick && (args.hostname !== undefined || args.tokenFile !== undefined)) return fail("--quick takes no --hostname or --token-file");
-	const mode: TunnelMode = args.quick ? "quick" : args.hostname !== undefined || args.tokenFile !== undefined ? "named" : (before?.mode ?? "quick");
+	if (args.apiTokenFile !== undefined && (args.quick || args.tokenFile !== undefined)) return fail("--api-token-file takes no --quick or --token-file: it sets up a named tunnel and fetches its token itself");
+	if (args.apiTokenFile !== undefined && args.hostname === undefined) return fail("--api-token-file needs --hostname HOST, the public name to create");
+	const mode: TunnelMode = args.quick ? "quick" : args.hostname !== undefined || args.tokenFile !== undefined || args.apiTokenFile !== undefined ? "named" : (before?.mode ?? "quick");
 	if (mode === "quick" && args.push === "accept") return fail("a quick tunnel's hostname changes on every start, so push is never pointed at it; use a named tunnel");
 	const hostname = mode === "named" ? (args.hostname ?? before?.hostname)?.toLowerCase() : undefined;
 	if (mode === "named" && (!hostname || !HOSTNAME_RE.test(hostname))) return fail(`a named tunnel needs --hostname HOST, a DNS name such as cp.example.com${hostname ? ` (not ${JSON.stringify(hostname)})` : ""}`);
@@ -213,7 +219,22 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 
 	let tokenFile = mode === "named" ? before?.token_file : undefined;
 	let token: string | undefined;
-	if (mode === "named" && args.tokenFile !== undefined) {
+	// The saved ids describe the tunnel whose token is stored, so a new --token-file drops them.
+	let ids: Pick<TunnelConfig, "tunnel_id" | "zone_id" | "account_id"> = mode === "named" && args.tokenFile === undefined && before ? { tunnel_id: before.tunnel_id, zone_id: before.zone_id, account_id: before.account_id } : {};
+	if (mode === "named" && args.apiTokenFile !== undefined && hostname) {
+		let apiToken: string;
+		try {
+			apiToken = readFileSync(resolve(args.apiTokenFile), "utf8").trim();
+		} catch (error) {
+			return fail(`cannot read --api-token-file: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`);
+		}
+		if (apiToken.length === 0 || Buffer.byteLength(apiToken) > TOKEN_MAX_BYTES || /\s/.test(apiToken)) return fail(`--api-token-file must hold one Cloudflare API token (no spaces, at most ${TOKEN_MAX_BYTES} bytes)`);
+		const setup = await setupNamedTunnel({ hostname, port, apiToken, tunnelName: tunnelNameFor(home), ...(before?.tunnel_id ? { savedTunnelId: before.tunnel_id } : {}) }, ports.cfFetch, (line) => ports.err(`cp-tunnel: ${line}`));
+		if (!setup.ok) return fail(setup.reason);
+		token = setup.token;
+		ids = { tunnel_id: setup.tunnel_id, zone_id: setup.zone_id, account_id: setup.account_id };
+		tokenFile = join(paths.dataDir, "tunnel", "token");
+	} else if (mode === "named" && args.tokenFile !== undefined) {
 		try {
 			token = readFileSync(resolve(args.tokenFile), "utf8").trim();
 		} catch (error) {
@@ -222,7 +243,7 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 		if (token.length === 0 || Buffer.byteLength(token) > TOKEN_MAX_BYTES || /\s/.test(token)) return fail(`--token-file must hold one tunnel token (no spaces, at most ${TOKEN_MAX_BYTES} bytes)`);
 		tokenFile = join(paths.dataDir, "tunnel", "token");
 	}
-	if (mode === "named" && (!tokenFile || (token === undefined && !existsSync(tokenFile)))) return fail("a named tunnel needs --token-file FILE (the token Cloudflare shows for the tunnel)");
+	if (mode === "named" && (!tokenFile || (token === undefined && !existsSync(tokenFile)))) return fail("a named tunnel needs --token-file FILE (the token Cloudflare shows for the tunnel) or --api-token-file FILE (a scoped Cloudflare API token)");
 
 	const binary = await ports.provision(cloudflaredBinDir(home));
 	if (!binary.ok) return fail(`no usable cloudflared: ${binary.reason}`);
@@ -233,7 +254,7 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 			const stored = storeToken(join(paths.dataDir, "tunnel"), token);
 			if (stored) return stored;
 		}
-		return { schema_version: 1, enabled: true, mode, port, binary: binary.path, ...(mode === "named" ? { hostname, token_file: tokenFile } : {}), revision: (current?.revision ?? 0) + 1 } as TunnelConfig;
+		return { schema_version: 1, enabled: true, mode, port, binary: binary.path, ...(mode === "named" ? { hostname, token_file: tokenFile, ...ids } : {}), revision: (current?.revision ?? 0) + 1 } as TunnelConfig;
 	});
 	if (typeof written === "string") return fail(written);
 
@@ -261,6 +282,7 @@ async function up(home: string, args: Args, paths: Paths, control: Control, port
 			: `cp-tunnel: named tunnel up on ${ready.origin}`,
 	);
 	if (mode === "named") pushConsent(paths.dataDir, ready.origin, args.push, ports);
+	if (args.apiTokenFile !== undefined) ports.err("cp-tunnel: You can now delete the API token in Cloudflare; it is only needed to change the hostname.");
 	return pair(args.level ?? "full", "cli-up");
 }
 
@@ -325,6 +347,7 @@ if (import.meta.main) {
 		now: Date.now,
 		sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
 		provision: (binDir) => provisionCloudflared(binDir, { ...defaultProvisionPorts(), log: (line) => void process.stderr.write(`cp-tunnel: ${line}\n`) }),
+		cfFetch: defaultCfFetch,
 		control: (stateDir, op, body) => deviceControlRequest(stateDir, op, body),
 		daemonRunning: (home) => {
 			try {
