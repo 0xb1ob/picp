@@ -195,6 +195,19 @@ test("run high-risk asks once under run attribution; scripts never use standing 
  assert.equal(JSON.stringify(runs.run(run.id)?.authority_log),auditBefore);
 });
 
+// Read-only planning never edits code, so a run's ask_on risk:high must not gate it; a ship job still is.
+test("a risk:high read-only research dispatch in a schedule run passes with no escalation; ship stays refused",async(t)=>{
+ const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
+ await runs.editRun(run.id,(row)=>{row.policy={...row.policy,allowed_actions:[...row.policy.allowed_actions,"plan"]};});
+ const base = {jobId:"cp-member",project:"demo",risk:"high" as const};
+ const store = new EscalationStore({home:home.path});
+ assert.equal((await mandates.assertDispatchAllowed({...base,kind:"research",readOnly:true})).run?.id,run.id);
+ assert.equal(store.list({kind:"risk_high_irreversible"}).length,0);
+ await assert.rejects(mandates.assertDispatchAllowed({...base,kind:"research"}),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
+ await assert.rejects(mandates.assertDispatchAllowed({...base,kind:"research",readOnly:true,promotion:true}),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
+ await assert.rejects(mandates.assertDispatchAllowed({...base,kind:"ship",readOnly:true}),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
+});
+
 test("verified operator starts pre-approve risk:high for their run only; timer runs and hard stops still ask under run attribution",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};

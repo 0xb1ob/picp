@@ -4327,7 +4327,9 @@ Read-only planning (research with a readOnly profile) is never gated: planners c
 job that implements a plan is. A fresh `cp_dispatch` of a `kind:research` job whose resolved profile
 frontmatter says `readOnly: true` (planner, qa) skips this gate and `wouldAskRiskHigh` whatever `ask_on`
 says (`riskGateExempt`, `src/dispatch-authority.ts`); a ship, script or promotion dispatch, or a research job
-with a writing profile, is gated as above. Schedule-run authority and checkpoint decides are unchanged.
+with a writing profile, is gated as above. The same exemption holds inside a schedule run (`scheduleRunVerdict`
+skips its risk:high and hard-stop escalation for an exempt job). Checkpoint decides are unchanged: their kinds
+(`ship`, `diff`, `merge`, `final_fix`) only ever name ship jobs, never a read-only research job.
 
 **Operator risk pre-approval** (`cp_mandate preapprove_risk`, `src/risk-preapproval.ts`, unload-parent PR0). The
 operator can pre-approve a grant's risk:high work once instead of per job: `cp_mandate preapprove_risk mandate_id
