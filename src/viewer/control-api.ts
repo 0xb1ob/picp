@@ -63,6 +63,7 @@ import { agentDirFor, skillRoots, withSkillLines } from "./skill-catalog.ts";
 import { isImageUploadId, isTextUploadId, statUpload, UPLOAD_MAX_PER_MESSAGE, UPLOAD_MESSAGE_MAX_BYTES, UPLOAD_RATE_LIMIT, UPLOAD_SEND_TIMEOUT_MS, uploadRoot } from "./uploads.ts";
 
 import { scheduleControlFieldError, type ScheduleControlFields } from "./control-files.ts";
+import { strictHost } from "./host-config.ts";
 import { schedulePolicyView } from "./schedule-policy-view.ts";
 export const SCHEDULE_POLICY_PATH = "/api/schedules/policy";
 export function handleSchedulePolicy(req: IncomingMessage, options: ControlRouteOptions): ControlRouteResult {
@@ -343,6 +344,19 @@ function threaded(options: ControlRouteOptions, result: ControlSendResponse, tag
 	return { ...result, thread: { tag, id: bound.ok ? bound.thread : null, error: bound.ok ? null : bound.error } };
 }
 
+/** The `Origin` header is http(s) on exactly this request's Host header, its default port written or not. */
+function originIsHost(req: IncomingMessage): boolean {
+	const host = req.headers.host?.trim().toLowerCase();
+	if (!host || !req.headers.origin) return false;
+	try {
+		const url = new URL(req.headers.origin);
+		if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+		return url.host === host || (url.port === "" && `${url.host}:${url.protocol === "https:" ? 443 : 80}` === host);
+	} catch {
+		return false; // an unparseable Origin is simply not this host
+	}
+}
+
 const IMAGE_CONTENT_TYPE = /^image\/(png|jpeg|webp|gif)\s*(?:;|$)/i;
 
 /**
@@ -391,7 +405,9 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		// No HTTPS origin configured: same-origin with this bind (the plain-HTTP origin the Host guard already pinned).
 		// A remote device: exactly the tunnel origin it paired through, never the local listener's list.
 		const origins = access.kind === "remote" ? [access.origin] : origin ? allowedOrigins(options, origin) : [bindOrigin(options)];
-		if (!origins.includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${origin ?? `${bindOrigin(options)} (no HTTPS origin is configured; npm run push:init -- --origin https://<dashboard host> to use one)`}`);
+		// Without viewer.strict_host, a page served under this request's own Host (a proxy) is same-origin too.
+		const proxied = access.kind === "local" && !strictHost(options.stateDir) && originIsHost(req);
+		if (!origins.includes(req.headers.origin ?? "") && !proxied) return refuse(403, `Origin must be ${origin ?? `${bindOrigin(options)} (no HTTPS origin is configured; npm run push:init -- --origin https://<dashboard host> to use one)`}`);
 		const site = req.headers["sec-fetch-site"];
 		if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
 		const type = req.headers["content-type"] ?? "";

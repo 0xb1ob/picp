@@ -50,6 +50,20 @@ test("unpaired: every route class and method refuses 401 before the dispatcher; 
 	assert.notEqual((await r("/api/pair/claim", { method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: "{}" })).status, 401, "the claim is public");
 });
 
+test("named tunnel: Host equal to the configured hostname (any case, bare or :443) reaches the device gate; another Host is 421", async (t) => {
+	const { r, remote, pair } = await rig(t);
+	remote.hostname = "cp.example.test";
+	for (const host of ["cp.example.test", "CP.Example.Test", "cp.example.test:443"]) assert.equal((await r("/api/overview", { headers: { host } })).status, 401, host);
+	const device = pair("Laptop");
+	assert.equal((await r("/api/overview", { headers: { host: "cp.example.test", cookie: device.cookie } })).status, 200);
+	for (const host of ["evil.example", "cp.example.test:8443", "x.cp.example.test", "cp.example.test.evil"]) {
+		const reply = await r("/api/overview", { headers: { host, cookie: device.cookie } });
+		assert.equal(reply.status, 421, host);
+		assert.match(reply.text, /^refused: Host must be 127\.0\.0\.1:\d+ or cp\.example\.test\n$/);
+	}
+	assert.equal((await r("/api/overview", { headers: { cookie: device.cookie } })).status, 200, "the loopback Host still passes");
+});
+
 test("bad cookies: unknown, malformed, duplicated, expired and revoked sessions are 401 and clear the cookie; 10 failures per address then 429", async (t) => {
 	const { r, pair, store, clock } = await rig(t);
 	const good = pair("Phone");

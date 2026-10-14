@@ -44,6 +44,7 @@ import { QUALITY_OFF } from "../src/quality.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG, loadRoutingConfig } from "../src/routing.ts";
 import { readUpdateConfig } from "../src/service/update.ts";
+import { loadViewerConfig } from "../src/viewer/host-config.ts";
 import { readOwnerConsistently, readSettings } from "../src/settings.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -58,6 +59,7 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	capacity: `${LAYOUT.data}/capacity.json`,
 	update: `${LAYOUT.data}/update.json`,
 	routing: LAYOUT.routingFile,
+	viewer: `${LAYOUT.data}/viewer.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
 
@@ -83,10 +85,10 @@ function snapshot(home: string, env: NodeJS.ProcessEnv = {}): SettingsSnapshot {
 	return snap;
 }
 
-test("(a) catalog: 31 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 31);
+test("(a) catalog: 32 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 32);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 31);
+	assert.equal(new Set(SETTING_KEYS).size, 32);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -208,6 +210,7 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			const config = readUpdateConfig(join(home, LAYOUT.data));
 			return typeof config !== "string" && config[field.file_key as "enabled"] === value;
 		},
+		viewer: (_field, value) => (write(home, "viewer", { strict_host: value }), accepts(() => loadViewerConfig(ownerFile(home, "viewer")).strict_host, value)),
 	};
 	let compared = 0;
 	for (const field of SETTING_FIELDS) {
@@ -259,10 +262,11 @@ function loaderValues(home: string): Partial<Record<SettingKey, unknown>> {
 		"review.quality_threshold": DEFAULT_QUALITY_THRESHOLD,
 		"maintenance.update_enabled": update.enabled,
 		"maintenance.update_interval_min": update.interval_min,
+		"viewer.strict_host": loadViewerConfig(ownerFile(home, "viewer")).strict_host,
 	};
 }
 
-test("(d) empty home: every owner absent; 28 fields ok from code at the loader's value; capacity disabled at its defaults", (t) => {
+test("(d) empty home: every owner absent; 29 fields ok from code at the loader's value; capacity disabled at its defaults", (t) => {
 	const home = scratch(t);
 	const snap = snapshot(home);
 	assert.deepEqual(snap.owners.map((row) => row.owner), [...SETTING_FILE_OWNERS]);
@@ -270,7 +274,7 @@ test("(d) empty home: every owner absent; 28 fields ok from code at the loader's
 		assert.deepEqual(row, { owner: row.owner, path: OWNER_FILE[row.owner], state: "absent", sha256: null });
 	}
 	const expected = loaderValues(home);
-	assert.equal(Object.keys(expected).length, 28);
+	assert.equal(Object.keys(expected).length, 29);
 	for (const [key, value] of Object.entries(expected)) {
 		assert.deepEqual(view(snap, key as SettingKey), { key, value, source: "code", status: "ok" }, key);
 	}
@@ -307,6 +311,7 @@ test("(e) a valid override per owner: source file, status ok, the written value"
 		capacity: { ...CAPACITY_MIN, quota: { five_hour: 70, balance_margin: null } },
 		update: { enabled: true, interval_min: 30 },
 		routing: { schema_version: 1, allow: ["anthropic/*"], rubric: [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }] },
+		viewer: { strict_host: true },
 	};
 	for (const [owner, body] of Object.entries(files)) write(home, owner as SettingFileOwner, body);
 	const snap = snapshot(home, { CP_JOB_WALL_CLOCK_SECONDS: "600" });
@@ -331,6 +336,7 @@ test("(e) a valid override per owner: source file, status ok, the written value"
 	assertView("capacity.balance_margin", null);
 	assertView("maintenance.update_enabled", true);
 	assertView("maintenance.update_interval_min", 30);
+	assertView("viewer.strict_host", true);
 	assertView("models.allow", ["anthropic/*"]);
 	assertView("models.rubric", [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }]);
 	assertView("models.parent", "anthropic/claude-opus-5-5");
@@ -354,6 +360,7 @@ test("(f) an invalid owner file: the consumer's own behaviour, no throw, a redac
 		capacity: { ...CAPACITY_MIN, quota: { five_hour: 101 } },
 		update: { enabled: true, interval_min: 0 },
 		routing: { schema_version: 1, allow: "x", rubric: [] },
+		viewer: { strict_host: "yes" },
 	};
 	const expected = (key: SettingKey) => {
 		if (key === "grants.token_ceiling") return { value: 0, source: "code", status: "fallback" };

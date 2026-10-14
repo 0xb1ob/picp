@@ -40,6 +40,7 @@ import { loadQualityConfig, resolveQualityConfig } from "./quality.ts";
 import { loadCapacityConfig } from "./quota.ts";
 import { loadRoutingConfig } from "./routing.ts";
 import { readUpdateConfig } from "./service/update.ts";
+import { loadViewerConfig } from "./viewer/host-config.ts";
 
 const ERROR_MAX = 500;
 const ENV_KEYS = ["CP_JOB_WALL_CLOCK_SECONDS", "CP_JOB_TOOL_CALL_CAP"] as const;
@@ -294,6 +295,11 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 		file: (home) => join(home, LAYOUT.routingFile),
 		read: (home, _env, file) =>
 			settle("routing", readOwnerConsistently(file, () => loadRoutingConfig(home)), (config: RoutingConfig) => ({ "models.allow": [...config.allow], "models.rubric": [...config.rubric] })),
+	},
+	viewer: {
+		file: dataFile("viewer.json"),
+		read: (_home, _env, file) =>
+			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host })),
 	},
 };
 

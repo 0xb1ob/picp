@@ -92,6 +92,19 @@ test("the listener opens only for the controller's running, matching revision an
 	assert.equal(r.lines.filter((line) => line.includes("listening on")).length, 1, "not reopened");
 });
 
+test("a named tunnel's listener also answers Host <hostname> from data/tunnel.json; a quick one does not", async (t) => {
+	const r = await rig(t);
+	await r.runtime.check();
+	const at = (host: string) => call(r.port, "/pair", { headers: { host, connection: "close" } }).then((reply) => reply.status);
+	assert.equal(await at("cp.example.test"), 421, "quick: loopback Host only");
+	const named = { ...config(r.port, 2), mode: "named" as const, hostname: "cp.example.test", token_file: "/opt/cf/token" };
+	r.files.config = { ok: true, config: named };
+	r.files.runtime = { ok: true, runtime: { ...running(r.port, 2, 2, "https://cp.example.test"), mode: "named" } };
+	await r.runtime.check();
+	assert.equal(await at("cp.example.test"), 200);
+	assert.equal(await at("other.example.test"), 421);
+});
+
 test("the local listener's device routes follow the store owner: 404 before, then the list with Add for a loopback peer", async (t) => {
 	const r = await rig(t);
 	const port = await freePort();

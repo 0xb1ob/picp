@@ -81,6 +81,7 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"capacity.balance_margin": "delete",
 	"maintenance.update_enabled": "installer_seed",
 	"maintenance.update_interval_min": "installer_seed",
+	"viewer.strict_host": "delete",
 });
 
 /** What cp-install writes to `data/update.json` (src/service/install.ts step 7). */

@@ -1,9 +1,10 @@
 /**
  * Remote dashboard PR 1b: the remote listener's gate. A second server, separate from the loopback/tailnet one and
- * left unchanged by it, bound to 127.0.0.1 on its own port behind the tunnel (which rewrites Host to that address).
+ * left unchanged by it, bound to 127.0.0.1 on its own port behind the tunnel (a quick tunnel rewrites Host to that
+ * address; a named one forwards its public hostname, which is accepted too).
  * Nothing starts it yet: the tunnel wiring is a later PR, so the feature stays off by default.
  *
- * Every request passes, in order: the exact Host; the two public routes (exact `GET|HEAD /pair`, exact
+ * Every request passes, in order: the Host; the two public routes (exact `GET|HEAD /pair`, exact
  * `POST /api/pair/claim`); a running origin binding; the `__Host-` device cookie (missing: 401; a presented bad one
  * counts toward 10 per 10 minutes per client address, then 429); the store's check, which slides the session and
  * commits before the answer. Only then is a frozen remote context bound to the request (access.ts) and the shared
@@ -32,10 +33,19 @@ const UNPAIRED = "unauthorized: pair this device with a link from `cp-tunnel pai
 export interface RemoteOptions {
 	port: number;
 	devices: DeviceRoutes;
+	/** Named tunnel: its public hostname (data/tunnel.json), also accepted as Host. */
+	hostname?: string;
 	/** Test seams: the two 10-per-10-minute limiters and the clock. */
 	claimLimiter?: AttemptLimiter;
 	cookieLimiter?: AttemptLimiter;
 	now?: () => Date;
+}
+
+/** A named tunnel forwards its public Host as is: the configured hostname, any case, bare or with :443. */
+function namedHost(header: string | undefined, hostname: string | undefined): boolean {
+	const got = header?.trim().toLowerCase();
+	const want = hostname?.toLowerCase();
+	return want !== undefined && (got === want || got === `${want}:443`);
 }
 
 /** The single device cookie value; `null` when the header carries it more than once (refused, never guessed). */
@@ -45,8 +55,8 @@ function deviceCookie(header: string | undefined): string | undefined | null {
 }
 
 export function remoteHandle(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, remote: RemoteOptions, warn = onceWarner(() => {})): void {
-	if (!hostAllowed(req.headers.host, REMOTE_HOST, remote.port)) {
-		send(res, 421, "text/plain; charset=utf-8", `refused: Host must be ${hostHeaderFor(REMOTE_HOST, remote.port)}\n`);
+	if (!hostAllowed(req.headers.host, REMOTE_HOST, remote.port) && !namedHost(req.headers.host, remote.hostname)) {
+		send(res, 421, "text/plain; charset=utf-8", `refused: Host must be ${hostHeaderFor(REMOTE_HOST, remote.port)}${remote.hostname ? ` or ${remote.hostname}` : ""}\n`);
 		return;
 	}
 	const now = (remote.now ?? (() => new Date()))();

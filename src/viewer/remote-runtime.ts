@@ -114,7 +114,8 @@ export function remoteRuntime(options: ViewerOptions, overrides: Partial<RemoteR
 			if (!recovered.ok) note(`device store recovery refused (${recovered.reason}); every device request fails closed until it is fixed`);
 			else if (recovered.recovered.length > 0) note(`finished ${recovered.recovered.length} interrupted pairing(s)`);
 		}
-		const want = wantedListener(ports.readConfig(), ports.readRuntime());
+		const config = ports.readConfig();
+		const want = wantedListener(config, ports.readRuntime());
 		const same = open && want && want.port === open.listening.port && want.mode === open.listening.mode && want.origin === open.listening.origin && want.generation === open.listening.generation;
 		if (open && !same) close(want ? `now ${want.origin} generation ${want.generation} on ${want.port}` : "the tunnel is not running this config");
 		if (!want) return;
@@ -123,7 +124,8 @@ export function remoteRuntime(options: ViewerOptions, overrides: Partial<RemoteR
 			return;
 		}
 		// Its own copy: the local flag never stands in for a tunnel request (the remote gate's device context does).
-		const server = createRemoteViewer({ ...options, requireTailnet: false, ...(want.mode === "quick" ? { refreshTransport: "poll" as const } : {}) }, { port: want.port, devices: routes as DeviceRoutes });
+		const hostname = config.ok && want.mode === "named" ? config.config?.hostname : undefined;
+		const server = createRemoteViewer({ ...options, requireTailnet: false, ...(want.mode === "quick" ? { refreshTransport: "poll" as const } : {}) }, { port: want.port, devices: routes as DeviceRoutes, ...(hostname ? { hostname } : {}) });
 		const failed = await listen(server, want.port);
 		if (failed) return note(`cannot listen on 127.0.0.1:${want.port} (${failed}); retrying`);
 		open = { server, listening: want };

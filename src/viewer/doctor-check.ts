@@ -10,6 +10,7 @@
 import type { DoctorFinding } from "../contracts.ts";
 import type { CommandRunner } from "../doctor.ts";
 import { controlSocketFile, readControlConfig, readControlRecord } from "./control-files.ts";
+import { loadViewerConfig, viewerConfigFile } from "./host-config.ts";
 import { pidAlive } from "./overview-health.ts";
 import { resolveStateDir } from "./sessions.ts";
 import { serviceFindings, viewerExpected } from "../service/status.ts";
@@ -22,7 +23,7 @@ function pidsOf(run: CommandRunner, cwd: string, pattern: string): string[] {
 /** `env` is where the service lines read the unit dir and the legacy home: injected in tests so the host's own units never leak in. */
 export function viewerFindings(run: CommandRunner, cwd: string, env: NodeJS.ProcessEnv = process.env): DoctorFinding[] {
 	const stateDir = resolveStateDir(cwd);
-	return [viewerFinding(run, cwd, env), dashboardControlFinding(stateDir), ...serviceFindings(run, cwd, env, stateDir)];
+	return [viewerFinding(run, cwd, env), dashboardControlFinding(stateDir), viewerHostFinding(stateDir), ...serviceFindings(run, cwd, env, stateDir)];
 }
 
 function viewerFinding(run: CommandRunner, cwd: string, env: NodeJS.ProcessEnv): DoctorFinding {
@@ -42,6 +43,18 @@ function viewerFinding(run: CommandRunner, cwd: string, env: NodeJS.ProcessEnv):
 		what: "an operator session is up but the session viewer is not running",
 		fix: "optional: it runs with --require-tailnet, so check `tailscale ip -4` (or set CP_VIEWER_HOST), then restart bin/cp-operator (or run `bin/cp-view` in a terminal)",
 	};
+}
+
+/** One line: does the local listener pin its bind Host (`viewer.strict_host`, data/viewer.json)? */
+export function viewerHostFinding(stateDir: string): DoctorFinding {
+	try {
+		if (!loadViewerConfig(viewerConfigFile(stateDir)).strict_host) {
+			return { check: "viewer-host", severity: "ok", what: "viewer Host check off (viewer.strict_host=false): any name that reaches this port is served; set viewer.strict_host=true to pin it" };
+		}
+		return { check: "viewer-host", severity: "ok", what: "viewer Host check on (viewer.strict_host=true): only the exact bind host:port is served" };
+	} catch (error) {
+		return { check: "viewer-host", severity: "warn", what: "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned", detail: (error as Error).message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false}) or remove it" };
+	}
 }
 
 /** One line: is the dashboard allowed to steer the operator session, and is a session serving it? */

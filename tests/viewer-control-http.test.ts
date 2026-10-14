@@ -17,6 +17,7 @@ import { herdrCommand } from "../src/viewer/launchers.ts";
 import { ControlLimiter } from "../src/viewer/control-api.ts";
 import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord } from "../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -169,7 +170,8 @@ test("no HTTPS origin configured: a tailnet bind accepts only its own http:// or
 	assert.equal((await at(self, { kind: "message", text: "over http" })).status, 202);
 	assert.equal((await at(self, { kind: "answer", ask_id: "ask-abcd", label: "Keep" })).status, 202);
 	assert.equal(injected.length, 2);
-	for (const foreign of ["https://evil.example", `https://100.64.0.9:${port}`, `http://100.64.0.9:${port + 1}`, `http://127.0.0.1:${port}`, ""]) {
+	// `https://100.64.0.9:<port>` names this Host, so it passes without viewer.strict_host (the proxy test pins that).
+	for (const foreign of ["https://evil.example", `http://100.64.0.9:${port + 1}`, `http://127.0.0.1:${port}`, ""]) {
 		const out = await at(foreign, { kind: "message", text: "x" });
 		assert.equal(out.status, 403, foreign);
 		assert.match(String(out.body.error), new RegExp(`^Origin must be http://100\\.64\\.0\\.9:${port} \\(no HTTPS origin is configured`));
@@ -180,8 +182,10 @@ test("no HTTPS origin configured: a tailnet bind accepts only its own http:// or
 	assert.equal(sub.status, 409, "push still needs push:init (HTTPS)");
 
 	put(pushConfigFile(pushDataDir(stateDir)), JSON.stringify({ origin: ORIGIN, subject: "mailto:op@example.com", public_key: Buffer.alloc(65, 4).toString("base64url"), created_at: "2026-09-27T08:00:00Z" }));
+	assert.equal((await at(self, { kind: "message", text: "x" })).status, 202, "configured, Host check off: the bind's own Host is same-origin");
+	put(viewerConfigFile(stateDir), JSON.stringify({ strict_host: true }));
 	const configured = await at(self, { kind: "message", text: "x" });
-	assert.equal(configured.status, 403, "configured: a non-loopback bind's own origin stays refused");
+	assert.equal(configured.status, 403, "configured under strict_host: a non-loopback bind's own origin stays refused");
 	assert.match(String(configured.body.error), /^Origin must be https:\/\/cp\.example\.ts\.net$/);
 	assert.equal((await at(ORIGIN, { kind: "message", text: "via https" })).status, 202);
 });
@@ -655,4 +659,26 @@ test("skill mentions: an installed @name gains one code-written [cp-skill] line 
 	assert.equal((await call(offline.port, MESSAGE, json(inbox, { kind: "message", text: "later @tdd-x" }))).status, 202);
 	const held = readFileSync(controlInboxFile(offline.stateDir), "utf8").trim().split("\n").map((l) => JSON.parse(l));
 	assert.equal(held[0].text, `later @tdd-x\n\n${line}`, "the inbox holds the line for the next session");
+});
+
+test("proxied dashboard (Coder port-forward): Origin naming the request's own Host is accepted; a mismatch is 403; strict_host keeps only today's list", async (t) => {
+	const { stateDir, port } = await setup(t);
+	const { injected, csrf } = await bridge(t, stateDir);
+	const PROXY = "8766--dev--box.coder.example";
+	const via = (host: string, origin: string, extra: Record<string, string> = {}) => {
+		const req = json(csrf, { kind: "message", text: "via proxy" }, { origin, ...extra });
+		return call(port, MESSAGE, { ...req, headers: { ...req.headers, host } });
+	};
+	assert.equal((await via(PROXY, `https://${PROXY}`)).status, 202);
+	assert.equal((await via(`${PROXY}:443`, `https://${PROXY}`)).status, 202, "a written default port is the same host");
+	assert.equal((await via(PROXY, `http://${PROXY}`)).status, 202, "http or https");
+	assert.equal((await via(`127.0.0.1:${port}`, `https://127.0.0.1:${port}`)).status, 202, "off: any scheme on the bind's own Host");
+	for (const origin of ["https://evil.example", `https://${PROXY}:8443`, `https://x.${PROXY}`, "null", ""]) assert.equal((await via(PROXY, origin)).status, 403, origin);
+	assert.equal((await via(PROXY, `https://${PROXY}`, { "sec-fetch-site": "cross-site" })).status, 403, "Sec-Fetch-Site still guards");
+	assert.equal((await via(PROXY, `https://${PROXY}`, { "x-cp-control-token": "0".repeat(64) })).status, 403, "the CSRF token still guards");
+	assert.equal(injected.length, 4);
+	put(viewerConfigFile(stateDir), JSON.stringify({ strict_host: true }));
+	assert.equal((await via(PROXY, `https://${PROXY}`)).status, 421, "strict: the proxied name is refused before the route");
+	assert.equal((await via(`127.0.0.1:${port}`, `https://127.0.0.1:${port}`)).status, 403, "strict: the configured list only, not Host-derived");
+	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "message", text: "configured" }))).status, 202, "strict: the configured origin still works");
 });

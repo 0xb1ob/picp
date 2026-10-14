@@ -16,7 +16,7 @@ import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
 import { ReviewerModelSchema, RoutingRuleSchema } from "./routing.ts";
 
-export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance"] as const;
+export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
 
 /** Owner files in revision order; `env` is the one owner without a file. */
@@ -31,6 +31,7 @@ export const SETTING_OWNERS = [
 	"capacity",
 	"update",
 	"routing",
+	"viewer",
 	"env",
 ] as const;
 export type SettingOwner = (typeof SETTING_OWNERS)[number];
@@ -62,6 +63,7 @@ export const SETTING_APPLIES = [
 	"next_update_run",
 	"next_parent_start",
 	"next_operator_launch",
+	"next_viewer_request",
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
@@ -100,6 +102,7 @@ export const SETTING_KEYS = [
 	"capacity.balance_margin",
 	"maintenance.update_enabled",
 	"maintenance.update_interval_min",
+	"viewer.strict_host",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
@@ -146,7 +149,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 31 fields, in `SETTING_KEYS` order. */
+/** The 32 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -204,6 +207,9 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("maintenance", "update", { applies: "next_update_run", on_invalid: "disable" }, {
 		update_enabled: { file_key: "enabled", type: "boolean", default: false, label: "Automatic updates", help: "Whether the daemon updates this home on its own." },
 		update_interval_min: { file_key: "interval_min", type: "number", exclusive_minimum: 0, default: 15, label: "Update interval (minutes)", help: "Minutes between automatic update checks." },
+	}),
+	...group("viewer", "viewer", { applies: "next_viewer_request", on_invalid: "refuse" }, {
+		strict_host: { file_key: "strict_host", type: "boolean", default: false, label: "Pin the dashboard Host", help: "Serve the local dashboard only under its exact bind host:port (the DNS-rebinding guard). Off: any name that reaches the port, such as a proxy's, is served with full control; an invalid file pins it." },
 	}),
 ]);
 

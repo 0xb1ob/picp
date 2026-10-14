@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,7 +127,8 @@ test("reuse: only a viewer for the same home is reused and never killed", async 
 });
 
 test("reuse: an unrelated listener is refused without stopping it", async (t) => {
-	const existing = createViewer({ home: "/unused", stateDir: "/unused/state", host: "127.0.0.1", port: 1 });
+	// Not a viewer: a viewer itself now answers any Host (viewer.strict_host off), so it would read as another home.
+	const existing = createHttpServer((_req, res) => res.writeHead(404).end());
 	await new Promise<void>((resolve) => existing.listen(0, "127.0.0.1", resolve));
 	t.after(() => existing.close());
 	await assert.rejects(startViewer(fakeViewer((existing.address() as AddressInfo).port)), /cannot verify|not a viewer/);
