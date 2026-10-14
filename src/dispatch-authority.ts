@@ -10,7 +10,12 @@ import { runStartedBy, scheduleRunVerdict, ScheduleAuthorityError } from "./sche
 export interface DispatchAuthorityJob {
 	jobId: string; project: string; kind?: "ship" | "research"; pathHints?: string[]; risk?: Risk;
 	evidence?: readonly string[]; promotion?: boolean; script?: boolean;
+	/** The resolved profile's `readOnly` frontmatter, set only by dispatch.ts where the profile is resolved. */
+	readOnly?: boolean;
 }
+/** Read-only planning never edits code, so risk:high never gates it; the ship job that implements the plan is. */
+export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script">): boolean =>
+	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script;
 export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
 	try {
 		const verdict = scheduleRunVerdict(store.runContext(), job.promotion ? "promote" : "dispatch", job, jobs, store.authorityNow());
@@ -24,7 +29,7 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 	if (!selected) return permission;
 	const speaking = [selected];
 	let preapproved: Mandate[] = [];
-	if (job.risk === "high" && speaking.some((mandate) => mandate.ask_on.includes("risk:high"))) {
+	if (job.risk === "high" && !riskGateExempt(job) && speaking.some((mandate) => mandate.ask_on.includes("risk:high"))) {
 		const escalations = new EscalationStore({ home: store.home });
 		// Explicit approve only: raiseRiskHigh recommends drop, which is never authorization.
 		const APPROVE = /^(?:approve|approved|yes)$/i;

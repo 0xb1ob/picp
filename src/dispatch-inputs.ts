@@ -40,7 +40,7 @@ export function composeRoutingInputs(
 const jobText = (issue: Job, task: ResolvedTask): string => [task.forInference, `# Job: ${issue.title}`, issue.description ?? ""].join("\n");
 
 /** H6: the gate's risk, from routing's axis and a risk a parent (`risk`, a `risk:` label, a header) or planner (`recordedRisk`) recorded. */
-export function riskGate(mandates: MandateStore | undefined, request: DispatchRequest, issue: Job, task: ResolvedTask, job: { jobId: string; project: string; kind: JobKind }, inputs: ReturnType<typeof resolveRoutingInputs>, jobs?: readonly MandateUsageJob[]) {
+export function riskGate(mandates: MandateStore | undefined, request: DispatchRequest, issue: Job, task: ResolvedTask, job: { jobId: string; project: string; kind: JobKind; readOnly?: boolean }, inputs: ReturnType<typeof resolveRoutingInputs>, jobs?: readonly MandateUsageJob[]) {
 	const recorded = recordedRisk({ ...(request.risk && recordedProvenance(inputs.provenance.risk) ? { requested: request.risk } : {}), ...(request.recordedRisk ? { pipeline: request.recordedRisk } : {}), job: issue, taskText: task.forInference });
 	return { ...inferredRiskGate({ ...(mandates ? { mandates } : {}), jobs, job: { ...job, pathHints: [task.forInference] }, routed: inputs.risk, routedFrom: inputs.provenance.risk, ...(recorded ? { recorded: recorded.risk, recordedFrom: recorded.from } : {}), text: jobText(issue, task) }), ...(recorded ? { recorded } : {}) };
 }

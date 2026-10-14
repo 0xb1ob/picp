@@ -750,6 +750,29 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 	assert.equal(result.state, "dispatched");
 });
 
+// cp-risk-gate-skip-planning: read-only planning (research + a readOnly profile) is never gated by ask_on risk:high;
+// a ship dispatch, or a research job with a writing profile, still is — the planner cannot edit code, the ship job can.
+test("risk:high under ask_on never gates read-only planning; ship and a writing research profile still refuse", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "plan the cred rotation", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const task = "Rotate the production database credentials.";
+	const escalations = new EscalationStore({ home: b.home });
+	for (const [slug, profile] of [["plan-creds", "planner"], ["qa-creds", "qa"]] as const) {
+		const job = await b.ledger.create({ title: `plan ${slug}`, project: "demo", delivery: "local", kind: "research", slug });
+		const result = await dispatcher.dispatch({ jobId: job.id, task, risk: "high", profile, model: b.model, fetch: false });
+		assert.equal(result.state, "dispatched", profile);
+	}
+	assert.deepEqual(escalations.open(), [], "read-only planning raises no escalation");
+
+	const writer = await b.ledger.create({ title: "research with writer", project: "demo", delivery: "local", kind: "research", slug: "writer-creds" });
+	await assert.rejects(() => dispatcher.dispatch({ jobId: writer.id, task, risk: "high", profile: "implementer", model: b.model, fetch: false }), /risk:high under ask_on/);
+	const ship = await b.ledger.create({ title: "ship creds", project: "demo", delivery: "local", kind: "ship", slug: "ship-creds" });
+	await assert.rejects(() => dispatcher.dispatch({ jobId: ship.id, task, risk: "high", model: b.model, fetch: false }), /risk:high under ask_on/);
+	assert.deepEqual(escalations.open().map((entry) => entry.job_ids).sort(), [[ship.id], [writer.id]].sort(), "one escalation per gated job");
+});
+
 // cp-7re9: deny_projects refuses a model dispatch at preflight (project_denied), which runs
 // before the mandate's risk:high gate and before the lease (src/dispatch.ts: routing → bounds → preflight → assertDispatchAllowed → lease).
 test("cp-7re9: a denied project refuses a model dispatch with project_denied, before the risk:high gate and before any lease", { skip: SKIP, timeout: 180_000 }, async (t) => {

@@ -1353,6 +1353,32 @@ test("wouldAskRiskHigh: dry-run predicate matches the gate without raising anyth
 	assert.equal(new EscalationStore({ home: home.path }).list().length, 0, "a dry run raises nothing");
 });
 
+// cp-risk-gate-skip-planning: a fresh read-only research dispatch is exempt from ask_on risk:high in the gate and its
+// dry-run mirror; ship, a writing profile, a promotion or a script is gated exactly as before.
+test("risk:high gate: read-only planning is exempt; ship, writing profiles, promotions and scripts still ask", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	issue(store, { ask_on: ["risk:high"], objective: "plan the bump" });
+	const escalations = new EscalationStore({ home: home.path });
+	const planning = { jobId: "cp-plan", project: "demo", kind: "research" as const, readOnly: true };
+	assert.equal(store.wouldAskRiskHigh(planning, "high"), false);
+	await store.assertDispatchAllowed({ ...planning, risk: "high" });
+	assert.equal(escalations.list().length, 0, "read-only planning raises no escalation");
+	assert.equal(store.wouldAskRiskHigh({ jobId: "cp-ship", project: "demo", kind: "ship" }, "high"), true);
+	const gated = [
+		{ jobId: "cp-ship", kind: "ship" as const, readOnly: true },
+		{ jobId: "cp-writer", kind: "research" as const, readOnly: false },
+		{ jobId: "cp-promoted", kind: "ship" as const, promotion: true },
+		{ jobId: "cp-plan-promoted", kind: "research" as const, readOnly: true, promotion: true },
+		{ jobId: "cp-script", kind: "research" as const, readOnly: true, script: true },
+	];
+	for (const job of gated) {
+		await assert.rejects(() => store.assertDispatchAllowed({ ...job, project: "demo", risk: "high" }), /risk:high under ask_on/, job.jobId);
+	}
+	assert.equal(escalations.list().length, gated.length, "one escalation per gated job");
+});
+
 // -- exclusions.paths globbing + objective bare-ref resolution (pi-command-post-autonomy-programme-cur.2.6) --
 
 test("evaluateAuthority: the scaffolded **/.env* exclusion actually refuses .env paths", (t) => {
