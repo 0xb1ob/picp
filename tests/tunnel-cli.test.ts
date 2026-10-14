@@ -3,13 +3,14 @@
  * controller writes the runtime record and a fake viewer answers the owner-socket ack whenever the CLI sleeps.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { initPush } from "../src/push/keys.ts";
 import { atomicWrite, daemonPaths } from "../src/service/daemon-files.ts";
 import { readTunnelConfig, type TunnelRuntime, tunnelConfigFile, tunnelRuntimeFile } from "../src/service/daemon-tunnel-files.ts";
 import { cli, type TunnelCliPorts, UP_WAIT_MS } from "../src/tunnel/cli.ts";
+import { CF_API, type CfFetch, DNS_SCOPE, setupNamedTunnel, TUNNEL_SCOPE, tunnelNameFor } from "../src/tunnel/cloudflare-api.ts";
 import type { DeviceControlReply } from "../src/viewer/device-control.ts";
 import { pushConfigFile, vapidKeyFile } from "../src/viewer/push-files.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -56,6 +57,7 @@ function rig(t: import("node:test").TestContext, options: { daemon?: boolean; ru
 			tick();
 		},
 		provision: async (binDir) => (calls.push(`provision ${binDir}`), { ok: true, path: "/opt/cf/cloudflared", source: "installed", version: "2026.3.0" }),
+		cfFetch: async () => assert.fail("no Cloudflare API call expected"),
 		control: async (_stateDir, op, args = {}): Promise<DeviceControlReply> => {
 			calls.push(`control ${op} ${JSON.stringify(args)}`);
 			if (op === "status") return { ok: true, result: { pid: 1, ...world.ack, port: null } };
@@ -95,7 +97,7 @@ const pairs = (r: Rig) => r.calls.filter((call) => call.startsWith("control pair
 
 test("argument refusals: usage on stderr with exit 2, and nothing is written", async (t) => {
 	const r = rig(t);
-	for (const argv of [[], ["launch"], ["pair", "--hostname", "x.example.com"], ["devices", "--level", "view"], ["revoke"], ["status", "extra"], ["up", "--level", "admin"], ["up", "--push-origin", "maybe"], ["up", "--bogus"]]) {
+	for (const argv of [[], ["launch"], ["pair", "--hostname", "x.example.com"], ["pair", "--api-token-file", "/x"], ["devices", "--level", "view"], ["revoke"], ["status", "extra"], ["up", "--level", "admin"], ["up", "--push-origin", "maybe"], ["up", "--bogus"]]) {
 		r.err.length = 0;
 		assert.equal(await r.run(...argv), 2, argv.join(" "));
 		assert.match(r.err.join("\n"), /usage: cp-tunnel up/, argv.join(" "));
@@ -318,4 +320,170 @@ test("down: a disabled revision, success only once cloudflared exited and the li
 	r.out.length = 0;
 	assert.equal(await r.run("status"), 0);
 	assert.equal(r.out[0], "config: disabled, quick, port 8767, revision 3");
+});
+
+const API_TOKEN = "cfapi-SECRET-api-token-0123456789";
+const RUN_TOKEN = "eyJhIjoicnVuLXRva2VuIn0";
+const ZONE = "023e105f4ecef8ad9ca31a8372d0c353";
+const ACCOUNT = "699d98642c564d2e855e9661899b7252";
+const TUNNEL = "f70ff985-a4ef-4643-bbbc-4a0ed4fc8415";
+const HOST = "cp.lab.example.co.uk";
+type CfItem = Record<string, unknown>;
+
+/** A fake api.cloudflare.com: one zone `example.co.uk`, whatever records and tunnels a test seeds, scripted refusals. */
+function fakeCloudflare(seed: { records?: CfItem[]; tunnels?: CfItem[] } = {}) {
+	const calls: Array<{ call: string; body?: unknown }> = [];
+	const state = { records: seed.records ?? [], tunnels: seed.tunnels ?? [], refuse: undefined as undefined | ((call: string) => Response | undefined) };
+	const fetch: CfFetch = async (url, init) => {
+		assert.ok(url.startsWith(CF_API), url);
+		assert.equal(init.headers.authorization, `Bearer ${API_TOKEN}`);
+		const call = `${init.method} ${url.slice(CF_API.length)}`;
+		const body = init.body === undefined ? undefined : (JSON.parse(init.body) as CfItem);
+		calls.push({ call, ...(body ? { body } : {}) });
+		const refused = state.refuse?.(call);
+		if (refused) return refused;
+		const ok = (result: unknown) => Response.json({ success: true, errors: [], messages: [], result });
+		const { pathname, searchParams: q } = new URL(url);
+		const path = pathname.slice("/client/v4".length);
+		if (path === "/zones") return ok(q.get("name") === "example.co.uk" ? [{ id: ZONE, name: "example.co.uk", account: { id: ACCOUNT } }] : []);
+		if (path === `/zones/${ZONE}/dns_records` && init.method === "GET") return ok(state.records.filter((record) => record.name === q.get("name")));
+		if (path === `/zones/${ZONE}/dns_records`) return (state.records.push(body!), ok({ id: "rec-1", ...body }));
+		if (path === `/accounts/${ACCOUNT}/cfd_tunnel` && init.method === "GET") return ok(state.tunnels.filter((tunnel) => (q.has("uuid") ? tunnel.id === q.get("uuid") : tunnel.name === q.get("name"))));
+		if (path === `/accounts/${ACCOUNT}/cfd_tunnel`) return (state.tunnels.push({ id: TUNNEL, ...body }), ok({ id: TUNNEL, ...body }));
+		if (path === `/accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/configurations`) return ok({ tunnel_id: TUNNEL, version: 1 });
+		if (path === `/accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/token`) return ok(RUN_TOKEN);
+		return Response.json({ success: false, errors: [{ code: 7003, message: `no route ${call}` }] }, { status: 404 });
+	};
+	return { calls, state, fetch, seen: () => calls.map((entry) => entry.call) };
+}
+
+/** A rig wired to the fake API, with the API token in a file; `clean` asserts it never left memory. */
+function apiRig(t: import("node:test").TestContext, seed?: Parameters<typeof fakeCloudflare>[0]) {
+	const r = rig(t);
+	const cf = fakeCloudflare(seed);
+	r.ports.cfFetch = cf.fetch;
+	const tokenFile = join(r.home, "cf-token");
+	writeFileSync(tokenFile, `${API_TOKEN}\n`);
+	const up = (...extra: string[]) => r.run("up", "--hostname", HOST, "--api-token-file", tokenFile, ...extra);
+	const clean = () => {
+		const data = (readdirSync(r.paths.dataDir, { recursive: true }) as string[]).map((name) => join(r.paths.dataDir, name)).filter((file) => statSync(file).isFile());
+		for (const text of [...r.out, ...r.err, ...r.calls, ...data.map((file) => readFileSync(file, "utf8"))]) assert.ok(!text.includes(API_TOKEN), text);
+	};
+	return { r, cf, tokenFile, up, clean };
+}
+
+const ZONE_LOOKUPS = ["GET /zones?name=cp.lab.example.co.uk", "GET /zones?name=lab.example.co.uk", "GET /zones?name=example.co.uk"];
+
+test("--api-token-file: zone by the longest matching suffix, a new tunnel, its ingress, DNS and run token, then the named flow", async (t) => {
+	const { r, cf, up, clean } = apiRig(t);
+	const name = tunnelNameFor(r.home);
+	assert.equal(await up(), 0, r.err.join("\n"));
+	assert.deepEqual(cf.calls, [
+		...ZONE_LOOKUPS.map((call) => ({ call })),
+		{ call: `GET /accounts/${ACCOUNT}/cfd_tunnel?is_deleted=false&name=${name}` },
+		{ call: `GET /zones/${ZONE}/dns_records?name=${HOST}` },
+		{ call: `POST /accounts/${ACCOUNT}/cfd_tunnel`, body: { name, config_src: "cloudflare" } },
+		{
+			call: `PUT /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/configurations`,
+			body: { config: { ingress: [{ hostname: HOST, service: "http://127.0.0.1:8767", originRequest: { httpHostHeader: "127.0.0.1:8767" } }, { service: "http_status:404" }] } },
+		},
+		{ call: `POST /zones/${ZONE}/dns_records`, body: { type: "CNAME", name: HOST, content: `${TUNNEL}.cfargotunnel.com`, proxied: true } },
+		{ call: `GET /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/token` },
+	]);
+	const stored = join(r.paths.dataDir, "tunnel", "token");
+	const ids = { tunnel_id: TUNNEL, zone_id: ZONE, account_id: ACCOUNT };
+	assert.deepEqual(r.config(), { ok: true, config: { schema_version: 1, enabled: true, mode: "named", port: 8767, binary: "/opt/cf/cloudflared", hostname: HOST, token_file: stored, ...ids, revision: 1 } });
+	assert.equal(readFileSync(stored, "utf8"), RUN_TOKEN);
+	assert.equal(statSync(stored).mode & 0o777, 0o600);
+	assert.deepEqual(r.out, [`https://${HOST}`]);
+	const err = r.err.join("\n");
+	assert.match(err, new RegExp(`created tunnel ${name} \\(${TUNNEL}\\)`));
+	assert.match(err, new RegExp(`created DNS record: ${HOST} CNAME ${TUNNEL}\\.cfargotunnel\\.com \\(proxied\\)`));
+	assert.equal(r.err.at(-2), "cp-tunnel: You can now delete the API token in Cloudflare; it is only needed to change the hostname.");
+	clean();
+
+	// An idempotent re-run reuses the saved tunnel and its own CNAME: nothing is created twice.
+	cf.calls.length = 0;
+	r.err.length = 0;
+	assert.equal(await up(), 0, r.err.join("\n"));
+	assert.deepEqual(cf.seen(), [
+		...ZONE_LOOKUPS,
+		`GET /accounts/${ACCOUNT}/cfd_tunnel?is_deleted=false&uuid=${TUNNEL}`,
+		`GET /zones/${ZONE}/dns_records?name=${HOST}`,
+		`PUT /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/configurations`,
+		`GET /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/token`,
+	]);
+	assert.match(r.err.join("\n"), new RegExp(`reusing tunnel ${TUNNEL}[\\s\\S]*${HOST} already points to this tunnel`));
+	assert.deepEqual(r.saved(), { schema_version: 1, enabled: true, mode: "named", port: 8767, binary: "/opt/cf/cloudflared", hostname: HOST, token_file: stored, ...ids, revision: 2 });
+	assert.equal(cf.state.tunnels.length, 1);
+	assert.equal(cf.state.records.length, 1);
+	clean();
+});
+
+test("--api-token-file never overwrites a foreign DNS record: refused before any tunnel exists", async (t) => {
+	for (const record of [{ type: "A", name: HOST, content: "192.0.2.7" }, { type: "CNAME", name: HOST, content: "other.cfargotunnel.com" }]) {
+		const { r, cf, up, clean } = apiRig(t, { records: [record] });
+		assert.equal(await up(), 1);
+		assert.match(r.err.join("\n"), new RegExp(`${HOST} already has DNS records \\(${record.type} ${record.content}\\); cp-tunnel never overwrites one`));
+		assert.deepEqual(cf.seen().filter((call) => !call.startsWith("GET")), [], "nothing created");
+		assert.deepEqual(r.config(), { ok: true, config: null });
+		assert.equal(existsSync(join(r.paths.dataDir, "tunnel", "token")), false);
+		assert.deepEqual(r.calls, [], "no cloudflared was provisioned");
+		clean();
+	}
+});
+
+test("--api-token-file: a 403 or a 10000 auth error is one line naming the missing scope; a later failure keeps the tunnel", async (t) => {
+	const denied = (status: number, code: number) => Response.json({ success: false, errors: [{ code, message: `Authentication error for ${API_TOKEN}` }] }, { status });
+	const tunnel = apiRig(t);
+	tunnel.cf.state.refuse = (call) => (call === `POST /accounts/${ACCOUNT}/cfd_tunnel` ? denied(403, 10000) : undefined);
+	assert.equal(await tunnel.up(), 1);
+	assert.equal(tunnel.r.err.at(-1), `cp-tunnel up: the Cloudflare API token lacks the ${TUNNEL_SCOPE} permission (POST /accounts/${ACCOUNT}/cfd_tunnel was refused)`);
+	tunnel.clean();
+
+	const dns = apiRig(t);
+	dns.cf.state.refuse = (call) => (call.startsWith("GET /zones?") ? denied(400, 10000) : undefined);
+	assert.equal(await dns.up(), 1);
+	assert.match(dns.r.err.at(-1)!, new RegExp(`lacks the ${DNS_SCOPE} permission`));
+	dns.clean();
+
+	// The DNS create fails after the tunnel exists: it stays, and the re-run finds it by name (no config was saved).
+	const partial = apiRig(t);
+	partial.cf.state.refuse = (call) => (call === `POST /zones/${ZONE}/dns_records` ? Response.json({ success: false, errors: [{ code: 1004, message: "DNS Validation Error" }] }, { status: 400 }) : undefined);
+	assert.equal(await partial.up(), 1);
+	assert.match(partial.r.err.at(-1)!, new RegExp(`HTTP 400 \\(1004: DNS Validation Error\\)\\. The tunnel ${TUNNEL} stays in place; re-run the same cp-tunnel up command`));
+	assert.deepEqual(partial.r.config(), { ok: true, config: null });
+	partial.cf.state.refuse = undefined;
+	assert.equal(await partial.up(), 0, partial.r.err.join("\n"));
+	assert.equal(partial.cf.state.tunnels.length, 1, "the re-run reused the tunnel");
+	assert.equal(partial.r.saved()?.tunnel_id, TUNNEL);
+	partial.clean();
+});
+
+test("setupNamedTunnel redacts the API token from a failure that echoes it", async () => {
+	const echo: CfFetch = async (url) => {
+		throw new Error(`connect failed for ${url} with Bearer ${API_TOKEN}`);
+	};
+	const result = await setupNamedTunnel({ hostname: HOST, port: 8767, apiToken: API_TOKEN, tunnelName: "picp-test" }, echo, () => {});
+	assert.equal(result.ok, false);
+	assert.ok(!result.ok && !result.reason.includes(API_TOKEN) && result.reason.includes("Bearer [redacted]"), JSON.stringify(result));
+});
+
+test("--api-token-file refusals: with --token-file, with --quick, without --hostname; nothing is called or written", async (t) => {
+	const { r, cf, tokenFile, clean } = apiRig(t);
+	const cases: Array<[string[], RegExp]> = [
+		[["up", "--hostname", HOST, "--api-token-file", tokenFile, "--token-file", tokenFile], /--api-token-file takes no --quick or --token-file/],
+		[["up", "--quick", "--api-token-file", tokenFile], /--api-token-file takes no --quick or --token-file/],
+		[["up", "--api-token-file", tokenFile], /--api-token-file needs --hostname HOST/],
+		[["up", "--hostname", HOST, "--api-token-file", "/nonexistent/cf-token"], /cannot read --api-token-file: ENOENT/],
+	];
+	for (const [argv, refusal] of cases) {
+		r.err.length = 0;
+		assert.equal(await r.run(...argv), 1, argv.join(" "));
+		assert.match(r.err.join("\n"), refusal, argv.join(" "));
+	}
+	assert.deepEqual(cf.calls, []);
+	assert.deepEqual(r.calls, []);
+	assert.deepEqual(r.config(), { ok: true, config: null });
+	clean();
 });

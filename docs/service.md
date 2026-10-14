@@ -315,15 +315,30 @@ cloudflared restarts (`up`, a daemon restart or reload, a crash) and every devic
 uptime guarantee; Quick Tunnels carry no SSE, so the remote dashboard polls every 2 s while visible. Push stays where
 it was.
 
-**Named tunnel** (stable hostname): create a tunnel and a public hostname for it in the Cloudflare dashboard, with that
-public hostname's Service set to `HTTP` → `127.0.0.1:<remote port>` (default `127.0.0.1:8767`; the port `cp-tunnel up`
-uses, `--port`). The remote listener answers Host `127.0.0.1:<port>` or the configured hostname (any case, bare or
-`:443`) and 421 to any other name. Save the
-tunnel token to a file, then `cp-tunnel up --hostname cp.example.com --token-file ~/tunnel-token`. The token is copied
-to `data/tunnel/token` (0600) once cloudflared is provisioned; your file is not needed afterwards. Web Push can move to the
-named origin only with consent: `--push-origin accept`, or "y" at the prompt (no terminal or no answer keeps the current
-push origin and keys). Optional: put Cloudflare Access in front of the hostname for a second sign-in; the device gate
-still applies behind it.
+**Named tunnel** (stable hostname), automated: create a Cloudflare API token (My Profile → API Tokens → Create Custom
+Token) with exactly two permissions, **Account › Cloudflare Tunnel › Edit** and **Zone › DNS › Edit** (limit both to
+the account and zone you use), save it to a file, then
+`cp-tunnel up --hostname cp.example.com --api-token-file ~/cf-token`. One command finds the zone, refuses if any DNS
+record already exists for the hostname (except this home's own CNAME, so a re-run is idempotent), creates or reuses
+the tunnel `picp-<home id>`, writes its ingress (`http://127.0.0.1:<remote port>`, Host header the same), adds the
+proxied CNAME, fetches the run token into `data/tunnel/token` (0600) and records the hostname, tunnel, zone and account
+ids in `data/tunnel.json`. The API token is held in memory only: never saved, logged or echoed. If a step after the
+tunnel exists fails, the tunnel stays; re-run the same command. Afterwards, delete the API token in Cloudflare; it is
+only needed to change the hostname. A 403 names the missing permission.
+
+`cloudflared tunnel login` is not used: its `cert.pem` can manage every tunnel in the account, the API token only
+what its two scopes allow.
+
+Manual fallback: create a tunnel and a public hostname for it in the Cloudflare dashboard, with that public hostname's
+Service set to `HTTP` → `127.0.0.1:<remote port>` (default `127.0.0.1:8767`; the port `cp-tunnel up` uses,
+`--remote-port`). The remote listener answers Host `127.0.0.1:<port>` or the configured hostname (any case, bare or
+`:443`) and 421 to any other name. Save the tunnel token to a file, then
+`cp-tunnel up --hostname cp.example.com --token-file ~/tunnel-token`. The token is copied to `data/tunnel/token`
+(0600) once cloudflared is provisioned; your file is not needed afterwards.
+
+Either way, Web Push can move to the named origin only with consent: `--push-origin accept`, or "y" at the prompt (no
+terminal or no answer keeps the current push origin and keys). Optional: put Cloudflare Access in front of the
+hostname for a second sign-in; the device gate still applies behind it.
 
 **Pairing.** `cp-tunnel pair [--level full|view]` (terminal), or Settings → **Devices** → Add device on this machine's
 or a tailnet dashboard (it shows the QR in the page). Open the link on the new device and give it a name. Full control

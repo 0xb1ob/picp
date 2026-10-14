@@ -69,12 +69,19 @@ export interface TunnelConfig {
 	/** Named mode: the stable public hostname and the absolute token file. */
 	hostname?: string;
 	token_file?: string;
+	/** Named mode set up through the Cloudflare API (`--api-token-file`): its ids, never a credential. */
+	tunnel_id?: string;
+	zone_id?: string;
+	account_id?: string;
 	/** Bumped on every change: the runtime answers the revision it applied. */
 	revision: number;
 }
 export type TunnelConfigRead = { ok: true; config: TunnelConfig | null } | { ok: false; reason: string };
 
 export const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+/** A Cloudflare zone, account or tunnel id: hex or a UUID, safe to put in an API path. */
+export const CLOUDFLARE_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+const CLOUDFLARE_IDS = ["tunnel_id", "zone_id", "account_id"] as const;
 const absolutePath = (value: unknown): value is string => typeof value === "string" && value.startsWith("/") && !/[\0-\x1f\x7f]/.test(value);
 const validPort = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 1024 && (value as number) <= 65535;
 
@@ -99,9 +106,15 @@ export function readTunnelConfig(dataDir: string): TunnelConfigRead {
 	const named = raw.mode === "named";
 	if (named ? typeof raw.hostname !== "string" || !HOSTNAME_RE.test(raw.hostname) : raw.hostname !== undefined) return bad("hostname");
 	if (named ? !absolutePath(raw.token_file) : raw.token_file !== undefined) return bad("token_file");
+	const ids: Record<string, string> = {};
+	for (const field of CLOUDFLARE_IDS) {
+		if (raw[field] === undefined) continue;
+		if (!named || typeof raw[field] !== "string" || !CLOUDFLARE_ID_RE.test(raw[field])) return bad(field);
+		ids[field] = raw[field];
+	}
 	return {
 		ok: true,
-		config: { schema_version: 1, enabled: raw.enabled, mode: raw.mode, port: raw.port as number, binary: raw.binary, revision: raw.revision as number, ...(named ? { hostname: raw.hostname as string, token_file: raw.token_file as string } : {}) },
+		config: { schema_version: 1, enabled: raw.enabled, mode: raw.mode, port: raw.port as number, binary: raw.binary, revision: raw.revision as number, ...(named ? { hostname: raw.hostname as string, token_file: raw.token_file as string, ...ids } : {}) },
 	};
 }
 
