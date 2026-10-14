@@ -52,7 +52,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
-loosened. The separate published-board policy still forbids scripts. Host binding,
+loosened. The separate published-board policy still forbids scripts. Host binding (opt-in `viewer.strict_host`),
 GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack`, `POST /api/threads/done`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
@@ -259,7 +259,7 @@ on Decisions show it.
   4 KiB (413), a valid subscription on the push-service allowlist (400) and at
   most 10 devices (409). Only `src/viewer/push-subscriptions.ts` writes: one 0600
   file per device under `data/push/subscriptions/`.
-- The Host guard is unchanged. The HTTPS origin is a TLS proxy the operator runs
+- The Host guard is off by default (`viewer.strict_host`, docs/contracts.md "Viewer Host guard"). The HTTPS origin is a TLS proxy the operator runs
   outside this repository (for this home `https://cp.example.com`, a private
   Traefik with `passHostHeader = false`), so the viewer still sees its bind
   address as Host; the subscription route checks `Origin` against the configured

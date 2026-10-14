@@ -125,7 +125,7 @@ test("settings write routes: the session's outcomes pass through with no viewer 
 	const status = await call(port, SETTINGS_PATH);
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 31);
+	assert.equal((status.body.catalog as unknown[]).length, 32);
 	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
@@ -164,7 +164,7 @@ test("GET /api/settings never waits for pi --list-models: a listing that never r
 	const options = { home, stateDir, host: "127.0.0.1", port, requireTailnet: true };
 	const read = async () => (await handleSettingsStatus({} as IncomingMessage, options, new Date(), lister)).body as Record<string, unknown>;
 	const first = await read(); // resolves although the run below is still pending
-	assert.deepEqual([first.available_models, first.models_error, first.models_loading, (first.catalog as unknown[]).length], [null, null, true, 31]);
+	assert.deepEqual([first.available_models, first.models_error, first.models_loading, (first.catalog as unknown[]).length], [null, null, true, 32]);
 	await read();
 	assert.equal(runs, 1, "repeat reads share the one background run");
 	finish({ status: 0, stdout: "provider model\nopenai gpt-5\n" });

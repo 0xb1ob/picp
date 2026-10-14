@@ -1,4 +1,4 @@
-DOCTOR BROKEN · 3 error · 6 warn · 32 ok (at 2026-08-27T12:00:00Z)
+DOCTOR BROKEN · 3 error · 6 warn · 33 ok (at 2026-08-27T12:00:00Z)
 home: <HOME>
 package: <PKG>
 
@@ -67,6 +67,7 @@ package: <PKG>
 ✓ [fleet.file] fleet: 0 record(s)
 ✓ [viewer] session viewer not running (no operator session up; bin/cp-operator starts it)
 ✓ [dashboard-control] dashboard control: on (on by default (no data/dashboard-control.json); no operator session serving it; the dashboard says session not running)
+✓ [viewer-host] viewer Host check off (viewer.strict_host=false): any name that reaches this port is served; set viewer.strict_host=true to pin it
 ✓ [storage] home-local files are under the runtime root, .pi-command-post/ (docs/storage.md)
 
 this home cannot dispatch until the errors above are fixed

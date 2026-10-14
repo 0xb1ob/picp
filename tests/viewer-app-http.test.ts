@@ -41,6 +41,8 @@ test("a missing app build returns 503 without a classic fallback; APIs and healt
  }
  assert.equal((await get("/healthz")).status, 200);
  assert.equal((await get("/", "POST")).status, 405);
+ assert.equal((await get("/", "GET", "evil.example")).status, 503, "the Host check is off by default");
+ mkdirSync(join(home.path,LAYOUT.data),{recursive:true}); writeFileSync(join(home.path,LAYOUT.data,"viewer.json"),'{"strict_host":true}');
  assert.equal((await get("/", "GET", "evil.example")).status, 421);
  for (const view of ["awaiting","decided","decisions"]) {
   const reply = await get(`/api/${view}`); assert.equal(reply.status,200);
@@ -62,6 +64,7 @@ test("a missing app build returns 503 without a classic fallback; APIs and healt
 test("built assets are allowlisted under the strict CSP; all requests leave operational state untouched", async t => {
  const home = createScratchHome(); t.after(() => home.cleanup());
  const stateDir = join(home.path, LAYOUT.state); mkdirSync(stateDir,{recursive:true});
+ mkdirSync(join(home.path,LAYOUT.data),{recursive:true}); writeFileSync(join(home.path,LAYOUT.data,"viewer.json"),'{"strict_host":true}');
  writeFileSync(join(stateDir,"fleet.json"),JSON.stringify({jobs:[]}));
  const app = await buildViewer({stateDir,packageRoot:REPO_ROOT});
  const snapshot = (dir:string): unknown => readdirSync(dir,{withFileTypes:true}).map(e => [e.name,e.isDirectory() ? snapshot(join(dir,e.name)) : readFileSync(join(dir,e.name)).toString("base64")]);

@@ -7,12 +7,13 @@
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createViewer, hostAllowed, type ViewerOptions } from "../src/viewer/server.ts";
 import { bindHostRefusal } from "../src/viewer/bind-host.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { deriveSidebar, resolveSessionFile, resolveStateDir, sidebar, type SessionRow } from "../src/viewer/sessions.ts";
 import { readLines, startOffset } from "../src/viewer/tail.ts";
 import { defaultHost } from "../src/viewer/cli.ts";
@@ -299,7 +300,23 @@ test("server: host check, GET-only, and no arbitrary paths", async (t) => {
 	t.after(() => server.close());
 	const port = options.port;
 
+	// Operator decision ask-1946d8fc2bf8: a proxied name (Coder port-forward) or no Host at all is served by default;
+	// viewer.strict_host=true restores the 421, and an invalid data/viewer.json fails closed to it.
+	assert.equal((await get(port, "/healthz", { host: "8766--dev--box.coder.example" })).status, 200);
+	const hostless = await new Promise<string>((resolvePromise, reject) => {
+		const socket = connect(port, "127.0.0.1", () => socket.end("GET /healthz HTTP/1.0\r\n\r\n"));
+		let raw = "";
+		socket.on("data", (chunk) => (raw += chunk)).on("end", () => resolvePromise(raw)).on("error", reject);
+	});
+	assert.match(hostless, /^HTTP\/1\.\d 200/);
+	mkdirSync(dirname(viewerConfigFile(options.stateDir)), { recursive: true });
+	writeFileSync(viewerConfigFile(options.stateDir), JSON.stringify({ strict_host: true }));
 	assert.equal((await get(port, "/", { host: "evil.example" })).status, 421);
+	assert.equal((await get(port, "/healthz")).status, 200, "the bind's own Host still passes");
+	writeFileSync(viewerConfigFile(options.stateDir), JSON.stringify({ strict_host: "no" }));
+	assert.equal((await get(port, "/", { host: "evil.example" })).status, 421, "invalid: pinned");
+	writeFileSync(viewerConfigFile(options.stateDir), JSON.stringify({ strict_host: false }));
+	assert.equal((await get(port, "/healthz", { host: "evil.example" })).status, 200, "read per request: no restart");
 	assert.equal((await get(port, "/", {}, "POST")).status, 405);
 	assert.equal((await get(port, "/state/fleet.json")).status, 404);
 	assert.equal((await get(port, "/api/stream?id=..%2F..%2Fsecret")).status, 404);

@@ -176,7 +176,7 @@ test("server: boards under /boards/<slug>/ with a strict CSP; everything else 40
 		assert.equal(reply.status, 404, path);
 		assert.match(String(reply.headers["content-security-policy"]), /default-src 'self'/, path);
 	}
-	assert.equal((await get(port, "/boards/alpha/", "evil.example")).status, 421, "same host-bind check as the viewer");
+	assert.equal((await get(port, "/boards/alpha/", "evil.example")).status, 200, "same Host policy as the viewer: off by default");
 
 	for (let i = 0; i < 2; i += 1) {
 		const sidebar = JSON.parse((await get(port, "/api/sessions")).body.toString()) as { boards: Board[] };

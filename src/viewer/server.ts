@@ -13,8 +13,8 @@
  * `POST /api/settings/apply|restore` (with `GET /api/settings`, settings-api.ts) forward one `settings_apply` frame to the
  * operator session, which validates, audits and writes the owner files; the viewer writes no settings file.
  * The one request that reaches the parent does so only as a line in `state/schedule-control.jsonl`, which the
- * parent reads. Every route answers only
- * its own bind Host; the operator's own Full transcript
+ * parent reads. Every route answers any Host unless `viewer.strict_host` (data/viewer.json) pins the bind Host
+ * (host-config.ts); the operator's own Full transcript
  * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes, both answers routes,
  * both thread routes, the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
@@ -53,6 +53,7 @@ import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
 import { readVersion } from "./version-view.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
+import { strictHost } from "./host-config.ts";
 import { DEVICE_NOTICES_PATH, DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDeviceNotices, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
 
 export interface ViewerOptions extends ViewerState {
@@ -89,8 +90,8 @@ export function hostHeaderFor(host: string, port: number): string {
 }
 
 /**
- * DNS-rebinding guard: only the exact configured bind is accepted. A missing
- * Host header, another name for the same address, or another port is refused.
+ * DNS-rebinding guard: only the exact configured bind is accepted. A missing Host header, another name for the
+ * same address, or another port is refused. The local listener applies it only under `viewer.strict_host`.
  */
 export function hostAllowed(header: string | undefined, host: string, port: number): boolean {
 	if (!header) return false;
@@ -162,7 +163,7 @@ function board(res: ServerResponse, pathname: string, options: ViewerOptions, wa
 }
 
 export function handle(req: IncomingMessage, res: ServerResponse, options: ViewerOptions, warn: BoardWarn = () => {}): void {
-	if (!hostAllowed(req.headers.host, options.host, options.port)) {
+	if (strictHost(options.stateDir) && !hostAllowed(req.headers.host, options.host, options.port)) {
 		send(res, 421, "text/plain; charset=utf-8", `refused: Host must be ${hostHeaderFor(options.host, options.port)}\n`);
 		return;
 	}
@@ -207,7 +208,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 	}
 	// The operator's own full transcript can contain anything, so it is served only
 	// when this viewer was started under `--require-tailnet` (what bin/cp-operator
-	// passes); the Host guard above still runs first, for every route.
+	// passes); the Host guard above (when on) still runs first, for every route.
 	if (url.searchParams.get("transcript") === "1" && !canRead(accessOf(req), options.requireTailnet === true)) {
 		sendJson(res, 403, { error: "the operator transcript is served only under --require-tailnet" });
 		return;

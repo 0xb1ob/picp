@@ -6082,6 +6082,15 @@ closed). `/doctor` prints one `[dashboard-control]` line: `on` or `off`, and why
 serves it. Access is the dashboard's own: the HTTPS origin is reachable only from the operator's tailnet devices,
 so there is no login, identity or device allowlist (operator addendum, 2026-09-27).
 
+**Viewer Host guard (`viewer.strict_host`, default off).** The local viewer serves any `Host` (a missing one too), so a
+port-forwarding proxy that passes its own name (Coder's `https://8766--…/`) reaches the dashboard and its controls.
+The control routes then also accept an `http(s)` `Origin` naming the request's own `Host`; every other control guard
+stands, and device pairing and revoke (`src/viewer/devices-api.ts`) stay pinned to the bind or configured origin. The
+cost is DNS rebinding: a page whose name resolves to this bind is same-origin with itself. `data/viewer.json`
+`{"strict_host": true}` (Settings → viewer) restores the old guard — Host must equal the bind address (421) and Origin
+the configured list only — read per request, no restart; an invalid file fails closed (strict) and `/doctor` warns.
+`/doctor` prints one `[viewer-host]` line either way. The remote listener keeps its own Host gate (Remote gate below).
+
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text
 is literal (`expandPromptTemplates` is never set, so no slash command, template or skill), idle is a new prompt,
@@ -6159,7 +6168,7 @@ under Operator threads):
 | viewer runs `--require-tailnet` | 403 |
 | 20 requests per 60 s and one in flight per client address (refusals count, so this also bounds the journal) | 429 with `retry-after` |
 | `data/dashboard-control.json` invalid / `enabled:false` | 503 / 403 `dashboard control is off (…)` |
-| `Origin` equals the public origin `/api/push` reports (or a loopback bind's own); with no public origin configured, the bind's own `http://` origin (same-origin with the Host the guard pinned; push still needs HTTPS) | 403 `Origin must be …` |
+| `Origin` equals the public origin `/api/push` reports (or a loopback bind's own); with no public origin configured, the bind's own `http://` origin; or, while `viewer.strict_host` is off (the default), an `http(s)` Origin naming the request's own `Host` (a port-forwarding proxy such as Coder; device and pairing routes keep their own pinned origin) | 403 `Origin must be …` |
 | `Sec-Fetch-Site` same-origin when sent | 403 |
 | `application/json` | 415 |
 | body ≤ 20 KiB | 413 |
@@ -6169,7 +6178,7 @@ under Operator threads):
 | the socket answers within 5 s | 503 `session not running: … refused the connection (…)` / 504 |
 | the session's own checks | 202 `{id, state, deliver}` (state `queued` or `delivered`), or 400/403/409/500/502 with the reason |
 
-`APP_CSP`, `hostAllowed`, the push route and every read route are unchanged; a POST to any other `/api/*` route is
+`APP_CSP`, the Host guard (see Viewer Host guard), the push route and every read route are unchanged; a POST to any other `/api/*` route is
 still 405 (the image upload route below is the one addition). The Full transcript itself stays served only under
 `--require-tailnet`.
 
@@ -6615,7 +6624,8 @@ fixed reasons — never a code, secret, digest or raw input. A `code_issued` lin
 written before the code is stored, and a failed write stores none): no audit consumer may treat it as a live code.
 
 **Remote gate (PR 1b, `src/viewer/remote-server.ts`).** A second listener on `127.0.0.1` at its own port; the tunnel
-rewrites Host to that address and the gate demands it exactly (421 otherwise). Only exact `GET|HEAD /pair` (the
+rewrites Host to that address and the gate demands it exactly, or (a named tunnel, which forwards the public name) the
+`hostname` from `data/tunnel.json`, case-insensitive, bare or `:443`; 421 otherwise. Only exact `GET|HEAD /pair` (the
 self-contained page, `src/viewer/pair-page.ts`: CSP admits only its own inline script and style by hash, no storage,
 the fragment code read and scrubbed first) and exact `POST /api/pair/claim` (`src/viewer/pair-api.ts`) are public.
 Every other path and method — app, assets, boards, PWA files, identity, health, version, projections, SSE, push,

@@ -50,7 +50,7 @@ test("the map endpoint exposes all grants and cross-project blockers without wri
   const url=`http://127.0.0.1:${state.port}/api/${view}`;
   assert.equal((await fetch(url,{method:"POST"})).status,405);
   const refused=await new Promise<number>((resolve,reject)=>{const req=request(url,{headers:{host:"evil.example"}},res=>{res.resume();res.on("end",()=>resolve(res.statusCode!));});req.on("error",reject);req.end();});
-  assert.equal(refused,421);
+  assert.equal(refused,200,"the Host check is off by default");
   assert.equal((await fetch(`http://127.0.0.1:${state.port}/api/stream?view=${view}`,{method:"HEAD"})).status,200);
  }
  assert.equal(pollingStreams(),0);assert.deepEqual(snapshot(state.home),before);

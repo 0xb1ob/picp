@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { controlJournalFile } from "../src/viewer/control-files.ts";
 import { devicesFile } from "../src/viewer/device-files.ts";
-import { DEVICES_TOKEN } from "../src/viewer/devices-api.ts";
+import { DEVICES_REVOKE_PATH, DEVICES_TOKEN } from "../src/viewer/devices-api.ts";
 import { bindOrigin } from "../src/viewer/push-api.ts";
 import { REMOTE_ORIGIN as ORIGIN, remoteRig } from "./harness/remote.ts";
 
@@ -120,6 +120,12 @@ test("Add device refusals: management token, Origin, Sec-Fetch-Site, body shape,
 	const env = await rig(t);
 	assert.equal((await create(env, {}, { "x-cp-control-token": "0".repeat(64) })).status, 403);
 	assert.equal((await create(env, {}, { origin: "https://evil.example" })).status, 403);
+	// A proxied Host with its own Origin passes the control routes (viewer.strict_host off), never device management.
+	const proxy = { host: "8766--dev--box.coder.example", origin: "https://8766--dev--box.coder.example" };
+	const proxied = await create(env, {}, proxy);
+	assert.deepEqual([proxied.status, proxied.body.error], [403, `Origin must be ${bindOrigin(env.options)}`]);
+	const revoke = await env.l(DEVICES_REVOKE_PATH, { method: "POST", headers: { ...proxy, "content-type": "application/json", "x-cp-control-token": DEVICES_TOKEN }, body: JSON.stringify({ id: "dev-0123456789abcdef" }) });
+	assert.deepEqual([revoke.status, revoke.body.error], [403, `Origin must be ${bindOrigin(env.options)}`]);
 	assert.equal((await create(env, {}, { "sec-fetch-site": "cross-site" })).status, 403);
 	assert.equal((await create(env, { level: "admin" })).status, 400);
 	assert.equal((await create(env, { level: "full", name: "x" })).status, 400);

@@ -25,6 +25,7 @@ const OWNER_FILE: Record<Exclude<SettingFileOwner, "routing">, string> = {
 	quality: `${LAYOUT.data}/quality.json`,
 	capacity: `${LAYOUT.data}/capacity.json`,
 	update: `${LAYOUT.data}/update.json`,
+	viewer: `${LAYOUT.data}/viewer.json`,
 };
 type Owner = keyof typeof OWNER_FILE;
 const CAPACITY = { url: "https://secret-gateway.example/", path: "/v1/secret-path" };
@@ -67,6 +68,7 @@ function fullHome(t: TestContext): string {
 	put(home, "quality", { model: "anthropic/claude-haiku" });
 	put(home, "capacity", CAPACITY);
 	put(home, "update", { enabled: true, interval_min: 15 });
+	put(home, "viewer", {});
 	return home;
 }
 
@@ -80,9 +82,10 @@ const SET: Partial<Record<SettingKey, unknown>> = {
 	"review.quality_verify": true,
 	"capacity.five_hour": 70,
 	"maintenance.update_interval_min": 30,
+	"viewer.strict_host": true,
 };
 
-test("set per owner: each of the 9 owners changes only the named key; other keys survive; read-back is file/ok", (t) => {
+test("set per owner: each of the 10 owners changes only the named key; other keys survive; read-back is file/ok", (t) => {
 	const home = fullHome(t);
 	const result = apply(home, { mode: "set", changes: SET });
 	assert.equal(result.status, 200, JSON.stringify(result));
@@ -95,6 +98,7 @@ test("set per owner: each of the 9 owners changes only the named key; other keys
 	assert.deepEqual(json(home, "quality"), { model: "anthropic/claude-haiku", verify: true });
 	assert.deepEqual(json(home, "capacity"), { ...CAPACITY, quota: { five_hour: 70 } });
 	assert.deepEqual(json(home, "update"), { enabled: true, interval_min: 30 });
+	assert.deepEqual(json(home, "viewer"), { strict_host: true });
 	assert.deepEqual(json(home, "gate"), { schema_version: 1, review_timeout_ms: 60_000 });
 	assert.equal(readFileSync(file(home, "gate"), "utf8"), `${JSON.stringify({ schema_version: 1, review_timeout_ms: 60_000 }, null, 2)}\n`);
 	const again = apply(home, { mode: "set", changes: SET });
@@ -120,6 +124,7 @@ test("restore table: RESTORE_ACTIONS is pinned; restore all deletes or writes pe
 		"capacity.balance_margin": "delete",
 		"maintenance.update_enabled": "installer_seed",
 		"maintenance.update_interval_min": "installer_seed",
+		"viewer.strict_host": "delete",
 	});
 	assert.deepEqual(Object.keys(RESTORE_ACTIONS).sort(), SETTING_FIELDS.filter((field) => field.editable).map((field) => field.key).sort(), "every editable key, nothing else");
 	const home = fullHome(t);
@@ -136,6 +141,7 @@ test("restore table: RESTORE_ACTIONS is pinned; restore all deletes or writes pe
 	assert.deepEqual(json(home, "quality"), { model: "anthropic/claude-haiku" });
 	assert.deepEqual(json(home, "capacity"), CAPACITY, "an emptied quota goes too");
 	assert.deepEqual(json(home, "update"), { enabled: false }, "not an installed home: the catalog default, interval deleted");
+	assert.deepEqual(json(home, "viewer"), {}, "strict_host deleted: the Host check is off again");
 	for (const field of SETTING_FIELDS.filter((row) => row.editable)) assert.deepEqual(view(result.snapshot!, field.key)?.value, field.default, field.key);
 	const changes = result.changes!.map((change) => [change.key, change.action]);
 	assert.ok(changes.some(([key, action]) => key === "review.timeout_ms" && action === "delete"));

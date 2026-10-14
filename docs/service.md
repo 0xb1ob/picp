@@ -173,6 +173,12 @@ bind, `data/dashboard-control.json` `{"enabled": false}` stays the kill switch.
 `cp-view --require-tailnet` applies the same policy at start: a hand-edited
 `CP_VIEWER_HOST=0.0.0.0` (or a public or non-IP `--host`) exits instead of serving.
 
+**Opening the dashboard through a proxy (Coder port-forward, etc.).** It just works: the viewer serves whatever name
+the proxy forwards as Host (`https://8766--…/`), and the controls accept that page's own origin. Keep the proxy
+owner-only — whoever gets through it has full local control, with no device pairing. Pairing and revoking devices
+stay on the bind address. `data/viewer.json` `{"strict_host": true}` (Settings → viewer) restores the Host check and
+with it the DNS-rebinding guard; the proxy then gets 421. `/doctor` `[viewer-host]` says which is in force.
+
 ### 3c. The models
 
 Two choices from one list: the parent (`parent_model` in `data/daemon.json`, `CP_PARENT_MODEL` in the
@@ -309,7 +315,10 @@ cloudflared restarts (`up`, a daemon restart or reload, a crash) and every devic
 uptime guarantee; Quick Tunnels carry no SSE, so the remote dashboard polls every 2 s while visible. Push stays where
 it was.
 
-**Named tunnel** (stable hostname): create a tunnel and a public hostname for it in the Cloudflare dashboard, save the
+**Named tunnel** (stable hostname): create a tunnel and a public hostname for it in the Cloudflare dashboard, with that
+public hostname's Service set to `HTTP` → `127.0.0.1:<remote port>` (default `127.0.0.1:8767`; the port `cp-tunnel up`
+uses, `--port`). The remote listener answers Host `127.0.0.1:<port>` or the configured hostname (any case, bare or
+`:443`) and 421 to any other name. Save the
 tunnel token to a file, then `cp-tunnel up --hostname cp.example.com --token-file ~/tunnel-token`. The token is copied
 to `data/tunnel/token` (0600) once cloudflared is provisioned; your file is not needed afterwards. Web Push can move to the
 named origin only with consent: `--push-origin accept`, or "y" at the prompt (no terminal or no answer keeps the current

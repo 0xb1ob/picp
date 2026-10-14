@@ -198,7 +198,7 @@ test("server: /api/dashboard and /api/awaiting are JSON under a deny-all CSP; ev
 	}
 	for (const path of ["/api/dashboard", "/api/awaiting", "/api/job", "/api/diff", "/api/roots", "/api/files", "/api/git", "/api/version"]) {
 		for (const method of ["POST", "PUT", "PATCH", "DELETE"]) assert.equal((await get(options.port, path, method)).status, 405, `${method} ${path}`);
-		assert.equal((await get(options.port, path, "GET", "evil.example")).status, 421, path);
+		assert.notEqual((await get(options.port, path, "GET", "evil.example")).status, 421, `${path}: the Host check is off by default`);
 	}
 });
 

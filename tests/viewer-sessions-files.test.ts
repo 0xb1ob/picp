@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { createViewer } from "../src/viewer/server.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { route, screenDataUrl } from "../viewer-app/routes.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -244,11 +245,12 @@ test("operator Full transcript is refused off-tailnet: not under --require-tailn
  assert.equal(refused.status,403,"only a viewer started with --require-tailnet serves this route");
  assert.match(String((await refused.json() as {error:string}).error),/require-tailnet/);
  assert.equal((await fetch(`http://127.0.0.1:${plain.port}/api/sessions?view=you`)).status,200,"every other route is untouched");
- assert.equal(await foreignHost(plain.port),421,"and the Host guard runs first");
- // bin/cp-operator's viewer (--require-tailnet): served, but only to the bind's own Host.
+ assert.equal(await foreignHost(plain.port),403,"a foreign Host (no Host check by default) still meets the transcript guard");
+ // bin/cp-operator's viewer (--require-tailnet) under viewer.strict_host: served only to the bind's own Host.
  const tailnet={home:home.path,stateDir,host:"127.0.0.1",port:0,requireTailnet:true}; const server=createViewer(tailnet);
  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve)); tailnet.port=(server.address() as AddressInfo).port;
  t.after(()=>server.close());
+ mkdirSync(dirname(viewerConfigFile(stateDir)),{recursive:true}); writeFileSync(viewerConfigFile(stateDir),'{"strict_host":true}');
  assert.equal(await foreignHost(tailnet.port),421,"an off-tailnet Host is refused before the transcript is read");
  assert.equal((await fetch(`http://127.0.0.1:${tailnet.port}${path}`)).status,200,"and the same route answers on the bind itself");
 });

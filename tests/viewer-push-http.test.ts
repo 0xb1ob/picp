@@ -12,6 +12,7 @@ import { APP_CSP } from "../src/viewer/app-page.ts";
 import { listSubscriptions, pushDataDir, subscriptionFile, subscriptionId, subscriptionsDir } from "../src/viewer/push-files.ts";
 import { bindOrigin } from "../src/viewer/push-api.ts";
 import { createViewer } from "../src/viewer/server.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { REMOTE_ORIGIN, remoteRig } from "./harness/remote.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -127,9 +128,11 @@ test("subscription route refuses everything but a same-origin JSON subscription 
 	assert.equal((await call("/api/awaiting", { method: "POST" })).status, 405);
 });
 
-test("the loopback bind's own origin may subscribe; a foreign Host is still refused before the route", async (t) => {
+test("the loopback bind's own origin may subscribe; under viewer.strict_host a foreign Host is refused before the route", async (t) => {
 	const { call, options } = await viewer(t);
 	assert.equal((await call("/api/push/subscription", post(device(), { "content-type": "application/json", origin: `http://127.0.0.1:${options.port}` }))).status, 201);
+	assert.equal((await call("/healthz", { headers: { host: "cp.example.com" } })).status, 200, "the Host check is off by default");
+	writeFileSync(viewerConfigFile(options.stateDir), JSON.stringify({ strict_host: true }));
 	assert.equal((await call("/api/push/subscription", { ...post(device()), headers: { ...json, host: "cp.example.com" } })).status, 421);
 	assert.equal((await call("/healthz", { headers: { host: "cp.example.com" } })).status, 421);
 });

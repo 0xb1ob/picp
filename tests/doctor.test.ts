@@ -43,6 +43,7 @@ import { boundedList } from "../src/routing.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { LEGACY_JOB_ID_KEY, sweepJobIdRename } from "../src/state-migrations.ts";
 import { controlConfigFile, controlRecordFile, controlSocketFile } from "../src/viewer/control-files.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { daemonPaths } from "../src/service/daemon-files.ts";
 import type { ModelProbe } from "../src/routing.ts";
 import {
@@ -338,6 +339,21 @@ test("dashboard-control: one line, on by default, off with {enabled:false}, a wa
 	assert.match(invalid?.what ?? "", /^dashboard control: off \(.*unreadable/);
 	assert.match(invalid?.fix ?? "", /remove it/);
 	assert.equal(find(await home.doctor(), "viewer").length, 1, "the viewer finding is unchanged");
+});
+
+test("viewer-host: one ok line naming the setting, off by default; on with strict_host; a warn when data/viewer.json is invalid", async (t) => {
+	const home = fixture(t);
+	const file = viewerConfigFile(join(home.home.path, LAYOUT.state));
+	const off = find(await home.doctor(), "viewer-host");
+	assert.equal(off.length, 1);
+	assert.deepEqual([off[0]?.severity, off[0]?.what], ["ok", "viewer Host check off (viewer.strict_host=false): any name that reaches this port is served; set viewer.strict_host=true to pin it"]);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, '{"strict_host": true}');
+	assert.match(find(await home.doctor(), "viewer-host")[0]?.what ?? "", /^viewer Host check on \(viewer\.strict_host=true\)/);
+	writeFileSync(file, '{"strict_host": "yes"}');
+	const invalid = find(await home.doctor(), "viewer-host")[0];
+	assert.equal(invalid?.severity, "warn");
+	assert.match(invalid?.fix ?? "", /remove it/);
 });
 
 test("mode: a multi-mode report says so, with the runtime's reason", async (t) => {
