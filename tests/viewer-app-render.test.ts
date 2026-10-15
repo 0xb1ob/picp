@@ -147,12 +147,12 @@ test("ask-81b54d83f0b2: CI the token cannot read is a red badge, a held fact, a 
  assert.deepEqual(data.ci_unreadable, [{project:"demo",job_ids:["cp-denied"]}], "per project, from the watcher's own record");
  const {parseHTML} = await import("linkedom"); const document = parseHTML(screen(data)).document;
  const ci = (id: string) => document.querySelector(`[aria-label="${id}"] .overview-ci`)?.textContent;
- assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions/checks read");
+ assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions read");
  assert.ok(document.querySelector('[aria-label="cp-denied"] .job-ci-red.job-ci-unreadable'), "red");
  assert.equal(ci("cp-running"), "CI running aaaaaaa"); assert.equal(ci("cp-quiet"), "no CI yet");
  assert.equal(document.querySelector('[aria-label="cp-denied"] .overview-flight-extra .overview-meta')?.textContent, "CI unreadable (token)");
- assert.match(document.querySelector(".overview-health")!.textContent!, /CI access.*CI unreadable — token lacks Actions\/checks read: demo/);
- assert.match(document.querySelector(".overview-alarm[role=alert]")!.textContent!, /for demo: 1 held job cannot show CI.*Actions read \+ Checks read \+ Commit statuses read; classic: repo/);
+ assert.match(document.querySelector(".overview-health")!.textContent!, /CI access.*CI unreadable — token lacks Actions read: demo/);
+ assert.match(document.querySelector(".overview-alarm[role=alert]")!.textContent!, /for demo: 1 held job cannot show CI.*Actions read \+ Contents read \+ Metadata read \+ Pull requests read; classic: repo/);
  put(join(LAYOUT.state, "ci-watch.json"), {jobs:[]});
  const clean = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
  assert.deepEqual(clean.ci_unreadable, []); assert.doesNotMatch(screen(clean), /CI access|unreadable/, "no flag without a refused read");
@@ -175,7 +175,7 @@ test("PR4: forwarded CI shows labelled where native CI cannot say, keeps the red
  assert.deepEqual(data.ci_unreadable, [{project:"demo",job_ids:["cp-denied"]}], "a forward never clears the token flag");
  const {parseHTML} = await import("linkedom"); const document = parseHTML(screen(data)).document;
  const ci = (id: string) => document.querySelector(`[aria-label="${id}"] .overview-ci`)?.textContent;
- assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions/checks read · forwarded: CI green");
+ assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions read · forwarded: CI green");
  assert.ok(document.querySelector('[aria-label="cp-denied"] .job-ci-red.job-ci-unreadable'), "still red");
  assert.equal(ci("cp-running"), "CI running aaaaaaa", "native evidence wins");
  assert.equal(ci("cp-quiet"), "CI green (forwarded) aaaaaaa");
