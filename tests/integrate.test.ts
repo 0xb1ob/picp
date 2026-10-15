@@ -2240,7 +2240,7 @@ test("a gh run list refused for permission names the token and what it needs in 
 	b.approve(HEAD_A);
 	const result = await b.integrator({ runs: { fail: "HTTP 403: Resource not accessible by personal access token" } }).advance({ jobId: BR });
 	assert.deepEqual([result.step, result.next], ["ci", "retry"]);
-	assert.match(result.reason, /CI unreadable — token lacks Actions\/checks read; needs fine-grained PAT: Actions read/);
+	assert.match(result.reason, /CI unreadable — token lacks Actions read; needs fine-grained PAT: Actions read/);
 	const limited = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: BR });
 	assert.doesNotMatch(limited.reason, /token lacks/, "a rate limit is not a permission verdict");
 });

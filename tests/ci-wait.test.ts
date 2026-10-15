@@ -122,6 +122,8 @@ test("a sleep-then-poll bash call is refused, by shape", () => {
 		detectCiWait("sleep 120 && gh api repos/o/r/commits/deadbeef/check-runs")?.shape,
 		"sleep_then_poll",
 	);
+	assert.equal(detectCiWait("while true; do gh api repos/o/r/actions/runs/9/attempts/1/jobs; sleep 30; done")?.shape, "poll_loop");
+	assert.equal(detectCiWait("sleep 60; gh api repos/o/r/statuses/deadbeef")?.shape, "sleep_then_poll");
 
 	// The refusal names the shape and the sanctioned path, so the worker does not
 	// invent a second workaround for the first one.
@@ -197,6 +199,11 @@ test("ciStatusQuery meters status queries, not failure logs or quoted mentions",
 		"gh --repo=o/r run view 123",
 		"git fetch && gh run list --branch b",
 		"gh api repos/o/r/commits/deadbeef/check-runs",
+		"gh api repos/o/r/commits/deadbeef/statuses",
+		"gh api repos/o/r/statuses/deadbeef",
+		"gh api 'repos/o/r/actions/runs?head_sha=deadbeef&per_page=100'",
+		"gh api repos/o/r/actions/runs/123/attempts/2/jobs?per_page=100",
+		"gh api repos/o/r/actions/jobs/9",
 	]) {
 		assert.equal(ciStatusQuery(command), true, command);
 	}
@@ -208,6 +215,7 @@ test("ciStatusQuery meters status queries, not failure logs or quoted mentions",
 		"gh --repo o/r run view 123 --log-failed",
 		"gh run view 123 --repo o/r --log",
 		"gh api repos/o/r/actions/runs/123/logs",
+		"gh api repos/o/r/actions/jobs/9/logs",
 		'grep -rn "gh run list" tests/',
 		"npm test",
 		"gh pr view 42 --json url",
