@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { BlockedJob, FailedJob, FlightJob, ShippedJob, TeamJob } from "./api-types.ts";
 import type { JobRow } from "./fleet-view.ts";
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
-import { isQuiescentParked } from "../contracts.ts";
 import { SHA } from "./git-read.ts";
 import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
 import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
@@ -71,8 +70,8 @@ export function withTeam(jobs: Json[], now: number, rows: readonly JobRow[]): Te
    approvals:null, approvals_required:null, ci:null, last_human_activity_at:timestamp(parked.last_human_activity_at) ? parked.last_human_activity_at : null}];
  }).sort((a,b) => a.handed_at.localeCompare(b.handed_at));
 }
-/** The one With-the-team predicate for Overview and Board; a fleet row from disk is loosely typed. */
-export const quiescent = (job: Json): boolean => isQuiescentParked(job as Parameters<typeof isQuiescentParked>[0]);
+// Mirrors isQuiescentParked (src/contracts/awaiting-merge.ts); viewer modules cannot import contracts.
+export const quiescent = (job: Json): boolean => job.phase === "awaiting_merge" && obj(job.awaiting_merge) !== undefined && obj(job.awaiting_merge)?.pending === undefined;
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
 export function mergeReceipt(state: ViewerState, id: string): Json | undefined {
  const receipt = readObject(join(state.stateDir,"runs",id,"merge.json"));
