@@ -1,8 +1,9 @@
+import { applyDelta, type Delta } from "../src/viewer/json-delta.ts";
 export interface Stream extends EventTarget { close(): void }
 /** `code`: the HTTP status of the last refused fetch (a 403 is a route the server will not serve here). */
 export interface Snapshot<T> { data: T | null; status: "connecting" | "live" | "stale" | "offline"; error: string | null; code?: number | undefined }
 interface Dependencies {
- fetch(url: string, init: {signal: AbortSignal}): Promise<Response>;
+ fetch(url: string, init: {signal: AbortSignal; headers?: Record<string,string>}): Promise<Response>;
  stream(url: string): Stream;
 }
 export const POLL_MS = 2000;
@@ -19,6 +20,8 @@ export function pollStream(): Stream {
 export function createResource<T>(url: string, streamUrl: string, deps: Dependencies = {fetch: (u,i) => fetch(u,i), stream:u => new EventSource(u)}) {
  let state: Snapshot<T> = {data:null,status:"connecting",error:null};
  let generation = 0, visible = false, connected = false, trailing = false, disposed = false;
+ // The server version `state.data` holds (`x-cp-version`); null asks for a full body next time.
+ let version: string | null = null;
  let source: Stream | null = null, request: AbortController | null = null;
  let freshness: ReturnType<typeof setTimeout> | undefined;
  const listeners = new Set<(state: Snapshot<T>) => void>();
@@ -29,17 +32,27 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
   const current = generation; const controller = new AbortController(); request = controller;
   let code: number | undefined;
   try {
-   const response = await deps.fetch(url,{signal:controller.signal});
+   const base = version && state.data ? version : null;
+   const response = await deps.fetch(url,{signal:controller.signal,...(base ? {headers:{"x-cp-delta-base":base}} : {})});
    if (!response.ok) { code = response.status; throw new Error("Overview unavailable"); }
-   const data = await response.json() as T;
+   const body = await response.json() as T;
    if (generation !== current || disposed) return;
+   let data = body;
+   const echoed = response.headers.get("x-cp-delta-base");
+   if (echoed !== null) {
+    try {
+     if (echoed !== base || !state.data) throw new Error("delta for another base");
+     data = applyDelta(state.data, body as Delta);
+    } catch { version = null; trailing = true; return; }
+   }
+   version = response.headers.get("x-cp-version");
    clearTimeout(freshness);
    freshness = setTimeout(() => { state.status = "stale"; state.error = "Refresh delayed"; publish(); },5000);
    state = {data, status:connected ? "live" : "stale", error:null}; publish();
   } catch {
    if (generation !== current || disposed) return;
    // A remote 401 is a revoked or expired device: protected data goes, never shown stale (the local listener never answers 401).
-   if (code === 401) state.data = null;
+   if (code === 401) { state.data = null; version = null; }
    clearTimeout(freshness); state.status = state.data ? "stale" : "offline"; state.error = "Refresh failed";
    if (code === undefined) delete state.code; else state.code = code;
    publish();
@@ -70,6 +83,6 @@ export function createResource<T>(url: string, streamUrl: string, deps: Dependen
    catch { error(); }
    void refresh();
   },
-  dispose() { disposed = true; visible = false; disconnect(); listeners.clear(); },
+  dispose() { disposed = true; visible = false; version = null; disconnect(); listeners.clear(); },
  };
 }

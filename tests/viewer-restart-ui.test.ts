@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
+import { parseHTML } from "linkedom";
 import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
 import type { ControlView } from "../viewer-app/control.ts";
 import { type Restarting, restartDisabled, restartInFlight, restartLine, restartOperator } from "../viewer-app/restart-control.ts";
@@ -56,6 +57,26 @@ test("restart client: posts exactly {restart:true} with the CSRF token; 202 is r
 	for (const state of ["restarting", "stopping", "relaunching"] as const) assert.equal(restartInFlight(restarting(state)), true, state);
 	for (const state of ["restarted", "refused", "failed"] as const) assert.equal(restartInFlight(restarting(state)), false, state);
 	assert.equal(restartLine(status({}), restarting("restarted")), "Operator session restarted · 2026-01-01T00-00-00-000Z_0123abcd.jsonl");
+});
+
+test("a composer's restart poll reads the full control status, so its queued sends survive the restart", async (t) => {
+	// Regression: the restart poll read ?sends=0 and handed that status to the composer, emptying its queued sends.
+	const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {useRestart} from "./viewer-app/use-restart.ts"; export {act}; const Probe=({status,fetcher,expose})=>{expose(useRestart(true,status,fetcher,()=>{},true).restart);return null;}; export const mount=(root,props)=>render(h(Probe,props),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+	const { act, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: (fn: () => unknown) => Promise<void>; mount: (root: unknown, props: unknown) => void; unmount: (root: unknown) => void };
+	const { document } = parseHTML("<html><body><div id='root'></div></body></html>");
+	const saved = Object.getOwnPropertyDescriptor(globalThis, "document");
+	Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+	const root = document.getElementById("root")!;
+	t.after(async () => { await act(() => unmount(root)); if (saved) Object.defineProperty(globalThis, "document", saved); else Reflect.deleteProperty(globalThis, "document"); });
+	const gets: string[] = []; let restart = () => {};
+	const fetcher = async (url: string, init?: RequestInit) => {
+		if (init?.method === "POST") return new Response(JSON.stringify({ state: "restarting", id: "dc-20260101000000-0123abcd", session_file: "x.jsonl" }), { status: 202 });
+		gets.push(url); return new Response(JSON.stringify(status({ running: false, token: null })));
+	};
+	await act(() => mount(root, { status: status({}), fetcher, expose: (fn: () => void) => { restart = fn; } }));
+	await act(() => restart());
+	for (let i = 0; i < 50 && !gets.length; i++) await act(() => new Promise((done) => setTimeout(done, 100)));
+	assert.equal(gets[0], "/api/operator/control");
 });
 
 test("restart CSS: wraps at 390 px (no fixed widths, long file names break), one row at 1440 px", () => {

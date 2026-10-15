@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import type { AwaitingDetail, ControlStatusResponse, SessionEntry } from "../src/viewer/api-types.ts";
 import { sessionsView } from "../src/viewer/sessions-view.ts";
-import { type ControlView, controlChip, controlLine, deliveryLine, sendControl, startOperator } from "../viewer-app/control.ts";
+import { type ControlView, controlChip, controlLine, deliveryLine, readControl, sendControl, startOperator } from "../viewer-app/control.ts";
 import { overview } from "../src/viewer/overview-view.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -26,6 +26,14 @@ const detail = (id: string, extra: Partial<AwaitingDetail> = {}): AwaitingDetail
 	reason: null, source_created_at: null, mandate_id: null, mandate_status: null, spend: null, spend_cap: null, mandate_objective: null, jobs: [], escalation: null, evidence: [], ...extra,
 });
 const pinned = (html: string) => /<section class="session-pinned"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+
+test("readControl asks for the full status by default and for ?sends=0 with sends=false", async () => {
+	const urls: string[] = [];
+	const fetcher = (url: string) => (urls.push(url), Promise.resolve(new Response(JSON.stringify(status({})))));
+	await readControl(fetcher);
+	await readControl(fetcher, undefined, false);
+	assert.deepEqual(urls, ["/api/operator/control", "/api/operator/control?sends=0"]);
+});
 
 test("cards and composer: open asks pinned above the composer with a button per option; inline history is a pointer; no control disables with the reason; busy offers follow-up, steer and abort", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
