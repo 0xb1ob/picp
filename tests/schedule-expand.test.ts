@@ -133,7 +133,7 @@ test("the cp-org-pr-review skill documents the fan-out, the approve-only reviewe
 	for (const part of [
 		"untrusted input", "Never check out, fetch, build, install, test or run", "Your one GitHub write is `gh pr review <url> --approve`",
 		"no body and no other flag", "Never request changes, comment", "`headRefOid` equals the assigned SHA", "`commit_id` must equal the SHA",
-		"`SUCCESS`", "zero unresolved review threads", "`CHANGES_REQUESTED`", "bot finding", "`hold:` URL", "critical finding", "Never post an approval twice", "[REDACTED]",
+		"actions/runs?head_sha=", "zero unresolved review threads", "`CHANGES_REQUESTED`", "bot finding", "`hold:` URL", "critical finding", "Never post an approval twice", "[REDACTED]",
 	]) assert.ok(brief.includes(part) || brief.replace(/\n\s*/g, " ").includes(part), `the reviewer brief says ${part}`);
 	const s1 = text.slice(text.indexOf("## S1 task template"), text.indexOf("## Do not"));
 	for (const part of ["This job posts nothing", "zero GitHub calls", "never re-posts"]) assert.ok(s1.includes(part), `the S1 brief says ${part}`);

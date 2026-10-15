@@ -4,10 +4,12 @@
  * prohibited endpoints are never followed, and the acquisition sources carry no prohibited request string.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { actionsBranchRunsPath, readActionsCi, readOlderBranchRuns } from "../src/actions-ci.ts";
+import { ciAccessFindings } from "../src/ci-access-doctor.ts";
+import { LAYOUT, SCHEMA_VERSION } from "../src/contracts.ts";
 import { ghForeignRuns } from "../src/foreign-ci-watch.ts";
 import { checkMainCi, MainCiStore } from "../src/main-ci.ts";
 import { type CommandRunner, ghCiRuns } from "../src/merge-ask.ts";
@@ -34,6 +36,8 @@ const ACQUISITION_SOURCES = [
 	"src/ci-infra-rerun.ts",
 	"src/parked-ci.ts",
 	"src/awaiting-merge.ts",
+	"src/ci-access-doctor.ts",
+	"src/ci-configured.ts",
 ];
 
 function allowlistedGh(answer: (endpoint: string) => string) {
@@ -146,4 +150,32 @@ test("CI acquisition sources issue no `gh run list` or `gh run view --json` read
 		const hits = code(readFileSync(join(REPO_ROOT, file), "utf8")).split("\n").filter((line) => /["']run["'],\s*["']list["']|--json["']?,\s*["']jobs|actions\/runs.*--jq/.test(line));
 		assert.deepEqual(hits, [], `${file} must read CI through src/actions-ci.ts`);
 	}
+});
+
+// PR5: /doctor probes workflows, the newest run and its attempt jobs — nothing else. A Checks or status probe, or
+// following a response's URL, throws in the fake gh, and the finding would no longer say "CI readable".
+test("/doctor's CI probe sends only allowlisted Actions requests", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	mkdirSync(dirname(join(home.path, LAYOUT.projectsFile)), { recursive: true });
+	const projects = [{ name: "app", clone_url: "https://github.com/acme/app", delivery: "pr", registered_at: "2026-10-15T00:00:00Z" }];
+	writeFileSync(join(home.path, LAYOUT.projectsFile), JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: "2026-10-15T00:00:00Z", projects }));
+	const doctorAllowed = [...ALLOWED, /^repos\/acme\/app\/actions\/workflows$/, /^repos\/acme\/app\/actions\/runs\?per_page=1&page=1$/];
+	const api = "https://api.github.com/repos/acme/app";
+	const calls: string[] = [];
+	const findings = ciAccessFindings(home.path, (command, args) => {
+		const endpoint = String(args[1]);
+		if (command !== "gh" || args[0] !== "api" || args.length !== 2 || !doctorAllowed.some((p) => p.test(endpoint)) || PROHIBITED.test(endpoint)) {
+			throw new Error(`prohibited CI request: ${command} ${args.join(" ")}`);
+		}
+		calls.push(endpoint);
+		const body = endpoint.endsWith("/workflows")
+			? { total_count: 1, workflows: [{ id: 1 }] }
+			: endpoint.includes("/jobs")
+				? { total_count: 1, jobs: [{ id: 3, run_id: 7, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success", check_run_url: `${api}/check-runs/3` }] }
+				: { total_count: 1, workflow_runs: [{ id: 7, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success", check_suite_url: `${api}/check-suites/9`, statuses_url: `${api}/statuses/${SHA}` }] };
+		return { status: 0, stdout: JSON.stringify(body), stderr: "" };
+	});
+	assert.equal(calls.length, 3, calls.join("\n"));
+	assert.match(findings[0]?.what ?? "", /^CI readable for acme\/app/);
 });
