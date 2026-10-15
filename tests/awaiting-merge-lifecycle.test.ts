@@ -1,6 +1,7 @@
 /** awaiting_merge PR6: a human_handoff parks the job, the viewer keeps its CI, and the batched watch ends the cycle. */
 
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Parking } from "../src/awaiting-merge.ts";
@@ -92,6 +93,8 @@ test("acceptance: the watch's green CI for the head is shown With the team after
 	const parked = b.fleet.require("cp-park");
 	assert.equal(parked.phase, "awaiting_merge");
 	assert.equal(isWatched(parked as WatchableRecord), false, "the per-job watch drops a parked job");
+	// The ci-watch row would answer by itself; deleting it proves the view falls back to the ci_observed event.
+	rmSync(join(b.home, LAYOUT.ciWatchFile));
 	const view = overview({ home: b.home, stateDir: join(b.home, LAYOUT.state) }, NOW.getTime());
 	assert.deepEqual(view.with_team.map((job) => [job.id, job.head, job.ci, job.ci_forwarded]), [["cp-park", HEAD, "green", null]]);
 	assert.deepEqual(view.in_flight, []);
