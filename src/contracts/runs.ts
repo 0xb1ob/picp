@@ -180,6 +180,12 @@ export const CP_EVENT_KINDS = [
 	"revive_refused",
 	/** A live, idle held author's process was stopped to free a spawn slot (phase and lease kept); `cp_send` restores it. */
 	"held_released",
+	/** awaiting_merge: the worker was observed closed and the lease returned; the job waits on a team merge. */
+	"awaiting_merge_parked",
+	/** A park stopped before the job was parked: `{ code, message, fix, stage? }`; nothing it had not reached changed. */
+	"awaiting_merge_refused",
+	/** A parked job re-entered the ship loop on a fresh lease of its own branch (same job id, same session). */
+	"awaiting_merge_resumed",
 	/**
 	 * A wake-up was not sent, or was rewritten on delivery, because the facts it
 	 * described had already moved on (cp-p6m). Silence is acceptable for a stale

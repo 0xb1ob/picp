@@ -36,7 +36,8 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
  const windows = modelWindows(state.stateDir);
  const ciRows = Array.isArray(watched) ? watched.map(obj) : [];
- return jobs.filter(j => ["waiting","held","launching"].includes(String(j.phase))).map(job => {
+ // A parked job owing a CP step (pending resume/revalidation) is In flight; only a quiescent one is With the team.
+ return jobs.filter(j => ["waiting","held","launching"].includes(String(j.phase)) || (j.phase === "awaiting_merge" && !quiescent(j))).map(job => {
   const id = String(job.job_id); const status = readStatus(state,id);
   const ci = ciRows.find(row => row?.job_id === id);
   const envelope = obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
@@ -48,7 +49,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
   const row = rows.find(r => r.job_id === id);
   const runPhase = str(status?.phase);
   return {id, project:String(job.project), title:row?.title ?? null,
-   phase:job.phase === "held" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
+   phase:job.phase === "held" || job.phase === "awaiting_merge" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
    model:row?.model ?? null, script_path:job.executor === "script" ? str(job.script_path) ?? "script" : null,
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
    ci:jobCi(ci,head),
@@ -61,7 +62,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
 export function withTeam(jobs: Json[], now: number, rows: readonly JobRow[]): TeamJob[] {
  return jobs.flatMap(job => {
   const parked = obj(job.awaiting_merge);
-  if (job.phase !== "awaiting_merge" || !parked || parked.pending !== undefined || !timestamp(parked.handed_at)) return [];
+  if (!quiescent(job) || !parked || !timestamp(parked.handed_at)) return [];
   const id = String(job.job_id); const head = str(parked.head_sha); const pr = str(parked.pr_url);
   if (!head || !SHA.test(head) || !pr || !isSafeChangeRequestUrl(pr)) return [];
   return [{id, project:String(job.project), title:rows.find(r => r.job_id === id)?.title ?? null, pr_url:pr, head, base:str(parked.base) ?? "",
@@ -69,6 +70,8 @@ export function withTeam(jobs: Json[], now: number, rows: readonly JobRow[]): Te
    approvals:null, approvals_required:null, ci:null, last_human_activity_at:timestamp(parked.last_human_activity_at) ? parked.last_human_activity_at : null}];
  }).sort((a,b) => a.handed_at.localeCompare(b.handed_at));
 }
+// Mirrors isQuiescentParked (src/contracts/awaiting-merge.ts); viewer modules cannot import contracts.
+export const quiescent = (job: Json): boolean => job.phase === "awaiting_merge" && obj(job.awaiting_merge) !== undefined && obj(job.awaiting_merge)?.pending === undefined;
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
 export function mergeReceipt(state: ViewerState, id: string): Json | undefined {
  const receipt = readObject(join(state.stateDir,"runs",id,"merge.json"));

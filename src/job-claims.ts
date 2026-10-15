@@ -9,7 +9,7 @@
  * ponytail: in-process only — both owners live in the one parent process that
  * holds the WorkerManager; a cross-process lock is needed only if that changes.
  */
-export type JobOwner = "teardown" | "recovery";
+export type JobOwner = "teardown" | "recovery" | "park" | "resume";
 export type JobClaims = Map<string, JobOwner>;
 
 /**

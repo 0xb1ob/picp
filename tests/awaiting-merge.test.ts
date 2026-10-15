@@ -129,10 +129,11 @@ test("viewer: a parked job leaves In flight for With the team, keeps its phase, 
 	const now = Date.parse("2026-10-15T12:00:00Z");
 	const data = overview(state, now);
 	assert.equal(data.availability.fleet, "ok");
-	assert.deepEqual(data.in_flight.map((j) => j.id), ["cp-held"]);
+	assert.deepEqual(data.in_flight.map((j) => [j.id, j.phase]), [["cp-pend", "held"], ["cp-held", "held"]], "a pending parked row is CP work");
 	assert.deepEqual(data.with_team.map((j) => [j.id, j.head, j.age_seconds, j.frozen_seconds, j.approvals, j.ci]), [["cp-park", HEAD, 7200, 600, null, null]]);
 	assert.equal(overview(state, now + 60_000).with_team[0]?.frozen_seconds, 600, "execution time is frozen while team age grows");
 	const jobs = jobsView(state, now).jobs;
 	assert.equal(jobs.find((j) => j.id === "cp-park")?.phase, "awaiting_merge");
+	assert.equal(jobs.find((j) => j.id === "cp-pend")?.phase, "held", "Board and Overview agree: pending is not With the team");
 	assert.ok(boardView(state, now).columns.some((c) => c.key === "awaiting_merge"));
 });

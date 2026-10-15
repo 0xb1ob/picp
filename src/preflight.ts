@@ -132,6 +132,11 @@ function isLive(job: FleetRecord): boolean {
  * already has a live worker is promoted, never given a second one.
  */
 export function decideOccupancy(jobs: readonly FleetRecord[], input: OccupancyInput): OccupancyDecision {
+	const parked = jobs.find((job) => job.job_id === input.jobId && job.phase === "awaiting_merge");
+	if (parked) {
+		return { kind: "refuse", job: parked, message: `${input.jobId} is parked awaiting a team merge (no worker or lease)`,
+			fix: `cp_send ${input.jobId} resumes it on a fresh lease of ${parked.branch}; never a fresh dispatch of a parked job` };
+	}
 	const live = jobs.filter(isLive);
 	const target = input.worktree ? canonicalDir(input.worktree) : undefined;
 

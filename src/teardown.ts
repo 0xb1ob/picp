@@ -119,6 +119,8 @@ export const GATE_CODES = [
 	"job_in_flight",
 	/** cp-a9fq: treehouse did not confirm the return; the lease is kept and the job is not done. */
 	"lease_return_failed",
+	/** awaiting_merge: no lease or worker is held and the recorded worktree may be another job's; nothing is touched. */
+	"job_parked",
 ] as const;
 export type GateCode = (typeof GATE_CODES)[number];
 
@@ -225,6 +227,13 @@ export class Teardown {
 			lease_returned: false,
 			artifacts_removed: false,
 		};
+		// Before any git or lease call: a parked job's recorded path is history, possibly another job's lease now.
+		if (record.phase === "awaiting_merge") {
+			const failure: GateFailure = { code: "job_parked", message: `${jobId} is awaiting a team merge: it holds no lease or worker, and ${record.worktree} may belong to another job`,
+				fix: `nothing to tear down while it waits on the team merge; cp_send ${jobId} resumes it on a fresh lease` };
+			runs.open(jobId).cp("teardown_refused", { ...failure });
+			return { ...base, failure };
+		}
 		const inFlight = holder ? jobInFlight(jobId, holder) : undefined;
 		if (inFlight) {
 			runs.open(jobId).cp("teardown_refused", { ...inFlight });

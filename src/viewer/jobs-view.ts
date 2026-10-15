@@ -13,7 +13,7 @@ import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObje
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
-import { jobCi, recordedReview } from "./overview-jobs.ts";
+import { jobCi, quiescent, recordedReview } from "./overview-jobs.ts";
 import { reportsView } from "./reports-view.ts";
 
 function records(state:ViewerState) {
@@ -56,7 +56,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const head=[ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
   const {review,attempts}=recordedReview(state,id,head ?? null);
   const labels=strings(job?.labels); const project=str(entry?.project) ?? labels.find(l=>l.startsWith("project:"))?.slice(8) ?? "Unassigned";
-  const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry?.phase === "awaiting_merge" ? "awaiting_merge" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
+  const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry && quiescent(entry) ? "awaiting_merge" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
   const status=readStatus(state,id); const receipt=readObject(join(state.stateDir,"runs",id,"merge.json"));
   const merged=receipt?.job_id===id && timestamp(receipt.merged_at) && isSafeChangeRequestUrl(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "");
   const failureAt=phase==="failed" ? [obj(entry?.failure)?.at,obj(status?.failure)?.at].find(timestamp) : undefined;
