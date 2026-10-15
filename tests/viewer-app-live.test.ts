@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
 import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
+import { diffJson } from "../src/viewer/json-delta.ts";
 
 class Events extends EventTarget implements Stream { closed = false; close() { this.closed = true; } }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -47,6 +48,35 @@ test("quick-mode pollStream: a two-second refresh clock while visible, no reques
  status = 503; t.mock.timers.tick(POLL_MS); await tick(); assert.equal(resource.snapshot().data?.n, 6, "a failed poll keeps stale data");
  status = 401; t.mock.timers.tick(POLL_MS); await tick(); assert.equal(resource.snapshot().data, null, "a revoked device's 401 drops the protected data");
  resource.dispose(); t.mock.timers.tick(POLL_MS * 5); await tick(); assert.equal(gets, 8);
+});
+
+test("delta responses: the held version is sent as base, a delta is applied, a mismatch refetches full, a 401 drops the base", async () => {
+ const calls: {headers?: Record<string,string>}[] = []; const replies: Response[] = [];
+ const resource = createResource<{n:number; rows:{id:string; v:number}[]}>("/api/jobs", "/api/stream?view=jobs", {
+  fetch: (_url, init) => { calls.push({...(init.headers ? {headers:init.headers} : {})}); return Promise.resolve(replies.shift() ?? new Response("{}", {status:503})); },
+  stream: () => new Events(),
+ });
+ const full = {n:1, rows:[{id:"a",v:1},{id:"b",v:1}]}, next = {n:2, rows:[{id:"a",v:1},{id:"b",v:2}]};
+ replies.push(new Response(JSON.stringify(full), {headers:{"x-cp-version":"n-1"}}));
+ resource.setVisible(true); await tick();
+ assert.equal(calls[0]!.headers, undefined, "the first GET has no base");
+ replies.push(new Response(JSON.stringify(diffJson(full, next)), {headers:{"x-cp-version":"n-2","x-cp-delta-base":"n-1"}}));
+ resource.setVisible(false); resource.setVisible(true); await tick();
+ assert.equal(calls[1]!.headers?.["x-cp-delta-base"], "n-1", "the version survives a hide/show");
+ assert.deepEqual(resource.snapshot().data, next);
+ // A delta naming another base must not publish; exactly one full refetch follows, without a base header.
+ const after = {n:3, rows:[]};
+ replies.push(new Response('{"v":{"n":99,"rows":[]}}', {headers:{"x-cp-version":"n-9","x-cp-delta-base":"n-8"}}), new Response(JSON.stringify(after), {headers:{"x-cp-version":"n-3"}}));
+ resource.setVisible(false); resource.setVisible(true); await tick(); await tick();
+ assert.equal(calls.length, 4); assert.equal(calls[2]!.headers?.["x-cp-delta-base"], "n-2"); assert.equal(calls[3]!.headers, undefined);
+ assert.deepEqual(resource.snapshot().data, after);
+ replies.push(new Response("{}", {status:401}));
+ resource.setVisible(false); resource.setVisible(true); await tick();
+ assert.equal(calls[4]!.headers?.["x-cp-delta-base"], "n-3"); assert.equal(resource.snapshot().data, null, "a 401 drops data");
+ replies.push(new Response(JSON.stringify(full), {headers:{"x-cp-version":"n-4"}}));
+ resource.setVisible(false); resource.setVisible(true); await tick();
+ assert.equal(calls[5]!.headers, undefined, "after a 401 the next request carries no base");
+ resource.dispose();
 });
 
 test("view SSE emits immediately without a transcript, respects backpressure, and clears its clock once", t => {

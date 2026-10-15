@@ -530,6 +530,15 @@ Responses (JSON, JS, CSS, HTML, text, manifest; 200 and at least 1 KiB) are br- 
 request accepts it, with `vary: accept-encoding`; the event stream never is. Hashed `/assets/viewer/*` files are
 `public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
 
+Each tick still GETs the screen's URL; only the body shrinks. Screen views (`/api/overview`, `/api/jobs`, `/api/board`,
+`/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`,
+`/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`) tag each 200 with `x-cp-version`. The app sends the
+version it holds as `x-cp-delta-base`; when the server still holds that version for the same principal (local or the
+remote device) and URL (16 per key, 48 MiB total, process memory), and the keyed diff (`src/viewer/json-delta.ts`) is
+under half the full size, it answers the diff and echoes `x-cp-delta-base`. Anything else (unknown, evicted or
+pre-restart base) gets the full body. The app falls back to one full GET when a delta names another base or fails to
+apply, and a 401 drops the base with the data. There is no replay; a lost tick changes nothing.
+
 ## Design And Fonts
 
 Ported from the supplied design export screens `00-28bafde0-overview`,
