@@ -429,6 +429,8 @@ export interface OverviewResponse {
  failed: FailedJob[];
  /** Audit P3 #19: `state/main-ci.json`, re-read by the viewer; `missing` is no latch file, `unavailable` unreadable or off-schema. */
  main_ci: {availability: SourceAvailability; red: MainCiRed[]};
+ /** Projects with a held job whose CI read the token was refused (ask-81b54d83f0b2), with those job ids. */
+ ci_unreadable: {project: string; job_ids: string[]}[];
  mandates: {active_count: number | null; paused_count: number | null; paused_projects: string[]; revoked_hidden_count: number | null; items: OverviewMandate[]};
  fleet: {parent: ParentHealth; workers: {live: number | null; working: number | null; idle_held: number | null; unknown: number}; operator: OperatorHealth};
  /** cp-daemon P3: the watchdog's last run (`state/health.json`); null when it never ran. */

@@ -133,6 +133,31 @@ test("audit P3 #20 #21 end to end: recorded ci-watch values reach the held fact,
  assert.match(html, /#\d+ ↗.*merged <\/span><code>[0-9a-f]{7}/);
 });
 
+test("ask-81b54d83f0b2: CI the token cannot read is a red badge, a held fact, a health chip and an alarm, never 'no CI yet'", async t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const screen=(data)=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {screen} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const put = (file: string, value: unknown) => { const path = join(home.path, file); mkdirSync(dirname(path), {recursive:true}); writeFileSync(path, JSON.stringify(value)); };
+ const at = new Date().toISOString();
+ put(LAYOUT.fleetFile, {jobs:["cp-denied","cp-running","cp-quiet"].map(job_id => ({job_id,project:job_id === "cp-running" ? "other" : "demo",phase:"held",dispatched_at:at}))});
+ // A refused read carries no head (the watcher's #fail never reads one); a running head and no row at all stay distinct.
+ put(join(LAYOUT.state, "ci-watch.json"), {jobs:[{job_id:"cp-denied",last_ci:"unreadable"},{job_id:"cp-running",head_sha:"a".repeat(40),last_ci:"in_progress"}]});
+ const data = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
+ assert.deepEqual(data.in_flight.map(j => [j.id,j.ci]), [["cp-denied","unreadable"],["cp-running","in_progress"],["cp-quiet",null]]);
+ assert.deepEqual(data.ci_unreadable, [{project:"demo",job_ids:["cp-denied"]}], "per project, from the watcher's own record");
+ const {parseHTML} = await import("linkedom"); const document = parseHTML(screen(data)).document;
+ const ci = (id: string) => document.querySelector(`[aria-label="${id}"] .overview-ci`)?.textContent;
+ assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions/checks read");
+ assert.ok(document.querySelector('[aria-label="cp-denied"] .job-ci-red.job-ci-unreadable'), "red");
+ assert.equal(ci("cp-running"), "CI running aaaaaaa"); assert.equal(ci("cp-quiet"), "no CI yet");
+ assert.equal(document.querySelector('[aria-label="cp-denied"] .overview-flight-extra .overview-meta')?.textContent, "CI unreadable (token)");
+ assert.match(document.querySelector(".overview-health")!.textContent!, /CI access.*CI unreadable — token lacks Actions\/checks read: demo/);
+ assert.match(document.querySelector(".overview-alarm[role=alert]")!.textContent!, /for demo: 1 held job cannot show CI.*Actions read \+ Checks read \+ Commit statuses read; classic: repo/);
+ put(join(LAYOUT.state, "ci-watch.json"), {jobs:[]});
+ const clean = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
+ assert.deepEqual(clean.ci_unreadable, []); assert.doesNotMatch(screen(clean), /CI access|unreadable/, "no flag without a refused read");
+});
+
 test("stamp, shortSha, prNumber and phaseText", async t => {
  const {stamp, shortSha, prNumber, phaseText} = await import("../viewer-app/format.ts");
  const zone = process.env.TZ; t.after(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });

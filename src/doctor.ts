@@ -66,6 +66,7 @@ import { DEFAULT_PARENT_COMPACT_TOKENS, parentContextStatus, parentSettings, sta
 import { viewerFindings } from "./viewer/doctor-check.ts";
 import { pushFindings } from "./push/status.ts";
 import { storageFindings } from "./storage.ts";
+import { ciAccessFindings } from "./ci-access-doctor.ts";
 import { jobIdMigrationFinding } from "./state-migrations.ts";
 import { detectBudgetClamp, resolveJobBudget } from "./worker-manager.ts";
 import { ROLE_PACKAGES, WORKER_PACKAGES_LOADED_AT } from "./worker-packages.ts";
@@ -310,6 +311,7 @@ export class Doctor {
 			...viewerFindings(this.#run, this.#options.home, this.#options.serviceEnv),
 			...pushFindings(this.#options.home, this.#now()),
 			...storageFindings(this.#options.home, this.#run),
+			...ciAccessFindings(this.#options.home, this.#run),
 		];
 		// The one place every finding passes before the contract sees it: no source check, present or
 		// future, can turn a long path, message or list into a crashed diagnosis (doctor-caps.ts).
