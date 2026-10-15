@@ -16,14 +16,13 @@ import {
 	type MainCiObservation,
 	MainCiStore,
 	mainRedHold,
-	mainRunsArgs,
 	memoLogin,
-	parseMainRuns,
 	resolveMainCiScope,
 	runMainCiTick,
 } from "../src/main-ci.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
 import { createScratchHome } from "./harness/index.ts";
+import { answerActions } from "./harness/actions-api.ts";
 
 const T1 = "1111111111111111111111111111111111111111";
 const T2 = "2222222222222222222222222222222222222222";
@@ -57,7 +56,7 @@ interface World {
 	jobs?: unknown;
 }
 
-const RUNS_PREFIX = "gh api repos/{owner}/{repo}/actions/runs?branch=main&head_sha=";
+const RUNS_PREFIX = "gh api repos/{owner}/{repo}/actions/runs";
 
 function execFor(world: World, calls: string[] = []): CommandRunner {
 	return async (command, args) => {
@@ -69,12 +68,15 @@ function execFor(world: World, calls: string[] = []): CommandRunner {
 		}
 		if (line === "git rev-parse origin/main") return `${world.tip}\n`;
 		if (line.startsWith(RUNS_PREFIX)) {
-			assert.equal(args[1], `repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${world.tip}&per_page=100`, "the query is scoped to the fetched tip");
+			if (!line.includes("/attempts/")) {
+				assert.equal(args[1], `repos/{owner}/{repo}/actions/runs?head_sha=${world.tip}&branch=main&per_page=100&page=1`, "the query is scoped to the fetched tip");
+			}
 			if (world.ghFails) throw new Error(world.ghFails);
-			return typeof world.runs === "string" ? world.runs : JSON.stringify(world.runs);
+			if (typeof world.runs === "string") return world.runs;
+			const jobs = ((world.jobs as { jobs?: Array<Record<string, unknown>> } | undefined)?.jobs ?? []).map((job, index) => ({ id: index + 1, status: "completed", ...job }));
+			return answerActions(String(args[1]), world.runs.map((run) => ({ ...run, jobs }))) ?? assert.fail(line);
 		}
 		if (line.endsWith("--log-failed")) return world.logFailed ?? "";
-		if (line.endsWith("--json jobs")) return JSON.stringify(world.jobs ?? { jobs: [] });
 		throw new Error(`unexpected command: ${line}`);
 	};
 }
@@ -283,14 +285,15 @@ test("mainRedHold: fails open with a fact on unreadable state, holds a latched p
 		branch: "b",
 		head: T2,
 		ancestry: async () => true,
-		runs: async () => ({ status: 0, stdout: JSON.stringify([green(T2)]) }),
+		runs: async () => [green(T2)],
 		scope: async () => ({ enforce: true as const, login: "me" }),
 	};
 	assert.deepEqual(await mainRedHold(base), {});
 	ctx.store.setRed("demo", T1, { failing: "structure", login: "me" });
 	assert.match((await mainRedHold(base)).fact ?? "", /fix-forward/);
 	assert.equal((await mainRedHold({ ...base, ancestry: async () => false })).hold, "main is red since 111111111111: structure; rebase onto origin/main and pass CI to merge");
-	assert.ok((await mainRedHold({ ...base, runs: async () => ({ status: 0, stdout: "not json" }) })).hold);
+	assert.ok((await mainRedHold({ ...base, runs: async () => { throw new Error("Actions CI read denied: gh api … (HTTP 403)"); } })).hold, "an unreadable observation holds");
+	assert.ok((await mainRedHold({ ...base, runs: async () => [green(T1)] })).hold, "green on another head is not this head's green");
 	writeFileSync(ctx.store.file, "{not json");
 	const open = await mainRedHold(base);
 	assert.equal(open.hold, undefined);
@@ -445,7 +448,7 @@ test("cp-oc0m: mainRedHold enforces only an own row under an enforced scope; no 
 		branch: "b",
 		head: T2,
 		ancestry: async () => false,
-		runs: async () => ({ status: 0, stdout: "[]" }),
+		runs: async () => [],
 		scope: async () => ({ enforce: true as const, login: "me" }),
 	};
 	assert.deepEqual(await mainRedHold({ ...base, scope: async () => assert.fail("no scope without a row") }), {});
@@ -475,20 +478,29 @@ test("cp-oc0m: resolveMainCiScope — active mandate and readable login enforce;
 	assert.equal(broken.enforce, false);
 });
 
-test("cp-oc0m: the REST query, its parser and the counted filter", () => {
-	assert.deepEqual(mainRunsArgs(T1).slice(0, 3), ["api", `repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${T1}&per_page=100`, "--jq"]);
-	const runs = parseMainRuns(JSON.stringify([{ ...failed(T1), attempt: 2 }, { status: "completed", conclusion: "success" }, { ...green(T1), event: 7, triggeringActor: null }]));
-	assert.equal(runs.length, 2, "a row without headSha is not a fact");
-	assert.deepEqual(runs[0], { status: "completed", conclusion: "failure", headSha: T1, databaseId: 2, attempt: 2, workflowName: "CI", event: "push", triggeringActor: "me" });
-	assert.equal(runs[1]?.event, undefined);
-	assert.equal(runs[1]?.triggeringActor, undefined);
-	assert.deepEqual(parseMainRuns(""), []);
-	assert.deepEqual(parseMainRuns("{}"), []);
-	assert.throws(() => parseMainRuns("not json"));
+test("cp-oc0m: the Actions query carries event and triggering actor, and the counted filter uses them", async (t) => {
+	const ctx = setup(t);
+	const calls: string[] = [];
+	const obs = await checkMainCi({ project: "demo", cwd: ctx.clone, store: ctx.store, login: "me", exec: execFor({ tip: T1, runs: [{ ...failed(T1), attempt: 2 }] }, calls) });
+	assert.equal(obs?.event, "main_ci_failed");
+	assert.ok(calls.includes(`gh api repos/{owner}/{repo}/actions/runs?head_sha=${T1}&branch=main&per_page=100&page=1`));
+	assert.ok(calls.includes("gh api repos/{owner}/{repo}/actions/runs/2/attempts/2/jobs?per_page=100&page=1"), "the run attempt's jobs are read too");
+	const runs = [failed(T1, 1), failed(T1, 2, { event: "dynamic" }), failed(T1, 3, { triggeringActor: "Me" }), failed(T1, 4, { triggeringActor: "x" })];
 	assert.deepEqual(
-		countedMainRuns([failed(T1, 1), failed(T1, 2, { event: "dynamic" }), failed(T1, 3, { triggeringActor: "Me" }), failed(T1, 4, { triggeringActor: "x" })], "me").map((run) => run.databaseId),
+		countedMainRuns(runs.map((run) => ({ ...run, databaseId: run.databaseId!, attempt: 1, jobs: [] })), "me").map((run) => run.databaseId),
 		[1, 3],
 	);
+});
+
+test("main CI: an unreadable jobs read or a malformed runs page latches nothing and throws a named error", async (t) => {
+	const ctx = setup(t);
+	const jobsDenied: CommandRunner = async (command, args) => {
+		if (String(args[1]).includes("/attempts/")) throw new Error("gh: Resource not accessible by integration (HTTP 403)");
+		return execFor({ tip: T1, runs: [failed(T1)] })(command, args, { cwd: ctx.clone, timeoutMs: 1000 });
+	};
+	await assert.rejects(checkMainCi({ project: "demo", cwd: ctx.clone, store: ctx.store, login: "me", exec: jobsDenied }), /actions\/runs unreadable: Actions CI read denied/);
+	await assert.rejects(check(ctx, { tip: T1, runs: "not json" }), /actions\/runs unreadable/);
+	assert.equal(ctx.store.entry("demo"), undefined);
 });
 
 test("formatMainCiNotice: released wording", () => {

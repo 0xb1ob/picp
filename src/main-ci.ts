@@ -34,7 +34,8 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION, validate } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { isActive } from "./mandate-accounting.ts";
-import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, parseCiRuns, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
+import { type ActionsRun, readActionsCi } from "./actions-ci.ts";
+import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 
 const MainCiEntrySchema = Type.Object(
 	{
@@ -143,29 +144,8 @@ function sameLogin(a: string | undefined, b: string | undefined): boolean {
 	return (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
 }
 
-/** A main-branch run from the REST endpoint: a `CiRun` plus what decides whether it counts. */
-export type MainRun = CiRun & { event?: string; triggeringActor?: string };
-
-const MAIN_RUNS_JQ = "[.workflow_runs[] | {status, conclusion, headSha: .head_sha, workflowName: .name, databaseId: .id, attempt: .run_attempt, event, triggeringActor: .triggering_actor.login}]";
-
-/** One GET for the tip's runs: `gh run list --json` has no triggering actor. `execFile` passes no shell, so nothing needs quoting. */
-export function mainRunsArgs(tip: string): string[] {
-	return ["api", `repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${tip}&per_page=100`, "--jq", MAIN_RUNS_JQ];
-}
-
-/** `parseCiRuns`' tolerance, plus `event` / `triggeringActor` when they are strings. Invalid JSON throws. */
-export function parseMainRuns(stdout: string): MainRun[] {
-	const text = stdout.trim();
-	if (text.length === 0) return [];
-	const parsed: unknown = JSON.parse(text);
-	if (!Array.isArray(parsed)) return [];
-	return parsed.flatMap((entry: unknown): MainRun[] => {
-		const [run] = parseCiRuns(JSON.stringify([entry]));
-		if (!run) return [];
-		const row = entry as Record<string, unknown>;
-		return [{ ...run, ...(typeof row.event === "string" ? { event: row.event } : {}), ...(typeof row.triggeringActor === "string" ? { triggeringActor: row.triggeringActor } : {}) }];
-	});
-}
+/** A main-branch run: an Actions run with what decides whether it counts (`event`, `triggeringActor`). */
+export type MainRun = ActionsRun;
 
 /** The runs that count: not `dynamic` (Dependabot Updates), triggered by this login (case-insensitive). */
 export function countedMainRuns(runs: readonly MainRun[], login: string): MainRun[] {
@@ -246,14 +226,9 @@ export async function readMainTip(cwd: string, exec: CommandRunner, timeoutMs: n
 	return tip;
 }
 
-/** `gh run view <id> --json jobs`: the failing job's name. Best-effort. */
-async function failingJobName(cwd: string, runId: number, exec: CommandRunner, timeoutMs: number): Promise<string | undefined> {
-	try {
-		const parsed = JSON.parse((await exec("gh", ["run", "view", String(runId), "--json", "jobs"], { cwd, timeoutMs })).trim() || "{}") as { jobs?: Array<{ name?: string; conclusion?: string | null }> };
-		return (parsed.jobs ?? []).find((job) => job.conclusion && job.conclusion.toLowerCase() !== "success")?.name?.trim() || undefined;
-	} catch {
-		return undefined; // Degrades to the workflow name; the wake still fires.
-	}
+/** The failing job's name, from the attempt jobs the observation already read. */
+function failingJobName(run: MainRun | undefined): string | undefined {
+	return run?.jobs.find((job) => job.conclusion && job.conclusion.toLowerCase() !== "success")?.name.trim() || undefined;
 }
 
 /** `gh run view <id> --log-failed`: the first failing-test line. A heuristic over log text, best-effort. */
@@ -287,14 +262,14 @@ export async function checkMainCi(options: { project: string; cwd: string; store
 	const tip = await readMainTip(cwd, exec, timeoutMs);
 	let runs: MainRun[];
 	try {
-		runs = parseMainRuns(await exec("gh", mainRunsArgs(tip), { cwd, timeoutMs }));
+		runs = await readActionsCi({ cwd, exec, sha: tip, branch: "main", timeoutMs });
 	} catch (error) {
 		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 200)}`);
 	}
 	const classified = classifyMainTip(tip, countedMainRuns(runs, login));
 	if (classified.status === "red" && !own) {
 		const id = classified.failingRunId;
-		const failing = id === undefined ? undefined : ((await failingTestLine(cwd, id, exec, timeoutMs)) ?? (await failingJobName(cwd, id, exec, timeoutMs)));
+		const failing = id === undefined ? undefined : ((await failingTestLine(cwd, id, exec, timeoutMs)) ?? failingJobName(runs.find((run) => run.databaseId === id)));
 		const extra = { ...(classified.workflow ? { workflow: classified.workflow } : {}), ...(failing ? { failing } : {}) };
 		store.setRed(project, tip, { ...extra, login });
 		return { project, event: "main_ci_failed", sha: tip, reason: classified.reason, ...extra };
@@ -389,7 +364,7 @@ export async function mainRedHold(options: {
 	branch: string;
 	head: string;
 	ancestry: () => Promise<boolean | undefined>;
-	runs: () => Promise<{ status: number | null; stdout: string }>;
+	runs: () => Promise<readonly CiRun[]>;
 	scope: () => Promise<MainCiScope>;
 }): Promise<{ hold?: string; fact?: string }> {
 	const read = new MainCiStore({ home: options.home }).read();
@@ -402,14 +377,12 @@ export async function mainRedHold(options: {
 	if (row.login === undefined || !sameLogin(row.login, scope.login)) return { fact: `main-ci: red since ${sha} latched ${row.login ? `for ${row.login}` : "before own-run filtering"}, not ${scope.login}; not blocking` };
 	const hold = { hold: `main is red since ${sha}: ${row.failing ?? row.workflow ?? "CI failed"}; rebase onto origin/main and pass CI to merge` };
 	if ((await options.ancestry()) !== true) return hold;
-	const runs = await options.runs();
-	if (runs.status !== 0) return hold;
-	let parsed: CiRun[];
+	let runs: readonly CiRun[];
 	try {
-		parsed = parseCiRuns(runs.stdout);
+		runs = await options.runs();
 	} catch {
-		return hold;
+		return hold; // an unreadable observation never clears the fix-forward hold
 	}
-	if (readCiForHead({ branch: options.branch, headSha: options.head, runs: parsed }).ci !== "green") return hold;
+	if (readCiForHead({ branch: options.branch, headSha: options.head, runs }).ci !== "green") return hold;
 	return { fact: `main red since ${sha}; fix-forward: head contains origin/main and CI green` };
 }

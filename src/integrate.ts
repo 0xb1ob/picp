@@ -5,7 +5,7 @@
  *
  * Two-writer boundary: the implementer owns the branch while its `pr` receipt is `open`. This
  * tool runs only server-side or read-only git (`gh pr update-branch --rebase`, `git ls-remote`,
- * `git merge-base --is-ancestor`, `gh run list`) and never pushes from a worktree. A conflict or
+ * `git merge-base --is-ancestor`, `gh api …/actions/runs`) and never pushes from a worktree. A conflict or
  * red CI is handed back to the job's own implementer with `cp_send` (one promote, then a human).
  * Recording the merge moves the `pr` receipt to `merged`, after which `decideReopen`
  * (`src/supersede.ts`) refuses any further `cp_send`, so `record` runs after the last promote
@@ -22,7 +22,7 @@
  * authoritative empty workflow list (ci-configured.ts) means no CI configured and still
  * requires repository permission. See docs/contracts.md, Integration.
  *
- * CI: one non-blocking `gh run list` feeds readCiForHead (src/merge-ask.ts); unfinished CI returns
+ * CI: one Actions runs/jobs read of the pushed head feeds readCiForHead (src/merge-ask.ts); unfinished CI returns
  * next: wait. This tool never waits inside `gh run watch`.
  *
  * Rescue refs: sync keeps every head it discards at `refs/cp-salvage/<job-id>/<utc>` before
@@ -77,7 +77,8 @@ import { changeRequestObserver, projectForge } from "./forge-runtime.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
 import type { ForgeObserver } from "./forges/adapter.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
-import { ghRunListArgs, parseCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
+import { type CiRun, ghCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
+import { readOlderBranchRuns, statusRunner } from "./actions-ci.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
 import { readDrain } from "./drain.ts";
 import { type MainCiScope, mainRedHold } from "./main-ci.ts";
@@ -455,27 +456,34 @@ export class Integrator {
 			});
 		}
 		const mainCiScope = async (): Promise<MainCiScope> => (await this.#options.mainCiScope?.(record.project)) ?? { enforce: false, reason: "no main-CI scope wired" };
-		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: () => this.#run(cwd, "gh", ghRunListArgs(branch)), scope: mainCiScope });
+		let observed: Promise<CiRun[]> | undefined; // one Actions observation of this head per advance
+		const readRuns = () => (observed ??= ghCiRuns({ cwd, exec: statusRunner((dir, bin, args) => this.#run(dir, bin, args)) })(head));
+		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: readRuns, scope: mainCiScope });
 		if (mainRed.fact) facts.push(mainRed.fact); // k52: a red origin/main pauses every merge path below, fix-forward excepted
 		if (mainRed.hold) return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...facts, mainRed.hold], prUrl, headSha: head, reason: `${jobId}: ${mainRed.hold}` });
 
-		// CI, for the head that would merge. A completed green run on a superseded
-		// sha proves nothing, and `readCiForHead` is the one place that rule lives.
-		const runs = await this.#run(cwd, "gh", ghRunListArgs(branch));
-		if (runs.status !== 0) {
+		// CI, for the head that would merge: every Actions run and attempt job on exactly that sha.
+		let runsParsed: CiRun[];
+		try {
+			runsParsed = await readRuns();
+		} catch (error) {
+			const detail = (error as Error).message.slice(0, 300);
 			return this.#write({
 				jobId,
 				branch,
 				step: "ci",
 				next: "retry",
-				facts: [...facts, firstLine(runs)],
+				facts: [...facts, detail],
 				prUrl,
 				headSha: head,
-				reason: `${jobId}: could not read CI for ${branch} (${ciReadDenied(`gh run list ${firstLine(runs)}`) ? `${CI_UNREADABLE_LABEL}; needs ${CI_READ_NEEDED}` : firstLine(runs)}). Nothing was merged.`,
+				reason: `${jobId}: could not read CI for ${branch} (${ciReadDenied(detail) ? `${CI_UNREADABLE_LABEL}; needs ${CI_READ_NEEDED}` : detail}). Nothing was merged.`,
 			});
 		}
-		const runsParsed = safeParseRuns(runs.stdout);
-		const ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
+		let ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
+		// Main parity: no run yet on a fresh head, but runs on an older sha of the branch, is `superseded` (wait).
+		const older = ci.ci === "unknown" && !runsParsed.length ? await readOlderBranchRuns({ cwd, exec: statusRunner((dir, bin, args) => this.#run(dir, bin, args)), branch, head }).catch((error: Error) => error) : [];
+		if (older instanceof Error) facts.push(`ci: branch runs unreadable — ${older.message.slice(0, 200)}`);
+		else if (older.length) ci = readCiForHead({ branch, headSha: head, runs: older });
 		const runRef = ci.ci === "failed" ? formatRunRef(ciRunRef(runsParsed, head, prUrl)) : "";
 		facts.push(`ci: ${ci.ci} — ${ci.reason}${runRef}`);
 		/** Set only when the repository itself answered "no workflows" (`src/ci-configured.ts`). */
@@ -504,7 +512,7 @@ export class Integrator {
 			if (ci.ci === "unknown" && runsParsed.length === 0) {
 				const configured = readCiConfigured(await this.#run(cwd, "gh", ghWorkflowsArgs()));
 				facts.push(`ci configuration: ${configured.state} (${configured.cause}) — ${configured.reason}`);
-				if (configured.state !== "none") {
+				if (configured.state !== "none" || older instanceof Error) {
 					// (b) CI could not be read — runs may exist and may be red. The per-head
 					// human checkpoint is the honest exit, exactly as before: an unreadable
 					// signal is never permission.
@@ -1980,14 +1988,6 @@ export function isSalvageRef(ref: string): boolean {
 function hexSha(value: string | undefined): string | undefined {
 	const sha = (value ?? "").trim().toLowerCase();
 	return /^[0-9a-f]{7,64}$/.test(sha) ? sha : undefined;
-}
-
-function safeParseRuns(stdout: string) {
-	try {
-		return parseCiRuns(stdout);
-	} catch {
-		return [];
-	}
 }
 
 /** `AwaitingItem.decision` is bounded to `AWAITING_DECISION_MAX_CHARS` (100). */

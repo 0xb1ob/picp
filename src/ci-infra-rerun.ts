@@ -13,7 +13,7 @@
  * Everything else goes to the parent unchanged (`ciFailedMessage` resolve): a
  * test/build step failure, attempt ≥ 2, a cancelled or timed-out run, a run with
  * no id, an existing claim, a drain, an unreadable claim file or jobs listing.
- * Nothing here merges, waits on CI or loops: one `gh run view` per failed run,
+ * Nothing here merges, waits on CI or loops: one Actions attempt-jobs read per failed run,
  * one `gh run rerun` per failed run, once per job + head, ever.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { CI_RERUNS_MAX, type CiRerunEntry, type CiRerunsFile, isoTimestamp, LAYOUT, validateCiRerunsFile } from "./contracts.ts";
 import { readDrain } from "./drain.ts";
 import { atomicWriteJson } from "./json-store.ts";
+import { type ActionsJob, readActionsJobs, statusRunner } from "./actions-ci.ts";
 import { type CiRun, GREEN_CONCLUSIONS, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner } from "./merges.ts";
 
@@ -38,40 +39,21 @@ export interface InfraVerdict {
 	reason: string;
 }
 
-interface ViewStep {
-	name?: unknown;
-	conclusion?: unknown;
-}
-interface ViewJob {
-	name?: unknown;
-	conclusion?: unknown;
-	steps?: unknown;
-}
-
-/** `gh run view <id> --json jobs` → infra iff every failed job's first failed step is a setup step and no failed step is a test step. */
-export function classifyInfraFailure(viewJson: string): InfraVerdict {
-	let jobs: ViewJob[];
-	try {
-		const parsed = JSON.parse(viewJson) as { jobs?: unknown };
-		if (!Array.isArray(parsed?.jobs)) return { infra: false, reason: "gh run view returned no jobs list" };
-		jobs = parsed.jobs as ViewJob[];
-	} catch (error) {
-		return { infra: false, reason: `gh run view output is not JSON (${(error as Error).message})` };
-	}
-	const conclusion = (value: unknown) => (typeof value === "string" ? value.toLowerCase() : "");
+/** Infra iff every failed job's first failed step is a setup step and no failed step is a test step. */
+export function classifyInfraFailure(jobs: readonly Pick<ActionsJob, "name" | "conclusion" | "steps">[]): InfraVerdict {
+	const conclusion = (value: string | null) => (value ?? "").toLowerCase();
 	const stopped = jobs.find((job) => ["cancelled", "timed_out"].includes(conclusion(job.conclusion)));
-	if (stopped) return { infra: false, reason: `job ${String(stopped.name)} was ${conclusion(stopped.conclusion)} — never rerun automatically` };
+	if (stopped) return { infra: false, reason: `job ${stopped.name} was ${conclusion(stopped.conclusion)} — never rerun automatically` };
 	const failed = jobs.filter((job) => conclusion(job.conclusion) === "failure");
 	if (failed.length === 0) return { infra: false, reason: "no job concluded failure" };
 	let first: string | undefined;
 	for (const job of failed) {
-		const steps = (Array.isArray(job.steps) ? job.steps : []) as ViewStep[];
-		const failedSteps = steps.filter((step) => conclusion(step.conclusion) === "failure").map((step) => String(step.name ?? "").trim());
+		const failedSteps = job.steps.filter((step) => conclusion(step.conclusion) === "failure").map((step) => step.name.trim());
 		const head = failedSteps[0];
-		if (!head) return { infra: false, reason: `job ${String(job.name)} failed with no failed step to read` };
+		if (!head) return { infra: false, reason: `job ${job.name} failed with no failed step to read` };
 		const test = failedSteps.find((name) => TEST_STEP.test(name));
-		if (test) return { infra: false, step: test, reason: `job ${String(job.name)} failed in "${test}" — a test/build failure is the implementer's` };
-		if (!INFRA_SETUP_STEP.test(head)) return { infra: false, step: head, reason: `job ${String(job.name)} first failed in "${head}", which is not a setup step` };
+		if (test) return { infra: false, step: test, reason: `job ${job.name} failed in "${test}" — a test/build failure is the implementer's` };
+		if (!INFRA_SETUP_STEP.test(head)) return { infra: false, step: head, reason: `job ${job.name} first failed in "${head}", which is not a setup step` };
 		first ??= head;
 	}
 	return { infra: true, ...(first ? { step: first } : {}), reason: `every failed job first failed in a setup step ("${first}")` };
@@ -115,7 +97,7 @@ export class CiRerunStore {
 export interface InfraRerunInput {
 	jobId: string;
 	head: string;
-	/** `gh run list` rows for the branch (newest first), as integrate parsed them. */
+	/** The Actions runs on the head, as integrate read them. */
 	runs: readonly CiRun[];
 	cwd: string;
 	run: CommandRunner;
@@ -167,9 +149,13 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
 	const steps: Array<{ id: number; step: string }> = [];
 	for (const run of failed) {
 		const id = run.databaseId as number;
-		const view = await input.run(input.cwd, "gh", ["run", "view", String(id), "--json", "jobs"]);
-		if (view.status !== 0) return skip(`gh run view ${id} failed: ${firstLine(view.stderr || view.stdout)}`);
-		const verdict = classifyInfraFailure(view.stdout);
+		let jobs: ActionsJob[];
+		try {
+			jobs = await readActionsJobs({ cwd: input.cwd, exec: statusRunner(input.run) }, { runId: id, attempt: run.attempt as number, sha: input.head });
+		} catch (error) {
+			return skip(`run ${id} jobs unreadable: ${firstLine((error as Error).message)}`);
+		}
+		const verdict = classifyInfraFailure(jobs);
 		if (!verdict.infra) return skip(`run ${id}: ${verdict.reason}`);
 		steps.push({ id, step: verdict.step ?? "setup" });
 	}

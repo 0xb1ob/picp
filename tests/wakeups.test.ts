@@ -74,6 +74,7 @@ import {
 	type ReviewWakeupFacts,
 } from "../src/wakeups.ts";
 import { createScratchHome, readRunEvents, type ScratchHome } from "./harness/index.ts";
+import { answerActions, type FakeRun } from "./harness/actions-api.ts";
 
 // ---------------------------------------------------------------------------
 // bench
@@ -1970,7 +1971,7 @@ test("k52: one surfaceCi pass on a latched-red project sends exactly one kind:'c
 		const line = `${command} ${args.join(" ")}`;
 		if (line === "git fetch origin main") return "";
 		if (line === "git rev-parse origin/main") return `${MAIN_T2}\n`;
-		if (line.startsWith(`gh api repos/{owner}/{repo}/actions/runs?branch=main&head_sha=${MAIN_T2}&`)) return JSON.stringify(runs);
+		if (line.startsWith("gh api repos/{owner}/{repo}/actions/runs")) return answerActions(String(args[1]), runs as FakeRun[]) ?? assert.fail(line);
 		if (line.endsWith("--log-failed")) return "tests\tstep\t2026-01-01T00:00:00Z AssertionError: x\n";
 		throw new Error(`unexpected command: ${line}`);
 	};

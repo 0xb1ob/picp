@@ -87,7 +87,7 @@ function verdict(jobId: string, overrides: Record<string, unknown> = {}): Script
 }
 
 /** Writes a `cp_review`-shaped diff verdict straight to disk (the same fixture shape `writeReviewPass` uses elsewhere). */
-/** A `gh` that answers `pr view`/`api pulls`/`run list`/`pr merge` by asking real `git` what is actually on origin — no fixture to drift. */
+/** A `gh` answering `pr view`/`api pulls`/Actions runs+jobs/`pr merge` from what real `git` sees on origin. */
 function writeFakeGh(bin: string, branch: string, prUrl: string, stateFile: string): void {
 	mkdirSync(bin, { recursive: true });
 	writeFileSync(
@@ -122,8 +122,14 @@ if (args[0] === "api" && (args[1] || "").endsWith("pulls/91")) {
   process.stdout.write(JSON.stringify({ number: 91, html_url: prUrl, state: merged() ? "closed" : "open", merged: merged(), head: { sha: head(), ref: branch } }));
   process.exit(0);
 }
-if (args[0] === "run" && args[1] === "list") {
-  process.stdout.write(JSON.stringify([{ status: "completed", conclusion: "success", headSha: head(), workflowName: "ci" }]));
+if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
+  const sha = args[1].split("head_sha=")[1].slice(0, 40);
+  const runs = sha === head() ? [{ id: 7, run_attempt: 1, head_sha: sha, status: "completed", conclusion: "success", name: "ci" }] : [];
+  process.stdout.write(JSON.stringify({ total_count: runs.length, workflow_runs: runs }));
+  process.exit(0);
+}
+if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
+  process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
   process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "merge") {

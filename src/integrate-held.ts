@@ -1,7 +1,8 @@
 import type { FleetRecord } from "./contracts.ts";
 import type { IntegrateResult } from "./integrate.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
-import { ghRunListArgs, parseCiRuns, readCiForHead } from "./merge-ask.ts";
+import { ghCiRuns, readCiForHead } from "./merge-ask.ts";
+import { statusRunner } from "./actions-ci.ts";
 import type { CommandRunner } from "./merges.ts";
 
 export interface HeldState {
@@ -74,14 +75,14 @@ export async function advanceHeld(input: { jobId: string; record: FleetRecord; c
 		const head = /^[0-9a-f]{7,64}$/.test(raw) ? raw : undefined;
 		seen = { facts: [`gh: ${prUrl} is ${state || "in an unknown state"}${head ? ` at ${head.slice(0, 12)}` : ""}`], prUrl, ...(head ? { headSha: head } : {}) };
 		if (state !== "OPEN" || !head) return wait(`ci: not read — ${state !== "OPEN" ? `PR is ${state || "in an unknown state"}` : "no head"}`);
-		const runs = await ports.run(cwd, "gh", ghRunListArgs(record.branch));
+		const read = await ghCiRuns({ cwd, exec: statusRunner(ports.run) })(head).then((runs) => ({ runs }), (error: Error) => ({ error }));
 		const pausedAfterCi = paused();
 		if (pausedAfterCi) return pausedAfterCi;
-		if (runs.status !== 0) {
-			seen.facts.push(`ci: unreadable — ${((runs.stderr || runs.stdout).trim().split("\n")[0] ?? "no output").slice(0, 300)}`);
+		if ("error" in read) {
+			seen.facts.push(`ci: unreadable — ${read.error.message.slice(0, 300)}`);
 			return wait();
 		}
-		const parsed = parseCiRuns(runs.stdout);
+		const parsed = read.runs;
 		const ci = readCiForHead({ branch: record.branch, headSha: head, runs: parsed });
 		const ref = ci.ci === "failed" ? ciRunRef(parsed, head, prUrl) : {};
 		seen.facts.push(`ci: ${ci.ci} — ${ci.reason}${formatRunRef(ref)}`);

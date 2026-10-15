@@ -643,14 +643,14 @@ export class CommandPost {
 		});
 		// cp-e2d: the one thing in this process that asks a third-party server a
 		// question on a timer. Its facts come from the same two REST queries the
-		// merge-ask gate already uses (`gh run list`, plus one `gh api pulls/{n}`),
+		// merge-ask gate already uses (Actions runs/jobs, plus one `gh api pulls/{n}`),
 		// and it never merges, declares or tears anything down.
 		this.shippedSeen = new ShippedSeenStore({ home: options.home });
 		this.ciWatch = new CiWatch({
 			home: options.home,
 			jobs: () => this.fleet.list() as WatchableRecord[],
 			pr: async (job, prUrl) => watchChangeRequest(options.home, job.project, prUrl, () => ghPrRest({ cwd: this.#clonePath(job.job_id) })(prUrl)),
-			runs: async (job) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id) })(job.branch)),
+			runs: async (job, head) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id) })(head)),
 			head: async (job) =>
 				gitRemoteHead({ cwd: this.#clonePath(job.job_id), fallback: (id) => this.reportedHeadSha(id) })(
 					job.branch,
@@ -784,7 +784,7 @@ export class CommandPost {
 
 	/**
 	 * The default merge-ask gate (cp-gmy): the branch's current pushed head from
-	 * the remote, and one `gh run list` for that branch, in the job's own project
+	 * the remote, and one exact-head Actions read for it, in the job's own project
 	 * clone. Every lookup is per call, because a gate that caches is a gate that
 	 * defers an ask on facts that stopped being true.
 	 */
@@ -813,7 +813,7 @@ export class CommandPost {
 			reviewedHeads: (jobId) => readReviewPassHeads(this.home, jobId),
 			head: async (branch, jobId) =>
 				gitRemoteHead({ cwd: dirFor(jobId), fallback: (id) => this.reportedHeadSha(id) })(branch, jobId),
-			runs: async (branch, jobId) => ghCiRuns({ cwd: dirFor(jobId) })(branch),
+			runs: async (_branch, jobId, head) => ghCiRuns({ cwd: dirFor(jobId) })(head),
 			unsupported: (jobId) => gitlabCiUnsupported(this.fleet.get(jobId) as WatchableRecord | undefined),
 			// cp-no-ci-repo-derived: asked only when the branch has no runs at all, and
 			// only ever able to *unblock* a row — an unreadable answer defers exactly as

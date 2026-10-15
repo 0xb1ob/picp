@@ -17,6 +17,7 @@ import { ParentCompactHold } from "../src/parent-compact-hold.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { Sender } from "../src/send.ts";
 import { createScratchHome, fakeWorkerManager } from "./harness/index.ts";
+import { answerActions } from "./harness/actions-api.ts";
 
 const JOB = "cp-held-ci";
 const PR = "https://github.com/o/r/pull/61";
@@ -52,7 +53,9 @@ async function bench(t: TestContext) {
 		commands.push(`${bin} ${args.join(" ")}`);
 		let value: unknown;
 		if (bin === "gh" && args[0] === "pr" && args[1] === "view") value = { number: 61, url: PR, state: "OPEN", headRefName: JOB, headRefOid: world.head, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", baseRefName: "main" };
-		else if (bin === "gh" && args[0] === "run" && args[1] === "list") value = [{ status: "completed", conclusion: world.conclusion, headSha: world.head, workflowName: "ci", databaseId: 77 }];
+		else if (bin === "gh" && args[0] === "api" && answerActions(String(args[1]), []) !== undefined) {
+			return { status: 0, stdout: answerActions(String(args[1]), [{ status: "completed", conclusion: world.conclusion, headSha: world.head, workflowName: "ci", databaseId: 77 }])!, stderr: "" };
+		}
 		else if (bin === "git" && args[0] === "ls-remote") return { status: 0, stdout: `${world.head}\trefs/heads/${JOB}\n`, stderr: "" };
 		else if (bin === "git" && args[0] === "fetch") return { status: 0, stdout: "", stderr: "" };
 		else throw new Error(`unexpected command: ${commands.at(-1)}`);
@@ -108,7 +111,7 @@ async function bench(t: TestContext) {
 
 function heldOnly(b: Awaited<ReturnType<typeof bench>>) {
 	assert.deepEqual(b.holds.get(JOB), b.hold);
-	assert.ok(b.commands.every((command) => command.startsWith("gh pr view ") || command.startsWith("gh run list ")), b.commands.join("\n"));
+	assert.ok(b.commands.every((command) => command.startsWith("gh pr view ") || command.startsWith("gh api repos/{owner}/{repo}/actions/runs")), b.commands.join("\n"));
 	assert.equal(new CheckpointStore(b.home, { kind: "merge" }).list().length, 0);
 	assert.equal(new AwaitingStore({ home: b.home }).list().length, 0);
 }

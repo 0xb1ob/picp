@@ -80,6 +80,7 @@ import { HeldRelease } from "../src/held-release.ts";
 import { HeldContinuation } from "../src/held-continuation.ts";
 
 import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
+import { answerActions, type FakeRun } from "./harness/actions-api.ts";
 import { readReviewMergeWindow } from "../src/review-merge-window.ts";
 const BR = "cp-int1";
 const PR_URL = "https://github.com/o/r/pull/61";
@@ -147,12 +148,12 @@ interface GhFail {
 	status?: number;
 }
 
-type CiRunJson = { status: string; conclusion: string | null; headSha: string; workflowName?: string; databaseId?: number; attempt?: number };
+type CiRunJson = FakeRun;
 
 interface World {
 	/** What `gh pr view` answers, or a failure. */
 	pr: PrJson | GhFail;
-	/** What `gh run list` answers, or a failure. */
+	/** Every Actions run the fake API knows (served per exact head), or a failure. */
 	runs: CiRunJson[] | GhFail;
 	/** exit of `git merge-base --is-ancestor origin/<base> origin/<branch>`; `"unreadable"` is exit 128. */
 	ancestor: boolean | "unreadable";
@@ -346,9 +347,9 @@ function runnerFor(world: World, calls: Calls, worktree?: string): CommandRunner
 				}
 				return { status: 0, stdout: "", stderr: "" };
 			}
-			if (args[0] === "run" && args[1] === "list") {
+			if (args[0] === "api" && answerActions(String(args[1]), []) !== undefined) {
 				if ("fail" in world.runs) return { status: 1, stdout: "", stderr: world.runs.fail };
-				return { status: 0, stdout: JSON.stringify(world.runs), stderr: "" };
+				return { status: 0, stdout: answerActions(String(args[1]), world.runs) ?? "", stderr: "" };
 			}
 			throw new Error(`unexpected gh call: ${line}`);
 		}
@@ -730,7 +731,12 @@ function mergedPr(head = HEAD_A): PrJson {
 
 /** picp-wzq: a held step may read the PR and its CI, and do nothing else. */
 function onlyHeldReads(calls: Calls): void {
-	for (const call of calls) assert.match(call, /^gh (pr view|run list) /, `a held step ran ${call}`);
+	for (const call of calls) assert.match(call, /^gh (pr view |api repos\/\{owner\}\/\{repo\}\/actions\/runs[?/])/, `a held step ran ${call}`);
+}
+
+/** An Actions runs/jobs read: the only CI evidence request. */
+function isActionsRead(args: readonly string[]): boolean {
+	return args[0] === "api" && String(args[1]).includes("/actions/runs");
 }
 
 test("a durable operator hold prevents a green, reviewed PR from merging, and still names its CI", async (t) => {
@@ -747,7 +753,7 @@ test("a durable operator hold prevents a green, reviewed PR from merging, and st
 	assert.equal(result.head_sha, HEAD_A);
 	assert.equal(result.pr_url, PR_URL);
 	assert.equal(result.record.head_sha, HEAD_A);
-	assert.equal(b.calls.length, 2);
+	assert.equal(b.calls.length, 3, "PR, then Actions runs and their one attempt-jobs read");
 	onlyHeldReads(b.calls);
 });
 
@@ -758,7 +764,7 @@ test("integration hold persists across instances; explicit release resumes with 
 	assert.equal(new IntegrationHolds(b.home).get(BR)?.reason, "browser QA");
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
 	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
-	assert.equal(b.calls.length, 4);
+	assert.equal(b.calls.length, 6);
 	onlyHeldReads(b.calls);
 	new IntegrationHolds(b.home).release(BR);
 	holds.release(BR); // Releasing twice is harmless.
@@ -786,7 +792,7 @@ test("a held red head uses one sourced CI repair while integration remains pause
 	assert.equal(b.sent.length, 1);
 	assert.match(b.sent[0]!.message, /run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243/);
 	assert.match(b.sent[0]!.message, /integration hold remains active/);
-	assert.equal(b.calls.length, 3, "PR, CI, then confirming PR read only");
+	assert.equal(b.calls.length, 4, "PR, Actions runs + jobs, then confirming PR read only");
 	onlyHeldReads(b.calls);
 	assert.deepEqual(holds.get(BR), hold);
 	assert.equal(b.teardowns.length + b.closed.length, 0);
@@ -827,7 +833,7 @@ test("held repair requires an open, proven branch and current-head failed CI", a
 		const run = runnerFor(defaultWorld(heldRed), b.calls);
 		const result = await b.integrator({}, { run: async (cwd, bin, args) => {
 			const answer = await run(cwd, bin, args);
-			return args[0] === "run" ? { ...answer, stdout } : answer;
+			return isActionsRead(args) ? { ...answer, stdout } : answer;
 		} }).advance({ jobId: BR });
 		assert.equal(result.next, "wait", stdout);
 		assert.equal(b.sent.length, 0);
@@ -887,7 +893,7 @@ test("held repair revalidates after paused CI and confirming PR reads", async (t
 			let views = 0;
 			const integration = b.integrator({}, { run: async (cwd, bin, args) => {
 				if (args[0] === "pr" && args[1] === "view") views++;
-				if (at === "ci" ? args[0] === "run" : args[0] === "pr" && views === 2) {
+				if (at === "ci" ? isActionsRead(args) && views === 1 && !String(args[1]).includes("/jobs") : args[0] === "pr" && views === 2) {
 					enter();
 					await release;
 				}
@@ -913,7 +919,7 @@ test("held repair revalidates after paused CI and confirming PR reads", async (t
 			assert.equal(result.next, change === "hold-reason" ? "resolve" : ["blocked", "unreadable-report", "hazard"].includes(change) ? "surface" : "wait", `${at}/${change}`);
 			assert.equal(b.sent.length, change === "hold-reason" ? 1 : 0, `${at}/${change}`);
 			if (change === "hold-reason") assert.match(result.reason, /updated QA reason/);
-			if (at === "ci" && ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "waiting", "generation", "hazard"].includes(change)) assert.equal(b.calls.length, 2, "no confirming subprocess after refusal");
+			if (at === "ci" && ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "waiting", "generation", "hazard"].includes(change)) assert.equal(b.calls.length, 3, "no confirming subprocess after refusal");
 			onlyHeldReads(b.calls);
 		}
 	}
@@ -973,7 +979,7 @@ for (const permission of ["CLEAN", undefined]) {
 		const integration = b.integrator({}, {
 			run: async (cwd, bin, args, options) => {
 				const result = await run(cwd, bin, args, options);
-				if (bin === "gh" && args[0] === "run") holds.hold(BR, "QA requested during CI read");
+				if (bin === "gh" && isActionsRead(args)) holds.hold(BR, "QA requested during CI read");
 				return result;
 			},
 		});
@@ -1436,7 +1442,7 @@ test("BEHIND is updated server-side once, and the old head's CI and review do no
 	assert.equal(behind.next, "advance");
 	assert.equal(behind.head_sha, undefined, "the moved head is not carried forward");
 	assert.equal(updateBranchCalls(b.calls), 1);
-	assert.ok(b.calls.some((line) => line.startsWith("gh run list")), "CI was read on the original head first");
+	assert.ok(b.calls.some((line) => line.startsWith(`gh api repos/{owner}/{repo}/actions/runs?head_sha=${HEAD_A}`)), "CI was read on the original head first");
 	assert.ok(!b.calls.some((line) => line.startsWith("gh pr merge")));
 	assert.match(behind.reason, /CI and cp_review must pass on the new commit/);
 
@@ -1553,6 +1559,68 @@ test("a repo that HAS workflows but no run yet on this head still falls back to 
 	const mergeCall = b.calls.find((line) => line.startsWith("gh pr merge"));
 	assert.ok(mergeCall);
 	assert.equal(matchHeadBinding(mergeCall)?.head, HEAD_A, "a CI-less fallback merge is bound to the authorized head too");
+});
+
+// Exact-head reads cannot see an older sha's run, so zero runs on the head asks one more Actions read: the branch's
+// runs. Runs on an older sha keep main's `superseded` wait (a fresh push); none at all is C7; a failed read is C7's
+// unreadable case. The branch read only ever picks between those — it is never green evidence for the head.
+const BRANCH_RUNS = `gh api repos/{owner}/{repo}/actions/runs?branch=${BR}&per_page=100&page=1`;
+
+test("zero runs on a fresh head with branch runs on an older sha is superseded: wait, no checkpoint", async (t) => {
+	const b = await benchOf(t);
+	const result = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_B, workflowName: "ci" }] }).advance({ jobId: BR });
+	assert.deepEqual([result.step, result.next], ["ci", "wait"], result.reason);
+	assert.match(result.reason, /no CI run has started on aaaaaaa yet \(latest run is on bbbbbbb\)/);
+	const reads = b.calls.filter((line) => line.startsWith("gh api repos/{owner}/{repo}/actions/runs?"));
+	assert.deepEqual(reads.map((line) => line.includes("head_sha=")), [true, false], "exact head first, then the branch");
+	assert.ok(b.calls.includes(BRANCH_RUNS), b.calls.join("\n"));
+	assert.equal(b.calls.some((line) => line.includes("actions/workflows")), false, "superseded never reaches C7");
+	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+});
+
+test("zero runs on the head and none on the branch takes C7: workflows present asks a human, none is no CI", async (t) => {
+	const present = await benchOf(t);
+	const asked = await present.integrator({ runs: [] }).advance({ jobId: BR });
+	assert.deepEqual([asked.step, asked.next], ["authorize", "surface"]);
+	assert.ok(present.calls.includes(BRANCH_RUNS));
+	assert.ok(present.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+
+	const none = await benchOf(t);
+	const noCi = await none.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: BR });
+	assert.ok(none.calls.includes(BRANCH_RUNS));
+	assert.equal(none.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `no CI mints no checkpoint: ${noCi.reason}`);
+});
+
+test("an unreadable branch-runs read is C7 unreadable: the per-head checkpoint even when workflows say none", async (t) => {
+	for (const answer of [
+		{ status: 1, stdout: "", stderr: "gh: Resource not accessible by integration (HTTP 403)" },
+		{ status: 0, stdout: "<html>502</html>", stderr: "" },
+		{ status: 0, stdout: JSON.stringify({ total_count: 1, workflow_runs: [{ id: 4, run_attempt: 1, head_sha: "not-a-sha", status: "completed", conclusion: "success" }] }), stderr: "" },
+	]) {
+		const b = await benchOf(t);
+		const run = runnerFor(defaultWorld({ runs: [], workflows: NO_WORKFLOWS }), b.calls, b.worktree);
+		const result = await b
+			.integrator({ runs: [], workflows: NO_WORKFLOWS }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), answer) : run(cwd, bin, args, options)) })
+			.advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next], ["authorize", "surface"], result.reason);
+		assert.ok(result.facts.some((fact) => fact.startsWith("ci: branch runs unreadable")), result.facts.join("\n"));
+		assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+		assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
+	}
+});
+
+test("the branch-runs read is never green evidence: a green run on the head seen only there does not merge", async (t) => {
+	// The exact-head read answers zero runs (a lagging index); the branch read lists a green run *on this head*.
+	const b = await benchOf(t);
+	const green = { status: "completed", conclusion: "success", headSha: HEAD_A, workflowName: "ci" };
+	const run = runnerFor(defaultWorld({ runs: [] }), b.calls, b.worktree);
+	const result = await b
+		.integrator({ runs: [] }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), { status: 0, stdout: answerActions(String(args[1]), [green])!, stderr: "" }) : run(cwd, bin, args, options)) })
+		.advance({ jobId: BR });
+	assert.notEqual(result.step, "merge");
+	assert.ok(!result.facts.some((fact) => fact.startsWith("ci: green")), result.facts.join("\n"));
+	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
+	assert.equal(b.calls.filter((line) => line.includes("/attempts/")).length, 0, "no jobs are read for branch runs");
 });
 
 // ---------------------------------------------------------------------------
@@ -1812,7 +1880,7 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 test("unload-parent PR2: an infra-only red head is rerun once and waits; a second attempt, or a test failure, promotes the implementer as today", async (t) => {
 	const b = await benchOf(t);
 	const gh: string[] = [];
-	const view = (step: string) => JSON.stringify({ jobs: [{ name: "suite", conclusion: "failure", steps: [{ name: "Set up job", conclusion: "success" }, { name: step, conclusion: "failure" }] }] });
+	const view = (step: string) => JSON.stringify({ total_count: 1, jobs: [{ id: 1, run_id: 77, name: "suite", status: "completed", conclusion: "failure", steps: [{ name: "Set up job", status: "completed", conclusion: "success" }, { name: step, status: "completed", conclusion: "failure" }] }] });
 	let failedStep = "Install treehouse";
 	const rerunFor = (home: string): IntegratorOptions["infraRerun"] => (input) =>
 		maybeRerunInfra({
@@ -1820,8 +1888,8 @@ test("unload-parent PR2: an infra-only red head is rerun once and waits; a secon
 			home,
 			store: new CiRerunStore(home),
 			run: async (_cwd, _bin, args) => {
-				gh.push(args.slice(0, 3).join(" "));
-				return { status: 0, stdout: args[1] === "view" ? view(failedStep) : "", stderr: "" };
+				gh.push(args[0] === "api" ? String(args[1]).replace(/\?.*$/, "") : args.slice(0, 3).join(" "));
+				return { status: 0, stdout: args[0] === "api" ? view(failedStep) : "", stderr: "" };
 			},
 		});
 	const infraRerun = rerunFor(b.home);
@@ -1830,7 +1898,7 @@ test("unload-parent PR2: an infra-only red head is rerun once and waits; a secon
 	const first = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
 	assert.deepEqual([first.step, first.next], ["ci", "wait"], first.reason);
 	assert.match(first.reason, /reran the failed jobs once/);
-	assert.deepEqual(gh, ["run view 77", "run rerun 77"]);
+	assert.deepEqual(gh, ["repos/{owner}/{repo}/actions/runs/77/attempts/1/jobs", "run rerun 77"]);
 	assert.equal(b.sent.length, 0, "no implementer promote for an infra failure");
 
 	const again = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
@@ -2226,7 +2294,7 @@ test("a gh 403 mutates nothing and asks to be retried, carrying the first stderr
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
-test("a rate-limited gh run list stops before the merge, not after it", async (t) => {
+test("a rate-limited Actions CI read stops before the merge, not after it", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
 	const result = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: BR });
@@ -2235,7 +2303,7 @@ test("a rate-limited gh run list stops before the merge, not after it", async (t
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
-test("a gh run list refused for permission names the token and what it needs in the reason (ask-81b54d83f0b2)", async (t) => {
+test("an Actions CI read refused for permission names the token and what it needs in the reason (ask-81b54d83f0b2)", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
 	const result = await b.integrator({ runs: { fail: "HTTP 403: Resource not accessible by personal access token" } }).advance({ jobId: BR });
@@ -2243,6 +2311,27 @@ test("a gh run list refused for permission names the token and what it needs in 
 	assert.match(result.reason, /CI unreadable — token lacks Actions read; needs fine-grained PAT: Actions read/);
 	const limited = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: BR });
 	assert.doesNotMatch(limited.reason, /token lacks/, "a rate limit is not a permission verdict");
+});
+
+// Actions-only CI (PR3): the runs read alone is never green. A denied, partial or malformed attempt-jobs read
+// makes the whole observation unreadable — no run-only green, no merge, no `gh pr ready`.
+test("a denied, partial or malformed Actions jobs read never merges or readies the PR", async (t) => {
+	const answers = [
+		{ status: 1, stdout: "", stderr: "gh: Resource not accessible by integration (HTTP 403)" },
+		{ status: 0, stdout: JSON.stringify({ total_count: 2, jobs: [] }), stderr: "" },
+		{ status: 0, stdout: "<html>502</html>", stderr: "" },
+	];
+	for (const [index, answer] of answers.entries()) {
+		const b = await benchOf(t);
+		b.approve(HEAD_A);
+		const run = runnerFor(defaultWorld({ pr: draftPr() }), b.calls, b.worktree);
+		const result = await b
+			.integrator({}, { run: async (cwd, bin, args, options) => (bin === "gh" && String(args[1]).includes("/jobs") ? answer : run(cwd, bin, args, options)) })
+			.advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next], ["ci", "retry"], result.reason);
+		assert.equal(b.calls.filter((line) => /^gh pr (merge|ready)/.test(line)).length, 0, `answer ${index}`);
+		if (index === 0) assert.match(result.reason, /CI unreadable — token lacks Actions read/);
+	}
 });
 
 test("a missing gh surfaces, and names force as the operator's honest exit rather than automation", async (t) => {
@@ -3443,7 +3532,7 @@ for (const permission of ["CLEAN", undefined]) {
 		const integration = b.integrator({}, {
 			run: async (cwd, bin, args, options) => {
 				const result = await run(cwd, bin, args, options);
-				if (bin === "gh" && args[0] === "run") writeBlockedEnvelope(b.home, HEAD_A);
+				if (bin === "gh" && isActionsRead(args)) writeBlockedEnvelope(b.home, HEAD_A);
 				return result;
 			},
 		});

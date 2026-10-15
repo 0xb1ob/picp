@@ -43,7 +43,8 @@ import {
 import { BlockedDispatchError } from "./dispatch.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { type Job, parseJobLabels } from "./ledger.ts";
-import { type CiRun, type CommandRunner, MERGE_ASK_QUERY_TIMEOUT_MS, parseCiRuns, runCommand } from "./merge-ask.ts";
+import { readActionsCi } from "./actions-ci.ts";
+import { type CiRun, type CommandRunner, MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
 
 const SCHEDULE_LABEL = "schedule:";
 /** A PR that is gone or private to this token: reported once, then never queried again. */
@@ -101,21 +102,13 @@ export function foreignPrJobs(jobs: readonly ForeignJobRecord[], ownPrUrls: read
 }
 
 // ---------------------------------------------------------------------------
-// The runs query: one REST GET against the PR's base repo
+// The runs query: Actions runs and attempt jobs against the PR's base repo
 // ---------------------------------------------------------------------------
 
-const FOREIGN_RUNS_JQ = "[.workflow_runs[] | {status, conclusion, headSha: .head_sha, workflowName: .name, databaseId: .id, attempt: .run_attempt}]";
-
-/** `gh api repos/<owner>/<repo>/actions/runs?head_sha=<sha>` — fork PR runs are listed on the base repo. `execFile` passes no shell. */
-export function foreignRunsArgs(owner: string, repo: string, sha: string): string[] {
-	if (!/^[0-9a-f]{7,64}$/i.test(sha)) throw new Error(`refusing to query runs for a malformed head sha ${JSON.stringify(sha.slice(0, 80))}`);
-	return ["api", `repos/${owner}/${repo}/actions/runs?head_sha=${sha}&per_page=100`, "--jq", FOREIGN_RUNS_JQ];
-}
-
+/** Every Actions run on `sha` with its attempt jobs, read on the base repo, where a fork PR's runs are listed. */
 export function ghForeignRuns(options: { cwd: string; exec?: CommandRunner; timeoutMs?: number }) {
-	const exec = options.exec ?? runCommand;
-	return async (owner: string, repo: string, sha: string): Promise<CiRun[]> =>
-		parseCiRuns(await exec("gh", foreignRunsArgs(owner, repo, sha), { cwd: options.cwd, timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS }));
+	return (owner: string, repo: string, sha: string): Promise<CiRun[]> =>
+		readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, repo: { owner, repo }, sha, timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS });
 }
 
 // ---------------------------------------------------------------------------

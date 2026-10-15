@@ -593,20 +593,42 @@ test("awaitingRowsNotSupplied folds a promoted row in only when the caller did n
 // The production query shapes, without running them
 // ---------------------------------------------------------------------------
 
-test("ghCiRuns issues one non-blocking `gh run list` with the json fields that work in this home", async () => {
+test("ghCiRuns reads only Actions runs on the exact head plus each run attempt's jobs, never a branch list", async () => {
 	const seen: { command: string; args: readonly string[] }[] = [];
 	const runs = await ghCiRuns({
 		cwd: "/tmp/repo",
 		exec: async (command, args) => {
 			seen.push({ command, args });
-			return JSON.stringify([{ status: "completed", conclusion: "success", headSha: HEAD, workflowName: "ci" }]);
+			return String(args[1]).includes("/jobs")
+				? JSON.stringify({ total_count: 0, jobs: [] })
+				: JSON.stringify({ total_count: 1, workflow_runs: [{ id: 7, run_attempt: 2, head_sha: HEAD, status: "completed", conclusion: "success", name: "ci" }] });
 		},
-	})("cp-gmy");
-	assert.deepEqual(seen[0]!.command, "gh");
-	assert.deepEqual(seen[0]!.args.slice(0, 4), ["run", "list", "--branch", "cp-gmy"]);
-	assert.ok(seen[0]!.args.includes("conclusion,status,headSha,workflowName,databaseId,attempt"));
-	assert.ok(!seen[0]!.args.some((arg) => arg === "--watch"), "never a watch; never a poll");
-	assert.deepEqual(runs, [{ status: "completed", conclusion: "success", headSha: HEAD, workflowName: "ci" }]);
+	})(HEAD);
+	assert.deepEqual(
+		seen.map(({ command, args }) => [command, ...args]),
+		[
+			["gh", "api", `repos/{owner}/{repo}/actions/runs?head_sha=${HEAD}&per_page=100&page=1`],
+			["gh", "api", "repos/{owner}/{repo}/actions/runs/7/attempts/2/jobs?per_page=100&page=1"],
+		],
+	);
+	assert.deepEqual(runs, [{ status: "completed", conclusion: "success", headSha: HEAD, databaseId: 7, attempt: 2, workflowName: "ci", jobs: [] }]);
+	await assert.rejects(ghCiRuns({ cwd: "/tmp/repo", exec: async () => { throw new Error("HTTP 403"); } })(HEAD), /Actions CI read denied/, "a failed read throws, never []");
+});
+
+test("the merge-ask probe asks for runs only once a head resolves, and passes that exact head", async () => {
+	const asked: string[] = [];
+	const probe = createMergeAskProbe({
+		head: async () => ({ sha: HEAD }),
+		runs: async (_branch, _jobId, head) => {
+			asked.push(head);
+			throw new Error("Actions CI read transport: gh api …");
+		},
+	});
+	const verdict = await probe({ job_id: "cp-gmy", decision: "Merge PR #47?" } as Parameters<typeof probe>[0]);
+	assert.deepEqual(asked, [HEAD]);
+	assert.deepEqual([verdict.action, verdict.ci], ["defer", "unknown"], "an unreadable Actions read defers, never asks");
+	const headless = createMergeAskProbe({ head: async () => ({ reason: "not pushed" }), runs: async () => assert.fail("no head, no runs read") });
+	assert.equal((await headless({ job_id: "cp-gmy", decision: "Merge PR #47?" } as Parameters<typeof probe>[0])).action, "defer");
 });
 
 test("parseCiRuns drops rows with no headSha and normalises an empty conclusion to null", () => {

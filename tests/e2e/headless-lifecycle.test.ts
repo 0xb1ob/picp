@@ -67,6 +67,18 @@ function writeFakeGh(bin: string, headSha: string, stateFile: string): void {
 const { readFileSync } = require("fs");
 const head = ${JSON.stringify(headSha)};
 const args = process.argv.slice(2);
+if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
+  const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
+  const run = state === "green"
+    ? { id: 7, run_attempt: 1, conclusion: "success", status: "completed", head_sha: head, name: "ci" }
+    : { id: 7, run_attempt: 1, conclusion: null, status: "in_progress", head_sha: head, name: "ci" };
+  process.stdout.write(JSON.stringify({ total_count: args[1].includes(head) ? 1 : 0, workflow_runs: args[1].includes(head) ? [run] : [] }));
+  process.exit(0);
+}
+if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
+  process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
+  process.exit(0);
+}
 if (args[0] === "api") {
   process.stdout.write(JSON.stringify({
     number: 58,
@@ -75,14 +87,6 @@ if (args[0] === "api") {
     merged: false,
     head: { sha: head, ref: "cp-held" },
   }));
-  process.exit(0);
-}
-if (args[0] === "run" && args[1] === "list") {
-  const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
-  const run = state === "green"
-    ? { conclusion: "success", status: "completed", headSha: head, workflowName: "ci" }
-    : { conclusion: null, status: "in_progress", headSha: head, workflowName: "ci" };
-  process.stdout.write(JSON.stringify([run]));
   process.exit(0);
 }
 process.stderr.write("unexpected gh " + args.join(" ") + "\\n");
