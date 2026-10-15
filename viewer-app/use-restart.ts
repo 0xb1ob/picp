@@ -7,9 +7,10 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 /**
  * Restart session: one `POST /api/operator/restart`, then the control status every 2 s (≤ 90 s): `stopping` while the
  * same session (its `session_started_at`) still serves, `relaunching` while none does, `restarted` once a new one does.
- * Every status read is handed to `onStatus`, so the composer follows the session down and back.
+ * Every status read is handed to `onStatus`, so the composer follows the session down and back; `sends` matches the
+ * owner's own reads, so a composer's queued-sends list survives the restart.
  */
-export function useRestart(active: boolean, status: ControlStatus | null, fetcher: Fetch, onStatus: (value: ControlStatus) => void): {restarting: Restarting | null; restart: () => void} {
+export function useRestart(active: boolean, status: ControlStatus | null, fetcher: Fetch, onStatus: (value: ControlStatus) => void, sends: boolean): {restarting: Restarting | null; restart: () => void} {
  const [restarting, setRestarting] = useState<Restarting | null>(null);
  const polling = restarting?.state === "stopping" || restarting?.state === "relaunching";
  useEffect(() => {
@@ -22,7 +23,7 @@ export function useRestart(active: boolean, status: ControlStatus | null, fetche
    while (!stop) {
     await new Promise(done => setTimeout(done, 2_000));
     if (stop) return;
-    const value = await readControl(fetcher, undefined, false);
+    const value = await readControl(fetcher, undefined, sends);
     if (stop) return;
     onStatus(value);
     const running = !("error" in value) && value.running && !!value.token;
