@@ -13,6 +13,7 @@ import {
 	parseRunsPage,
 	readActionsCi,
 	readActionsJobs,
+	statusRunner,
 } from "../src/actions-ci.ts";
 import { ciReadDenied } from "../src/ci-access.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
@@ -240,4 +241,17 @@ test("readActionsJobs: one attempt's jobs, all pages, through the same validatio
 	const jobs = await readActionsJobs({ cwd: "/x", exec, repo: REPO }, { runId: 9, attempt: 3 });
 	assert.deepEqual(calls, [jobsPath(9, 3)]);
 	assert.equal(jobs[0]?.conclusion, "failure");
+});
+
+test("statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws", async () => {
+	const seen: unknown[] = [];
+	const exec = statusRunner(async (cwd, bin, args, options) => {
+		seen.push({ cwd, bin, args, options });
+		return { status: String(args[1]).includes("/jobs") ? 1 : 0, stdout: runsBody([run(1)]), stderr: "HTTP 403" };
+	});
+	await assert.rejects(readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, timeoutMs: 1000, now: () => 0 }));
+	assert.deepEqual(seen, [
+		{ cwd: "/x", bin: "gh", args: ["api", runsPath()], options: { timeoutMs: 1000 } },
+		{ cwd: "/x", bin: "gh", args: ["api", jobsPath(1)], options: { timeoutMs: 1000 } },
+	]);
 });

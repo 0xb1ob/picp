@@ -307,9 +307,9 @@ export async function readOlderBranchRuns(options: ActionsReadOptions & { branch
 }
 
 /** A `{ status, stdout, stderr }` runner (src/merges.ts) as the throwing `CommandRunner` these readers take. */
-export function statusRunner(run: (cwd: string, bin: string, args: readonly string[]) => ReturnType<StatusRunner>): CommandRunner {
+export function statusRunner(run: StatusRunner): CommandRunner {
 	return async (command, args, options) => {
-		const result = await run(options.cwd, command, args);
+		const result = await run(options.cwd, command, args, { timeoutMs: options.timeoutMs });
 		if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
 		return result.stdout;
 	};
