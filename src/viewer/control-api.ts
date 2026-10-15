@@ -259,7 +259,8 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	// Resume last session: the same launchers (tmux and herdr run the wrapper with the fixed `-c`).
 	const record = readControlRecord(options.stateDir);
 	const session = operatorSession(options.stateDir);
-	const base = { ...statusBase(now), launchers: can, resume: { ...can }, ...readPendingSends(options.stateDir, now, session) };
+	const statusOnly = new URL(req.url ?? "/", "http://x").searchParams.get("sends") === "0";
+	const base = { ...statusBase(now), launchers: can, resume: { ...can }, ...(statusOnly ? {} : readPendingSends(options.stateDir, now, session)) };
 	if (record.state !== "ok" || !session.running) {
 		const inbox = readInbox(options.stateDir);
 		const why = record.state === "absent" ? `no dashboard control record at ${controlRecordFile(options.stateDir)}` : session.reason;

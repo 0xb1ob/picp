@@ -415,6 +415,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 - `use-control.ts` (route-level, in `app.tsx`) reads `/api/operator/control` on
   mount and on every refresh of the transcript, and sends with the
   `x-cp-control-token` header; `control.ts` holds the fetch and the one-line texts.
+  Every reader but the Full-transcript composer asks `?sends=0`: the same status without `sends`/`sends_error`.
 
 The POST route is refused unless the viewer runs under `--require-tailnet`; then it
 checks, in order: 20 requests per 60 s and one in flight per client address, the

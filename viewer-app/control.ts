@@ -39,9 +39,10 @@ export async function failure(response: Response): Promise<string> {
  return `HTTP ${response.status}`;
 }
 
-export async function readControl(fetch: Fetch, signal?: AbortSignal): Promise<ControlStatus> {
+/** `sends: false` asks for `?sends=0`: the status without the composer's pending-send journal. */
+export async function readControl(fetch: Fetch, signal?: AbortSignal, sends = true): Promise<ControlStatus> {
  try {
-  const response = await fetch(CONTROL_STATUS_URL, signal ? {signal} : {});
+  const response = await fetch(sends ? CONTROL_STATUS_URL : `${CONTROL_STATUS_URL}?sends=0`, signal ? {signal} : {});
   return response.ok ? await response.json() as ControlStatusResponse : {error: await failure(response)};
  } catch {
   return {error: "Dashboard control status unavailable"};
