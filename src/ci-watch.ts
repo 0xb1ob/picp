@@ -99,6 +99,7 @@ import {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CI_UNREADABLE, ciReadDenied } from "./ci-access.ts";
 import { ciRunRef, failedRunOn, formatRunRef } from "./ci-run-ref.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
@@ -781,6 +782,7 @@ export class CiWatch {
 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
 			consecutive_failures: failures,
 			last_error: message.slice(0, 300),
+			...(ciReadDenied(message) ? { last_ci: CI_UNREADABLE } : {}), // a refused read is loud, never "no CI yet"
 		});
 	}
 

@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import type { FlightJob, OverviewResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
-import { CiSignal, ModelName, reviewText } from "../components/JobSignals.tsx";
+import { CI_READ_NEEDED, CI_UNREADABLE_LABEL, CiSignal, ModelName, reviewText } from "../components/JobSignals.tsx";
 import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
@@ -39,6 +39,7 @@ function Health({data}: {data:OverviewResponse}) {
   <Chip tone={red.length ? "ci-red" : main.availability === "unavailable" ? "tight" : "idle"} label="main CI" value={mainValue} title={main.red.map(r => `${r.project}: ${r.failing ?? r.workflow ?? "CI failed"} on ${r.red_since_sha}`).join("\n") || undefined}/>
   <Chip href="#jobs" tone={!fleet && (data.fleet.workers.live ?? 0) > 0 ? "working" : "idle"} label="workers" value={`${fleet ? "-" : count(data.fleet.workers.live)} live / ${count(slots)} slots`}/>
   {data.quota && <Chip wide tone={tight.length ? "tight" : "working"} label="quota" value={tight.length ? `tight: ${tight.join(", ")}` : "ok"}/>}
+  {data.ci_unreadable.length > 0 && <Chip wide href="#jobs" tone="ci-red" label="CI access" value={`${CI_UNREADABLE_LABEL}: ${data.ci_unreadable.map(p => p.project).join(", ")}`} title={[...data.ci_unreadable.map(p => `${p.project}: ${p.job_ids.join(", ")}`), CI_READ_NEEDED].join("\n")}/>}
  </section>;
 }
 /** The watchdog's last run (cp-daemon P3), the one service fact no chip carries; Start session while the operator is offline. */
@@ -58,6 +59,7 @@ const ago = (at: string, now: string): string => {
 function heldFact(j: FlightJob): string {
  // ci-watch writes `failed` (src/merge-ask.ts); its schema takes any string, so a recorded `red` reads the same.
  if (j.ci === "failed" || j.ci === "red") return "CI red";
+ if (j.ci === "unreadable") return "CI unreadable (token)";
  if (j.ci === "in_progress") return "CI running";
  if (j.review_attempts) return `review ${j.review_attempts}/5 ${j.review === "revise" ? "changes requested" : j.review ?? "not recorded"}`;
  return j.ci === "green" || j.ci === "unreviewed" ? "CI green" : "held";
@@ -81,7 +83,7 @@ function decidedLine(data: OverviewResponse): string {
 }
 /** cp-6fyl PR2: a health check failing this long is an alarm (matches src/service-alerts.ts); an unacked relay's own 600 s is `delivery.alarm`. */
 const HEALTH_ALARM_SECONDS = 900;
-/** The last line of defense: what the parent sent and the main session never saw, or a service failing for a quarter hour. One line per cause. */
+/** Last line of defense, one line per cause: unseen relays, a service failing 15 min, CI the token cannot read. */
 function Alarm({data}: {data:OverviewResponse}) {
  const lines: string[] = [];
  const relay = data.delivery;
@@ -90,6 +92,7 @@ function Alarm({data}: {data:OverviewResponse}) {
   const age = (Date.parse(data.generated_at) - Date.parse(f.since)) / 1000;
   if (age >= HEALTH_ALARM_SECONDS) lines.push(`health check ${f.check} failing ${elapsed(age)}: ${f.detail}`);
  }
+ for (const p of data.ci_unreadable) lines.push(`${CI_UNREADABLE_LABEL} for ${p.project}: ${p.job_ids.length} held job${p.job_ids.length === 1 ? "" : "s"} cannot show CI or hand off (${CI_READ_NEEDED})`);
  return lines.length ? <section class="overview-alarm" role="alert">{lines.map(line => <p key={line}>{line}</p>)}</section> : null;
 }
 const LANDED_ROWS = 5;

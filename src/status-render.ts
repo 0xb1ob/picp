@@ -21,6 +21,7 @@
  */
 
 import { ASK_OPERATOR_TOOL, LONG_TOOL_CALL_SECONDS, type StatusJob, WEDGED_TOOL_CALL_SECONDS } from "./contracts.ts";
+import { CI_UNREADABLE } from "./ci-access.ts";
 // Type-only: the CI classification `state/ci-watch.json` records is the gate's
 // own union, and this module pins its phrases to it (cp-status-wait-reasons).
 // `merge-ask.ts` imports `contracts.ts` and nothing here, so there is no cycle.
@@ -300,6 +301,7 @@ export function waitReason(job: StatusJob): string | null {
 	// says what it is doing, and a failed one says why it stopped.
 	if (job.phase !== "held") return null;
 	const ci = job.ci;
+	if (ci?.state === CI_UNREADABLE) return "CI unreadable (token)"; // ask-81b54d83f0b2: the cause, before any head
 	if (!ci?.head_sha) return job.delivery === "pr" ? "a pushed head on origin" : null;
 	const head = ci.head_sha.slice(0, 7);
 	// Deliberate, and the only free-string path: a classification this renderer
