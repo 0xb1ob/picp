@@ -54,7 +54,7 @@ export function unmanagedLiveWorker(home: string, record: FleetRecord, managed: 
 
 /** cp-a9fq: another owner holds this job's in-flight state; tearing down beside it is the hazard, so refuse. */
 export function jobInFlight(jobId: string, holder: JobOwner): GateFailure {
-	const what = { recovery: "automatic recovery (a revive or redispatch in this worktree)", teardown: "another teardown", park: "an awaiting_merge park", resume: "a resume from awaiting_merge" }[holder];
+	const what = { recovery: "automatic recovery (a revive or redispatch in this worktree)", teardown: "another teardown", park: "an awaiting_merge park", resume: "a resume from awaiting_merge", watch: "the awaiting_merge watch applying a PR exit" }[holder];
 	return {
 		code: "job_in_flight",
 		message: `${jobId}: ${what} is in flight; a teardown beside it could return a worktree a revived worker stands in, or close the job under it`,

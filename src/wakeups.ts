@@ -255,6 +255,8 @@ export interface JobWakeupFacts {
 	 * superseded by that same failure landing on the record.
 	 */
 	failure_class?: string;
+	/** The parking cycle while the record carries one (`awaiting_merge.cycle`). */
+	parked_cycle?: number;
 	/**
 	 * The branch's pushed head as the CI watcher last observed it (cp-e2d).
 	 * Read from `state/ci-watch.json` — a **file**, never a subprocess: this
@@ -458,6 +460,12 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date = 
 		return fresh;
 	}
 	if (stamp.kind === "recovery") {
+		// awaiting_merge: a pending-exit wake keyed `parked-cycle:<n>` is news only while that cycle still waits on CP.
+		const cycle = /^parked-cycle:(\d+)$/.exec(stamp.keys?.[0] ?? "")?.[1];
+		if (cycle !== undefined && stamp.job_id) {
+			const parked = facts.job(stamp.job_id);
+			return parked?.phase === "awaiting_merge" && parked.parked_cycle === Number(cycle) ? fresh : stale(`${stamp.job_id} is no longer parked in cycle ${cycle}`);
+		}
 		const ids = stamp.keys ?? [];
 		if (ids.length === 0) return fresh;
 		const still = ids.some((id) => {
@@ -630,6 +638,7 @@ export interface FleetRecordLike {
 	supersessions?: number;
 	/** The recorded cause, when the record is `failed` (cp-0wq7). */
 	failure?: { class: string };
+	awaiting_merge?: { cycle: number };
 }
 
 /** The slice of a status projection this module reads. */
@@ -736,6 +745,7 @@ export function wakeupFacts(sources: WakeupFactSources): WakeupFacts {
 					generation: (record.supersessions ?? 0) + 1,
 					...(record.reported_at !== undefined ? { reported_at: record.reported_at } : {}),
 					...(record.failure ? { failure_class: record.failure.class } : {}),
+					...(record.awaiting_merge ? { parked_cycle: record.awaiting_merge.cycle } : {}),
 					...(status ? { alive: status.alive, run_phase: status.run_phase } : {}),
 					...(status && status.current_tool !== null
 						? { tool_call_key: toolCallKey(jobId, status.tool_calls) }
