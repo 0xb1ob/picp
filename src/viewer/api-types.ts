@@ -150,7 +150,7 @@ export interface FilesResponse {
  generated_at: string; roots: FileRoot[]; selected: string | null; path: string; listing: Listing | null;
 }
 
-export type JobPhase = "queued" | "launching" | "working" | "held" | "done" | "failed" | "waiting" | "idle";
+export type JobPhase = "queued" | "launching" | "working" | "held" | "awaiting_merge" | "done" | "failed" | "waiting" | "idle";
 export interface ViewerRoutingFacts {
  scope: string | null; risk: string | null;
  provenance: {scope: string | null; risk: string | null};
@@ -369,6 +369,12 @@ export interface FlightJob {
  cost_usd?: number | null;
 }
 export interface ShippedJob { id: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
+/** A parked PR waiting on a human merge. `age_seconds` grows; `frozen_seconds` is execution time, stopped at handoff. Null: unknown. */
+export interface TeamJob {
+ id: string; project: string; title: string | null; pr_url: string; head: string; base: string; handed_at: string;
+ age_seconds: number; frozen_seconds: number; approvals: number | null; approvals_required: number | null;
+ ci: string | null; last_human_activity_at: string | null;
+}
 /** A fleet job in phase `failed`; `failure` is its headline, one line of at most 80 chars. */
 export interface FailedJob { id: string; project: string; title: string | null; failure: string | null }
 /** One `state/main-ci.json` row: that project's main is latched red (src/main-ci.ts). No row is no latch, never proof of green. */
@@ -414,6 +420,8 @@ export interface OverviewResponse {
  awaiting: {count: number | null; items: Ask[]}; parent_questions: Question[];
  decided_today: {count: number | null; items: Decision[]; worth_count: null; by_you?: number | null}; all_questions_delegated: boolean;
  in_flight: FlightJob[]; shipped_today: ShippedJob[];
+ /** Quiescent `awaiting_merge` jobs: handed to the team, no worker, lease or slot. A pending resume is CP work, not here. */
+ with_team: TeamJob[];
  /** Jobs done today without a merge receipt; with `shipped_today`, the Board's "Landed today". Null: fleet or ledger unreadable. */
  closed_today: number | null;
  blocked: {items: BlockedJob[]; stranded_count: number | null};

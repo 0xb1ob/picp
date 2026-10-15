@@ -415,6 +415,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 - `use-control.ts` (route-level, in `app.tsx`) reads `/api/operator/control` on
   mount and on every refresh of the transcript, and sends with the
   `x-cp-control-token` header; `control.ts` holds the fetch and the one-line texts.
+  Every reader but the Full-transcript composer asks `?sends=0`: the same status without `sends`/`sends_error`.
 
 The POST route is refused unless the viewer runs under `--require-tailnet`; then it
 checks, in order: 20 requests per 60 s and one in flight per client address, the
@@ -525,6 +526,10 @@ close/abort and visibility return reconnects/refetches. Live requires an open
 stream and a successful GET within five seconds; a one-shot freshness deadline
 marks delayed reads stale without adding a polling loop. Failed reads retain
 last data visibly stale. Listeners, aborts and timers are cleaned up on unmount.
+
+Responses (JSON, JS, CSS, HTML, text, manifest; 200 and at least 1 KiB) are br- or gzip-compressed when the
+request accepts it, with `vary: accept-encoding`; the event stream never is. Hashed `/assets/viewer/*` files are
+`public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
 
 ## Design And Fonts
 

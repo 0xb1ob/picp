@@ -28,7 +28,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  useEffect(() => {
   if (!active) return;
   const controller = new AbortController();
-  void readControl(fetcher, controller.signal).then(value => { if (!controller.signal.aborted) setStatus(value); });
+  void readControl(fetcher, controller.signal, composer).then(value => { if (!controller.signal.aborted) setStatus(value); });
   return () => controller.abort();
  }, [active, refreshKey, generation]);
  useEffect(() => {
@@ -38,7 +38,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   let stop = false;
   const poll = async () => {
    while (!stop) {
-    const value = await readControl(fetcher);
+    const value = await readControl(fetcher, undefined, composer);
     if (stop) return;
     setStatus(value);
     if (!("error" in value) && value.running && value.token) return setStarting({state: "running", reason: null});

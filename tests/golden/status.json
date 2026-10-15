@@ -11,6 +11,7 @@
     "launching": 0,
     "waiting": 1,
     "held": 1,
+    "awaiting_merge": 0,
     "done": 0,
     "failed": 1,
     "live": 2,
