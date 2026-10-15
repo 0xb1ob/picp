@@ -1,0 +1,285 @@
+/**
+ * The Actions REST transport: workflow runs for one exact head plus each run attempt's jobs, the only CI evidence.
+ * Fail closed: a denied, malformed, partial, capped or late read throws `ActionsCiError`, never a shorter green list.
+ * Requests are built from validated ids only; URLs inside a response (jobs_url, check_runs_url …) are never followed.
+ */
+import type { CiRun, CommandRunner } from "./merge-ask.ts";
+
+/** Total budget for one observation (every page of runs and jobs), as `MERGE_ASK_QUERY_TIMEOUT_MS`. */
+export const ACTIONS_CI_TIMEOUT_MS = 15_000;
+export const ACTIONS_PER_PAGE = 100;
+export const ACTIONS_MAX_PAGES = 10;
+/** GitHub returns at most this many runs for a filtered list; a total at or past it cannot be proven complete. */
+export const ACTIONS_FILTERED_RUN_CEILING = 1000;
+
+export interface ActionsStep {
+	name: string;
+	status: string;
+	conclusion: string | null;
+}
+
+export interface ActionsJob {
+	id: number;
+	runId: number;
+	runAttempt: number;
+	name: string;
+	status: string;
+	conclusion: string | null;
+	steps: ActionsStep[];
+}
+
+/** A `CiRun` with the identity always present and its attempt's jobs read in full. */
+export interface ActionsRun extends CiRun {
+	databaseId: number;
+	attempt: number;
+	event?: string;
+	triggeringActor?: string;
+	jobs: ActionsJob[];
+}
+
+export type ActionsCiErrorCategory = "denied" | "rate_limited" | "transport" | "malformed" | "incomplete" | "deadline";
+
+/** Bounded: a category, the Actions endpoint and an HTTP code for a denial; never a raw response body. */
+export class ActionsCiError extends Error {
+	readonly category: ActionsCiErrorCategory;
+	readonly endpoint: string;
+	constructor(category: ActionsCiErrorCategory, endpoint: string, detail = "") {
+		super(`Actions CI read ${category}: gh api ${endpoint.slice(0, 200)}${detail ? ` (${detail})` : ""}`);
+		this.name = "ActionsCiError";
+		this.category = category;
+		this.endpoint = endpoint;
+	}
+}
+
+export interface ActionsRepo {
+	owner: string;
+	repo: string;
+}
+
+const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+const BRANCH = /^[A-Za-z0-9._/-]{1,255}$/;
+
+function repoPath(repo: ActionsRepo | undefined): string {
+	if (!repo) return "repos/{owner}/{repo}";
+	if (!NAME.test(repo.owner) || !NAME.test(repo.repo) || repo.owner.startsWith(".") || repo.repo.startsWith(".")) {
+		throw new Error(`refusing an Actions read for a malformed repo ${JSON.stringify(`${repo.owner}/${repo.repo}`.slice(0, 80))}`);
+	}
+	return `repos/${repo.owner}/${repo.repo}`;
+}
+
+function positive(value: number): boolean {
+	return Number.isSafeInteger(value) && value > 0;
+}
+
+/** `repos/<o>/<r>/actions/runs?head_sha=<sha>[&branch=<b>]&per_page=100&page=<n>`; `{owner}/{repo}` when no repo is given. */
+export function actionsRunsPath(input: { repo?: ActionsRepo; sha: string; branch?: string; page: number }): string {
+	if (!SHA.test(input.sha)) throw new Error(`refusing an Actions read for a malformed head sha ${JSON.stringify(input.sha.slice(0, 80))}`);
+	if (input.branch !== undefined && (!BRANCH.test(input.branch) || input.branch.includes(".."))) {
+		throw new Error(`refusing an Actions read for a malformed branch ${JSON.stringify(input.branch.slice(0, 80))}`);
+	}
+	if (!positive(input.page)) throw new Error(`refusing an Actions read for page ${input.page}`);
+	const branch = input.branch === undefined ? "" : `&branch=${encodeURIComponent(input.branch)}`;
+	return `${repoPath(input.repo)}/actions/runs?head_sha=${input.sha}${branch}&per_page=${ACTIONS_PER_PAGE}&page=${input.page}`;
+}
+
+/** `repos/<o>/<r>/actions/runs/<id>/attempts/<attempt>/jobs?per_page=100&page=<n>`. */
+export function actionsJobsPath(input: { repo?: ActionsRepo; runId: number; attempt: number; page: number }): string {
+	if (!positive(input.runId) || !positive(input.attempt) || !positive(input.page)) {
+		throw new Error(`refusing an Actions jobs read for run ${input.runId} attempt ${input.attempt} page ${input.page}`);
+	}
+	return `${repoPath(input.repo)}/actions/runs/${input.runId}/attempts/${input.attempt}/jobs?per_page=${ACTIONS_PER_PAGE}&page=${input.page}`;
+}
+
+interface Page<T> {
+	total: number;
+	items: T[];
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function nullableString(value: unknown): string | null | undefined {
+	if (value === null) return null;
+	return typeof value === "string" ? value : undefined;
+}
+
+function pageOf(stdout: string, endpoint: string, key: string): Page<Record<string, unknown>> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(stdout);
+	} catch {
+		throw new ActionsCiError("malformed", endpoint, "not JSON");
+	}
+	const body = record(parsed);
+	const total = body?.total_count;
+	const list = body?.[key];
+	if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(list)) {
+		throw new ActionsCiError("malformed", endpoint, `missing total_count or ${key}`);
+	}
+	if (list.length > ACTIONS_PER_PAGE) throw new ActionsCiError("malformed", endpoint, "page longer than per_page");
+	const items = list.map((entry) => record(entry));
+	if (items.some((entry) => entry === undefined)) throw new ActionsCiError("malformed", endpoint, `${key} entry is not an object`);
+	return { total, items: items as Record<string, unknown>[] };
+}
+
+type RunRow = Omit<ActionsRun, "jobs">;
+
+/** One page of `actions/runs`: every row must name a run id, attempt and exactly `sha`; status null is unfinished. */
+export function parseRunsPage(stdout: string, sha: string, endpoint = "actions/runs"): Page<RunRow> {
+	const page = pageOf(stdout, endpoint, "workflow_runs");
+	const items = page.items.map((row): RunRow => {
+		const { id, run_attempt: attempt, head_sha: headSha } = row;
+		const status = nullableString(row.status);
+		const conclusion = nullableString(row.conclusion);
+		if (typeof id !== "number" || !positive(id) || typeof attempt !== "number" || !positive(attempt)) {
+			throw new ActionsCiError("malformed", endpoint, "run without id or run_attempt");
+		}
+		if (typeof headSha !== "string" || headSha.toLowerCase() !== sha.toLowerCase()) {
+			throw new ActionsCiError("malformed", endpoint, `run ${id} is not on the requested head`);
+		}
+		if (status === undefined || conclusion === undefined) throw new ActionsCiError("malformed", endpoint, `run ${id} without status`);
+		const actor = record(row.triggering_actor)?.login;
+		return {
+			status: status ?? "unknown",
+			conclusion: conclusion === "" ? null : conclusion,
+			headSha,
+			databaseId: id,
+			attempt,
+			...(typeof row.name === "string" ? { workflowName: row.name } : {}),
+			...(typeof row.event === "string" ? { event: row.event } : {}),
+			...(typeof actor === "string" ? { triggeringActor: actor } : {}),
+		};
+	});
+	return { total: page.total, items };
+}
+
+/** One page of attempt jobs: each job must belong to `runId`/`attempt` (and `sha` when the job names a head). */
+export function parseJobsPage(stdout: string, run: { runId: number; attempt: number; sha?: string }, endpoint = "actions/jobs"): Page<ActionsJob> {
+	const page = pageOf(stdout, endpoint, "jobs");
+	const items = page.items.map((row): ActionsJob => {
+		const { id, run_id: runId, run_attempt: runAttempt, head_sha: headSha } = row;
+		const status = nullableString(row.status);
+		const conclusion = nullableString(row.conclusion);
+		if (typeof id !== "number" || !positive(id) || runId !== run.runId) throw new ActionsCiError("malformed", endpoint, "job not of the run");
+		if (runAttempt !== undefined && runAttempt !== run.attempt) throw new ActionsCiError("malformed", endpoint, `job ${id} not of attempt ${run.attempt}`);
+		if (run.sha !== undefined && headSha !== undefined && (typeof headSha !== "string" || headSha.toLowerCase() !== run.sha.toLowerCase())) {
+			throw new ActionsCiError("malformed", endpoint, `job ${id} is not on the requested head`);
+		}
+		if (status === undefined || conclusion === undefined) throw new ActionsCiError("malformed", endpoint, `job ${id} without status`);
+		const steps = Array.isArray(row.steps) ? row.steps : [];
+		return {
+			id,
+			runId: run.runId,
+			runAttempt: run.attempt,
+			name: typeof row.name === "string" ? row.name : "",
+			status: status ?? "unknown",
+			conclusion: conclusion === "" ? null : conclusion,
+			steps: steps.flatMap((step): ActionsStep[] => {
+				const value = record(step);
+				if (!value) return [];
+				const stepConclusion = nullableString(value.conclusion);
+				return [{ name: typeof value.name === "string" ? value.name : "", status: typeof value.status === "string" ? value.status : "unknown", conclusion: stepConclusion ?? null }];
+			}),
+		};
+	});
+	return { total: page.total, items };
+}
+
+export interface ActionsReadOptions {
+	cwd: string;
+	exec: CommandRunner;
+	/** The repo to address; absent means gh resolves `{owner}/{repo}` from `cwd`'s remote. */
+	repo?: ActionsRepo;
+	/** Total budget for the whole observation, every page included. */
+	timeoutMs?: number;
+	now?: () => number;
+}
+
+interface Budget {
+	deadline: number;
+	now: () => number;
+}
+
+function budgetOf(options: ActionsReadOptions): Budget {
+	const now = options.now ?? Date.now;
+	return { deadline: now() + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now };
+}
+
+async function get(options: ActionsReadOptions, budget: Budget, endpoint: string): Promise<string> {
+	const remaining = budget.deadline - budget.now();
+	if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
+	try {
+		return await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs: remaining });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (/rate limit/i.test(message)) throw new ActionsCiError("rate_limited", endpoint);
+		const code = /\bHTTP (40[34])\b/.exec(message)?.[1];
+		if (code) throw new ActionsCiError("denied", endpoint, `HTTP ${code}`);
+		throw new ActionsCiError("transport", endpoint);
+	}
+}
+
+/** Same id and same fields twice (a page boundary shift) is one item; the same id with different fields is unknown. */
+function addUnique<T extends object>(into: Map<number, T>, key: number, item: T, endpoint: string): void {
+	const seen = into.get(key);
+	if (seen && JSON.stringify(seen) !== JSON.stringify(item)) throw new ActionsCiError("incomplete", endpoint, `conflicting duplicate ${key}`);
+	into.set(key, item);
+}
+
+async function paged<T extends object>(
+	options: ActionsReadOptions,
+	budget: Budget,
+	pathOf: (page: number) => string,
+	parse: (stdout: string, endpoint: string) => Page<T>,
+	keyOf: (item: T) => number,
+): Promise<T[]> {
+	const items = new Map<number, T>();
+	for (let page = 1; page <= ACTIONS_MAX_PAGES; page++) {
+		const endpoint = pathOf(page);
+		const result = parse(await get(options, budget, endpoint), endpoint);
+		if (result.total >= ACTIONS_FILTERED_RUN_CEILING) throw new ActionsCiError("incomplete", endpoint, `total_count ${result.total} past the API ceiling`);
+		for (const item of result.items) addUnique(items, keyOf(item), item, endpoint);
+		if (result.items.length < ACTIONS_PER_PAGE) {
+			if (items.size !== result.total) throw new ActionsCiError("incomplete", endpoint, `read ${items.size} of total_count ${result.total}`);
+			return [...items.values()];
+		}
+	}
+	throw new ActionsCiError("incomplete", pathOf(ACTIONS_MAX_PAGES), `more than ${ACTIONS_MAX_PAGES} pages`);
+}
+
+async function jobsWithin(options: ActionsReadOptions, budget: Budget, run: { runId: number; attempt: number; sha?: string }): Promise<ActionsJob[]> {
+	return paged(
+		options,
+		budget,
+		(page) => actionsJobsPath({ repo: options.repo, runId: run.runId, attempt: run.attempt, page }),
+		(stdout, endpoint) => parseJobsPage(stdout, run, endpoint),
+		(job) => job.id,
+	);
+}
+
+/** Every job of one run attempt, all pages; any failed page throws rather than returning a partial list. */
+export async function readActionsJobs(options: ActionsReadOptions, run: { runId: number; attempt: number; sha?: string }): Promise<ActionsJob[]> {
+	return jobsWithin(options, budgetOf(options), run);
+}
+
+/**
+ * Every workflow run on exactly `sha` (optionally one branch), each with its attempt's jobs, within one total budget.
+ * Zero runs is a valid observation; a queued or skipped run may have zero jobs. Never collapses runs by workflow name.
+ */
+export async function readActionsCi(options: ActionsReadOptions & { sha: string; branch?: string }): Promise<ActionsRun[]> {
+	const budget = budgetOf(options);
+	const runs = await paged(
+		options,
+		budget,
+		(page) => actionsRunsPath({ repo: options.repo, sha: options.sha, branch: options.branch, page }),
+		(stdout, endpoint) => parseRunsPage(stdout, options.sha, endpoint),
+		(run) => run.databaseId,
+	);
+	const observed: ActionsRun[] = [];
+	for (const run of runs) {
+		observed.push({ ...run, jobs: await jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha }) });
+	}
+	return observed;
+}
