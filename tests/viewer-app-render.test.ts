@@ -158,6 +158,30 @@ test("ask-81b54d83f0b2: CI the token cannot read is a red badge, a held fact, a 
  assert.deepEqual(clean.ci_unreadable, []); assert.doesNotMatch(screen(clean), /CI access|unreadable/, "no flag without a refused read");
 });
 
+test("PR4: forwarded CI shows labelled where native CI cannot say, keeps the red unreadable badge, never beats native", async t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const screen=(data)=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {screen} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ const put = (file: string, value: unknown) => { const path = join(home.path, file); mkdirSync(dirname(path), {recursive:true}); writeFileSync(path, JSON.stringify(value)); };
+ const ids = ["cp-denied","cp-running","cp-quiet"]; const head = "a".repeat(40);
+ put(LAYOUT.fleetFile, {jobs:ids.map(job_id => ({job_id,project:"demo",phase:"held",dispatched_at:new Date().toISOString()}))});
+ put(join(LAYOUT.state, "ci-watch.json"), {jobs:[{job_id:"cp-denied",last_ci:"unreadable"},{job_id:"cp-running",head_sha:head,last_ci:"in_progress"}]});
+ for (const id of ids) {
+  put(join(LAYOUT.runs, id, "envelope.json"), {envelope:{head_sha:head}});
+  put(join(LAYOUT.runs, id, "ci-evidence.json"), {schema_version:1,job_id:id,repo:"o/r",observations:[{head_sha:head,result:"success",source:"forwarded",observed_at:"2026-10-15T12:00:00Z",operator_quote:"green."}]});
+ }
+ const data = overview({home:home.path,stateDir:join(home.path, LAYOUT.state)});
+ assert.deepEqual(data.in_flight.map(j => [j.id,j.ci,j.ci_forwarded?.ci]), [["cp-denied","unreadable","green"],["cp-running","in_progress","green"],["cp-quiet",null,"green"]]);
+ assert.deepEqual(data.ci_unreadable, [{project:"demo",job_ids:["cp-denied"]}], "a forward never clears the token flag");
+ const {parseHTML} = await import("linkedom"); const document = parseHTML(screen(data)).document;
+ const ci = (id: string) => document.querySelector(`[aria-label="${id}"] .overview-ci`)?.textContent;
+ assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions/checks read · forwarded: CI green");
+ assert.ok(document.querySelector('[aria-label="cp-denied"] .job-ci-red.job-ci-unreadable'), "still red");
+ assert.equal(ci("cp-running"), "CI running aaaaaaa", "native evidence wins");
+ assert.equal(ci("cp-quiet"), "CI green (forwarded) aaaaaaa");
+ assert.match(document.querySelector('[aria-label="cp-quiet"] .job-ci-forwarded')?.getAttribute("title") ?? "", /display only, native CI still gates the handoff/);
+});
+
 test("stamp, shortSha, prNumber and phaseText", async t => {
  const {stamp, shortSha, prNumber, phaseText} = await import("../viewer-app/format.ts");
  const zone = process.env.TZ; t.after(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });

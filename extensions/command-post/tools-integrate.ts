@@ -10,6 +10,8 @@ import { formatIntegration } from "../../src/integrate.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { type MergeStrategy } from "../../src/contracts.ts";
 import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
+import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../../src/ci-evidence.ts";
+import { parsePrUrl } from "../../src/ci-watch.ts";
 import { formatTeardown } from "../../src/teardown.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { writeBackLine } from "../../src/trackers/link.ts";
@@ -133,8 +135,10 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The delivery:pr ship job whose PR is being merged" }),
 			action: Type.Optional(
-				StringEnum(["advance", "status", "hold", "release"], {
-					description: "advance (default): do the next step. status: read only. hold: pause with reason. release: allow the next advance.",
+				StringEnum(["advance", "status", "hold", "release", "record_ci"], {
+					description:
+						"advance (default): do the next step. status: read only. hold: pause with reason. release: allow the next advance. " +
+						"record_ci: store CI the operator forwarded for head_sha, for display only; it never satisfies a CI gate.",
 				}),
 			),
 			pr: Type.Optional(Type.String({ description: "PR url or number; defaults to the job's own pr receipt" })),
@@ -143,6 +147,10 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			),
 			reason: Type.Optional(Type.String({ description: "hold: required reason for pausing integration", minLength: 1, maxLength: 2000 })),
 			base: Type.Optional(Type.String({ description: "The PR's base branch (default: the PR's own, then main)" })),
+			head_sha: Type.Optional(Type.String({ description: "record_ci: the full 40-hex head sha the forwarded result is for" })),
+			result: Type.Optional(StringEnum([...FORWARDED_RESULTS], { description: "record_ci: the forwarded CI outcome" })),
+			operator_quote: Type.Optional(Type.String({ description: "record_ci: the operator's sentence forwarding the result, verbatim from an operator message" })),
+			url: Type.Optional(Type.String({ description: "record_ci: optional https link to the CI run the operator cited" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
@@ -155,6 +163,27 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 					content: [{ type: "text", text: hold ? `${params.job_id}: integration held: ${hold.reason}` : `${params.job_id}: integration hold released; call cp_integrate advance to resume with all gates rechecked.` }],
 					details: { job_id: params.job_id, hold },
 				};
+			}
+			if (params.action === "record_ci") {
+				if (!params.head_sha || !params.result || !params.operator_quote) throw new Error("cp_integrate record_ci needs head_sha, result and operator_quote");
+				const verified = requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTextsFromEntries(ctx.sessionManager.getEntries()) });
+				const record = post.fleet.require(params.job_id);
+				const prUrl = record.awaiting_merge?.pr_url ?? record.receipts?.find((receipt) => receipt.kind === "pr" && receipt.url)?.url;
+				const pr = prUrl ? parsePrUrl(prUrl) : undefined;
+				if (!pr) throw new Error(`cp_integrate record_ci: ${params.job_id} has no GitHub PR to attach CI to`);
+				const observation = recordForwardedCi({
+					home: post.home,
+					jobId: params.job_id,
+					repo: `${pr.owner}/${pr.repo}`,
+					headSha: params.head_sha,
+					result: params.result as ForwardedResult,
+					operatorQuote: verified.stored.operator_quote,
+					currentHead: record.awaiting_merge?.head_sha ?? post.ciWatch.store.job(params.job_id)?.head_sha,
+					url: params.url,
+				});
+				refreshWidget(ctx);
+				const text = `${params.job_id}: forwarded CI ${observation.result} recorded on ${observation.head_sha.slice(0, 12)}; display only, native CI still gates the handoff`;
+				return { content: [{ type: "text", text }], details: { job_id: params.job_id, observation } };
 			}
 			if (params.action === "status") {
 				// A pure read: what the record says and what the end-state facts say.

@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { BlockedJob, FailedJob, FlightJob, ShippedJob, TeamJob } from "./api-types.ts";
+import type { BlockedJob, FailedJob, FlightJob, ForwardedCi, ShippedJob, TeamJob } from "./api-types.ts";
 import type { JobRow } from "./fleet-view.ts";
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { SHA } from "./git-read.ts";
@@ -23,6 +23,15 @@ export const CI_UNREADABLE = "unreadable";
 /** A ci-watch row's CI for `head`; a refused read is shown whatever head it was for, never as "no CI yet". */
 export const jobCi = (row: Json | undefined, head: string | null | undefined): string | null =>
  row?.last_ci === CI_UNREADABLE ? CI_UNREADABLE : head && row?.head_sha === head ? str(row.last_ci) ?? null : null;
+const FORWARDED_VIEW: Record<string, string> = {success:"green", failure:"failed", pending:"in_progress"};
+/** The newest operator-forwarded CI for `head` (runs/<id>/ci-evidence.json, src/ci-evidence.ts); display-only, null when none. */
+export function forwardedCi(state: ViewerState, id: string, head: string | null | undefined): ForwardedCi | null {
+ const list = isSafeId(id) && head ? readObject(join(state.stateDir,"runs",id,"ci-evidence.json"))?.observations : undefined;
+ const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
+  .sort((a,b) => String(a.observed_at).localeCompare(String(b.observed_at))).at(-1);
+ const url = str(latest?.url);
+ return latest ? {ci:FORWARDED_VIEW[String(latest.result)]!, observed_at:String(latest.observed_at), url:url && /^https:\/\/[^\s@?#]+$/.test(url) ? url : null} : null;
+}
 /** Projects with a held job whose CI read the token was refused (ask-81b54d83f0b2), each with those job ids. */
 export function ciUnreadable(state: ViewerState, jobs: Json[]): {project: string; job_ids: string[]}[] {
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
@@ -52,7 +61,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
    phase:job.phase === "held" || job.phase === "awaiting_merge" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
    model:row?.model ?? null, script_path:job.executor === "script" ? str(job.script_path) ?? "script" : null,
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
-   ci:jobCi(ci,head),
+   ci:jobCi(ci,head), ci_forwarded:forwardedCi(state,id,head),
    review:str(review?.verdict) ?? null, review_attempts:Math.min(5,attempts.length), routing:routingText(state,job),
    note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null,
    context:workerContext(state,id,row?.model,windows), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null};
