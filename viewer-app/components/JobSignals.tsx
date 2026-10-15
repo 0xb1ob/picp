@@ -12,7 +12,10 @@ export const reviewText = (job:ViewerJob) => {
 /** The red badge for a CI read the token was refused (ask-81b54d83f0b2): never "no CI yet". */
 export const CI_UNREADABLE_LABEL = "CI unreadable — token lacks Actions/checks read";
 export const CI_READ_NEEDED = "needs fine-grained PAT: Actions read + Checks read + Commit statuses read; classic: repo";
-/** `no CI yet` when nothing has run; the red badge when the token was refused; otherwise `CI <state> <sha7>`, `(forwarded)` when only the operator saw it. */
+/**
+ * `no CI yet` when nothing has run; the red badge when the token was refused;
+ * otherwise `CI <state> <sha7>`, `(forwarded)` when only the operator saw it.
+ */
 export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
  const cls = (tone: string) => `job-ci job-ci-${tone}${badge ? " job-badge" : ""}`;
  const tone = (ci: string) => ci === "failed" ? "red" : ci === "in_progress" ? "running" : ci;

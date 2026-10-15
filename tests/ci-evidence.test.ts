@@ -75,12 +75,16 @@ test("cp_integrate record_ci: needs a verbatim operator quote and the job's curr
 	const b = bench(t);
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: { text: string }[] }> }>();
 	const record = { job_id: "cp-fwd", receipts: [{ kind: "pr", url: "https://github.com/o/r/pull/3", status: "open" }] };
+	let watched: { head_sha?: string } | undefined;
 	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
-		commandPost: () => ({ home: b.home, fleet: { require: () => record }, ciWatch: { store: { job: () => ({ head_sha: A }) } } }),
+		commandPost: () => ({ home: b.home, fleet: { require: () => record }, ciWatch: { store: { job: () => watched } } }),
 		setLive: () => {}, refreshWidget: () => {},
 	} as never);
 	const ctx = { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: `fyi: ${QUOTE}` } }] } };
 	const invoke = (params: Record<string, unknown>) => tools.get("cp_integrate")!.execute("t", { job_id: "cp-fwd", action: "record_ci", result: "success", ...params }, undefined, undefined, ctx);
+	await assert.rejects(invoke({ head_sha: A, operator_quote: QUOTE }), /no known current head/);
+	assert.equal(readCiEvidence(b.home, "cp-fwd"), undefined, "no head known: nothing is written");
+	watched = { head_sha: A };
 	await assert.rejects(invoke({ head_sha: A, operator_quote: "CI is green, trust me." }), /quote not found/);
 	await assert.rejects(invoke({ head_sha: B, operator_quote: QUOTE }), /superseded head/);
 	assert.match((await invoke({ head_sha: A, operator_quote: QUOTE })).content[0]!.text, /forwarded CI success recorded on aaaaaaaaaaaa; display only/);

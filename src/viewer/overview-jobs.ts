@@ -24,7 +24,10 @@ export const CI_UNREADABLE = "unreadable";
 export const jobCi = (row: Json | undefined, head: string | null | undefined): string | null =>
  row?.last_ci === CI_UNREADABLE ? CI_UNREADABLE : head && row?.head_sha === head ? str(row.last_ci) ?? null : null;
 const FORWARDED_VIEW: Record<string, string> = {success:"green", failure:"failed", pending:"in_progress"};
-/** The newest operator-forwarded CI for `head` (runs/<id>/ci-evidence.json, src/ci-evidence.ts); display-only, null when none. */
+/**
+ * The newest operator-forwarded CI for `head` (runs/<id>/ci-evidence.json, src/ci-evidence.ts);
+ * display-only, null when none.
+ */
 export function forwardedCi(state: ViewerState, id: string, head: string | null | undefined): ForwardedCi | null {
  const list = isSafeId(id) && head ? readObject(join(state.stateDir,"runs",id,"ci-evidence.json"))?.observations : undefined;
  const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
