@@ -3620,10 +3620,17 @@ fallback. It hands off when the verdict is `permitted`, or `pending` with cause
 `reviews`, `behind` or `unknown_block` (a rule-required update counts as
 `behind`, as it does for the update step) — and only after `#reviewRequired`
 passes; an unreviewed head returns `next: review` unchanged. The handoff records
-step `permit`, next `surface`, journals `integration_permitted` with
-`policy: human_handoff`, and declares one subject-keyed Awaiting row
-`human-review pr <url>` naming the head. Under the policy, `gh pr merge` and
-`gh pr update-branch` never run and no merge checkpoint is minted.
+step `permit`, journals `integration_permitted` with `policy: human_handoff`, and
+then **parks the job** (awaiting_merge PR6): `makeHandoff`'s `park` port calls
+`Parking.park` with the PR url, `owner/repo`, head, GitHub's own `baseRefName`
+(the stack base) and the handoff time. A completed park returns `next: wait`, no
+Awaiting row; the held continuation relays one `HELD PR PARKED` notice per job and
+cycle and wakes no parent turn. A park that cannot finish (gates refuse, HEAD
+moved, a throw, or no observed base) keeps the job held with its lease and falls
+back to today's handoff: next `surface` and one subject-keyed Awaiting row
+`human-review pr <url>` naming the head, the reason ending `Not parked (<code>)`.
+Under the policy, `gh pr merge` and `gh pr update-branch` never run and no merge
+checkpoint is minted.
 
 **What never hands off:** pending CI (`wait`), CI on a superseded head (`wait`),
 red CI (resolve), a permission `retry`, and `pending` with cause `checks`,
@@ -3631,14 +3638,23 @@ red CI (resolve), a permission `retry`, and `pending` with cause `checks`,
 state that cannot be read surfaces "not handed off" with **no** merge checkpoint
 and no row.
 
-**Landing and change requests add no new path.** The human's merge on GitHub is
-observed like any external merge (`MERGED` → record, teardown, close), and the
-row goes obsolete on the merged receipt. A change request is a `cp_send` to the
-same job (`cp_revive` first if its worker is dead): it reopens the envelope, the
-worker pushes and reports, the continuation reviews the new head and waits for
-its CI, and the handoff then updates the same row — one continuation notice per
-head, never a new job or branch. Until then the row still names the old head.
-GitHub review events are not polled, and an approval on GitHub never triggers a
+**After parking, one batched watch owns the PR.** The parent that holds the home
+lock runs `awaitingMerge.sweep` (`src/awaiting-merge.ts` over
+`src/awaiting-merge-watch.ts`) at the CI-watch cadence from one timer
+(`extensions/command-post/awaiting-merge-tick.ts`), never one per job; the per-job
+CI watch drops a parked job. Every human comment or review (bots, apps and this
+home's `gh` login excluded), changes requested, a moved head or base, or a close
+marks the parked record `pending` and journals one wake-up per cycle and event;
+`cp_send` resumes the same job on a fresh lease. A merge records the receipt,
+closes the ledger, tears nothing down (nothing is held), queues a stacked child's
+merge-and-retarget action, releases armed dispatches and wakes once. Sweep
+failures are journaled once per cause as `recovery` wake-ups and never throw.
+`cp_integrate status` prints the parked cycle, PR, head, base and pending event,
+and the stack actions the job owes; `cp_integrate stack_ack stack_action:<id>
+disposition:done|disposed` settles one. The viewer shows a parked head's native CI
+from its last `ci_observed` run event (`recordCiObserved`, `src/ci-evidence.ts`).
+A legacy `human-review pr` row from before PR6 is revalidated by the ordinary
+continuation: its next handoff parks it. An approval on GitHub never triggers a
 merge by the command post.
 
 ### Forge identity and observation (`forge`, v1 PR 1)

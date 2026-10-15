@@ -28,6 +28,7 @@ import { registerProjectMemoryTools } from "./tools-project-memory.ts";
 import { registerReviewTools } from "./tools-review.ts";
 import { registerScheduleTools } from "./tools-schedule.ts";
 import { registerTrackerTools } from "./tools-tracker.ts";
+import { registerAwaitingMergeTick } from "./awaiting-merge-tick.ts";
 import { registerPushTick } from "./push-tick.ts";
 import { registerServiceAlertTick } from "./service-alert-tick.ts";
 import { registerSendStatusTools } from "./tools-send-status.ts";
@@ -99,6 +100,7 @@ export default function (pi: ExtensionAPI): void {
 	registerTrackerTools(pi, deps, () => s.parentLock !== undefined);
 	registerPushTick(pi, deps, () => s.parentLock !== undefined);
 	registerServiceAlertTick(pi, deps, () => s.parentLock !== undefined);
+	registerAwaitingMergeTick(pi, deps, () => s.parentLock !== undefined);
 
 	// Spec 2026-09-04: the ledger's two surfaces. `emit` and `commandPost` are
 	// this closure's; the policy lives in ./jobs.ts so it is testable without pi.

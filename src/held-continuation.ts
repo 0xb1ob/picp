@@ -325,6 +325,8 @@ export class HeldContinuation {
 			if (this.#draining()) return out("draining", step, `${jobId}: a drain started mid-step; startup resumes it`);
 			if (result.next === "advance") continue;
 			if (result.next === "wait") {
+				// awaiting_merge: the handoff parked the job; one relay, then the batched watch owns it.
+				if (this.#deps.fleet.get(jobId)?.phase === "awaiting_merge") return this.#parked(jobId, result, out("wait", step, result.reason, "wait"));
 				if (result.review_resume_at && result.head_sha && trigger.head && shaMatches(result.head_sha, trigger.head)) {
 					const window = this.#deps.reviewWindow?.(jobId, trigger.head) ?? { head_sha: result.head_sha, attempt: trigger.attempt ?? 0, decided_at: "", review_resume_at: result.review_resume_at };
 					if (!this.#stopped) this.#arm(trigger, window);
@@ -419,6 +421,18 @@ export class HeldContinuation {
 		} catch {
 			return true;
 		}
+	}
+
+	#parked(jobId: string, result: IntegrateResult, outcome: ContinuationOutcome): ContinuationOutcome {
+		const deliver = this.#deps.relay ?? ((notice: { content: string }) => operatorNotify(undefined, notice.content));
+		const cycle = this.#deps.fleet.get(jobId)?.awaiting_merge?.cycle ?? 0;
+		try {
+			const lines = [`HELD PR PARKED — ${jobId} (with the team, awaiting_merge cycle ${cycle})`, `  ${result.reason}`, ...(result.pr_url ? [`  ${result.pr_url}`] : [])];
+			deliver({ id: boundedWakeupId(`continuation:parked:${jobId}:${cycle}`), job_id: jobId, content: lines.join("\n") });
+		} catch {
+			// The park already happened and the integration record says so; a lost notice changes nothing.
+		}
+		return outcome;
 	}
 
 	#landed(jobId: string): void {

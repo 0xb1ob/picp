@@ -8,10 +8,11 @@ import { Type } from "typebox";
 import { formatMerge } from "../../src/merges.ts";
 import { formatIntegration } from "../../src/integrate.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
-import { type MergeStrategy } from "../../src/contracts.ts";
+import { type FleetRecord, type MergeStrategy } from "../../src/contracts.ts";
 import { operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../../src/ci-evidence.ts";
 import { parsePrUrl } from "../../src/ci-watch.ts";
+import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
 import { TrackerStore } from "../../src/trackers/config.ts";
 import { writeBackLine } from "../../src/trackers/link.ts";
@@ -135,10 +136,11 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The delivery:pr ship job whose PR is being merged" }),
 			action: Type.Optional(
-				StringEnum(["advance", "status", "hold", "release", "record_ci"], {
+				StringEnum(["advance", "status", "hold", "release", "record_ci", "stack_ack"], {
 					description:
 						"advance (default): do the next step. status: read only. hold: pause with reason. release: allow the next advance. " +
-						"record_ci: store CI the operator forwarded for head_sha, for display only; it never satisfies a CI gate.",
+						"record_ci: store CI the operator forwarded for head_sha, for display only; it never satisfies a CI gate. " +
+						"stack_ack: settle a queued stacked merge-and-retarget action (stack_action, disposition) once the child's own ship loop did it.",
 				}),
 			),
 			pr: Type.Optional(Type.String({ description: "PR url or number; defaults to the job's own pr receipt" })),
@@ -151,6 +153,8 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			result: Type.Optional(StringEnum([...FORWARDED_RESULTS], { description: "record_ci: the forwarded CI outcome" })),
 			operator_quote: Type.Optional(Type.String({ description: "record_ci: the operator's sentence forwarding the result, verbatim from an operator message" })),
 			url: Type.Optional(Type.String({ description: "record_ci: optional https link to the CI run the operator cited" })),
+			stack_action: Type.Optional(Type.String({ description: "stack_ack: the stack action id (<parent>:<child>:<merge sha>) from cp_integrate status" })),
+			disposition: Type.Optional(StringEnum(["done", "disposed"], { description: "stack_ack: done (merged and retargeted) or disposed (not needed)" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
@@ -188,6 +192,11 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				const text = `${params.job_id}: forwarded CI ${observation.result} recorded on ${observation.head_sha.slice(0, 12)}; display only, native CI still gates the handoff`;
 				return { content: [{ type: "text", text }], details: { job_id: params.job_id, observation } };
 			}
+			if (params.action === "stack_ack") {
+				if (!params.stack_action || !params.disposition) throw new Error("cp_integrate stack_ack needs stack_action and disposition");
+				const action = new StackFollowups({ home: post.home }).settle(params.stack_action, params.disposition as "done" | "disposed");
+				return { content: [{ type: "text", text: `${action.id}: stack action ${action.status} at ${action.settled_at}` }], details: { job_id: params.job_id, action } };
+			}
 			if (params.action === "status") {
 				// A pure read: what the record says and what the end-state facts say.
 				// Never a step, so it can be called at any time without consequence.
@@ -205,12 +214,13 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				} catch (error) {
 					watchLine = `unavailable (${(error as Error).message})`;
 				}
+				const parkedLine = awaitingMergeLine(post.home, () => post.fleet.get(params.job_id), params.job_id);
 				const details = { job_id: params.job_id, record: record ?? null, end_state: endState, hold, ci_watch: ciWatch };
 				const text = record
 					? [`${record.job_id} integrate: ${record.step} -> ${record.next}`, `  ${record.reason}`, ...record.facts.map((fact) => `  - ${fact}`)].join("\n")
 					: `${params.job_id}: no integration has been attempted yet`;
 				return {
-					content: [{ type: "text", text: `${text}\n  ci-watch: ${watchLine}\n  hold: ${hold?.reason ?? "none"}\n  end state: ${JSON.stringify(endState)}` }],
+					content: [{ type: "text", text: `${text}\n  ci-watch: ${watchLine}\n  hold: ${hold?.reason ?? "none"}\n  end state: ${JSON.stringify(endState)}${parkedLine}` }],
 					details,
 				};
 			}
@@ -290,4 +300,28 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			};
 		},
 	});
+}
+
+/** cp_integrate status: the parked PR (awaiting_merge) and the stack actions the job owes or is owed; files only. */
+function awaitingMergeLine(home: string, read: () => FleetRecord | undefined, jobId: string): string {
+	const lines: string[] = [];
+	let record: FleetRecord | undefined;
+	try {
+		record = read();
+	} catch (error) {
+		lines.push(`  fleet unreadable: ${(error as Error).message.split("\n")[0]}`);
+	}
+	const parked = record?.phase === "awaiting_merge" ? record.awaiting_merge : undefined;
+	if (parked) {
+		const pending = parked.pending ? `; pending ${parked.pending.kind} (cp_send ${jobId} resumes it on a fresh lease)` : "; quiescent";
+		lines.push(`  awaiting_merge: cycle ${parked.cycle}, ${parked.pr_url} at ${parked.head_sha.slice(0, 12)} onto ${parked.base}, handed ${parked.handed_at}${pending}`);
+	}
+	try {
+		for (const action of pendingStackActions(home).filter((candidate) => candidate.parent_job === jobId || candidate.child_job === jobId)) {
+			lines.push(`  stack action ${action.id}: merge ${action.target_base} into ${action.child_branch} (plain merge, no force push), retarget its PR from ${action.previous_base} to ${action.target_base}; then cp_integrate stack_ack`);
+		}
+	} catch (error) {
+		lines.push(`  stack actions unreadable: ${(error as Error).message.split("\n")[0]}`);
+	}
+	return lines.length ? `\n${lines.join("\n")}` : "";
 }

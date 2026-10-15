@@ -7,7 +7,9 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CI_EVIDENCE_KEEP, type CiEvidenceFile, type CiObservation, isoTimestamp, paths, validateCiEvidenceFile } from "./contracts.ts";
+import type { CiObservation as WatchObservation } from "./ci-watch.ts";
 import { atomicWriteJson } from "./json-store.ts";
+import type { RunRegistry } from "./runs.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 
 export class CiEvidenceError extends Error {}
@@ -75,4 +77,18 @@ export function recordForwardedCi(input: ForwardedCiInput): CiObservation {
 	mkdirSync(dirname(path), { recursive: true });
 	atomicWriteJson(path, parsed.value);
 	return observation;
+}
+
+/** Journal a native CI observation as a `ci_observed` run event; the viewer reads it for a parked head's CI. */
+export function recordCiObserved(runs: Pick<RunRegistry, "open">, jobId: string, observation: WatchObservation): void {
+	runs.open(jobId).cp("ci_observed", {
+		job_id: jobId,
+		event: observation.event,
+		head_sha: observation.head_sha,
+		reason: observation.reason,
+		...(observation.pr_url ? { pr_url: observation.pr_url } : {}),
+		...(observation.merge_commit_sha ? { merge_commit_sha: observation.merge_commit_sha } : {}),
+		...(observation.run_id !== undefined ? { run_id: observation.run_id } : {}),
+		...(observation.run_url ? { run_url: observation.run_url } : {}),
+	});
 }

@@ -11,16 +11,20 @@ import {
 	validateParkIntent,
 } from "./contracts.ts";
 import { AwaitingMergeResume } from "./awaiting-merge-resume.ts";
+import type { ExitPorts } from "./awaiting-merge-exits.ts";
+import { AwaitingMergeWatch, type SweepResult } from "./awaiting-merge-watch.ts";
 import { deleteCheckpoint } from "./checkpoint-ref.ts";
 import type { FleetStore } from "./fleet.ts";
+import type { LedgerLike } from "./integrate.ts";
 import { type JobClaims, withJobClaim } from "./job-claims.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { leaseFromRecord, type LeaseManager } from "./leases.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { GateOutcome } from "./teardown.ts";
+import { StackFollowups } from "./stack-followups.ts";
 import { defaultGit, jobInFlight, unmanagedLiveWorker, withdrawHumanReview } from "./teardown-head.ts";
-import type { DurableWakeupInput } from "./wakeup-outbox.ts";
+import { boundedCauseId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 
 export { AwaitingMergeResume, ResumeError } from "./awaiting-merge-resume.ts";
@@ -62,20 +66,50 @@ export interface AwaitingMergeHost {
 	registry: { assertCanonicalClone(project: string): string };
 	teardown: { checkGates(worktree: string, branch: string, kind: FleetRecord["kind"], jobId?: string): Promise<GateOutcome> };
 	revive(jobId: string): Promise<unknown>;
+	merges: ExitPorts["merges"];
+	ledger(): LedgerLike;
+	armedDispatches: { release(): Promise<unknown> };
+	/** This home's gh login: its comments on a parked PR are CP activity, never a human event. */
+	ghLogin(): Promise<string>;
 }
 
-/** The park/resume primitives over one host and one shared claim map (teardown and recovery hold the same one). */
-export function awaitingMergePorts(host: AwaitingMergeHost, claims: JobClaims, journal: (input: DurableWakeupInput) => void) {
+/**
+ * The park/resume primitives and the batched watch over one host and one shared claim map (teardown and recovery
+ * hold the same one). `sweep` acts only while `owns()` (this process holds the home) and never throws.
+ */
+export function awaitingMergePorts(host: AwaitingMergeHost, claims: JobClaims, journal: (input: DurableWakeupInput) => void, owns: () => boolean = () => true) {
 	const parking = () => new Parking({
 		home: host.home, fleet: host.fleet, leases: host.leases, manager: host.manager, runs: host.runs, claims, journal,
 		gates: (record) => host.teardown.checkGates(record.worktree, record.branch, record.kind, record.job_id),
 	});
+	let watch: AwaitingMergeWatch | undefined;
+	const logins: string[] = [];
+	const sweep = async (): Promise<SweepResult> => {
+		if (!owns()) return { skipped: "this process does not hold the home", observed: 0, outcomes: [], errors: [], catching_up: [] };
+		const login = await host.ghLogin().catch(() => "");
+		if (login && !logins.includes(login)) logins.push(login);
+		const stacks = new StackFollowups({ home: host.home });
+		watch ??= new AwaitingMergeWatch({
+			home: host.home, fleet: host.fleet, merges: host.merges, ledger: () => host.ledger(), stacks, stackEdges: stacks, claims, runs: host.runs, cpLogins: logins,
+			wakeups: { enqueue: (input) => (journal(input), true) }, onLanded: async () => void (await host.armedDispatches.release()),
+		});
+		try {
+			const result = await watch.sweep();
+			for (const error of result.errors) journal({ id: boundedCauseId("awaiting-merge-watch:", error), kind: "recovery", content: `AWAITING-MERGE WATCH — ${error}\n  The watch keeps its last observation and retries on its next sweep.` });
+			return result;
+		} catch (error) {
+			const cause = (error as Error).message.split("\n")[0]?.slice(0, 300) || "no message";
+			journal({ id: boundedCauseId("awaiting-merge-watch:", cause), kind: "recovery", content: `AWAITING-MERGE WATCH FAILED — ${cause}\n  Parked PRs are observed again on the next sweep.` });
+			return { observed: 0, outcomes: [], errors: [cause], catching_up: [] };
+		}
+	};
 	return {
 		park: (jobId: string, facts: ParkFacts) => parking().park(jobId, facts),
 		recover: () => parking().recover(),
 		resume: (jobId: string) => new AwaitingMergeResume({
 			fleet: host.fleet, leases: host.leases, runs: host.runs, claims, clone: (project) => host.registry.assertCanonicalClone(project), revive: (id) => host.revive(id),
 		}).resume(jobId),
+		sweep,
 	};
 }
 
