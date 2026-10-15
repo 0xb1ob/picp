@@ -15,6 +15,7 @@ import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { ghCiConfigured } from "./ci-configured.ts";
 import { CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
+import { recordCiObserved } from "./ci-evidence.ts";
 import { ForeignCiWatch, type ForeignCiTick, ghForeignRuns } from "./foreign-ci-watch.ts";
 import { gitlabCiUnsupported, isGitlabJob, watchChangeRequest } from "./forge-runtime.ts";
 import {
@@ -319,7 +320,7 @@ export class CommandPost {
 	readonly #announcer: FailureAnnouncer;
 	readonly #ghLogin: () => Promise<string>;
 	readonly #claims: import("./job-claims.ts").JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
-	readonly awaitingMerge = awaitingMergePorts(this, this.#claims, (input) => this.#journalDurable(input)); // park/resume (src/awaiting-merge.ts)
+	readonly awaitingMerge = awaitingMergePorts(this, this.#claims, (input) => this.#journalDurable(input), () => this.#ownsHome()); // park/resume/watch (src/awaiting-merge.ts)
 
 	constructor(options: CommandPostOptions) {
 		this.#options = options;
@@ -597,7 +598,7 @@ export class CommandPost {
 				return { receipt: result.receipt, ...(result.error ? { error: result.error } : {}) };
 			},
 			awaiting: () => this.awaiting,
-			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs }), // merge_policy by record.project through this registry; no fleet lookup
+			handoff: makeHandoff({ registry: this.registry, awaiting: () => this.awaiting, runs: this.runs, park: (jobId, facts) => this.awaitingMerge.park(jobId, facts) }), // merge_policy by record.project; a handed-off PR parks
 			infraRerun: (input) => maybeRerunInfra({ ...input, home: options.home, store: new CiRerunStore(options.home) }), // unload-parent PR2: one rerun per job+head
 			mainCiScope: (project) => resolveMainCiScope({ project, mandates: () => this.mandates.list(), now: isoTimestamp(), login: () => this.ghLogin() }), // cp-oc0m
 		});
@@ -657,16 +658,7 @@ export class CommandPost {
 				),
 			onObserved: (jobId, observation) => {
 				try {
-					this.runs.open(jobId).cp("ci_observed", {
-						job_id: jobId,
-						event: observation.event,
-						head_sha: observation.head_sha,
-						reason: observation.reason,
-						...(observation.pr_url ? { pr_url: observation.pr_url } : {}),
-						...(observation.merge_commit_sha ? { merge_commit_sha: observation.merge_commit_sha } : {}),
-						...(observation.run_id !== undefined ? { run_id: observation.run_id } : {}),
-						...(observation.run_url ? { run_url: observation.run_url } : {}),
-					});
+					recordCiObserved(this.runs, jobId, observation);
 				} catch {
 					// A run log that cannot be written must never swallow a wake-up.
 				}

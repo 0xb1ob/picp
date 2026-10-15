@@ -44,6 +44,17 @@ npm run test:one -- tests/integrate.test.ts         # a merged MR's tail; open/c
 npm run test:one -- tests/viewer-jobs.test.ts       # GitLab links in the dashboard
 ```
 
+awaiting_merge (parked `human_handoff` PRs) is covered with synthetic fleet, watch and GraphQL fixtures; no gh, git
+or network runs:
+
+```bash
+npm run test:one -- tests/awaiting-merge-park.test.ts       # park/resume primitives, crash stages, refusals
+npm run test:one -- tests/awaiting-merge-watch.test.ts      # batched watch, exits, stack follow-ups, the sweep port
+npm run test:one -- tests/awaiting-merge-lifecycle.test.ts  # handoff parks, viewer keeps CI, change request, merge
+npm run test:one -- tests/awaiting-merge-viewer.test.ts     # With the team, frozen time and cost, head CI
+npm run test:one -- tests/human-handoff.test.ts             # the handoff port: park, fallback row, review first
+```
+
 Worker-prompt evals are a separate axis: `npm run eval` scores the assembled
 prompt text against a checked-in corpus; the model-quality half runs only
 under `CP_EVAL_LIVE=1` ([evals.md](evals.md)).

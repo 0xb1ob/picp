@@ -37,7 +37,7 @@ function bench(t: { after(fn: () => void): void }) {
 	};
 	const pending = parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: AT, head_sha: B } });
 	put(LAYOUT.fleetFile, { schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), jobs: [parked("cp-park", { last_human_activity_at: "2026-10-15T10:30:00Z" }), parked("cp-bare"), pending] });
-	put(`${LAYOUT.state}/awaiting-merge-watch.json`, { schema_version: 1, updated_at: AT, prs: [
+	put(LAYOUT.awaitingMergeWatchFile, { schema_version: 1, updated_at: AT, prs: [
 		{ job_id: "cp-park", cycle: 2, pr_url: "https://github.com/o/r/pull/7", state: "open", head_sha: A, base: "main", approvals: 1, approvals_required: null, cursors: {}, last_human_activity_at: "2026-10-15T11:00:00Z", observed_at: AT },
 		{ job_id: "cp-bare", cycle: 1, pr_url: "https://github.com/o/r/pull/7", state: "open", head_sha: A, base: "main", approvals: 3, approvals_required: 2, cursors: {}, observed_at: AT },
 	] });

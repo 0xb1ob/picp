@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AwaitingStore } from "../src/awaiting.ts";
+import type { ParkFacts, ParkResult } from "../src/awaiting-merge.ts";
+import { EMPTY_USAGE } from "../src/contracts.ts";
 import { recordForwardedCi } from "../src/ci-evidence.ts";
 import { HANDOFF_PENDING_CAUSES, type HandoffInput, type HandoffWrite, handOffDecision, makeHandoff, mergePolicyOf, reviewThenHandoff } from "../src/human-handoff.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
@@ -144,4 +146,35 @@ test("reviewThenHandoff: a review hold wins and the port never runs; otherwise t
 	assert.equal(await reviewThenHandoff(async () => undefined, port, input({ at: "fallback" })), handed);
 	assert.equal(portCalls, 1);
 	assert.equal(await reviewThenHandoff(async () => undefined, undefined, input({ at: "fallback" })), undefined, "no port wired: nothing changes");
+});
+
+test("the port parks a handed-off PR (awaiting_merge PR6): next wait, no row; no base or a refused park keeps today's row", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const awaiting = new AwaitingStore({ home: home.path });
+	const calls: ParkFacts[] = [];
+	let result: ParkResult | Error = { job_id: JOB, parked: true, awaiting_merge: { cycle: 1, pr_url: PR, repo: "example/example-app", branch: JOB, head_sha: HEAD_A, base: "main", handed_at: "2026-10-15T10:00:00.000Z", released_at: "2026-10-15T10:00:00.000Z", frozen_seconds: 1, frozen_usage: EMPTY_USAGE } };
+	const park = async (_jobId: string, facts: ParkFacts) => {
+		calls.push(facts);
+		if (result instanceof Error) throw result;
+		return result;
+	};
+	const port = makeHandoff({ registry: registryOf("human_handoff"), awaiting: () => awaiting, park, now: () => new Date("2026-10-15T10:00:00Z") });
+
+	const parked = input({ base: "main", review: async () => undefined });
+	assert.deepEqual([(await port(parked))?.next, awaiting.list().length], ["wait", 0]);
+	assert.deepEqual(calls, [{ pr_url: PR, repo: "example/example-app", head_sha: HEAD_A, base: "main", handed_at: "2026-10-15T10:00:00Z" }]);
+	assert.match(parked.written[0]?.facts.at(-1) ?? "", /parked with the team at aaaaaaaaaaaa \(awaiting_merge cycle 1\)/);
+
+	assert.equal((await port(input({ review: async () => undefined })))?.next, "surface", "no observed base: the legacy row");
+	assert.equal(calls.length, 1, "never parked without a base");
+	result = { job_id: JOB, parked: false, failure: { code: "head_mismatch", message: "HEAD moved", fix: "review again" } };
+	const refused = input({ base: "main", review: async () => undefined });
+	assert.equal((await port(refused))?.next, "surface");
+	assert.match(refused.written[0]?.reason ?? "", /Not parked \(head_mismatch\): HEAD moved/);
+	result = new Error("fleet phase moved\nstack");
+	const thrown = input({ base: "main", review: async () => undefined });
+	assert.equal((await port(thrown))?.next, "surface", "a throwing park never escapes the handoff");
+	assert.match(thrown.written[0]?.reason ?? "", /Not parked \(not_parkable\): fleet phase moved —/);
+	assert.equal(awaiting.list().length, 1, "one row for the PR, reused");
 });

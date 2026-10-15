@@ -3,12 +3,13 @@
  *
  * A project may choose that the command post never lands its PRs. Once the
  * current head has a passing `cp_review` and green CI (or the repository
- * positively has no CI), `cp_integrate` hands the PR to a human on GitHub: one
- * subject-keyed Awaiting row `human-review pr <url>` naming the head, step
- * `permit`, next `surface`. It never runs `gh pr merge` or `gh pr update-branch`
- * and never mints a merge checkpoint. The human's merge is observed through the
- * ordinary `MERGED` path; a change request is a `cp_send` to the same job, and
- * the new head is reviewed, CI-checked and handed off again on the same row.
+ * positively has no CI), `cp_integrate` hands the PR to a human on GitHub and
+ * parks the job in `awaiting_merge` (src/awaiting-merge.ts): worker closed,
+ * lease returned, step `permit`, next `wait`. A park that cannot finish keeps
+ * the job held behind one subject-keyed Awaiting row `human-review pr <url>`,
+ * next `surface`. It never runs `gh pr merge` or `gh pr update-branch` and never
+ * mints a merge checkpoint. The batched awaiting-merge watch observes the
+ * human's merge, a change request or a moved head (src/awaiting-merge-exits.ts).
  *
  * The policy is read through the project registry the composition root injects,
  * keyed by the project name on the job's fleet record — the same name
@@ -16,7 +17,9 @@
  * returns `undefined` at every hook, so integration is unchanged.
  */
 
-import type { MergePolicy, Project } from "./contracts.ts";
+import type { ParkFacts, ParkResult } from "./awaiting-merge.ts";
+import { parsePrUrl } from "./ci-watch.ts";
+import { isoTimestamp, type MergePolicy, type Project } from "./contracts.ts";
 import type { AwaitingLike, IntegrateResult } from "./integrate.ts";
 import type { MergePermissionVerdict } from "./merge-permission.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -34,7 +37,7 @@ export interface HandoffWrite {
 	jobId: string;
 	branch: string;
 	step: "permit";
-	next: "surface";
+	next: "surface" | "wait";
 	facts: string[];
 	reason: string;
 	prUrl: string;
@@ -49,6 +52,8 @@ export interface HandoffInput {
 	head: string;
 	/** The project name from the job's fleet record. */
 	project: string;
+	/** The PR's base as GitHub reported it; parking records it. Absent never parks. */
+	base?: string;
 	/** `permit`: CI is green (or positively absent) and GitHub's verdict was read. `fallback`: CI or merge state is unreadable. */
 	at: "permit" | "fallback";
 	verdict?: MergePermissionVerdict;
@@ -86,7 +91,7 @@ const bounded = (text: string, max: number) => (text.length <= max ? text : `${t
 /** The subject prefix of the handoff's Awaiting row; teardown withdraws it when the job closes (picp-pvo). */
 export const HUMAN_REVIEW_SUBJECT = "human-review pr ";
 
-export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: () => AwaitingLike | undefined; runs?: RunRegistry }): HandoffPort {
+export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: () => AwaitingLike | undefined; runs?: RunRegistry } & ParkDeps): HandoffPort {
 	return async (input) => {
 		const { jobId, branch, prUrl, head } = input;
 		const head12 = head.slice(0, 12);
@@ -110,6 +115,17 @@ export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: ()
 		if (handOffDecision(input.verdict) === "default") return undefined;
 		const blocked = await input.review?.();
 		if (blocked) return blocked;
+		try {
+			deps.runs?.open(jobId).cp("integration_permitted", { job_id: jobId, step: "permit", policy: "human_handoff", head_sha: head, pr_url: prUrl });
+		} catch {
+			// A run log that cannot be written never undoes a handoff.
+		}
+		const parked = await parkHandedOff(deps, input);
+		if (parked?.parked) {
+			const facts = [...input.facts, `human_handoff: parked with the team at ${head12} (awaiting_merge cycle ${parked.awaiting_merge.cycle}) — worker closed, lease returned, nothing merged`];
+			return input.write({ jobId, branch, step: "permit", next: "wait", facts, prUrl, headSha: head,
+				reason: `${jobId}: ${prUrl} at ${head12} passed cp_review and CI and waits with the team (awaiting_merge). The command post never merges it; the awaiting-merge watch closes the job on a merge and wakes you on a change request, a human comment, a moved head or a close.` });
+		}
 		const subject = bounded(`${HUMAN_REVIEW_SUBJECT}${prUrl}`, 200);
 		try {
 			await deps.awaiting?.()?.declareGated({
@@ -124,14 +140,24 @@ export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: ()
 		} catch {
 			// Best-effort, like the merge-pending reminder: the record and the notice still say it.
 		}
-		try {
-			deps.runs?.open(jobId).cp("integration_permitted", { job_id: jobId, step: "permit", policy: "human_handoff", head_sha: head, pr_url: prUrl });
-		} catch {
-			// A run log that cannot be written never undoes a handoff.
-		}
+		const notParked = parked ? ` Not parked (${parked.failure.code}): ${parked.failure.message} — ${parked.failure.fix}.` : "";
 		return surface(
-			`human_handoff: handed to a human at ${head12} (cp_review passed, CI green or none configured) — nothing merged`,
-			`${jobId}: ${prUrl} at ${head12} passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to ${jobId}.`,
+			`human_handoff: handed to a human at ${head12} (cp_review passed, CI green or none configured) — nothing merged${parked ? `; not parked: ${parked.failure.code}` : ""}`,
+			`${jobId}: ${prUrl} at ${head12} passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to ${jobId}.${notParked}`,
 		);
 	};
+}
+
+type ParkDeps = { park?: (jobId: string, facts: ParkFacts) => Promise<ParkResult>; now?: () => Date };
+
+/** Park the handed-off job; `undefined` when no park port, base or GitHub PR url is known (the legacy row stands). */
+async function parkHandedOff(deps: ParkDeps, input: HandoffInput): Promise<ParkResult | undefined> {
+	const pr = parsePrUrl(input.prUrl);
+	if (!deps.park || !input.base || !pr) return undefined;
+	const facts: ParkFacts = { pr_url: input.prUrl, repo: `${pr.owner}/${pr.repo}`, head_sha: input.head, base: input.base, handed_at: isoTimestamp((deps.now ?? (() => new Date()))()) };
+	try {
+		return await deps.park(input.jobId, facts);
+	} catch (error) {
+		return { job_id: input.jobId, parked: false, failure: { code: "not_parkable", message: (error as Error).message.split("\n")[0] ?? "park threw", fix: "the job stays held; call cp_integrate again" } };
+	}
 }

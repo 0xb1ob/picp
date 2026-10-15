@@ -1267,6 +1267,18 @@ test("human_handoff: one durable notice per handed-off head, none for a repeat, 
 	assert.match(b.notices.at(-1)?.content ?? "", /HELD PR LANDED — cp-4wz/);
 });
 
+test("awaiting_merge PR6: a handoff that parked relays once without waking the parent; the parked job is then stale", async () => {
+	const b = continuationBench();
+	b.during.step = () => Object.assign(b.records[0]!, { phase: "awaiting_merge", awaiting_merge: { cycle: 1 } });
+	const outcome = await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.equal(outcome.action, "wait");
+	assert.deepEqual(b.wakes, [], "parked is a stable stop: no parent turn");
+	assert.equal(b.relays.length, 1);
+	assert.match(b.relays[0]?.content ?? "", /HELD PR PARKED — cp-4wz \(with the team, awaiting_merge cycle 1\)/);
+	assert.equal((await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD })).action, "stale");
+	assert.equal(b.advances.length, 1);
+});
+
 test("jje.2 stale: a moved head, a reopened generation or a job no longer held acts on nothing", async () => {
 	const b = continuationBench();
 	b.script.set("cp-4wz", ["advance", "done"]);

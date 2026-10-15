@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applyExit, decideExit, type ExitPorts, type PrSnapshot } from "../src/awaiting-merge-exits.ts";
+import { awaitingMergePorts } from "../src/awaiting-merge.ts";
 import { AwaitingMergeWatch, batchQuery, readWatchFile } from "../src/awaiting-merge-watch.ts";
 import { EMPTY_USAGE, type FleetRecord } from "../src/contracts.ts";
 import { drainFile } from "../src/drain.ts";
@@ -233,4 +234,21 @@ test("cp_integrate on a parked job waits for the watch and runs no gh or git", a
 	const result = await integrator.advance({ jobId: "cp-park" });
 	assert.equal(result.next, "wait");
 	assert.match(result.reason, /awaiting_merge watch/);
+});
+
+test("awaiting_merge PR6 sweep port: skipped without the home lock; a throwing sweep is journaled once per cause", async (t) => {
+	const b = await bench(t);
+	const journaled: DurableWakeupInput[] = [];
+	let logins = 0;
+	let owned = false;
+	const unreadable = () => { throw new Error("fleet.json is not readable JSON"); };
+	const fleet = { read: unreadable, list: unreadable, get: () => undefined };
+	const host = { home: b.home, fleet, runs: undefined, merges: b.ports.merges, ledger: b.ports.ledger, armedDispatches: { release: async () => {} }, ghLogin: async () => (logins += 1, "cp-bot") };
+	const ports = awaitingMergePorts(host as never, new Map(), (input) => journaled.push(input), () => owned);
+	assert.equal((await ports.sweep()).skipped, "this process does not hold the home");
+	assert.equal(logins, 0, "no gh call without the lock");
+	owned = true;
+	for (const _ of [1, 2]) assert.deepEqual((await ports.sweep()).errors, ["fleet.json is not readable JSON"]);
+	assert.equal(new Set(journaled.map((input) => input.id)).size, 1, "one outbox id for the same cause");
+	assert.equal(journaled[0]?.kind, "recovery");
 });

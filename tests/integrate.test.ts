@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromCheckpoints, isDerivedAwaitingId, obsoleteDeclaredReason } from "../src/awaiting.ts";
 import { makeHandoff } from "../src/human-handoff.ts";
+import type { ParkFacts, ParkResult } from "../src/awaiting-merge.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
 import { detectCiWait } from "../src/ci-wait.ts";
 import {
@@ -504,6 +505,8 @@ interface BenchOptions {
 	noAwaiting?: boolean;
 	/** Wires the human-handoff port with a registry that knows only the bench's project ("demo"). */
 	policy?: "repo" | "human_handoff";
+	/** awaiting_merge PR6: the handoff's park port, as CommandPost wires it. */
+	park?: (jobId: string, facts: ParkFacts) => Promise<ParkResult>;
 	/** unload-parent PR2: the infra-rerun port, as CommandPost wires it. */
 	infraRerun?: IntegratorOptions["infraRerun"];
 	/** k52/cp-oc0m: whether a main-CI latch is enforced, as CommandPost wires it. */
@@ -618,7 +621,7 @@ async function benchOf(
 				...(options.infraRerun ? { infraRerun: options.infraRerun } : {}),
 				...(options.mainCiScope ? { mainCiScope: options.mainCiScope } : {}),
 				...(options.observer ? { observer: options.observer } : {}),
-				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs }) } : {}),
+				...(options.policy ? { handoff: makeHandoff({ registry: { get: (name) => (name === "demo" ? { merge_policy: options.policy } : undefined) }, awaiting: () => new AwaitingStore({ home: home.path }), runs, ...(options.park ? { park: options.park } : {}) }) } : {}),
 				...(options.noSender
 					? {}
 					: {
@@ -3343,6 +3346,38 @@ test("human_handoff: the human's merge lands through the ordinary MERGED path an
 	const row = handoffRows(b)[0];
 	assert.ok(row);
 	assert.ok(obsoleteDeclaredReason(row, b.fleet.list() as unknown as Parameters<typeof obsoleteDeclaredReason>[1]));
+});
+
+test("human_handoff parks the handed-off job (awaiting_merge PR6): GitHub's base, next wait, no row; a parked call touches nothing", async (t) => {
+	const b = await benchOf(t);
+	const facts: ParkFacts[] = [];
+	const park = async (jobId: string, seen: ParkFacts): Promise<ParkResult> => {
+		facts.push(seen);
+		const parked = { cycle: 1, ...seen, branch: BR, released_at: seen.handed_at, frozen_seconds: 60, frozen_usage: EMPTY_USAGE };
+		await b.fleet.mutate((jobs) => {
+			const job = jobs.find((candidate) => candidate.job_id === jobId)!;
+			Object.assign(job, { phase: "awaiting_merge", awaiting_merge: parked, worker: { ...job.worker, exited_at: seen.handed_at } });
+		});
+		return { job_id: jobId, parked: true, awaiting_merge: parked };
+	};
+	const handed = await b.integrator({ pr: { ...openPr(), baseRefName: "release" } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	assert.deepEqual([handed.step, handed.next, handed.head_sha], ["permit", "wait", HEAD_A]);
+	assert.deepEqual(facts.map((seen) => [seen.pr_url, seen.repo, seen.head_sha, seen.base]), [[PR_URL, "o/r", HEAD_A, "release"]], "the PR's own base, not the request's");
+	assert.ok(handed.facts.some((fact) => fact.startsWith("human_handoff: parked with the team")));
+	assert.equal(handoffRows(b).length, 0, "a parked PR declares no human-review row");
+	assert.deepEqual(mutations(b), []);
+	const before = b.calls.length;
+	const again = await b.integrator({}, { ...HANDOFF, park }).advance({ jobId: BR });
+	assert.deepEqual([again.step, again.next, b.calls.length, facts.length], ["start", "wait", before, 1], "parked: no gh, git or park call");
+
+	const refused = await benchOf(t);
+	const failing = async (jobId: string): Promise<ParkResult> => ({ job_id: jobId, parked: false, failure: { code: "gate_refused", message: "dirty: uncommitted changes", fix: "commit" } });
+	const legacy = await refused.integrator({}, { ...HANDOFF, park: failing }).advance({ jobId: BR });
+	assert.deepEqual([legacy.step, legacy.next], ["permit", "surface"], "a park that cannot finish keeps today's handoff");
+	assert.match(legacy.reason, /Not parked \(gate_refused\)/);
+	assert.equal(handoffRows(refused).length, 1);
+	assert.equal(refused.fleet.require(BR).phase, "held");
+	assert.deepEqual(mutations(refused), []);
 });
 
 // ---------------------------------------------------------------------------
