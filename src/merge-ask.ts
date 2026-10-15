@@ -22,8 +22,8 @@
  *
  * A completed run on a superseded sha says nothing about the head that would
  * merge, so it does not count as finished. (`gh pr checks` 403s in this home;
- * `gh run list --branch <b> --json conclusion,status,headSha` is the query that
- * works, and it is the shape this module's default probe issues — once, never
+ * the Actions REST runs read on the exact head (plus each attempt's jobs) is the
+ * query that works, and it is the shape this module's default probe issues — once, never
  * in a loop.)
  *
  * Outcomes, and none of them is silence:
@@ -104,6 +104,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readActionsCi } from "./actions-ci.ts";
 import type { CiConfiguredState } from "./ci-configured.ts";
 import {
 	AWAITING_DECISION_MAX_CHARS,
@@ -117,7 +118,7 @@ import { acceptedFinalFixHeads } from "./final-fix.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
 import { isCompletePass } from "./review-subject.ts";
 
-/** One row of `gh run list --json conclusion,status,headSha,workflowName,databaseId,attempt`. */
+/** One workflow run, as `src/actions-ci.ts` normalizes an Actions REST row. */
 export interface CiRun {
 	/** `queued` | `in_progress` | `completed` | anything gh grows later. */
 	status: string;
@@ -364,7 +365,7 @@ export function evaluateMergeAskCi(input: {
 			return verdict({
 				action: "defer",
 				ci: "unknown",
-				reason: `no CI runs are observable for ${input.branch} on ${short(head)} — not asked until one is`,
+				reason: `no Actions CI runs are observable for ${input.branch} on ${short(head)} — not asked until one is`,
 				head,
 			});
 		}
@@ -373,14 +374,14 @@ export function evaluateMergeAskCi(input: {
 			return verdict({
 				action: "defer",
 				ci: "unreviewed",
-				reason: `no CI is configured for ${input.branch}, but no passing cp_review on ${short(head)} yet — review it, then ask`,
+				reason: `no CI is configured (no Actions workflows) for ${input.branch}, but no passing cp_review on ${short(head)} yet — review it, then ask`,
 				head,
 			});
 		}
 		return verdict({
 			action: "raise",
 			ci: "no_ci",
-			reason: `no CI is configured for this repository — nothing will run on ${short(head)}`,
+			reason: `no CI is configured for this repository (no Actions workflows) — nothing will run on ${short(head)}`,
 			head,
 		});
 	}
@@ -450,7 +451,7 @@ export function evaluateMergeAskCi(input: {
  * Three implementations of this query is the bad outcome; this is the function
  * they import instead, and `evaluateMergeAskCi` above is still the only rule.
  *
- * Pure: the caller supplies the runs (`ghRunListArgs` builds the one query) and
+ * Pure: the caller supplies the runs (`ghCiRuns` reads them from Actions) and
  * the head, so it is hermetic wherever it is used.
  */
 export function readCiForHead(input: {
@@ -524,8 +525,8 @@ export function mergeAskPrNumber(decision: string, gitlab = false): string | und
 // ---------------------------------------------------------------------------
 
 export interface MergeAskProbeDeps {
-	/** Completed and in-flight runs for a branch, newest first. */
-	runs: (branch: string, jobId: string) => Promise<readonly CiRun[]>;
+	/** Every Actions run on the resolved pushed `head`; asked only once a head is known. */
+	runs: (branch: string, jobId: string, head: string) => Promise<readonly CiRun[]>;
 	/**
 	 * cp-p1sh: the job's merge receipt, when one exists — local, already observed,
 	 * and checked *before* CI, because a merge that has happened is not a question
@@ -602,7 +603,7 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
 			if (unsupported) return verdict({ action: "defer", ci: "unknown", reason: unsupported });
 			const head = await deps.head(branch, input.job_id);
 			if (!head.sha) return evaluateMergeAskCi({ branch, head, runs: [] });
-			const runs = await deps.runs(branch, input.job_id);
+			const runs = await deps.runs(branch, input.job_id, head.sha);
 			const reviewedHeads = deps.reviewedHeads ? await deps.reviewedHeads(input.job_id) : undefined;
 			// Only asked when there is nothing to read: a branch with runs already has
 			// its answer, and this is a network call on a render path.
@@ -637,7 +638,7 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
 }
 
 // ---------------------------------------------------------------------------
-// The production facts: one `gh run list`, one `git rev-parse`/`ls-remote`
+// The production facts: Actions runs/jobs for one head, one `git rev-parse`/`ls-remote`
 // ---------------------------------------------------------------------------
 
 export type CommandRunner = (
@@ -664,33 +665,10 @@ export const runCommand: CommandRunner = (command, args, options) =>
 
 /** Default timeout for the one CI query. A gate must never hang a render. */
 export const MERGE_ASK_QUERY_TIMEOUT_MS = 15_000;
-/** How many runs the query asks for: enough to see the newest per workflow. */
-export const MERGE_ASK_RUN_LIMIT = 10;
 
-/**
- * The **only** place `gh run list` is spelled out (cp-uug §9). `gh pr checks`
- * 403s in this home, so this is the query that actually works, and it is a
- * single non-blocking call — exactly the shape `src/ci-wait.ts` sanctions and
- * never the `--watch`/poll shapes it refuses.
- */
-export function ghRunListArgs(branch: string, limit: number = MERGE_ASK_RUN_LIMIT): string[] {
-	return ["run", "list", "--branch", branch, "--limit", String(limit), "--json", "conclusion,status,headSha,workflowName,databaseId,attempt"];
-}
-
-/**
- * `gh run list --branch <b> --limit N --json conclusion,status,headSha,workflowName`
- * — a single non-blocking query, exactly the shape `src/ci-wait.ts` sanctions
- * and never the `--watch`/poll shapes it refuses.
- */
-export function ghCiRuns(options: { cwd: string; exec?: CommandRunner; timeoutMs?: number }): (branch: string) => Promise<CiRun[]> {
-	const exec = options.exec ?? runCommand;
-	return async (branch: string) => {
-		const stdout = await exec("gh", ghRunListArgs(branch), {
-			cwd: options.cwd,
-			timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS,
-		});
-		return parseCiRuns(stdout);
-	};
+/** Every Actions run on exactly `head` with its attempt jobs (src/actions-ci.ts); a failed read throws, never `[]`. */
+export function ghCiRuns(options: { cwd: string; exec?: CommandRunner; timeoutMs?: number }): (head: string) => Promise<CiRun[]> {
+	return (head) => readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, sha: head, timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS });
 }
 
 /** Tolerant of gh's field drift: anything without a headSha is not a fact. */

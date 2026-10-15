@@ -495,11 +495,13 @@ test("every command the watcher builds passes detectCiWait", async () => {
 	const built: string[] = [];
 	const exec = async (command: string, args: readonly string[]) => {
 		built.push([command, ...args].join(" "));
-		return command === "gh" && args[0] === "api" ? JSON.stringify({ number: 58, state: "open", merged: false, head: { sha: HEAD } }) : "[]";
+		if (String(args[1]).includes("/actions/runs?")) return JSON.stringify({ total_count: 1, workflow_runs: [{ id: 5, run_attempt: 1, head_sha: HEAD, status: "queued", conclusion: null }] });
+		if (String(args[1]).includes("/jobs?")) return JSON.stringify({ total_count: 0, jobs: [] });
+		return JSON.stringify({ number: 58, state: "open", merged: false, head: { sha: HEAD } });
 	};
 	await ghPrRest({ cwd: "/tmp", exec })(PR);
-	await ghCiRuns({ cwd: "/tmp", exec })("cp-4wz");
-	assert.equal(built.length, 2);
+	await ghCiRuns({ cwd: "/tmp", exec })(HEAD);
+	assert.equal(built.length, 3);
 	for (const command of built) {
 		assert.equal(detectCiWait(command), undefined, `the watcher must never build a refused shape: ${command}`);
 	}

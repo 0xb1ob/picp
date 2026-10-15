@@ -14,15 +14,22 @@ import { createScratchHome } from "./harness/index.ts";
 
 const HEAD = "d48a81d1f4d3aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-/** The repo's own workflow (.github/workflows/ci.yml) with one failed step. */
-function view(failed: string, conclusion = "failure"): string {
+type Job = Parameters<typeof classifyInfraFailure>[0][number];
+
+/** The repo's own workflow (.github/workflows/ci.yml) with one failed step, as Actions attempt jobs. */
+function view(failed: string, conclusion = "failure"): Job[] {
 	const names = ["Set up job", "Checkout", "Set up Node", "Install dependencies", "Install treehouse", "Run suite (typecheck + tests)", "Eval contract check"];
 	const at = names.indexOf(failed);
-	const steps = names.map((name, index) => ({ name, conclusion: index < at ? "success" : index === at ? "failure" : "skipped" }));
-	return JSON.stringify({ jobs: [{ name: "suite", conclusion, steps }] });
+	const steps = names.map((name, index) => ({ name, status: "completed", conclusion: index < at ? "success" : index === at ? "failure" : "skipped" }));
+	return [{ name: "suite", conclusion, steps }];
 }
 
-test("classifyInfraFailure: setup steps are infra; the suite, a cancel and an unreadable listing are not", () => {
+/** `view` as the REST attempt-jobs page `gh api …/attempts/<n>/jobs` returns. */
+function jobsPage(jobs: Job[]): string {
+	return JSON.stringify({ total_count: jobs.length, jobs: jobs.map((job, index) => ({ id: index + 1, run_id: 41, status: "completed", ...job })) });
+}
+
+test("classifyInfraFailure: setup steps are infra; the suite and a cancel are not", () => {
 	for (const step of ["Set up job", "Checkout", "Set up Node", "Install dependencies", "Install treehouse"]) {
 		const verdict = classifyInfraFailure(view(step));
 		assert.equal(verdict.infra, true, step);
@@ -32,11 +39,11 @@ test("classifyInfraFailure: setup steps are infra; the suite, a cancel and an un
 	assert.equal(classifyInfraFailure(view("Eval contract check")).infra, false);
 	assert.equal(classifyInfraFailure(view("Install treehouse", "cancelled")).infra, false, "a cancelled job is never infra");
 	assert.equal(classifyInfraFailure(view("Install treehouse", "timed_out")).infra, false, "a timed-out job is never infra");
-	assert.equal(classifyInfraFailure(JSON.stringify({ jobs: [{ name: "a", conclusion: "failure", steps: [{ name: "Install build tools", conclusion: "failure" }] }] })).infra, false, "a setup-looking step naming a build is not infra");
-	const mixed = { jobs: [JSON.parse(view("Install treehouse")).jobs[0], { ...JSON.parse(view("Run suite (typecheck + tests)")).jobs[0], name: "other" }] };
-	assert.equal(classifyInfraFailure(JSON.stringify(mixed)).infra, false, "every failed job must be infra");
-	assert.equal(classifyInfraFailure("not json").infra, false);
-	assert.equal(classifyInfraFailure(JSON.stringify({ jobs: [{ name: "a", conclusion: "failure", steps: [] }] })).infra, false, "a failed job with no failed step is not proven infra");
+	const build = [{ name: "a", conclusion: "failure", steps: [{ name: "Install build tools", status: "completed", conclusion: "failure" }] }];
+	assert.equal(classifyInfraFailure(build).infra, false, "a setup-looking step naming a build is not infra");
+	const mixed = [view("Install treehouse")[0]!, { ...view("Run suite (typecheck + tests)")[0]!, name: "other" }];
+	assert.equal(classifyInfraFailure(mixed).infra, false, "every failed job must be infra");
+	assert.equal(classifyInfraFailure([{ name: "a", conclusion: "failure", steps: [] }]).infra, false, "a failed job with no failed step is not proven infra");
 });
 
 function bench(t: { after(fn: () => void): void }, options: { view?: string; viewStatus?: number; rerunStatus?: number } = {}) {
@@ -46,12 +53,12 @@ function bench(t: { after(fn: () => void): void }, options: { view?: string; vie
 	const calls: string[] = [];
 	const claimsAtRerun: number[] = [];
 	const run = async (_cwd: string, _bin: string, args: readonly string[]) => {
-		calls.push(args.join(" "));
+		calls.push(args[0] === "api" ? `api ${String(args[1]).replace(/\?.*$/, "")}` : args.join(" "));
 		if (args[1] === "rerun") {
 			claimsAtRerun.push(store.read().entries.length);
 			return { status: options.rerunStatus ?? 0, stdout: "", stderr: options.rerunStatus ? "HTTP 403: forbidden" : "" };
 		}
-		return { status: options.viewStatus ?? 0, stdout: options.view ?? view("Install treehouse"), stderr: options.viewStatus ? "gh: not found" : "" };
+		return { status: options.viewStatus ?? 0, stdout: options.view ?? jobsPage(view("Install treehouse")), stderr: options.viewStatus ? "gh: Resource not accessible by integration (HTTP 403)" : "" };
 	};
 	const failed = (overrides: Partial<CiRun> = {}): CiRun => ({ status: "completed", conclusion: "failure", headSha: HEAD, databaseId: 41, attempt: 1, workflowName: "CI", ...overrides });
 	const go = (runs: CiRun[]) => maybeRerunInfra({ jobId: "cp-r1", head: HEAD, runs, cwd: home.path, run, home: home.path, store, now: () => new Date("2026-10-04T15:00:00Z") });
@@ -62,7 +69,7 @@ test("an infra-only failure is claimed first, then rerun once; the same job+head
 	const b = bench(t);
 	const outcome = await b.go([b.failed()]);
 	assert.equal(outcome?.rerun, true, outcome?.fact);
-	assert.deepEqual(b.calls, ["run view 41 --json jobs", "run rerun 41 --failed"]);
+	assert.deepEqual(b.calls, ["api repos/{owner}/{repo}/actions/runs/41/attempts/1/jobs", "run rerun 41 --failed"]);
 	assert.deepEqual(b.claimsAtRerun, [1], "the claim was on disk before gh run rerun ran");
 	assert.deepEqual(JSON.parse(readFileSync(join(b.home, LAYOUT.ciRerunsFile), "utf8")).entries, [{ job_id: "cp-r1", head_sha: HEAD, run_id: 41, step: "Install treehouse", at: "2026-10-04T15:00:00Z" }]);
 	const again = await b.go([b.failed()]);
@@ -85,10 +92,10 @@ test("attempt 2, a test failure, a cancel, no run id, a green head and a drain a
 	assert.match((await b.go([b.failed()]))?.fact ?? "", /draining/);
 	assert.deepEqual(b.calls, []);
 
-	const tests = bench(t, { view: view("Run suite (typecheck + tests)") });
+	const tests = bench(t, { view: jobsPage(view("Run suite (typecheck + tests)")) });
 	const outcome = await tests.go([tests.failed()]);
 	assert.equal(outcome?.rerun, false);
-	assert.deepEqual(tests.calls, ["run view 41 --json jobs"], "classified, never rerun");
+	assert.deepEqual(tests.calls, ["api repos/{owner}/{repo}/actions/runs/41/attempts/1/jobs"], "classified, never rerun");
 	assert.deepEqual(tests.store.read().entries, [], "no claim for a test failure");
 });
 
@@ -100,8 +107,14 @@ test("fail closed: an unreadable claim file or jobs listing reruns nothing; a re
 	assert.deepEqual(corrupt.calls, []);
 
 	const blind = bench(t, { viewStatus: 1 });
-	assert.match((await blind.go([blind.failed()]))?.fact ?? "", /gh run view 41 failed/);
+	assert.match((await blind.go([blind.failed()]))?.fact ?? "", /run 41 jobs unreadable: .*denied/);
 	assert.deepEqual(blind.store.read().entries, []);
+	for (const partial of [JSON.stringify({ total_count: 2, jobs: [] }), "{}", "not json"]) {
+		const missing = bench(t, { view: partial });
+		assert.match((await missing.go([missing.failed()]))?.fact ?? "", /run 41 jobs unreadable/, partial);
+		assert.equal(missing.calls.filter((call) => call.startsWith("run rerun")).length, 0, "missing jobs never rerun");
+		assert.deepEqual(missing.store.read().entries, [], "and never claim");
+	}
 
 	const refused = bench(t, { rerunStatus: 1 });
 	const outcome = await refused.go([refused.failed()]);

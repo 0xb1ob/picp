@@ -47,7 +47,7 @@
  *    asserts `undefined`.
  *  - **It never uses GraphQL check-rollup fields.** `gh pr checks` and
  *    `gh pr view --json statusCheckRollup` 403 with this home's token. REST
- *    (`gh run list --json …`, `gh api repos/{o}/{r}/pulls/{n}`) works.
+ *    (`gh api …/actions/runs?head_sha=…` plus attempt jobs, `…/pulls/{n}`) works.
  *  - **It never re-derives CI state.** `evaluateMergeAskCi` (cp-gmy) is the one
  *    implementation of "has CI finished for the head that would merge", and
  *    this module calls it. One evaluator, always.
@@ -506,8 +506,8 @@ export interface CiWatchDeps {
 	jobs: () => readonly WatchableRecord[];
 	/** REST facts about the job's PR. `undefined` when the receipt names none. */
 	pr: (job: WatchableRecord, prUrl: string) => Promise<PrObservation | undefined>;
-	/** Completed and in-flight runs for the job's branch, newest first. */
-	runs: (job: WatchableRecord) => Promise<readonly CiRun[]>;
+	/** Every Actions run on the resolved pushed `head`; never asked without one. */
+	runs: (job: WatchableRecord, head: string) => Promise<readonly CiRun[]>;
 	/** The branch's pushed head, asked only when the PR did not answer. */
 	head?: (job: WatchableRecord) => Promise<HeadResolution>;
 	now?: () => Date;
@@ -701,9 +701,9 @@ export class CiWatch {
 		const pr = prUrl ? await this.#deps.pr(record, prUrl) : undefined;
 		let head: HeadResolution = pr?.head_sha ? { sha: pr.head_sha } : { reason: `no head known for ${record.branch}` };
 		if (!head.sha && this.#deps.head) head = await this.#deps.head(record);
-		// The runs query is skipped entirely once the PR's story is over: a merged
-		// or closed PR derives its event from the REST call already made.
-		const runs = pr?.merged || (pr?.state ?? "").toLowerCase() === "closed" ? [] : await this.#deps.runs(record);
+		// The runs query is skipped once the PR's story is over (merged or closed: the REST call already says)
+		// and when no head is known, since Actions runs are read for one exact head.
+		const runs = !head.sha || pr?.merged || (pr?.state ?? "").toLowerCase() === "closed" ? [] : await this.#deps.runs(record, head.sha);
 		const facts: CiFacts = {
 			jobId: record.job_id,
 			branch: record.branch,
@@ -867,7 +867,7 @@ const HEADLINES: Readonly<Record<CiWatchEvent, string>> = Object.freeze({
  * They are also load-bearing in the other direction (cp-3zbp): the green copy
  * used to tell the parent to "verify CI against the head sha yourself, check
  * ancestry", which predates this watcher *being* the GitHub read. It bought a
- * turn of `gh run list` / `gh pr view` (the second of which 403s on
+ * turn of Actions reads / `gh pr view` (the second of which 403s on
  * `statusCheckRollup` with this home's token) re-proving the fact the message
  * carries. The notice therefore names the one next step instead.
  */

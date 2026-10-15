@@ -4,6 +4,7 @@
  * Requests are built from validated ids only; URLs inside a response (jobs_url, check_runs_url …) are never followed.
  */
 import type { CiRun, CommandRunner } from "./merge-ask.ts";
+import type { CommandRunner as StatusRunner } from "./merges.ts";
 
 /** Total budget for one observation (every page of runs and jobs), as `MERGE_ASK_QUERY_TIMEOUT_MS`. */
 export const ACTIONS_CI_TIMEOUT_MS = 15_000;
@@ -285,4 +286,13 @@ export async function readActionsCi(options: ActionsReadOptions & { sha: string;
 		observed.push({ ...run, jobs: await jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha }) });
 	}
 	return observed;
+}
+
+/** A `{ status, stdout, stderr }` runner (src/merges.ts) as the throwing `CommandRunner` these readers take. */
+export function statusRunner(run: (cwd: string, bin: string, args: readonly string[]) => ReturnType<StatusRunner>): CommandRunner {
+	return async (command, args, options) => {
+		const result = await run(options.cwd, command, args);
+		if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+		return result.stdout;
+	};
 }

@@ -19,7 +19,7 @@ import {
 	type ForeignCiWatchDeps,
 	type ForeignJobRecord,
 	foreignPrJobs,
-	foreignRunsArgs,
+	ghForeignRuns,
 	formatForeignCiNotice,
 } from "../src/foreign-ci-watch.ts";
 import type { CiRun } from "../src/merge-ask.ts";
@@ -164,8 +164,26 @@ test("evidence only: the ports are read-only, the module reaches no merge or wak
 	for (const banned of ["./integrate.ts", "./wakeups.ts", "./wakeup-outbox.ts", "sendWakeup", "gh pr merge", "rerun", "comment("]) {
 		assert.equal(source.includes(banned), false, `foreign-ci-watch.ts must not reach ${banned}`);
 	}
-	assert.equal(detectCiWait(["gh", ...foreignRunsArgs("acme", "widgets", HEAD)].join(" ")), undefined);
-	assert.throws(() => foreignRunsArgs("acme", "widgets", "HEAD;rm"), /malformed head sha/);
+});
+
+test("ghForeignRuns reads Actions runs and attempt jobs on the PR's base repo; an unreadable read never becomes []", async () => {
+	const calls: string[] = [];
+	const exec = async (command: string, args: readonly string[]) => {
+		calls.push([command, ...args].join(" "));
+		assert.equal(detectCiWait([command, ...args].join(" ")), undefined, "a single non-blocking read");
+		return String(args[1]).includes("/jobs")
+			? JSON.stringify({ total_count: 1, jobs: [{ id: 3, run_id: 9, name: "test", status: "in_progress", conclusion: null }] })
+			: JSON.stringify({ total_count: 1, workflow_runs: [{ id: 9, run_attempt: 1, head_sha: HEAD, status: "in_progress", conclusion: null, name: "ci" }] });
+	};
+	const runs = await ghForeignRuns({ cwd: "/x", exec })("acme", "widgets", HEAD);
+	assert.deepEqual(calls, [
+		`gh api repos/acme/widgets/actions/runs?head_sha=${HEAD}&per_page=100&page=1`,
+		"gh api repos/acme/widgets/actions/runs/9/attempts/1/jobs?per_page=100&page=1",
+	]);
+	assert.deepEqual(runs.map((run) => [run.status, run.databaseId]), [["in_progress", 9]]);
+	const denied = async () => { throw new Error("gh: Resource not accessible by integration (HTTP 403)"); };
+	await assert.rejects(ghForeignRuns({ cwd: "/x", exec: denied })("acme", "widgets", HEAD), /Actions CI read denied/);
+	await assert.rejects(ghForeignRuns({ cwd: "/x", exec })("acme", "widgets", "HEAD;rm"), /malformed head sha/);
 });
 
 test("the reviewer gate waits for CI, then carries its state into the brief; past the timeout it goes ahead with CI unknown", async (t) => {
