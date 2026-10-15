@@ -23,10 +23,13 @@ function reviewFact(job: ViewerJob): string {
 }
 
 function ciFact(job: ViewerJob): string {
- if (!job.ci) return "not run yet";
- const state = job.ci === "failed" ? "red" : job.ci === "in_progress" ? "running" : job.ci;
+ const tone = (ci: string) => ci === "failed" ? "red" : ci === "in_progress" ? "running" : ci;
+ const fwd = !job.ci || job.ci === "unknown" || job.ci === "unreadable" ? job.ci_forwarded : null;
+ const forwarded = fwd ? `${tone(fwd.ci)} forwarded by the operator, display only` : null;
+ if (!job.ci) return forwarded ?? "not run yet";
  const sha = shortSha(job.head);
- return sha ? `${state} on ${sha}` : state;
+ const native = sha ? `${tone(job.ci)} on ${sha}` : tone(job.ci);
+ return forwarded ? `${native} · ${forwarded}` : native;
 }
 
 function clockFact(job: ViewerJob): string {

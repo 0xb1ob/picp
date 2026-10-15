@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AwaitingStore } from "../src/awaiting.ts";
+import { recordForwardedCi } from "../src/ci-evidence.ts";
 import { HANDOFF_PENDING_CAUSES, type HandoffInput, type HandoffWrite, handOffDecision, makeHandoff, mergePolicyOf, reviewThenHandoff } from "../src/human-handoff.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 import type { MergePermissionVerdict } from "../src/merge-permission.ts";
@@ -77,6 +78,16 @@ test("the port: repo changes nothing; a default verdict falls through; fallback 
 	assert.deepEqual([result?.step, result?.next], ["permit", "surface"]);
 	assert.match(fallback.written[0]?.facts.at(-1) ?? "", /not handed off, no merge checkpoint/);
 	assert.equal(awaiting.list().length, 0, "fallback declares no row");
+});
+
+test("forwarded CI is display-only (ask-81b54d83f0b2): a forwarded green never hands off an unreadable-CI PR", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	recordForwardedCi({ home: home.path, jobId: JOB, repo: "example/example-app", headSha: HEAD_A, result: "success", operatorQuote: "CI is green on that head." });
+	const port = makeHandoff({ registry: registryOf("human_handoff"), awaiting: () => new AwaitingStore({ home: home.path }) });
+	const fallback = input({ at: "fallback", verdict: undefined });
+	assert.equal((await port(fallback))?.next, "surface");
+	assert.match(fallback.written[0]?.facts.at(-1) ?? "", /CI or merge state unreadable — not handed off/);
 });
 
 test("the port: review first, then one row per PR, updated in place for a new head", async (t) => {

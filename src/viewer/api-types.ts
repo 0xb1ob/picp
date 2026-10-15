@@ -359,10 +359,14 @@ export interface ThreadsResponse { generated_at: string; availability: SourceAva
 /** `POST /api/threads/done` accepted: 202 once its `done` line is on disk. */
 export interface ThreadDoneResponse { id: string; state: "done"; done_at: string }
 export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[]; answers: AnswersView }
+/** `ci` in the native vocabulary (green, failed, in_progress); `url` only a plain https link. */
+export interface ForwardedCi { ci: string; observed_at: string; url: string | null }
 export interface FlightJob {
  id: string; project: string; title: string | null; phase: string; model: string | null; script_path: string | null;
  elapsed_seconds: number | null; limit_seconds: number | null;
  head: string | null; ci: string | null; review: string | null; review_attempts: number;
+ /** Operator-forwarded CI for `head`: shown only where native CI is absent, unknown or unreadable; never a gate. */
+ ci_forwarded?: ForwardedCi | null;
  routing: string | null; note: string | null; pr_url?: string | null;
  /** The live worker's context, when a screen has it. Overview fills this; absent on older payloads. */
  context?: ContextUsage | null;

@@ -12,7 +12,7 @@ import { AwaitingStore } from "../src/awaiting.ts";
 import { Integrator } from "../src/integrate.ts";
 import { MergeStore } from "../src/merges.ts";
 import { cpNext } from "../src/next.ts";
-import { pendingStackActions, StackFollowups } from "../src/stack-followups.ts";
+import { pendingStackActions, readStackFollowups, StackFollowups } from "../src/stack-followups.ts";
 import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
 import { checkWakeup } from "../src/wakeups.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -173,6 +173,36 @@ test("watch sweep: overlapping calls run one sweep", async (t) => {
 	assert.equal((await watch.sweep()).skipped, "a sweep is already running");
 	release();
 	assert.equal((await first).observed, 1);
+});
+
+test("watch sweep: a skipped apply keeps the prior cursors, so that page is re-read", async (t) => {
+	const b = await bench(t);
+	const claims = new Map([["cp-park", "resume" as const]]);
+	const watch = new AwaitingMergeWatch({ ...b.ports, claims, home: b.home, runner: async () => ({ data: { p0: { pullRequest: rawPr() } } }) });
+	const result = await watch.sweep();
+	assert.deepEqual(result.outcomes.map((outcome) => outcome.applied), ["skipped"]);
+	assert.deepEqual(result.catching_up, []);
+	assert.deepEqual(readWatchFile(b.home).prs[0]?.cursors, {});
+});
+
+test("watch sweep: a batch answered only by path-less errors (bad credentials) is a runner failure and backs off", async (t) => {
+	const b = await bench(t);
+	const watch = new AwaitingMergeWatch({ ...b.ports, home: b.home, runner: async () => ({ errors: [{ message: "Bad credentials" }] }) });
+	const result = await watch.sweep();
+	assert.equal(result.backoff_until, "2026-10-15T12:01:00Z");
+	assert.match(readWatchFile(b.home).last_error ?? "", /Bad credentials/);
+	assert.equal(result.observed, 0);
+});
+
+test("watch sweep: a live job whose PR is based on a parked branch gets a stack edge", async (t) => {
+	const live: FleetRecord = { ...parked("cp-child"), phase: "held" };
+	delete live.awaiting_merge;
+	const b = await bench(t, [parked(), live]);
+	const queries: string[] = [];
+	const answer = { data: { p0: { pullRequest: rawPr(), stacked: { nodes: [{ headRefName: "cp-child" }, { headRefName: "someone-else" }] } } } };
+	await new AwaitingMergeWatch({ ...b.ports, stackEdges: b.stacks, home: b.home, runner: async (query) => (queries.push(query), answer) }).sweep();
+	assert.match(queries[0]!, /stacked: pullRequests\(baseRefName: "cp-park", states: OPEN/);
+	assert.deepEqual(readStackFollowups(b.home).edges.map((edge) => [edge.parent_job, edge.child_job]), [["cp-park", "cp-child"]]);
 });
 
 test("checkWakeup: a pending-exit wake is stale once its job left that parking cycle", () => {

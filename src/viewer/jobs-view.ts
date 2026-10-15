@@ -13,7 +13,7 @@ import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObje
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
-import { jobCi, quiescent, recordedReview } from "./overview-jobs.ts";
+import { forwardedCi, jobCi, quiescent, recordedReview } from "./overview-jobs.ts";
 import { reportsView } from "./reports-view.ts";
 
 function records(state:ViewerState) {
@@ -70,7 +70,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
-   ci:jobCi(ci,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
+   ci:jobCi(ci,head),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,
    routing_facts:entry ? routingFacts(state,entry) : null,
    cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : null,pr_url:merged ? String(receipt.pr_url) : detail?.pr_url ?? null,pr_status:merged ? "merged" : detail?.pr_status ?? null,
