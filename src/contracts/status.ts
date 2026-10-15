@@ -6,6 +6,7 @@ import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type Jo
 import { type Failure, FailureSchema } from "./limits.ts";
 import { type JobRouting, JobRoutingSchema } from "./routing.ts";
 import { JOB_PHASES, type JobPhase, JobPhaseSchema, ReceiptSchema, ScriptObservedExitSchema, ScriptProcessSchema, UnreportedWorkSchema } from "./fleet.ts";
+import { type AwaitingMerge, AwaitingMergeSchema } from "./awaiting-merge.ts";
 import { QUESTION_MAX_CHARS, QUESTION_METHODS } from "./questions.ts";
 import { ReviewSurfaceSchema } from "./reviews.ts";
 import { type RunPhase, RunPhaseSchema } from "./runs.ts";
@@ -106,7 +107,7 @@ export type StatusInclude = (typeof STATUS_INCLUDES)[number];
 export const StatusIncludeSchema = StringEnum([...STATUS_INCLUDES]);
 
 /** Job phases a default (`active`) snapshot shows: everything not torn down. */
-export const STATUS_ACTIVE_PHASES: readonly JobPhase[] = Object.freeze(["launching", "waiting", "held", "failed"]);
+export const STATUS_ACTIVE_PHASES: readonly JobPhase[] = Object.freeze(["launching", "waiting", "held", "awaiting_merge", "failed"]);
 
 /**
  * One row of the fleet view. Two liveness facts are kept apart on purpose:
@@ -193,6 +194,8 @@ export const StatusJobSchema = Type.Object(
 		unreported_work: Type.Optional(UnreportedWorkSchema),
 		/** How a `done` job was closed (cp-8km); see `FleetRecordSchema`. */
 		closed_reason: Type.Optional(StringEnum(["gated", "forced"])),
+		/** The parking record of an `awaiting_merge` job; see `FleetRecordSchema`. */
+		awaiting_merge: Type.Optional(AwaitingMergeSchema),
 		/**
 		 * A question this job has asked the operator and nobody has answered yet
 		 * (T31). A fact with a timestamp, not a phase: the worker is still `waiting`
@@ -272,6 +275,7 @@ export type StatusJob = Replace<
 		time_source: StatusTimeSource;
 		failure?: Failure;
 		routing?: JobRouting;
+		awaiting_merge?: AwaitingMerge;
 	}
 >;
 
@@ -331,6 +335,8 @@ export const StatusSnapshotSchema = Type.Object(
 				launching: Type.Integer({ minimum: 0 }),
 				waiting: Type.Integer({ minimum: 0 }),
 				held: Type.Integer({ minimum: 0 }),
+				/** Parked with the team: no worker, no lease, so never part of `live` or `working`. */
+				awaiting_merge: Type.Integer({ minimum: 0 }),
 				done: Type.Integer({ minimum: 0 }),
 				failed: Type.Integer({ minimum: 0 }),
 				/** Workers whose pid answered the probe. */

@@ -6,14 +6,14 @@ import { roots } from "./explorer.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { decisions } from "./overview-decisions.ts";
 import { delivery } from "./overview-delivery.ts";
-import { blocked, closedToday, failedJobs, flights, shipped } from "./overview-jobs.ts";
+import { blocked, closedToday, failedJobs, flights, shipped, withTeam } from "./overview-jobs.ts";
 import { health, quota } from "./overview-health.ts";
 import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp } from "./overview-read.ts";
 import { operatorSession, readInbox } from "./control-inbox.ts";
 
 export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: number) => boolean): OverviewResponse {
  const decision = decisions(state, now);
- const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs", j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","done","failed","launching"].includes(String(j.phase)));
+ const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs", j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","awaiting_merge","done","failed","launching"].includes(String(j.phase)));
  const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
  const grants = source<Json[]>(() => readdirSync(join(state.stateDir,"mandates")).filter(n => /^md-[A-Za-z0-9_-]+\.json$/.test(n)).map(name => {
   const grant = parseObject(readBounded(join(state.stateDir,"mandates",name)));
@@ -35,7 +35,7 @@ export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: n
   generated_at:new Date(now).toISOString(), availability,
   awaiting:decision.awaiting, parent_questions:decision.parent_questions, decided_today:decision.decided_today,
   all_questions_delegated:decision.all_questions_delegated,
-  in_flight:flights(state,fleet.value,decision.escalations.value,now,rows), shipped_today:shipped(state,fleet.value,ledger.value,now,rows),
+  in_flight:flights(state,fleet.value,decision.escalations.value,now,rows), with_team:withTeam(fleet.value,now,rows), shipped_today:shipped(state,fleet.value,ledger.value,now,rows),
   closed_today:fleet.availability === "unavailable" || ledger.availability === "unavailable" ? null : closedToday(state,fleet.value,ledger.value,now),
   blocked:blocked(ledger.value,grants.value,fleet.value,now,ledger.availability !== "unavailable" && grants.availability !== "unavailable"),
   failed:failedJobs(state,fleet.value,ledger.value), main_ci:mainCi(state),

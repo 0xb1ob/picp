@@ -6,6 +6,7 @@ import { type Delivery, DeliverySchema, IsoTimestampSchema, JobIdSchema, type Jo
 import { isSafeScriptPath } from "./jobs.ts";
 import { type Failure, FailureSchema, JobHardBoundsSchema } from "./limits.ts";
 import { type JobRouting, JobRoutingSchema } from "./routing.ts";
+import { type AwaitingMerge, AwaitingMergeSchema } from "./awaiting-merge.ts";
 import type { Narrow, Replace } from "./internal.ts";
 
 // ---------------------------------------------------------------------------
@@ -16,13 +17,14 @@ import type { Narrow, Replace } from "./internal.ts";
  * Job phase (policy-level, from facts):
  *  waiting — dispatched, no envelope yet
  *  held    — envelope in, worker + lease deliberately kept alive (delivery:pr)
+ *  awaiting_merge — PR handed to the team (human_handoff): worker closed, lease returned, record on `awaiting_merge`
  *  done    — torn down: lease returned, worker observed closed
  *  failed  — worker died or a failure class was recorded; cause is on `failure`
  *
  * `stalled` from command-post is retired: with RPC facts a worker is either
  * running, settled, or observed-dead. There is nothing left to guess.
  */
-export const JOB_PHASES = ["launching", "waiting", "held", "done", "failed"] as const;
+export const JOB_PHASES = ["launching", "waiting", "held", "awaiting_merge", "done", "failed"] as const;
 export type JobPhase = (typeof JOB_PHASES)[number];
 export const JobPhaseSchema = StringEnum([...JOB_PHASES]);
 
@@ -313,12 +315,14 @@ export const FleetRecordSchema = Type.Object(
 		 * Absent on a job never torn down; `"gated"` on every normal teardown.
 		 */
 		closed_reason: Type.Optional(StringEnum(["gated", "forced"])),
+		/** The parking record: required while `awaiting_merge`, kept as history once `done`, absent otherwise. */
+		awaiting_merge: Type.Optional(AwaitingMergeSchema),
 	},
 	{ additionalProperties: false },
 );
 export type FleetRecord = Replace<
 	Static<typeof FleetRecordSchema>,
-	{ kind: JobKind; delivery: Delivery; phase: JobPhase; worker: WorkerHandle; failure?: Failure; routing?: JobRouting }
+	{ kind: JobKind; delivery: Delivery; phase: JobPhase; worker: WorkerHandle; failure?: Failure; routing?: JobRouting; awaiting_merge?: AwaitingMerge }
 >;
 
 export type ScriptFleetRecord = Omit<FleetRecord, "worker" | "executor" | "script_path" | "script_process"> & {
@@ -369,6 +373,24 @@ export function validateFleetFile(value: unknown): ValidationResult<FleetFile> {
 		if (job.phase === "failed" && !job.failure) {
 			errors.push(`/jobs/${job.job_id}: phase "failed" requires a failure with a class (never guess a cause)`);
 		}
+		errors.push(...parkedRecordErrors(job));
 	}
 	return errors.length === 0 ? result : { ok: false, errors };
+}
+
+/** Parked means a reported ship/pr job whose worker was observed closed and whose lease is gone. */
+function parkedRecordErrors(job: Static<typeof FleetRecordSchema>): string[] {
+	const at = `/jobs/${job.job_id}`;
+	if (job.phase !== "awaiting_merge") {
+		return job.awaiting_merge && job.phase !== "done" ? [`${at}: awaiting_merge is a parking record; phase "${job.phase}" cannot carry one`] : [];
+	}
+	const parked = job.awaiting_merge;
+	if (!parked) return [`${at}: phase "awaiting_merge" requires the awaiting_merge parking record`];
+	const errors: string[] = [];
+	if (job.kind !== "ship" || job.delivery !== "pr") errors.push(`${at}: only a ship/pr job can await a merge`);
+	if (!job.reported_at) errors.push(`${at}: phase "awaiting_merge" requires reported_at (a handoff follows an envelope)`);
+	if (!job.worker?.exited_at) errors.push(`${at}: phase "awaiting_merge" requires an observed worker exit (no live worker)`);
+	if (job.lease_id !== undefined || job.checkpoint_ref !== undefined) errors.push(`${at}: phase "awaiting_merge" holds no lease or checkpoint ref`);
+	if (parked.branch !== job.branch) errors.push(`${at}: awaiting_merge.branch "${parked.branch}" is not the job branch "${job.branch}"`);
+	return errors;
 }

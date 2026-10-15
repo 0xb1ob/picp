@@ -121,7 +121,8 @@ const PHASE_RANK: Readonly<Record<JobPhase, number>> = Object.freeze({
 	waiting: 1,
 	held: 2,
 	failed: 3,
-	done: 4,
+	awaiting_merge: 4,
+	done: 5,
 });
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,7 @@ export function assembleStatus(facts: StatusFacts): StatusSnapshot {
 			// re-derived: `/status` must not run git of its own.
 			...(record.unreported_work ? { unreported_work: record.unreported_work } : {}),
 			...(record.closed_reason ? { closed_reason: record.closed_reason } : {}),
+			...(record.awaiting_merge ? { awaiting_merge: record.awaiting_merge } : {}),
 			...(facts.questions?.get(record.job_id) ? { open_question: facts.questions.get(record.job_id) } : {}),
 			...(facts.blockers?.get(record.job_id) ? { blockers: facts.blockers.get(record.job_id) } : {}),
 			// cp-status-scope-risk: carried through from the fleet record, never
@@ -351,6 +353,7 @@ export function assembleStatus(facts: StatusFacts): StatusSnapshot {
 			launching: jobs.filter((job) => job.phase === "launching").length,
 			waiting: jobs.filter((job) => job.phase === "waiting").length,
 			held: jobs.filter((job) => job.phase === "held").length,
+			awaiting_merge: jobs.filter((job) => job.phase === "awaiting_merge").length,
 			done: jobs.filter((job) => job.phase === "done").length,
 			failed: jobs.filter((job) => job.phase === "failed").length,
 			live,
@@ -568,7 +571,7 @@ function row(cells: readonly string[], title: string): string {
 /**
  * The one-line fleet headline, shared by the table and the widget.
  *
- * `waiting`/`held`/`failed`/`done` are disjoint job phases and sum to the
+ * `waiting`/`held`/`awaiting_merge`/`failed`/`done` are disjoint job phases and sum to the
  * total; `live` and `working` are not a second job count, they are facets of
  * the SAME jobs (a held job can be live, a live job can be working). Rendering
  * them all in one flat list ('1 job · 1 held · 1 live · 1 working') reads as
@@ -579,7 +582,7 @@ export function statusHeadline(snapshot: StatusSnapshot): string {
 	const { counts } = snapshot;
 	const total = `${counts.jobs} job${counts.jobs === 1 ? "" : "s"}`;
 	const phaseParts: string[] = [];
-	for (const phase of ["waiting", "held", "failed", "done"] as const) {
+	for (const phase of ["waiting", "held", "awaiting_merge", "failed", "done"] as const) {
 		if (counts[phase] > 0) phaseParts.push(`${counts[phase]} ${phase}`);
 	}
 	const livenessParts: string[] = [];

@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { BlockedJob, FailedJob, FlightJob, ShippedJob } from "./api-types.ts";
+import type { BlockedJob, FailedJob, FlightJob, ShippedJob, TeamJob } from "./api-types.ts";
 import type { JobRow } from "./fleet-view.ts";
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { SHA } from "./git-read.ts";
@@ -43,6 +43,18 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
    note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null,
    context:workerContext(state,id,row?.model,windows), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null};
  });
+}
+/** Quiescent parked jobs (`awaiting_merge`, no pending CP work). Approvals and CI stay null (unknown) until observed. */
+export function withTeam(jobs: Json[], now: number, rows: readonly JobRow[]): TeamJob[] {
+ return jobs.flatMap(job => {
+  const parked = obj(job.awaiting_merge);
+  if (job.phase !== "awaiting_merge" || !parked || parked.pending !== undefined || !timestamp(parked.handed_at)) return [];
+  const id = String(job.job_id); const head = str(parked.head_sha); const pr = str(parked.pr_url);
+  if (!head || !SHA.test(head) || !pr || !isSafeChangeRequestUrl(pr)) return [];
+  return [{id, project:String(job.project), title:rows.find(r => r.job_id === id)?.title ?? null, pr_url:pr, head, base:str(parked.base) ?? "",
+   handed_at:parked.handed_at, age_seconds:Math.max(0,(now - Date.parse(parked.handed_at))/1000), frozen_seconds:nonnegative(parked.frozen_seconds) ?? 0,
+   approvals:null, approvals_required:null, ci:null, last_human_activity_at:timestamp(parked.last_human_activity_at) ? parked.last_human_activity_at : null}];
+ }).sort((a,b) => a.handed_at.localeCompare(b.handed_at));
 }
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
 export function mergeReceipt(state: ViewerState, id: string): Json | undefined {
