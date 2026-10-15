@@ -3586,6 +3586,21 @@ project name — the same name `cp_integrate` resolves the canonical clone from;
 `src/integrate.ts` performs no lookup of its own. An unreadable registry fails
 closed: surface, nothing merged.
 
+**New projects default to it, and onboarding detects the flow.** `cp_project add`
+without `policy` registers `human_handoff`. For a `delivery:pr` project on a GitHub
+remote it then runs one read-only probe (`src/merge-policy-detect.ts`: `gh api
+user`, `gh repo view`, the base branch's `rules/branches/<base>`, and a CODEOWNERS
+file at the root, `.github/` or `docs/` on the clone's base) and sets `repo` only
+for a **solo** repo: owner is the authenticated login, not org-owned, no required
+approving or code-owner review, no CODEOWNERS. Anything else is a team repo; a
+failed probe stays `human_handoff` (fail safe). An explicit `policy` on add wins and
+skips the probe; a re-add of a registered project neither probes nor changes it.
+The add output prints the policy, the signals behind it and the one-line
+`cp_project merge_policy` command to change it. Legacy entries without the key stay
+`repo`; no migration. A team-owned repo is configured here, never by a standing
+order or a per-job `integration_hold`. Under `repo`, a `reviews` block raises
+`merge_refused` plus a merge-pending row; under `human_handoff` it hands off quietly.
+
 **The handoff happens only after green CI and a passing review on the current
 head.** The hook sits after the CI read (green, or the repository positively has
 no CI) and after the draft step (a reviewed draft is readied first, exactly as

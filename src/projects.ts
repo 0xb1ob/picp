@@ -55,6 +55,8 @@ export interface RegisterInput {
 	notes?: string;
 	base_branch?: string;
 	forge?: ForgeConfig;
+	/** Absent or `repo` stores no key (absent means repo). */
+	merge_policy?: MergePolicy;
 }
 
 /**
@@ -243,7 +245,7 @@ export class ProjectRegistry {
 
 	/** Set who lands a reviewed, green PR; `repo` (the default) deletes the key. */
 	async setMergePolicy(name: string, policy: MergePolicy): Promise<Project> {
-		if (policy !== "repo" && policy !== "human_handoff") throw new ProjectError(`unknown merge policy "${String(policy)}" — repo or human_handoff`);
+		checkMergePolicy(policy);
 		await this.mutate((projects) => {
 			const index = projects.findIndex((entry) => entry.name === name);
 			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
@@ -327,6 +329,7 @@ export class ProjectRegistry {
 		}
 		const cloneUrl = input.clone_url.trim();
 		if (cloneUrl.length === 0) throw new ProjectError(`project ${input.name} needs a clone url`);
+		if (input.merge_policy !== undefined) checkMergePolicy(input.merge_policy);
 
 		const project: Project = {
 			name: input.name,
@@ -336,6 +339,7 @@ export class ProjectRegistry {
 			...(input.notes !== undefined ? { notes: input.notes } : {}),
 			...(input.base_branch !== undefined ? { base_branch: input.base_branch } : {}),
 			...(input.forge ? { forge: checkedForge(input.name, cloneUrl, input.forge) } : {}),
+			...(input.merge_policy === "human_handoff" ? { merge_policy: "human_handoff" as const } : {}),
 		};
 		await this.mutate((projects) => {
 			const existing = projects.find((entry) => entry.name === input.name);
@@ -550,12 +554,18 @@ export function formatForge(forge: ForgeConfig): string {
 	].join("  ");
 }
 
-/** The result of registering (or adopting) one project, as one line. */
-export function formatEnsured(result: EnsureCloneResult): string {
+/** The result of registering (or adopting) one project; `mergeNote` says why the merge policy is what it is. */
+export function formatEnsured(result: EnsureCloneResult, mergeNote?: string): string {
+	const { name, merge_policy: policy = "repo" } = result.project;
 	return [
-		`${result.project.name} ready (delivery:${result.project.delivery})`,
+		`${name} ready (delivery:${result.project.delivery})`,
 		`  clone: ${result.path} (${result.cloned ? "cloned now" : "already present"})`,
 		`  url:   ${result.project.clone_url}`,
-		`  use it with the br label project:${result.project.name}`,
+		`  merge: ${policy}${mergeNote ? ` (${mergeNote})` : ""} — change with cp_project merge_policy name:${name} policy:${policy === "repo" ? "human_handoff" : "repo"}`,
+		`  use it with the br label project:${name}`,
 	].join("\n");
+}
+
+function checkMergePolicy(policy: unknown): void {
+	if (policy !== "repo" && policy !== "human_handoff") throw new ProjectError(`unknown merge policy "${String(policy)}" — repo or human_handoff`);
 }

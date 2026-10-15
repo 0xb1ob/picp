@@ -20,6 +20,7 @@ import {
 	sameRemote,
 } from "../src/projects.ts";
 import { Ledger } from "../src/ledger.ts";
+import { classifyMergeFlow, detectMergePolicy, ghMergeFlowProbe, type MergeFlowFacts } from "../src/merge-policy-detect.ts";
 import { createScratchHome, createScratchLedger, createScratchRepo, git, type ScratchHome, type ScratchRepo } from "./harness/index.ts";
 
 
@@ -305,6 +306,7 @@ test("cp_project's path: register from the session, twice, and render it", async
 	assert.match(rendered, /web ready \(delivery:pr\)/);
 	assert.match(rendered, /cloned now/);
 	assert.match(rendered, /project:web/, "the operator is told the label to use");
+	assert.match(rendered, /merge: repo — change with cp_project merge_policy name:web policy:human_handoff/, "registry default is unchanged");
 
 	// Adding the same project again is a no-op that says so — never a second clone.
 	const again = await registry.ensureProject({ name: "web", clone_url: repo.remote as string, delivery: "pr" });
@@ -459,6 +461,93 @@ test("merge_policy round-trips: absent is repo, human_handoff persists and rende
 	(file.projects[0] as Record<string, unknown>).merge_policy = "auto";
 	writeFileSync(registry.file, JSON.stringify(file));
 	assert.throws(() => registry.read(), /violates the registry contract/);
+});
+
+test("register stores merge_policy human_handoff; repo and absent store no key; junk is refused and writes nothing", async (t) => {
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	assert.equal((await registry.register({ name: "team", clone_url: "https://github.com/o/team.git", merge_policy: "human_handoff" })).merge_policy, "human_handoff");
+	assert.ok(!("merge_policy" in (await registry.register({ name: "solo", clone_url: "https://github.com/o/solo.git", merge_policy: "repo" }))));
+	assert.ok(!("merge_policy" in (await registry.register({ name: "legacy", clone_url: "https://github.com/o/legacy.git" }))));
+	const before = readFileSync(registry.file, "utf8");
+	await assert.rejects(registry.register({ name: "junk", clone_url: "https://github.com/o/junk.git", merge_policy: "auto" as never }), /unknown merge policy "auto"/);
+	assert.equal(readFileSync(registry.file, "utf8"), before);
+});
+
+const SOLO: MergeFlowFacts = { owner: "me", login: "Me", inOrganization: false, requiredReviews: false, codeOwners: false };
+
+test("classifyMergeFlow: solo only when every signal agrees; a failed probe is human_handoff", async () => {
+	assert.deepEqual(classifyMergeFlow(SOLO), { policy: "repo", note: "detected solo repo: owned by Me, no required reviews, no CODEOWNERS" });
+	assert.deepEqual(classifyMergeFlow({ ...SOLO, owner: "acme", inOrganization: true }), { policy: "human_handoff", note: "detected team repo: org-owned" });
+	assert.deepEqual(classifyMergeFlow({ ...SOLO, owner: "friend" }), { policy: "human_handoff", note: "detected team repo: owned by friend, not Me" });
+	assert.equal(classifyMergeFlow({ ...SOLO, requiredReviews: true }).note, "detected team repo: required reviews");
+	assert.equal(classifyMergeFlow({ ...SOLO, inOrganization: true, codeOwners: true }).note, "detected team repo: org-owned, CODEOWNERS");
+	const failed = await detectMergePolicy(async () => { throw new Error("gh: HTTP 403"); }, { cwd: "/", repo: "o/r" });
+	assert.deepEqual(failed, { policy: "human_handoff", note: "detection failed, fail safe: gh: HTTP 403" });
+});
+
+test("ghMergeFlowProbe reads login, repo view, base rules and CODEOWNERS on the base; an unreadable call throws", async () => {
+	const calls: string[] = [];
+	const answers: Record<string, string> = {
+		"gh api user --jq .login": "me\n",
+		"gh repo view o/r --json owner,isInOrganization,defaultBranchRef": JSON.stringify({ owner: { login: "me" }, isInOrganization: false, defaultBranchRef: { name: "main" } }),
+		"gh api repos/{owner}/{repo}/rules/branches/main": JSON.stringify([{ type: "pull_request", parameters: { required_approving_review_count: 0, require_code_owner_review: true } }]),
+		"git ls-tree --name-only origin/main -- CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS": ".github/CODEOWNERS\n",
+	};
+	const exec = async (command: string, args: readonly string[]) => {
+		const key = [command, ...args].join(" ");
+		calls.push(key);
+		if (!(key in answers)) throw new Error(`unexpected ${key}`);
+		return answers[key] as string;
+	};
+	assert.deepEqual(await ghMergeFlowProbe(exec)({ cwd: "/clone", repo: "o/r" }), { owner: "me", login: "me", inOrganization: false, requiredReviews: true, codeOwners: true });
+	assert.deepEqual(calls, Object.keys(answers));
+	answers["gh repo view o/r --json owner,isInOrganization,defaultBranchRef"] = "{}";
+	await assert.rejects(ghMergeFlowProbe(exec)({ cwd: "/clone", repo: "o/r" }), /answered without owner/);
+});
+
+test("cp_project add: new projects default to human_handoff, detection may set repo, explicit policy skips it, re-add changes nothing", async (t) => {
+	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	let facts: MergeFlowFacts | Error = SOLO;
+	const probed: string[] = [];
+	const probe = async (input: { repo: string }) => {
+		probed.push(input.repo);
+		if (facts instanceof Error) throw facts;
+		return facts;
+	};
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never, probe);
+	const run = async (params: Record<string, unknown>) =>
+		((await tools.get("cp_project")!.execute("c", { action: "add", ...params }, undefined, undefined, {})) as { content: Array<{ text: string }> }).content[0]!.text;
+	// A GitHub remote without network: the canonical clone is already in place with that origin.
+	const addGithub = (name: string, extra: Record<string, unknown> = {}) => {
+		const url = `https://github.com/o/${name}.git`;
+		execFileSync("git", ["clone", "-q", withRepo(t, name).remote as string, registry.pathOf(name)]);
+		git(registry.pathOf(name), "remote", "set-url", "origin", url);
+		return run({ name, clone_url: url, ...extra });
+	};
+
+	const local = await run({ name: "local", clone_url: withRepo(t, "local").remote });
+	assert.equal(registry.require("local").merge_policy, "human_handoff");
+	assert.match(local, /merge: human_handoff \(default for new projects; not a GitHub remote, so no detection\) — change with cp_project merge_policy name:local policy:repo/);
+
+	const solo = await addGithub("solo");
+	assert.ok(!("merge_policy" in registry.require("solo")));
+	assert.match(solo, /merge: repo \(detected solo repo: owned by Me, no required reviews, no CODEOWNERS\) — change with cp_project merge_policy name:solo policy:human_handoff/);
+
+	facts = { ...SOLO, owner: "acme", inOrganization: true, codeOwners: true };
+	assert.match(await addGithub("team"), /merge: human_handoff \(detected team repo: org-owned, CODEOWNERS\)/);
+	assert.equal(registry.require("team").merge_policy, "human_handoff");
+
+	facts = new Error("gh: HTTP 403");
+	assert.match(await addGithub("unknown"), /merge: human_handoff \(detection failed, fail safe: gh: HTTP 403\)/);
+	assert.deepEqual(probed, ["o/solo", "o/team", "o/unknown"]);
+
+	assert.match(await addGithub("explicit", { policy: "repo" }), /merge: repo \(set explicitly\)/);
+	assert.ok(!("merge_policy" in registry.require("explicit")));
+	assert.match(await run({ name: "solo", clone_url: "https://github.com/o/solo.git" }), /merge: repo \(existing project, unchanged\)/);
+	assert.equal(probed.length, 3, "an explicit policy or a re-add never probes");
 });
 
 test("the ledger refuses a job in an archived project with a clear message", async (t) => {

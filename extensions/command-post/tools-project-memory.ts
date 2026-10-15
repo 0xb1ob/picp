@@ -8,11 +8,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatMemoryStatus } from "../../src/memory.ts";
 import { formatCurationAudit, formatCurationPlan, formatMemoryReport, PROMOTABLE_TIERS, REJECT_CAUSES } from "../../src/curation.ts";
-import type { ForgeConfig } from "../../src/forge-url.ts";
+import { type ForgeConfig, resolveForgeRepository } from "../../src/forge-url.ts";
+import type { MergePolicy } from "../../src/contracts.ts";
+import { detectMergePolicy, ghMergeFlowProbe, type MergeFlowProbe } from "../../src/merge-policy-detect.ts";
 import { formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
-export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
+/** `probe` reads who merges a newly added GitHub project; injectable so tests need no network. */
+export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps, probe: MergeFlowProbe = ghMergeFlowProbe()): void {
 	const { commandPost, setLive } = deps;
 
 	// Project registration (cp-sdm). Until this existed, `cp_dispatch` refused
@@ -31,6 +34,7 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
 			"reviewer_model sets the exact model for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
 			"forge declares a self-managed GitLab (kind gitlab, web_base_url, optional api_base_url, token_env = the variable NAME); null clears. Never pass a token value.",
+			"cp_project add without policy detects who merges: a solo GitHub repo gets repo, a team or unreadable one human_handoff. A team-owned repo is merge_policy, never a standing order.",
 		],
 		parameters: Type.Object({
 			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model", "forge"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, set/clear reviewer_model, or set/clear its forge" }),
@@ -53,7 +57,7 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 				),
 			),
 			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "reviewer_model: exact provider/model for plan gates and diff reviews; null clears. Eligible mandate preference takes precedence; unusable models refuse." })),
-			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy: repo (default; cp_integrate merges when the repository permits) or human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post)" })),
+			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy, or add's policy (wins over detection): human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post) or repo (cp_integrate merges when the repository permits). add without it detects: a solo GitHub repo gets repo, anything else human_handoff" })),
 			clone_url: Type.Optional(Type.String({ description: "git remote to clone/fetch from; required for add" })),
 			delivery: Type.Optional(
 				StringEnum(["pr", "local"], { description: "Default delivery for jobs in this repo (default: pr)" }),
@@ -117,18 +121,29 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 				};
 			}
 			if (!params.clone_url) throw new Error("cp_project add needs a clone_url");
+			const existed = registry.get(params.name) !== undefined;
 			// ensureProject is register-if-absent plus clone-on-demand, so adding a
 			// project twice is a no-op that says so rather than a second clone.
-			const result = await registry.ensureProject({
+			let result = await registry.ensureProject({
 				name: params.name,
 				clone_url: params.clone_url,
 				delivery: (params.delivery ?? "pr") as "pr" | "local",
+				merge_policy: (params.policy ?? "human_handoff") as MergePolicy,
 				...(params.base_branch ? { base_branch: params.base_branch } : {}),
 				...(params.notes ? { notes: params.notes } : {}),
 				...(params.forge ? { forge: params.forge as ForgeConfig } : {}),
 			});
+			let mergeNote = existed ? "existing project, unchanged" : params.policy ? "set explicitly" : "default for new projects";
+			if (!existed && !params.policy && result.project.delivery === "pr") {
+				const forge = resolveForgeRepository(result.project.clone_url, result.project.forge);
+				if (forge.ok && forge.repository.kind === "github") {
+					const decision = await detectMergePolicy(probe, { cwd: result.path, repo: forge.repository.path, ...(result.project.base_branch ? { base: result.project.base_branch } : {}) });
+					if (decision.policy === "repo") result = { ...result, project: await registry.setMergePolicy(result.project.name, "repo") };
+					mergeNote = decision.note;
+				} else mergeNote += "; not a GitHub remote, so no detection";
+			}
 			return {
-				content: [{ type: "text", text: formatEnsured(result) }],
+				content: [{ type: "text", text: formatEnsured(result, mergeNote) }],
 				details: result as unknown as Record<string, unknown>,
 			};
 		},
