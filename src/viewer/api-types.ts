@@ -369,7 +369,10 @@ export interface FlightJob {
  cost_usd?: number | null;
 }
 export interface ShippedJob { id: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
-/** A parked PR waiting on a human merge. `age_seconds` grows; `frozen_seconds` is execution time, stopped at handoff. Null: unknown. */
+/**
+ * A parked PR waiting on a human merge. `age_seconds` grows; `frozen_seconds` is execution time, stopped at handoff.
+ * Null: unknown.
+ */
 export interface TeamJob {
  id: string; project: string; title: string | null; pr_url: string; head: string; base: string; handed_at: string;
  age_seconds: number; frozen_seconds: number; approvals: number | null; approvals_required: number | null;
@@ -420,7 +423,10 @@ export interface OverviewResponse {
  awaiting: {count: number | null; items: Ask[]}; parent_questions: Question[];
  decided_today: {count: number | null; items: Decision[]; worth_count: null; by_you?: number | null}; all_questions_delegated: boolean;
  in_flight: FlightJob[]; shipped_today: ShippedJob[];
- /** Quiescent `awaiting_merge` jobs: handed to the team, no worker, lease or slot. A pending resume is CP work, not here. */
+ /**
+  * Quiescent `awaiting_merge` jobs: handed to the team, no worker, lease or slot.
+  * A pending resume is CP work and sits in `in_flight`, not here.
+  */
  with_team: TeamJob[];
  /** Jobs done today without a merge receipt; with `shipped_today`, the Board's "Landed today". Null: fleet or ledger unreadable. */
  closed_today: number | null;
