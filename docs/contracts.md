@@ -6121,7 +6121,8 @@ first failed (409).
 
 **The dashboard queue (cp-y43c).** A composer message sent while the session is busy, or while an earlier one waits,
 is held by the bridge, not handed to pi's `followUp` queue: `outcome queued` is journaled and the reply carries
-`editable: true`. Each `agent_settled` (`settled()`) hands over the oldest one — at most one per settled turn, FIFO —
+`editable: true`. Each `agent_settled` (`settled()`, run from a macrotask so that pi's own settle-time turns start
+first) hands over the oldest one — at most one per settled turn, FIFO —
 as a prompt (a `followUp` if pi is busy again at that instant), journaling `injected` **before** pi is called. Until
 that line, `POST /api/operator/queue` `{"op":"edit","id","text"}` / `{"op":"cancel","id"}` (session CSRF token,
 409 offline) changes it, journaling `edited` / `outcome cancelled`; an edit's text is treated like a composer send
