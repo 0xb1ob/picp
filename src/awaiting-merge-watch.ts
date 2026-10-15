@@ -211,7 +211,10 @@ interface RawPr {
 	reviews: Page<{ id: string; state: string; body: string; createdAt: string; author: Author | null; comments: { totalCount: number } }>;
 }
 
-/** One aliased `repository.pullRequest` (plus open PRs based on its branch) per target and `rateLimit`; strings are JSON-quoted. */
+/**
+ * One aliased `repository.pullRequest` (plus open PRs based on its branch) per target and `rateLimit`;
+ * strings are JSON-quoted.
+ */
 export function batchQuery(batch: readonly (Pick<Target, "owner" | "name" | "number" | "prior"> & { branch?: string })[]): string {
 	const after = (cursor: string | undefined) => (cursor ? `, after: ${JSON.stringify(cursor)}` : "");
 	const author = "author { login __typename }";

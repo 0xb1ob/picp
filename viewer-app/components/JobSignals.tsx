@@ -9,10 +9,18 @@ export const reviewText = (job:ViewerJob) => {
  return job.review_attempts ? `review ${job.review_attempts}/5 · ${verdict}` : "review not started";
 };
 
+/** What a parked job's pending CP step asks for; null when it is quiescent (with the team). */
+export const parkedPendingText = (kind: string | null | undefined): string | null => kind ? ({
+ changes_requested:"changes requested on the PR", human_comment:"new human comment to address", head_moved:"head moved: review and CI again",
+ base_changed:"base changed: revalidation pending", closed_unmerged:"PR closed unmerged: abandon or reopen",
+} as Record<string,string>)[kind] ?? `pending: ${kind}` : null;
 /** The red badge for a CI read the token was refused (ask-81b54d83f0b2): never "no CI yet". */
 export const CI_UNREADABLE_LABEL = "CI unreadable — token lacks Actions/checks read";
 export const CI_READ_NEEDED = "needs fine-grained PAT: Actions read + Checks read + Commit statuses read; classic: repo";
-/** `no CI yet` when nothing has run; the red badge when the token was refused; otherwise `CI <state> <sha7>`, `(forwarded)` when only the operator saw it. */
+/**
+ * `no CI yet` when nothing has run; the red badge when the token was refused;
+ * otherwise `CI <state> <sha7>`, `(forwarded)` when only the operator saw it.
+ */
 export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
  const cls = (tone: string) => `job-ci job-ci-${tone}${badge ? " job-badge" : ""}`;
  const tone = (ci: string) => ci === "failed" ? "red" : ci === "in_progress" ? "running" : ci;

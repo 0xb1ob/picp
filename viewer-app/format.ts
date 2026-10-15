@@ -34,8 +34,8 @@ export function prNumber(url: string | null): string | null {
  const segment = url.split("/").filter(Boolean).at(-1);
  return segment ? `#${segment}` : null;
 }
-/** List phase label. Fleet `waiting` with no live run reads "no run status"; every other phase is unchanged. */
+/** List phase label: fleet `waiting` with no live run is "no run status", `awaiting_merge` "with the team". */
 export function phaseText(phase: string): string {
- return phase === "waiting" ? "no run status" : phase;
+ return phase === "waiting" ? "no run status" : phase === "awaiting_merge" ? "with the team" : phase;
 }
 export const percent = (value: number, max: number): number => Math.min(100,Math.max(0,max > 0 ? value/max*100 : 0));

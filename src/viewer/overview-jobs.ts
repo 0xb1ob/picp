@@ -5,10 +5,12 @@ import type { JobRow } from "./fleet-view.ts";
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { SHA } from "./git-read.ts";
 import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
-import { nonnegative, strings, timestamp, today } from "./overview-read.ts";
+import { nonnegative, parseObject, strings, timestamp, today } from "./overview-read.ts";
 import { routingText } from "./overview-health.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { compareActiveGrants } from "../grant-order.ts";
+import { fileCache } from "./file-cache.ts";
+import { readLines, startOffset } from "./tail.ts";
 /** The job's recorded reviews: attempt count, and the latest untruncated verdict for `head` (or a patch-equivalent pass). */
 export function recordedReview(state: ViewerState, id: string, head: string | null): {review: Json | undefined; attempts: string[]} {
  let names: string[] = []; try { names = readdirSync(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
@@ -23,8 +25,30 @@ export const CI_UNREADABLE = "unreadable";
 /** A ci-watch row's CI for `head`; a refused read is shown whatever head it was for, never as "no CI yet". */
 export const jobCi = (row: Json | undefined, head: string | null | undefined): string | null =>
  row?.last_ci === CI_UNREADABLE ? CI_UNREADABLE : head && row?.head_sha === head ? str(row.last_ci) ?? null : null;
+const CI_EVENTS_BYTES = 256 * 1024;
+const ciEvents = fileCache((path: string) => readLines(path, startOffset(path, undefined, CI_EVENTS_BYTES).offset, CI_EVENTS_BYTES).lines
+ .map(l => parseObject(l.text)).filter((e): e is Json => e?.source === "cp" && e.type === "ci_observed")
+ .flatMap(e => { const p = obj(e.payload); const ci = p?.event === "ci_green" ? "green" : p?.event === "ci_failed" ? "failed" : null; const head = str(p?.head_sha);
+  return ci && head ? [{ci, head}] : []; }));
+/** CI for `head`: the ci-watch row, else the last `ci_observed` event for it (a parked job's watch row is pruned). */
+export function headCi(state: ViewerState, id: string, row: Json | undefined, head: string | null): string | null {
+ const watched = jobCi(row,head);
+ if (watched || !head || !isSafeId(id)) return watched;
+ try { return ciEvents(join(state.stateDir,"runs",id,"events.jsonl")).findLast(e => e.head === head)?.ci ?? null; } catch { return null; }
+}
+/** A parked job's current head: a moved head (pending `head_moved`) first, else the handed-off one. */
+export function parkedHead(job: Json | undefined): string | null {
+ const parked = job?.phase === "awaiting_merge" ? obj(job.awaiting_merge) : undefined;
+ const head = str(obj(parked?.pending)?.head_sha) ?? str(parked?.head_sha);
+ return head && SHA.test(head) ? head : null;
+}
+/** Execution seconds frozen at parking, null when the job is not parked. */
+export const parkedSeconds = (job: Json | undefined): number | null => job?.phase === "awaiting_merge" ? nonnegative(obj(job.awaiting_merge)?.frozen_seconds) : null;
 const FORWARDED_VIEW: Record<string, string> = {success:"green", failure:"failed", pending:"in_progress"};
-/** The newest operator-forwarded CI for `head` (runs/<id>/ci-evidence.json, src/ci-evidence.ts); display-only, null when none. */
+/**
+ * The newest operator-forwarded CI for `head` (runs/<id>/ci-evidence.json, src/ci-evidence.ts);
+ * display-only, null when none.
+ */
 export function forwardedCi(state: ViewerState, id: string, head: string | null | undefined): ForwardedCi | null {
  const list = isSafeId(id) && head ? readObject(join(state.stateDir,"runs",id,"ci-evidence.json"))?.observations : undefined;
  const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
@@ -50,10 +74,10 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
   const id = String(job.job_id); const status = readStatus(state,id);
   const ci = ciRows.find(row => row?.job_id === id);
   const envelope = obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
-  const head = [ci?.head_sha,envelope?.head_sha].find((v): v is string => typeof v === "string" && SHA.test(v)) ?? null;
+  const head = parkedHead(job) ?? [ci?.head_sha,envelope?.head_sha].find((v): v is string => typeof v === "string" && SHA.test(v)) ?? null;
   const started = status?.started_at ?? job.dispatched_at;
   const exited = status?.exited_at ?? obj(job.worker)?.exited_at;
-  const elapsed = timestamp(started) ? Math.max(0, ((timestamp(exited) ? Date.parse(exited) : now) - Date.parse(started))/1000) : null;
+  const elapsed = parkedSeconds(job) ?? (timestamp(started) ? Math.max(0, ((timestamp(exited) ? Date.parse(exited) : now) - Date.parse(started))/1000) : null);
   const {review, attempts} = recordedReview(state,id,head);
   const row = rows.find(r => r.job_id === id);
   const runPhase = str(status?.phase);
@@ -61,22 +85,29 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
    phase:job.phase === "held" || job.phase === "awaiting_merge" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
    model:row?.model ?? null, script_path:job.executor === "script" ? str(job.script_path) ?? "script" : null,
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
-   ci:jobCi(ci,head), ci_forwarded:forwardedCi(state,id,head),
+   ci:headCi(state,id,ci,head), ci_forwarded:forwardedCi(state,id,head), parked_pending:str(obj(obj(job.awaiting_merge)?.pending)?.kind) ?? null,
    review:str(review?.verdict) ?? null, review_attempts:Math.min(5,attempts.length), routing:routingText(state,job),
    note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null,
    context:workerContext(state,id,row?.model,windows), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null};
  });
 }
 /** Quiescent parked jobs (`awaiting_merge`, no pending CP work). Approvals and CI stay null (unknown) until observed. */
-export function withTeam(jobs: Json[], now: number, rows: readonly JobRow[]): TeamJob[] {
+export function withTeam(state: ViewerState, jobs: Json[], now: number, rows: readonly JobRow[]): TeamJob[] {
+ const watched = readObject(join(state.stateDir,"awaiting-merge-watch.json"))?.prs;
+ const watchRows = Array.isArray(watched) ? watched.map(obj) : [];
  return jobs.flatMap(job => {
   const parked = obj(job.awaiting_merge);
   if (!quiescent(job) || !parked || !timestamp(parked.handed_at)) return [];
   const id = String(job.job_id); const head = str(parked.head_sha); const pr = str(parked.pr_url);
   if (!head || !SHA.test(head) || !pr || !isSafeChangeRequestUrl(pr)) return [];
+  // Only this cycle's observation of this head counts; an older cycle's approvals describe another hand-off.
+  const seen = watchRows.find(r => r?.job_id === id && r.cycle === parked.cycle && r.head_sha === head);
+  const activity = [parked.last_human_activity_at,seen?.last_human_activity_at].filter(timestamp).sort().at(-1) ?? null;
+  const required = nonnegative(seen?.approvals_required);
   return [{id, project:String(job.project), title:rows.find(r => r.job_id === id)?.title ?? null, pr_url:pr, head, base:str(parked.base) ?? "",
    handed_at:parked.handed_at, age_seconds:Math.max(0,(now - Date.parse(parked.handed_at))/1000), frozen_seconds:nonnegative(parked.frozen_seconds) ?? 0,
-   approvals:null, approvals_required:null, ci:null, last_human_activity_at:timestamp(parked.last_human_activity_at) ? parked.last_human_activity_at : null}];
+   approvals:nonnegative(seen?.approvals), approvals_required:required === null ? null : Math.floor(required),
+   ci:headCi(state,id,undefined,head), ci_forwarded:forwardedCi(state,id,head), last_human_activity_at:activity}];
  }).sort((a,b) => a.handed_at.localeCompare(b.handed_at));
 }
 // Mirrors isQuiescentParked (src/contracts/awaiting-merge.ts); viewer modules cannot import contracts.

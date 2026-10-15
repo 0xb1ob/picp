@@ -13,7 +13,7 @@ import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObje
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
-import { forwardedCi, jobCi, quiescent, recordedReview } from "./overview-jobs.ts";
+import { forwardedCi, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
 import { reportsView } from "./reports-view.ts";
 
 function records(state:ViewerState) {
@@ -53,7 +53,8 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const entry=fleet.find(j=>j.job_id===id); const job=ledger.find(j=>j.id===id);
   const detail=rows.get(id); const live=base.in_flight.find(j=>j.id===id);
   const ci=ciRows.find(j=>j?.job_id===id); const envelope=obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
-  const head=[ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
+  const head=parkedHead(entry) ?? [ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
+  const parked=entry?.phase==="awaiting_merge" ? obj(entry.awaiting_merge) : undefined;
   const {review,attempts}=recordedReview(state,id,head ?? null);
   const labels=strings(job?.labels); const project=str(entry?.project) ?? labels.find(l=>l.startsWith("project:"))?.slice(8) ?? "Unassigned";
   const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry && quiescent(entry) ? "awaiting_merge" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
@@ -63,14 +64,14 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const finished=merged ? String(receipt.merged_at) : [failureAt,entry?.closed_at,status?.exited_at,job?.closed_at].find(timestamp) ?? null;
   const started=[status?.started_at,entry?.dispatched_at].find(timestamp);
   const ended=[status?.exited_at,entry?.closed_at,failureAt].find(timestamp);
-  const duration=started ? Math.max(0,((ended ? Date.parse(ended) : now)-Date.parse(started))/1000) : null;
+  const duration=parkedSeconds(entry) ?? (started ? Math.max(0,((ended ? Date.parse(ended) : now)-Date.parse(started))/1000) : null);
   const mandate=dispatchMandate(state,id,entry,status) ?? str(covering(job ?? entry ?? {},project,grants,str(entry?.kind) ?? labels.find(l=>l.startsWith("kind:"))?.slice(5),now,entry?.dispatched_at)?.id) ?? null;
   const skills=(Array.isArray(entry?.skills) ? entry.skills : []).map(s=>str(obj(s)?.name)).filter((s):s is string=>!!s);
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
-   ci:jobCi(ci,head),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
+   ci:headCi(state,id,ci,head ?? null),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,
    routing_facts:entry ? routingFacts(state,entry) : null,
    cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : null,pr_url:merged ? String(receipt.pr_url) : detail?.pr_url ?? null,pr_status:merged ? "merged" : detail?.pr_status ?? null,
@@ -80,7 +81,8 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
    // The envelope headline: one line, 80 chars like the failure headline. Never the artifact body.
    summary:(()=>{const line=str(envelope?.summary)?.split("\n").find(l=>l.trim())?.trim();return line ? line.length>80 ? `${line.slice(0,79)}…` : line : null;})(),
    blockers:base.blocked.items.find(j=>j.id===id)?.blockers.map(b=>b.id) ?? [],context:entry ? workerContext(state,id,detail?.model,windows) : null,
-   ...(skills.length ? {skills} : {})};
+   ...(skills.length ? {skills} : {}),
+   ...(parked ? {parked_pending:str(obj(parked.pending)?.kind) ?? null,handed_at:timestamp(parked.handed_at) ? parked.handed_at : null} : {})};
  });
  return {generated_at:base.generated_at,awaiting_count:base.awaiting.count,jobs,
   projects:[...new Set([...jobs.map(j=>j.project),...base.mandates.paused_projects])].sort().map(name=>({name,paused:base.mandates.paused_projects.includes(name)})),warnings:base.warnings};

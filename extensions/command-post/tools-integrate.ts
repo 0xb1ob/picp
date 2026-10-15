@@ -171,6 +171,9 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				const prUrl = record.awaiting_merge?.pr_url ?? record.receipts?.find((receipt) => receipt.kind === "pr" && receipt.url)?.url;
 				const pr = prUrl ? parsePrUrl(prUrl) : undefined;
 				if (!pr) throw new Error(`cp_integrate record_ci: ${params.job_id} has no GitHub PR to attach CI to`);
+				const currentHead = record.awaiting_merge?.head_sha ?? post.ciWatch.store.job(params.job_id)?.head_sha;
+				// Without a known head, a forward could describe any sha, superseded ones included.
+				if (!currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
 				const observation = recordForwardedCi({
 					home: post.home,
 					jobId: params.job_id,
@@ -178,7 +181,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 					headSha: params.head_sha,
 					result: params.result as ForwardedResult,
 					operatorQuote: verified.stored.operator_quote,
-					currentHead: record.awaiting_merge?.head_sha ?? post.ciWatch.store.job(params.job_id)?.head_sha,
+					currentHead,
 					url: params.url,
 				});
 				refreshWidget(ctx);

@@ -35,7 +35,7 @@ export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: n
   generated_at:new Date(now).toISOString(), availability,
   awaiting:decision.awaiting, parent_questions:decision.parent_questions, decided_today:decision.decided_today,
   all_questions_delegated:decision.all_questions_delegated,
-  in_flight:flights(state,fleet.value,decision.escalations.value,now,rows), with_team:withTeam(fleet.value,now,rows), shipped_today:shipped(state,fleet.value,ledger.value,now,rows),
+  in_flight:flights(state,fleet.value,decision.escalations.value,now,rows), with_team:withTeam(state,fleet.value,now,rows), shipped_today:shipped(state,fleet.value,ledger.value,now,rows),
   closed_today:fleet.availability === "unavailable" || ledger.availability === "unavailable" ? null : closedToday(state,fleet.value,ledger.value,now),
   blocked:blocked(ledger.value,grants.value,fleet.value,now,ledger.availability !== "unavailable" && grants.availability !== "unavailable"),
   failed:failedJobs(state,fleet.value,ledger.value), main_ci:mainCi(state), ci_unreadable:ciUnreadable(state,fleet.value),

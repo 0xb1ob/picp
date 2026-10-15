@@ -32,6 +32,7 @@
 .job-dot-working { border: 0; background: var(--green); }
 .job-dot-launching { border: 1.5px solid var(--green); }
 .job-dot-held { border: 1.5px solid var(--blue); }
+.job-dot-awaiting_merge { background: var(--blue); border: 1.5px solid var(--blue); }
 .job-dot-done { border: 0; background: var(--faint); }
 .job-dot-failed { border: 0; border-radius: 2px; background: var(--muted); }
 .job-phase { margin-left: auto; font-size: 12px; }
