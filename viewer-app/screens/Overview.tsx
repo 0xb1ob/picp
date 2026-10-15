@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
-import type { FlightJob, OverviewResponse, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { FlightJob, OverviewResponse, TeamJob, ViewerJob } from "../../src/viewer/api-types.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
-import { CI_READ_NEEDED, CI_UNREADABLE_LABEL, CiSignal, ModelName, reviewText } from "../components/JobSignals.tsx";
+import { CI_READ_NEEDED, CI_UNREADABLE_LABEL, CiSignal, ModelName, parkedPendingText, reviewText } from "../components/JobSignals.tsx";
 import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
@@ -55,8 +55,10 @@ const ago = (at: string, now: string): string => {
  const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(at)) / 60_000));
  return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
 };
-/** Audit P3 #21: why a held job is held, in one fact: red or running CI first, then the review, then green CI. */
+/** Audit P3 #21: why a held job is held, in one fact: a parked pending step, red/running CI, the review, green CI. */
 function heldFact(j: FlightJob): string {
+ const pending = parkedPendingText(j.parked_pending);
+ if (pending) return pending;
  // ci-watch writes `failed` (src/merge-ask.ts); its schema takes any string, so a recorded `red` reads the same.
  if (j.ci === "failed" || j.ci === "red") return "CI red";
  if (j.ci === "unreadable") return "CI unreadable (token)";
@@ -73,6 +75,20 @@ function FlightRow({j, manyProjects}: {j: FlightJob; manyProjects: boolean}) {
   <div class="overview-clock"><span>{elapsed(j.elapsed_seconds)} / {elapsed(j.limit_seconds)}</span>{j.elapsed_seconds !== null && j.limit_seconds !== null && j.limit_seconds > 0 && <progress aria-label="Wall clock" max="100" value={percent(j.elapsed_seconds,j.limit_seconds)}/>}</div>
   <div class="overview-context">{j.context ? <ContextChip usage={j.context} compact/> : <span class="overview-meta">context n/a</span>}</div>
   <span class="overview-review">{review.startsWith("review ") ? <><span class="overview-review-prefix">review </span>{review.slice(7)}</> : review}</span><span class="overview-ci"><CiSignal job={signal(j)}/></span><span class="overview-model"><ModelName job={signal(j)}/></span><span class="overview-cost">{money(j.cost_usd ?? null)}</span>
+ </article>;
+}
+/** A parked PR: unknown approvals or CI read as unknown, never zero or "no CI yet"; age grows, execution does not. */
+function TeamRow({j, manyProjects, now}: {j: TeamJob; manyProjects: boolean; now: string}) {
+ const approvals = j.approvals === null ? "approvals unknown" : `${j.approvals}/${j.approvals_required ?? "?"} approvals`;
+ return <article class="overview-line overview-team" aria-label={j.id}>
+  <a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-awaiting_merge"/><code>{j.id}</code></a>
+  <div class="overview-flight-title"><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span>{manyProjects && <div class="overview-flight-extra"><span class="overview-project" title={j.project}>{j.project}</span></div>}</div>
+  <a href={j.pr_url} class="overview-team-pr" title={j.pr_url}>{prNumber(j.pr_url) ?? "PR"} ↗</a>
+  <code class="overview-team-head" title={`${j.head} → ${j.base}`}>{shortSha(j.head)}</code>
+  <span class="overview-team-age" title={`handed off ${observedTime(j.handed_at)}; execution ${elapsed(j.frozen_seconds)}, stopped at hand-off`}>{elapsed(j.age_seconds)}</span>
+  <span class="overview-team-approvals">{approvals}</span>
+  <span class="overview-ci"><CiSignal job={{...j, ci: j.ci ?? "unknown"} as unknown as ViewerJob}/></span>
+  <span class="overview-team-activity">{j.last_human_activity_at ? `human ${ago(j.last_human_activity_at, now)}` : "no human activity"}</span>
  </article>;
 }
 function decidedLine(data: OverviewResponse): string {
@@ -104,6 +120,7 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
  const fleet = data.availability.fleet === "unavailable";
  const stuck = data.blocked.items.length + data.failed.length;
  const manyProjects = new Set(data.in_flight.map(j => j.project)).size > 1;
+ const teamProjects = new Set(data.with_team.map(j => j.project)).size > 1;
  const blockerPhase = (id: string, phase: string | null) => { const live = data.in_flight.find(f => f.id === id)?.phase ?? phase; return live ? phaseText(live) : null; };
  const costs = data.shipped_today.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  const more = data.shipped_today.length - LANDED_ROWS;
@@ -121,6 +138,10 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
   <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}{data.in_flight.length > 0 && <span class="overview-held-hint">held = waiting on CI or review, normal for hours</span>}</>}>
    {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["Job","Title","Wall clock","Context","Review","CI","Model","Cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
   </Block>
+  {!fleet && data.with_team.length > 0 && <Block title={<>With the team &middot; {data.with_team.length}<span class="overview-held-hint">handed off; waiting on a human merge, no worker or slot</span></>}>
+   <div class="overview-team-columns" aria-hidden="true">{["Job","Title","PR","Head","Age","Approvals","CI","Last human"].map(label => <span key={label}>{label}</span>)}</div>
+   {data.with_team.map(j => <TeamRow key={j.id} j={j} manyProjects={teamProjects} now={data.generated_at}/>)}
+  </Block>}
   <Block title={<>Landed today &middot; {fleet ? "-" : data.shipped_today.length} merged{data.closed_today ? <> &middot; {data.closed_today} closed without PR</> : null}{costs.length > 0 && <> &middot; <span title="merged jobs only, worker plus reviewer">{money(costs.reduce((sum,c) => sum + c,0))}</span></>}</>}>
    {data.shipped_today.length > 0 && <div class="overview-landed-columns" aria-hidden="true">{["Job","Title","PR","Commit","Cost"].map(label => <span key={label}>{label}</span>)}</div>}
    {data.shipped_today.slice(0,LANDED_ROWS).map(j => <article key={j.id} class="overview-line overview-landed" aria-label={j.id}><a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-done"/><code>{j.id}</code></a><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><a href={j.pr_url} class="overview-landed-pr">{prNumber(j.pr_url)} ↗</a><span class="overview-meta overview-merge" title={j.merge_sha}><span class="overview-merge-word">merged </span><code>{shortSha(j.merge_sha)}</code></span><span class="overview-cost">{money(j.cost_usd)}</span></article>)}

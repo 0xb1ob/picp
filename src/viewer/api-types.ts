@@ -169,6 +169,8 @@ export interface ViewerJob extends FlightJob {
  routing_facts?: ViewerRoutingFacts | null;
  /** Operator-named skills the fleet record carries (`cp_dispatch skills`); absent when none. */
  skills?: string[];
+ /** A parked job's hand-off time (team age counts from it); absent otherwise. */
+ handed_at?: string | null;
 }
 export interface JobsResponse {
  generated_at: string; awaiting_count: number | null;
@@ -367,6 +369,8 @@ export interface FlightJob {
  head: string | null; ci: string | null; review: string | null; review_attempts: number;
  /** Operator-forwarded CI for `head`: shown only where native CI is absent, unknown or unreadable; never a gate. */
  ci_forwarded?: ForwardedCi | null;
+ /** A parked job's pending CP step (`changes_requested`, `head_moved`, ...); null or absent otherwise. */
+ parked_pending?: string | null;
  routing: string | null; note: string | null; pr_url?: string | null;
  /** The live worker's context, when a screen has it. Overview fills this; absent on older payloads. */
  context?: ContextUsage | null;
@@ -380,7 +384,7 @@ export interface ShippedJob { id: string; title: string | null; merged_at: strin
 export interface TeamJob {
  id: string; project: string; title: string | null; pr_url: string; head: string; base: string; handed_at: string;
  age_seconds: number; frozen_seconds: number; approvals: number | null; approvals_required: number | null;
- ci: string | null; last_human_activity_at: string | null;
+ ci: string | null; ci_forwarded?: ForwardedCi | null; last_human_activity_at: string | null;
 }
 /** A fleet job in phase `failed`; `failure` is its headline, one line of at most 80 chars. */
 export interface FailedJob { id: string; project: string; title: string | null; failure: string | null }

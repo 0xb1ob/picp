@@ -136,7 +136,7 @@ test("empty Board columns fold to strips on phone and desktop", async t => {
  const columnKinds=kinds(waiting.querySelector(".board-columns")!);
  const cut=columnKinds.indexOf("strip");
  assert.ok(cut>0 && columnKinds.slice(cut).every(k=>k==="strip") && columnKinds.slice(0,cut).every(k=>k==="col"),"strips follow the columns that have cards");
- assert.deepEqual(labels(waiting,".board-strip"),["Held · 0","Launching · 0","Queued · 0","Failed · 0","Landed today · 0"]);
+ assert.deepEqual(labels(waiting,".board-strip"),["Held · 0","Launching · 0","Queued · 0","With the team · 0","Failed · 0","Landed today · 0"]);
  const blocker=waiting.querySelector('a[href="#job/cp-idle"]')!;
  assert.match(blocker.textContent!,/blocks cp-work/);
  assert.doesNotMatch(waiting.querySelector('a[href="#job/cp-work"]')!.textContent!,/blocks cp-idle/);

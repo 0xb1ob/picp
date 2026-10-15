@@ -195,6 +195,7 @@ test("stamp, shortSha, prNumber and phaseText", async t => {
  assert.equal(prNumber("https://github.com/acme/repo/pull/265"), "#265");
  assert.equal(phaseText("waiting"), "no run status");
  assert.equal(phaseText("working"), "working");
+ assert.equal(phaseText("awaiting_merge"), "with the team");
 });
 
 

@@ -70,6 +70,18 @@ progress::-moz-progress-bar { background: var(--secondary); }
 .overview-landed > .overview-line-text { grid-area: title; }
 .overview-landed-pr { grid-area: pr; display: flex; align-items: center; min-height: 44px; }
 .overview-merge { grid-area: merge; }
+.overview-dot-awaiting_merge { background: var(--blue); border-color: var(--blue); }
+.overview-team-columns { display: none; }
+.overview-team { display: grid; align-items: center; gap: 2px 14px; padding: 4px 0; color: var(--muted); grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-areas: "job age" "title title" "pr head" "approvals ci" "activity activity"; }
+.overview-team > * { min-width: 0; }
+.overview-team .overview-job-id { grid-area: job; min-height: 44px; }
+.overview-team .overview-job-id code, .overview-team .overview-line-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-team-pr { grid-area: pr; display: flex; align-items: center; min-height: 44px; }
+.overview-team-head { grid-area: head; }
+.overview-team-age { grid-area: age; justify-self: end; font-size: 12px; white-space: nowrap; }
+.overview-team-approvals { grid-area: approvals; font-size: 12px; }
+.overview-team .overview-ci { overflow-wrap: anywhere; }
+.overview-team-activity { grid-area: activity; font-size: 12px; overflow-wrap: anywhere; }
 @media (min-width: 900px) {
  /* The header row leads the page, above an alarm; paused pills sit in its context slot. */
  .overview { gap: 28px; }
@@ -88,6 +100,7 @@ progress::-moz-progress-bar { background: var(--secondary); }
  .overview-flight { grid-template-columns: 9rem minmax(0,1fr) 9rem; grid-template-areas: "job title cost" ". clock context" ". review ci" ". model model"; }
  .overview-flight .overview-line-text { display: block; white-space: nowrap; }
  .overview-landed { grid-template-columns: 9rem minmax(0,1fr) 5rem 9rem 4rem; grid-template-areas: "job title pr merge cost"; padding: 0; }
+ .overview-team { grid-template-columns: 9rem minmax(0,1fr) 9rem; grid-template-areas: "job title age" ". pr head" ". approvals ci" ". activity activity"; }
 }
 /* Compact tracks (616px + 56px of gaps) leave Title the 1fr: 256px at 1200 (nearly twice Job) and 496px (~70 characters) at 1440. 900-1199px keeps the stacked layout above, where Title is the widest column. */
 @media (min-width: 1200px) {
@@ -95,6 +108,10 @@ progress::-moz-progress-bar { background: var(--secondary); }
  .overview-ci { overflow-wrap: anywhere; }
  .overview-flight { grid-template-areas: "job title clock context review ci model cost"; }
  .overview-landed, .overview-landed-columns { grid-template-columns: 136px minmax(0,1fr) 80px 96px 56px; column-gap: 8px; }
+ .overview-team, .overview-team-columns { grid-template-columns: 136px minmax(0,1fr) 56px 72px 56px 88px 108px 96px; column-gap: 8px; }
+ .overview-team { grid-template-areas: "job title pr head age approvals ci activity"; padding: 0; }
+ .overview-team-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }
+ .overview-team-age { justify-self: start; }
  .overview-merge-word { display: none; }
  .overview .ctx-prefix, .overview .overview-review-prefix { display: none; }
  .overview-flight-columns, .overview-landed-columns { display: grid; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--dim); }

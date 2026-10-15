@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JobResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { JobTranscript } from "./JobTranscript.tsx";
-import { elapsed, money, prNumber, shortSha, time } from "../format.ts";
+import { elapsed, money, observedTime, prNumber, shortSha, time } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
-import { PhaseDot, CiSignal, ModelName } from "../components/JobSignals.tsx";
+import { PhaseDot, CiSignal, ModelName, parkedPendingText } from "../components/JobSignals.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { composerHref } from "../routes.ts";
 import "./job-detail.css";
@@ -103,7 +103,8 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
   <header class="job-detail-heading">
    <PageHeader stack back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
    <div class="job-badges"><span class={`job-badge job-badge-${job.phase}`}><PhaseDot phase={job.phase}/>{job.phase}</span>{job.pr_url && <a class="job-badge job-badge-pr" href={job.pr_url}>{prNumber(job.pr_url)}{job.pr_status && ` ${job.pr_status}`} ↗</a>}<CiSignal job={job} badge/><span class="job-badge job-badge-review">review {reviewFact(job)}</span></div>
-   {job.phase === "held" && <p>held = waiting on CI or review, normal for hours</p>}
+   {job.phase === "held" && <p>{parkedPendingText(job.parked_pending) ?? "held = waiting on CI or review, normal for hours"}</p>}
+   {job.phase === "awaiting_merge" && <p>with the team{job.handed_at ? ` since ${observedTime(job.handed_at)}` : ""}: waiting on a human merge, no worker or slot; execution clock stopped</p>}
   </header>
   <div class="job-detail-top">
    {data.questions.map(q => <section class="job-question" key={q.id}><h2>{q.kind === "final_fix" ? "Final-fix approval open" : "Parent question open"}</h2><p><code>{q.id}</code> · {q.question}</p><p>Being handled by the operator session.</p></section>)}

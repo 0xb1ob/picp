@@ -101,7 +101,8 @@ function usageJobs(state: ViewerState): UsageJob[] {
 		const project = str(job.project);
 		if (!id || !isSafeId(id) || !project) continue;
 		const fleet = usage(job.usage);
-		const live = usage(readStatus(state, id)?.usage);
+		// A parked job has no worker: its usage was frozen into the fleet record at release, so no run status overlays it.
+		const live = job.phase === "awaiting_merge" ? undefined : usage(readStatus(state, id)?.usage);
 		const scheduleId = str(job.schedule_id);
 		out.push({ job, job_id: id, project, kind: str(job.kind), phase: str(job.phase), usage: live && live.total_tokens > (fleet?.total_tokens ?? 0) ? live : fleet, schedule_id: scheduleId, schedule_mandate: scheduleId ? schedules.get(scheduleId) : undefined });
 	}
@@ -221,7 +222,7 @@ export function jobRow(state: ViewerState, entry: UsageJob, title: string | unde
 		branch: str(job.branch),
 		pr_url: str(pr?.url) ?? [str(obj(job.bound_pr)?.url)].find((url) => isSafeChangeRequestUrl(url ?? "")), // a bound PR shows before its envelope
 		pr_status: str(pr?.status),
-		live: (runPhase === "working" || runPhase === "starting") && entry.phase !== "done" && entry.phase !== "failed",
+		live: (runPhase === "working" || runPhase === "starting") && !["done", "failed", "awaiting_merge"].includes(entry.phase ?? ""),
 	};
 }
 

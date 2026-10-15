@@ -32,7 +32,7 @@ function Card({job,jobs}:{job:ViewerJob;jobs:ViewerJob[]}) {
  </a>;
 }
 const matches=(job:ViewerJob,key:string)=>key==="waiting" ? ["waiting","idle"].includes(job.phase) : job.phase===key;
-const COLUMN_ORDER=["held","working","waiting","launching","queued","failed","done"];
+const COLUMN_ORDER=["held","working","waiting","launching","queued","awaiting_merge","failed","done"];
 const LANDED_CARDS=4;
 type Opt={id:string;sub:string;status:string;count:string};
 function Strip({column}:{column:BoardResponse["columns"][number]}) {

@@ -8,13 +8,14 @@ import { PageHeader } from "../components/PageHeader.tsx";
 import "./jobs.css";
 import { CiSignal, ModelName, PhaseDot, reviewText } from "../components/JobSignals.tsx";
 export { CiSignal, PhaseDot, reviewText };
-export const inFlight = (job:ViewerJob) => !["done","failed","queued"].includes(job.phase);
+/** A live worker or a pending CP step; a quiescent parked job (`awaiting_merge`) is With the team instead. */
+export const inFlight = (job:ViewerJob) => !["done","failed","queued","awaiting_merge"].includes(job.phase);
 const DONE_ROWS = 5;
 export function JobSignals({job}:{job:ViewerJob}) {
  return <><span class="job-clock">{elapsed(job.elapsed_seconds)} / {elapsed(job.limit_seconds)}{job.limit_seconds !== null && job.elapsed_seconds !== null && <progress aria-label="Wall clock" max="100" value={percent(job.elapsed_seconds,job.limit_seconds)}/>}</span><span class="job-context"><ContextChip usage={job.context} compact/>{!job.context && "context n/a"}</span><span class="job-review">{reviewText(job)}</span><CiSignal job={job}/><span class="job-model"><ModelName job={job}/></span><span class="job-cost">{money(job.cost_usd)}</span></>;
 }
 export function JobRow({job}:{job:ViewerJob}) {
- const flight = inFlight(job); const finished = ["done","failed"].includes(job.phase);
+ const flight = inFlight(job) || job.phase === "awaiting_merge"; const finished = ["done","failed"].includes(job.phase);
  const merged = job.pr_status === "merged" || job.merge_sha !== null;
  return <article class={`job-row ${flight ? "job-row-flight" : finished ? "job-row-done" : "job-row-queued"}`}><a class="job-row-link" href={jobHref(job.id)} title={job.ledger_disagrees ? `ledger ${job.ledger_status} · run ${phaseText(job.phase)}` : undefined}><span class="job-title" title={job.title ?? job.id}>{job.title ?? job.id}</span><span class="job-row-heading"><span class="job-row-id"><PhaseDot phase={job.phase}/><code title={job.id}>{job.id}</code>{job.ledger_disagrees && <span class="job-ledger">ledger {job.ledger_status}</span>}</span><span class="job-phase">{phaseText(job.phase)}<span class="job-project"> · {job.project}</span></span></span></a>
  {flight ? <div class="job-signals"><JobSignals job={job}/></div> : finished ? <div class="job-finished"><span class="job-outcome">{job.pr_url && <a href={job.pr_url} target="_blank" rel="noopener noreferrer">{prNumber(job.pr_url)} ↗</a>} {merged ? "merged" : job.phase === "failed" ? "failed" : job.pr_url ? `PR ${job.pr_status ?? "status not recorded"}` : "closed · no PR"}</span><code class="job-commit" title={job.merge_sha ?? job.head ?? undefined}>{shortSha(job.merge_sha ?? job.head) ?? "no commits"}</code><span class="job-model"><ModelName job={job}/></span><span class="job-finished-at">{job.finished_at ? time(job.finished_at) : "not recorded"}</span><span class="job-cost">{money(job.cost_usd)}</span></div> : <span class="job-meta">not dispatched</span>}
@@ -49,12 +50,14 @@ export function Jobs({data}:{data:JobsResponse}) {
  const [filter,setFilter]=useState("all");
  const [open,setOpen]=useState<Record<string, boolean>>({});
  const live=data.jobs.filter(inFlight); const done=data.jobs.filter(j=>["done","failed"].includes(j.phase) && j.finished_today); const queued=data.jobs.filter(j=>j.phase==="queued");
+ const team=data.jobs.filter(j=>j.phase==="awaiting_merge");
  const older=data.jobs.filter(j=>["done","failed"].includes(j.phase) && !j.finished_today).length;
  const {groups, empty} = doneGroups(done, data.projects);
  const more = groups.filter(g => g.items.length > DONE_ROWS && open[g.name] !== true);
  return <div class="jobs-screen"><header class="jobs-heading"><PageHeader title="Jobs"/><div class="jobs-toolbar"><JobsViews current="jobs"/>
- <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div></div></header>
+ <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+team.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div></div></header>
  {filter!=="done" && <section class="jobs-group"><header><h2>In flight · {live.length}</h2><p>held = waiting on CI or review, normal for hours</p></header>{live.length>0 && <JobColumns/>}{live.map(job=><JobRow key={job.id} job={job}/>)}{!live.length && <p class="jobs-empty">Nothing in flight.</p>}</section>}
+ {filter==="all" && team.length>0 && <section class="jobs-group"><header><h2>With the team · {team.length}</h2><p>handed off; waiting on a human merge, no worker or slot</p></header><JobColumns/>{team.map(job=><JobRow key={job.id} job={job}/>)}</section>}
  {filter==="all" && queued.length>0 && <section class="jobs-group"><header><h2>Queued · {queued.length}</h2></header>{queued.map(job=><JobRow key={job.id} job={job}/>)}</section>}
  {filter!=="live" && <section class="jobs-group"><header><h2>Done today · {done.length}</h2><p>newest first</p></header>{groups.map(group => <DoneGroup key={group.name} name={group.name} items={group.items} open={open[group.name] === true}/>)}{(more.length > 0 || empty.length > 0) && <div class="jobs-done-foot">{more.map(g => <button type="button" class="jobs-more" key={g.name} onClick={() => setOpen(s => ({...s, [g.name]: true}))}>Show {g.items.length - DONE_ROWS} more from {g.name}</button>)}{empty.length > 0 && <p class="jobs-empty">Nothing done today in {projectList(empty)}.</p>}</div>}{!done.length && !data.projects.length && <p class="jobs-empty">No finished jobs today.</p>}{older>0 && <p class="jobs-older">{older} older finished jobs not shown</p>}</section>}
  </div>;
