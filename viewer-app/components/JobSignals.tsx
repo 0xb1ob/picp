@@ -15,8 +15,8 @@ export const parkedPendingText = (kind: string | null | undefined): string | nul
  base_changed:"base changed: revalidation pending", closed_unmerged:"PR closed unmerged: abandon or reopen",
 } as Record<string,string>)[kind] ?? `pending: ${kind}` : null;
 /** The red badge for a CI read the token was refused (ask-81b54d83f0b2): never "no CI yet". */
-export const CI_UNREADABLE_LABEL = "CI unreadable — token lacks Actions/checks read";
-export const CI_READ_NEEDED = "needs fine-grained PAT: Actions read + Checks read + Commit statuses read; classic: repo";
+export const CI_UNREADABLE_LABEL = "CI unreadable — token lacks Actions read";
+export const CI_READ_NEEDED = "needs fine-grained PAT: Actions read + Contents read + Metadata read + Pull requests read; classic: repo";
 /**
  * `no CI yet` when nothing has run; the red badge when the token was refused;
  * otherwise `CI <state> <sha7>`, `(forwarded)` when only the operator saw it.

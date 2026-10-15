@@ -312,6 +312,17 @@ test("parent reads of the checks API are refused and point at cp_integrate", (t)
 		"gh run view 123 --log-failed",
 		"gh -R acme/demo run list --limit 3",
 		"gh run -R acme/demo view 123",
+		"gh api repos/acme/demo/commits/abc123/check-runs",
+		"gh api repos/acme/demo/commits/abc123/check-suites --paginate",
+		"gh api 'repos/acme/demo/commits/abc123/status?per_page=1'",
+		"gh api repos/acme/demo/commits/abc123/statuses",
+		"gh api repos/acme/demo/statuses/abc123",
+		"gh api -X GET /repos/acme/demo/check-runs/9",
+		"gh api https://api.github.com/repos/acme/demo/commits/main/check-runs",
+		"gh api --hostname ghe.example https://ghe.example/api/v3/repos/acme/demo/statuses/abc",
+		"gh api 'repos/{owner}/{repo}/actions/runs?head_sha=abc&per_page=100'",
+		"gh api repos/acme/demo/actions/runs/9/attempts/2/jobs",
+		"gh api repos/acme/demo/actions/workflows",
 	]) {
 		assert.equal(b.bash(command)?.code, "ci_checks_read", `${command} was allowed`);
 	}
@@ -319,6 +330,10 @@ test("parent reads of the checks API are refused and point at cp_integrate", (t)
 	assert.equal(b.bash('gh issue create --body "document statusCheckRollup"'), undefined);
 	assert.equal(b.bash("gh --repo acme/demo pr view 12 --json number"), undefined);
 	assert.equal(b.bash("gh api repos/acme/demo/issues/1/comments --field=body=hello"), undefined);
+	assert.equal(b.bash("gh api repos/acme/demo/pulls/7"), undefined, "a PR read is not a CI read");
+	assert.equal(b.bash("gh api repos/acme/demo/pulls/7/reviews"), undefined);
+	assert.equal(b.bash("gh api repos/acme/demo/issues/1/comments -f body='see repos/acme/demo/commits/a/check-runs'"), undefined);
+	assert.equal(b.bash('gh pr create --title "read check-runs" --body "drop repos/o/r/statuses/abc"'), undefined);
 });
 
 test("the parent's write, edit and bash cannot append to the Schedules page's request journal; reads stay allowed", (t) => {

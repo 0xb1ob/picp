@@ -42,7 +42,7 @@ export const GUARD_CODES = [
 	"leased_git_mutation",
 	/** A tool call that would put a diff-review body into the parent's context. */
 	"diff_body_read",
-	/** A parent read of the checks API (`gh pr checks`, `statusCheckRollup`), refused in this home. */
+	/** A parent CI read (`gh pr checks`, `statusCheckRollup`, check-runs/statuses or Actions endpoints), refused here. */
 	"ci_checks_read",
 	/** A parent write to the Schedules page's request journal, the evidence a Run now clearance reads. */
 	"schedule_control_write",
@@ -195,18 +195,29 @@ const GIT_PUBLISHING_SUBCOMMANDS = new Set(["add", "stage", "commit", "rm", "sta
 
 /** gh flags that take a separate value, so the value is not mistaken for `pr`/`checks`. */
 const GH_VALUE_FLAGS = new Set(["-R", "--repo", "--hostname"]);
+/** `gh api` flags whose separate value is never the endpoint (`gh api -X GET repos/…`). */
+const GH_API_VALUE_FLAGS = new Set(["-X", "--method", "-H", "--header", "-f", "-F", "--field", "--raw-field",
+	"-q", "--jq", "-t", "--template", "--input", "--cache", "-p", "--preview", ...GH_VALUE_FLAGS]);
+
+/** A `gh api` endpoint (path or absolute URL) reading checks, commit statuses or Actions runs/jobs/workflows. */
+const GH_API_CI_PATH =
+	/^['"]?(?:https?:\/\/[^/\s]+(?:\/api\/v3)?)?\/?repos\/[^/\s]+\/[^/\s]+\/(?:commits\/[^/\s]+\/(?:check-runs|check-suites|status(?:es)?)\b|statuses\/|check-runs\b|check-suites\b|actions\/(?:runs|jobs|workflows)\b)/;
 
 /**
- * The CI read from tokenized gh argv: `gh [flags] pr [flags] checks`, `gh [flags] run list|view`, or a
- * `--json …statusCheckRollup` or any `gh api` argument naming `statusCheckRollup`.
- * A body or title that merely mentions the field is prose, not a read.
+ * The CI read from tokenized gh argv: `gh [flags] pr [flags] checks`, `gh [flags] run list|view`, a
+ * `--json …statusCheckRollup`, a `gh api` argument naming `statusCheckRollup`, or a `gh api` CI endpoint.
+ * A body or title that merely mentions the field is prose, not a read; only the endpoint is matched as a path.
  */
 function ghReadsChecks(argv: readonly string[]): boolean {
 	const positional: string[] = [];
+	let endpoint: string | undefined;
 	for (let i = 1; i < argv.length; i++) {
 		const token = argv[i] ?? "";
-		// Dash tokens too: `--field=query=…`, `--raw-field=…`, `-fquery=…` carry the query inline.
-		if (positional[0] === "api" && token.includes("statusCheckRollup")) return true;
+		if (positional[0] === "api") {
+			// Dash tokens too: `--field=query=…`, `--raw-field=…`, `-fquery=…` carry the query inline.
+			if (token.includes("statusCheckRollup")) return true;
+			if (endpoint === undefined && !token.startsWith("-") && !GH_API_VALUE_FLAGS.has(argv[i - 1] ?? "")) endpoint = token;
+		}
 		if (token.startsWith("-")) {
 			if (GH_VALUE_FLAGS.has(token)) i += 1;
 			else if (token === "--json" || token.startsWith("--json=")) {
@@ -217,11 +228,13 @@ function ghReadsChecks(argv: readonly string[]): boolean {
 		}
 		if (positional.length < 2) positional.push(token);
 	}
+	if (endpoint !== undefined && GH_API_CI_PATH.test(endpoint)) return true;
 	if (positional[0] === "run" && (positional[1] === "list" || positional[1] === "view")) return true;
 	return positional[0] === "pr" && positional[1] === "checks";
 }
 const CI_CHECKS_READ_REASON =
-	"blocked: the checks API and Actions run reads (gh run list/view) are refused in this home; CI is read by " +
+	"blocked: the checks and commit-status APIs and Actions run reads (gh run list/view, gh api …/actions/runs) are " +
+	"refused in this home; CI is read by " +
 	"cp_integrate and the cp-ci wake-up — call cp_integrate <job-id>";
 
 /** `state/schedule-control.jsonl` (src/viewer/control-files.ts): only the viewer and the parent's ScheduleControl append to it. */

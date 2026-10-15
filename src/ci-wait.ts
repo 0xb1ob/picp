@@ -70,7 +70,9 @@ function atCommandPosition(pattern: string): RegExp {
 const CI_QUERY_RES: readonly RegExp[] = [
 	atCommandPosition("gh\\s+run\\s+(?:list|view|watch)\\b"),
 	atCommandPosition("gh\\s+pr\\s+checks\\b"),
-	atCommandPosition("gh\\s+api\\b[^;&|\\n]*(?:check-runs|check-suites|actions/runs|commits/[^\\s]*/(?:status|check-runs))"),
+	atCommandPosition(
+		"gh\\s+api\\b[^;&|\\n]*(?:check-runs|check-suites|actions/(?:runs|jobs)|/statuses/|commits/[^\\s]*/(?:status|check-runs))",
+	),
 ];
 
 /** `sleep N`, in command position — never inside a quoted string. */
@@ -190,7 +192,7 @@ const CI_LOG_RE = /\s--log\b|\/logs\b/;
 
 /**
  * True when a command-position stage of `command` asks GitHub for CI *status*
- * (`gh run list|view`, `gh pr checks`, check-runs API). `gh run view --log[-failed]`
+ * (`gh run list|view`, `gh pr checks`, check-runs/statuses or Actions runs/jobs API). `gh run view --log[-failed]`
  * is not status and stays unmetered. The worker hook allows one per process.
  */
 export function ciStatusQuery(command: string): boolean {
