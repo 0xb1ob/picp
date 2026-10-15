@@ -636,7 +636,7 @@ export class Integrator {
 		});
 		// jje.5: an unreviewed draft is an intentional hold (next: review), never a merge-pending reminder.
 		if (verdict.cause === "draft") return (await this.#reviewRequired({ jobId, branch, facts, prUrl, head })) ?? this.#ready({ jobId, branch, facts, prUrl, head, cwd });
-		const handed = verdict.permission === "permitted" || verdict.permission === "pending" ? await this.#options.handoff?.({ jobId, branch, facts, prUrl, head, project: record.project, base: view.value.baseRefName?.trim() || base, at: "permit", verdict: ruleRequiresUpdate ? { ...verdict, cause: "behind" } : verdict, review: () => this.#reviewRequired({ jobId, branch, facts, prUrl, head }), write: (w) => this.#write(w) }) : undefined;
+		const handed = verdict.permission === "permitted" || verdict.permission === "pending" ? await this.#options.handoff?.({ jobId, branch, facts, prUrl, head, project: record.project, base: view.value.baseRefName?.trim() || undefined, at: "permit", verdict: ruleRequiresUpdate ? { ...verdict, cause: "behind" } : verdict, review: () => this.#reviewRequired({ jobId, branch, facts, prUrl, head }), write: (w) => this.#write(w) }) : undefined;
 		if (handed) return handed; // human_handoff: after green (or positively no) CI, before update-branch/retry/pending; a rule-required update counts as behind, as below
 
 		if (verdict.permission === "pending" && (verdict.cause === "behind" || ruleRequiresUpdate)) {

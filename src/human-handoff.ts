@@ -150,10 +150,11 @@ export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: ()
 
 type ParkDeps = { park?: (jobId: string, facts: ParkFacts) => Promise<ParkResult>; now?: () => Date };
 
-/** Park the handed-off job; `undefined` when no park port, base or GitHub PR url is known (the legacy row stands). */
+/** Park the handed-off job; `undefined` when no park port or GitHub PR url is known (the legacy row stands). */
 async function parkHandedOff(deps: ParkDeps, input: HandoffInput): Promise<ParkResult | undefined> {
 	const pr = parsePrUrl(input.prUrl);
-	if (!deps.park || !input.base || !pr) return undefined;
+	if (!deps.park || !pr) return undefined;
+	if (!input.base) return { job_id: input.jobId, parked: false, failure: { code: "not_parkable", message: "GitHub reported no base branch for the PR", fix: "the job stays held; call cp_integrate again once the PR reads its base" } };
 	const facts: ParkFacts = { pr_url: input.prUrl, repo: `${pr.owner}/${pr.repo}`, head_sha: input.head, base: input.base, handed_at: isoTimestamp((deps.now ?? (() => new Date()))()) };
 	try {
 		return await deps.park(input.jobId, facts);

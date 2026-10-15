@@ -3380,6 +3380,22 @@ test("human_handoff parks the handed-off job (awaiting_merge PR6): GitHub's base
 	assert.deepEqual(mutations(refused), []);
 });
 
+test("human_handoff parks on the trimmed observed base only; an empty baseRefName keeps today's handoff", async (t) => {
+	// Regression: an empty baseRefName fell back to the request's base and parked against a base GitHub never reported.
+	const seen: string[] = [];
+	const park = async (jobId: string, facts: ParkFacts): Promise<ParkResult> => (seen.push(facts.base), { job_id: jobId, parked: false, failure: { code: "gate_refused", message: "stop", fix: "none" } });
+	await (await benchOf(t)).integrator({ pr: { ...openPr(), baseRefName: " release " } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	assert.deepEqual(seen, ["release"], "the trimmed observed base");
+
+	const b = await benchOf(t);
+	const legacy = await b.integrator({ pr: { ...openPr(), baseRefName: "  " } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	assert.deepEqual([legacy.step, legacy.next, seen.length], ["permit", "surface", 1], "no observed base: never parked");
+	assert.match(legacy.reason, /Not parked \(not_parkable\): GitHub reported no base branch/);
+	assert.equal(handoffRows(b).length, 1);
+	assert.equal(b.fleet.require(BR).phase, "held");
+	assert.deepEqual(mutations(b), []);
+});
+
 // ---------------------------------------------------------------------------
 // N3: a blocked report is never merged
 // ---------------------------------------------------------------------------
