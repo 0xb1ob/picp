@@ -8,9 +8,11 @@ import type { ExtensionDeps } from "./shared.ts";
 
 export function registerAwaitingMergeTick(pi: ExtensionAPI, deps: ExtensionDeps, holdsLock: () => boolean): void {
 	let timer: NodeJS.Timeout | undefined;
+	let startup: NodeJS.Timeout | undefined;
 	let running = false;
+	// Gated per tick, not at start: a lock this session takes after startup still sweeps.
 	const tick = async (): Promise<void> => {
-		if (running) return;
+		if (running || !holdsLock()) return;
 		running = true;
 		try {
 			// The sweep journals its own errors as durable wake-ups and never throws.
@@ -22,13 +24,15 @@ export function registerAwaitingMergeTick(pi: ExtensionAPI, deps: ExtensionDeps,
 		}
 	};
 	pi.on("session_start", async () => {
-		if (!holdsLock() || timer) return;
+		if (timer) return;
 		timer = setInterval(() => void tick(), ciWatchIntervalMs());
 		timer.unref();
-		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
+		startup = setTimeout(() => void tick(), 0); // catch-up pass, after startup returns
+		startup.unref();
 	});
 	pi.on("session_shutdown", async () => {
-		if (timer) clearInterval(timer);
-		timer = undefined;
+		clearInterval(timer);
+		clearTimeout(startup);
+		timer = startup = undefined;
 	});
 }
