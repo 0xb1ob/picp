@@ -667,7 +667,7 @@ export class CiWatch {
 			return result;
 		}
 		try {
-			this.store.prune(new Set(watched.map((record) => record.job_id)));
+			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
 		} catch {
 			// Pruning is housekeeping; a failure here must not skip the tick.
 		}
@@ -782,7 +782,7 @@ export class CiWatch {
 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
 			consecutive_failures: failures,
 			last_error: message.slice(0, 300),
-			...(ciReadDenied(message) ? { last_ci: CI_UNREADABLE } : {}), // a refused read is loud, never "no CI yet"
+			last_ci: ciReadDenied(message) ? CI_UNREADABLE : "unknown", // loud when refused; never a stale green either way
 		});
 	}
 

@@ -5,7 +5,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Parking } from "../src/awaiting-merge.ts";
-import { AwaitingMergeWatch } from "../src/awaiting-merge-watch.ts";
+import { AwaitingMergeWatch, type WatchOptions } from "../src/awaiting-merge-watch.ts";
 import { recordCiObserved } from "../src/ci-evidence.ts";
 import { CiWatch, isWatched, type WatchableRecord } from "../src/ci-watch.ts";
 import { EMPTY_USAGE, LAYOUT, type FleetRecord } from "../src/contracts.ts";
@@ -13,6 +13,8 @@ import { FleetStore } from "../src/fleet.ts";
 import { makeHandoff } from "../src/human-handoff.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 import { MergeStore } from "../src/merges.ts";
+import type { CiRun } from "../src/merge-ask.ts";
+import { parkedCiObserver } from "../src/parked-ci.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { StackFollowups } from "../src/stack-followups.ts";
 import { overview } from "../src/viewer/overview-view.ts";
@@ -67,7 +69,7 @@ async function parkedBench(t: { after(fn: () => void): void }) {
 	return { home: home.path, fleet, runs, result, touched };
 }
 
-function watchOf(b: Awaited<ReturnType<typeof parkedBench>>, pullRequest: Record<string, unknown>) {
+function watchOf(b: Awaited<ReturnType<typeof parkedBench>>, pullRequest: Record<string, unknown>, extra: Partial<WatchOptions> = {}) {
 	const wakes: DurableWakeupInput[] = [];
 	const closed: string[] = [];
 	let landed = 0;
@@ -83,6 +85,7 @@ function watchOf(b: Awaited<ReturnType<typeof parkedBench>>, pullRequest: Record
 			latestOpinionatedReviews: { nodes: [] }, comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
 			reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] }, ...pullRequest,
 		} } } }),
+		...extra,
 	});
 	return { watch, wakes, closed, landed: () => landed };
 }
@@ -116,4 +119,29 @@ test("lifecycle: a team change request marks the parked job pending, a merge clo
 	assert.equal(b.fleet.require("cp-park").phase, "done");
 	assert.deepEqual([merged.closed, merged.landed()], [[`cp-park merged: ${PR}`], 1]);
 	assert.equal(b.touched.length, afterPark, "no gate, git or lease call after the release");
+});
+
+test("lifecycle: after a park, a moved head's Actions pending then red reach the dashboard; CI alone resumes nothing", async (t) => {
+	const b = await parkedBench(t);
+	const moved = "b".repeat(40);
+	let clock = new Date("2026-10-15T12:00:00Z");
+	let runs: CiRun[] = [{ status: "in_progress", conclusion: null, headSha: moved, databaseId: 9, attempt: 1, workflowName: "ci" }];
+	const observeCi = parkedCiObserver({ home: b.home, fleet: b.fleet, runs: b.runs, now: () => clock, read: async () => runs });
+	const held = new CiWatch({ home: b.home, now: () => clock, jobs: () => b.fleet.list() as WatchableRecord[], pr: async () => assert.fail("no held read"), runs: async () => assert.fail("no held read") });
+	const sweep = async (pullRequest: Record<string, unknown>) => {
+		const result = await watchOf(b, pullRequest, { observeCi }).watch.sweep();
+		assert.deepEqual((await held.tick()).checked, [], "the held watch never ticks a parked job");
+		return result;
+	};
+	const view = () => overview({ home: b.home, stateDir: join(b.home, LAYOUT.state) }, clock.getTime()).in_flight.map((job) => [job.id, job.head, job.ci]);
+	assert.deepEqual((await sweep({ state: "OPEN", headRefOid: moved })).outcomes.map((outcome) => outcome.applied), ["head_moved"]);
+	assert.deepEqual(view(), [["cp-park", moved, "in_progress"]]);
+	clock = new Date("2026-10-15T12:05:00Z");
+	runs = [{ status: "completed", conclusion: "failure", headSha: moved, databaseId: 9, attempt: 1, workflowName: "ci" }];
+	await sweep({ state: "OPEN", headRefOid: moved });
+	assert.deepEqual(view(), [["cp-park", moved, "failed"]]);
+	assert.equal(b.fleet.require("cp-park").phase, "awaiting_merge", "a red parked head resumes no worker");
+	const merged = await sweep({ state: "MERGED", headRefOid: moved, mergedAt: "2026-10-15T12:06:00Z", mergeCommit: { oid: MERGE } });
+	assert.deepEqual(merged.outcomes.map((outcome) => outcome.applied), ["merged"]);
+	assert.equal(b.fleet.require("cp-park").phase, "done");
 });

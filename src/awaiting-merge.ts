@@ -10,6 +10,7 @@ import {
 	type AwaitingMerge, type FleetRecord, FULL_SHA_PATTERN, isoTimestamp, isScriptFleetRecord, type ParkIntent, type ParkStage, paths,
 	validateParkIntent,
 } from "./contracts.ts";
+import { readActionsCi } from "./actions-ci.ts";
 import { AwaitingMergeResume } from "./awaiting-merge-resume.ts";
 import type { ExitPorts } from "./awaiting-merge-exits.ts";
 import { AwaitingMergeWatch, type SweepResult } from "./awaiting-merge-watch.ts";
@@ -19,6 +20,8 @@ import type { LedgerLike } from "./integrate.ts";
 import { type JobClaims, withJobClaim } from "./job-claims.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { leaseFromRecord, type LeaseManager } from "./leases.ts";
+import { MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
+import { parkedCiObserver } from "./parked-ci.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { GateOutcome } from "./teardown.ts";
@@ -92,6 +95,7 @@ export function awaitingMergePorts(host: AwaitingMergeHost, claims: JobClaims, j
 		watch ??= new AwaitingMergeWatch({
 			home: host.home, fleet: host.fleet, merges: host.merges, ledger: () => host.ledger(), stacks, stackEdges: stacks, claims, runs: host.runs, cpLogins: logins,
 			wakeups: { enqueue: (input) => (journal(input), true) }, onLanded: async () => void (await host.armedDispatches.release()),
+			observeCi: parkedCiObserver({ home: host.home, fleet: host.fleet, runs: host.runs, read: (record, sha) => readParkedActionsCi(host, record, sha) }),
 		});
 		try {
 			const result = await watch.sweep();
@@ -111,6 +115,13 @@ export function awaitingMergePorts(host: AwaitingMergeHost, claims: JobClaims, j
 		}).resume(jobId),
 		sweep,
 	};
+}
+
+/** Actions runs and jobs for a parked head, addressed at the parked repo from the canonical clone, never a worktree. */
+function readParkedActionsCi(host: AwaitingMergeHost, record: FleetRecord, sha: string) {
+	const [owner = "", repo = ""] = (record.awaiting_merge?.repo ?? "").split("/");
+	const cwd = host.registry.assertCanonicalClone(record.project);
+	return readActionsCi({ cwd, exec: runCommand, repo: { owner, repo }, sha, timeoutMs: MERGE_ASK_QUERY_TIMEOUT_MS });
 }
 
 export function readParkIntent(home: string, jobId: string): ParkIntent | undefined {

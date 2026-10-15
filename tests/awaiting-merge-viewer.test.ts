@@ -70,6 +70,21 @@ test("overview: a pending parked row shows the moved head with no old-head CI an
 	}
 });
 
+test("overview: With the team reads the parked sweep's current CI row; an old green never hides unknown/pending/denied", (t) => {
+	// cp-park has a journaled green for A; the row for A now says otherwise, and that row is the answer.
+	const { home, state } = bench(t);
+	const ciRow = (last_ci: string, head = A) => writeFileSync(join(home, LAYOUT.ciWatchFile), JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: AT,
+		jobs: [{ job_id: "cp-park", announced: [], head_sha: head, last_ci }, { job_id: "cp-bare", announced: [], head_sha: A, last_ci: "unreadable" }] }));
+	const team = () => Object.fromEntries(overview(state, NOW).with_team.map((j) => [j.id, [j.ci, j.ci_forwarded?.ci ?? null]]));
+	for (const ci of ["unknown", "in_progress", "unreadable"]) {
+		ciRow(ci);
+		assert.deepEqual(team()["cp-park"], [ci, null], `${ci} after an old green`);
+	}
+	ciRow("failed", B);
+	assert.deepEqual(team()["cp-park"], ["green", null], "a row for another head says nothing about A");
+	assert.deepEqual(team()["cp-bare"], ["unreadable", "green"], "a forwarded green stays separate and never hides a denial");
+});
+
 test("jobsView: parked jobs keep frozen duration and cost, the parked head's CI and their hand-off time", (t) => {
 	const { state } = bench(t);
 	const job = jobsView(state, NOW).jobs.find((j) => j.id === "cp-park")!;
