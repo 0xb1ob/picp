@@ -22,7 +22,7 @@ export function useRestart(active: boolean, status: ControlStatus | null, fetche
    while (!stop) {
     await new Promise(done => setTimeout(done, 2_000));
     if (stop) return;
-    const value = await readControl(fetcher);
+    const value = await readControl(fetcher, undefined, false);
     if (stop) return;
     onStatus(value);
     const running = !("error" in value) && value.running && !!value.token;
