@@ -16,19 +16,19 @@ export interface FakeRun {
 	jobs?: Array<Record<string, unknown>>;
 }
 
-const RUNS = /\/actions\/runs\?head_sha=([0-9a-f]+)(?:&branch=[^&]+)?&per_page=100&page=(\d+)$/i;
+const RUNS = /\/actions\/runs\?(?:head_sha=([0-9a-f]+)(?:&branch=[^&]+)?|branch=[^&]+)&per_page=100&page=(\d+)$/i;
 const JOBS = /\/actions\/runs\/(\d+)\/attempts\/(\d+)\/jobs\?per_page=100&page=(\d+)$/;
 
 function idOf(run: FakeRun, index: number): number {
 	return run.databaseId ?? 9000 + index;
 }
 
-/** The body for one Actions runs/jobs endpoint, or `undefined` when `endpoint` is neither. */
+/** The body for one Actions runs/jobs endpoint, or `undefined` when it is neither; a branch-only read lists every run. */
 export function answerActions(endpoint: string, runs: readonly FakeRun[]): string | undefined {
 	const listed = RUNS.exec(endpoint);
 	if (listed) {
-		const sha = listed[1]!.toLowerCase();
-		const rows = runs.flatMap((run, index) => (run.headSha.toLowerCase() === sha ? [{ run, id: idOf(run, index) }] : []));
+		const sha = listed[1]?.toLowerCase();
+		const rows = runs.flatMap((run, index) => (sha === undefined || run.headSha.toLowerCase() === sha ? [{ run, id: idOf(run, index) }] : []));
 		const page = Number(listed[2]) === 1 ? rows : [];
 		const workflowRuns = page.map(({ run, id }) => ({
 			id,

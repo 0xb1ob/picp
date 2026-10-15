@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readActionsCi } from "../src/actions-ci.ts";
+import { actionsBranchRunsPath, readActionsCi, readOlderBranchRuns } from "../src/actions-ci.ts";
 import { ghForeignRuns } from "../src/foreign-ci-watch.ts";
 import { checkMainCi, MainCiStore } from "../src/main-ci.ts";
 import { type CommandRunner, ghCiRuns } from "../src/merge-ask.ts";
@@ -17,6 +17,8 @@ const SHA = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
 const ALLOWED = [
 	/^repos\/(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|\{owner\}\/\{repo\})\/actions\/runs\?head_sha=[0-9a-f]{40}(?:&branch=[^&]+)?&per_page=100&page=\d+$/,
 	/^repos\/(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|\{owner\}\/\{repo\})\/actions\/runs\/\d+\/attempts\/\d+\/jobs\?per_page=100&page=\d+$/,
+	// Only to tell a fresh push (runs on an older sha: superseded) from C7's "no runs at all"; never green evidence.
+	/^repos\/(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|\{owner\}\/\{repo\})\/actions\/runs\?branch=[^&]+&per_page=100&page=1$/,
 ];
 const PROHIBITED = /check-runs|check-suites|check_runs|check_suites|\/status(?:es)?\b|statusCheckRollup|\bpr\s+checks\b|graphql/i;
 
@@ -116,6 +118,25 @@ test("native adapters (merge-ask/integrate/watch, foreign watch, main CI) send o
 	}
 	assert.equal(calls.length, 6, "runs plus one attempt-jobs page per adapter");
 	assert.ok(calls.every((call) => ALLOWED.some((pattern) => pattern.test(call)) && !PROHIBITED.test(call)), calls.join("\n"));
+});
+
+test("the branch-runs read is one allowlisted page, excludes the head, and never reads jobs", async () => {
+	const OLD = "a".repeat(40);
+	const { exec, calls } = allowlistedGh(() =>
+		JSON.stringify({
+			total_count: 2,
+			workflow_runs: [
+				{ id: 1, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success" },
+				{ id: 2, run_attempt: 1, head_sha: OLD, status: "completed", conclusion: "success" },
+			],
+		}),
+	);
+	const older = await readOlderBranchRuns({ cwd: "/x", exec, branch: "cp-x/y", head: SHA });
+	assert.deepEqual(older.map((run) => run.headSha), [OLD], "a run on the head itself is never returned");
+	assert.deepEqual(calls, ["repos/{owner}/{repo}/actions/runs?branch=cp-x%2Fy&per_page=100&page=1"]);
+	assert.throws(() => actionsBranchRunsPath({ branch: "a..b" }), /malformed branch/);
+	const { exec: denied } = allowlistedGh(() => { throw new Error("gh: HTTP 403"); });
+	await assert.rejects(readOlderBranchRuns({ cwd: "/x", exec: denied, branch: "b", head: SHA }), /Actions CI read denied/);
 });
 
 test("CI acquisition sources issue no `gh run list` or `gh run view --json` read", () => {

@@ -87,6 +87,14 @@ export function actionsRunsPath(input: { repo?: ActionsRepo; sha: string; branch
 	return `${repoPath(input.repo)}/actions/runs?head_sha=${input.sha}${branch}&per_page=${ACTIONS_PER_PAGE}&page=${input.page}`;
 }
 
+/** `repos/<o>/<r>/actions/runs?branch=<b>&per_page=100&page=1`: the newest runs of a branch, on any sha. */
+export function actionsBranchRunsPath(input: { repo?: ActionsRepo; branch: string }): string {
+	if (!BRANCH.test(input.branch) || input.branch.includes("..")) {
+		throw new Error(`refusing an Actions read for a malformed branch ${JSON.stringify(input.branch.slice(0, 80))}`);
+	}
+	return `${repoPath(input.repo)}/actions/runs?branch=${encodeURIComponent(input.branch)}&per_page=${ACTIONS_PER_PAGE}&page=1`;
+}
+
 /** `repos/<o>/<r>/actions/runs/<id>/attempts/<attempt>/jobs?per_page=100&page=<n>`. */
 export function actionsJobsPath(input: { repo?: ActionsRepo; runId: number; attempt: number; page: number }): string {
 	if (!positive(input.runId) || !positive(input.attempt) || !positive(input.page)) {
@@ -130,8 +138,8 @@ function pageOf(stdout: string, endpoint: string, key: string): Page<Record<stri
 
 type RunRow = Omit<ActionsRun, "jobs">;
 
-/** One page of `actions/runs`: every row must name a run id, attempt and exactly `sha`; status null is unfinished. */
-export function parseRunsPage(stdout: string, sha: string, endpoint = "actions/runs"): Page<RunRow> {
+/** One page of `actions/runs`: every row must name a run id, attempt and exactly `sha` (any valid sha when absent). */
+export function parseRunsPage(stdout: string, sha: string | undefined, endpoint = "actions/runs"): Page<RunRow> {
 	const page = pageOf(stdout, endpoint, "workflow_runs");
 	const items = page.items.map((row): RunRow => {
 		const { id, run_attempt: attempt, head_sha: headSha } = row;
@@ -140,7 +148,7 @@ export function parseRunsPage(stdout: string, sha: string, endpoint = "actions/r
 		if (typeof id !== "number" || !positive(id) || typeof attempt !== "number" || !positive(attempt)) {
 			throw new ActionsCiError("malformed", endpoint, "run without id or run_attempt");
 		}
-		if (typeof headSha !== "string" || headSha.toLowerCase() !== sha.toLowerCase()) {
+		if (typeof headSha !== "string" || (sha === undefined ? !SHA.test(headSha) : headSha.toLowerCase() !== sha.toLowerCase())) {
 			throw new ActionsCiError("malformed", endpoint, `run ${id} is not on the requested head`);
 		}
 		if (status === undefined || conclusion === undefined) throw new ActionsCiError("malformed", endpoint, `run ${id} without status`);
@@ -286,6 +294,16 @@ export async function readActionsCi(options: ActionsReadOptions & { sha: string;
 		observed.push({ ...run, jobs: await jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha }) });
 	}
 	return observed;
+}
+
+/**
+ * The branch's newest runs on any sha other than `head`, one validated page. Evidence only that `head` is a fresh
+ * push still waiting for its run (main's `superseded`) — never CI evidence for `head`. A failed read throws.
+ */
+export async function readOlderBranchRuns(options: ActionsReadOptions & { branch: string; head: string }): Promise<CiRun[]> {
+	const endpoint = actionsBranchRunsPath({ repo: options.repo, branch: options.branch });
+	const runs = parseRunsPage(await get(options, budgetOf(options), endpoint), undefined, endpoint).items;
+	return runs.filter((run) => run.headSha.toLowerCase() !== options.head.toLowerCase());
 }
 
 /** A `{ status, stdout, stderr }` runner (src/merges.ts) as the throwing `CommandRunner` these readers take. */

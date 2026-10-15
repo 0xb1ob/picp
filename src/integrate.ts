@@ -78,7 +78,7 @@ import { parseChangeRequestUrl } from "./forge-url.ts";
 import type { ForgeObserver } from "./forges/adapter.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
 import { type CiRun, ghCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
-import { statusRunner } from "./actions-ci.ts";
+import { readOlderBranchRuns, statusRunner } from "./actions-ci.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
 import { readDrain } from "./drain.ts";
 import { type MainCiScope, mainRedHold } from "./main-ci.ts";
@@ -479,7 +479,11 @@ export class Integrator {
 				reason: `${jobId}: could not read CI for ${branch} (${ciReadDenied(detail) ? `${CI_UNREADABLE_LABEL}; needs ${CI_READ_NEEDED}` : detail}). Nothing was merged.`,
 			});
 		}
-		const ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
+		let ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
+		// Main parity: no run yet on a fresh head, but runs on an older sha of the branch, is `superseded` (wait).
+		const older = ci.ci === "unknown" && !runsParsed.length ? await readOlderBranchRuns({ cwd, exec: statusRunner((dir, bin, args) => this.#run(dir, bin, args)), branch, head }).catch((error: Error) => error) : [];
+		if (older instanceof Error) facts.push(`ci: branch runs unreadable — ${older.message.slice(0, 200)}`);
+		else if (older.length) ci = readCiForHead({ branch, headSha: head, runs: older });
 		const runRef = ci.ci === "failed" ? formatRunRef(ciRunRef(runsParsed, head, prUrl)) : "";
 		facts.push(`ci: ${ci.ci} — ${ci.reason}${runRef}`);
 		/** Set only when the repository itself answered "no workflows" (`src/ci-configured.ts`). */
@@ -508,7 +512,7 @@ export class Integrator {
 			if (ci.ci === "unknown" && runsParsed.length === 0) {
 				const configured = readCiConfigured(await this.#run(cwd, "gh", ghWorkflowsArgs()));
 				facts.push(`ci configuration: ${configured.state} (${configured.cause}) — ${configured.reason}`);
-				if (configured.state !== "none") {
+				if (configured.state !== "none" || older instanceof Error) {
 					// (b) CI could not be read — runs may exist and may be red. The per-head
 					// human checkpoint is the honest exit, exactly as before: an unreadable
 					// signal is never permission.

@@ -1449,9 +1449,8 @@ test("BEHIND is updated server-side once, and the old head's CI and review do no
 	// The update landed head B; only head A has green CI and a review pass.
 	const movedPr = { ...openPr(), headRefOid: HEAD_B };
 	const stale = await b.integrator({ pr: movedPr }).advance({ jobId: BR });
-	// Exact-head reads: head B has no run of its own, so the cp-e0c/C7 per-head fallback (review, then a human) applies.
-	assert.equal(stale.step, "review", "green CI on the superseded head is not green");
-	assert.ok(!stale.facts.some((fact) => /CI green/i.test(fact)), stale.facts.join("\n"));
+	assert.equal(stale.step, "ci");
+	assert.equal(stale.next, "wait", "green CI on the superseded head is not green");
 	const unreviewed = await b
 		.integrator({ pr: movedPr, runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
 		.advance({ jobId: BR });
@@ -1523,17 +1522,15 @@ test("unknown mergeability never causes a rebase or a merge", async (t) => {
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
-// Exact-head reads never see the superseded run, so this is the cp-e0c/C7 per-head fallback: it never merges on CI
-// authority, only on the human checkpoint approved for this exact head.
 test("a completed green run on a superseded sha is not green", async (t) => {
 	const b = await benchOf(t);
-	const superseded = { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] };
-	const unapproved = await b.integrator(superseded).advance({ jobId: BR });
-	assert.notEqual(unapproved.step, "merge");
-	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	b.approve(HEAD_A);
-	const result = await b.integrator(superseded).advance({ jobId: BR });
-	assert.equal(result.record.merge_authority?.kind, "human_checkpoint", "merged on the per-head checkpoint, never on CI");
+	const result = await b
+		.integrator({ runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
+		.advance({ jobId: BR });
+	assert.equal(result.step, "ci");
+	assert.equal(result.next, "wait");
+	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
 test("CI still running on the pushed head merges nothing and asks nobody", async (t) => {
@@ -1562,6 +1559,68 @@ test("a repo that HAS workflows but no run yet on this head still falls back to 
 	const mergeCall = b.calls.find((line) => line.startsWith("gh pr merge"));
 	assert.ok(mergeCall);
 	assert.equal(matchHeadBinding(mergeCall)?.head, HEAD_A, "a CI-less fallback merge is bound to the authorized head too");
+});
+
+// Exact-head reads cannot see an older sha's run, so zero runs on the head asks one more Actions read: the branch's
+// runs. Runs on an older sha keep main's `superseded` wait (a fresh push); none at all is C7; a failed read is C7's
+// unreadable case. The branch read only ever picks between those — it is never green evidence for the head.
+const BRANCH_RUNS = `gh api repos/{owner}/{repo}/actions/runs?branch=${BR}&per_page=100&page=1`;
+
+test("zero runs on a fresh head with branch runs on an older sha is superseded: wait, no checkpoint", async (t) => {
+	const b = await benchOf(t);
+	const result = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_B, workflowName: "ci" }] }).advance({ jobId: BR });
+	assert.deepEqual([result.step, result.next], ["ci", "wait"], result.reason);
+	assert.match(result.reason, /no CI run has started on aaaaaaa yet \(latest run is on bbbbbbb\)/);
+	const reads = b.calls.filter((line) => line.startsWith("gh api repos/{owner}/{repo}/actions/runs?"));
+	assert.deepEqual(reads.map((line) => line.includes("head_sha=")), [true, false], "exact head first, then the branch");
+	assert.ok(b.calls.includes(BRANCH_RUNS), b.calls.join("\n"));
+	assert.equal(b.calls.some((line) => line.includes("actions/workflows")), false, "superseded never reaches C7");
+	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+});
+
+test("zero runs on the head and none on the branch takes C7: workflows present asks a human, none is no CI", async (t) => {
+	const present = await benchOf(t);
+	const asked = await present.integrator({ runs: [] }).advance({ jobId: BR });
+	assert.deepEqual([asked.step, asked.next], ["authorize", "surface"]);
+	assert.ok(present.calls.includes(BRANCH_RUNS));
+	assert.ok(present.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+
+	const none = await benchOf(t);
+	const noCi = await none.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: BR });
+	assert.ok(none.calls.includes(BRANCH_RUNS));
+	assert.equal(none.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `no CI mints no checkpoint: ${noCi.reason}`);
+});
+
+test("an unreadable branch-runs read is C7 unreadable: the per-head checkpoint even when workflows say none", async (t) => {
+	for (const answer of [
+		{ status: 1, stdout: "", stderr: "gh: Resource not accessible by integration (HTTP 403)" },
+		{ status: 0, stdout: "<html>502</html>", stderr: "" },
+		{ status: 0, stdout: JSON.stringify({ total_count: 1, workflow_runs: [{ id: 4, run_attempt: 1, head_sha: "not-a-sha", status: "completed", conclusion: "success" }] }), stderr: "" },
+	]) {
+		const b = await benchOf(t);
+		const run = runnerFor(defaultWorld({ runs: [], workflows: NO_WORKFLOWS }), b.calls, b.worktree);
+		const result = await b
+			.integrator({ runs: [], workflows: NO_WORKFLOWS }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), answer) : run(cwd, bin, args, options)) })
+			.advance({ jobId: BR });
+		assert.deepEqual([result.step, result.next], ["authorize", "surface"], result.reason);
+		assert.ok(result.facts.some((fact) => fact.startsWith("ci: branch runs unreadable")), result.facts.join("\n"));
+		assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+		assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
+	}
+});
+
+test("the branch-runs read is never green evidence: a green run on the head seen only there does not merge", async (t) => {
+	// The exact-head read answers zero runs (a lagging index); the branch read lists a green run *on this head*.
+	const b = await benchOf(t);
+	const green = { status: "completed", conclusion: "success", headSha: HEAD_A, workflowName: "ci" };
+	const run = runnerFor(defaultWorld({ runs: [] }), b.calls, b.worktree);
+	const result = await b
+		.integrator({ runs: [] }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), { status: 0, stdout: answerActions(String(args[1]), [green])!, stderr: "" }) : run(cwd, bin, args, options)) })
+		.advance({ jobId: BR });
+	assert.notEqual(result.step, "merge");
+	assert.ok(!result.facts.some((fact) => fact.startsWith("ci: green")), result.facts.join("\n"));
+	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
+	assert.equal(b.calls.filter((line) => line.includes("/attempts/")).length, 0, "no jobs are read for branch runs");
 });
 
 // ---------------------------------------------------------------------------
@@ -3242,7 +3301,7 @@ const REQUIRED_CHECKS = [{ type: "required_status_checks", parameters: { require
 test("human_handoff never hands off pending, superseded, red or unreadable CI, a retry, or a checks/unstable hold", async (t) => {
 	const cases: Array<[string, Partial<World>, string, string]> = [
 		["CI pending", { runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] }, "ci", "wait"],
-		["CI only on a superseded head", { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] }, "permit", "surface"],
+		["CI only on a superseded head", { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] }, "ci", "wait"],
 		["CI failed", { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }] }, "ci", "resolve"],
 		["mergeStateStatus UNKNOWN", { pr: { ...openPr(), mergeStateStatus: "UNKNOWN" } }, "permit", "retry"],
 		["UNSTABLE", { pr: { ...openPr(), mergeStateStatus: "UNSTABLE" } }, "permit", "surface"],
