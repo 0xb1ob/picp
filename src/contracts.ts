@@ -31,6 +31,7 @@ export * from "./contracts/escalations.ts";
 export * from "./contracts/mandates.ts";
 export * from "./contracts/pipeline.ts";
 export * from "./contracts/awaiting.ts";
+export * from "./contracts/awaiting-merge.ts";
 export * from "./contracts/wakeups.ts";
 export * from "./contracts/runs.ts";
 export * from "./contracts/workers.ts";

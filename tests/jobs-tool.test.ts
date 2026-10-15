@@ -383,6 +383,7 @@ test("portsFor's hasLiveWorker: launching has no worker; waiting/held do, done/f
 	const live: Record<string, string | undefined> = {
 		"cp-waiting": "waiting",
 		"cp-held": "held",
+		"cp-awaiting_merge": "awaiting_merge",
 		"cp-done": "done",
 		"cp-failed": "failed",
 	};
@@ -394,8 +395,8 @@ test("portsFor's hasLiveWorker: launching has no worker; waiting/held do, done/f
 	const p = portsFor(fakePost, MULTI_RUNTIME);
 	assert.deepEqual(
 		JOB_PHASES.map((phase) => p.hasLiveWorker(`cp-${phase}`)),
-		[false, true, true, false, false],
-		"launching has no process; waiting and held hold one; done and failed do not",
+		[false, true, true, false, false, false],
+		"launching has no process; waiting and held hold one; awaiting_merge, done and failed do not",
 	);
 	assert.equal(p.hasLiveWorker("cp-never-dispatched"), false, "no fleet record at all is not a live worker");
 });

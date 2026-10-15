@@ -37,7 +37,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { type Job, Ledger } from "../src/ledger.ts";
 import { initialStatus, readStatusFile, rebuildStatus, RunRecorder } from "../src/run-artifacts.ts";
 import { renderHeader } from "../src/watch.ts";
-import { formatScopeRisk, formatThinking } from "../src/status-render.ts";
+import { formatScopeRisk, formatThinking, waitReason } from "../src/status-render.ts";
 import {
 	ageSeconds,
 	assembleStatus,
@@ -1080,4 +1080,22 @@ test("a blocked planner is an ordinary waiting job with the blocker count", asyn
 	assert.ok(!lines.includes("asked you"));
 	assert.ok(!lines.includes("plan ready"));
 	home.cleanup();
+});
+
+test("awaiting_merge: counted as its own phase, never live or working, and its wait names the team or the CP step owed", () => {
+	const head = "c".repeat(40);
+	const awaiting_merge = { cycle: 1, pr_url: "https://github.com/o/r/pull/9", repo: "o/r", branch: "cp-park-f6", head_sha: head, base: "main",
+		handed_at: "2026-08-27T11:00:00Z", released_at: "2026-08-27T11:00:00Z", frozen_seconds: 120, frozen_usage: usage() };
+	const parkedJob = record({ job_id: "cp-park-f6", phase: "awaiting_merge", reported_at: "2026-08-27T10:59:00Z", awaiting_merge,
+		worker: { pid: 4246, exited_at: "2026-08-27T11:00:00Z", exit_code: 0 } });
+	const base = fixture();
+	const snapshot = assembleStatus({ ...base, records: [...base.records, parkedJob], alive: new Map([...base.alive, ["cp-park-f6", true]]) });
+	assert.equal(validateStatusSnapshot(snapshot).ok, true);
+	assert.equal(snapshot.counts.awaiting_merge, 1);
+	assert.equal(snapshot.counts.live, 2, "a parked job's stale pid is never probed live");
+	const row = snapshot.jobs.find((job) => job.job_id === "cp-park-f6");
+	assert.equal(row && waitReason(row), "a team merge of ccccccc");
+	assert.match(statusHeadline(snapshot), /1 awaiting_merge/);
+	const pending = { ...row!, awaiting_merge: { ...awaiting_merge, pending: { kind: "changes_requested" as const, event_id: "PRR_1", observed_at: NOW } } };
+	assert.equal(waitReason(pending), "CP: changes requested (resume pending)");
 });

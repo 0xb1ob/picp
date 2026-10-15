@@ -37,6 +37,10 @@ export interface Layout {
 	ciWatchFile: string;
 	/** What the foreign-PR CI watch has observed about PRs this home did not ship (cp-wlhu S5). */
 	foreignCiWatchFile: string;
+	/** The one batched watch over every awaiting_merge PR: cursors, last observation, global backoff. */
+	awaitingMergeWatchFile: string;
+	/** Stacked child edges and the merge-and-retarget actions queued for the parent. */
+	stackFollowupsFile: string;
 	/** `cp_dispatch` requests refused only by the spawn cap, drained FIFO by the lock owner (cp-itl4 4b-2). */
 	dispatchQueueFile: string;
 	/** The one infra-only CI rerun claimed per job + head (unload-parent PR2, src/ci-infra-rerun.ts). */
@@ -136,6 +140,8 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		answerCardsFile: `${state}/answer-cards.json`,
 		ciWatchFile: `${state}/ci-watch.json`,
 		foreignCiWatchFile: `${state}/foreign-ci-watch.json`,
+		awaitingMergeWatchFile: `${state}/awaiting-merge-watch.json`,
+		stackFollowupsFile: `${state}/stack-followups.json`,
 		dispatchQueueFile: `${state}/dispatch-queue.json`,
 		ciRerunsFile: `${state}/ci-reruns.json`,
 		armedDispatchFile: `${state}/armed-dispatches.json`,
@@ -288,6 +294,14 @@ export const paths = Object.freeze({
 	},
 	scriptResultFile(jobId: string): string {
 		return `${LAYOUT.runs}/${requireJobId(jobId)}/script-result.json`;
+	},
+	/** The awaiting-merge release intent, written before any external effect of parking. */
+	parkIntentFile(jobId: string): string {
+		return `${LAYOUT.runs}/${requireJobId(jobId)}/park-intent.json`;
+	},
+	/** Head-keyed CI observations with their source (native or operator-forwarded). */
+	ciEvidenceFile(jobId: string): string {
+		return `${LAYOUT.runs}/${requireJobId(jobId)}/ci-evidence.json`;
 	},
 	envelopeFile(jobId: string): string {
 		return `${LAYOUT.runs}/${requireJobId(jobId)}/envelope.json`;

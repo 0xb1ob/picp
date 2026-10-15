@@ -195,6 +195,7 @@ function snapshotOf(job: StatusJob): StatusSnapshot {
 			launching: job.phase === "launching" ? 1 : 0,
 			waiting: job.phase === "waiting" ? 1 : 0,
 			held: job.phase === "held" ? 1 : 0,
+			awaiting_merge: job.phase === "awaiting_merge" ? 1 : 0,
 			done: job.phase === "done" ? 1 : 0,
 			failed: job.phase === "failed" ? 1 : 0,
 			live: job.alive ? 1 : 0,

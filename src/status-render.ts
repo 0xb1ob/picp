@@ -20,11 +20,20 @@
  * which has an ASCII fallback the table does not need).
  */
 
-import { ASK_OPERATOR_TOOL, LONG_TOOL_CALL_SECONDS, type StatusJob, WEDGED_TOOL_CALL_SECONDS } from "./contracts.ts";
+import { ASK_OPERATOR_TOOL, LONG_TOOL_CALL_SECONDS, type ParkedPendingKind, type StatusJob, WEDGED_TOOL_CALL_SECONDS } from "./contracts.ts";
 // Type-only: the CI classification `state/ci-watch.json` records is the gate's
 // own union, and this module pins its phrases to it (cp-status-wait-reasons).
 // `merge-ask.ts` imports `contracts.ts` and nothing here, so there is no cycle.
 import type { MergeAskCi } from "./merge-ask.ts";
+
+/** What CP owes a parked job once a remote event marked it pending. */
+const PARKED_PENDING_REASON: Readonly<Record<ParkedPendingKind, string>> = Object.freeze({
+	changes_requested: "changes requested",
+	human_comment: "a new human comment",
+	head_moved: "review and CI of a moved head",
+	base_changed: "revalidation after a base change",
+	closed_unmerged: "abandon or reopen of a closed PR",
+});
 
 // ---------------------------------------------------------------------------
 // Value formatters
@@ -298,6 +307,11 @@ export function waitReason(job: StatusJob): string | null {
 	if (job.pending_review) return null;
 	// Only a delivered job is *waiting* on something: a live worker's row already
 	// says what it is doing, and a failed one says why it stopped.
+	if (job.phase === "awaiting_merge" && job.awaiting_merge) {
+		const parked = job.awaiting_merge;
+		const pending = parked.pending ? PARKED_PENDING_REASON[parked.pending.kind] : undefined;
+		return pending ? `CP: ${pending} (resume pending)` : `a team merge of ${parked.head_sha.slice(0, 7)}`;
+	}
 	if (job.phase !== "held") return null;
 	const ci = job.ci;
 	if (!ci?.head_sha) return job.delivery === "pr" ? "a pushed head on origin" : null;

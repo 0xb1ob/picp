@@ -52,6 +52,7 @@ export class FleetError extends Error {}
  * What reconcile concluded about one record.
  *
  *  terminal  — already `done`/`failed`; history is not re-litigated
+ *  parked    — `awaiting_merge`: the worker was observed closed and the lease returned; nothing to probe
  *  live      — the worker is alive AND this process owns it (a reload, not a restart)
  *  orphan    — the worker's pid is alive but nobody here owns it: reachable by
  *              nobody, so it is reported to the operator and left alone
@@ -62,7 +63,7 @@ export class FleetError extends Error {}
  *              disk: the work landed and envelope intake (T16) owns the phase
  *  failed    — dead worker with nothing to salvage; `failure` carries the class
  */
-export const RECONCILE_OUTCOMES = ["terminal", "live", "orphan", "revivable", "reported", "failed"] as const;
+export const RECONCILE_OUTCOMES = ["terminal", "parked", "live", "orphan", "revivable", "reported", "failed"] as const;
 export type ReconcileOutcome = (typeof RECONCILE_OUTCOMES)[number];
 
 export interface ReconcileEntry {
@@ -465,6 +466,10 @@ export class FleetStore {
 			session_file_present: sessionPresent,
 		};
 
+		// Parked with the team: no worker or lease to probe, so never revivable, failed or crashed.
+		if (phaseBefore === "awaiting_merge") {
+			return { ...base, outcome: "parked", phase_after: phaseBefore, resumable: false, detail: "awaiting a team merge; no worker or lease is held" };
+		}
 		if (phaseBefore === "done" || phaseBefore === "failed") {
 			return {
 				...base,

@@ -56,7 +56,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const head=[ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
   const {review,attempts}=recordedReview(state,id,head ?? null);
   const labels=strings(job?.labels); const project=str(entry?.project) ?? labels.find(l=>l.startsWith("project:"))?.slice(8) ?? "Unassigned";
-  const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
+  const phase:JobPhase=live ? live.phase as JobPhase : entry?.phase === "failed" ? "failed" : entry?.phase === "awaiting_merge" ? "awaiting_merge" : entry?.phase === "done" || (!entry && job?.status === "closed") ? "done" : "queued";
   const status=readStatus(state,id); const receipt=readObject(join(state.stateDir,"runs",id,"merge.json"));
   const merged=receipt?.job_id===id && timestamp(receipt.merged_at) && isSafeChangeRequestUrl(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "");
   const failureAt=phase==="failed" ? [obj(entry?.failure)?.at,obj(status?.failure)?.at].find(timestamp) : undefined;
@@ -100,6 +100,7 @@ export function boardView(state:ViewerState,now=Date.now()):BoardResponse {
  return {...data,jobs,lanes,columns:[
   {key:"queued",name:"Queued",hint:"blocked, or waiting for a slot"},{key:"launching",name:"Launching",hint:"worker starting"},
   {key:"working",name:"Working",hint:"worker running"},{key:"waiting",name:"Waiting",hint:"needs a person, or the worker is idle"},{key:"held",name:"Held",hint:"waiting on CI or review, normal for hours"},
+  {key:"awaiting_merge",name:"With the team",hint:"handed off; waiting on a human merge, no worker or slot"},
   {key:"done",name:"Landed today",hint:"merged or closed"},{key:"failed",name:"Failed",hint:"stopped; may continue on its lease"}],
   revoked_hidden:hidden.length,hidden_mandates:hidden,stranded_count:base.blocked.stranded_count};
 }

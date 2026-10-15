@@ -14,7 +14,7 @@ function sources(state: ViewerState) {
   return m;
  }).sort((a,b) => String(a.issued_at).localeCompare(String(b.issued_at)) || String(a.id).localeCompare(String(b.id))), []);
  const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs",j => typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(str(j.status) ?? "") && (j.blocked_by === undefined || Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id))));
- const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs",j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","done","failed","launching"].includes(str(j.phase) ?? ""));
+ const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs",j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","awaiting_merge","done","failed","launching"].includes(str(j.phase) ?? ""));
  return {grants,ledger,fleet,escalations:mandateEscalations(state)};
 }
 export function mandateEscalations(state: ViewerState) {
