@@ -23,7 +23,7 @@
  * snapshot plus small, bounded, caller-supplied rows.
  */
 
-import type { Receipt, StatusJob, StatusSnapshot } from "./contracts.ts";
+import { isQuiescentParked, type Receipt, type StatusJob, type StatusSnapshot } from "./contracts.ts";
 import { projectGroupedLines } from "./project-report.ts";
 import { formatAge, formatCost, formatScopeRisk, formatThinking, formatTokens, jobState, shortModel } from "./status-render.ts";
 
@@ -215,6 +215,18 @@ function inProgressLine(job: StatusJob, labels: ReadonlyMap<string, string>, wid
 	const stateCell = state.word === job.phase ? state.word : `${state.word} (${job.phase})`;
 	const facts = `${job.project} · ${shortModel(job.model)} · ${formatScopeRisk(job)} · ${formatThinking(job)} · ${stateCell} · ${formatAge(job.age_seconds)} · ${formatTokens(job.usage.total_tokens)} ${formatCost(job.usage.cost_usd)}`;
 	return truncate(`  - ${job.job_id} — ${label}  (${facts})`, width);
+}
+
+/** Quiescent parked jobs (Overview's "With the team"): handed to humans, nothing owed by CP; omitted when none. */
+function renderWithTeam(jobs: readonly StatusJob[], labels: ReadonlyMap<string, string>, width: number, now: string): string[] {
+	if (jobs.length === 0) return [];
+	const line = (job: StatusJob): string => {
+		const parked = job.awaiting_merge!;
+		const age = Math.max(0, Math.floor((Date.parse(now) - Date.parse(parked.handed_at)) / 1000));
+		const facts = `${job.project} · head ${parked.head_sha.slice(0, 7)} · with the team ${formatAge(age)}`;
+		return `${truncate(`  - ${job.job_id} — ${labelFor(job.job_id, job, labels)}  (${facts}): `, width)}${parked.pr_url}`;
+	};
+	return [`With the team · ${jobs.length}:`, ...projectGroupedLines(jobs, (job) => job.project, line), ""];
 }
 
 /** Section 2, "Blocked": parent-supplied — the same rows `br dep add` and the
@@ -415,7 +427,8 @@ export function assembleStatusBlock(
 	const labels = new Map((input.labels ?? []).map((entry) => [entry.job_id, entry.label] as const));
 	const jobsById = new Map(snapshot.jobs.map((job) => [job.job_id, job] as const));
 
-	const inProgressJobs = snapshot.jobs.filter((job) => job.phase !== "done");
+	const inProgressJobs = snapshot.jobs.filter((job) => job.phase !== "done" && !isQuiescentParked(job));
+	const withTeam = snapshot.jobs.filter((job) => isQuiescentParked(job));
 	const shippedCandidates = snapshot.jobs.filter((job) => job.phase === "done");
 
 	const shipped = renderShipped(shippedCandidates, labels, shownShipped, width);
@@ -423,6 +436,7 @@ export function assembleStatusBlock(
 	const sections = [
 		...renderInProgress(inProgressJobs, labels, width),
 		"",
+		...renderWithTeam(withTeam, labels, width, snapshot.generated_at),
 		...renderBlocked(input.blocked ?? [], jobsById, labels, width),
 		"",
 		...renderAwaiting(input.awaiting ?? [], jobsById, labels, width, input.awaitingUnavailable, input.mergeAsks ?? [], input.refused ?? []),

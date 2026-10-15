@@ -299,6 +299,8 @@ export class Integrator {
 		const branch = record.branch;
 		const cwd = this.#options.projectDir(record.project, record.worktree);
 		const facts: string[] = [];
+		// Parked: its worktree may be another job's; the batched watch (awaiting-merge-exits.ts) finishes the merge.
+		if (record.phase === "awaiting_merge") return this.#write({ jobId, branch, step: "start", next: "wait", facts: [`${jobId} is parked with the team; nothing is touched here`], ...(record.awaiting_merge ? { prUrl: record.awaiting_merge.pr_url } : {}), reason: `${jobId} waits on a team merge: the awaiting_merge watch observes the PR and closes the job without a worktree` });
 		// Held entry admits only the existing bounded CI repair; all integration stays paused.
 		const hold = this.#readHold(jobId);
 		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || branch;

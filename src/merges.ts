@@ -36,6 +36,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+	type FleetRecord,
 	isoTimestamp,
 	type MergeAuthority,
 	type MergeReceipt,
@@ -49,7 +50,7 @@ import {
 import type { FleetStore } from "./fleet.ts";
 import { changeRequestObserver } from "./forge-runtime.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
-import type { ForgeObserver } from "./forges/adapter.ts";
+import type { ChangeRequestObservation, ForgeObserver } from "./forges/adapter.ts";
 import { haveCommit, remoteTip } from "./landing-proof.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -186,7 +187,29 @@ export class MergeStore {
 					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
 			);
 		}
-		const view = read.observation;
+		return this.#write(record, read.observation, request, cwd);
+	}
+
+	/**
+	 * Record a merge from an observation a home-owned forge read already made (the awaiting_merge batch watch), with
+	 * the same validation as `record`. No git runs: a parked job's recorded worktree may be another job's by now.
+	 */
+	async recordObserved(jobId: string, view: ChangeRequestObservation, by: string): Promise<RecordMergeResult> {
+		const record = this.#options.fleet.get(jobId);
+		if (!record) throw new MergeError(`no fleet record for ${jobId} — a merge receipt is a fact about a job this home dispatched`);
+		const existing = this.get(jobId);
+		if (existing) {
+			if (existing.job_id !== jobId || existing.head_branch !== record.branch) {
+				throw new MergeError(`${jobId}: the stored merge receipt names ${existing.job_id} on ${existing.head_branch}, not this job's ${record.branch} — it discharges nothing here`);
+			}
+			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
+		}
+		return this.#write(record, view, { jobId, by }, undefined);
+	}
+
+	/** Validate an observation and write its receipt; `cwd` undefined skips every git read. */
+	async #write(record: FleetRecord, view: ChangeRequestObservation, request: RecordMergeRequest, cwd: string | undefined): Promise<RecordMergeResult> {
+		const jobId = record.job_id;
 		const label = view.provider === "gitlab" ? "GitLab" : "gh";
 
 		if (view.state !== "merged") {
@@ -201,7 +224,7 @@ export class MergeStore {
 		}
 		// GitLab names no merge or squash commit for a fast-forward: the head itself landed, if git sees it on the target.
 		const mergeCommit = view.merge_commit_sha ?? view.squash_commit_sha ??
-			(view.provider === "gitlab" && view.target_branch && (await this.#reachable(cwd, headSha, view.target_branch)) ? headSha : undefined);
+			(view.provider === "gitlab" && view.target_branch && cwd !== undefined && (await this.#reachable(cwd, headSha, view.target_branch)) ? headSha : undefined);
 		if (!mergeCommit) {
 			throw new MergeError(
 				`${jobId}: ${label} reports ${view.url} merged but names no merge commit — nothing is recorded. ` +
@@ -216,7 +239,7 @@ export class MergeStore {
 			);
 		}
 
-		const onRemote = await this.#branchOnRemote(cwd, headBranch);
+		const onRemote = cwd === undefined ? undefined : await this.#branchOnRemote(cwd, headBranch);
 		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
 		const project = parseChangeRequestUrl(view.url);
 		const receipt: MergeReceipt = {

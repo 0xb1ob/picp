@@ -526,3 +526,21 @@ test("cp-project-grouped-reporting: a single-project block carries no section he
 	const { text } = assembleStatusBlock(snapshot({ records: [record({ job_id: "cp-a1" }), record({ job_id: "cp-a2" })] }));
 	assert.equal(text.includes("[demo]"), false);
 });
+
+// A quiescent parked job is handed to the team: it leaves In progress for its own "With the team" line (as Overview and
+// Board do); one with a pending CP step (changes requested) stays In progress. Regression: parked rows read as active work.
+test("awaiting_merge: quiescent parked jobs render under With the team, not In progress", () => {
+	const parking = (branch: string) => ({ cycle: 1, pr_url: `https://github.com/acme/demo/pull/${branch.length}`, repo: "acme/demo", branch,
+		head_sha: "d".repeat(40), base: "main", handed_at: "2026-08-30T10:00:00Z", released_at: "2026-08-30T10:00:00Z", frozen_seconds: 60, frozen_usage: usage() });
+	const parkedRecord = (job_id: string, extra = {}) => record({ job_id, phase: "awaiting_merge", reported_at: "2026-08-30T09:59:00Z",
+		awaiting_merge: { ...parking(job_id), ...extra }, worker: { exited_at: "2026-08-30T10:00:00Z", exit_code: 0 } });
+	const snap = snapshot({ records: [record({ job_id: "cp-live" }), parkedRecord("cp-parked"),
+		parkedRecord("cp-pend", { pending: { kind: "changes_requested", event_id: "PRR_1", observed_at: NOW } })] });
+	const { text } = assembleStatusBlock(snap);
+	const section = (heading: string) => text.split(`${heading}:\n`)[1]!.split("\n\n")[0]!.split("\n");
+	assert.deepEqual(section("In progress").map((line) => line.trim().split(" ")[1]), ["cp-live", "cp-pend"]);
+	const team = section("With the team · 1");
+	assert.equal(team.length, 1);
+	assert.match(team[0]!, /^ {2}- cp-parked .*head ddddddd · with the team 2h.*: https:\/\/github\.com\/acme\/demo\/pull\/9$/);
+	assert.ok(text.indexOf("With the team") < text.indexOf("Blocked:"), "the team line sits between In progress and Blocked");
+});

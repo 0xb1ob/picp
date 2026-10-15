@@ -122,10 +122,18 @@ function deadReportedResearch(jobs: readonly FleetRecord[]): string | undefined 
 	return `reported research with a dead worker: ${ids.slice(0, 3).map((id) => `${id} — cp_teardown ${id}`).join("; ")}${ids.length > 3 ? `; +${ids.length - 3} more` : ""}`;
 }
 
+/** awaiting_merge: a parked job the team acted on owes CP work; only `cp_send` resumes it, nothing spawns by itself. */
+function pendingParked(jobs: readonly FleetRecord[]): string | undefined {
+	const rows = jobs.filter((job) => job.phase === "awaiting_merge" && job.awaiting_merge?.pending);
+	if (!rows.length) return undefined;
+	const shown = rows.slice(0, 3).map((job) => `${job.job_id} (${job.awaiting_merge!.pending!.kind}) — cp_send ${job.job_id} resumes it`);
+	return `parked PRs with team activity: ${shown.join("; ")}${rows.length > 3 ? `; +${rows.length - 3} more` : ""}`;
+}
+
 export async function cpNext(ports: NextPorts, project?: string): Promise<NextResult> {
 	const checkout = homeCheckoutFinding(ports.fleet.home, ports.packageRoot ?? PACKAGE_ROOT, execRunner);
 	const fleetJobs = ports.fleet.read().jobs;
-	const notes = [checkout ? `${checkout.what}: ${checkout.fix}` : undefined, deadReportedResearch(fleetJobs)].filter((note) => note !== undefined);
+	const notes = [checkout ? `${checkout.what}: ${checkout.fix}` : undefined, deadReportedResearch(fleetJobs), pendingParked(fleetJobs)].filter((note) => note !== undefined);
 	const warning = notes.length ? { warning: notes.join("\n") } : {};
 	const drain = readDrain(ports.fleet.home);
 	if (drain) return { ...warning, ready: [], action: { kind: "draining", reason: `draining since ${drain.started_at} (${drain.state}): no dispatch, promotion or new merge step until the parent restarts` } };
