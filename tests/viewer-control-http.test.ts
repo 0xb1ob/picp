@@ -111,6 +111,17 @@ test("control is on without a config file: a valid send is 202 and reaches the s
 	assert.equal(big.status, 202);
 });
 
+test("?sends=0 drops sends and sends_error from the status; token, running and recent match the default read", async (t) => {
+	const { stateDir, port } = await setup(t);
+	const { csrf } = await bridge(t, stateDir);
+	assert.equal((await call(port, MESSAGE, json(csrf, { kind: "message", text: "hello" }))).status, 202);
+	const full = (await call(port, "/api/operator/control")).body;
+	const lean = (await call(port, "/api/operator/control?sends=0")).body;
+	assert.ok("sends" in full && "sends_error" in full, "the default read still carries the composer's journal");
+	assert.equal("sends" in lean || "sends_error" in lean, false);
+	for (const key of ["token", "running", "recent"]) assert.deepEqual(lean[key], full[key], key);
+});
+
 test("refusals, in order, each named and each journaled once by the viewer with the client address", async (t) => {
 	const { stateDir, options, port } = await setup(t);
 	const { csrf } = await bridge(t, stateDir);
