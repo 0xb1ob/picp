@@ -66,7 +66,7 @@ export function readWatchFile(home: string): AwaitingMergeWatchFile {
 	return parsed.value;
 }
 
-interface Target { record: FleetRecord; owner: string; name: string; number: number; prior?: ParkedPrWatch }
+interface Target { record: FleetRecord; owner: string; name: string; number: number; branch: string; prior?: ParkedPrWatch }
 
 export class AwaitingMergeWatch {
 	readonly #options: WatchOptions;
@@ -92,7 +92,9 @@ export class AwaitingMergeWatch {
 		const now = this.#now();
 		const file = readWatchFile(this.#options.home);
 		if (file.backoff_until && Date.parse(file.backoff_until) > now.getTime()) return { ...result, skipped: `backing off until ${file.backoff_until}`, backoff_until: file.backoff_until };
-		const parked = this.#options.fleet.read().jobs.filter((job) => job.phase === "awaiting_merge" && job.awaiting_merge);
+		const jobs = this.#options.fleet.read().jobs;
+		const parked = jobs.filter((job) => job.phase === "awaiting_merge" && job.awaiting_merge);
+		const live = jobs.filter((job) => job.phase !== "awaiting_merge" && job.phase !== "done");
 		// A re-park starts a new cycle: its cursors start over, and jobs no longer parked drop out.
 		file.prs = file.prs.filter((pr) => parked.some((job) => job.job_id === pr.job_id && job.awaiting_merge!.cycle === pr.cycle));
 		const targets: Target[] = [];
@@ -103,7 +105,7 @@ export class AwaitingMergeWatch {
 				result.errors.push(`${record.job_id}: ${record.awaiting_merge!.pr_url} is not a GitHub pull request url`);
 				continue;
 			}
-			targets.push({ record, owner, name, number, prior: file.prs.find((pr) => pr.job_id === record.job_id) });
+			targets.push({ record, owner, name, number, branch: record.awaiting_merge!.branch, prior: file.prs.find((pr) => pr.job_id === record.job_id) });
 		}
 		const size = this.#options.batchSize ?? WATCH_BATCH_SIZE;
 		const observedBases: { job_id: string; repo: string; branch: string; base: string }[] = [];
@@ -112,6 +114,12 @@ export class AwaitingMergeWatch {
 			let body: { data?: Record<string, unknown>; errors?: { message?: string; path?: string[] }[] };
 			try {
 				body = (await (this.#options.runner ?? ghGraphql)(batchQuery(batch))) as typeof body;
+				const answered = batch.some((_, index) => (body.data?.[`p${index}`] as { pullRequest?: unknown } | null | undefined)?.pullRequest);
+				// Nothing answered and no error names a PR (bad credentials, a schema error): the runner failed, not the PRs.
+				if (!answered && (body.errors?.length ? body.errors.every((error) => !error.path?.length) : !body.data)) {
+					const why = body.errors?.map((error) => error.message).join("; ") || (body as { message?: string }).message || "no data in the answer";
+					throw new Error(`GitHub GraphQL refused the batch: ${why}`);
+				}
 			} catch (error) {
 				this.#failures += 1;
 				file.backoff_until = isoTimestamp(new Date(now.getTime() + Math.min(60_000 * 2 ** (this.#failures - 1), BACKOFF_MAX_MS)));
@@ -121,7 +129,8 @@ export class AwaitingMergeWatch {
 			}
 			this.#failures = 0;
 			for (const [index, target] of batch.entries()) {
-				const pr = (body.data?.[`p${index}`] as { pullRequest?: RawPr | null } | null | undefined)?.pullRequest;
+				const node = body.data?.[`p${index}`] as { pullRequest?: RawPr | null; stacked?: { nodes?: { headRefName: string }[] } } | null | undefined;
+				const pr = node?.pullRequest;
 				if (!pr) {
 					const why = body.errors?.find((error) => error.path?.[0] === `p${index}`)?.message ?? "no pull request in the answer";
 					result.errors.push(`${target.record.job_id}: ${why}; its last observation stands`);
@@ -131,19 +140,28 @@ export class AwaitingMergeWatch {
 				const parkedRecord = target.record.awaiting_merge!;
 				const read = normalize(pr, parkedRecord.handed_at, this.#options.cpLogins ?? []);
 				observedBases.push({ job_id: target.record.job_id, repo: parkedRecord.repo, branch: parkedRecord.branch, base: read.snap.base });
+				// Open PRs based on this parked branch: a live job among them is a stacked child the merge must queue.
+				for (const head of (node?.stacked?.nodes ?? []).map((child) => child.headRefName)) {
+					const child = live.find((job) => job.project === target.record.project && job.branch === head);
+					if (child) observedBases.push({ job_id: child.job_id, repo: parkedRecord.repo, branch: child.branch, base: parkedRecord.branch });
+				}
+				let outcome: ExitOutcome;
 				try {
-					result.outcomes.push(await applyExit(this.#options, target.record.job_id, parkedRecord.cycle, read.snap));
+					outcome = await applyExit(this.#options, target.record.job_id, parkedRecord.cycle, read.snap);
+					result.outcomes.push(outcome);
 				} catch (error) {
 					result.errors.push(`${target.record.job_id}: ${(error as Error).message.split("\n")[0]}; cursors kept, the next sweep re-reads it`);
 					continue;
 				}
-				if (read.catching_up) result.catching_up.push(target.record.job_id);
 				const prior = target.prior?.cursors ?? {};
+				// A skipped apply saw this page's events without acting on them: re-read them next sweep.
+				const skipped = outcome.applied === "skipped";
+				if (read.catching_up && !skipped) result.catching_up.push(target.record.job_id);
 				const entry: ParkedPrWatch = {
 					job_id: target.record.job_id, cycle: parkedRecord.cycle, pr_url: parkedRecord.pr_url, state: read.snap.state,
 					head_sha: read.snap.head_sha, base: read.snap.base, ...(read.snap.merge_sha && read.snap.state === "merged" ? { merge_sha: read.snap.merge_sha } : {}),
 					approvals: read.approvals, approvals_required: null,
-					cursors: { ...prior, ...read.cursors },
+					cursors: skipped ? prior : { ...prior, ...read.cursors },
 					...(read.last_human ?? target.prior?.last_human_activity_at ? { last_human_activity_at: read.last_human ?? target.prior!.last_human_activity_at! } : {}),
 					observed_at: isoTimestamp(now),
 				};
@@ -193,8 +211,8 @@ interface RawPr {
 	reviews: Page<{ id: string; state: string; body: string; createdAt: string; author: Author | null; comments: { totalCount: number } }>;
 }
 
-/** One aliased `repository.pullRequest` per target plus `rateLimit`; strings are JSON-quoted, never raw. */
-export function batchQuery(batch: readonly Pick<Target, "owner" | "name" | "number" | "prior">[]): string {
+/** One aliased `repository.pullRequest` (plus open PRs based on its branch) per target and `rateLimit`; strings are JSON-quoted. */
+export function batchQuery(batch: readonly (Pick<Target, "owner" | "name" | "number" | "prior"> & { branch?: string })[]): string {
 	const after = (cursor: string | undefined) => (cursor ? `, after: ${JSON.stringify(cursor)}` : "");
 	const author = "author { login __typename }";
 	const prs = batch.map((target, index) =>
@@ -203,7 +221,9 @@ export function batchQuery(batch: readonly Pick<Target, "owner" | "name" | "numb
 		` latestOpinionatedReviews(first: ${PAGE}) { nodes { state ${author} } }` +
 		` comments(first: ${PAGE}${after(target.prior?.cursors.comments)}) { pageInfo { hasNextPage endCursor } nodes { id createdAt ${author} } }` +
 		` reviews(first: ${PAGE}${after(target.prior?.cursors.reviews)}) { pageInfo { hasNextPage endCursor } nodes { id state body createdAt ${author} comments { totalCount } } }` +
-		" } }");
+		" }" +
+		(target.branch ? ` stacked: pullRequests(baseRefName: ${JSON.stringify(target.branch)}, states: OPEN, first: ${PAGE}) { nodes { headRefName } }` : "") +
+		" }");
 	return `query { rateLimit { remaining resetAt cost } ${prs.join(" ")} }`;
 }
 
