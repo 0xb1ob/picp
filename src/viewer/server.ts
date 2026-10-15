@@ -54,6 +54,8 @@ import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
 import { readVersion } from "./version-view.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
+import { diffJson } from "./json-delta.ts";
+import { viewVersions } from "./view-versions.ts";
 import { strictHost } from "./host-config.ts";
 import { DEVICE_NOTICES_PATH, DEVICES_PATH, DEVICES_REVOKE_PATH, type DeviceRoutes, handleDeviceNotices, handleDevicesList, handleDevicesWrite, PAIR_CREATE_PATH } from "./devices-api.ts";
 
@@ -138,6 +140,24 @@ const JSON_CSP = { "content-security-policy": "default-src 'none'; frame-ancesto
 
 export function sendJson(res: ServerResponse, status: number, value: unknown, extra: Record<string, string> = {}): void {
 	send(res, status, "application/json; charset=utf-8", JSON.stringify(value), { ...JSON_CSP, ...extra });
+}
+
+/**
+ * A 200 screen view tagged `x-cp-version`. With `x-cp-delta-base` naming a version still held for this principal and
+ * URL, the body is a keyed delta (json-delta.ts) and the base is echoed; otherwise the full body, as before.
+ */
+function sendView(req: IncomingMessage, res: ServerResponse, value: unknown): void {
+	const json = JSON.stringify(value);
+	const access = accessOf(req);
+	const key = `${access.kind === "remote" ? `remote:${access.device_id}` : "local"}|${req.url ?? "/"}`;
+	const asked = req.headers["x-cp-delta-base"];
+	const base = typeof asked === "string" ? viewVersions.base(key, asked) : undefined;
+	const version = viewVersions.record(key, json);
+	if (base !== undefined) {
+		const delta = JSON.stringify(diffJson(JSON.parse(base), JSON.parse(json)) ?? {});
+		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, "x-cp-version": version, "x-cp-delta-base": asked as string });
+	}
+	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, "x-cp-version": version });
 }
 
 /** `git diff base...head` for a held job, from its live worktree or its project clone; never fetched. */
@@ -318,45 +338,45 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
    const tier=url.searchParams.get("view");
    if (tier !== null) {
     const view=["you","parent","workers"].includes(tier) ? sessionsView(options,tier as "you" | "parent" | "workers",url.searchParams.get("id"),{transcript:url.searchParams.get("transcript") === "1",session:url.searchParams.get("session")}) : undefined;
-    sendJson(res,view ? 200 : 404,view ?? {error:"no such session"}); return;
+    if (view) sendView(req,res,view); else sendJson(res,404,{error:"no such session"}); return;
    }
 			send(res, 200, "application/json; charset=utf-8", JSON.stringify({ ...sidebar(options), boards: listBoards(options, warn) }));
 			return;
   }
 		case "/api/stats": {
 			const out = statsView(options, url.searchParams, Date.now());
-			sendJson(res, out.status, out.body);
+			if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
 			return;
 		}
 		case "/api/jobs":
-			sendJson(res, 200, jobsView(options));
+			sendView(req, res, jobsView(options));
 			return;
 		case "/api/board":
-			sendJson(res, 200, boardView(options));
+			sendView(req, res, boardView(options));
 			return;
 		case "/api/reports":
-			sendJson(res, 200, reportsView(options, warn));
+			sendView(req, res, reportsView(options, warn));
 			return;
 		case "/api/schedules":
-			sendJson(res, 200, schedulesView(options, warn));
+			sendView(req, res, schedulesView(options, warn));
 			return;
 		case "/api/overview":
-			sendJson(res, 200, overview(options));
+			sendView(req, res, overview(options));
 			return;
 		case "/api/map":
-			sendJson(res, 200, dependencyMap(options));
+			sendView(req, res, dependencyMap(options));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, dashboard(options));
 			return;
 		case "/api/awaiting":
-			sendJson(res, 200, awaitingScreen(options));
+			sendView(req, res, awaitingScreen(options));
 			return;
 		case "/api/decided":
-			sendJson(res, 200, decidedScreen(options));
+			sendView(req, res, decidedScreen(options));
 			return;
 		case "/api/decisions":
-			sendJson(res, 200, decisionsScreen(options));
+			sendView(req, res, decisionsScreen(options));
 			return;
 		case "/api/job": {
 			const job = jobDetail(options, url.searchParams.get("id") ?? "");
@@ -375,7 +395,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/files": {
    if (url.searchParams.get("view") === "screen") {
     const view=filesView(options,url.searchParams.get("root"),url.searchParams.get("path") ?? "");
-    sendJson(res,view ? 200 : 404,view ?? {error:"no such path"}); return;
+    if (view) sendView(req,res,view); else sendJson(res,404,{error:"no such path"}); return;
    }
 			const listing = listOrRead(options, url.searchParams.get("root") ?? "", url.searchParams.get("path") ?? "");
 			if (listing) sendJson(res, 200, listing);
@@ -407,7 +427,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 					send(res, log === undefined ? 404 : 200, "text/plain; charset=utf-8", log ?? "Run log unavailable (missing or exceeds 16 MiB).\n", { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" });
 					return;
 				}
-				sendJson(res, job ? 200 : 404, job ?? { error: "no such job" });
+				if (job) sendView(req, res, job); else sendJson(res, 404, { error: "no such job" });
 				return;
 			}
 			if (url.pathname.startsWith("/assets/viewer/")) {

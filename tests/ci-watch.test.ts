@@ -529,6 +529,21 @@ test("a query error backs off exponentially and a success resets it", async (t) 
 	assert.equal(bench.watch.store.job("cp-4wz")?.consecutive_failures, 0);
 });
 
+test("a CI read refused for permission records last_ci unreadable until a read succeeds; a network error does not", async (t) => {
+	const bench = benchOf(t);
+	bench.state.runsError = "gh run list --branch cp-4wz --limit 10 failed: network is unreachable";
+	await bench.watch.tick();
+	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, undefined, "a network failure is not a permission verdict");
+	bench.state.runsError = "gh run list --branch cp-4wz --limit 10 failed: HTTP 403: Resource not accessible by personal access token";
+	advance(bench, CI_WATCH_MAX_BACKOFF_MS);
+	await bench.watch.tick();
+	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, "unreadable");
+	delete bench.state.runsError;
+	advance(bench, CI_WATCH_MAX_BACKOFF_MS);
+	await bench.watch.tick();
+	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, "green", "a fixed token reads CI again at once");
+});
+
 test("a query that learned nothing does not age the head it did not read (pi-command-post-8ok)", async (t) => {
 	// `observedAt` is what tells `headMoved` whether this watcher's head is the
 	// current reading of the branch or a lagging one. It used to be

@@ -9,11 +9,16 @@ export const reviewText = (job:ViewerJob) => {
  return job.review_attempts ? `review ${job.review_attempts}/5 · ${verdict}` : "review not started";
 };
 
-/** `no CI yet` when nothing has run; otherwise `CI <state> <sha7>`. */
+/** The red badge for a CI read the token was refused (ask-81b54d83f0b2): never "no CI yet". */
+export const CI_UNREADABLE_LABEL = "CI unreadable — token lacks Actions/checks read";
+export const CI_READ_NEEDED = "needs fine-grained PAT: Actions read + Checks read + Commit statuses read; classic: repo";
+/** `no CI yet` when nothing has run; the red badge when the token was refused; otherwise `CI <state> <sha7>`. */
 export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
+ const cls = (tone: string) => `job-ci job-ci-${tone}${badge ? " job-badge" : ""}`;
+ if (job.ci === "unreadable") return <span class={cls("red job-ci-unreadable")} title={`${CI_UNREADABLE_LABEL}: ${CI_READ_NEEDED}`}><span class="job-ci-dot" aria-hidden="true"/>{CI_UNREADABLE_LABEL}</span>;
  const ci = job.ci === "failed" ? "red" : job.ci === "in_progress" ? "running" : job.ci;
  const sha = shortSha(job.head);
- return <span class={`job-ci job-ci-${ci ?? "none"}${badge ? " job-badge" : ""}`}><span class="job-ci-dot" aria-hidden="true"/>{job.ci == null ? "no CI yet" : <>CI {ci}{sha && <> <code>{sha}</code></>}</>}</span>;
+ return <span class={cls(ci ?? "none")}><span class="job-ci-dot" aria-hidden="true"/>{job.ci == null ? "no CI yet" : <>CI {ci}{sha && <> <code>{sha}</code></>}</>}</span>;
 }
 
 /** The model without its provider prefix (`anthropic/claude-opus-5-5` → `claude-opus-5-5`); the full id stays in the title. */

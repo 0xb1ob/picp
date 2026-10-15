@@ -19,6 +19,19 @@ export function recordedReview(state: ViewerState, id: string, head: string | nu
  const review = reviews.filter(r => head && r.head_sha === head && obj(r.diff_stat)?.truncated === false).sort((a,b) => (str(a.decided_at) ?? "").localeCompare(str(b.decided_at) ?? "")).at(-1);
  return {review, attempts};
 }
+/** The `last_ci` src/ci-access.ts records when the token was refused a CI read; viewer modules import nothing outside. */
+export const CI_UNREADABLE = "unreadable";
+/** A ci-watch row's CI for `head`; a refused read is shown whatever head it was for, never as "no CI yet". */
+export const jobCi = (row: Json | undefined, head: string | null | undefined): string | null =>
+ row?.last_ci === CI_UNREADABLE ? CI_UNREADABLE : head && row?.head_sha === head ? str(row.last_ci) ?? null : null;
+/** Projects with a held job whose CI read the token was refused (ask-81b54d83f0b2), each with those job ids. */
+export function ciUnreadable(state: ViewerState, jobs: Json[]): {project: string; job_ids: string[]}[] {
+ const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
+ const denied = new Set((Array.isArray(watched) ? watched.map(obj) : []).filter(r => r?.last_ci === CI_UNREADABLE).map(r => String(r?.job_id)));
+ const byProject = new Map<string, string[]>();
+ for (const job of jobs) if (denied.has(String(job.job_id))) byProject.set(String(job.project), [...byProject.get(String(job.project)) ?? [], String(job.job_id)]);
+ return [...byProject].sort(([a],[b]) => a.localeCompare(b)).map(([project,job_ids]) => ({project,job_ids}));
+}
 /** `rows`: the dashboard's job rows, every finished one included (`dashboard(state,now,Infinity)`), computed once by `overview`. */
 export function flights(state: ViewerState, jobs: Json[], escalations: Json[], now: number, rows: readonly JobRow[]): FlightJob[] {
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
@@ -40,7 +53,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
    phase:job.phase === "held" || job.phase === "awaiting_merge" ? "held" : job.phase === "launching" || runPhase === "starting" ? "launching" : ["working","idle"].includes(runPhase ?? "") ? runPhase! : "waiting",
    model:row?.model ?? null, script_path:job.executor === "script" ? str(job.script_path) ?? "script" : null,
    elapsed_seconds:elapsed, limit_seconds:nonnegative(obj(job.bounds)?.wall_clock_seconds) || null, head,
-   ci:head && ci?.head_sha === head ? str(ci.last_ci) ?? null : null,
+   ci:jobCi(ci,head),
    review:str(review?.verdict) ?? null, review_attempts:Math.min(5,attempts.length), routing:routingText(state,job),
    note:escalations.filter(e => e.status === "open" && strings(e.job_ids).includes(id)).map(e => `${e.id}: ${e.question}`).join(" · ") || null, pr_url:row?.pr_url ?? null,
    context:workerContext(state,id,row?.model,windows), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null};

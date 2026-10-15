@@ -8,6 +8,8 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { createViewer } from "../src/viewer/server.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { createScratchHome } from "./harness/index.ts";
+import { call, remoteRig } from "./harness/remote.ts";
+import { createRemoteViewer } from "../src/viewer/remote-server.ts";
 
 test("bodies of at least 1 KiB are gzip/br-encoded when accepted; streams, small and HEAD replies stay identity", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
@@ -65,4 +67,17 @@ test("bodies of at least 1 KiB are gzip/br-encoded when accepted; streams, small
 	const missing = await get("/assets/viewer/nope-1.js");
 	assert.equal(missing.status, 404);
 	assert.equal(missing.headers["cache-control"], "no-store", "a missing asset is never cached");
+});
+
+test("the remote listener serves a hashed /assets/viewer/* asset with no-store, never the local immutable cache", async (t) => {
+	const { pair, options, remote } = await remoteRig(t);
+	const asset = "/assets/viewer/main-ABCDEF12.js";
+	const app = { script: asset, stylesheet: "/assets/viewer/main-ABCDEF12.css", assets: { [asset]: { bytes: Buffer.from("console.log(1);\n"), mime: "text/javascript; charset=utf-8" } }, duration_ms: 0, bytes: 0 };
+	const withApp = { ...remote, port: 0 };
+	const server = createRemoteViewer({ ...options, app }, withApp);
+	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+	t.after(() => server.close());
+	withApp.port = (server.address() as AddressInfo).port;
+	const reply = await call(withApp.port, asset, { headers: { cookie: pair("Phone").cookie } });
+	assert.deepEqual([reply.status, reply.headers["cache-control"]], [200, "no-store"]);
 });

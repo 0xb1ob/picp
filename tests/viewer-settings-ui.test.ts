@@ -44,7 +44,7 @@ function server(get: () => SettingsResponse, post: (url: string, body: Record<st
 			return new Response(JSON.stringify(answer), { status });
 		}
 		if (url === "/api/settings") return new Response(JSON.stringify(get()));
-		if (url === "/api/operator/control") return new Response(JSON.stringify({ generated_at: "now", enabled: true, running: true, reason: null, token: TOKEN, offline: false, held: 0, inbox_token: null }));
+		if (url === "/api/operator/control?sends=0") return new Response(JSON.stringify({ generated_at: "now", enabled: true, running: true, reason: null, token: TOKEN, offline: false, held: 0, inbox_token: null }));
 		return new Response("{}", { status: 404 });
 	};
 	return { fetcher, posts };

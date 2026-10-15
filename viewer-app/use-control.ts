@@ -49,7 +49,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   void poll();
   return () => { stop = true; };
  }, [active, starting?.state]);
- const {restarting, restart} = useRestart(active, status, fetcher, setStatus);
+ const {restarting, restart} = useRestart(active, status, fetcher, setStatus, composer);
  if (!active) return undefined;
  // Decision cards and abort keep their delivery summary; composer messages live in the FIFO list.
  const seen = delivery?.id && (entries.some(e => e.dashboard_id === delivery.id) || (status && !("error" in status) && status.recent.some(row=>row.id === delivery.id && row.state === "delivered")));

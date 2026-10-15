@@ -65,6 +65,7 @@ import { awaitingId } from "./awaiting.ts";
 import { readLiveReport } from "./supersede.ts";
 import { CheckpointStore } from "./checkpoint.ts";
 import { type CiConfiguredVerdict, ghWorkflowsArgs, readCiConfigured } from "./ci-configured.ts";
+import { CI_READ_NEEDED, CI_UNREADABLE_LABEL, ciReadDenied } from "./ci-access.ts";
 import type { InfraRerunInput, InfraRerunOutcome } from "./ci-infra-rerun.ts";
 import type { FleetStore } from "./fleet.ts";
 import { finalFixMessage, recordFinalFixPromotion, resolveFinalFix } from "./final-fix.ts";
@@ -468,7 +469,7 @@ export class Integrator {
 				facts: [...facts, firstLine(runs)],
 				prUrl,
 				headSha: head,
-				reason: `${jobId}: could not read CI for ${branch} (${firstLine(runs)}). Nothing was merged.`,
+				reason: `${jobId}: could not read CI for ${branch} (${ciReadDenied(`gh run list ${firstLine(runs)}`) ? `${CI_UNREADABLE_LABEL}; needs ${CI_READ_NEEDED}` : firstLine(runs)}). Nothing was merged.`,
 			});
 		}
 		const runsParsed = safeParseRuns(runs.stdout);

@@ -17,7 +17,7 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
  useEffect(() => {
   const controller = new AbortController();
   let retry: ReturnType<typeof setTimeout> | undefined;
-  void Promise.all([readSettings(fetcher, controller.signal), readControl(fetcher, controller.signal)]).then(([settings, control]) => {
+  void Promise.all([readSettings(fetcher, controller.signal), readControl(fetcher, controller.signal, false)]).then(([settings, control]) => {
    if (controller.signal.aborted) return;
    setStatus(settings);
    setToken("error" in control || !control.running ? null : control.token ?? null);
