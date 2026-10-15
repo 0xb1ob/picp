@@ -13,7 +13,9 @@ import { decideOccupancy } from "../src/preflight.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { Teardown } from "../src/teardown.ts";
 import type { GateOutcome } from "../src/teardown.ts";
-import { createScratchHome } from "./harness/index.ts";
+import { HeldRelease } from "../src/held-release.ts";
+import { Sender } from "../src/send.ts";
+import { createScratchHome, type FakeWorker, fakeWorkerManager } from "./harness/index.ts";
 
 const HEAD = "a".repeat(40);
 const FACTS: ParkFacts = { pr_url: "https://github.com/o/r/pull/7", repo: "o/r", head_sha: HEAD, base: "main", handed_at: "2026-10-15T10:00:00Z" };
@@ -227,4 +229,35 @@ test("a refused spawn restores the parked record exactly and returns the new lea
 	await assert.rejects(b.resume.resume("cp-park"), (error: unknown) => error instanceof ResumeError && error.code === "session_missing");
 	assert.deepEqual(b.leaseCalls, [], "no lease is taken for a session that cannot resume");
 	assert.equal(existsSync(join(b.home, paths.parkIntentFile("cp-park"))), false);
+});
+
+// cp_send is the resume path: the parked job leaves awaiting_merge for held on the new lease, the revived worker gets the
+// note-led message, and HeldRelease's "released" restore never fires a second revive (worker_revived follows the park's
+// held_released). Regression: Sender kept the pre-resume record and could restore the resumed worker as released.
+test("cp_send on a parked job resumes its worker on a fresh lease and the job leaves awaiting_merge", async (t) => {
+	const b = await resumeBench(t);
+	const workers = fakeWorkerManager(b.home, 3);
+	t.after(() => workers.manager.shutdownAll());
+	let revived: FakeWorker | undefined;
+	const resume = new AwaitingMergeResume({
+		fleet: b.fleet, runs: b.runs, clone: () => b.lease.clone, leases: { acquire: async () => b.lease, release: async () => ({ ok: true }) },
+		revive: async (jobId) => {
+			revived = workers.spawn(jobId);
+			b.runs.open(jobId).cp("worker_revived", { pid: revived.pid });
+		},
+	});
+	const heldRelease = new HeldRelease({ home: b.home } as never);
+	const sender = new Sender({
+		fleet: b.fleet, manager: workers.manager, runs: b.runs, home: b.home, resume: (id) => resume.resume(id),
+		released: (id) => heldRelease.wasReleased(id), revive: async () => assert.fail("a resumed worker is never restored as released"),
+	});
+	const result = await sender.send({ jobId: "cp-park", message: "address the team's review" });
+	assert.equal(result.receipt, "delivered");
+	assert.equal(heldRelease.wasReleased("cp-park"), false);
+	assert.match(revived?.sent[0] ?? "", /^\[resumed from awaiting_merge\][^]*\n\naddress the team's review/);
+	const record = b.fleet.require("cp-park");
+	assert.notEqual(record.phase, "awaiting_merge");
+	assert.equal(record.awaiting_merge, undefined);
+	assert.equal(record.worktree, b.lease.path);
+	assert.equal(record.lease_id, "lease-2");
 });

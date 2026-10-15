@@ -195,7 +195,7 @@ export class Sender {
 		const vetoed = vetoedReviseRefusal(home, request.jobId, message);
 		if (vetoed) throw new SendError(vetoed);
 
-		const record = fleet.get(request.jobId);
+		let record = fleet.get(request.jobId);
 		if (!record) {
 			throw new SendError(`no fleet record for ${request.jobId} — dispatch it first (cp_dispatch)`);
 		}
@@ -253,6 +253,10 @@ export class Sender {
 			} catch (error) {
 				throw new SendError(`${request.jobId}: resume from awaiting_merge refused — ${(error as Error).message}. Nothing was sent.`);
 			}
+			// Resume rewrote phase, worktree, lease and worker handle: the rest of this send reads the record it left.
+			const resumed = fleet.get(request.jobId);
+			if (!resumed) throw new SendError(`${request.jobId}: the fleet record vanished after resume; nothing was sent`);
+			record = resumed;
 		}
 
 		// 4b-1: never deliver into a worker HeldRelease is stopping; wait for its observed exit, then restore it.
@@ -266,7 +270,8 @@ export class Sender {
 		const noLiveWorker = () =>
 			`${request.jobId} has no live worker in this session (fleet phase ${record.phase}, pid ${record.worker.pid}). ` +
 			`cp_revive ${request.jobId} to relaunch it from ${record.worker.session_file || "its session file"}, or tear the job down.`;
-		if (!managed && this.#options.revive && this.#options.released?.(request.jobId)) {
+		// A resumed worker was just relaunched; it is never a released one to restore a second time.
+		if (!managed && !parked && this.#options.revive && this.#options.released?.(request.jobId)) {
 			assertNotDraining(home, `restore of released ${request.jobId}`);
 			try {
 				await this.#options.revive(request.jobId);
