@@ -22,6 +22,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
@@ -111,9 +112,26 @@ const SECURITY_HEADERS = {
 // A remote-listener response is never cached anywhere, whatever the route asked (an attachment's 7-day cache included).
 const REMOTE_NO_STORE = { "cache-control": "no-store" };
 
+const COMPRESSIBLE = /^(application\/json|text\/javascript|text\/css|text\/html|text\/plain|application\/manifest\+json)\b/;
+
+/** `br` or `gzip` when the client offers it (q > 0) for a 200 body worth compressing; `undefined` sends identity. */
+function encodingFor(res: ServerResponse, status: number, type: string, size: number): "br" | "gzip" | undefined {
+	if (status !== 200 || size < 1024 || res.req?.method === "HEAD" || !COMPRESSIBLE.test(type)) return undefined;
+	const offered = new Set(String(res.req?.headers["accept-encoding"] ?? "").split(",").flatMap((part) => {
+		const [name = "", ...params] = part.split(";").map((s) => s.trim().toLowerCase());
+		const q = params.find((p) => p.startsWith("q="));
+		return q && Number(q.slice(2)) === 0 ? [] : [name];
+	}));
+	return offered.has("br") ? "br" : offered.has("gzip") ? "gzip" : undefined;
+}
+
 export function send(res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}): void {
-	res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, ...extra, ...(accessOf(res.req).kind === "remote" ? REMOTE_NO_STORE : {}) });
-	res.end(body);
+	const encoding = encodingFor(res, status, type, Buffer.byteLength(body));
+	const encoded = encoding === "br" ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 } })
+		: encoding === "gzip" ? gzipSync(body, { level: 6 }) : body;
+	const negotiated = encoding ? { "content-encoding": encoding, vary: "accept-encoding" } : {};
+	res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, ...extra, ...negotiated, ...(accessOf(res.req).kind === "remote" ? REMOTE_NO_STORE : {}) });
+	res.end(encoded);
 }
 
 const JSON_CSP = { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" };
@@ -394,7 +412,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			}
 			if (url.pathname.startsWith("/assets/viewer/")) {
 				const asset = options.app && Object.hasOwn(options.app.assets, url.pathname) ? options.app.assets[url.pathname] : undefined;
-				send(res, asset ? 200 : 404, asset?.mime ?? "text/plain; charset=utf-8", asset ? Buffer.from(asset.bytes) : "not found\n", { "content-security-policy": APP_CSP });
+				// Asset names are content-hashed (build.ts), so a local client may keep them; remote stays no-store in send().
+				send(res, asset ? 200 : 404, asset?.mime ?? "text/plain; charset=utf-8", asset ? Buffer.from(asset.bytes) : "not found\n", { "content-security-policy": APP_CSP, ...(asset ? { "cache-control": "public, max-age=31536000, immutable" } : {}) });
 				return;
 			}
 			const iconSize = Object.hasOwn(APP_ICONS, url.pathname) ? APP_ICONS[url.pathname] : undefined;

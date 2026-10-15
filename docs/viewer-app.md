@@ -526,6 +526,10 @@ stream and a successful GET within five seconds; a one-shot freshness deadline
 marks delayed reads stale without adding a polling loop. Failed reads retain
 last data visibly stale. Listeners, aborts and timers are cleaned up on unmount.
 
+Responses (JSON, JS, CSS, HTML, text, manifest; 200 and at least 1 KiB) are br- or gzip-compressed when the
+request accepts it, with `vary: accept-encoding`; the event stream never is. Hashed `/assets/viewer/*` files are
+`public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
+
 ## Design And Fonts
 
 Ported from the supplied design export screens `00-28bafde0-overview`,
