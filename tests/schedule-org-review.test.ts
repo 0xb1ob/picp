@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, type RiskPreapproval } from "../src/contracts.ts";
@@ -19,7 +19,7 @@ import { carriedPreapproval } from "../src/schedule-grant.ts";
 import { orgReviewConfig, Scheduler } from "../src/scheduler.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
 import { controlConfigFile } from "../src/viewer/control-files.ts";
-import { createScratchHome, createScratchLedger } from "./harness/index.ts";
+import { createScratchHome, createScratchLedger, REPO_ROOT } from "./harness/index.ts";
 
 const T0 = new Date("2026-07-01T07:03:00Z");
 const PID = 4242;
@@ -216,4 +216,17 @@ test("verifiedRunNowClick: only the viewer's one run_now request for this schedu
 	mkdirSync(dirname(controlConfigFile(stateDir)), { recursive: true });
 	writeFileSync(controlConfigFile(stateDir), '{"enabled": false}');
 	assert.match(why(ok), /dashboard control is off/);
+});
+
+// The reviewer's approval gate reads CI from Actions runs and attempt jobs at the exact head. A rollup/checks gate
+// coming back, or no-run/incomplete evidence counting as green, would let an approval land on unseen CI.
+test("the org-review recipe gates approval on exact-head Actions runs and jobs, never rollup or checks", () => {
+	const text = readFileSync(join(REPO_ROOT, "skills/cp-org-pr-review/SKILL.md"), "utf8");
+	const brief = text.slice(text.indexOf("## Reviewer task template"), text.indexOf("## S1 task template")).replace(/\n\s*/g, " ");
+	const gate = brief.slice(brief.indexOf("4. CI is all green"), brief.indexOf("5. zero unresolved"));
+	assert.match(gate, /actions\/runs\?head_sha=<sha>&per_page=100&page=<n>/);
+	assert.match(gate, /actions\/runs\/<id>\/attempts\/<run_attempt>\/jobs\?per_page=100&page=<n>/);
+	assert.match(gate, /No runs, an unreadable or incomplete page, or any run still queued or in progress is not green/);
+	assert.match(gate, /Never fall back to the Checks API, commit statuses or `statusCheckRollup`/);
+	assert.doesNotMatch(gate.replace(/Never fall back[^;]*;/, ""), /statusCheckRollup|check-runs|\/status(?:es)?\b|`SUCCESS`/);
 });

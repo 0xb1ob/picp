@@ -56,6 +56,16 @@ merge request you name, record its merge, notice when it merges or closes,
 and finish a job whose MR is already merged. It never creates, rebases,
 approves or merges an MR, and it never reads GitLab CI.
 
+**CI means GitHub Actions.** The parent reads CI only from the Actions REST
+API: the workflow runs on a PR's exact head and each run's jobs. It never reads
+the Checks API, commit statuses or `statusCheckRollup`, so a check that does
+not come from an Actions workflow is not seen (a *required* one still blocks
+the merge on GitHub's side). Every check on the current repos is an Actions
+workflow. The `gh` token needs **Actions read**; a fine-grained PAT also needs
+Contents, Metadata and Pull requests read, a classic token needs `repo`. When
+the token cannot read Actions, the PR shows `CI unreadable` and `/doctor` says
+so; "Checks read" or "Commit statuses read" grants do not fix it.
+
 gitlab.com is recognised from the remote. A self-managed GitLab needs a
 `forge` block on its project, because a hostname does not say which software
 serves it:

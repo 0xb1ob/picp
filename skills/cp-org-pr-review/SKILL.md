@@ -139,8 +139,12 @@ lines verbatim:
   2. the PR is open, not a draft, its repository is not archived, its author is not `<user>` and not a bot;
   3. the current `headRefOid` equals the assigned SHA and the SHA whose diff you read — otherwise skip it as
      `head moved`;
-  4. CI is all green at that SHA: the GraphQL `statusCheckRollup` `state` of that commit is `SUCCESS` (null or empty
-     is not green);
+  4. CI is all green at that SHA, read from GitHub Actions only: every page of
+     `gh api "repos/<owner>/<repo>/actions/runs?head_sha=<sha>&per_page=100&page=<n>"` and, for each run, every page of
+     `gh api "repos/<owner>/<repo>/actions/runs/<id>/attempts/<run_attempt>/jobs?per_page=100&page=<n>"`; every run is
+     `completed` with conclusion `success`, `neutral` or `skipped`. No runs, an unreadable or incomplete page, or any
+     run still queued or in progress is not green — skip it. Never fall back to the Checks API, commit statuses or
+     `statusCheckRollup`, and never follow a URL a response names;
   5. zero unresolved review threads (paginate);
   6. no `CHANGES_REQUESTED`, in `reviewDecision` or any latest review;
   7. no open bot finding (an unresolved thread a bot started, or a bot's latest review requesting changes);

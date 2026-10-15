@@ -55,6 +55,17 @@ npm run test:one -- tests/awaiting-merge-viewer.test.ts     # With the team, fro
 npm run test:one -- tests/human-handoff.test.ts             # the handoff port: park, fallback row, review first
 ```
 
+CI evidence is GitHub Actions only (runs on the exact head plus each run attempt's jobs, `src/actions-ci.ts`). These
+files need no token or network; the policy file's fake `gh` throws on any request outside the Actions allowlist:
+
+```bash
+npm run test:one -- tests/actions-ci.test.ts            # runs/jobs parsing, pagination, attempts, fail-closed reads
+npm run test:one -- tests/actions-ci-policy.test.ts     # allowlist; no Checks/status/rollup read in any CI reader
+npm run test:one -- tests/ci-access.test.ts             # Actions-only advice; /doctor workflows, runs and jobs probe
+npm run test:one -- tests/ci-configured.test.ts         # only a positive empty workflow list is "no Actions CI"
+npm run test:one -- tests/schedule-org-review.test.ts   # the org-review approval gate reads Actions, never rollup
+```
+
 Worker-prompt evals are a separate axis: `npm run eval` scores the assembled
 prompt text against a checked-in corpus; the model-quality half runs only
 under `CP_EVAL_LIVE=1` ([evals.md](evals.md)).
