@@ -206,6 +206,23 @@ test("watch sweep: a live job whose PR is based on a parked branch gets a stack 
 	assert.deepEqual(readStackFollowups(b.home).edges.map((edge) => [edge.parent_job, edge.child_job]), [["cp-park", "cp-child"]]);
 });
 
+test("watch sweep: observeCi sees open snapshots (a moved head included), never merged/closed; its fault skips nothing", async (t) => {
+	const b = await bench(t, [parked(), parked("cp-two", "cp-two", "main", 9), parked("cp-three", "cp-three", "main", 10)]);
+	const moved = "b".repeat(40);
+	const answer = { data: {
+		p0: { pullRequest: rawPr({ headRefOid: moved }) },
+		p1: { pullRequest: rawPr({ url: "https://github.com/o/r/pull/9", number: 9, state: "CLOSED" }) },
+		p2: { pullRequest: rawPr({ url: "https://github.com/o/r/pull/10", number: 10, state: "MERGED", mergedAt: "2026-10-15T11:59:00Z", mergeCommit: { oid: MERGE } }) },
+	} };
+	const seen: string[] = [];
+	const observeCi = async (record: FleetRecord, snapshot: PrSnapshot) => { seen.push(`${record.job_id}@${snapshot.head_sha}`); throw new Error("store unwritable"); };
+	const result = await new AwaitingMergeWatch({ ...b.ports, home: b.home, observeCi, runner: async () => answer }).sweep();
+	assert.deepEqual(seen, [`cp-park@${moved}`]);
+	assert.deepEqual(result.outcomes.map((outcome) => outcome.applied), ["head_moved", "closed_unmerged"]);
+	assert.match(result.errors.join("\n"), /cp-park: native CI not recorded — store unwritable/);
+	assert.deepEqual(readWatchFile(b.home).prs.map((pr) => [pr.job_id, pr.cursors.comments]), [["cp-park", "C1"], ["cp-two", "C1"]]);
+});
+
 test("checkWakeup: a pending-exit wake is stale once its job left that parking cycle", () => {
 	const stamp = { kind: "recovery" as const, job_id: "cp-park", keys: ["parked-cycle:1"], issued_at: HANDED };
 	const facts = (phase: FleetRecord["phase"], parked_cycle?: number) => ({ job: () => ({ phase, generation: 1, ...(parked_cycle ? { parked_cycle } : {}) }) });

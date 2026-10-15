@@ -487,6 +487,20 @@ test("a job that leaves the watch set is pruned from the state file", async (t) 
 	assert.equal(bench.watch.head("cp-4wz"), undefined);
 });
 
+test("a parked job's row survives the prune but is never ticked; isWatched still excludes it; done rows still prune", async (t) => {
+	// The parked sweep (src/parked-ci.ts) owns this row; pruning it would hide the parked head's CI from the dashboard.
+	const bench = benchOf(t, { jobs: [record(), record({ job_id: "cp-done", branch: "cp-done" })] });
+	await bench.watch.tick();
+	const parked = record({ phase: "awaiting_merge" as JobPhase });
+	bench.state.jobs = [parked, record({ job_id: "cp-done", branch: "cp-done", phase: "done" as JobPhase })];
+	advance(bench, CI_WATCH_MAX_BACKOFF_MS);
+	const tick = await bench.watch.tick();
+	assert.deepEqual(tick.checked, []);
+	assert.equal(isWatched(parked), false);
+	assert.equal(bench.watch.head("cp-4wz"), HEAD);
+	assert.equal(bench.watch.head("cp-done"), undefined);
+});
+
 // ---------------------------------------------------------------------------
 // Polling policy
 // ---------------------------------------------------------------------------
@@ -531,11 +545,14 @@ test("a query error backs off exponentially and a success resets it", async (t) 
 	assert.equal(bench.watch.store.job("cp-4wz")?.consecutive_failures, 0);
 });
 
-test("a CI read refused for permission records last_ci unreadable until a read succeeds; a network error does not", async (t) => {
+test("a CI read refused for permission records last_ci unreadable until a read succeeds; a network error is unknown", async (t) => {
 	const bench = benchOf(t);
-	bench.state.runsError = "gh run list --branch cp-4wz --limit 10 failed: network is unreachable";
 	await bench.watch.tick();
-	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, undefined, "a network failure is not a permission verdict");
+	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, "green");
+	bench.state.runsError = "gh run list --branch cp-4wz --limit 10 failed: network is unreachable";
+	advance(bench, CI_WATCH_MAX_BACKOFF_MS);
+	await bench.watch.tick();
+	assert.equal(bench.watch.store.job("cp-4wz")?.last_ci, "unknown", "a failed read is no verdict, never the stale green");
 	bench.state.runsError = "gh run list --branch cp-4wz --limit 10 failed: HTTP 403: Resource not accessible by personal access token";
 	advance(bench, CI_WATCH_MAX_BACKOFF_MS);
 	await bench.watch.tick();

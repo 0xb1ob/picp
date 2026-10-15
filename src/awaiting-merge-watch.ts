@@ -50,6 +50,8 @@ export interface WatchOptions extends ExitPorts {
 	/** Logins of this home's own accounts: their comments are CP activity, never a human event. */
 	cpLogins?: readonly string[];
 	batchSize?: number;
+	/** Native CI for each open snapshot's head (src/parked-ci.ts); observation only, never a lifecycle exit. */
+	observeCi?: (record: FleetRecord, snap: PrSnapshot) => Promise<void>;
 }
 
 export function readWatchFile(home: string): AwaitingMergeWatchFile {
@@ -144,6 +146,12 @@ export class AwaitingMergeWatch {
 				for (const head of (node?.stacked?.nodes ?? []).map((child) => child.headRefName)) {
 					const child = live.find((job) => job.project === target.record.project && job.branch === head);
 					if (child) observedBases.push({ job_id: child.job_id, repo: parkedRecord.repo, branch: child.branch, base: parkedRecord.branch });
+				}
+				// A CI read fault is stored per job; it never skips applyExit or the cursors below.
+				if (read.snap.state === "open") {
+					await this.#options.observeCi?.(target.record, read.snap).catch((error: Error) => {
+						result.errors.push(`${target.record.job_id}: native CI not recorded — ${error.message.split("\n")[0]}`);
+					});
 				}
 				let outcome: ExitOutcome;
 				try {

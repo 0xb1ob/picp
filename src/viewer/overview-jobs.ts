@@ -30,7 +30,7 @@ const ciEvents = fileCache((path: string) => readLines(path, startOffset(path, u
  .map(l => parseObject(l.text)).filter((e): e is Json => e?.source === "cp" && e.type === "ci_observed")
  .flatMap(e => { const p = obj(e.payload); const ci = p?.event === "ci_green" ? "green" : p?.event === "ci_failed" ? "failed" : null; const head = str(p?.head_sha);
   return ci && head ? [{ci, head}] : []; }));
-/** CI for `head`: the ci-watch row, else the last `ci_observed` event for it (a parked job's watch row is pruned). */
+/** CI for `head`: the current ci-watch row (its `unknown` is the answer), else the last `ci_observed` event for it. */
 export function headCi(state: ViewerState, id: string, row: Json | undefined, head: string | null): string | null {
  const watched = jobCi(row,head);
  if (watched || !head || !isSafeId(id)) return watched;
@@ -95,6 +95,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
 export function withTeam(state: ViewerState, jobs: Json[], now: number, rows: readonly JobRow[]): TeamJob[] {
  const watched = readObject(join(state.stateDir,"awaiting-merge-watch.json"))?.prs;
  const watchRows = Array.isArray(watched) ? watched.map(obj) : [];
+ const ciWatched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs; const ciRows = Array.isArray(ciWatched) ? ciWatched.map(obj) : [];
  return jobs.flatMap(job => {
   const parked = obj(job.awaiting_merge);
   if (!quiescent(job) || !parked || !timestamp(parked.handed_at)) return [];
@@ -107,7 +108,7 @@ export function withTeam(state: ViewerState, jobs: Json[], now: number, rows: re
   return [{id, project:String(job.project), title:rows.find(r => r.job_id === id)?.title ?? null, pr_url:pr, head, base:str(parked.base) ?? "",
    handed_at:parked.handed_at, age_seconds:Math.max(0,(now - Date.parse(parked.handed_at))/1000), frozen_seconds:nonnegative(parked.frozen_seconds) ?? 0,
    approvals:nonnegative(seen?.approvals), approvals_required:required === null ? null : Math.floor(required),
-   ci:headCi(state,id,undefined,head), ci_forwarded:forwardedCi(state,id,head), last_human_activity_at:activity}];
+   ci:headCi(state,id,ciRows.find(r => r?.job_id === id),head), ci_forwarded:forwardedCi(state,id,head), last_human_activity_at:activity}];
  }).sort((a,b) => a.handed_at.localeCompare(b.handed_at));
 }
 // Mirrors isQuiescentParked (src/contracts/awaiting-merge.ts); viewer modules cannot import contracts.

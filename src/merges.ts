@@ -66,7 +66,7 @@ export type CommandRunner = (
 	 * reads a diff and nothing else), and it is a parameter rather than a shell
 	 * pipe because nothing in this system builds a command line for a shell.
 	 */
-	options?: { stdin?: string },
+	options?: { stdin?: string; timeoutMs?: number },
 ) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
 /** The `gh pr view --json` fields, now owned by the GitHub observer; re-exported for existing callers. */

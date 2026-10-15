@@ -34,6 +34,8 @@ const ACQUISITION_SOURCES = [
 	"src/integrate.ts",
 	"src/integrate-held.ts",
 	"src/ci-infra-rerun.ts",
+	"src/parked-ci.ts",
+	"src/awaiting-merge.ts",
 	"src/ci-access-doctor.ts",
 	"src/ci-configured.ts",
 ];

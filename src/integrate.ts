@@ -309,7 +309,7 @@ export class Integrator {
 		const gitlab = parseChangeRequestUrl(pr)?.kind === "gitlab" || (forge?.ok === true && forge.repository.kind === "gitlab");
 		if (hold && gitlab) return this.#heldResult(jobId, branch, hold, { facts, prUrl: pr, lead: GITLAB_HELD_LEAD });
 		if (hold) return advanceHeld({ jobId, record, cwd, pr, hold }, {
-			view: (pr) => this.#viewPr(cwd, pr), run: (dir, bin, args) => this.#run(dir, bin, args),
+			view: (pr) => this.#viewPr(cwd, pr), run: (dir, bin, args, opts) => this.#run(dir, bin, args, opts),
 			merged: () => this.#options.merges.get(jobId), hold: () => this.#readHold(jobId),
 			fleet: () => fleet.get(jobId), promoting: () => this.promoting(jobId),
 			blocked: (seen) => this.#deliveryBlocked({ jobId, branch, facts: seen.facts, prUrl: seen.prUrl, head: seen.headSha }),
@@ -457,7 +457,7 @@ export class Integrator {
 		}
 		const mainCiScope = async (): Promise<MainCiScope> => (await this.#options.mainCiScope?.(record.project)) ?? { enforce: false, reason: "no main-CI scope wired" };
 		let observed: Promise<CiRun[]> | undefined; // one Actions observation of this head per advance
-		const readRuns = () => (observed ??= ghCiRuns({ cwd, exec: statusRunner((dir, bin, args) => this.#run(dir, bin, args)) })(head));
+		const readRuns = () => (observed ??= ghCiRuns({ cwd, exec: statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts)) })(head));
 		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: readRuns, scope: mainCiScope });
 		if (mainRed.fact) facts.push(mainRed.fact); // k52: a red origin/main pauses every merge path below, fix-forward excepted
 		if (mainRed.hold) return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...facts, mainRed.hold], prUrl, headSha: head, reason: `${jobId}: ${mainRed.hold}` });
@@ -481,7 +481,7 @@ export class Integrator {
 		}
 		let ci = readCiForHead({ branch, headSha: head, runs: runsParsed });
 		// Main parity: no run yet on a fresh head, but runs on an older sha of the branch, is `superseded` (wait).
-		const older = ci.ci === "unknown" && !runsParsed.length ? await readOlderBranchRuns({ cwd, exec: statusRunner((dir, bin, args) => this.#run(dir, bin, args)), branch, head }).catch((error: Error) => error) : [];
+		const older = ci.ci === "unknown" && !runsParsed.length ? await readOlderBranchRuns({ cwd, exec: statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts)), branch, head }).catch((error: Error) => error) : [];
 		if (older instanceof Error) facts.push(`ci: branch runs unreadable — ${older.message.slice(0, 200)}`);
 		else if (older.length) ci = readCiForHead({ branch, headSha: head, runs: older });
 		const runRef = ci.ci === "failed" ? formatRunRef(ciRunRef(runsParsed, head, prUrl)) : "";
@@ -1884,7 +1884,7 @@ export class Integrator {
 		return (this.#options.now ?? (() => new Date()))();
 	}
 
-	async #run(cwd: string, bin: string, args: readonly string[], options?: { stdin?: string }) {
+	async #run(cwd: string, bin: string, args: readonly string[], options?: { stdin?: string; timeoutMs?: number }) {
 		const custom = this.#options.run;
 		if (custom) return custom(cwd, bin, args, options);
 		return defaultRun(cwd, bin, args, options);
@@ -2032,9 +2032,9 @@ function resolveGitDir(worktree: string): string | undefined {
 	}
 }
 
-function defaultRun(cwd: string, bin: string, args: readonly string[], options?: { stdin?: string }) {
+function defaultRun(cwd: string, bin: string, args: readonly string[], options?: { stdin?: string; timeoutMs?: number }) {
 	return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolvePromise) => {
-		const child = execFile(bin, [...args], { cwd, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+		const child = execFile(bin, [...args], { cwd, timeout: options?.timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
 			const status = typeof error?.code === "number" ? error.code : error ? 1 : 0;
 			resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
 		});
