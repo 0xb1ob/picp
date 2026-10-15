@@ -95,6 +95,11 @@ export function actionsBranchRunsPath(input: { repo?: ActionsRepo; branch: strin
 	return `${repoPath(input.repo)}/actions/runs?branch=${encodeURIComponent(input.branch)}&per_page=${ACTIONS_PER_PAGE}&page=1`;
 }
 
+/** `repos/<o>/<r>/actions/runs?per_page=1&page=1`: the newest run on any head, for /doctor's access probe only. */
+export function actionsLatestRunPath(repo: ActionsRepo): string {
+	return `${repoPath(repo)}/actions/runs?per_page=1&page=1`;
+}
+
 /** `repos/<o>/<r>/actions/runs/<id>/attempts/<attempt>/jobs?per_page=100&page=<n>`. */
 export function actionsJobsPath(input: { repo?: ActionsRepo; runId: number; attempt: number; page: number }): string {
 	if (!positive(input.runId) || !positive(input.attempt) || !positive(input.page)) {

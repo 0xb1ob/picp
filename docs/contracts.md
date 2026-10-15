@@ -965,11 +965,13 @@ derived from the PR URL, with no extra query and its key unchanged.
   already encodes the only correct rule ("a completed run counts only when its
   `headSha` is the branch's current pushed head; one unfinished run on that head
   defers the whole aggregate"). There is one evaluator, always.
-- **Two REST queries per job per tick**: `gh api repos/{o}/{r}/pulls/{n}` (state,
-  merged, merge commit *and* the head sha, in one request) and
-  `gh run list --branch <b> --limit 10 --json conclusion,status,headSha,workflowName`.
-  **Never the GraphQL check-rollup fields** (`gh pr checks`,
-  `gh pr view --json statusCheckRollup`): they 403 with this home's token.
+- **REST queries per job per tick**: `gh api repos/{o}/{r}/pulls/{n}` (state,
+  merged, merge commit *and* the head sha, in one request), then the Actions
+  runs for exactly that head and each run attempt's jobs
+  (`readActionsCi`, `src/actions-ci.ts`). No head, no CI read.
+  **Never the Checks API, commit statuses or the GraphQL check rollup**
+  (`gh pr checks`, `gh pr view --json statusCheckRollup`): they 403 with this
+  home's token, and CI evidence is Actions only.
 - **Never a blocking shape.** No `sleep`, no shell loop, no `gh run watch`, no
   `--watch`; every subprocess is bounded by `execFile`'s own `timeout` option,
   because `timeout(1)` is absent on these machines. A test feeds every command
@@ -3535,7 +3537,21 @@ ship row forever waiting on a run that cannot happen, and every unreadable
 state defers exactly as it always did. The review precondition is untouched:
 no CI is not no review.
 
-**The probe reads GitHub Actions and nothing else.** `none` means the
+**CI evidence is GitHub Actions and nothing else.** Every native CI read —
+`cp_integrate`, the merge ask, the held-PR watch, foreign and main CI,
+the dashboard (from the watch's state) and `/doctor` — goes through
+`src/actions-ci.ts`: workflow runs on the exact head plus each run attempt's
+jobs, over REST. The Checks API, the commit-status API and GraphQL
+`statusCheckRollup` are never read as evidence (`tests/actions-ci-policy.test.ts`
+pins it); the parent's guard refuses them too. The token needs Actions read
+(fine-grained PAT: plus Contents, Metadata and Pull requests read; classic:
+`repo`) — never "Checks read" or "Commit statuses read", which fix nothing.
+A denied Actions read stays the loud `CI unreadable` state, never "no CI yet".
+Non-Actions checks are therefore not seen. Every check on the current repos is
+an Actions workflow (Run tests, Droid, Critical Path Check, ethereum-dashboard);
+that is the operator's reported deployment, not something this home detects.
+
+**The no-workflows probe reads GitHub Actions too.** `none` means the
 repository has no Actions workflows, which is a narrower claim than "no CI
 anywhere": a repository whose CI is an external provider (CircleCI, Jenkins,
 Buildkite, any commit-status poster) has zero Actions workflows and is
@@ -3543,7 +3559,16 @@ classified `none`. An external check that is **required** is still covered by
 the permission read above — an unposted required status leaves
 `mergeStateStatus` non-CLEAN, so the merge is `pending` and nothing lands. The
 residual case is a **non-required** external check still in flight: GitHub can
-report CLEAN while it runs, and the merge proceeds without that signal.
+report CLEAN while it runs, and the merge proceeds without that signal. A repo
+that needs such a signal makes it required, or uses `merge_policy: human_handoff`.
+
+**`/doctor`'s `ci.<project>`** (`src/ci-access-doctor.ts`) asks the workflows
+endpoint, then the newest run (`actions/runs?per_page=1`) and every page of that
+run attempt's jobs. Its findings are distinct: no Actions workflows; workflows
+but no runs yet (run and job access untested — workflows alone never claim it);
+CI readable (runs and jobs read); `CI unreadable — token lacks Actions read` for
+a denial at any of the three reads; and CI state unknown, named by category only
+(`command_failed`, `malformed`, `incomplete` …). It never echoes `gh` output.
 
 **Where this home cannot read the verdict at all** — `unreadable`, or a CI
 state it cannot read for the branch — the per-PR, per-head-sha human
@@ -5241,10 +5266,10 @@ promoted from a merge precondition to an *ask* precondition
 ([`src/merge-ask.ts`](../src/merge-ask.ts)): a completed run exists for the
 branch **and** that run's `headSha` is the branch's current pushed head. A
 completed run on a superseded sha says nothing about the commit that would
-merge, so it does not count. (`gh pr checks` 403s in this home;
-`gh run list --branch <b> --json conclusion,status,headSha` is the query, issued
-once per render — never the poll shapes [`src/ci-wait.ts`](../src/ci-wait.ts)
-refuses.)
+merge, so it does not count. (`gh pr checks` 403s in this home; the Actions
+runs for the resolved head plus each run attempt's jobs (`ghCiRuns` over
+`readActionsCi`) are the query, issued once per render — never the poll shapes
+[`src/ci-wait.ts`](../src/ci-wait.ts) refuses.)
 
 **The gate lives where the row is created, not in the render.**
 `AwaitingStore.declare` is the choke point, so a premature ask cannot exist even
@@ -8176,7 +8201,9 @@ max_reviewers + 2 (5 by default); `dispatch_parallelism` is the seed's, never ra
 it when it is below max_reviewers. **Brief-level gates** (the reviewers run with this home's `gh` credentials, as
 cp-pr-review's): a reviewer's one GitHub write is `gh pr review <url> --approve`, no body, on the head SHA it reviewed,
 only when the gh user is `user:`, the PR is open, non-draft, not archived, not its own or a bot's, the head equals the
-assigned and reviewed SHA, CI is `SUCCESS` at it, no unresolved thread, no `CHANGES_REQUESTED`, no open bot finding, no
+assigned and reviewed SHA, CI is green at it by GitHub Actions alone (every page of `actions/runs?head_sha=<sha>` and of
+each run attempt's jobs, every run completed `success`/`neutral`/`skipped`; no runs, an unreadable or incomplete page or an
+unfinished run is not green, and there is no Checks, commit-status or `statusCheckRollup` fallback), no unresolved thread, no `CHANGES_REQUESTED`, no open bot finding, no
 `hold:`, no critical finding, and no approval of that user on that SHA already exists (never twice); it never requests
 changes, comments, merges, closes, pushes, edits, labels, dismisses or re-requests. `gh pr review` cannot pin a commit,
 so the reviewer re-reads the head immediately before and reads the review's `commit_id` back after; a mismatch is

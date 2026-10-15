@@ -45,11 +45,11 @@
  * CLEAN while it runs, and this home merges without that signal.
  */
 
-/** `none` is the only state that may relax anything; everything else is (b). */
+/** `none` (no Actions workflows) is the only state that may relax anything; everything else is (b). */
 export type CiConfiguredState = "none" | "present" | "unreadable";
 
 export type CiConfiguredCause =
-	/** The endpoint answered, and it answered zero. This is (a), positively. */
+	/** The endpoint answered, and it answered zero Actions workflows. This is (a), positively. */
 	| "authoritative_empty"
 	/** The endpoint answered, and the repository has workflows. */
 	| "workflows_present"
@@ -156,14 +156,14 @@ export function readCiConfigured(result: { status: number | null; stdout: string
 		return {
 			state: "none",
 			cause: "authoritative_empty",
-			reason: "the repository's own workflows endpoint reports 0 workflows \u2014 no CI will ever run on any head",
+			reason: "the repository's own workflows endpoint reports 0 Actions workflows \u2014 no Actions CI will ever run on any head",
 			workflow_count: 0,
 		};
 	}
 	return {
 		state: "present",
 		cause: "workflows_present",
-		reason: `the repository has ${total} workflow(s) configured`,
+		reason: `the repository has ${total} Actions workflow(s) configured`,
 		workflow_count: total,
 	};
 }
