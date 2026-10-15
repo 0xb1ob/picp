@@ -501,15 +501,14 @@ export class Integrator {
 			});
 		}
 		if (ci.ci !== "green") {
-			// cp-e0c/C7, cp-no-ci-repo-derived: zero Actions runs on this exact head is a run not started yet
-			// when workflows exist; only an unreadable inventory is the human fallback, and none is no CI.
+			// cp-e0c/C7 and cp-no-ci-repo-derived: zero observable runs for this branch
+			// is not a transient `retry`, and it is not one condition either. Ask the
+			// repository what workflows it *has*, because "no runs" is what an
+			// unreadable `gh` looks like too.
 			if (ci.ci === "unknown" && runsParsed.length === 0) {
 				const configured = readCiConfigured(await this.#run(cwd, "gh", ghWorkflowsArgs()));
 				facts.push(`ci configuration: ${configured.state} (${configured.cause}) — ${configured.reason}`);
-				if (configured.state === "present") {
-					return this.#write({ jobId, branch, step: "ci", next: "wait", facts, prUrl, headSha: head, reason: `${jobId}: ${ci.reason}. Nothing was merged; call cp_integrate again once CI runs on ${head.slice(0, 12)}.` });
-				}
-				if (configured.state === "unreadable") {
+				if (configured.state !== "none") {
 					// (b) CI could not be read — runs may exist and may be red. The per-head
 					// human checkpoint is the honest exit, exactly as before: an unreadable
 					// signal is never permission.

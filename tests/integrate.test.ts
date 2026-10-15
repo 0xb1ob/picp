@@ -1449,8 +1449,9 @@ test("BEHIND is updated server-side once, and the old head's CI and review do no
 	// The update landed head B; only head A has green CI and a review pass.
 	const movedPr = { ...openPr(), headRefOid: HEAD_B };
 	const stale = await b.integrator({ pr: movedPr }).advance({ jobId: BR });
-	assert.equal(stale.step, "ci");
-	assert.equal(stale.next, "wait", "green CI on the superseded head is not green");
+	// Exact-head reads: head B has no run of its own, so the cp-e0c/C7 per-head fallback (review, then a human) applies.
+	assert.equal(stale.step, "review", "green CI on the superseded head is not green");
+	assert.ok(!stale.facts.some((fact) => /CI green/i.test(fact)), stale.facts.join("\n"));
 	const unreviewed = await b
 		.integrator({ pr: movedPr, runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
 		.advance({ jobId: BR });
@@ -1522,15 +1523,17 @@ test("unknown mergeability never causes a rebase or a merge", async (t) => {
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
+// Exact-head reads never see the superseded run, so this is the cp-e0c/C7 per-head fallback: it never merges on CI
+// authority, only on the human checkpoint approved for this exact head.
 test("a completed green run on a superseded sha is not green", async (t) => {
 	const b = await benchOf(t);
-	b.approve(HEAD_A);
-	const result = await b
-		.integrator({ runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
-		.advance({ jobId: BR });
-	assert.equal(result.step, "ci");
-	assert.equal(result.next, "wait");
+	const superseded = { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] };
+	const unapproved = await b.integrator(superseded).advance({ jobId: BR });
+	assert.notEqual(unapproved.step, "merge");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
+	b.approve(HEAD_A);
+	const result = await b.integrator(superseded).advance({ jobId: BR });
+	assert.equal(result.record.merge_authority?.kind, "human_checkpoint", "merged on the per-head checkpoint, never on CI");
 });
 
 test("CI still running on the pushed head merges nothing and asks nobody", async (t) => {
@@ -1543,25 +1546,19 @@ test("CI still running on the pushed head merges nothing and asks nobody", async
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
-// Exact-head Actions reads: zero runs on the head is also the moment right after a push (or a server-side update),
-// so a repo that has workflows waits for the run; only an unreadable inventory falls back to a human checkpoint.
-test("a repo that HAS workflows but no run yet on this head waits; an unreadable inventory falls back to a per-head checkpoint (cp-e0c/C7)", async (t) => {
+test("a repo that HAS workflows but no run yet on this head still falls back to a per-head checkpoint (cp-e0c/C7)", async (t) => {
 	const b = await benchOf(t);
-	const waiting = await b.integrator({ runs: [] }).advance({ jobId: BR });
-	assert.deepEqual([waiting.step, waiting.next], ["ci", "wait"], waiting.reason);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, "no human is asked while a run can still start");
-
-	const unreadable = { runs: [], workflows: { fail: "HTTP 403" } };
-	const asked = await b.integrator(unreadable).advance({ jobId: BR });
+	const asked = await b.integrator({ runs: [] }).advance({ jobId: BR });
 	assert.equal(asked.step, "authorize");
 	assert.equal(asked.next, "surface");
-	assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), "a checkpoint must exist when CI cannot be told apart");
+	assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), "a checkpoint must exist for a CI-less branch");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 
 	b.approve(HEAD_A);
-	const merged = await b.integrator(unreadable).advance({ jobId: BR });
+	const merged = await b.integrator({ runs: [] }).advance({ jobId: BR });
 	assert.equal(merged.step, "merge");
 	assert.equal(merged.record.merge_authority?.kind, "human_checkpoint");
+	// Both fallback triggers bind the head, not just the unreadable-verdict one.
 	const mergeCall = b.calls.find((line) => line.startsWith("gh pr merge"));
 	assert.ok(mergeCall);
 	assert.equal(matchHeadBinding(mergeCall)?.head, HEAD_A, "a CI-less fallback merge is bound to the authorized head too");
@@ -3245,7 +3242,7 @@ const REQUIRED_CHECKS = [{ type: "required_status_checks", parameters: { require
 test("human_handoff never hands off pending, superseded, red or unreadable CI, a retry, or a checks/unstable hold", async (t) => {
 	const cases: Array<[string, Partial<World>, string, string]> = [
 		["CI pending", { runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] }, "ci", "wait"],
-		["CI only on a superseded head", { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] }, "ci", "wait"],
+		["CI only on a superseded head", { runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] }, "permit", "surface"],
 		["CI failed", { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }] }, "ci", "resolve"],
 		["mergeStateStatus UNKNOWN", { pr: { ...openPr(), mergeStateStatus: "UNKNOWN" } }, "permit", "retry"],
 		["UNSTABLE", { pr: { ...openPr(), mergeStateStatus: "UNSTABLE" } }, "permit", "surface"],
