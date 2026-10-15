@@ -50,6 +50,7 @@ import {
 	type DoctorReport,
 	type StatusSnapshot,
 } from "./contracts.ts";
+import { awaitingMergePorts } from "./awaiting-merge.ts";
 import { CapacityReader } from "./capacity.ts";
 import { DiffReview, type DiffReviewRequest, type DiffReviewStart } from "./diff-review.ts";
 import { formatReviewFinishFailure, type OrphanReport, ReviewRuns, type ReviewWakeup } from "./review-runs.ts";
@@ -318,6 +319,7 @@ export class CommandPost {
 	readonly #announcer: FailureAnnouncer;
 	readonly #ghLogin: () => Promise<string>;
 	readonly #claims: import("./job-claims.ts").JobClaims = new Map(); // cp-a9fq: teardown vs bounded recovery, one owner per job
+	readonly awaitingMerge = awaitingMergePorts(this, this.#claims, (input) => this.#journalDurable(input)); // park/resume (src/awaiting-merge.ts)
 
 	constructor(options: CommandPostOptions) {
 		this.#options = options;
@@ -390,7 +392,7 @@ export class CommandPost {
 		});
 		this.mandates = new MandateStore(options.home);
 		this.#ghLogin = memoLogin(runCommand, options.home); // k52/cp-oc0m: whose main CI runs count; resolved once, retried after a failure
-		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId) });
+		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId), resume: (jobId) => this.awaitingMerge.resume(jobId) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
 		// it and a card that is only queued when a live extension happens to be
@@ -726,6 +728,7 @@ export class CommandPost {
 		}
 		this.#journalRecovery(report);
 		await this.teardown.retryLedgerCloses();
+		await this.awaitingMerge.recover(); // a park cut by the restart continues from its stage; refusals land in the run log
 		return { report, intake: results };
 	}
 

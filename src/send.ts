@@ -137,6 +137,8 @@ export interface SenderOptions {
 	revive?: (jobId: string) => Promise<unknown>;
 	/** 4b-1: was this job's process last stopped by HeldRelease (and not revived since)? */
 	released?: (jobId: string) => boolean;
+	/** awaiting_merge: resume a parked job on a fresh lease (AwaitingMergeResume#resume); its note leads the message. */
+	resume?: (jobId: string) => Promise<{ note: string }>;
 }
 
 const MARKER_FOR_MODE: Readonly<Record<DeliveryMode, "prompt_sent" | "steer_sent" | "follow_up_sent">> = Object.freeze({
@@ -205,7 +207,11 @@ export class Sender {
 					"takeover job, a new branch or a force push.",
 			);
 		}
-		if (!LIVE_PHASES.includes(record.phase)) {
+		const parked = record.phase === "awaiting_merge";
+		if (parked && !this.#options.resume) {
+			throw new SendError(`${request.jobId} is parked awaiting a team merge (no worker or lease) and this session has no resume path; nothing was sent.`);
+		}
+		if (!LIVE_PHASES.includes(record.phase) && !parked) {
 			throw new SendError(
 				`${request.jobId} is ${record.phase}; there is nothing to promote. A finished job is teardown + fresh dispatch ` +
 					`(cp_teardown ${request.jobId}, then cp_dispatch a new job id), never a brief to a closed envelope slot.`,
@@ -232,11 +238,20 @@ export class Sender {
 		if (denied) throw new SendError(denied);
 
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
-		if (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined && this.#options.mandates) {
+		// A parked job's resume takes a lease and a spawn, so it needs the same permission whatever the purpose.
+		if ((parked || (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined)) && this.#options.mandates) {
 			try {
 				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
 			} catch (error) {
 				throw new SendError((error as Error).message);
+			}
+		}
+		if (parked) {
+			assertNotDraining(home, `resume of parked ${request.jobId}`);
+			try {
+				message = `${(await this.#options.resume!(request.jobId)).note}\n\n${message}`;
+			} catch (error) {
+				throw new SendError(`${request.jobId}: resume from awaiting_merge refused — ${(error as Error).message}. Nothing was sent.`);
 			}
 		}
 

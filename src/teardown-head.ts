@@ -54,7 +54,7 @@ export function unmanagedLiveWorker(home: string, record: FleetRecord, managed: 
 
 /** cp-a9fq: another owner holds this job's in-flight state; tearing down beside it is the hazard, so refuse. */
 export function jobInFlight(jobId: string, holder: JobOwner): GateFailure {
-	const what = holder === "recovery" ? "automatic recovery (a revive or redispatch in this worktree)" : "another teardown";
+	const what = { recovery: "automatic recovery (a revive or redispatch in this worktree)", teardown: "another teardown", park: "an awaiting_merge park", resume: "a resume from awaiting_merge" }[holder];
 	return {
 		code: "job_in_flight",
 		message: `${jobId}: ${what} is in flight; a teardown beside it could return a worktree a revived worker stands in, or close the job under it`,
@@ -167,7 +167,7 @@ function ledgerCloseFailedWakeup(records: readonly FleetRecord[], failed: Ledger
 }
 
 /**
- * picp-pvo: the job is closed, so its `human-review pr <url>` Awaiting row stops asking.
+ * picp-pvo: the job is closed (or parked with the team), so its `human-review pr <url>` Awaiting row stops asking.
  * Only this job's open or deferred rows with that subject; an answer is never withdrawn.
  * A store that cannot be written never undoes a teardown: it is one `recovery` wake-up.
  */
@@ -183,7 +183,7 @@ export async function withdrawHumanReview(home: string, record: FleetRecord, jou
 			id: boundedWakeupId(`human-review-withdraw-failed:${record.job_id}`),
 			kind: "recovery",
 			job_id: record.job_id,
-			content: `[${record.project}] ${record.job_id}: torn down, but its human-review Awaiting row could not be withdrawn — ${firstLine(error)}\n  next: nothing to answer; the row reads as obsolete once the job is done (state/awaiting.json keeps it open).`,
+			content: `[${record.project}] ${record.job_id}: ${record.phase === "awaiting_merge" ? "parked with the team" : "torn down"}, but its human-review Awaiting row could not be withdrawn — ${firstLine(error)}\n  next: nothing to answer; the row reads as obsolete once the job is done (state/awaiting.json keeps it open).`,
 		});
 	}
 }

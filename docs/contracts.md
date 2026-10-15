@@ -3077,6 +3077,17 @@ reports **no** pass reason — nothing was proven, so nothing is claimed. A
 refused teardown is logged as `cp:teardown_refused`, which is deliberately not
 a `failure`: nothing broke, the gate held.
 
+**A parked job is not torn down (awaiting_merge PR2).** `src/awaiting-merge.ts` parks a reported, held ship/pr job
+in teardown order without closing it: gates (must pass as `pushed`, HEAD equal to the handed-off sha) →
+`runs/<job>/park-intent.json` → `held_released` + observed worker close → gates again → checkpoint ref deleted →
+stage `worker_closed` → lease returned by `lease_id` → stage `lease_returned` → fleet `awaiting_merge`
+(`cp:awaiting_merge_parked`). Startup recovery continues an intent from its stage; from `worker_closed` on it never
+reads the recorded worktree. A refusal before the lease is touched keeps the job held with its lease
+(`cp:awaiting_merge_refused`), its closed worker restorable by `cp_send`. `cp_teardown` refuses a parked job with
+`job_parked` — forced too — before any git or lease call; `cp_revive` and a fresh `cp_dispatch` of its id refuse;
+`cp_send` resumes it (`src/awaiting-merge-resume.ts`): fresh lease, origin's branch tip checked out, the same
+session revived as `held`, and on any failure the new lease returned and the parked record restored exactly.
+
 **`closed_reason` (cp-8km)**, persisted on the `FleetRecord` itself, not only in
 the run log (`events.jsonl` is read by no policy code): every teardown sets it,
 `"gated"` when the gates above actually passed, `"forced"` when `force` skipped
