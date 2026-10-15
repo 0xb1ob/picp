@@ -72,7 +72,10 @@ function positive(value: number): boolean {
 	return Number.isSafeInteger(value) && value > 0;
 }
 
-/** `repos/<o>/<r>/actions/runs?head_sha=<sha>[&branch=<b>]&per_page=100&page=<n>`; `{owner}/{repo}` when no repo is given. */
+/**
+ * `repos/<o>/<r>/actions/runs?head_sha=<sha>[&branch=<b>]&per_page=100&page=<n>`;
+ * `{owner}/{repo}` when no repo is given.
+ */
 export function actionsRunsPath(input: { repo?: ActionsRepo; sha: string; branch?: string; page: number }): string {
 	if (!SHA.test(input.sha)) throw new Error(`refusing an Actions read for a malformed head sha ${JSON.stringify(input.sha.slice(0, 80))}`);
 	if (input.branch !== undefined && (!BRANCH.test(input.branch) || input.branch.includes(".."))) {
