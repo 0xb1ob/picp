@@ -98,9 +98,12 @@ test("the real sender records a new pairing's alert with no parent running, refu
 	t.after(() => {
 		if (sender.child.exitCode === null) sender.child.kill("SIGKILL");
 	});
+	// The sender records a new recipient as 'pending' before it settles it (durable before any network call), so wait
+	// past that first write: returning on it raced the second write and flaked as 'pending' on loaded CI runners.
 	const item = await until(() => {
 		const read = readDeviceNotifications(stateDir);
-		return read.state === "invalid" ? undefined : read.ledger.items.find((entry) => entry.pairing_id === claimed.pairing_id);
+		const found = read.state === "invalid" ? undefined : read.ledger.items.find((entry) => entry.pairing_id === claimed.pairing_id);
+		return found?.state === "pending" ? undefined : found;
 	});
 	assert.equal(item.state, "unavailable", "push is not set up: an honest open state, not a delivery");
 	assert.equal(JSON.parse(readFileSync(deviceNotifyLeaseFile(stateDir), "utf8")).pid, sender.child.pid);
