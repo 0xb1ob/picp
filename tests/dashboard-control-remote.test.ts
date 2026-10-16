@@ -33,7 +33,7 @@ function fakePorts() {
 		inject: (text) => { state.injected.push(text); },
 		abort: () => {},
 		isIdle: () => state.idle,
-		hasPendingMessages: () => false,
+		hasPendingMessages: () => true, // holds each handoff unseen: no re-hand (dashboard-compaction.test.ts)
 		sessionFile: () => "/tmp/operator-session.jsonl",
 	};
 	return { state, ports };

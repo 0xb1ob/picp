@@ -30,7 +30,7 @@ const put = (file: string, text: string) => { mkdirSync(dirname(file), { recursi
 const journal = (stateDir: string): Array<Record<string, unknown>> => existsSync(controlJournalFile(stateDir)) ? readFileSync(controlJournalFile(stateDir), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
 
 function fakePorts(overrides: Partial<ControlPorts> = {}) {
-	const state = { idle: true, injected: [] as Array<[string, string | undefined]>, aborted: 0, observer: undefined as DashboardControl | undefined, echo: false };
+	const state = { idle: true, injected: [] as Array<[string, string | undefined]>, aborted: 0, observer: undefined as DashboardControl | undefined, echo: false, pending: false };
 	const ports: ControlPorts = {
 		inject: (text, deliverAs) => {
 			state.injected.push([text, deliverAs]);
@@ -38,7 +38,8 @@ function fakePorts(overrides: Partial<ControlPorts> = {}) {
 		},
 		abort: () => { state.aborted += 1; },
 		isIdle: () => state.idle,
-		hasPendingMessages: () => false,
+		// `pending: true`: a pi that holds each handoff unseen, so a settle never re-hands it (dashboard-compaction.test.ts).
+		hasPendingMessages: () => state.pending,
 		sessionFile: () => "/tmp/operator-session.jsonl",
 		...overrides,
 	};
@@ -424,6 +425,7 @@ test("queue: busy messages wait in the dashboard, one per settled turn, oldest f
 	const { stateDir } = scratch(t);
 	const fake = fakePorts();
 	fake.state.idle = false;
+	fake.state.pending = true;
 	const { control, record } = await listening(t, stateDir, fake.ports);
 	const [a, b, c] = [await queued(record, "alpha"), await queued(record, "bravo"), await queued(record, "charlie")];
 	assert.equal(fake.state.injected.length, 0, "nothing reaches pi while it is busy");
@@ -497,6 +499,7 @@ test("queue restart: a stopped bridge's held messages reload in order with their
 	assert.deepEqual(states(stateDir, a), ["request", "queued", "injected", "dropped"], "unseen at stop: dropped, never resent (at most once)");
 
 	const second = fakePorts();
+	second.state.pending = true;
 	const two = await listening(t, stateDir, second.ports);
 	assert.deepEqual(head(second.state.injected), ["two"], "idle at start: the oldest held message, once");
 	two.control.settled();
@@ -525,6 +528,7 @@ test("queue restart, FIFO across the offline inbox (review 1): an older held mes
 		].map((line) => JSON.stringify(line)).join("\n") + "\n");
 		put(controlInboxFile(stateDir), JSON.stringify({ type: "held", id: "dc-20261009115000-0000b001", at: inboxAt, text: "typed offline", ask_id: null }) + "\n");
 		const fake = fakePorts();
+		fake.state.pending = true;
 		const { control, record } = await listening(t, stateDir, fake.ports, { now: () => at });
 		const first = order === "held-first" ? /^held in the queue\n\n/ : /^\[cp-dashboard inbox — 1 message/;
 		const second = order === "held-first" ? /^\[cp-dashboard inbox — 1 message/ : /^held in the queue\n\n/;
