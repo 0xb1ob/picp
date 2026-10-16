@@ -84,7 +84,7 @@ export interface DashboardControl {
 	socket: string;
 	/** Feed every message the session starts or sends to the model; a dashboard marker marks its request delivered. */
 	observe(message: unknown): void;
-	/** cp-y43c: the session's turn settled; hand the oldest dashboard-queued message over (at most one per turn). */
+	/** cp-y43c: a turn settled; re-hand a dropped handoff, else hand the oldest queued message over (one per turn). */
 	settled(): void;
 	stop(): void;
 }
@@ -277,7 +277,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	 * a restarted bridge reloads only ids with no `injected` line, so it never hands one over twice. A direct send waits
 	 * up to `waitMs` for the sighting to answer delivered or queued, as before.
 	 */
-	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; thread: string | null; remote?: RemoteDevice; editors?: RemoteDevice[] };
+	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; thread: string | null; remote?: RemoteDevice; editors?: RemoteDevice[]; again?: true };
 	const handOver = async (entry: Handing, deliverAs: "steer" | "followUp" | undefined, deliver: ControlDeliver, refuse: (status: number, reason: string) => Reply, queued: boolean): Promise<Reply> => {
 		const { id, kind, askId, peer, text, images, files, thread } = entry;
 		// PR 1c: the device line sits right above the marker, after the user's text, so typed text can never forge it.
@@ -299,7 +299,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const { inline, paths } = prepared;
 		// Stopped while preparing: no `injected` line, never given to pi; the next bridge reloads it as queued.
 		if (queued && stopped) return { ok: false, status: 503, error: "dashboard control stopped before the handoff" };
-		const claimed = outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : null);
+		const claimed = outcome(id, kind, askId, peer, "injected", paths.length ? `${paths.length} image(s) sent as a file path (resize failed)` : entry.again ? "re-handed: not seen in the session when the turn settled" : null);
 		if (!claimed.ok && queued) return { ok: false, status: 500, error: `failed: audit journal unwritable (${claimed.error})` };
 		if (queued) {
 			// Claimed: from here an edit or cancel is refused as already sent, with the text pi is given.
@@ -367,8 +367,45 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		handing = null;
 		settle(false); // no turn ran: the next one may go
 	};
+	/** Handoffs pi took but has not shown, with their handoff count: pi 1.1.0 drops a refused extension prompt silently. */
+	const given = new Map<string, { entry: Held; tries: number }>();
+	const give = (entry: Held, tries: number): void => {
+		handing = entry.id;
+		preparing.add(entry.id);
+		const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", entry.askId, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
+		void handOver({ ...entry, kind: "message", thread: entry.thread ?? null, ...(tries > 1 ? { again: true as const } : {}) }, undefined, "prompt", refuse, true).then((reply) => {
+			preparing.delete(entry.id);
+			if (reply.ok) given.set(entry.id, { entry, tries });
+			if (reply.ok || stopped) return;
+			if (reply.status === 500) {
+				// The handoff line never reached the journal: pi was not called, so the message is still the dashboard's.
+				queue.unshift(entry);
+				log(`cp-bridge: dashboard queue ${entry.id} kept queued: ${reply.error}\n`);
+				if (handing === entry.id) handing = null;
+				return;
+			}
+			handoffEnded(entry.id);
+		});
+	};
+	/**
+	 * A turn settled with a handoff unseen and nothing queued in pi: pi dropped it (a turn started before pi took the
+	 * prompt, or compaction refused it). Hand it over once more as this turn's handoff; a second loss is `failed`.
+	 */
+	const redeliver = (): boolean => {
+		const pending = ports.hasPendingMessages();
+		for (const [id, { entry, tries }] of given) {
+			if (!open.has(id)) { given.delete(id); continue; }
+			if (pending) continue;
+			given.delete(id);
+			open.delete(id);
+			if (tries < 2) { give(entry, tries + 1); return true; }
+			outcome(id, "message", entry.askId, entry.peer, "failed", "handed to the session twice, never seen in its transcript");
+		}
+		return false;
+	};
 	function settle(turnEnded: boolean): void {
 		if (turnEnded) handing = null;
+		if (turnEnded && !stopped && redeliver()) return;
 		while (!stopped && handing === null && (queue.length || inboxAt !== null) && ports.isIdle()) {
 			if (readControlConfig(stateDir).state !== "on") return;
 			if (inboxAt !== null && !(queue.length && Date.parse(queue[0]!.at) < inboxAt)) {
@@ -382,21 +419,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 				outcome(entry.id, "message", entry.askId, entry.peer, "dropped", "queued longer than 24 h");
 				continue;
 			}
-			handing = entry.id;
-			preparing.add(entry.id);
-			const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", entry.askId, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
-			void handOver({ ...entry, kind: "message", thread: entry.thread ?? null }, undefined, "prompt", refuse, true).then((reply) => {
-				preparing.delete(entry.id);
-				if (reply.ok || stopped) return;
-				if (reply.status === 500) {
-					// The handoff line never reached the journal: pi was not called, so the message is still the dashboard's.
-					queue.unshift(entry);
-					log(`cp-bridge: dashboard queue ${entry.id} kept queued: ${reply.error}\n`);
-					if (handing === entry.id) handing = null;
-					return;
-				}
-				handoffEnded(entry.id);
-			});
+			give(entry, 1);
 		}
 	}
 

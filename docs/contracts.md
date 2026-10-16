@@ -6186,6 +6186,12 @@ its oldest line: older held messages go first, the inbox turn next, then newer o
 send waits behind them, as does any send while a handoff is unfinished (from the shift through image/file
 preparation until that turn settles or fails). >24 h is `dropped`. Steers and decision-card clicks (`kind: answer`) never queue and may pass
 held messages; a card's free-text reply is a message and queues with its `ask-…:` prefix.
+**A handoff pi drops is re-handed once.** pi 1.1.0's `sendUserMessage` returns nothing and sends a refused prompt
+(a turn started before pi took it, or compaction in progress) only to `emitError`. So when a turn settles while a
+handoff is still unseen and pi holds no queued message, the bridge hands it over again as that turn's handoff
+(a second `injected` line, reason `re-handed: …`); a second loss is `outcome failed` (`handed to the session twice,
+never seen in its transcript`), never `injected` forever. This is not a double send: a handoff pi neither shows nor
+holds when a turn settles never reached the model (the handoff runs from a macrotask, so pi never defers it past a settle).
 **Guarantee: at most once, not exactly once.** The journal append and pi's acceptance cannot be one atomic step, so
 the claim is written first: a crash between them, or a session ending before the transcript shows the message, leaves
 it `dropped`/`failed`, visible, and never resent. `injected` means handed to pi, not applied; only the transcript
