@@ -146,7 +146,7 @@ export function sendJson(res: ServerResponse, status: number, value: unknown, ex
  * A 200 screen view tagged `x-cp-version`. With `x-cp-delta-base` naming a version still held for this principal and
  * URL, the body is a keyed delta (json-delta.ts) and the base is echoed; otherwise the full body, as before.
  */
-function sendView(req: IncomingMessage, res: ServerResponse, value: unknown): void {
+function sendView(req: IncomingMessage, res: ServerResponse, value: unknown, extra: Record<string, string> = {}): void {
 	const json = JSON.stringify(value);
 	const access = accessOf(req);
 	const key = `${access.kind === "remote" ? `remote:${access.device_id}` : "local"}|${req.url ?? "/"}`;
@@ -155,9 +155,9 @@ function sendView(req: IncomingMessage, res: ServerResponse, value: unknown): vo
 	const version = viewVersions.record(key, json);
 	if (base !== undefined) {
 		const delta = JSON.stringify(diffJson(JSON.parse(base), JSON.parse(json)) ?? {});
-		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, "x-cp-version": version, "x-cp-delta-base": asked as string });
+		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, "x-cp-version": version, "x-cp-delta-base": asked as string });
 	}
-	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, "x-cp-version": version });
+	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, ...extra, "x-cp-version": version });
 }
 
 /** `git diff base...head` for a held job, from its live worktree or its project clone; never fetched. */
@@ -291,7 +291,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		case CONTROL_STATUS_PATH:
 			handleControlStatus(req, options)
-				.then((out) => sendJson(res, out.status, out.body, out.headers))
+				.then((out) => out.status === 200 ? sendView(req, res, out.body, out.headers) : sendJson(res, out.status, out.body, out.headers))
 				.catch(() => {
 					if (!res.headersSent) sendJson(res, 500, { error: "internal" });
 				});
@@ -421,7 +421,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				const match = /^\/api\/job\/([^/]+)(\/events|\/transcript)?$/.exec(url.pathname);
 				let id = ""; try { id = decodeURIComponent(match?.[1] ?? ""); } catch { /* Invalid encoding is not a job id. */ }
 				const job = jobView(options, id);
-				if (job && match?.[2] === "/transcript") { sendJson(res, 200, readWorkerTranscript(options, id)); return; }
+				if (job && match?.[2] === "/transcript") { sendView(req, res, readWorkerTranscript(options, id)); return; }
 				if (job && match?.[2]) {
 					const log = jobEvents(options, id);
 					send(res, log === undefined ? 404 : 200, "text/plain; charset=utf-8", log ?? "Run log unavailable (missing or exceeds 16 MiB).\n", { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" });

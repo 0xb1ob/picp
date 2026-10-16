@@ -541,7 +541,8 @@ request accepts it, with `vary: accept-encoding`; the event stream never is. Has
 
 Each tick still GETs the screen's URL; only the body shrinks. Screen views (`/api/overview`, `/api/jobs`, `/api/board`,
 `/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`,
-`/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`) tag each 200 with `x-cp-version`. The app sends the
+`/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`, plus `/api/job/<id>/transcript` and
+`/api/operator/control`, keyed with its `?sends=` query) tag each 200 with `x-cp-version`. The app sends the
 version it holds as `x-cp-delta-base`; when the server still holds that version for the same principal (local or the
 remote device) and URL (16 per key, 48 MiB total, process memory), and the keyed diff (`src/viewer/json-delta.ts`) is
 under half the full size, it answers the diff and echoes `x-cp-delta-base`. Anything else (unknown, evicted or

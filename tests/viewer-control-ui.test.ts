@@ -35,6 +35,30 @@ test("readControl asks for the full status by default and for ?sends=0 with send
 	assert.deepEqual(urls, ["/api/operator/control", "/api/operator/control?sends=0"]);
 });
 
+// PR4: readControl holds one version per URL; a delta for another base refetches in full once, a refusal drops the base.
+test("readControl sends x-cp-delta-base per URL, applies the delta, and falls back to a full read", async () => {
+	const lean = "/api/operator/control?sends=0", full = "/api/operator/control";
+	const reply = (body: unknown, headers: Record<string, string> = {}, status = 200) => new Response(JSON.stringify(body), { status, headers });
+	const replies = [
+		reply(status({}), { "x-cp-version": "n-1" }),
+		reply(status({}), { "x-cp-version": "m-1" }),
+		reply({ set: { busy: true } }, { "x-cp-version": "n-2", "x-cp-delta-base": "n-1" }),
+		reply({ set: { busy: false } }, { "x-cp-version": "n-3", "x-cp-delta-base": "n-0" }),
+		reply(status({ held: 3 }), { "x-cp-version": "n-4" }),
+		reply({}, {}, 401),
+		reply(status({})),
+	];
+	const seen: Array<[string, string | undefined]> = [];
+	const fetcher = (url: string, init?: RequestInit) => (seen.push([url, (init?.headers as Record<string, string> | undefined)?.["x-cp-delta-base"]]), Promise.resolve(replies.shift()!));
+	await readControl(fetcher, undefined, false);
+	await readControl(fetcher);
+	assert.deepEqual(await readControl(fetcher, undefined, false), status({ busy: true }));
+	assert.deepEqual(await readControl(fetcher, undefined, false), status({ held: 3 }), "a mismatched base is refetched in full");
+	assert.deepEqual(await readControl(fetcher, undefined, false), { error: "HTTP 401" });
+	await readControl(fetcher, undefined, false);
+	assert.deepEqual(seen, [[lean, undefined], [full, undefined], [lean, "n-1"], [lean, "n-2"], [lean, undefined], [lean, "n-4"], [lean, undefined]]);
+});
+
 test("cards and composer: open asks pinned above the composer with a button per option; inline history is a pointer; no control disables with the reason; busy offers follow-up, steer and abort", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const state = { home: home.path, stateDir: join(home.path, LAYOUT.state) };

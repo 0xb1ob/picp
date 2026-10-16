@@ -1,5 +1,6 @@
 import type { ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, OperatorUploadResponse, SkillsResponse } from "../src/viewer/api-types.ts";
 import type { Restarting } from "./restart-control.ts";
+import { type Held, readDelta } from "./resource.ts";
 
 /** Dashboard control (cp-dashboard-operator-control): what the Full transcript's composer and decision cards can say and do. */
 export const CONTROL_STATUS_URL = "/api/operator/control";
@@ -39,12 +40,18 @@ export async function failure(response: Response): Promise<string> {
  return `HTTP ${response.status}`;
 }
 
+// The last status per URL (`?sends=` included) and its server version, the base of the next delta read.
+const held = new Map<string, Held<ControlStatusResponse>>();
 /** `sends: false` asks for `?sends=0`: the status without the composer's pending-send journal. */
 export async function readControl(fetch: Fetch, signal?: AbortSignal, sends = true): Promise<ControlStatus> {
+ const url = sends ? CONTROL_STATUS_URL : `${CONTROL_STATUS_URL}?sends=0`;
  try {
-  const response = await fetch(sends ? CONTROL_STATUS_URL : `${CONTROL_STATUS_URL}?sends=0`, signal ? {signal} : {});
-  return response.ok ? await response.json() as ControlStatusResponse : {error: await failure(response)};
+  const read = await readDelta(fetch, url, held.get(url) ?? null, signal);
+  if (!read.ok) { held.delete(url); return {error: await failure(read.response)}; }
+  if (read.held.version) held.set(url, read.held); else held.delete(url);
+  return read.held.value;
  } catch {
+  held.delete(url);
   return {error: "Dashboard control status unavailable"};
  }
 }

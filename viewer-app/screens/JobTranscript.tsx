@@ -3,6 +3,7 @@ import type { JobTranscriptResponse, ReportItem, SessionEntry } from "../../src/
 import { ToolRunRow } from "../components/ToolRunRow.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { time } from "../format.ts";
+import { type Held, readDelta } from "../resource.ts";
 
 /** A tool call's arguments and result, split the way parseTranscript joins them (`Arguments\n…\n\nResult\n…`). */
 function parts(entry: SessionEntry): {args: Record<string, unknown>; result: string} {
@@ -66,6 +67,8 @@ export function JobTranscript({jobId, generatedAt, model, reports, finished}: {j
  const [failed, setFailed] = useState(false);
  const inflight = useRef<AbortController | null>(null);
  const loaded = useRef(false), loadedLive = useRef(false), lastAt = useRef(0);
+ // The shown transcript with its server version: the base the next live tick asks a delta against.
+ const held = useRef<Held<JobTranscriptResponse> | null>(null);
  const [settled, setSettled] = useState(0);
  const finishedNow = useRef(finished);
  finishedNow.current = finished;
@@ -75,7 +78,7 @@ export function JobTranscript({jobId, generatedAt, model, reports, finished}: {j
   const abort = inflight.current = new AbortController();
   lastAt.current = Date.now();
   const wasLive = !finished;
-  fetch(`/api/job/${encodeURIComponent(jobId)}/transcript`, {signal: abort.signal}).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((body: JobTranscriptResponse) => { loaded.current = true; loadedLive.current = wasLive; setData(body); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (inflight.current !== abort) return; inflight.current = null; if (wasLive && finishedNow.current) setSettled(n => n + 1); });
+  readDelta<JobTranscriptResponse>((url, init) => fetch(url, init), `/api/job/${encodeURIComponent(jobId)}/transcript`, held.current, abort.signal).then(read => read.ok ? read.held : Promise.reject(new Error(String(read.response.status)))).then(next => { held.current = next; loaded.current = true; loadedLive.current = wasLive; setData(next.value); setFailed(false); }).catch(() => { if (!abort.signal.aborted) setFailed(true); }).finally(() => { if (inflight.current !== abort) return; inflight.current = null; if (wasLive && finishedNow.current) setSettled(n => n + 1); });
  }, [jobId, generatedAt, finished, settled]);
  if (failed && !data) return <p class="jobs-empty" role="status">Transcript unavailable</p>;
  if (!data) return <p role="status">Loading</p>;
