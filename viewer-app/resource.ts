@@ -17,6 +17,23 @@ export function pollStream(): Stream {
  const clock = setInterval(() => target.dispatchEvent(new Event("refresh")), POLL_MS);
  return Object.assign(target, { close() { clearTimeout(opened); clearInterval(clock); } });
 }
+/** A value with the server version it came from (`x-cp-version`; null when the server sent none). */
+export interface Held<T> { version: string | null; value: T }
+/**
+ * One GET outside `createResource`: sends `x-cp-delta-base` for `held` and applies a delta reply onto it. A reply for
+ * another base, or one that does not apply, refetches in full once. A non-2xx reply comes back for the caller to read.
+ */
+export async function readDelta<T>(fetch: (url: string, init?: RequestInit) => Promise<Response>, url: string, held: Held<T> | null, signal?: AbortSignal): Promise<{ok: true; held: Held<T>} | {ok: false; response: Response}> {
+ for (const base of held?.version ? [held, null] : [null]) {
+  const response = await fetch(url, {...(signal ? {signal} : {}), ...(base?.version ? {headers: {"x-cp-delta-base": base.version}} : {})});
+  if (!response.ok) return {ok: false, response};
+  const body = await response.json() as T;
+  const echoed = response.headers.get("x-cp-delta-base"), version = response.headers.get("x-cp-version");
+  if (echoed === null) return {ok: true, held: {version, value: body}};
+  try { if (base && echoed === base.version) return {ok: true, held: {version, value: applyDelta(base.value, body as Delta)}}; } catch { /* refetch in full */ }
+ }
+ throw new Error("delta reply for another base");
+}
 export function createResource<T>(url: string, streamUrl: string, deps: Dependencies = {fetch: (u,i) => fetch(u,i), stream:u => new EventSource(u)}) {
  let state: Snapshot<T> = {data:null,status:"connecting",error:null};
  let generation = 0, visible = false, connected = false, trailing = false, disposed = false;

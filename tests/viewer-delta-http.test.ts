@@ -4,6 +4,7 @@ import { request, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { gzipSync } from "node:zlib";
 import { LAYOUT } from "../src/contracts.ts";
 import { applyDelta } from "../src/viewer/json-delta.ts";
 import { createViewer } from "../src/viewer/server.ts";
@@ -62,4 +63,47 @@ test("screen GETs carry x-cp-version; a held base gets a keyed delta, an unknown
 	const missing = await get("/api/job/nope");
 	assert.equal(missing.status, 404);
 	assert.equal(missing.headers["x-cp-version"], undefined);
+});
+
+// PR4: the control status (keyed with its `?sends=` query) and a live job's transcript answer deltas too.
+test("control status and job transcript carry x-cp-version and answer a held base with a delta", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const at = "2026-09-26T12:00:00Z";
+	const put = (file: string, text: string) => { const path = join(home.path, file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+	const line = (i: number) => JSON.stringify({ type: "message", timestamp: new Date(Date.parse(at) + i * 1000).toISOString(), message: i === 0 ? { role: "user", content: "The brief" } : { role: "assistant", content: [{ type: "text", text: `step ${i} ${"x".repeat(300)}` }] } });
+	const session = join(home.path, LAYOUT.state, "sessions", "cp-live.jsonl");
+	const lines = Array.from({ length: 200 }, (_, i) => line(i));
+	put(join(LAYOUT.state, "sessions", "cp-live.jsonl"), lines.join("\n") + "\n");
+	put(".pi-command-post/jobs.json", JSON.stringify({ jobs: [{ id: "cp-live", title: "live", status: "in_progress", labels: ["project:demo", "kind:ship"] }] }));
+	put(LAYOUT.fleetFile, JSON.stringify({ jobs: [{ job_id: "cp-live", project: "demo", kind: "ship", phase: "working", dispatched_at: at }] }));
+	put(join(LAYOUT.runs, "cp-live/status.json"), JSON.stringify({ session_file: session }));
+	const options = { home: home.path, stateDir: join(home.path, LAYOUT.state), host: "127.0.0.1", port: 0, requireTailnet: true };
+	const server = createViewer(options);
+	await new Promise<void>((resolve) => server.listen(0, options.host, resolve));
+	options.port = (server.address() as AddressInfo).port;
+	t.after(() => server.close());
+	const get = async (path: string, headers: Record<string, string> = {}) => {
+		const r = await fetch(`http://127.0.0.1:${options.port}${path}`, { headers });
+		return { status: r.status, version: r.headers.get("x-cp-version"), base: r.headers.get("x-cp-delta-base"), text: await r.text() };
+	};
+
+	const transcript = "/api/job/cp-live/transcript";
+	const first = await get(transcript);
+	assert.ok(first.version, "the transcript is versioned");
+	put(join(LAYOUT.state, "sessions", "cp-live.jsonl"), [...lines, line(200)].join("\n") + "\n");
+	const delta = await get(transcript, { "x-cp-delta-base": first.version! });
+	assert.equal(delta.base, first.version);
+	// A new entry changes membership, so the delta carries the id list too; it gzips well under 1 KiB.
+	assert.ok(gzipSync(delta.text).length < 1024, `one new entry is a small delta, got ${delta.text.length} vs full ${first.text.length}`);
+	assert.equal(JSON.stringify(applyDelta(JSON.parse(first.text), JSON.parse(delta.text))), (await get(transcript)).text);
+	assert.equal((await get("/api/job/cp-missing/transcript")).version, null, "a 404 is never versioned");
+
+	const lean = await get("/api/operator/control?sends=0");
+	assert.equal(lean.status, 200);
+	assert.ok(lean.version);
+	const again = await get("/api/operator/control?sends=0", { "x-cp-delta-base": lean.version! });
+	assert.equal(again.base, lean.version);
+	const fresh = JSON.parse((await get("/api/operator/control?sends=0")).text) as Record<string, unknown>;
+	assert.deepEqual({ ...applyDelta(JSON.parse(lean.text), JSON.parse(again.text)), generated_at: null }, { ...fresh, generated_at: null });
+	assert.equal((await get("/api/operator/control", { "x-cp-delta-base": lean.version! })).base, null, "the ?sends= query is part of the key");
 });
