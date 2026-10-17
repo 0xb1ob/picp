@@ -26,7 +26,7 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 /** Add schedule… prefills the composer with this: the schedule's saved policy is its authority, set on the operator's words. */
 export const ADD_SCHEDULE_DRAFT = "Add a schedule (cp_schedule add): name \"…\", project \"…\", cron \"0 9 * * *\" tz \"UTC\" (or a watch script), kind research, delivery answer, title \"…\", description \"…\". Its saved policy authorizes every run; optional limits (usd, tokens, child_jobs, parallelism, run_hours).";
 
-/** Run options' thinking choices; the browser bundle cannot import RUN_THINKING_LEVELS (node-only module), a test pins parity. */
+/** Run thinking choices: RUN_THINKING_LEVELS is node-only, so the bundle copies it and a test pins parity. */
 export const RUN_OPTION_THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 /** Run options → `overrides`: blank fields are omitted, so the saved policy's model, thinking and parallelism apply. */
 export function runOverrides(model: string, thinking: string, parallelism: string): RunOverrides | undefined {

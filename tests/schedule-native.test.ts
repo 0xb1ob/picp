@@ -11,7 +11,7 @@ import { ScheduleAuthorityError, scheduleRunVerdict } from "../src/schedule-auth
 import { resolveExecution, startScheduledPipeline, withRunExecution } from "../src/schedule-native.ts";
 import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { Scheduler } from "../src/scheduler.ts";
-import { isNativePolicy, RUN_THINKING_LEVELS, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import { isNativePolicy, RUN_THINKING_LEVELS, schedulePolicyErrors, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { RUN_OPTION_THINKING, runOverrides } from "../viewer-app/schedule-control.ts";
 import { scheduleControlFieldError } from "../src/viewer/control-files.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
@@ -136,6 +136,21 @@ test("a native pipeline starts in code: one bound ship, labelled and admitted, n
 	assert.equal(scheduleRunVerdict(ctx, "implement", plan, []).source, "schedule-run");
 	assert.throws(() => scheduleRunVerdict(ctx, "implement", { ...plan, gateFlags: { blocking_unknowns: false, destructive_scope: false, scope_growth: true } }, []), /flagged or final-fix/);
 	assert.throws(() => scheduleRunVerdict(ctx, "merge", plan, []), /never merges/);
+});
+
+test("a native pipeline needs child_jobs >= 2, and a full run refuses its ship before the ship job exists", async (t) => {
+	const b = await bench(t, { kind: "research", delivery: "pipeline" });
+	const policy = b.runs.activePolicy(b.schedule.id) as NativeSchedulePolicy;
+	assert.deepEqual(schedulePolicyErrors({ ...policy, limits: { ...policy.limits, child_jobs: 2 } }), []);
+	assert.match(schedulePolicyErrors({ ...policy, limits: { ...policy.limits, child_jobs: 1 } }).join("; "), /child_jobs: a pipeline admits its anchor and its ship/);
+	// A run whose cap is already spent (anchor + other members) must not leave an orphan ship behind the refusal.
+	const fired = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
+	const run = b.runs.run(fired.run_id!)!;
+	for (let i = run.members.length; i < policy.limits.child_jobs; i++) await b.runs.admitMember(run.id, { job_id: `cp-fill-${i}`, role: null, admitted_at: run.members[0]!.admitted_at });
+	const runner = new PipelineRunner({ home: b.home.path, ledger: b.ledger, dispatcher: () => ({ dispatch: async (r: { jobId: string }) => ({ job_id: r.jobId }) }) } as unknown as PipelineOptions);
+	const starter = { start: runner.start.bind(runner), started: (id: string) => runner.store.get(id) !== undefined };
+	await assert.rejects(startScheduledPipeline(starter, b.runs, b.schedule, fired), /cannot admit the ship/);
+	assert.deepEqual((await b.ledger.list({ all: true })).filter((job) => job.title.startsWith("ship:")), [], "no ship created");
 });
 
 test("run thinking levels mirror the routing contract and the dashboard's run options", () => {

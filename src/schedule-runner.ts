@@ -17,6 +17,7 @@
  * found by the restart sweep — sends the parent's ordinary envelope wake, and a
  * swept run whose recorded outcome is not teardown-shaped (escalate, a raised
  * escalation, unreadable) is woken without a teardown: no scheduled run ends silently.
+ * A native cp-self-review run is driven here too (src/schedule-self-review.ts), with no parent wake on success.
  */
 
 import type { FleetRecord } from "./contracts.ts";
@@ -27,6 +28,7 @@ import { nextCronSlot, parseCron, type Schedule } from "./viewer/schedule-core.t
 import { parentExpandedIds } from "./schedule-expand.ts";
 import { runIsSettled } from "./schedule-runs.ts";
 import { wasDropped } from "./ledger.ts";
+import { advanceSelfReview, isSelfReviewRun, SELF_REVIEW_SKILL, selfReviewRole } from "./schedule-self-review.ts";
 
 export const RUNNER_DELIVERIES: readonly string[] = ["answer", "board", "local"];
 const SCHEDULE_LABEL = "schedule:";
@@ -43,7 +45,7 @@ export function runnerOwns(job: { labels?: readonly string[] }, expanded: Readon
 const scheduleIdOf = (job: Job): string | undefined => job.labels.find((label) => label.startsWith(SCHEDULE_LABEL))?.slice(SCHEDULE_LABEL.length);
 
 export interface RunnerPorts {
-	dispatch: (request: { jobId: string; task?: string }) => Promise<unknown>;
+	dispatch: (request: { jobId: string; task?: string; wallClockSeconds?: number }) => Promise<unknown>;
 	tearDown: (jobId: string) => Promise<{ torn_down: boolean; failure?: { message: string } }>;
 	/** The recorded intake outcome of a reported run (idempotent `intake.intake`: `already`, no second onReported). */
 	recorded: (jobId: string) => Promise<IntakeResult>;
@@ -69,17 +71,49 @@ export class ScheduleRunner {
 	/** Runs this process already finished or handed to the parent: never torn down or woken twice. */
 	readonly #handled = new Set<string>();
 	#swept = false;
+	/** One self-review advance at a time per run: a fire, an envelope and a tick never interleave their writes. */
+	readonly #advancing = new Map<string, Promise<void>>();
 
 	constructor(ports: RunnerPorts) {
 		this.#ports = ports;
 	}
 
-	/** A fired event: dispatch its job now. Never throws. */
-	async onFired(event: { schedule_id: string; job_id?: string }): Promise<void> {
+	/** A fired event: dispatch its job now, or drive a native self-review run's recipe. Never throws. */
+	async onFired(event: { schedule_id: string; job_id?: string; run_id?: string; skill?: string; native?: boolean }): Promise<void> {
+		if (event.native && event.skill === SELF_REVIEW_SKILL && event.run_id) return this.#advance(event.run_id);
 		if (!event.job_id) return;
 		const schedule = this.#ports.schedules().find((entry) => entry.id === event.schedule_id);
 		if (!schedule) return this.#ports.log(`schedule runner: ${event.schedule_id} is gone; ${event.job_id} is dropped on the next tick`);
-		await this.#dispatch(event.job_id, schedule);
+		await this.#dispatch(event.job_id, schedule.job.script_path !== undefined ? {} : { task: schedule.job.description ?? schedule.job.title });
+	}
+
+	/** Serialized per run; a fault is logged and the next event or tick retries the same idempotent step. */
+	#advance(runId: string): Promise<void> {
+		const runs = this.#ports.runs;
+		if (!runs?.active) return Promise.resolve();
+		const step = async (): Promise<void> => {
+			try {
+				await advanceSelfReview({
+					runs, ledger: this.#ports.ledger(), fleetJobs: this.#ports.fleetJobs, now: this.#ports.now,
+					dispatch: ({ jobId, ...request }) => this.#dispatch(jobId, request),
+				}, runId);
+			} catch (error) {
+				this.#ports.log(`schedule runner: self-review run ${runId} did not advance: ${(error as Error).message}`);
+			}
+		};
+		const next = (this.#advancing.get(runId) ?? Promise.resolve()).then(step);
+		this.#advancing.set(runId, next);
+		void next.then(() => { if (this.#advancing.get(runId) === next) this.#advancing.delete(runId); });
+		return next;
+	}
+
+	#selfReviewRunOf(jobId: string): string | undefined {
+		try {
+			const run = this.#ports.runs?.active ? this.#ports.runs.runOfJob(jobId) : undefined;
+			return selfReviewRole(run, jobId) ? run!.id : undefined;
+		} catch {
+			return undefined; // unreadable runs: the parent's to see
+		}
 	}
 
 	/** Each tick: retry every open runner-owned job with no fleet record, or drop it once its next slot has come. */
@@ -95,7 +129,7 @@ export class ScheduleRunner {
 			const next = schedule ? nextSlot(schedule, new Date(job.created_at)) : undefined;
 			const stale = !schedule ? `schedule ${id} is gone` : !schedule.enabled ? `schedule ${id} is disabled` : next && next <= now ? "not dispatched before the next slot" : undefined;
 			if (!stale) {
-				await this.#dispatch(job.id, schedule as Schedule);
+				await this.#dispatch(job.id, schedule!.job.script_path !== undefined ? {} : { task: schedule!.job.description ?? schedule!.job.title });
 				continue;
 			}
 			const last = [...job.comments].reverse().find((comment) => comment.text.startsWith(REFUSED))?.text;
@@ -105,6 +139,9 @@ export class ScheduleRunner {
 			} catch (error) {
 				this.#ports.log(`schedule runner: could not drop ${job.id}: ${(error as Error).message}`);
 			}
+		}
+		for (const run of this.#ports.runs?.active ? this.#ports.runs.runs() : []) {
+			if (run.phase !== "closed" && isSelfReviewRun(run)) await this.#advance(run.id);
 		}
 		await this.#closeSettledRuns();
 	}
@@ -119,7 +156,12 @@ export class ScheduleRunner {
 	}
 	/** Whether a fresh envelope is the runner's to tear down (the rest wake the parent as before). */
 	claims(result: IntakeResult): boolean {
-		return !result.already && teardownShaped(result) && this.#owns(result.job_id);
+		return !result.already && this.#claimable(result) && this.#owns(result.job_id);
+	}
+
+	/** A recipe member is the runner's only on a done envelope: a blocked or failed one is the parent's exception. */
+	#claimable(result: IntakeResult): boolean {
+		return teardownShaped(result) && (result.status === "done" || !this.#selfReviewRunOf(result.job_id));
 	}
 
 	/**
@@ -131,7 +173,12 @@ export class ScheduleRunner {
 		this.#handled.add(result.job_id);
 		try {
 			const outcome = await this.#ports.tearDown(result.job_id);
-			if (outcome.torn_down) { await this.#closeSettledRuns(); return true; }
+			if (outcome.torn_down) {
+				const run = this.#selfReviewRunOf(result.job_id);
+				if (run) await this.#advance(run);
+				await this.#closeSettledRuns();
+				return true;
+			}
 			this.#ports.log(`schedule runner: teardown of ${result.job_id} refused: ${outcome.failure?.message ?? "not torn down"}; waking the parent`);
 		} catch (error) {
 			this.#ports.log(`schedule runner: teardown of ${result.job_id} failed: ${(error as Error).message}; waking the parent`);
@@ -160,7 +207,7 @@ export class ScheduleRunner {
 				result = { job_id: record.job_id, accepted: false, already: true, phase: record.phase, summary: message };
 			}
 			if (this.#handled.has(record.job_id)) continue; // a live onReported took it meanwhile
-			if (teardownShaped(result)) await this.onReported(result);
+			if (this.#claimable(result)) await this.onReported(result);
 			else {
 				this.#handled.add(record.job_id);
 				this.#ports.wake(result);
@@ -171,17 +218,17 @@ export class ScheduleRunner {
 	#owns(jobId: string): boolean {
 		try {
 			const job = this.#ports.ledger().read().jobs.find((entry) => entry.id === jobId);
-			return job !== undefined && runnerOwns(job, parentExpandedIds(this.#ports.schedules()));
+			return (job !== undefined && runnerOwns(job, parentExpandedIds(this.#ports.schedules()))) || this.#selfReviewRunOf(jobId) !== undefined;
 		} catch {
 			return false; // an unreadable ledger is the parent's to see
 		}
 	}
 
-	async #dispatch(jobId: string, schedule: Schedule): Promise<void> {
+	async #dispatch(jobId: string, request: { task?: string; wallClockSeconds?: number }): Promise<void> {
 		if (this.#inflight.has(jobId)) return;
 		this.#inflight.add(jobId);
 		try {
-			await this.#ports.dispatch(schedule.job.script_path !== undefined ? { jobId } : { jobId, task: schedule.job.description ?? schedule.job.title });
+			await this.#ports.dispatch({ jobId, ...request });
 		} catch (error) {
 			const message = (error as Error).message;
 			const key = `${jobId}|${message}`;

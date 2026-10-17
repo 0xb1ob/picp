@@ -125,6 +125,7 @@ export function formatNativeEvent(event: Pick<ScheduleEvent, "reason" | "job_id"
 	const via = event.manual ? `; run now via ${event.manual_via === "cp_schedule" ? "cp_schedule" : "the dashboard"} (${event.manual})` : "";
 	const fired = `${head} ${event.replayed ? "replayed" : "fired"}: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${via}. `;
 	if (event.replayed) return `${fired}Nothing new to do.`;
+	if (event.skill === "cp-self-review") return `${fired}The schedule runner drives ${event.run_id}'s self-review recipe in code from anchor ${event.job_id}; nothing to expand or dispatch.`;
 	if (event.skill) return `${fired}${event.job_id} is a parent-expanded run (deferred anchor) of ${event.run_id}: use skill ${event.skill} to expand it — its jobs carry label schedule:${event.schedule_id}; never dispatch the anchor.`;
 	if (event.delivery === "pipeline") return `${fired}The schedule host starts its pipeline in code under ${event.run_id}; no cp_pipeline start needed.`;
 	return fired + (RUNNER_DELIVERIES.includes(event.delivery ?? "")

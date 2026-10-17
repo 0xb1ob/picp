@@ -8531,7 +8531,24 @@ its quote and takes no overrides. The dashboard journals `overrides` on `run_now
 A native pipeline is started by the schedule host in code on the run's fired research anchor: the ship job is
 titled `ship: <title> (<run id>)`, labelled `schedule:<id>` and admitted to the run before its dependency is
 recorded; a replay after a crash finds that ship again by title and never starts a second pipeline. Only a
-failed start wakes the parent.
+failed start wakes the parent. A native pipeline policy needs `limits.child_jobs` ≥ 2 (anchor + ship), and a run
+that cannot admit the ship (closed, or its child cap spent) refuses before the ship job is created.
+
+#### Native self-review runs (PR3 of the schedules refactor)
+
+A native cp-self-review run is driven by the schedule runner in code (`src/schedule-self-review.ts`; task text
+in `prompts/schedules/`), never by the parent. On its fire, each member envelope and each tick the runner takes
+one idempotent step, serialized per run: it creates and admits six report-only readers (L1–L6, research/local)
+and the synthesis S1 (research/board) with their member `role`, titled `<role title> [<anchor id>]` so a crash
+replay finds a created job again; it adds S1 ← L1–L6 and an `expanded:` comment on the anchor; dispatches
+readers in order within `execution.effective.parallelism` (wall clock 3 h each), then S1 once all six closed
+undropped; and closes the anchor `researched: synthesis <S1>`. A passed deadline or a `usd`/`tokens` cap notice
+at 100% drops every unstarted member; a dropped reader drops S1, and the anchor is then dropped, so the run
+closes `partial` without a false-success synthesis. A done member envelope is torn down with no parent wake; a
+blocked or failed one, a refused teardown or an escalation wakes the parent as before. The run is never a
+pending expansion (no expansion wake), `cp_next` never offers its members, and a `schedule:<id>` label on a
+non-member job is refused while it is open. A legacy parent-expanded run (an `expanded:` marker and no role
+members) stays the parent's under `skills/cp-self-review`.
 
 **`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
 `schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the

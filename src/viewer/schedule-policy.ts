@@ -120,6 +120,7 @@ function nativeEffectErrors(policy: NativeSchedulePolicy): string[] {
 	if (policy.mode !== effectsMode(effects)) errors.push(`/mode: must be ${effectsMode(effects)} for these effects`);
 	const needed = recipe.delivery === "pipeline" ? ["research", "ship"] : [recipe.kind];
 	if (needed.some((kind) => !policy.kinds.includes(kind as "ship" | "research"))) errors.push(`/kinds: must include ${needed.join(", ")}`);
+	if (recipe.delivery === "pipeline" && policy.limits.child_jobs < 2) errors.push("/limits/child_jobs: a pipeline admits its anchor and its ship (at least 2)");
 	if (policy.mode === "report-only" && policy.kinds.includes("ship")) errors.push("/kinds: report-only runs admit research jobs only");
 	return errors;
 }

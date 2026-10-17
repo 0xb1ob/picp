@@ -33,6 +33,7 @@ import type { CommandRunner } from "./merge-ask.ts";
 import { formatReadyBeads, readReadyBeads, type ReadyBeads } from "./ready-beads.ts";
 import { readDrain } from "./drain.ts";
 import { runnerOwns } from "./schedule-runner.ts";
+import { selfReviewRole } from "./schedule-self-review.ts";
 import { readParentExpanded } from "./schedule-expand.ts";
 import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedule-authority.ts";
 import { runSpend } from "./schedule-runs.ts";
@@ -177,7 +178,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 			if (authority.source === "mandate") { readyAll.push(job); continue; }
 			const run = authority.run;
 			const result = runResultOf(run);
-			if (runnerOwns(job, readParentExpanded(ctx.home)) || ports.queued?.().includes(job.id)) continue;
+			if (runnerOwns(job, readParentExpanded(ctx.home)) || selfReviewRole(run, job.id) || ports.queued?.().includes(job.id)) continue;
 			result.ready.push(job);
 			if (result.run!.live_workers + run.members.filter((member) => ports.queued?.().includes(member.job_id)).length >= run.policy.limits.parallelism) {
 				result.action.reason = `run ${run.id}: parallelism is full (queued admission counts)`;
