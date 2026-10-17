@@ -45,6 +45,7 @@ import { startVersionLine, type VersionLine } from "./version-line.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
 import { OPERATOR_NOTE } from "../../src/operator-note.ts";
+import { operatorCacheWarming } from "../../src/operator-cache-warming.ts";
 import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
@@ -554,6 +555,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (event) => {
 		event.systemPromptOptions.sections.operator_note = OPERATOR_NOTE;
 	});
+	pi.on("cache_warming_decision", async (event) => operatorCacheWarming(event));
 
 	pi.registerCommand("cp-bridge", {
 		description: "List cp_* tools in this main session (must not include fleet tools)",

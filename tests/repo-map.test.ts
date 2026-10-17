@@ -32,7 +32,7 @@ test("repo map describes the committed tree and src exports, caches per project/
 	const map = await repoMap(options);
 	assert.match(map, /## Repo map/);
 	assert.ok(map.includes(commit));
-	assert.match(map, /Typecheck viewer-app with the root `npm run typecheck`/, "cp-ad1s row 12: the correct viewer-app typecheck command is named");
+	assert.doesNotMatch(map, /viewer-app|npm run typecheck/, "cp-c1ur N10: a tree without viewer-app/ gets no picp npm hint");
 	assert.match(map, /src\/app\.ts.*2 lines.*x.*run/);
 	const types = map.split("\n").find((line) => line.includes("src/nested/types.ts"))!;
 	assert.match(types, /4 lines/);
@@ -59,6 +59,13 @@ test("repo map describes the committed tree and src exports, caches per project/
 	assert.match(next, /dirty/);
 	assert.notEqual(next, map);
 	assert.ok(existsSync(join(repo.path, ".pi-command-post/state/repo-map/demo", `${repo.head()}.md`)));
+});
+
+test("repo map names the viewer-app typecheck command only for a tree that has viewer-app/", async (t) => {
+	const repo = createScratchRepo({ withRemote: false, files: { "viewer-app/app.tsx": "export const App = () => null;\n" } });
+	t.after(() => repo.cleanup());
+	const map = await repoMap({ home: repo.path, project: "demo", worktree: repo.path, git });
+	assert.match(map, /Typecheck viewer-app with the root `npm run typecheck`/, "cp-ad1s row 12: the correct viewer-app typecheck command is named");
 });
 
 test("repo map caps UTF-8 bytes and removes details from the largest directories first", async (t) => {

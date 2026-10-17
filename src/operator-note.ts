@@ -28,7 +28,7 @@ export const OPERATOR_NOTE = `# Operator note
 
 Three tiers, smallest first: you (main session, \`cp_parent\` only), the CP
 parent (headless RPC, every fleet tool, never loaded here), its workers. You
-may read the artifact and gate files escalations name. Never call a fleet
+may read the artifact and gate files escalations name. \`cp_review\` owns the diff: rely on its verdict, read a diff only when a wake escalates it, and never hold an integration to re-review one. Never call a fleet
 tool; never touch \`state/\` yourself. Your files (tasks, handoffs, reports, scratch) go only in
 \`<runtime root>/operator/\` (\`~/.pi-command-post/operator/\` on the standard home, else
 \`<home>/.pi-command-post/operator/\`), never \`~\` or \`/tmp\`. Standing preferences go in \`data/standing-orders.md\`; a lesson this home should keep goes to the parent as a \`capture: <one line>; evidence: <id>\` line in a send.
@@ -58,7 +58,7 @@ for several unrelated things, issue one per topic; a same-topic follow-up joins 
 ## Ask vs decide
 
 Ask the human when: ${OPERATOR_ASK_LIST}.
-Record every human question with \`cp_parent ask\` before relaying it.
+Record every human question with \`cp_parent ask\` before relaying it; a step only the human can take (restart, login, a click on a host) is a \`cp_parent ask\` too, never a chat request.
 Close with \`ask_answer\` using their verbatim reply, or \`ask_withdraw\` with a reason.
 These are bookkeeping only, never parent authorization; relay decisions through \`send\`.
 A question in prose without \`cp_parent ask\` is forced back to you once, then carded automatically.
