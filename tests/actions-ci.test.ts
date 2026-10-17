@@ -220,6 +220,53 @@ test("errors: denial stays classifiable as unreadable CI; rate limit does not; r
 	assert.ok(!garbled.message.includes(secret));
 });
 
+// The "Actions read came back malformed (not JSON)" stalls: a transient non-JSON body or an HTML error page now
+// retries inside the tick, and a persisting one is a single fault naming gh's status and a redacted body preview.
+test("retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview", async () => {
+	const pauses: number[] = [];
+	const sleep = async (ms: number) => void pauses.push(ms);
+	const bodies = [`{"total_count":1,"workflow_runs":[{"id":1`, runsBody([run(1)])];
+	const { exec, calls } = fakeGh({ [runsPath()]: () => bodies.shift() ?? "", [jobsPath(1)]: jobsBody([]) });
+	assert.equal((await readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, sleep })).length, 1);
+	assert.deepEqual([calls, pauses], [[runsPath(), runsPath(), jobsPath(1)], [250]]);
+	const html = "<!DOCTYPE html>\n<html>ghp_canary0123456789 Unicorn!</html>";
+	const stuck = fakeGh({ [runsPath()]: html });
+	const error = await readActionsCi({ cwd: "/x", exec: stuck.exec, repo: REPO, sha: SHA, sleep }).then(() => assert.fail("expected a refusal"), (caught: unknown) => caught as ActionsCiError);
+	assert.equal(error.category, "malformed");
+	assert.equal(stuck.calls.length, 3);
+	assert.match(error.message, /not JSON; gh exit 0; body "<!DOCTYPE html> <html>\[redacted\] Unicorn!<\/html>"; 3 attempts/);
+	assert.ok(!error.message.includes("canary"));
+});
+
+test("retry: an HTML 403 is a transport fault with its status and body, never a token denial; JSON 403 is denied", async () => {
+	const sleep = async () => {};
+	const failing = (stdout: string) =>
+		readActionsCi({
+			cwd: "/x",
+			exec: fakeGh({ [runsPath()]: () => { throw Object.assign(new Error("gh api x failed: gh: HTTP 403"), { stdout }); } }).exec,
+			repo: REPO,
+			sha: SHA,
+			sleep,
+		}).then(() => assert.fail("expected a refusal"), (caught: unknown) => caught as ActionsCiError);
+	const html = await failing("<html><title>Access denied</title></html>");
+	assert.equal(html.category, "transport");
+	assert.match(html.message, /status 403; body "<html><title>Access denied<\/title><\/html>"; 3 attempts/);
+	assert.ok(!ciReadDenied(html.message));
+	const json = await failing(JSON.stringify({ message: "Resource not accessible by integration" }));
+	assert.equal(json.category, "denied");
+	assert.ok(ciReadDenied(json.message));
+});
+
+test("retry: never past the budget, and a structurally wrong JSON page is not retried", async () => {
+	let clock = 0;
+	const { exec, calls } = fakeGh({ [runsPath()]: () => ((clock += 900), "<html>") });
+	await assert.rejects(readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, timeoutMs: 1000, now: () => clock, sleep: async () => {} }), /malformed.*not JSON/);
+	assert.equal(calls.length, 1, "100 ms left is less than the 250 ms pause");
+	const wrong = fakeGh({ [runsPath()]: JSON.stringify({ workflow_runs: [] }) });
+	await assert.rejects(readActionsCi({ cwd: "/x", exec: wrong.exec, repo: REPO, sha: SHA, sleep: async () => {} }), /missing total_count/);
+	assert.equal(wrong.calls.length, 1);
+});
+
 test("budget: one total deadline across pages, each request gets only what remains", async () => {
 	let clock = 0;
 	const timeouts: number[] = [];

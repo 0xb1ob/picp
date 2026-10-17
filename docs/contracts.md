@@ -3640,6 +3640,15 @@ Non-Actions checks are therefore not seen. Every check on the current repos is
 an Actions workflow (Run tests, Droid, Critical Path Check, ethereum-dashboard);
 that is the operator's reported deployment, not something this home detects.
 
+**A transient Actions read retries inside the tick** (`ACTIONS_RETRY_DELAYS_MS`, `src/actions-ci.ts`): a body
+that is not JSON on gh exit 0, an HTML 403/404 (a proxy or abuse page — GitHub's own denials are JSON), a 5xx
+or a transport fault is re-read after 250 ms and 750 ms while the observation budget lasts. A JSON 403/404
+(`denied`), a rate limit or a structurally wrong JSON page is not retried. A persisting fault is still one
+named `ActionsCiError`: its category, the endpoint, gh's status (`HTTP 403` only for a denial, `status <n>`
+or `gh exit 0` otherwise, so an HTML page never reads as "token lacks Actions read"), a 60-byte body preview
+with `gh*_`/`github_pat_`/bearer tokens redacted, and the attempt count. There is no Checks or `gh pr checks`
+fallback: CI evidence stays Actions only.
+
 **The no-workflows probe reads GitHub Actions too.** `none` means the
 repository has no Actions workflows, which is a narrower claim than "no CI
 anywhere": a repository whose CI is an external provider (CircleCI, Jenkins,
