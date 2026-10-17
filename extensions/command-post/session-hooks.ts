@@ -33,6 +33,7 @@ import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../
 import { thresholdCancel } from "../../src/parent-compact-hold.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { formatScheduleMigration, formatSchedulePolicyImport, sweepScheduleGrantTemplates, sweepSchedulePolicyImport } from "../../src/schedule-migrations.ts";
+import { formatNativeMigration, sweepNativeScheduleMigration } from "../../src/schedule-native-migration.ts";
 import { reconcileRun } from "../../src/schedule-runs.ts";
 import { readSchedulesOrEmpty } from "../../src/schedule-expand.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
@@ -276,6 +277,20 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			if (ctx.hasUI) ctx.ui.notify(message, "error");
 			else process.stderr.write(`${message}\n`);
 			return; // Fail closed: do not start ticks or heal pointers after an unverified import.
+		}
+		// Schedules PR4: every drained legacy schedule becomes native before the first tick; a failure starts no ticks.
+		try {
+			const post = commandPost();
+			const text = formatNativeMigration(await sweepNativeScheduleMigration({ home, mandates: post.mandates, runs: post.mandates.scheduleRuns }));
+			if (text) {
+				if (ctx.hasUI) ctx.ui.notify(text, "info");
+				else process.stderr.write(`${text}\n`);
+			}
+		} catch (error) {
+			const message = `pi-command-post: native schedule migration failed for ${home}: ${(error as Error).message}`;
+			if (ctx.hasUI) ctx.ui.notify(message, "error");
+			else process.stderr.write(`${message}\n`);
+			return;
 		}
 
 		// Not reset here: the Shipped memory is keyed by session id and persisted, so

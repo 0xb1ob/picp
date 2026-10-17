@@ -18,10 +18,10 @@ export type NativeTrigger =
 	| { via: "cp_schedule"; tool_call_id: string; overrides?: RunOverrides };
 export interface NativeStarted { job_id?: string; run_id: string; reason: string; replayed?: true }
 
-/** The idempotency key of a start: the trusted request or tool call, or the fired slot. */
-export function startKeyOf(schedule: Pick<Schedule, "trigger">, slot: Date, manual?: NativeTrigger): string {
+/** The idempotency key of a start: the trusted request or tool call, or the schedule's fired slot (keys are home-unique). */
+export function startKeyOf(schedule: Pick<Schedule, "id" | "trigger">, slot: Date, manual?: NativeTrigger): string {
 	if (manual) return manual.via === "dashboard" ? `dashboard:${manual.request_id}` : `cp_schedule:${manual.tool_call_id}`;
-	return `${schedule.trigger.type === "watch" ? "watch" : "slot"}:${isoTimestamp(slot)}`;
+	return `${schedule.trigger.type === "watch" ? "watch" : "slot"}:${schedule.id}@${isoTimestamp(slot)}`;
 }
 
 /** Validated before any job exists: a run override wins, then the saved role pin, then routing. */

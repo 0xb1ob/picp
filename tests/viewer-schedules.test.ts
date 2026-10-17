@@ -230,8 +230,8 @@ test("a manual skill schedule: schema accepts it, the view has no next fire, the
 	assert.equal(triggerText(data.schedules[0]!), "manual (Run now only), expanded by skill cp-self-review");
 	const html = screen(data);
 	assert.match(html, /Manual: fires only on Run now/);
-	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under that fire's own grant\./);
-	assert.match(html, /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: move it to a schedule grant to resume<\/strong>/, "a template-less schedule with no recorded reason says so");
+	assert.match(html, /Each Run now records a deferred anchor job and wakes the parent to fan out the cp-self-review recipe under a saved native policy, once one is active\./);
+	assert.match(html, /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: open the editor to set up this schedule<\/strong>/, "a template-less schedule with no recorded reason says so");
 	assert.doesNotMatch(html, /Next fire|Next check/);
 });
 
@@ -293,8 +293,8 @@ test("fire grant template: validates (no merge, merge and risk:high always asked
 	});
 	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
 	const html = screen(data);
-	assert.match(html, /Fire grant <code>md-paus1<\/code> · paused \(operator\)<strong> · fires are refused while this grant is paused: resume it, or move the schedule to a new grant/);
-	assert.match(html, /Fire grant <code>md-live1<\/code> · active · next fire mints a fresh grant/);
+	assert.match(html, /Legacy grant <code>md-paus1<\/code> · paused \(operator\)<strong> · no fire mints a grant: the operator pause is kept when it migrates to a native policy/);
+	assert.match(html, /Legacy grant <code>md-live1<\/code> · active<strong> · no fire mints a grant: it migrates to a native policy once no legacy run is open/);
 	assert.match(html, /class="job-meta schedule-approval">Template of <code>md-seed1<\/code>: 24 h, \$10, 500000 tokens, job cap 2; allowed plan, implement; asks on merge, risk:high\. Approved .*“Yes, triage\. long-unbroken/);
 	assert.doesNotMatch(html, /no grant template/);
 });
@@ -311,31 +311,31 @@ async function renderPointer(t: { after(fn: () => void): void }, mandate_id: str
 	return { item: data.schedules[0]!, html: screen(data) };
 }
 
-test("Schedules page: a pointer revoked by the parent or the system (revoked_by) shows active, next fire mints a fresh grant", async (t) => {
+test("Schedules page: a legacy pointer revoked by the parent or the system (revoked_by) is no stop; nothing claims a fire mints", async (t) => {
 	for (const id of ["md-prev1", "md-sysr1"]) {
 		const { item, html } = await renderPointer(t, id);
-		assert.deepEqual([item.mandate_status, item.grant_stopped], ["active", false], `${id}: operatorStop is no stop, the fire path mints past it`);
-		assert.match(html, new RegExp(`Fire grant <code>${id}</code> · active · next fire mints a fresh grant`));
-		assert.doesNotMatch(html, /fires are refused/);
+		assert.deepEqual([item.mandate_status, item.grant_stopped], ["active", false], `${id}: operatorStop is no stop`);
+		assert.match(html, new RegExp(`Legacy grant <code>${id}</code> · active<strong> · no fire mints a grant: it migrates to a native policy once no legacy run is open`));
+		assert.doesNotMatch(html, /next fire mints a fresh grant/);
 	}
 });
 
-test("Schedules page: a pointer the operator revoked (revoked_by operator) shows stopped, as the fire path refuses it, and says move — never resume", async (t) => {
+test("Schedules page: a legacy pointer the operator revoked (revoked_by operator) shows stopped, kept by the migration", async (t) => {
 	const { item, html } = await renderPointer(t, "md-oprv1");
 	assert.deepEqual([item.mandate_status, item.grant_stopped], ["revoked", true]);
-	assert.match(html, /Fire grant <code>md-oprv1<\/code> · revoked<strong> · fires are refused while this grant is revoked: move the schedule to a new grant<\/strong>/);
+	assert.match(html, /Legacy grant <code>md-oprv1<\/code> · revoked<strong> · no fire mints a grant: the operator revoke is kept when it migrates to a native policy<\/strong>/);
 	assert.doesNotMatch(html, /resume it|next fire mints a fresh grant/);
 });
 
-test("Schedules page: a legacy revoke (no revoked_by, no provenance) shows stopped, as the fire path refuses it", async (t) => {
+test("Schedules page: a legacy revoke (no revoked_by, no provenance) shows stopped, as the operator's", async (t) => {
 	const { item, html } = await renderPointer(t, "md-lgcy1");
 	assert.deepEqual([item.mandate_status, item.grant_stopped], ["revoked", true]);
-	assert.match(html, /Fire grant <code>md-lgcy1<\/code> · revoked<strong> · fires are refused while this grant is revoked: move the schedule to a new grant<\/strong>/);
+	assert.match(html, /Legacy grant <code>md-lgcy1<\/code> · revoked<strong> · no fire mints a grant: the operator revoke is kept when it migrates to a native policy<\/strong>/);
 	assert.doesNotMatch(html, /resume it/);
 });
 
 test("Schedules page: a schedule the migration skipped shows the migration's reason and how to resume", async (t) => {
-	const reason = "schedule sch-ffffff has no grant template (migration: md-live1 is not a schedule grant), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume";
+	const reason = "schedule sch-ffffff has no grant template (migration: md-live1 is not a schedule grant), so no fire can mint a fresh grant: save a native policy in the editor to resume";
 	const schedule = { id: "sch-ffffff", name: "triage", project: "demo", mandate_id: "md-live1", trigger: { type: "manual" }, job: { title: "Triage", kind: "research", delivery: "answer" }, enabled: true, created_at: "2026-09-01T00:00:00Z", last_skip: { at: "2026-09-28T00:00:00Z", reason } };
 	const data = schedulesView(fixture(t, file(schedule)), () => {}, NOW);
 	const built = await build({
@@ -343,7 +343,7 @@ test("Schedules page: a schedule the migration skipped shows the migration's rea
 		bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" },
 	});
 	const { screen } = (await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`)) as { screen(data: SchedulesResponse): string };
-	assert.match(screen(data), /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: schedule sch-ffffff has no grant template \(migration: md-live1 is not a schedule grant\), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume<\/strong>/);
+	assert.match(screen(data), /Grant <code>md-live1<\/code> · active<strong> · no grant template, so every fire is refused: schedule sch-ffffff has no grant template \(migration: md-live1 is not a schedule grant\), so no fire can mint a fresh grant: save a native policy in the editor to resume<\/strong>/);
 });
 
 test("schedules view: an answer is read only from the job's own artifact dir; a path outside it is refused", (t) => {
@@ -473,7 +473,7 @@ test("Schedules renders an enabled cron, a disabled watch, an inactive mandate, 
 	assert.match(html, /Next fire /);
 	assert.match(html, /watch scripts\/x\.sh every 300 s, fires on changed output/);
 	assert.match(html, />disabled</);
-	assert.match(html, /fires are refused while this grant is paused/);
+	assert.match(html, /no fire mints a grant: fire at 2026-09-28T01:00Z not recorded: md-paus1 is paused/, "a recorded skip is shown verbatim");
 	assert.match(html, /this page's run history \(not the operator session\)/);
 	assert.doesNotMatch(html, /an answer card in the operator session/);
 	assert.match(html, /Warsaw: sunny, 29 C/);

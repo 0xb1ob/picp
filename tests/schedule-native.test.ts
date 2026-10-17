@@ -41,7 +41,7 @@ test("native add saves an activated native revision 1 and writes no grant", asyn
 	assert.equal(policy.limits.parallelism, 2);
 	assert.equal("approval" in policy || "ask_on" in policy || "allowed_actions" in policy, false);
 	await assert.rejects(b.scheduler.add({ name: "nightly", project: "demo", native: { action: ACTION, limits: {} }, manual: true, title: "x", kind: "research", delivery: "answer" }), /already has a schedule named/);
-	await assert.rejects(b.scheduler.add({ name: "quoteless", project: "demo", manual: true, title: "x", kind: "research", delivery: "answer" }), /needs the operator's quote/);
+	await assert.rejects(b.scheduler.add({ name: "quoteless", project: "demo", manual: true, title: "x", kind: "research", delivery: "answer" } as Parameters<Scheduler["add"]>[0]), /needs the operator's quote/);
 	// The schedule is written first; a failed policy save removes it again, leaving neither schedule nor policy.
 	const save = b.runs.savePolicyRevision.bind(b.runs);
 	b.runs.savePolicyRevision = async () => { throw new Error("policy journal unwritable"); };

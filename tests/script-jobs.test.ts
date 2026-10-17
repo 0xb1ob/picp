@@ -99,7 +99,7 @@ test("schedlater S1: a script_path schedule runs with no model; a refused teardo
  assert.equal(wakes.length, 2);
 });
 
-test("schedlater S1: a runner fire over the job cap is refused by the real dispatch gate, noted, never woken, and dropped at the next slot", async (t) => {
+test("schedlater S1: a runner fire over its run's parallelism is refused by the real dispatch gate, noted, never woken, and dropped at the next slot", async (t) => {
  const home = createScratchHome();
  const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
  t.after(() => { home.cleanup(); repo.cleanup(); });
@@ -110,38 +110,40 @@ test("schedlater S1: a runner fire over the job cap is refused by the real dispa
  // The ledger stamps created_at with the real clock, so the schedule clock is anchored to it.
  const real = Date.now();
  const clock = { now: new Date(real - 90_000) };
- const mandate = post.mandates.issue({ projects: ["demo"], objective: "nightly", expiry: isoTimestamp(new Date(real + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 1, schedule_grant: true });
+ const runs = post.mandates.scheduleRuns;
  const scheduler = new Scheduler({
-  home: home.path, ledger: () => post.ledger(), mandates: post.mandates, usageJobs: () => post.fleet.read().jobs, cloneOf: (p) => post.registry.pathOf(p), now: () => clock.now, startedAt: clock.now,
+  home: home.path, ledger: () => post.ledger(), mandates: post.mandates, runs, usageJobs: () => post.fleet.read().jobs, cloneOf: (p) => post.registry.pathOf(p), now: () => clock.now, startedAt: clock.now,
   mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }),
  });
- const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "* * * * *", tz: "UTC", title: "nightly", kind: "ship", delivery: "local", script_path: "scripts/run.sh" });
+ const native = { action: { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } }, limits: { parallelism: 1 } };
+ const schedule = await scheduler.add({ name: "nightly", project: "demo", native, cron: "* * * * *", tz: "UTC", title: "nightly", kind: "ship", delivery: "local", script_path: "scripts/run.sh" });
  const wakes: IntakeResult[] = [];
  const runner = new ScheduleRunner({
   dispatch: (request) => post.dispatch(request), tearDown: (id) => post.tearDown(id), recorded: (id) => post.intake.intake(id), wake: (result) => wakes.push(result),
-  ledger: () => post.ledger(), fleetJobs: () => post.fleet.read().jobs, schedules: () => scheduler.list(), now: () => clock.now, log: () => {},
+  ledger: () => post.ledger(), fleetJobs: () => post.fleet.read().jobs, schedules: () => scheduler.list(), now: () => clock.now, log: () => {}, runs,
  });
  clock.now = new Date(real);
  const [fired] = await scheduler.tick();
- assert.equal(fired?.outcome, "fired");
- // Another run of this schedule takes the fire grant's one slot after it was minted (schedlater S3: only the schedule's own jobs count).
+ assert.equal(fired?.outcome, "fired", fired?.reason);
+ // Another member of the same run is in flight, so the run's one parallel slot is taken (only its own jobs count).
  await post.fleet.add({
-  job_id: "cp-other", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "held", reported_at: isoTimestamp(), worktree: "/wt", branch: "cp-other", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, schedule_id: schedule.id,
+  job_id: "cp-other", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "waiting", worktree: "/wt", branch: "cp-other", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, schedule_id: schedule.id,
   worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m/x", started_at: isoTimestamp() },
  } as FleetRecord);
+ await runs.admitMember(fired!.run_id!, { job_id: "cp-other", role: null, admitted_at: isoTimestamp() });
  await runner.onFired(fired!);
  await runner.retryPending();
  const jobId = fired!.job_id!;
  assert.equal(post.fleet.get(jobId), undefined, "nothing leased or spawned over the cap");
  const notes = (await post.ledger().show(jobId)).comments.filter((c) => c.text.startsWith("dispatch refused"));
  assert.equal(notes.length, 1);
- assert.match(notes[0]!.text, /job cap 1 reached/);
+ assert.match(notes[0]!.text, /run parallelism is full/);
  assert.deepEqual(wakes, [], "a refusal is retried, not a parent wake");
  clock.now = new Date(Date.now() + 180_000); // past the next minute slot after the job's created_at
  await runner.retryPending();
  const dropped = await post.ledger().show(jobId);
  assert.equal(dropped.status, "closed");
- assert.match(dropped.close_reason ?? "", /not dispatched before the next slot: dispatch refused .*job cap 1 reached/);
+ assert.match(dropped.close_reason ?? "", /not dispatched before the next slot: dispatch refused .*run parallelism is full/);
 });
 
  test("script risk:high mandate refuses before leasing and dry_run only previews", async (t) => {

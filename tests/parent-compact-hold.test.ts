@@ -10,9 +10,10 @@ import { createSessionState } from "../extensions/command-post/shared.ts";
 import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
 import { registerScheduleTools } from "../extensions/command-post/tools-schedule.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { createScratchLedger } from "./harness/index.ts";
 import { CommandPost } from "../src/command-post.ts";
-import { isoTimestamp, LAYOUT } from "../src/contracts.ts";
+import { LAYOUT } from "../src/contracts.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
 import { type ContextReading, PARENT_COMPACT_HOLD_MS, PARENT_COMPACT_START_MS, ParentCompactHold } from "../src/parent-compact-hold.ts";
 import { frameBatch } from "../src/parent-outbox.ts";
@@ -77,19 +78,18 @@ function open() {
 	const scheduleHome = createScratchHome();
 	after(() => scheduleHome.cleanup());
 	const ledger = createScratchLedger({ home: scheduleHome.path, knownProjects: ["demo"] }).ledger;
-	const mandates = new MandateStore(scheduleHome.path);
+	const mandates = new MandateStore(scheduleHome.path, { runs: openScheduleRunStore(scheduleHome.path) });
 	const schedulePost = { home: scheduleHome.path, ledger: () => ledger, mandates, fleet: { read: () => ({ jobs: [] }) },
 		registry: { pathOf: () => scheduleHome.path, archivedNames: () => [], get: () => ({}) } };
 	registerScheduleTools(pi, { commandPost: () => schedulePost, setLive: () => {} } as never, () => true, () => {}, () => {}, (deliver) => {
 		if (wakeups.compactHold.offer(deliver) === "send") deliver();
 	});
 	const schedule = async (tag: string) => {
-		const seed = mandates.issue({ projects: ["demo"], objective: tag, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 1000000 }, job_cap: 2, schedule_grant: true });
-		const call = (params: Record<string, unknown>, quote = "") => executeSchedule("call-1", params, undefined, undefined, { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: quote } }] } });
-		const added = await call({ action: "add", name: `SYNTH-NOTICE ${tag}`, project: "demo", mandate_id: seed.id, manual: true, title: tag, kind: "ship", delivery: "pr" });
+		const call = (params: Record<string, unknown>, quote = "", id = `call-${tag}`) => executeSchedule(id, params, undefined, undefined, { sessionManager: { getEntries: () => [{ type: "message", message: { role: "user", content: quote } }] } });
+		const said = `Add the SYNTH-NOTICE ${tag} schedule.`;
+		const added = await call({ action: "add", name: `SYNTH-NOTICE ${tag}`, project: "demo", manual: true, title: tag, kind: "ship", delivery: "pr", operator_quote: said, limits: {} }, said, `add-${tag}`);
 		const id = /added (sch-[0-9a-f]{6})/.exec(added.content[0]!.text)![1]!;
-		const quote = `Run ${id} now.`;
-		return call({ action: "run_now", id, operator_quote: quote }, quote);
+		return call({ action: "run_now", id }, "", `run-${tag}`);
 	};
 	const fire = (name: string, event: unknown = {}, ctx?: unknown) => {
 		let result: unknown;

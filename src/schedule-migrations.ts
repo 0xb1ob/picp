@@ -101,10 +101,13 @@ export interface SchedulePolicyImportReport {
 	migrated: string[]; skipped: Array<{ id: string; reason: string }>; deferred: string[];
 }
 
-/** A persistent rollback snapshot: retries verify the original bytes, never replace them with partial imports. */
-export function policyImportBackups(home: string, mandates: MandateStore, now: Date): ScheduleImportBackup[] {
-	const dir = join(home, LAYOUT.migrationsDir, "backups");
-	const manifest = join(home, LAYOUT.migrationsDir, "2026-12-schedule-policy-v2.backup.json");
+/**
+ * A persistent rollback snapshot: retries verify the original bytes, never replace them with partial imports. `set`
+ * names another migration's manifest and backup directory and adds its own sources (runs, seed grants).
+ */
+export function policyImportBackups(home: string, mandates: MandateStore, now: Date, set?: { name: string; extra: readonly string[] }): ScheduleImportBackup[] {
+	const dir = join(home, LAYOUT.migrationsDir, "backups", ...(set ? [set.name] : []));
+	const manifest = join(home, LAYOUT.migrationsDir, `${set?.name ?? "2026-12-schedule-policy-v2"}.backup.json`);
 	let rows: ScheduleImportBackup[] = [];
 	if (existsSync(manifest)) {
 		const raw = JSON.parse(readFileSync(manifest, "utf8"));
@@ -116,7 +119,7 @@ export function policyImportBackups(home: string, mandates: MandateStore, now: D
 		if (row.backup && (hash(row.backup) !== row.sha256 || (statSync(row.backup).mode & 0o777) !== 0o600)) throw new SchedulerError(`schedule import backup verification failed: ${row.backup}`);
 	}
 	const file = join(home, LAYOUT.state, "schedules.json");
-	const sources = [file, join(home, LAYOUT.state, "schedule-policies.json"), ...new Set(readScheduleFile(file).flatMap(s => s.mandate_id ? [mandates.file(s.mandate_id)] : []))];
+	const sources = [...new Set([file, join(home, LAYOUT.state, "schedule-policies.json"), ...readScheduleFile(file).flatMap(s => s.mandate_id ? [mandates.file(s.mandate_id)] : []), ...(set?.extra ?? [])])];
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	for (const source of sources) {
 		if (rows.some(r => r.source === source)) continue;
