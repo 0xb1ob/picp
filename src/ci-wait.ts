@@ -171,7 +171,7 @@ export function detectSleepLoop(command: string): string | undefined {
 export function ciWaitRefusal(finding: CiWaitFinding): string {
 	return [
 		`Refused: ${finding.what} (${finding.shape}: ${finding.matched}).`,
-		"A worker never waits for CI. Your job ends at: rebase onto the base branch your brief names",
+		"A worker never waits for CI. Your job ends at: merge the base branch your brief names",
 		"(`origin/<base>`), run `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts` (never `npm test`),",
 		"push, and report the pushed head sha (`git rev-parse HEAD`) in report_result's `head_sha`.",
 		"The parent re-verifies CI against that sha before it merges anything, so waiting here duplicates a",

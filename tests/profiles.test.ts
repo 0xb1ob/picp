@@ -401,10 +401,10 @@ test("shipped briefs carry the policy the contract requires", () => {
 	assert.match(ship, /head_sha/);
 	assert.match(ship, /second PR/);
 	// The base is resolved per repository (preflight), so the template may never
-	// hardcode it: a non-main repo would be told to rebase onto a branch that
+	// hardcode it: a non-main repo would be told to merge a branch that
 	// does not exist, and to read `base_sha` from it.
 	assert.ok(!ship.includes("origin/main"), "brief-ship must not hardcode origin/main");
-	assert.match(ship, /git rebase origin\/\$\{base\}/);
+	assert.match(ship, /git merge origin\/\$\{base\}/);
 	assert.match(ship, /git rev-parse origin\/\$\{base\}/);
 	// ...and an unresolved base is a refusal, not an empty hole in a live brief.
 	assert.throws(
@@ -525,7 +525,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 		assert.equal(env[name], value, `workerEnvironment() must export ${name}=${value}`);
 	}
 
-	const order = ["git commit -F <file>", "git rebase origin/${base}", "npm run typecheck", "npm run test:one -- tests/<x>.test.ts", "git push --force-with-lease"];
+	const order = ["git commit -F <file>", "git merge origin/${base}", "npm run typecheck", "npm run test:one -- tests/<x>.test.ts", "a plain `git push`"];
 	let cursor = -1;
 	for (const step of order) {
 		const at = ship.indexOf(step, cursor + 1);
@@ -545,9 +545,10 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 		[/Nomad CI runs the full suite on the pushed head/i, "Nomad CI is the full-suite gate"],
 		[/\$\{worktree\}/, "the worktree boundary"],
 		[/second PR/, "one PR per job"],
-		[/git fetch origin/, "fetch before rebase"],
-		[/git rebase origin\/\$\{base\}/, "rebase onto the resolved base"],
-		[/--force-with-lease/, "force-with-lease push"],
+		[/git fetch origin/, "fetch before merging the base"],
+		[/git merge origin\/\$\{base\}/, "merge the resolved base"],
+		[/plain `git push`, never a force push/, "a plain push (cp-c1ur N6)"],
+		[/Never rebase, reset onto origin or force push/, "no history rewrite (cp-c1ur N6)"],
 		[/`delivery: local`/, "local delivery is named"],
 		[/\*\*no PR\*\*; the push is the delivery/i, "local delivery opens no PR"],
 		[/git status --porcelain` must be empty/, "a clean tree before reporting"],

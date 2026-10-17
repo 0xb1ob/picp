@@ -372,7 +372,7 @@ the worker's own worktree (required for ship; checked with `git rev-parse HEAD`,
 failing closed if git cannot answer). Failing those is repairable, so the model can
 fix the tree, copy the observed sha, or report `blocked` instead.
 
-### Ship worker final step: rebase, run focused checks, push, report the head sha
+### Ship worker final step: merge the base, run focused checks, push, report the head sha
 
 Every `ship` job **must** follow this final sequence before calling `report_result`.
 It replaces stale-base green runs (a worker reported green, the base moved, the
@@ -380,25 +380,42 @@ PR merged red). Evidence from live runs: PRs #15–22 landed green locally and
 went stale or conflicted by merge time; three needed re-dispatch, one took five
 rebases across a day.
 
-**Rebase onto `origin/<base>` — the base branch the brief names, resolved per
+**Merge `origin/<base>` — the base branch the brief names, resolved per
 repository from `origin/HEAD` and `main` only when that is what it resolves to —
 re-run typecheck and the touched tests locally, push, report the pushed head sha — and stop.** In
 detail:
 
 1. `git fetch origin` — ensure you have the latest base.
-2. `git rebase origin/<base>` — rebase your commits onto the current base.
+2. `git merge origin/<base>` — bring the current base into your branch. Never a
+   rebase: the branch only moves forward (cp-c1ur N6), so step 4 is a plain push.
    - **If there are conflicts:** resolve them so **both sides survive**. Never
      weaken a test or delete code to make a conflict go away. If you cannot
-     resolve both sides (the right resolution is unclear), report `blocked` with
-     the exact conflict and the resolution you tried — the operator will take it
-     from there.
+     resolve both sides (the right resolution is unclear), `git merge --abort` and
+     report `blocked` with the exact conflict and the resolution you tried — the
+     operator will take it from there.
 3. Run `npm run typecheck` and only the touched test files
-   (`npm run test:one -- tests/<x>.test.ts`) on the rebased tree — never the full
+   (`npm run test:one -- tests/<x>.test.ts`) on the merged tree — never the full
    `npm test` locally; CI (`.github/workflows/ci.yml`) runs the full suite once on
-   the pushed head. That focused run on the rebased base is the evidence the worker owes.
-4. `git push --force-with-lease` to update the branch with the rebased commits.
+   the pushed head. That focused run on the merged base is the evidence the worker owes.
+4. A plain `git push` — never a force push.
 5. `git rev-parse HEAD` → `head_sha`, `git rev-parse origin/<base>` → `base_sha`.
    Call `report_result` with both. **The job ends here.**
+
+#### The worker never rewrites its branch's history
+
+`src/worker-history-guard.ts`, wired into the worker's `bash` hook, refuses
+`git rebase` (only `--abort` passes, to leave a rebase already in progress), every
+forced push (`-f`, `--force`, `--force-with-lease`, a `+ref` refspec) and
+`git reset --hard` onto a remote-tracking ref (`origin/…`, `refs/remotes/…`,
+`@{u}`, `FETCH_HEAD`). The refusal names the merge alternative: `git fetch origin`,
+`git merge origin/<branch>` if origin moved, `git merge origin/<base>`, a plain push.
+The reset rule is a parse, not a read of "is origin ahead": the usual shape is
+`git fetch origin && git reset --hard origin/<branch>`, where the guard runs before
+the fetch and the tracking ref it could read is still stale. Adopting origin's
+history over local commits is refused whatever the counts; `git reset --hard` with
+no ref or a local one (`HEAD~1`) is untouched. The merge from a `gh pr update-branch
+--rebase` origin carries the same changes on both sides, so it normally merges
+cleanly. `cp_integrate` squash-merges, so merge commits never reach the base.
 
 `head_sha` and `base_sha` make the run self-describing: the parent knows exactly
 which commit, on exactly which base, CI is read for before merging.
@@ -3805,14 +3822,15 @@ The branch has exactly one writer at any moment, and the boundaries are code:
 3. a conflict, or CI red after a rebase, is handed **back** to the job's own
    implementer with `cp_send` and a message generated in code — one promote,
    then a human (`INTEGRATE_MAX_RESOLVE`, the shape of `GATE_MAX_REVISE`). Repeating that surface for the same head waits until the branch moves and does not surface again. A
-   replacement is never dispatched in its place. The conflict message's first
-   instruction is `git fetch origin && git reset --hard origin/<branch>`,
-   because a server-side rebase leaves the worker's own clone behind origin;
-   the CI-red message claims no server-side advance and never prescribes a
-   reset: only when `git rev-list --count HEAD..origin/<branch>` is not 0 does
-   it say `git fetch origin && git merge origin/<branch>`, which keeps the
-   worker's unpushed commits (`git rev-list --count origin/<branch>..HEAD`),
-   and it ends in a plain `git push`, never a force push;
+   replacement is never dispatched in its place. Neither message prescribes a
+   rebase, a reset or a force push (cp-c1ur N6), and the worker's history guard
+   refuses all three. Both start with `git fetch origin` and, only when
+   `git rev-list --count HEAD..origin/<branch>` is not 0 (a server-side
+   `gh pr update-branch --rebase`, or someone else's push), `git merge origin/<branch>`,
+   which keeps the worker's unpushed commits (`git rev-list --count origin/<branch>..HEAD`).
+   The conflict message then says `git fetch origin && git merge origin/<base>`,
+   resolve so both sides survive, commit; the CI-red message claims no server-side
+   advance and says fix with one more commit. Both end in a plain `git push`;
 4. `cp_merged` writes the receipt → the `pr` receipt becomes `merged` →
    `decideReopen` refuses any further `cp_send`. **Recording the merge is the
    code-enforced end of the implementer's write window**, which is why `record`
