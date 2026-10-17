@@ -5,7 +5,8 @@
  *  - a bulk `cp`/`rsync` of a command-post home (`detectHomeBulkCopy`, N1);
  *  - `gh auth status` / `gh auth token`, which print the stored token
  *    (`detectGhAuthStatus`, N2);
- *  - GitHub token shapes in bash results (`redactGithubTokens`, N2).
+ *  - GitHub token shapes in bash results (`redactGithubTokens`, N2);
+ *  - a search of the home or a credential dotdir for a key (`detectCredentialSearch`, N5).
  *
  * A worker never copies the host's `auth.json` (nor
  * `mcp-auth.json`, the MCP OAuth tokens pi reads in place: cp-fl8b). A
@@ -238,6 +239,44 @@ export function ghAuthStatusRefusal(finding: GhAuthStatusFinding): string {
 	return [
 		`Refused: \`gh auth ${finding.subcommand}\` prints the stored GitHub token into your transcript (${finding.matched}); gh before 2.97.0 leaves part of a fine-grained token unmasked even without --show-token.`,
 		"To check that gh is logged in, run `gh api user --jq .login` (it prints only the login). Never print a token.",
+	].join("\n");
+}
+
+// N5: a worker searched the home, ~/.pi and ~/.config for an API key and crawled session transcripts.
+const SEARCH_RE = new RegExp(`${CMD_POS}(?:command\\s+|\\\\)?(?:grep|egrep|fgrep|rg|ag|ack|find|fd)\\b[^;&|\\n]*`, "gi");
+const HOME_SCOPE_RE =
+	/^(?:~|\$\{?HOME\}?|\/home\/[^/\s]+|\/root)(?:\/*|\/+\.(?:pi|pi-command-post|config|ssh|aws|gnupg|docker|netrc|npmrc|env)(?:[/.-]\S*)?)$/;
+// An env-var name is upper case, so a lowercase `token` (usage stats in a transcript) stays searchable.
+const KEY_SHAPE_RES = [/[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)\b/, /\.env\b|auth\.json|api[_-]?key|secret|passw/i];
+
+export interface CredentialSearchFinding {
+	/** The search fragment, trimmed and bounded — quoted back to the worker. */
+	matched: string;
+}
+
+/**
+ * A finding when a command-position search (grep/rg/find/…) has a home root or a credential dotdir
+ * (`~/.pi`, `~/.config`, `~/.pi-command-post`, …) as an operand and a key-shaped word; a worktree search passes.
+ */
+export function detectCredentialSearch(command: string): CredentialSearchFinding | undefined {
+	if (typeof command !== "string") return undefined;
+	const body = command.replace(HEREDOC_BODY_RE, "$1");
+	for (const m of body.matchAll(SEARCH_RE)) {
+		const words = shellWords(m[0]);
+		const keyShaped = words.some((word) => KEY_SHAPE_RES.some((re) => re.test(word)));
+		if (!keyShaped || !words.some((word) => HOME_SCOPE_RE.test(word))) continue;
+		const flat = m[0].replace(/\s+/g, " ").trim();
+		return { matched: flat.length > 120 ? `${flat.slice(0, 119)}…` : flat };
+	}
+	return undefined;
+}
+
+/** The refusal a worker sees; names the one sanctioned credential read. */
+export function credentialSearchRefusal(finding: CredentialSearchFinding): string {
+	return [
+		`Refused: a worker never searches the home, ~/.pi, ~/.config or the session store for credentials (${finding.matched}).`,
+		"Read a credential only from the env var or file your task names, without printing it (`printenv NAME >/dev/null && echo set`).",
+		"If it is unset or unnamed, stop and report_result `blocked` naming the variable the run needs.",
 	].join("\n");
 }
 

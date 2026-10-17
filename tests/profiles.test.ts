@@ -577,7 +577,8 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
-	assert.ok(ship.length < 9550, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // picp-k2o: one line — do not reread a prior synthesis; +comment budget
+	assert.ok(ship.length < 9750, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // picp-k2o: one line — do not reread a prior synthesis; +comment budget; N5: credential sentence
+	assert.match(ship, /credential comes only from the env var or file your task names[^]*never search files or the home/);
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");
 });

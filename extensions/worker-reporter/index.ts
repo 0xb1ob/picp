@@ -35,6 +35,8 @@ import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../../src/worker-merge-guard.ts";
 import {
+	credentialSearchRefusal,
+	detectCredentialSearch,
 	detectGhAuthStatus,
 	detectHomeBulkCopy,
 	detectHostAuthCopy,
@@ -488,6 +490,8 @@ export default function (pi: ExtensionAPI): void {
 			if (homeCopy) return { block: true, reason: homeBulkCopyRefusal(homeCopy) };
 			const ghAuth = typeof command === "string" ? detectGhAuthStatus(command) : undefined;
 			if (ghAuth) return { block: true, reason: ghAuthStatusRefusal(ghAuth) };
+			const keySearch = typeof command === "string" ? detectCredentialSearch(command) : undefined;
+			if (keySearch) return { block: true, reason: credentialSearchRefusal(keySearch) };
 			if (typeof command === "string" && shellPatchCommand(command)) return { block: true, reason: shellPatchRefusal() };
 			// One CI status snapshot per worker process (revive = new process = one more).
 			if (typeof command === "string" && ciStatusQuery(command)) {

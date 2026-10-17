@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	credentialSearchRefusal,
+	detectCredentialSearch,
 	detectGhAuthStatus,
 	detectHomeBulkCopy,
 	detectHostAuthCopy,
@@ -134,6 +136,34 @@ test("gh auth status (any flag) and gh auth token are refused; quoted mentions a
 		"",
 	]) {
 		assert.equal(detectGhAuthStatus(command), undefined, command);
+	}
+});
+
+// N5: cp-limits-fvg-backtest-60d-llm-vtp9 ran these shapes (key name and user synthetic) and crawled transcripts.
+test("a search of the home or a credential dotdir for a key is refused; worktree and stats searches are not (N5)", () => {
+	for (const command of [
+		"grep -rlE 'EXAMPLE_API_KEY=' ~/.pi-command-post ~/.config ~/.pi 2>/dev/null",
+		"find ~ -maxdepth 6 -name '.env*'",
+		"cd /wt && rg -l OPENAI_API_KEY $HOME/.pi/agent",
+		'grep -r "api_key" /home/someone/.config/',
+		"find /root -name auth.json",
+	]) {
+		assert.ok(detectCredentialSearch(command), command);
+	}
+	const finding = detectCredentialSearch("find ~ -name .env");
+	assert.ok(finding);
+	assert.match(credentialSearchRefusal(finding), /printenv NAME >\/dev\/null && echo set/);
+	assert.match(credentialSearchRefusal(finding), /blocked/);
+	for (const command of [
+		"rg -n API_KEY src/ tests/",
+		"grep -rn TOKEN /home/someone/.treehouse/picp/3/picp/src",
+		'grep -c "totalTokens" ~/.pi/agent/sessions/x.jsonl',
+		"find ~/.pi-command-post/state/runs -name events.jsonl",
+		"printenv EXAMPLE_API_KEY >/dev/null && echo set",
+		"echo 'grep -r API_KEY ~/.config'",
+		"",
+	]) {
+		assert.equal(detectCredentialSearch(command), undefined, command);
 	}
 });
 

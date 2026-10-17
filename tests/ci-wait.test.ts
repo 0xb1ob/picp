@@ -168,6 +168,26 @@ test("a legitimate long-running command is never flagged", () => {
 	assert.equal(detectCiWait(""), undefined);
 });
 
+// N3: the operator held its turn 41 min on `timeout 1500 gh run watch …`; a wrapper prefix must not hide the command.
+test("N3: a wrapper prefix keeps a CI wait in command position; wrapped non-CI commands stay allowed", () => {
+	for (const [command, shape] of [
+		["timeout 1500 gh run watch 123", "blocking_watch"],
+		["timeout -k 5 --foreground 30m gh pr checks 42 --watch", "blocking_watch"],
+		["cd /wt && env GH_PAGER= gh run watch 9", "blocking_watch"],
+		["time gh run watch 9", "blocking_watch"],
+		["nice -n 10 nohup gh run watch 9", "blocking_watch"],
+		["command gh run watch 9", "blocking_watch"],
+		["stdbuf -oL gh run watch 9", "blocking_watch"],
+		["timeout 60 sleep 30; timeout 10 gh run list --branch b", "sleep_then_poll"],
+	] as const) {
+		assert.equal(detectCiWait(command)?.shape, shape, command);
+	}
+	assert.equal(ciStatusQuery("timeout 30 gh run list --branch b --limit 3"), true);
+	for (const command of ["timeout 60 ssh host true", "timeout 30 gh run list --branch b --limit 3", "env FOO=1 npm test", 'grep "timeout 1500 gh run watch" notes.md']) {
+		assert.equal(detectCiWait(command), undefined, `wrongly flagged: ${command}`);
+	}
+});
+
 test("N2: detectSleepLoop flags a command-position loop that sleeps, not a bare sleep, a one-shot query or a quote", () => {
 	for (const command of [
 		"for i in $(seq 1 30); do sleep 20; jq .state state/update.json; done",

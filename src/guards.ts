@@ -40,6 +40,8 @@ export const GUARD_CODES = [
 	"review_approval_read",
 	/** Parent git may not rewrite a live worker lease. */
 	"leased_git_mutation",
+	/** Parent git fetch/pull in a canonical clone under `projects/`: the tools own its refs (N12). */
+	"canonical_git_mutation",
 	/** A tool call that would put a diff-review body into the parent's context. */
 	"diff_body_read",
 	/** A parent CI read (`gh pr checks`, `statusCheckRollup`, check-runs/statuses or Actions endpoints), refused here. */
@@ -192,6 +194,11 @@ function isReviewPathString(path: string): boolean {
 
 /** git subcommands that can put a path into a commit or send one to a remote. */
 const GIT_PUBLISHING_SUBCOMMANDS = new Set(["add", "stage", "commit", "rm", "stash", "push"]);
+/** git subcommands that rewrite remote-tracking refs: refused in a live lease and in a canonical clone (N12). */
+const GIT_REF_FETCHES = new Set(["fetch", "pull"]);
+/** Where a canonical clone's refs move instead, for the parent and the operator refusals. */
+const CANONICAL_FETCH_FIX =
+	"cp_check and cp_dispatch fetch the clone themselves (a concurrent fetch races their ref locks) and cp_integrate syncs after a merge.";
 
 /** gh flags that take a separate value, so the value is not mistaken for `pr`/`checks`. */
 const GH_VALUE_FLAGS = new Set(["-R", "--repo", "--hostname"]);
@@ -428,39 +435,19 @@ export class ContextGuard {
 	#checkGit(argv: readonly string[], segment: string, cwd: string, uncertainCwd = false): GuardDecision | undefined {
 		const { subcommand, args } = parseGit(argv);
 		if (!subcommand) return undefined;
-		if (isDestructiveGit(subcommand, args)) {
-			let target = cwd;
-			let unresolved = uncertainCwd;
-			let gitDir = tokenize(segment).find((token) => token.startsWith("GIT_DIR="))?.slice("GIT_DIR=".length);
-			for (let i = 1; i < argv.length && argv[i] !== subcommand; i++) {
-				const token = argv[i] ?? "";
-				if (token === "-C" || token === "--work-tree") {
-					const dir = argv[++i] ?? "";
-					unresolved ||= !dir || shellPathUnresolved(dir);
-					if (token === "-C") target = resolve(target, dir);
-					else target = resolve(cwd, dir);
-				} else if (token.startsWith("-C") && token.length > 2) {
-					const dir = token.slice(2);
-					unresolved ||= shellPathUnresolved(dir);
-					target = resolve(target, dir);
-				} else if (token.startsWith("--work-tree=")) {
-					const dir = token.slice("--work-tree=".length);
-					unresolved ||= !dir || shellPathUnresolved(dir);
-					target = resolve(cwd, dir);
-				} else if (token === "--git-dir" || token.startsWith("--git-dir=")) {
-					gitDir = token === "--git-dir" ? argv[++i] : token.slice("--git-dir=".length);
-				}
-			}
-			unresolved ||= gitDir !== undefined && (!gitDir || shellPathUnresolved(gitDir));
-			const leased = this.#leases().some((path) => {
-				const root = canonicalDir(resolve(path));
-				return unresolved || isInside(canonicalDir(resolve(target)), root) ||
-					(gitDir !== undefined && isInside(canonicalDir(resolve(cwd, gitDir)), root));
-			});
-			if (leased) return {
+		const fetches = GIT_REF_FETCHES.has(subcommand);
+		if (fetches || isDestructiveGit(subcommand, args)) {
+			const where = gitTarget(argv, segment, cwd, uncertainCwd);
+			if (this.#leases().some((path) => gitTargetInside(where, canonicalDir(resolve(path))))) return {
 				code: "leased_git_mutation",
 				subject: segment.trim(),
 				reason: `blocked: parent git ${subcommand} may target a live worker lease. Use cp_send/cp_revive for worker changes or cp_integrate for merge and sync; keep the lease intact.`,
+			};
+			const clones = [resolve(this.#home, LAYOUT.projects), resolve(this.#canonicalHome, LAYOUT.projects)];
+			if (fetches && clones.some((root) => gitTargetInside(where, canonicalDir(root)))) return {
+				code: "canonical_git_mutation",
+				subject: segment.trim(),
+				reason: `blocked: parent git ${subcommand} may target a canonical clone under ${LAYOUT.projects}/. ${CANONICAL_FETCH_FIX}`,
 			};
 		}
 		if (!GIT_PUBLISHING_SUBCOMMANDS.has(subcommand)) return undefined;
@@ -681,6 +668,73 @@ function shellPathUnresolved(path: string): boolean {
 function isDestructiveGit(subcommand: string, args: readonly string[]): boolean {
 	return subcommand === "checkout" || subcommand === "switch" || subcommand === "reset" || subcommand === "clean" ||
 		(subcommand === "push" && args.some((arg) => arg === "-f" || arg === "--force" || arg.startsWith("--force-with-lease") || arg.startsWith("+")));
+}
+
+/** Where one `git` call acts; `unresolved` when a shell path (`~`, `$X`, a glob) hides it, so it fails closed. */
+interface GitTarget { subcommand: string; target: string; gitDir?: string; unresolved: boolean }
+
+/** `-C`, `--work-tree`, `--git-dir` and `GIT_DIR=` of a git argv, resolved from `cwd`. */
+function gitTarget(argv: readonly string[], segment: string, cwd: string, uncertainCwd: boolean): Omit<GitTarget, "subcommand"> {
+	const { subcommand } = parseGit(argv);
+	let target = cwd;
+	let unresolved = uncertainCwd;
+	let gitDir = tokenize(segment).find((token) => token.startsWith("GIT_DIR="))?.slice("GIT_DIR=".length);
+	for (let i = 1; i < argv.length && argv[i] !== subcommand; i++) {
+		const token = argv[i] ?? "";
+		if (token === "-C" || token === "--work-tree") {
+			const dir = argv[++i] ?? "";
+			unresolved ||= !dir || shellPathUnresolved(dir);
+			if (token === "-C") target = resolve(target, dir);
+			else target = resolve(cwd, dir);
+		} else if (token.startsWith("-C") && token.length > 2) {
+			const dir = token.slice(2);
+			unresolved ||= shellPathUnresolved(dir);
+			target = resolve(target, dir);
+		} else if (token.startsWith("--work-tree=")) {
+			const dir = token.slice("--work-tree=".length);
+			unresolved ||= !dir || shellPathUnresolved(dir);
+			target = resolve(cwd, dir);
+		} else if (token === "--git-dir" || token.startsWith("--git-dir=")) {
+			gitDir = token === "--git-dir" ? argv[++i] : token.slice("--git-dir=".length);
+		}
+	}
+	unresolved ||= gitDir !== undefined && (!gitDir || shellPathUnresolved(gitDir));
+	return { target: resolve(target), ...(gitDir ? { gitDir: resolve(cwd, gitDir) } : {}), unresolved };
+}
+
+/** True when `where` may act inside the canonical directory `root`. */
+function gitTargetInside(where: Omit<GitTarget, "subcommand">, root: string): boolean {
+	return where.unresolved || isInside(canonicalDir(where.target), root) || (where.gitDir !== undefined && isInside(canonicalDir(where.gitDir), root));
+}
+
+/** The operator's refusal of a git fetch/pull/reset/… in a canonical clone under `projectsDir()` (N12). */
+export function canonicalCloneRefusal(command: string, cwd: string, projectsDir: () => string): string | undefined {
+	const mutations = gitRefMutations(command, cwd);
+	if (mutations.length === 0) return undefined;
+	const root = canonicalDir(projectsDir());
+	const hit = mutations.find((where) => gitTargetInside(where, root));
+	return hit && `Refused: git ${hit.subcommand} may move refs in a canonical clone under ${root}/; ask through cp_parent instead: ${CANONICAL_FETCH_FIX}`;
+}
+
+/** Every git fetch/pull/checkout/switch/reset/clean or force push in `command`, with where it acts (`cd` tracked). */
+function gitRefMutations(command: string, cwd: string): GitTarget[] {
+	const found: GitTarget[] = [];
+	let shellCwd = cwd;
+	let uncertain = false;
+	for (const stage of splitStatements(command).flatMap(splitStages)) {
+		const argv = stripEnvAssignments(tokenize(stage));
+		const program = basename(argv[0] ?? "");
+		if (program === "cd") {
+			const dir = argv[1];
+			uncertain = !dir || shellPathUnresolved(dir);
+			if (dir && !uncertain) shellCwd = resolve(shellCwd, dir);
+		}
+		const { subcommand, args } = program === "git" ? parseGit(argv) : { subcommand: undefined, args: [] };
+		if (subcommand && (GIT_REF_FETCHES.has(subcommand) || isDestructiveGit(subcommand, args))) {
+			found.push({ subcommand, ...gitTarget(argv, stage, shellCwd, uncertain) });
+		}
+	}
+	return found;
 }
 
 function isBulkStaging(subcommand: string, args: readonly string[]): boolean {
