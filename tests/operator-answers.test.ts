@@ -66,6 +66,21 @@ test("secret-shaped text is redacted; one that survives redaction is refused by 
 	assert.equal(b.lines().length, 1);
 });
 
+test("PR1: a schedule result card is keyed by its source, redacted, and read back with its source; a bad source is skipped", async (t) => {
+	const b = await bench(t);
+	const source = { kind: "schedule" as const, schedule_id: "sch-123456", run_id: "run-20260701060000-abcdef", source_key: "run-20260701060000-abcdef:closed", outcome: "partial" };
+	const card = { project: "demo", title: "Nightly report — run partial", text: `token ${ghShaped} here`, evidence_paths: [], job_id: null, source };
+	const first = b.answers.postScheduleResult(card);
+	assert.equal(b.answers.postScheduleResult(card).state, "duplicate", "a retry after a crash reuses the first card");
+	assert.equal(b.lines().length, 1);
+	const line = JSON.parse(b.lines()[0]!);
+	assert.deepEqual([line.by, line.source, line.answer.includes(ghShaped)], ["schedule", source, false]);
+	assert.deepEqual(b.answers.list().map((item) => [item.id, item.source]), [[first.answer.id, source]]);
+	assert.throws(() => b.answers.postScheduleResult({ ...card, source: { ...source, source_key: "other" }, text: `${keyHeader}\nMIIE` }), /private key block/);
+	appendAnswerLine(b.stateDir, { ...line, id: "ans-bbbbbbbbbbbb", source: { ...source, extra: 1 } });
+	assert.equal(readAnswers(b.stateDir).skipped, 1);
+});
+
 test("job_id: research landings of any delivery are accepted and deduplicated; everything else is refused", async (t) => {
 	const b = await bench(t, [
 		["cp-local", {}], ["cp-answer", { delivery: "answer", phase: "done" }], ["cp-board", { delivery: "board" }],

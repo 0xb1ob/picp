@@ -96,6 +96,8 @@ export function registerScheduleTools(
 		try { await deps.commandPost().dispatchQueue.drain(); } catch (error) { log(`dispatch queue drain failed: ${(error as Error).message}`); }
 		// unload-parent PR2 backstop: a blocker closed by hand (no landing) releases its armed dependents here; release() never throws.
 		try { await deps.commandPost().armedDispatches.release(); } catch (error) { log(`armed dispatch release failed: ${(error as Error).message}`); }
+		// PR1: queue and post run result cards, apart from firing; the session-start catch-up tick is the startup recovery.
+		try { deps.commandPost().scheduleResults.sync(); } catch (error) { log(`schedule result sync failed: ${(error as Error).message}`); }
 		try {
 			scheduler ??= build();
 			runner ??= buildRunner();

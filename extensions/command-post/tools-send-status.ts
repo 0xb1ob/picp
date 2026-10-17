@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { awaitingRowsNotSupplied } from "../../src/awaiting.ts";
 import { isoTimestamp, type AwaitingItem } from "../../src/contracts.ts";
-import { blockedJobs } from "../../src/blocked-jobs.ts";
+import { blockedJobs, openRunOf } from "../../src/blocked-jobs.ts";
 import { renderSessionStatusBlock } from "../../src/shipped-seen.ts";
 import {
 	MAX_CELL_CHARS,
@@ -306,7 +306,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			// cp-b5eg: read the Shipped memory from disk, render, write it back. The
 			// session id is the key, so a reload (a new extension instance, same
 			// session) still sees what the previous instance reported.
-			const dependencies = blockedJobs(post.ledger(), post.mandates.list(), isoTimestamp(), undefined, post.mandates.scheduleMandates());
+			const dependencies = blockedJobs(post.ledger(), post.mandates.list(), isoTimestamp(), undefined, post.mandates.scheduleMandates(), openRunOf(post.mandates.scheduleRuns));
 			const blocked = [
 				...dependencies.map(({ job, waiting_on }) => ({ job_id: job.id, waiting_on })),
 				...(params.blocked ?? []).filter((row) => !dependencies.some(({ job }) => job.id === row.job_id)),

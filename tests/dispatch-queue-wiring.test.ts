@@ -84,6 +84,7 @@ test("4B2-T4: the scheduler tick drains the queue despite a scheduler fault, and
 	for (const holds of [true, false]) {
 		let drains = 0;
 		let releases = 0;
+		let syncs = 0;
 		const hooks = new Map<string, () => Promise<void>>();
 		const post = {
 			home: "/nonexistent",
@@ -91,8 +92,9 @@ test("4B2-T4: the scheduler tick drains the queue despite a scheduler fault, and
 				throw new Error("ledger down");
 			},
 			dispatchQueue: { drain: async () => void drains++ },
-			// unload-parent PR2: the same tick releases armed dependents, after the queue drain.
+			// unload-parent PR2: the same tick releases armed dependents, after the queue drain; PR1: and posts run cards.
 			armedDispatches: { release: async () => void releases++ },
+			scheduleResults: { sync: () => void syncs++ },
 		};
 		registerScheduleTools(
 			{ on: (event: string, fn: () => Promise<void>) => hooks.set(event, fn), registerTool: () => {}, sendMessage: () => {} } as never,
@@ -104,6 +106,7 @@ test("4B2-T4: the scheduler tick drains the queue despite a scheduler fault, and
 		await tick();
 		assert.equal(drains, holds ? 1 : 0);
 		assert.equal(releases, holds ? 1 : 0);
+		assert.equal(syncs, holds ? 1 : 0, "a ledger fault in the tick never stops the result cards");
 	}
 });
 
