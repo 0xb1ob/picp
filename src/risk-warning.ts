@@ -36,6 +36,8 @@ const RECORDED_AS: Record<RecordedRiskSource, string> = {
 	description_header: "recorded in the job description header",
 	task_header: "recorded in the task header",
 };
+/** Who made a gated high (cp-c1ur N14): a parent or human named it, a planner assessed it, or keyword classify inferred it. */
+const RISK_SOURCE: Record<RoutingProvenance, "explicit" | "planner" | "classify"> = { explicit: "explicit", assessed: "planner", inferred: "classify", defaulted: "classify" };
 const HEADER_END_RE = /^\s{0,3}(?:#{2,6}\s|(?:-{3,}|\*{3,}|_{3,})\s*$|`{3,}|~{3,})/;
 // ponytail: a clause-start `risk [:=] low|high`, not a parser; a following gate/escalation noun names the gate, not a declaration.
 const DECLARED_RE = /(?:^|[.;,(|]\s*|^\s*(?:[-*+]\s+|\|\s*)?(?:\*\*|__)?)\brisk(?:\*\*|__)?\s*(?:[:=]\s*)?(?:\*\*|__)?\s*(low|high)\b(?![-:\w])(?!\s*(?:escalations?|gates?|jobs?|asks?|checkpoints?|warnings?|refusals?|approvals?)\b)/gim;
@@ -146,8 +148,13 @@ export function inferredRiskGate(input: {
 	text: string;
 }): { risk: Risk; warning?: string; evidence?: string } {
 	const { routed, routedFrom, recorded, job } = input;
-	if (recorded === "high") return { risk: "high", ...(input.recordedFrom && input.recordedFrom !== "dispatch" ? { evidence: `risk high ${RECORDED_AS[input.recordedFrom]}` } : {}) };
-	if (recorded !== "low" || (routed === "high" && recordedProvenance(routedFrom))) return { risk: routed };
+	if (recorded === "high") {
+		const source = `risk source: ${input.recordedFrom === "planner" ? "planner" : "explicit"}`;
+		return { risk: "high", evidence: input.recordedFrom && input.recordedFrom !== "dispatch" ? `risk high ${RECORDED_AS[input.recordedFrom]}; ${source}` : source };
+	}
+	if (recorded !== "low" || (routed === "high" && recordedProvenance(routedFrom))) {
+		return { risk: routed, ...(routed === "high" ? { evidence: `risk source: ${RISK_SOURCE[routedFrom]}` } : {}) };
+	}
 	const keywords = riskKeywords(input.text, warningOnlyBenign);
 	// Every hit was a warning-only benign sense: the risk is low either way, so no wake line.
 	if (keywords.length === 0 && (routed !== "high" || riskKeywords(input.text).length > 0)) return { risk: "low" };

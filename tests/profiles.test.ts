@@ -455,6 +455,7 @@ test("the implementer profile states the implementation method, not just the pub
 		[/map it to every\s+requirement/i, "map the diff to every requirement"],
 		[/re-run the same focused checks/i, "re-run focused checks before reporting, never a full local suite"],
 		[/Review feedback is a claim to verify/i, "verify review feedback before acting on it"],
+		[/own focused-check commands replace the npm ones[^]*whole-suite command before push, run it once/i, "another project's checks and pre-push suite (cp-c1ur N10)"],
 	];
 	for (const [pattern, why] of required) {
 		assert.match(prompt, pattern, `implementer profile must require: ${why}`);
@@ -558,6 +559,8 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 		[/never a diff, a transcript or findings/i, "no findings body in the summary"],
 		// Cadence: focused checks during editing; CI owns the full suite.
 		[/npm run test:one -- tests\/\<x\>\.test\.ts/, "focused test file while working"],
+		[/another project every npm command here means its own equivalent[^\n]*whole-suite command[^\n]*runs once/, "another project's own checks (cp-c1ur N10)"],
+		[/\*\*Regenerate before pushing\*\* \(picp only\)/, "eval:contract regeneration is picp's alone"],
 		// Reviewable-diff boundaries: the worker learns the review caps before it
 		// pushes a PR no reviewer may score, and stages it instead of trimming it.
 		[new RegExp(`${DIFF_REVIEW_MAX_STAT_FILES} files`), "the diff-review file cap, from the constant"],
@@ -577,7 +580,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
-	assert.ok(ship.length < 9550, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // picp-k2o: one line — do not reread a prior synthesis; +comment budget
+	assert.ok(ship.length < 9800, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // cp-c1ur N10: per-project test cadence
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");
 });
