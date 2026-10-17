@@ -33,7 +33,9 @@ import { LeaseManager } from "../src/leases.ts";
 import { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { batchRiskHigh } from "../src/risk-batch.ts";
+import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
+import { Scheduler } from "../src/scheduler.ts";
 import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
 import { Preflight, type PreflightRequest, type PreflightResult } from "../src/preflight.ts";
 import { loadProfile } from "../src/profiles.ts";
@@ -820,6 +822,28 @@ test("cp-7re9: a denied project refuses a model dispatch with project_denied, be
 	// Control: with the deny removed, the same dispatch reaches the risk:high gate.
 	writeFileSync(file, JSON.stringify({}));
 	await assert.rejects(() => dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false }), /risk:high under ask_on/);
+});
+
+// PR4 replaces the legacy fire-time deny (no fire mints a grant): a native fire never consults deny_projects at start,
+// so the dispatch preflight is what refuses the run's member, before run authority and before any lease.
+test("a native schedule run's member in a denied project is refused at dispatch preflight (project_denied)", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const runs = new ScheduleRunStore({ home: b.home });
+	const mandates = new MandateStore(b.home, { runs });
+	const defaults = structuredClone(loadMandateDefaults(b.home));
+	const scheduler = new Scheduler({ home: b.home, ledger: () => b.ledger, mandates, runs, usageJobs: () => [], cloneOf: () => b.clone, mintContext: () => ({ defaults, ceiling: defaults.token_ceiling! }) });
+	const action = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native: { action, limits: {} }, manual: true, title: "Nightly bump", kind: "ship", delivery: "local" });
+	writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ deny_projects: ["demo"] }));
+	const fired = await scheduler.fireNow(schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
+	assert.equal(fired.outcome, "fired", fired.reason);
+	assert.deepEqual(mandates.list(), [], "a native fire mints no grant");
+	await assert.rejects(
+		() => b.makeDispatcher({ mandates }).dispatch({ jobId: fired.job_id!, task: "Bump x.", model: b.model, fetch: false }),
+		(error: Error) => error instanceof DispatchError && error.result?.findings.map((finding) => finding.code).join() === "project_denied",
+	);
+	assert.deepEqual(b.fleet.read().jobs, [], "no record");
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")), "a denied project never takes a lease");
 });
 
 test("4B2-T1c: a real Dispatcher's parallelism_full refusal reaches the queue coded; the head stays byte-identical, and a freed slot starts it", { skip: SKIP, timeout: 180_000 }, async (t) => {

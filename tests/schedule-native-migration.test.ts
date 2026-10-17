@@ -15,7 +15,7 @@ import { formatNativeMigration, nativeMigrationMarker, sweepNativeScheduleMigrat
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import { readScheduleFile, type Schedule, SCHEDULE_SCHEMA_VERSION } from "../src/viewer/schedule-core.ts";
-import { isNativePolicy, policyFromLegacy, type LegacySchedulePolicy, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import { isNativePolicy, nativePolicyDraft, policyFromLegacy, type LegacySchedulePolicy, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { readSchedulePolicies, type ScheduleRun } from "../src/viewer/schedule-run-core.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
@@ -154,6 +154,25 @@ test("a migration-skipped schedule saved natively later keeps no grant pointer, 
 	const draft = policyFromLegacy(gated, gated.grant_template!, b.mandates.get(gated.mandate_id)!);
 	const saved = await b.scheduler.savePolicy(gated.id, draft, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tool", quote_sha: "123456abcdef" } }, 0);
 	assert.ok(isNativePolicy(b.runs.activePolicy(gated.id)!), `active ${saved.active_revision}`);
+	const row = readScheduleFile(b.scheduler.file)[0]!;
+	assert.deepEqual([row.mandate_id, row.grant_template, row.last_skip], [undefined, undefined, undefined]);
+	assert.equal(b.mandates.get(gated.mandate_id)?.status, "revoked", "the retired pointer is revoked");
+});
+
+test("a migration-skipped schedule adopting a saved native revision later keeps no grant pointer, template or migration skip", async (t) => {
+	// The adopt path of the save test above: a saved-but-inactive native revision adopted from the editor must clear the
+	// legacy row too, or the skipped schedule keeps standing grant authority next to its native policy.
+	const b = bench(t);
+	const gated = b.legacy("gated", { job: { title: "gated", kind: "research", delivery: "pipeline" } }, { ask_on: ["plan_approval", "merge", "risk:high"] });
+	assert.equal((await b.sweep()).skipped.length, 1);
+	assert.ok(readScheduleFile(b.scheduler.file)[0]!.last_skip, "the skip is recorded on the row");
+	const legacy = policyFromLegacy(gated, gated.grant_template!, b.mandates.get(gated.mandate_id)!);
+	const revision = (b.runs.policyRecord(gated.id)?.revisions.at(-1)?.revision ?? 0) + 1;
+	const provenance = { channel: "cp_schedule" as const, tool_call_id: "tool-save", quote_sha: "abcdef654321" };
+	await b.runs.savePolicyRevision(nativePolicyDraft(legacy, { revision, saved_at: AT, saved_by: "operator-quote", provenance }));
+	assert.equal(b.runs.activePolicy(gated.id), undefined, "saved, not active");
+	await b.scheduler.activatePolicy(gated.id, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tool-adopt", quote_sha: "123456abcdef" } }, revision);
+	assert.ok(isNativePolicy(b.runs.activePolicy(gated.id)!));
 	const row = readScheduleFile(b.scheduler.file)[0]!;
 	assert.deepEqual([row.mandate_id, row.grant_template, row.last_skip], [undefined, undefined, undefined]);
 	assert.equal(b.mandates.get(gated.mandate_id)?.status, "revoked", "the retired pointer is revoked");

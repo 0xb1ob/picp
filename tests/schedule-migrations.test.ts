@@ -71,9 +71,9 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 	assert.equal(a4?.grant_template?.job_cap, 8, "a skill template is raised to its fan-out plus anchor");
 	assert.match(report.migrated[3]!.notes.join("; "), /job cap raised from 2 to 8/);
 	assert.equal(a5?.grant_template, undefined);
-	assert.match(a5?.last_skip?.reason ?? "", /^schedule sch-aaaaa5 has no grant template \(migration: seed grant md-ffffff is missing\), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume$/);
+	assert.match(a5?.last_skip?.reason ?? "", /^schedule sch-aaaaa5 has no grant template \(migration: seed grant md-ffffff is missing\), so no fire can mint a fresh grant: save a native policy in the editor to resume$/);
 	assert.match(a6?.last_skip?.reason ?? "", new RegExp(`^schedule sch-aaaaa6 has no grant template \\(migration: seed grant ${garbled.id} cannot be parsed`));
-	assert.match(a8?.last_skip?.reason ?? "", new RegExp(`^schedule sch-aaaaa8 has no grant template \\(migration: ${projectWide.id} is not a schedule grant\\), so no fire can mint a fresh grant: cp_schedule move it to a schedule grant to resume$`));
+	assert.match(a8?.last_skip?.reason ?? "", new RegExp(`^schedule sch-aaaaa8 has no grant template \\(migration: ${projectWide.id} is not a schedule grant\\), so no fire can mint a fresh grant: save a native policy in the editor to resume$`));
 	assert.ok(existsSync(scheduleMigrationMarkerPath(home.path)));
 	assert.match(formatScheduleMigration(report), /5 migrated, 3 skipped/);
 
