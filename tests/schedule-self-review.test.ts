@@ -5,8 +5,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FleetRecord } from "../src/contracts.ts";
+import { EscalationStore } from "../src/escalation.ts";
+import { FleetStore } from "../src/fleet.ts";
 import type { IntakeResult } from "../src/intake.ts";
+import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { cpNext } from "../src/next.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { pendingExpansions, scheduleLabelRefusal } from "../src/schedule-expand.ts";
 import { ScheduleRunner } from "../src/schedule-runner.ts";
@@ -19,7 +23,7 @@ import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 const ACTION = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
 const done = (jobId: string, overrides: Partial<IntakeResult> = {}): IntakeResult => ({ job_id: jobId, accepted: true, already: false, phase: "held", next: "teardown", status: "done", summary: "ok", ...overrides });
 
-async function bench(t: import("node:test").TestContext, description = "Review the fleet.") {
+async function bench(t: import("node:test").TestContext, description = "Review the fleet.", limits: { parallelism: number; child_jobs?: number } = { parallelism: 2 }) {
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const ledger = createScratchLedger({ home: home.path, knownProjects: ["demo"] }).ledger;
 	const clock = { now: new Date(new Date().toISOString().replace(/\.\d{3}Z$/, "Z")) };
@@ -27,7 +31,7 @@ async function bench(t: import("node:test").TestContext, description = "Review t
 	const mandates = new MandateStore(home.path, { runs, now: () => clock.now });
 	const defaults = structuredClone(loadMandateDefaults(home.path));
 	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, runs, usageJobs: () => [], cloneOf: () => home.path, now: () => clock.now, mintContext: () => ({ defaults, ceiling: defaults.token_ceiling! }) });
-	const schedule = await scheduler.add({ name: "self-review", project: "demo", native: { action: ACTION, limits: { parallelism: 2 } }, manual: true, title: "Self-review", description, kind: "research", delivery: "local", skill: "cp-self-review" });
+	const schedule = await scheduler.add({ name: "self-review", project: "demo", native: { action: ACTION, limits }, manual: true, title: "Self-review", description, kind: "research", delivery: "local", skill: "cp-self-review" });
 	const fleet: FleetRecord[] = [];
 	const calls = { dispatch: [] as { jobId: string; task?: string; wallClockSeconds?: number }[], wake: [] as IntakeResult[], log: [] as string[] };
 	const runner = new ScheduleRunner({
@@ -54,7 +58,7 @@ async function bench(t: import("node:test").TestContext, description = "Review t
 		assert.equal(runner.claims(done(jobId)), true, `${jobId} is the runner's`);
 		assert.equal(await runner.onReported(done(jobId)), true);
 	};
-	return { ledger, runs, scheduler, schedule, runner, fleet, calls, clock, fire, roles, report };
+	return { home, ledger, runs, mandates, scheduler, schedule, runner, fleet, calls, clock, fire, roles, report };
 }
 
 test("window: N hours ending at the anchor's creation (default 36, window_hours 1-168) and L3-L5 thirds", () => {
@@ -115,6 +119,55 @@ test("crash replay reuses a created job by title; a passed deadline drops unstar
 	assert.match((await b.ledger.show(fired.job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
 	assert.equal(b.runs.run(fired.run_id!)!.outcome, "partial");
 	assert.equal(b.calls.dispatch.length, 2, "S1 never starts without all six reports");
+});
+
+// PR3 review medium: a `:1` usd or tokens cap notice is the run's stop like a deadline; started readers finish,
+// unstarted ones and S1 drop, and the anchor closes partial.
+for (const axis of ["usd", "tokens"] as const) {
+	test(`a ${axis}:1 cap notice drops unstarted members and S1; the run closes partial`, async (t) => {
+		const b = await bench(t);
+		const fired = await b.fire();
+		await b.runner.onFired(fired);
+		const ids = b.roles(b.runs.run(fired.run_id!)!);
+		await b.runs.noteCap(fired.run_id!, `${axis}:0.8`);
+		await b.runner.retryPending();
+		assert.equal((await b.ledger.show(ids.L3!)).status, "open", "a warning-level notice stops nothing");
+		await b.runs.noteCap(fired.run_id!, `${axis}:1`);
+		await b.runner.retryPending();
+		for (const role of ["L3", "L4", "L5", "L6", "S1"]) assert.match((await b.ledger.show(ids[role]!)).close_reason ?? "", new RegExp(`^dropped: run .*: ${axis} cap reached; not started`));
+		await b.report(ids.L1!); await b.report(ids.L2!);
+		assert.match((await b.ledger.show(fired.job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
+		assert.equal(b.runs.run(fired.run_id!)!.outcome, "partial");
+		assert.equal(b.calls.dispatch.length, 2);
+	});
+}
+
+// PR3 review medium: a run whose anchor the parent already marked `expanded:` before the runner owned it (no admitted
+// role) stays the parent's; the runner creates, admits and dispatches nothing for it.
+test("a legacy parent-expanded run (expanded: marker, no admitted role) is never re-expanded in code", async (t) => {
+	const b = await bench(t);
+	const fired = await b.fire();
+	await b.ledger.comment(fired.job_id!, "expanded: L1 cp-parent1, S1 cp-parent2 (parent)");
+	const jobs = b.ledger.read().jobs.length, members = b.runs.run(fired.run_id!)!.members;
+	assert.ok(members.every((member) => member.role === null), "only the role-less anchor");
+	await b.runner.onFired(fired); await b.runner.retryPending();
+	assert.deepEqual(b.runs.run(fired.run_id!)!.members, members);
+	assert.equal(b.ledger.read().jobs.length, jobs, "no job created");
+	assert.deepEqual(b.calls.dispatch, []);
+});
+
+// PR3 review low: cp_next never offers a runner-owned member (admitted by role); a parent-admitted one (role null) it does.
+test("cp_next excludes a self-review run's role members but offers a parent-admitted member", async (t) => {
+	const b = await bench(t, undefined, { parallelism: 2, child_jobs: 9 });
+	const fired = await b.fire();
+	await b.runner.onFired(fired);
+	const ids = b.roles(b.runs.run(fired.run_id!)!);
+	const extra = await b.ledger.create({ title: "parent follow-up", project: "demo", kind: "research", delivery: "pr", labels: [`schedule:${b.schedule.id}`] });
+	await b.runs.admitMember(fired.run_id!, { job_id: extra.id, role: null, admitted_at: extra.created_at });
+	const next = await cpNext({ ledger: b.ledger as Ledger, fleet: new FleetStore({ home: b.home.path }), mandates: b.mandates, escalations: new EscalationStore({ home: b.home.path }) }, "demo");
+	const offered = [...next.ready.map((job) => job.id), next.action.job_id];
+	for (const role of Object.keys(ids)) assert.ok(!offered.includes(ids[role]), `${role} ${ids[role]} is the runner's`);
+	assert.ok(next.ready.some((job) => job.id === extra.id), "a role-less member is still the parent's to dispatch");
 });
 
 // PR3 review medium: a reader closed as failed (any non-delivery close, not only `dropped:`) is a lost report, so S1

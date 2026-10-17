@@ -62,7 +62,7 @@ function fanOut(schedule: Schedule): ScheduleItem["fan_out"] {
 
 /**
  * cp-org-pr-review only: the template seed's standing pre-approval a verified Run now click would carry (the same seed
- * conditions as `carriedPreapproval`), as its quote's sha12 — the quote itself never leaves the home.
+ * conditions the retired per-fire carry used), as its quote's sha12 — the quote itself never leaves the home.
  */
 function runNowClearance(grants: Json[], schedule: Schedule): ScheduleItem["run_now_clearance"] {
 	if (schedule.job.skill !== "cp-org-pr-review" || !schedule.grant_template) return null;

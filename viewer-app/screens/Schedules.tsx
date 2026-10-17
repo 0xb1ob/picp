@@ -102,12 +102,12 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
   <LastRuns s={s}/>
   <details class="schedule-details"><summary>Grant, template &amp; run history · {plural(s.runs.length, "run")}</summary>
    {s.grant_template ? <>
-    <p class="job-meta">Fire grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}{s.grant_stopped ? <strong> · fires are refused while this grant is {s.mandate_status}: {s.mandate_status === "paused" ? "resume it, or move the schedule to a new grant" : "move the schedule to a new grant"}</strong> : " · next fire mints a fresh grant"}</p>
+    <p class="job-meta">Legacy grant <code>{s.mandate_id}</code> · {s.mandate_status}{s.mandate_pause_reason && ` (${s.mandate_pause_reason})`}<strong> · no fire mints a grant: {s.last_skip?.reason ?? (s.grant_stopped ? `the operator ${s.mandate_status === "paused" ? "pause" : "revoke"} is kept when it migrates to a native policy` : "it migrates to a native policy once no legacy run is open")}</strong></p>
     <p class="job-meta schedule-approval">Template of <code>{s.grant_template.seed_mandate_id}</code>: {s.grant_template.expiry_hours} h, ${s.grant_template.spend_usd}, {s.grant_template.spend_tokens} tokens, job cap {s.grant_template.job_cap}; allowed {s.grant_template.allowed_actions.join(", ")}; asks on {s.grant_template.ask_on.join(", ")}. Approved {observedTime(s.grant_template.approval.approved_at)}: “{s.grant_template.approval.operator_quote}”</p>
-   </> : s.policy ? <p class="job-meta">Policy revision {s.policy.active_revision}: each fire starts a run; no grant minted.</p> : <p class="job-meta">Grant <code>{s.mandate_id ?? "none"}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason ?? (s.mandate_id ? "move it to a schedule grant to resume" : "open the editor to set up this schedule")}</strong></p>}
+   </> : s.policy ? <p class="job-meta">Policy revision {s.policy.active_revision}: each fire starts a run; no grant minted.</p> : <p class="job-meta">Grant <code>{s.mandate_id ?? "none"}</code> · {s.mandate_status}<strong> · no grant template, so every fire is refused: {s.last_skip?.reason ?? "open the editor to set up this schedule"}</strong></p>}
    {s.trigger.type === "manual" && <p class="job-meta">{next}</p>}
    <p class="job-meta"><code>{triggerText(s)}</code> · <code>{s.job.kind}</code>/<code>{s.job.delivery}</code></p>
-   {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under {s.policy ? "that run's saved policy" : "that fire's own grant"}.</p>}
+   {s.job.skill && <p class="job-meta">Each Run now records a deferred anchor job and wakes the parent to fan out the {s.job.skill} recipe under {s.policy ? "that run's saved policy" : "a saved native policy, once one is active"}.</p>}
    {s.last_fire && <p class="job-meta">Last fire slot: {observedTime(s.last_fire.slot)}</p>}
    {s.history.length ? <RunHistory s={s}/> : <p class="jobs-empty">No job fired yet</p>}
   </details>
@@ -144,8 +144,8 @@ export function ScheduleControls({s, control, policy = null}: {s:ScheduleItem; c
   </details>}
   {answered && <div class="schedule-settings">
    <button type="button" disabled={disabled} aria-expanded={editing} onClick={() => setEditing(open => !open)}>{editing ? "Close editor" : "Edit settings"}</button>
-   {!s.policy && (answered.policy || answered.legacy) && <button type="button" disabled={disabled || answered.blocking.length > 0} onClick={() => control.request("adopt", s.id, {revision: answered.policy?.revision ?? 0})}>Adopt saved settings</button>}
-   {s.policy && <button type="button" disabled={disabled || !!s.active_run} onClick={() => control.request("deactivate", s.id)}>Back to per-fire grants</button>}
+   {!s.policy && answered.policy && <button type="button" disabled={disabled || answered.blocking.length > 0} onClick={() => control.request("adopt", s.id, {revision: answered.policy!.revision})}>Adopt saved settings</button>}
+   {s.policy && <button type="button" disabled={disabled || !!s.active_run} onClick={() => control.request("deactivate", s.id)}>Deactivate policy</button>}
   </div>}
   {editing && answered && <ScheduleEditor s={s} policy={answered} control={control} onClose={() => setEditing(false)}/>}
   {s.fan_out && <FanOut s={s} fan={s.fan_out}/>}
@@ -177,8 +177,8 @@ export function Schedules({data, control}: {data:SchedulesResponse; control?:Sch
     {data.schedules.map(s => <Schedule key={s.id} s={s} control={control}/>)}
     {!data.schedules.length && !data.error && <p class="jobs-empty">No schedules. Ask the operator session to add one (cp_schedule).</p>}
    </section>
-   <aside class="schedule-how"><h2>How schedules run</h2><p>Every request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></aside>
-   <details class="schedule-how-phone"><summary>How schedules run</summary><p>Every request is journaled and applied by the parent under the schedule's own grant. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></details>
+   <aside class="schedule-how"><h2>How schedules run</h2><p>Every request is journaled and applied by the parent under the schedule's saved policy. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></aside>
+   <details class="schedule-how-phone"><summary>How schedules run</summary><p>Every request is journaled and applied by the parent under the schedule's saved policy. Schedules fire in the always-on parent; a slot missed while it was down fires once when it returns.</p></details>
   </div>
  </div>;
 }

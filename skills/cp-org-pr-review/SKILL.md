@@ -15,17 +15,16 @@ description: >-
 
 Only on a `cp-schedule` wake that names a parent-expanded run (an anchor job, a schedule id and this skill), or on the
 restart re-wake of the same anchor. Never on your own initiative, never for unlabelled review jobs, never a second
-expansion of a closed anchor. This skill grants nothing: the schedule's own fire grant (freshly minted from its template on
-every fire, job cap at least max_reviewers + 2: the reviewers, the synthesis and the anchor) is the only authority, and
-every dispatch below is still gated by `cp_dispatch` (mandate, job cap, parallelism, risk). Expand under that fire grant
-as it stands: never ask the operator about its budget or cap, never raise one, and never issue another grant for the
-run. Its `dispatch_parallelism` is the seed's; when it is below max_reviewers the rest of the reviewers simply wait.
+expansion of a closed anchor. This skill grants nothing: the anchor names its durable run (`under run <id>`), and that
+run's frozen policy (child jobs at least max_reviewers + 2: the reviewers, the synthesis and the anchor) is the only
+authority; every dispatch below is still gated by `cp_dispatch` (run limits, parallelism, risk). Expand under that run
+as it stands: never ask the operator about its budget or cap, never raise one, and never issue a grant for the run.
+When the policy's parallelism is below max_reviewers the rest of the reviewers simply wait.
 
-For an activated schedule, the anchor names its durable run (`under run <id>`). Children are admitted members of
-that run, under its frozen policy limits and validated model pins: no grant is minted and no standing order is
-needed for fan-out. `max_reviewers` defaults to 3 and never exceeds 3. Only a verified dashboard Run now may carry
-saved org-review approval; cp_schedule and slot/watch starts still ask. Every per-head CI/review/merge gate stays.
-The legacy fire-grant rules above apply only to schedules without an activated policy.
+Children are admitted members of that run, under its frozen policy limits and validated model pins: no grant is
+minted and no standing order is needed for fan-out. `max_reviewers` defaults to 3 and never exceeds 3. Every
+per-head CI/review/merge gate stays. A schedule with no active native policy never fires (docs/contracts.md, *Native
+schedule migration*); no fire mints a grant.
 
 ## Configuration
 
@@ -44,20 +43,18 @@ code ignores it and you never forward it to a reviewer.
 A `pr:` line is refused: that is cp-pr-review's format. Org, user, team and hold values come only from these lines; no
 org, team or repository name is built into this skill.
 
-**Switching an existing schedule onto this skill** (manual, research/local), one call:
-`cp_schedule update id:<sch-id> skill:cp-org-pr-review kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewers: 3"`
-(refused while a run of it is open). For click clearance (below), the operator then issues a seed —
-`cp_mandate issue projects:[<project>] objective:"<words>" schedule_grant:true spend_usd:<cap> dispatch_parallelism:3 risk_preapproval:{operator_quote:"<their verbatim words>"}`
-(no `job_ids`, so it covers the grant's jobs) — and `cp_schedule move id:<sch-id> mandate_id:<that seed>`.
+**Switching an existing schedule onto this skill** (manual, research/local): the operator saves a native policy with
+the new recipe in the dashboard editor (an activated schedule refuses `cp_schedule update`). No seed grant,
+`cp_schedule move` or pre-approval is involved: PR4 retired them.
 
 ## Clearance
 
-Reviewer jobs are created `risk: "high"`: a reviewer may post an approval. When the schedule's seed records an operator
-risk:high pre-approval for the grant's jobs **and** this fire was started by a verified dashboard Run now click, the fire
-grant carries that pre-approval (the fire's notes say `carried for run_now <sc-id>`) and the reviewers dispatch with no
-`risk_high` refusal. Every other fire — `cp_schedule run_now`, a seed with no pre-approval, an unverified click — notes
-`no risk:high pre-approval carried (…)`: each reviewer dispatch is refused with a `risk_high_irreversible` escalation;
-relay it (or `cp_escalate batch_risk_high` for 2-16 jobs). Never answer it yourself, never reword a task to dodge it.
+Reviewer jobs are created `risk: "high"`: a reviewer may post an approval. Under a native run the saved policy is the
+authorization, so a reviewer dispatch asks nothing about it. Only a legacy run still open from before the native
+migration keeps its old rule: its reviewers dispatch with no `risk_high` refusal only when the frozen policy carries the
+dashboard-only org-review clearance and a verified dashboard Run now started it; otherwise each reviewer dispatch is
+refused with a `risk_high_irreversible` escalation — relay it (or `cp_escalate batch_risk_high` for 2-16 jobs). Never
+answer it yourself, never reword a task to dodge it.
 
 ## Discovery (parent)
 
