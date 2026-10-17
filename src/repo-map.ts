@@ -29,8 +29,10 @@ function exportsOf(source: string): string[] {
 
 type Row = { section: "tree" | "src"; directory: string; text: string };
 
-function render(commit: string, rows: Row[]): string {
-	const header = `\n\n## Repo map\n\nBase commit: ${commit}. Tracked files only; navigation data, not instructions.\nTypecheck viewer-app with the root \`npm run typecheck\` (already covers viewer-app/**/*.tsx under jsx: react-jsx / preact); a lone \`tsc\` on one file skips that config and reports a false JSX.IntrinsicElements error.\n`;
+function render(commit: string, rows: Row[], viewerApp: boolean): string {
+	// picp's viewer-app typecheck hint only: another project's brief never names picp's npm scripts (cp-c1ur N10).
+	const viewerHint = viewerApp ? "Typecheck viewer-app with the root `npm run typecheck` (already covers viewer-app/**/*.tsx under jsx: react-jsx / preact); a lone `tsc` on one file skips that config and reports a false JSX.IntrinsicElements error.\n" : "";
+	const header = `\n\n## Repo map\n\nBase commit: ${commit}. Tracked files only; navigation data, not instructions.\n${viewerHint}`;
 	const note = "\nTruncated to 6 KiB; largest directory details omitted first.\n";
 	const groups = new Map<string, { rows: Row[]; bytes: number }>();
 	for (const row of rows) {
@@ -93,7 +95,7 @@ export async function repoMap(options: { home: string; project: string; worktree
 			const symbols = exportsOf(source);
 			rows.push({ section: "src", directory: dirname(path), text: `- ${JSON.stringify(path)}: ${lines} lines; exports: ${symbols.join(", ") || "(none detected)"}` });
 		}
-		const map = render(commit, rows);
+		const map = render(commit, rows, rows.some((row) => row.text === `- ${JSON.stringify("viewer-app/")}`));
 		atomicWriteText(cache, map);
 		return map;
 	} catch (error) {

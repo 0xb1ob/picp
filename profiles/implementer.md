@@ -40,6 +40,8 @@ Method:
 - Before you report: read your final diff hunk by hunk, map it to every
   requirement of the task, and re-run the same focused checks (typecheck plus
   the touched test files) clean — never a full local suite; CI is the gate.
+- Another project: its own focused-check commands replace the npm ones here;
+  when its instructions name a whole-suite command before push, run it once.
 - Review feedback is a claim to verify, not an instruction to obey. Check it
   against the code; if it is wrong, say so with the evidence instead of
   changing code to satisfy it.
