@@ -12,11 +12,12 @@ const REMOTE_RE = new RegExp(`${CMD_POS}(?:(?:command|env|exec|nohup|sudo)\\s+)?
 // `ssh -i <key>` hands the key to ssh without printing it; only that value is exempt.
 const IDENTITY_RE = new RegExp(`(${CMD_POS}(?:command\\s+)?(?:ssh|scp|sftp)(?![\\w-])[^;&|\\n]*?)\\s-i\\s*\\S+`, "gi");
 
-/** True for a private key under a `.ssh/` dir (`id_*` but `*.pub`, `*.key`, a glob) or any `*.pem` path. */
+/** True for a `.ssh` dir, a bare private-key name (`id_*`, no extension), a key in `.ssh/`, or any `*.pem` path. */
 export function isKeyPath(path: string): boolean {
-	if (/[^/]\.pem$/i.test(path)) return true;
-	const name = /(?:^|\/)\.ssh\/+([^/]*)$/.exec(path)?.[1];
-	if (name === undefined || name.endsWith(".pub")) return false;
+	if (/[^/]\.pem$/i.test(path) || /(?:^|\/)\.ssh\/*$/.test(path)) return true;
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	if (/^id_[\w*?-]+$/.test(name)) return true;
+	if (!/(?:^|\/)\.ssh\/+[^/]*$/.test(path) || name.endsWith(".pub")) return false;
 	return name.startsWith("id_") || /\.key$/i.test(name) || /[*?[{]/.test(name);
 }
 
@@ -31,7 +32,7 @@ export const remoteHostCall = (command: string): boolean => REMOTE_RE.test(comma
 
 export function keyReadRefusal(path: string): string {
 	return [
-		`Refused: a worker never reads a private ssh key or a *.pem file (\`${path}\`).`,
+		`Refused: a worker never reads a private ssh key, a .ssh directory or a *.pem file (\`${path}\`).`,
 		"ssh and scp already use this host's ~/.ssh/config and agent; never print, copy or encode key material.",
 		"If the job cannot be done without it, report_result `blocked` naming the file and why.",
 	].join("\n");

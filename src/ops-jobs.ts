@@ -3,7 +3,7 @@
  * risk by class, and `resource:<name>` labels lease a remote resource for as long as the job is live (until teardown).
  */
 import type { Delivery, FleetRecord, Job, JobKind, Risk } from "./contracts.ts";
-import { DispatchError } from "./dispatch.ts";
+import { DispatchError } from "./dispatch-error.ts";
 import { parseJobLabels } from "./ledger.ts";
 
 export const OPS_PROFILE_NAME = "ops";

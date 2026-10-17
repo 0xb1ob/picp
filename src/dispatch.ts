@@ -73,6 +73,7 @@ import { resolveJobSkills, skillsBriefNote } from "./job-skills.ts";
 import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
+import { DispatchError } from "./dispatch-error.ts";
 export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
 
 /** A git invocation, injectable so the branch paths are testable without a repo. */
@@ -81,13 +82,7 @@ export type GitRunner = (
 	args: readonly string[],
 ) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
-export class DispatchError extends Error {
-	readonly result: PreflightResult | undefined;
-	constructor(message: string, result?: PreflightResult) {
-		super(message);
-		this.result = result;
-	}
-}
+export { DispatchError } from "./dispatch-error.ts";
 
 /** Refused only because open blockers remain: `cp_dispatch` arms it (src/dependency-dispatch.ts). */
 export class BlockedDispatchError extends DispatchError {
