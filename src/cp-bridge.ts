@@ -19,7 +19,7 @@ import {
 } from "./contracts.ts";
 import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
-import { journalBridgeEvent, runAutoControl } from "./parent-auto-control.ts";
+import { journalBridgeEvent, runAutoControl, trackAssistant } from "./parent-auto-control.ts";
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
@@ -73,6 +73,7 @@ export interface BridgeRelay {
 	sendId?: string;
 	escalationId?: string;
 	drainId?: string; // a drain wake's durable id: recheckRelay re-reads the live drain at delivery (cp-ukqv)
+	informational?: boolean; // N9: news with nothing to act on (a landing, idle beads): delivered without a turn
 	stale: boolean;
 	text: string;
 	receipt: BridgeReceipt;
@@ -626,7 +627,7 @@ export class CpBridge {
 	}
 
 	#relayLanding(text: string): void {
-		if (this.#landedUnseen(text.replace(/^\[[^\]\n]+\] /, ""))) this.#emit({ kind: "wake", stale: false, text, receipt: climb(emptyReceipt(), "owner_observed"), paths: [] });
+		if (this.#landedUnseen(text.replace(/^\[[^\]\n]+\] /, ""))) this.#emit({ kind: "wake", stale: false, text, receipt: climb(emptyReceipt(), "owner_observed"), paths: [], informational: true });
 	}
 	#onEvent(event: WorkerEvent): void {
 		// RPC notifications survive startup, when quiet custom-message events have no subscriber yet.
@@ -643,7 +644,7 @@ export class CpBridge {
 			const durableIds = durableIdsFromMessage(message), drainId = durableIds.find((id) => id.startsWith("drain:"));
 			const directWake = drainId !== undefined || durableIds.some((id) => id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
 			if (message?.role === "custom" && durableIds.some(isLandedContinuation)) this.#relayLanding(textOf(message));
-			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [], ...(drainId ? { drainId } : {}) });
+			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [], ...(drainId ? { drainId } : {}), ...(directWake ? {} : { informational: true }) });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
 			if (stamped) { this.#turn.jobId = stamped; for (const ids of [this.#turn.jobIds, this.#turn.segJobIds]) if (!ids.includes(stamped)) ids.push(stamped); }
 			const envelope = envelopeSummaryOf(message);
@@ -651,7 +652,7 @@ export class CpBridge {
 			if (message?.role === "user") this.#delivery?.landed(textOf(message), this.#turn);
 			if (!message || message.role !== "assistant") return;
 			this.#turn.assistantCount += 1;
-			this.#lastAssistant = lastValidAssistant([message]) ?? this.#lastAssistant;
+			this.#lastAssistant = trackAssistant(this.#home, this.#lastAssistant, lastValidAssistant([message]));
 			const text = textOf(event.message);
 			if (text.length > 0) this.#turn.texts.push(text);
 			if (text.includes(STALE_WAKEUP_HEADLINE)) this.#turn.stale = true;

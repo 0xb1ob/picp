@@ -351,10 +351,8 @@ export class CommandPost {
 			home: options.home,
 			runs: this.runs,
 			...(options.sendWakeup ? { wakeup: options.sendWakeup } : {}),
-			beforeWakeup: async (wakeup) => {
-				await this.continuation.onVerdict(wakeup);
-				await options.beforeWakeup?.(wakeup);
-			},
+			beforeWakeup: async (wakeup) => await options.beforeWakeup?.(wakeup),
+			afterWakeup: (wakeup) => this.continuation.onVerdict(wakeup),
 			// A finish with no safe cp-verdict must not leave a held PR silently waiting: one durable notice per attempt.
 			onFinishFailure: (pending, reason) => this.#journalDurable({
 				id: boundedWakeupId(`review-finish:${pending.job_id}:${pending.surface}:${pending.attempt}:${pending.started_at}`),

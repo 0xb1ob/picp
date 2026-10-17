@@ -17,7 +17,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, missionRotation, parentCompactInstructions, parentContextLog, parentSettings, standingOrdersFile } from "../src/parent-context.ts";
 import type { Mandate } from "../src/contracts.ts";
-import { runAutoControl } from "../src/parent-auto-control.ts";
+import { cacheRebuildLine, PROMPT_CACHE_TTL_SECONDS, runAutoControl, trackAssistant } from "../src/parent-auto-control.ts";
 import { PARENT_CONTROL_BUSY } from "../src/parent-diagnostics.ts";
 import type { ParentStatus } from "../src/cp-bridge.ts";
 import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
@@ -124,6 +124,24 @@ test("N17: runAutoControl rotates after a parent revoke with no cp_next mission 
 	await runAutoControl(home.path, undefined, undefined, control, () => assert.fail("no error relay"));
 	assert.deepEqual(rotated, [grant.id]);
 	assert.match(readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8"), new RegExp(`rotated mission=${grant.id} trigger="revoked by parent"`));
+});
+
+// N1(c) (cp-c1ur): warm rebuilds were invisible; only a turn that kept its prompt size inside the cache TTL but read
+// under half of it is a rebuild — a compaction shrinks the prompt, and a long gap expires the cache by design.
+test("N1: trackAssistant logs cache_rebuild only for a same-size prompt inside the TTL that lost its cache", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const turn = (at: number, cacheRead: number, cacheWrite: number) => ({ role: "assistant", stopReason: "stop", timestamp: at, usage: { input: 10, output: 5, cacheRead, cacheWrite } });
+	const warm = turn(0, 100_000, 2_000);
+	assert.equal(cacheRebuildLine(warm, turn(13_000, 102_000, 1_000)), undefined, "a warm read");
+	assert.equal(cacheRebuildLine(warm, turn(13_000, 30_692, 141_748)), "cache_rebuild cr=30692 prev=102010 gap_s=13");
+	assert.equal(cacheRebuildLine(warm, turn((PROMPT_CACHE_TTL_SECONDS + 1) * 1000, 0, 150_000)), undefined, "the TTL expired");
+	assert.equal(cacheRebuildLine(warm, turn(13_000, 0, 20_000)), undefined, "a compaction shrank the prompt");
+	assert.equal(cacheRebuildLine(undefined, turn(13_000, 0, 150_000)), undefined, "nothing to compare");
+	const next = turn(13_000, 30_692, 141_748);
+	assert.equal(trackAssistant(home.path, warm, next), next);
+	assert.equal(trackAssistant(home.path, next, undefined), next, "an unusable assistant keeps the previous one");
+	assert.match(readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8"), /parent context cache_rebuild cr=30692 prev=102010 gap_s=13\n$/);
 });
 
 test("parentContextLog appends exactly one line to state/daemon.log", (t) => {

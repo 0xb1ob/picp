@@ -136,6 +136,31 @@ test("N9: a withheld tail wake never leaves the context ending on assistant", as
 	assert.deepEqual(await context({ messages: [user, staleVerdict] }), { messages: [user] }, "a user tail needs no stand-in");
 });
 
+// N2 (cp-c1ur): dropping a withheld verdict lost its medium/low findings ("I haven't seen the review text").
+test("N2: a withheld verdict with findings reaches the model as its findings stand-in", async (t) => {
+	const post = scratchPost(t);
+	post.runs.open("cp-gone");
+	let context: ContextHook | undefined;
+	const pi = {
+		on(name: string, handler: ContextHook) { if (name === "context") context = handler; },
+		registerEntryRenderer() {},
+	} as unknown as ExtensionAPI;
+	const state = createSessionState();
+	state.post = post;
+	const wakeups = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {} });
+	registerSessionHooks(pi, state, createSessionPost(pi, state, wakeups), wakeups);
+	assert.ok(context);
+	const user: WakeupCarrier = { role: "user", content: "Continue the current work" };
+	const verdict: WakeupCarrier = {
+		role: "custom", customType: "cp-verdict", content: "VERDICT pass: call cp_integrate", timestamp: 7_000,
+		details: { cp_wakeup: { kind: "verdict", job_id: "cp-gone", keys: ["review", "1"], issued_at: "2026-09-26T08:00:00Z" }, verdict: { reasons: ["medium: rename"] } },
+	};
+	const result = await context({ messages: [user, verdict] });
+	assert.equal(result?.messages.length, 2);
+	assert.match(String(result?.messages[1]?.content), /WITHHELD VERDICT for cp-gone[\s\S]*medium: rename/);
+	assert.doesNotMatch(String(result?.messages[1]?.content), /cp_integrate/);
+});
+
 // cp-vy73 (PR-3, cp-cc45 F3/F6): the busy-wake gate through the real hook wiring.
 test("cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges once for a stranded one", async (t) => {
 	const post = scratchPost(t);
