@@ -1,40 +1,45 @@
 /**
- * Lane X, Pier 1.5 — saved schedules (cron with TZ, watch) that fire normal
- * jobs under a named mandate, and catch up once when the parent comes back.
+ * Lane X, Pier 1.5 — saved schedules (cron with TZ, watch, manual) that fire normal jobs under a run of their
+ * active native policy revision, and catch up once when the parent comes back. No fire mints a grant.
  */
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { EMPTY_USAGE, type FleetRecord, WORKER_FORBIDDEN_TOOLS } from "../src/contracts.ts";
+import { WORKER_FORBIDDEN_TOOLS } from "../src/contracts.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { cpNext } from "../src/next.ts";
-import { formatScheduleEvent, formatSchedules, latestCronSlot, parseCron, runWatchScript, Scheduler, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
-import { ScheduleRunStore } from "../src/schedule-runs.ts";
-import { sweepSchedulePolicyImport } from "../src/schedule-migrations.ts";
+import { formatScheduleEvent, formatSchedules, latestCronSlot, parseCron, runWatchScript, Scheduler, type ScheduleEvent, type SchedulerPorts, type WatchRun } from "../src/scheduler.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { createScratchHome, createScratchLedger, type ScratchHome } from "./harness/index.ts";
 
 const T0 = new Date("2026-07-01T06:00:00Z");
+const ACTION = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
+const NATIVE = { action: ACTION, limits: {} };
 
 function bench(home: ScratchHome, overrides: Partial<SchedulerPorts> = {}) {
 	const clock = { now: T0 };
 	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const mandates = new MandateStore(home.path, { now: () => clock.now });
+	const runs = openScheduleRunStore(home.path);
+	const mandates = new MandateStore(home.path, { runs, now: () => clock.now });
 	const fleet = new FleetStore({ home: home.path });
 	const ports: SchedulerPorts = {
-		home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path,
+		home: home.path, ledger: () => ledger, mandates, runs, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path,
 		now: () => clock.now, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }), ...overrides,
 	};
-	const grant = (extra: Partial<Parameters<MandateStore["issue"]>[0]> = {}) =>
-		mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true, ...extra });
-	return { clock, ledger, mandates, fleet, ports, grant };
+	/** Closes a fire's anchor and its run, as the schedule runner would once the run settles. */
+	const settle = async (event: ScheduleEvent | undefined) => {
+		await ledger.close(event?.job_id as string, "landed");
+		await runs.closeRun(event?.run_id as string, "completed", clock.now.toISOString().replace(/\.\d{3}Z$/, "Z"));
+	};
+	return { clock, ledger, runs, mandates, fleet, ports, settle };
 }
 
 const job = { title: "nightly report", kind: "research" as const, delivery: "answer" as const };
@@ -53,23 +58,23 @@ test("cron: five fields in a time zone, day-of-month OR day-of-week, bad input r
 	for (const bad of ["* * * *", "60 * * * *", "0 0 * 13 *", "0 0 * * MON", "5-1 * * * *"]) assert.throws(() => parseCron(bad), new RegExp("cron"));
 });
 
-test("a cron fire is an ordinary job under the named mandate, the runner's (not cp_next's) to dispatch; the next tick does not refire", async (t) => {
+test("a cron fire is an ordinary job under a native run, the runner's (not cp_next's) to dispatch; the next tick does not refire", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, mandates, fleet, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, mandates, fleet, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "Europe/Warsaw", ...job });
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native: NATIVE, cron: "0 9 * * *", tz: "Europe/Warsaw", ...job });
 	assert.deepEqual(await scheduler.tick(), [], "no slot yet");
 	clock.now = new Date("2026-07-01T07:00:20Z");
 	const [event] = await scheduler.tick();
-	assert.equal(event?.outcome, "fired");
+	assert.equal(event?.outcome, "fired", event?.reason);
 	assert.equal(event?.missed_at, undefined, "a live parent's fire is not a missed one");
 	const created = await ledger.show(event?.job_id as string);
 	assert.equal(created.title, "nightly report (nightly 2026-07-01T07:00Z)");
 	assert.ok(created.labels.includes(`schedule:${schedule.id}`) && created.labels.includes("delivery:answer"));
-	assert.match(created.notes ?? "", new RegExp(`under fire grant ${event?.mandate_id}`));
-	assert.notEqual(event?.mandate_id, mandate.id, "the fire files under a fresh grant, never its seed");
+	assert.match(created.notes ?? "", new RegExp(`under run ${event?.run_id}`));
+	assert.equal(event?.mandate_id, undefined);
+	assert.deepEqual(mandates.list(), [], "no fire mints a grant");
 	clock.now = new Date("2026-07-01T07:00:50Z");
 	assert.deepEqual(await scheduler.tick(), []);
 	assert.equal((await ledger.list()).length, 1);
@@ -82,42 +87,25 @@ test("a cron fire is an ordinary job under the named mandate, the runner's (not 
 test("schedlater S1: a pr schedule's fire still wakes the parent and is cp_next's to dispatch", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, mandates, fleet, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, mandates, fleet, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 7 * * *", tz: "UTC", title: "nightly fix", kind: "ship", delivery: "pr" });
+	await scheduler.add({ name: "nightly", project: "demo", native: NATIVE, cron: "0 7 * * *", tz: "UTC", title: "nightly fix", kind: "ship", delivery: "pr" });
 	clock.now = new Date("2026-07-01T07:00:20Z");
 	const [event] = await scheduler.tick();
 	assert.equal(event?.delivery, "pr");
 	assert.match(formatScheduleEvent(event!), /Call cp_next/);
+	const unrelated = await ledger.create({ title: "unrelated", project: "demo", kind: "ship", delivery: "pr" });
 	const next = await cpNext({ ledger, fleet, mandates, escalations: new EscalationStore({ home: home.path }), now: () => clock.now }, "demo");
 	assert.deepEqual([next.action.kind, next.action.job_id], ["dispatch", event?.job_id]);
+	assert.ok(!next.ready.some((entry) => entry.id === unrelated.id), `${unrelated.id} is not the schedule's`);
 });
 
-test("a fire at a millisecond instant survives another grant expiring in the same sweep (2026-10-06T00:05Z)", async (t) => {
+test("run now at a millisecond instant fires", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, mandates, ports, grant } = bench(home);
-	const mandate = grant();
-	const other = mandates.issue({ projects: ["demo"], objective: "other", expiry: "2026-07-01T06:30:00Z", spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1, at: "2026-06-01T00:00:00Z" });
+	const { clock, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 7 * * *", tz: "UTC", ...job });
-	clock.now = new Date("2026-07-01T07:00:20.123Z");
-	const [event] = await scheduler.tick();
-	assert.equal(event?.outcome, "fired", event?.reason);
-	const expired = mandates.get(other.id);
-	assert.equal(expired?.status, "expired");
-	assert.equal(expired?.escalations[0]?.at, "2026-07-01T07:00:20Z");
-});
-
-test("run now at a millisecond instant fires while an unrelated grant is expired", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const { clock, mandates, ports, grant } = bench(home);
-	const mandate = grant();
-	mandates.issue({ projects: ["demo"], objective: "other", expiry: "2026-07-01T06:30:00Z", spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1, at: "2026-06-01T00:00:00Z" });
-	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "on demand", project: "demo", mandate_id: mandate.id, manual: true, ...job });
+	const schedule = await scheduler.add({ name: "on demand", project: "demo", native: NATIVE, manual: true, ...job });
 	clock.now = new Date("2026-07-01T07:00:20.456Z");
 	const event = await scheduler.fireNow(schedule.id, "sc-1");
 	assert.equal(event.outcome, "fired", event.reason);
@@ -126,32 +114,30 @@ test("run now at a millisecond instant fires while an unrelated grant is expired
 test("parent start catches up a missed cron slot once, stamped missed <time>", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, runs, ports } = bench(home);
 	clock.now = new Date("2026-06-27T00:00:00Z");
-	await new Scheduler(ports).add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "UTC", ...job });
+	await new Scheduler(ports).add({ name: "nightly", project: "demo", native: NATIVE, cron: "0 9 * * *", tz: "UTC", ...job });
 	// The parent was down for four 09:00 slots; it comes up at T0.
 	clock.now = T0;
 	const restarted = new Scheduler(ports);
 	const events = await restarted.tick();
 	assert.equal(events.length, 1, "one catch-up, never a backlog");
 	assert.equal(events[0]?.missed_at, "2026-06-30T09:00Z");
-	const [only] = await ledger.list();
-	assert.match(only?.notes ?? "", /missed 2026-06-30T09:00Z/);
+	assert.equal((await ledger.list()).length, 1);
+	assert.equal(runs.runs()[0]?.trigger.missed, true);
 	assert.deepEqual(await restarted.tick(), []);
 });
 
 test("cron exactly once: a clock set back after a fire never fires the slot again, and last_checked_at never rewinds", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports, settle } = bench(home);
 	const scheduler = new Scheduler(ports);
-	await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "UTC", ...job });
+	await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job });
 	clock.now = new Date("2026-07-01T07:00:30Z");
 	const [fired] = await scheduler.tick();
 	assert.equal(fired?.outcome, "fired");
-	await ledger.close(fired?.job_id as string, "landed");
+	await settle(fired);
 	clock.now = new Date("2026-07-01T06:00:10Z"); // set back an hour
 	assert.deepEqual(await scheduler.tick(), []);
 	assert.equal(scheduler.list()[0]?.last_checked_at, "2026-07-01T07:00:30.000Z", "monotonic");
@@ -163,14 +149,13 @@ test("cron exactly once: a clock set back after a fire never fires the slot agai
 test("cron: a corrected forward clock jump restarts slot evaluation from now instead of silencing the schedule until the future checkpoint", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ports, settle } = bench(home);
 	const scheduler = new Scheduler(ports);
-	await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "UTC", ...job });
+	await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job });
 	clock.now = new Date("2026-07-02T07:00:30Z"); // a day ahead by mistake
 	const [early] = await scheduler.tick();
 	assert.equal(early?.outcome, "fired");
-	await ledger.close(early?.job_id as string, "landed");
+	await settle(early);
 	clock.now = new Date("2026-07-01T08:00:10Z"); // corrected
 	const [reset] = await scheduler.tick();
 	assert.equal(reset?.outcome, "skipped");
@@ -179,20 +164,19 @@ test("cron: a corrected forward clock jump restarts slot evaluation from now ins
 	clock.now = new Date("2026-07-01T09:00:10Z");
 	const [next] = await scheduler.tick();
 	assert.equal(next?.outcome, "fired", "the next slot fires, not a day later");
-	await ledger.close(next?.job_id as string, "landed");
+	await settle(next);
 	assert.equal(scheduler.list()[0]?.last_fire?.slot, "2026-07-01T09:00:00.000Z");
 });
 
 test("cron: after a corrected forward jump, the slot fired early is not fired again when real time reaches it", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports, settle } = bench(home);
 	const scheduler = new Scheduler(ports);
-	await scheduler.add({ name: "daily", project: "demo", mandate_id: mandate.id, cron: "0 7 * * *", tz: "UTC", ...job });
+	await scheduler.add({ name: "daily", project: "demo", native: NATIVE, cron: "0 7 * * *", tz: "UTC", ...job });
 	clock.now = new Date("2026-07-02T07:00:30Z"); // a day ahead by mistake
 	const [early] = await scheduler.tick();
-	await ledger.close(early?.job_id as string, "landed");
+	await settle(early);
 	clock.now = new Date("2026-07-01T08:00:10Z"); // corrected: restart from now
 	assert.match((await scheduler.tick())[0]?.reason ?? "", /ahead of the clock/);
 	clock.now = new Date("2026-07-02T07:00:20Z");
@@ -205,15 +189,14 @@ test("cron: after a corrected forward jump, the slot fired early is not fired ag
 test("cron exactly once: a DST fall-back repeated hour fires its slot once (Europe/Warsaw 2026-10-25 02:30)", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports, settle } = bench(home);
 	clock.now = new Date("2026-10-24T12:00:00Z");
 	const scheduler = new Scheduler({ ...ports, startedAt: clock.now });
-	await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "30 2 * * *", tz: "Europe/Warsaw", ...job });
+	await scheduler.add({ name: "nightly", project: "demo", native: NATIVE, cron: "30 2 * * *", tz: "Europe/Warsaw", ...job });
 	clock.now = new Date("2026-10-25T00:30:20Z"); // 02:30 CEST
 	const [fired] = await scheduler.tick();
 	assert.equal(fired?.outcome, "fired");
-	await ledger.close(fired?.job_id as string, "landed");
+	await settle(fired);
 	clock.now = new Date("2026-10-25T01:30:20Z"); // 02:30 CET, the same wall-clock minute
 	const [repeat] = await scheduler.tick();
 	assert.equal(repeat?.outcome, "skipped");
@@ -228,105 +211,69 @@ test("cron exactly once: a DST fall-back repeated hour fires its slot once (Euro
 test("cron: a wildcard-hour cron fires in both real hours of a DST fall-back repeated local hour", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports, settle } = bench(home);
 	clock.now = new Date("2026-10-24T23:30:00Z");
 	const scheduler = new Scheduler({ ...ports, startedAt: clock.now });
-	await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "Europe/Warsaw", ...job });
+	await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "Europe/Warsaw", ...job });
 	const outcomes: string[] = [];
 	// 00:00Z = 02:00 CEST, 01:00Z = 02:00 CET (the repeated local minute), 02:00Z = 03:00 CET.
 	for (const at of ["2026-10-25T00:00:20Z", "2026-10-25T01:00:20Z", "2026-10-25T02:00:20Z"]) {
 		clock.now = new Date(at);
 		const [event] = await scheduler.tick();
 		outcomes.push(event?.outcome ?? "none");
-		if (event?.job_id) await ledger.close(event.job_id, "landed");
+		if (event?.job_id) await settle(event);
 	}
 	assert.deepEqual(outcomes, ["fired", "fired", "fired"]);
 	assert.equal((await ledger.list({ all: true })).length, 3, "one job per real hour");
 });
 
-test("a fire is never a bypass: no active grant, a job-scoped grant, an open previous fire and the job cap all hold", async (t) => {
+test("an open run holds the next slot: the skip names the run and is news once", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, mandates, fleet, ports, grant } = bench(home);
-	const scoped = grant({ job_ids: ["cp-aaa"] });
+	const { clock, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	// ship/pr: cp_next is the dispatcher here, so its job cap is observable (runner jobs meet the same cap in dispatch).
-	const base = { name: "hourly", project: "demo", cron: "0 * * * *", tz: "UTC", ...job, kind: "ship" as const, delivery: "pr" as const };
-	await assert.rejects(scheduler.add({ ...base, mandate_id: scoped.id }), /names job_ids; a schedule grant never does/);
-	mandates.revoke(scoped.id); // same issued_at as the next grant: keep cp_next's pick deterministic
-	await assert.rejects(scheduler.add({ ...base, mandate_id: "md-ffffff" }), /no mandate md-ffffff/);
-	// schedlater S3: a project-wide grant never carries a schedule.
-	const wide = grant({ schedule_grant: undefined });
-	await assert.rejects(scheduler.add({ ...base, mandate_id: wide.id }), /not a schedule grant.*schedule_grant:true/);
-	mandates.revoke(wide.id);
-	const mandate = grant({ job_cap: 1 });
-	const schedule = await scheduler.add({ ...base, mandate_id: mandate.id });
-	// One grant per schedule.
-	await assert.rejects(scheduler.add({ ...base, name: "second", mandate_id: mandate.id }), new RegExp(`already the grant of schedule ${schedule.id} \\(hourly\\); one grant per schedule`));
-
-	mandates.pause(mandate.id);
+	await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job });
 	clock.now = new Date("2026-07-01T07:00:05Z");
-	const [skipped] = await scheduler.tick();
-	assert.equal(skipped?.outcome, "skipped");
-	assert.match(skipped?.reason ?? "", /is paused/);
-	assert.equal((await ledger.list()).length, 0);
-
-	mandates.resume(mandate.id);
-	clock.now = new Date("2026-07-01T08:00:05Z");
 	const [fired] = await scheduler.tick();
 	assert.equal(fired?.outcome, "fired");
-	clock.now = new Date("2026-07-01T09:00:05Z");
+	clock.now = new Date("2026-07-01T08:00:05Z");
 	const [overlap] = await scheduler.tick();
-	assert.match(overlap?.reason ?? "", new RegExp(`previous fire ${fired?.job_id} is still open`));
-
-	// schedlater S3: an unrelated ready job is never recommended under the schedule's grant.
-	const unrelated = await ledger.create({ title: "unrelated", project: "demo", kind: "ship", delivery: "pr" });
-	const scopedNext = await cpNext({ ledger, fleet, mandates, escalations: new EscalationStore({ home: home.path }), now: () => clock.now }, "demo");
-	assert.equal(scopedNext.mandate?.id, fired?.mandate_id, "the fire's own fresh grant");
-	assert.deepEqual(scopedNext.ready.map((entry) => entry.id), [fired?.job_id], `${unrelated.id} is not the schedule's`);
-	assert.equal(scopedNext.action.job_id, fired?.job_id);
-
-	// Job cap: another run of this schedule already holds the one slot, so cp_next will not dispatch the fired job.
-	await fleet.add({
-		job_id: "cp-other", project: "demo", kind: "ship", delivery: "pr", origin: "terminal", phase: "held", reported_at: "2026-07-01T01:00:00Z", worktree: "/wt", branch: "cp-other",
-		dispatched_at: "2026-07-01T00:00:00Z", usage: EMPTY_USAGE, schedule_id: schedule.id,
-		worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m/x", started_at: "2026-07-01T00:00:00Z" },
-	} as FleetRecord);
-	const next = await cpNext({ ledger, fleet, mandates, escalations: new EscalationStore({ home: home.path }), now: () => clock.now }, "demo");
-	assert.equal(next.action.kind, "wait");
-	assert.match(next.action.reason, /job cap 1 reached/);
+	assert.match(overlap?.reason ?? "", new RegExp(`already_running: schedule .* has open run ${fired?.run_id}`));
 });
 
-test("a schedule saved with no grant template (pre-migration, or skipped by it) skips every fire and is never fired under its pointer", async (t) => {
+test("PR4: a schedule with no active native revision never fires, mints nothing and names why", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, mandates, ports, grant } = bench(home);
-	const wide = grant({ schedule_grant: undefined });
+	const { clock, ledger, mandates, ports } = bench(home);
+	const seed = mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true });
 	const scheduler = new Scheduler(ports);
-	const saved = { id: "sch-abc123", name: "legacy", project: "demo", mandate_id: wide.id, trigger: { type: "cron", cron: "0 * * * *", tz: "UTC" }, job, enabled: true, created_at: T0.toISOString() };
+	const saved = { id: "sch-abc123", name: "legacy", project: "demo", mandate_id: seed.id, trigger: { type: "cron", cron: "0 * * * *", tz: "UTC" }, job, enabled: true, created_at: T0.toISOString() };
 	writeFileSync(scheduler.file, JSON.stringify({ schema_version: 1, schedules: [saved] }));
 	clock.now = new Date("2026-07-01T07:00:05Z");
 	const [skipped] = await scheduler.tick();
 	assert.equal(skipped?.outcome, "skipped");
-	assert.match(skipped?.reason ?? "", /schedule sch-abc123 has no grant template .*cp_schedule move it to a schedule grant to resume/);
+	assert.match(skipped?.reason ?? "", /schedule sch-abc123 has no active native policy \(needs setup: .*\); no fire mints a grant/);
 	clock.now = new Date("2026-07-01T08:00:05Z");
 	assert.deepEqual(await scheduler.tick(), [], "the same skip is news once");
-	assert.match(scheduler.list()[0]?.last_skip?.reason ?? "", /has no grant template/, "recorded on the schedule every time");
-	assert.equal(scheduler.list()[0]?.last_skip?.at, "2026-07-01T08:00:05.000Z");
-	assert.equal((await ledger.list({ all: true })).length, 0, "no job is ever recorded under it");
-	assert.equal(mandates.list().length, 1, "and no grant minted");
+	assert.equal(scheduler.list()[0]?.last_skip?.at, "2026-07-01T08:00:05.000Z", "recorded on the schedule every time");
+	assert.match((await scheduler.fireNow("sch-abc123", { via: "cp_schedule", tool_call_id: "call-1" })).reason, /^run now not recorded: .*no active native policy/);
+	await assert.rejects(scheduler.setEnabled("sch-abc123", true), /enable sch-abc123 refused: .*no active native policy/);
+	// A legacy fire still open: the refusal says it drains first.
+	await ledger.create({ title: "old fire", project: "demo", kind: "research", delivery: "answer", labels: ["schedule:sch-abc123"] });
+	const drain = await scheduler.fireNow("sch-abc123", "sc-1");
+	assert.match(drain.reason, /legacy run cp-\w+ is still open: .*migrates to a native policy once it drains/);
+	assert.equal((await ledger.list({ all: true })).length, 1, "no job is ever recorded under it");
+	assert.deepEqual(mandates.list().map((entry) => entry.id), [seed.id], "and no grant minted");
 });
 
 test("watch: exit 0 fires, changed output fires only on a change, and a missed interval is caught up once", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	let run: WatchRun = { code: 1, stdout: "" };
-	const { clock, ledger, ports, grant } = bench(home, { runWatch: async () => run });
-	const mandate = grant();
+	const { clock, ports, settle } = bench(home, { runWatch: async () => run });
 	const scheduler = new Scheduler(ports);
-	const zero = await scheduler.add({ name: "ready", project: "demo", mandate_id: mandate.id, watch_script: "scripts/ready.sh", every_seconds: 60, on: "exit0", ...job, title: "ready" });
-	await scheduler.add({ name: "diff", project: "demo", mandate_id: grant().id, watch_script: "scripts/diff.sh", every_seconds: 60, on: "changed", ...job, title: "diff" });
+	const zero = await scheduler.add({ name: "ready", project: "demo", native: NATIVE, watch_script: "scripts/ready.sh", every_seconds: 60, on: "exit0", ...job, title: "ready" });
+	await scheduler.add({ name: "diff", project: "demo", native: NATIVE, watch_script: "scripts/diff.sh", every_seconds: 60, on: "changed", ...job, title: "diff" });
 	const first = await scheduler.tick();
 	assert.deepEqual(first.map((event) => event.outcome), ["skipped"], "exit 1: exit0 waits quietly; changed names the failure");
 	run = { code: 0, stdout: "v1" };
@@ -335,12 +282,12 @@ test("watch: exit 0 fires, changed output fires only on a change, and a missed i
 	clock.now = new Date(T0.getTime() + 61_000);
 	const second = await scheduler.tick();
 	assert.deepEqual(second.map((event) => [event.name, event.outcome]), [["ready", "fired"]], "the first output is the baseline");
-	await ledger.close(second[0]?.job_id as string, "landed");
+	await settle(second[0]);
 	run = { code: 0, stdout: "v2" };
 	clock.now = new Date(T0.getTime() + 122_000);
 	const third = await scheduler.tick();
 	assert.deepEqual(third.map((event) => [event.name, event.outcome]), [["ready", "fired"], ["diff", "fired"]]);
-	for (const event of third) await ledger.close(event.job_id as string, "landed");
+	for (const event of third) await settle(event);
 
 	// Down for ten minutes: the restarted parent runs each watch once and stamps the fire missed.
 	clock.now = new Date(T0.getTime() + 722_000);
@@ -352,22 +299,22 @@ test("watch: exit 0 fires, changed output fires only on a change, and a missed i
 	assert.deepEqual(await restarted.tick(), []);
 });
 
-test("cp-hhuf P6: enable is refused unless the schedule's grant passes the fire check; disable never is", async (t) => {
+test("cp-hhuf P6: enable needs an active native revision whose live bounds hold; disable never is gated", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { mandates, ports, grant } = bench(home);
-	const mandate = grant();
-	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "UTC", ...job });
-	mandates.pause(mandate.id);
-	assert.equal((await scheduler.setEnabled(schedule.id, false)).enabled, false, "disable is never grant-gated");
-	await assert.rejects(scheduler.setEnabled(schedule.id, true), new RegExp(`enable ${schedule.id} refused: ${mandate.id} is paused`));
+	const { ports } = bench(home);
+	let context: ReturnType<NonNullable<SchedulerPorts["mintContext"]>> = ports.mintContext!("demo");
+	const scheduler = new Scheduler({ ...ports, mintContext: () => context });
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native: NATIVE, cron: "0 9 * * *", tz: "UTC", ...job });
+	context = { refusal: "the live defaults are unreadable" };
+	assert.equal((await scheduler.setEnabled(schedule.id, false)).enabled, false, "disable is never gated");
+	await assert.rejects(scheduler.setEnabled(schedule.id, true), new RegExp(`enable ${schedule.id} refused: the live defaults are unreadable`));
 	assert.equal(scheduler.list()[0]?.enabled, false, "stays disabled");
-	mandates.resume(mandate.id);
+	context = ports.mintContext!("demo");
 	assert.equal((await scheduler.setEnabled(schedule.id, true)).enabled, true);
+	await scheduler.deactivatePolicy(schedule.id, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tc-off", quote_sha: "0123456789ab" } });
 	await scheduler.setEnabled(schedule.id, false);
-	mandates.revoke(mandate.id, { by: "operator", operator_quote: "revoke the nightly grant", decided_by: "operator-quote" });
-	await assert.rejects(scheduler.setEnabled(schedule.id, true), /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
+	await assert.rejects(scheduler.setEnabled(schedule.id, true), /no active native policy/);
 	assert.equal(scheduler.list()[0]?.enabled, false);
 	await assert.rejects(scheduler.setEnabled("sch-ffffff", true), /no schedule sch-ffffff/);
 });
@@ -375,10 +322,9 @@ test("cp-hhuf P6: enable is refused unless the schedule's grant passes the fire 
 test("cp-hhuf P6 addendum 1: a daily cron disabled for three days, then enabled, files no job until its next slot", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "daily", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "UTC", ...job });
+	const schedule = await scheduler.add({ name: "daily", project: "demo", native: NATIVE, cron: "0 9 * * *", tz: "UTC", ...job });
 	assert.deepEqual(await scheduler.tick(), []);
 	await scheduler.setEnabled(schedule.id, false);
 	clock.now = new Date("2026-07-04T10:00:00Z"); // the 07-01 .. 07-04 09:00 slots passed while disabled
@@ -398,19 +344,11 @@ test("cp-hhuf P6 addendum 1: a daily cron disabled for three days, then enabled,
 test("cp-hhuf P6: run now is a manual fire under the slot's checks and never touches last_fire/last_skip", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, mandates, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "UTC", ...job });
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native: NATIVE, cron: "0 9 * * *", tz: "UTC", ...job });
 	await assert.rejects(scheduler.fireNow("sch-ffffff", "sc-x"), /no schedule sch-ffffff/);
-	mandates.pause(mandate.id);
 	clock.now = new Date("2026-07-01T07:03:10Z");
-	const paused = await scheduler.fireNow(schedule.id, "sc-20260701070310-0000abcd");
-	assert.equal(paused.outcome, "skipped");
-	assert.match(paused.reason, new RegExp(`^run now not recorded: ${mandate.id} is paused`));
-	assert.equal((await ledger.list({ all: true })).length, 0);
-	assert.equal(scheduler.list()[0]?.last_skip, undefined, "a manual refusal is never recorded on the schedule");
-	mandates.resume(mandate.id);
 	const fired = await scheduler.fireNow(schedule.id, "sc-20260701070310-0000abcd");
 	assert.equal(fired.outcome, "fired");
 	assert.equal(fired.manual, "sc-20260701070310-0000abcd");
@@ -421,44 +359,33 @@ test("cp-hhuf P6: run now is a manual fire under the slot's checks and never tou
 	assert.match(created.notes ?? "", /run now from the dashboard \(sc-20260701070310-0000abcd\)/);
 	assert.equal(scheduler.list()[0]?.last_fire, undefined);
 	assert.equal(scheduler.list()[0]?.last_skip, undefined);
-	assert.match(formatScheduleEvent(fired), /run now from the dashboard \(sc-20260701070310-0000abcd\)/);
+	assert.match(formatScheduleEvent(fired), /run now via the dashboard \(sc-20260701070310-0000abcd\)/);
 	const open = await scheduler.fireNow(schedule.id, "sc-2");
-	assert.match(open.reason, new RegExp(`run now not recorded: the previous fire ${fired.job_id} is still open`));
-	await ledger.close(fired.job_id as string, "landed");
+	assert.match(open.reason, new RegExp(`^run now not recorded: already_running: .*open run ${fired.run_id}`));
+	assert.equal(scheduler.list()[0]?.last_skip, undefined, "a manual refusal is never recorded on the schedule");
 	await scheduler.setEnabled(schedule.id, false);
 	await assert.rejects(scheduler.fireNow(schedule.id, "sc-3"), new RegExp(`schedule ${schedule.id} is disabled; enable it first`));
 });
 
-test("S2: a cp_schedule run now whose quote comment fails still fires, names the warning, and its notes keep the quote single-use", async (t) => {
+test("PR4: a cp_schedule run now starts natively with no operator quote", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { ledger, ports, grant } = bench(home);
-	const failing = new Proxy(ledger, {
-		get: (target, key) => {
-			if (key === "comment") return async () => { throw new Error("ENOSPC"); };
-			const value = Reflect.get(target, key, target);
-			return typeof value === "function" ? value.bind(target) : value;
-		},
-	});
-	const scheduler = new Scheduler({ ...ports, ledger: () => failing });
-	const schedule = await scheduler.add({ name: "on demand", project: "demo", mandate_id: grant().id, manual: true, ...job });
-	const trigger = { via: "cp_schedule" as const, tool_call_id: "call-1", operator_quote: "Run on demand now.", decided_by: "operator-quote", source_sha: "0123456789ab" };
-	const fired = await scheduler.fireNow(schedule.id, trigger);
-	assert.equal(fired.outcome, "fired");
+	const { ledger, mandates, ports } = bench(home);
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "on demand", project: "demo", native: NATIVE, manual: true, ...job });
+	const fired = await scheduler.fireNow(schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
+	assert.equal(fired.outcome, "fired", fired.reason);
 	assert.equal(fired.manual_via, "cp_schedule");
-	assert.match(fired.reason, /warning: the verbatim quote comment was not written \(ENOSPC\); the job notes carry run-now quote sha 0123456789ab/);
-	assert.deepEqual((await ledger.show(fired.job_id as string)).comments, []);
-	await ledger.close(fired.job_id as string, "done");
-	assert.match((await scheduler.fireNow(schedule.id, { ...trigger, tool_call_id: "call-2" })).reason, new RegExp(`already authorized run now ${fired.job_id}`));
+	assert.match((await ledger.show(fired.job_id as string)).notes ?? "", /run now via cp_schedule \(call-1\)/);
+	assert.deepEqual(mandates.list(), []);
 });
 
 test("cp-hhuf P6: a tick fire and a run now started together create exactly one job", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
-	const mandate = grant();
+	const { clock, ledger, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "UTC", ...job });
+	const schedule = await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job });
 	clock.now = new Date("2026-07-01T07:00:05Z");
 	const [ticked, manual] = await Promise.all([scheduler.tick(), scheduler.fireNow(schedule.id, "sc-1")]);
 	const outcomes = [...ticked.map((event) => event.outcome), manual.outcome].sort();
@@ -470,13 +397,12 @@ test("an archived project: cp_schedule add is refused, and a schedule saved befo
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const archived: string[] = [];
-	const { clock, ledger, ports, grant } = bench(home, { archivedProjects: () => archived });
-	const mandate = grant();
+	const { clock, ledger, ports } = bench(home, { archivedProjects: () => archived });
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "hourly", project: "demo", mandate_id: mandate.id, cron: "0 * * * *", tz: "UTC", ...job });
+	const schedule = await scheduler.add({ name: "hourly", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job });
 	archived.push("demo");
 	await assert.rejects(
-		scheduler.add({ name: "other", project: "demo", mandate_id: grant().id, cron: "0 * * * *", tz: "UTC", ...job }),
+		scheduler.add({ name: "other", project: "demo", native: NATIVE, cron: "0 * * * *", tz: "UTC", ...job }),
 		/cp_schedule add refused: archived project demo — unarchive with cp_project unarchive first/,
 	);
 	assert.equal(scheduler.list().length, 1, "the refused add wrote nothing");
@@ -494,9 +420,9 @@ const skillJob = { title: "Self-review", kind: "research" as const, delivery: "l
 test("a manual skill schedule is never ticked: no fire, no write, no job at any clock", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { clock, ledger, ports, grant } = bench(home);
+	const { clock, ledger, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "self-review", project: "demo", mandate_id: grant().id, manual: true, ...skillJob });
+	const schedule = await scheduler.add({ name: "self-review", project: "demo", native: NATIVE, manual: true, ...skillJob });
 	assert.deepEqual([schedule.trigger, schedule.job.skill], [{ type: "manual" }, "cp-self-review"]);
 	for (const at of [T0.getTime(), T0.getTime() + 400 * 86_400_000]) {
 		clock.now = new Date(at);
@@ -511,10 +437,9 @@ test("a manual skill schedule is never ticked: no fire, no write, no job at any 
 test("manual/skill add refusals each throw and write nothing", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { ports, grant } = bench(home);
+	const { ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const id = grant().id;
-	const base = { name: "self-review", project: "demo", mandate_id: id };
+	const base = { name: "self-review", project: "demo", native: NATIVE };
 	const refusals: [Partial<Parameters<Scheduler["add"]>[0]>, RegExp][] = [
 		[{ manual: true, cron: "0 9 * * *", tz: "UTC", ...skillJob }, /exactly one of cron/],
 		[{ ...skillJob, skill: undefined, kind: "research", delivery: "local" }, /exactly one of cron/],
@@ -526,43 +451,36 @@ test("manual/skill add refusals each throw and write nothing", async (t) => {
 	for (const [input, message] of refusals) await assert.rejects(scheduler.add({ ...base, ...skillJob, ...input } as Parameters<Scheduler["add"]>[0]), message);
 	// skill on a cron schedule: the cron branch has manual unset.
 	await assert.rejects(scheduler.add({ ...base, cron: "0 9 * * *", tz: "UTC", ...skillJob }), /skill needs a manual schedule/);
-	await assert.rejects(scheduler.add({ ...base, manual: true, ...skillJob, mandate_id: grant({ schedule_grant: undefined }).id }), /not a schedule grant/);
+	await assert.rejects(scheduler.add({ name: "no quote", project: "demo", manual: true, ...skillJob } as Parameters<Scheduler["add"]>[0]), /needs the operator's quote/);
 	assert.equal(scheduler.list().length, 0);
 });
 
-test("run now on a manual skill schedule: grant-checked, one deferred anchor, single flight", async (t) => {
+test("run now on a manual skill schedule: one deferred anchor, single flight", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { ledger, mandates, ports, grant } = bench(home);
-	const mandate = grant();
+	const { ledger, ports } = bench(home);
 	const scheduler = new Scheduler(ports);
-	const schedule = await scheduler.add({ name: "self-review", project: "demo", mandate_id: mandate.id, manual: true, ...skillJob });
-	mandates.pause(mandate.id);
-	const paused = await scheduler.fireNow(schedule.id, "sc-1");
-	assert.equal(paused.outcome, "skipped");
-	assert.match(paused.reason, new RegExp(`^run now not recorded: ${mandate.id} is paused`));
-	assert.equal((await ledger.list({ all: true })).length, 0);
-	mandates.resume(mandate.id);
+	const schedule = await scheduler.add({ name: "self-review", project: "demo", native: NATIVE, manual: true, ...skillJob });
 	const fired = await scheduler.fireNow(schedule.id, "sc-2");
 	assert.equal(fired.outcome, "fired");
 	assert.equal(fired.skill, "cp-self-review");
 	const anchor = await ledger.show(fired.job_id as string);
 	assert.equal(anchor.status, "deferred");
 	assert.ok(anchor.labels.includes(`schedule:${schedule.id}`));
-	assert.match(formatScheduleEvent(fired), /parent-expanded run.*skill cp-self-review/);
-	assert.match((await scheduler.fireNow(schedule.id, "sc-3")).reason, new RegExp(`the previous fire ${anchor.id} is still open`));
+	assert.match(formatScheduleEvent(fired), /self-review recipe in code/);
+	assert.match((await scheduler.fireNow(schedule.id, "sc-3")).reason, new RegExp(`open run ${fired.run_id}`));
 	assert.equal((await ledger.list({ all: true })).length, 1);
 });
 
-test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a fire grant template that holds every reviewer plus the synthesis and the anchor", async (t) => {
+test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a child-job cap that holds every reviewer plus the synthesis and the anchor", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const { ports, grant } = bench(home, { repoOf: (project) => (project === "demo" ? "Acme/Demo" : undefined) });
+	const { runs, ports } = bench(home, { repoOf: (project) => (project === "demo" ? "Acme/Demo" : undefined) });
 	const scheduler = new Scheduler(ports);
 	const pr = (n: number) => `pr: https://github.com/acme/demo/pull/${n}`;
 	const review = { project: "demo", manual: true as const, title: "PR review", kind: "research" as const, delivery: "local" as const, skill: "cp-pr-review" };
 	const description = `Review the open queue.\n${pr(7)}\n  ${pr(9)}  \n`;
-	const added = await scheduler.add({ ...review, name: "prs", mandate_id: grant().id, description });
+	const added = await scheduler.add({ ...review, name: "prs", native: NATIVE, description });
 	assert.deepEqual([added.job.skill, added.job.description], ["cp-pr-review", description]);
 	const refusals: [string, RegExp][] = [
 		[`${pr(7)}\npr: https://github.com/other/demo/pull/8`, /not in the project's repo Acme\/Demo/],
@@ -572,14 +490,13 @@ test("cp-pr-review add: 1-20 exact pr: urls in the project's own repo, and a fir
 		["pr: https://github.com/acme/demo/pull/3/files", /is not a PR url/],
 		[`${pr(3)}\n${pr(3)}`, /listed twice/],
 	];
-	for (const [text, message] of refusals) await assert.rejects(scheduler.add({ ...review, name: "bad", mandate_id: grant().id, description: text }), message);
-	await assert.rejects(new Scheduler({ ...ports, repoOf: undefined }).add({ ...review, name: "bad", mandate_id: grant().id, description: pr(1) }), /needs the project's GitHub repo/);
-	// A3: the template's job cap is raised to N reviewers + 1 synthesis + the anchor (job_cap 2 → 4 for 2 PRs), never refused.
-	const tight = await scheduler.add({ ...review, name: "tight", mandate_id: grant({ job_cap: 2 }).id, description: `${pr(1)}\n${pr(2)}` });
-	assert.equal(tight.grant_template?.job_cap, 4);
-	assert.match(tight.notes!.join("; "), /job cap raised from 2 to 4: one cp-pr-review fire records 3 jobs plus its deferred anchor/);
-	const fits = await scheduler.add({ ...review, name: "fits", mandate_id: grant({ job_cap: 9 }).id, description: `${pr(1)}\n${pr(2)}` });
-	assert.equal(fits.grant_template?.job_cap, 9);
+	for (const [text, message] of refusals) await assert.rejects(scheduler.add({ ...review, name: "bad", native: NATIVE, description: text }), message);
+	await assert.rejects(new Scheduler({ ...ports, repoOf: undefined }).add({ ...review, name: "bad", native: NATIVE, description: pr(1) }), /needs the project's GitHub repo/);
+	// A3: the child-job cap is floored at N reviewers + 1 synthesis + the anchor (2 → 4 for 2 PRs), never refused.
+	const tight = await scheduler.add({ ...review, name: "tight", native: { action: ACTION, limits: { child_jobs: 2 } }, description: `${pr(1)}\n${pr(2)}` });
+	assert.equal(runs.activePolicy(tight.id)?.limits.child_jobs, 4);
+	const fits = await scheduler.add({ ...review, name: "fits", native: { action: ACTION, limits: { child_jobs: 9 } }, description: `${pr(1)}\n${pr(2)}` });
+	assert.equal(runs.activePolicy(fits.id)?.limits.child_jobs, 9);
 	assert.deepEqual(scheduler.list().map((entry) => entry.name), ["prs", "tight", "fits"]);
 });
 
@@ -600,23 +517,18 @@ test("runWatchScript runs only a tracked script, with the script runner's bare e
 	await assert.rejects(runWatchScript(repo, "untracked.sh", 4_000), /not tracked/);
 });
 
-
-test("P4 scheduler reads policy-only v2, starts under run authority without a legacy template and keeps writers on v2", async (t) => {
+test("PR4: deactivate needs no legacy template; afterwards nothing fires until a native revision is adopted", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
-	const runs = new ScheduleRunStore({ home: home.path });
-	const { ports, mandates, grant, ledger } = bench(home, { runs });
-	const scheduler = new Scheduler(ports), seed = grant();
-	const schedule = await scheduler.add({ name: "v2 policy", project: "demo", mandate_id: seed.id, manual: true, ...job });
-	await sweepSchedulePolicyImport({ home: home.path, mandates, runs, now: T0 });
-	const stored = JSON.parse(readFileSync(scheduler.file, "utf8"));
-	assert.equal(stored.schema_version, 2); assert.equal(stored.schedules[0].grant_template, undefined); assert.equal(stored.schedules[0].mandate_id, undefined);
-	const before = JSON.stringify(mandates.list());
+	const { ports, runs, mandates, settle } = bench(home);
+	const scheduler = new Scheduler(ports);
+	const schedule = await scheduler.add({ name: "v2 policy", project: "demo", native: NATIVE, manual: true, ...job });
 	const event = await scheduler.fireNow(schedule.id, { via: "dashboard", request_id: "sc-v2-test", peer: null, revision: 1 });
-	assert.equal(event.outcome, "fired", event.reason); assert.ok(event.run_id); assert.equal(event.mandate_id, undefined);
-	assert.equal(runs.runOfJob(event.job_id!)?.id, event.run_id); assert.equal(JSON.stringify(mandates.list()), before, "policy-only fire mints no grant");
-	await assert.rejects(scheduler.deactivatePolicy(schedule.id, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tc-v2", quote_sha: "abcdef012345" } }), /restore the P4 backup/);
-	assert.ok(runs.activePolicy(schedule.id), "no deactivation into missing legacy bounds");
-	await scheduler.setEnabled(schedule.id, false); await scheduler.setEnabled(schedule.id, true);
-	assert.equal(JSON.parse(readFileSync(scheduler.file, "utf8")).schema_version, 2);
-	assert.equal((await ledger.show(event.job_id!)).notes?.includes(`under run ${event.run_id}`), true);
+	assert.equal(event.outcome, "fired", event.reason); assert.equal(runs.runOfJob(event.job_id!)?.id, event.run_id);
+	const action = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "tc-v2", quote_sha: "abcdef012345" } };
+	await assert.rejects(scheduler.deactivatePolicy(schedule.id, action), /has an open run; deactivate once it closes/);
+	await settle(event);
+	await scheduler.deactivatePolicy(schedule.id, action);
+	assert.equal(runs.activePolicy(schedule.id), undefined);
+	assert.match((await scheduler.fireNow(schedule.id, "sc-after")).reason, /no active native policy/);
+	assert.deepEqual(mandates.list(), [], "no grant at any step");
 });

@@ -116,3 +116,20 @@ test("crash replay reuses a created job by title; a passed deadline drops unstar
 	assert.equal(b.runs.run(fired.run_id!)!.outcome, "partial");
 	assert.equal(b.calls.dispatch.length, 2, "S1 never starts without all six reports");
 });
+
+// PR3 review medium: a reader closed as failed (any non-delivery close, not only `dropped:`) is a lost report, so S1
+// never synthesizes without it: S1 drops naming it, and the anchor closes partial.
+test("a reader closed as failed blocks S1 like a dropped one; the run is partial", async (t) => {
+	const b = await bench(t);
+	const fired = await b.fire();
+	await b.runner.onFired(fired);
+	const ids = b.roles(b.runs.run(fired.run_id!)!);
+	b.fleet.find((record) => record.job_id === ids.L1)!.phase = "failed";
+	await b.ledger.close(ids.L1!, "failed: worker died before its report");
+	await b.runner.retryPending();
+	for (const role of ["L2", "L3", "L4", "L5", "L6"]) await b.report(ids[role]!);
+	assert.match((await b.ledger.show(ids.S1!)).close_reason ?? "", new RegExp(`^dropped: run .*: required reader\\(s\\) ${ids.L1} not delivered`));
+	assert.ok(!b.calls.dispatch.some((call) => call.jobId === ids.S1), "S1 never starts without all six reports");
+	assert.match((await b.ledger.show(fired.job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
+	assert.equal(b.runs.run(fired.run_id!)!.outcome, "partial");
+});

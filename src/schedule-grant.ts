@@ -1,10 +1,6 @@
 /**
- * Per-fire grants: every schedule mints a fresh grant on every fire (docs/contracts.md, *Fresh grant per fire*). At
- * `cp_schedule add` (or `move`, or the one-shot migration) the seed schedule grant's bounds are snapshotted into the
- * schedule's `grant_template`, its approval quoting the seed's own objective verbatim; every fire — cron, watch, the
- * dashboard's Run now or `cp_schedule run_now` — then mints a fresh `schedule_grant` from that template, re-evaluated
- * against the live home defaults, inside the scheduler's serialized fire lane. There is no opt-out and no reuse of a
- * grant: merge and risk:high are always asked, exclusions only grow and the token cap only shrinks.
+ * Legacy grant templates. No fire mints a grant since PR4 (docs/contracts.md, *Native schedule migration*):
+ * `mintFireGrant`, `pointerRefusal` and `carriedPreapproval` have no caller and PR4b deletes them.
  */
 import { isoTimestamp, type JobKind, type Mandate, type MandateDefaults, type ProjectMandateOverride, type RiskPreapproval, type ScheduleFire } from "./contracts.ts";
 import type { IssueMandateInput, MandateStore, MandateUsageJob } from "./mandate.ts";

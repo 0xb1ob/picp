@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
 import { registerScheduleTools } from "../extensions/command-post/tools-schedule.ts";
-import { isoTimestamp, LAYOUT } from "../src/contracts.ts";
+import { LAYOUT } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { loadMandateDefaults } from "../src/mandate-defaults.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { ParentCompactHold } from "../src/parent-compact-hold.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
@@ -48,10 +50,11 @@ for (const held of [false, true]) test(`skill fire and restart recovery: ${held 
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const mandates = new MandateStore(home.path);
-	const grant = mandates.issue({ projects: ["demo"], objective: "self-review", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, schedule_grant: true });
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => new FleetStore({ home: home.path }).read().jobs, cloneOf: () => home.path });
-	const schedule = await scheduler.add({ name: "self-review", project: "demo", mandate_id: grant.id, manual: true, title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review" });
+	const mandates = new MandateStore(home.path, { runs: openScheduleRunStore(home.path) });
+	const defaults = loadMandateDefaults(home.path);
+	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, runs: mandates.scheduleRuns, usageJobs: () => new FleetStore({ home: home.path }).read().jobs, cloneOf: () => home.path, mintContext: () => ({ defaults, ceiling: 100_000_000 }), repoOf: () => "acme/demo" });
+	const action = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
+	const schedule = await scheduler.add({ name: "pr-review", project: "demo", native: { action, limits: {} }, manual: true, title: "PR review", kind: "research", delivery: "local", skill: "cp-pr-review", description: "pr: https://github.com/acme/demo/pull/1" });
 	const hold = new ParentCompactHold({ timer: () => () => {} });
 	if (held) hold.settled({ over: true, raw: 210000, effective: 210000, threshold: 200000 });
 	let offers = 0;
@@ -107,11 +110,11 @@ for (const held of [false, true]) test(`skill fire and restart recovery: ${held 
 		assert.equal(parent.sent[0]!.customType, "cp-schedule");
 		assert.equal(parent.sent[0]!.display, true);
 		assert.match(parent.sent[0]!.content, /parent-expanded run/);
-		assert.deepEqual([parent.sent[0]!.details.schedule_id, parent.sent[0]!.details.job_id, parent.sent[0]!.details.skill], [schedule.id, anchor.id, "cp-self-review"]);
+		assert.deepEqual([parent.sent[0]!.details.schedule_id, parent.sent[0]!.details.job_id, parent.sent[0]!.details.skill], [schedule.id, anchor.id, "cp-pr-review"]);
 		assert.deepEqual(parent.options, [{ deliverAs: "followUp", triggerTurn: true }]);
 	}
-	assert.match(first.sent[0]!.content, /run now from the dashboard/);
-	assert.match(second.sent[0]!.content, /use skill cp-self-review to expand it now/);
+	assert.match(first.sent[0]!.content, /run now via the dashboard/);
+	assert.match(second.sent[0]!.content, /use skill cp-pr-review to expand it now/);
 	assert.deepEqual(mandates.list(), grants, "recovery/release mints no grant");
 	assert.equal((await ledger.list({ labels: [`schedule:${schedule.id}`] })).length, 1);
 

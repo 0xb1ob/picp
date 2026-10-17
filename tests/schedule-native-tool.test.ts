@@ -57,7 +57,7 @@ test("native add needs no mandate_id: a quote naming it saves an active native r
 	b.said.push("Add a schedule.");
 	await assert.rejects(b.call({ action: "add", name: "nightly", project: "demo", title: "x", kind: "ship", delivery: "pr", manual: true, operator_quote: "Add a schedule." }), /whole token/);
 	await assert.rejects(b.call({ action: "add", name: "nightly", project: "demo", title: "x", kind: "ship", delivery: "pr", manual: true }), /needs operator_quote/);
-	await assert.rejects(b.call({ action: "add", name: "nightly", project: "demo", title: "x", kind: "ship", delivery: "pr", manual: true, mandate_id: "md-x", limits: { usd: 1 } }), /limits are for a native add/);
+	await assert.rejects(b.call({ action: "add", name: "nightly", project: "demo", title: "x", kind: "ship", delivery: "pr", manual: true, mandate_id: "md-x", limits: { usd: 1 } }), /unknown parameter mandate_id/);
 	const text = await b.add("nightly", "ship", "pr");
 	assert.match(text, /native policy revision 1 saved and active/);
 	const policy = b.runs.activePolicy(b.idOf(text));
@@ -69,7 +69,7 @@ test("native run_now ignores operator_quote, takes overrides and mints no grant"
 	const b = bench(t);
 	const id = b.idOf(await b.add("nightly", "ship", "pr"));
 	const text = await b.call({ action: "run_now", id, operator_quote: "never said by anyone", overrides: { model: "mock/fast", parallelism: 1 } }, "call-run");
-	assert.match(text, /fired/); assert.match(text, /operator_quote is ignored on a native schedule/);
+	assert.match(text, /fired/); assert.match(text, /operator_quote is ignored; the saved native policy authorizes the run/);
 	const run = b.runs.openRun(id)!;
 	assert.equal(run.start_key, "cp_schedule:call-run");
 	assert.deepEqual(run.execution?.effective, { model: "mock/fast", parallelism: 1 });

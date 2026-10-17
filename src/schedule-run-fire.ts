@@ -1,47 +1,11 @@
-/** Policy-backed fire and operator activation, serialized by Scheduler. */
-import { randomBytes } from "node:crypto";
-import { dirname } from "node:path";
+/** Operator activation of saved policies, serialized by Scheduler; native runs start through src/schedule-native.ts. */
 import { isoTimestamp } from "./contracts.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
-import { refused, type MintContext, type Refusal } from "./schedule-grant.ts";
-import { verifiedRunNowClick } from "./schedule-control.ts";
+import { refused, type MintContext } from "./schedule-grant.ts";
 import type { Ledger } from "./ledger.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
-import { isNativePolicy, policyFromLegacy, schedulePolicyErrors, type LegacySchedulePolicy, type SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { isNativePolicy, nativePolicyDraft, schedulePolicyErrors, type SchedulePolicy } from "./viewer/schedule-policy.ts";
 import type { Schedule } from "./viewer/schedule-core.ts";
-import type { FireTrigger } from "./scheduler.ts";
-
-/** Legacy-generation runs only: native policies start through src/schedule-native.ts. */
-export async function startRun(input: {runs:ScheduleRunStore; ledger:Ledger; schedule:Schedule; policy:LegacySchedulePolicy; context:MintContext; title:string; now:Date; slot:Date; missed:boolean; missedAt:Date; manual?:FireTrigger; controlPid?:number}): Promise<{job_id:string; run_id:string; reason:string} | Refusal> {
- const {runs,ledger,schedule,policy,now,manual} = input;
- if (manual?.via === "cp_schedule" && (!manual.operator_quote || !manual.source_sha)) return {refusal:"a legacy run_now needs a verified operator quote"};
- if (runs.openRun(schedule.id)) return {refusal:`schedule ${schedule.id} already has open run ${runs.openRun(schedule.id)!.id}`};
- if (schedule.job.delivery === "pipeline") return {refusal:"pipeline schedules remain legacy"};
- const channel = manual?.via ?? "slot";
- if (!policy.permitted_start_channels[channel]) return {refusal:`schedule ${schedule.id}: ${channel} start is not permitted`};
- const recipe = policy.recipe;
- if ((["title", "kind", "delivery", "description", "script_path"] as const).some((key) => schedule.job[key] !== recipe[key]) || (schedule.job.skill ?? null) !== recipe.skill) return {refusal:`schedule ${schedule.id}: saved policy recipe differs from the schedule`};
- const bounds = effectivePolicyBounds(policy,input.context,schedule.project,schedule.job.kind,now);
- if (refused(bounds)) return bounds;
- const stamp = isoTimestamp(now), id = `run-${stamp.replace(/[^0-9]/g,"")}-${randomBytes(3).toString("hex")}`;
- const snapshot = {...structuredClone(policy),limits:bounds.limits,exclusions:bounds.exclusions};
- const verified = manual?.via === "cp_schedule" || (manual?.via === "dashboard" && verifiedRunNowClick(dirname(runs.runsFile),manual.request_id,schedule.id,input.controlPid ?? process.pid).ok);
- const preapproval = !verified ? undefined : manual?.via === "cp_schedule"
-  ? {operator_quote:manual.operator_quote!,decided_by:manual.decided_by === "operator-delegated" ? "operator-delegated" as const : "operator-quote" as const,scope:"mandate_jobs" as const,granted_at:stamp,...(manual.delegation_rule ? {delegation_rule:manual.delegation_rule} : {}),...(manual.send_id ? {send_id:manual.send_id} : {})}
-  : {operator_quote:policy.approval.operator_quote,decided_by:policy.approval.decided_by,scope:"mandate_jobs" as const,granted_at:stamp,...(policy.approval.delegation_rule ? {delegation_rule:policy.approval.delegation_rule} : {}),...(policy.approval.send_id ? {send_id:policy.approval.send_id} : {})};
- await runs.createRun({schema_version:1,id,schedule_id:schedule.id,policy_revision:policy.revision,policy:snapshot,trigger:{via:manual?.via ?? (schedule.trigger.type === "watch" ? "watch" : "slot"),at:stamp,slot:isoTimestamp(input.slot),missed:input.missed,...(manual?.via === "dashboard" ? {request_id:manual.request_id} : manual ? {tool_call_id:manual.tool_call_id,quote_sha:manual.source_sha} : {})},anchor_job_id:null,members:[],phase:"accepted",outcome:null,started_at:stamp,deadline_at:isoTimestamp(new Date(now.getTime()+snapshot.limits.run_hours*3_600_000)),risk_preapproved:[],authority_log:[],cap_notices:[],...(preapproval ? {risk_preapproval:preapproval} : {})});
- const created = await ledger.create({title:input.title,project:schedule.project,kind:schedule.job.kind,delivery:schedule.job.delivery,labels:[`schedule:${schedule.id}`],...(schedule.job.description ? {description:schedule.job.description} : {}),...(schedule.job.script_path !== undefined ? {scriptPath:schedule.job.script_path} : {})});
- const under = `for ${schedule.id} (${schedule.name}) under run ${id} (policy rev ${policy.revision})`;
- const marker = manual?.via === "cp_schedule" ? `run-now quote sha ${manual.source_sha}` : undefined;
- const notes = manual?.via === "dashboard" ? `run now from the dashboard (${manual.request_id}) ${under}${manual.peer ? `; peer ${manual.peer}` : ""}` : manual ? `run now via cp_schedule (${manual.tool_call_id}) ${under}; authorized by ${manual.decided_by}; ${marker}` : `scheduled ${under}${input.missed ? `; missed ${isoTimestamp(input.missedAt)}` : ""}`;
- await ledger.update(created.id,{notes,...(schedule.job.skill ? {status:"deferred"} : {})});
- await runs.attachAnchor(id,{job_id:created.id,role:null,admitted_at:created.created_at});
- await runs.setPhase(id,"running");
- let warning = "";
- if (manual?.via === "cp_schedule") try { await ledger.comment(created.id,`${marker}: ${manual.operator_quote}`); } catch(error) { warning = `; warning: quote comment not written (${(error as Error).message}); the notes retain ${marker}`; }
- return {job_id:created.id,run_id:id,reason:`created ${created.id} under run ${id}; no grant minted${warning}`};
-}
-
 
 export interface PolicyAction {
  provenance: SchedulePolicy["provenance"];
@@ -59,28 +23,22 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  const {schedule,runs,action,now} = input;
  const record = runs.policyRecord(schedule.id);
  const latest = record?.revisions.at(-1);
- if (schedule.job.delivery === "pipeline" && !isNativePolicy(input.draft ?? latest)) throw new Error("legacy pipeline schedules remain on per-fire grants; save a native policy");
  if (input.op !== "deactivate" && input.base !== (latest?.revision ?? 0)) throw new Error("Schedule changed; review updated settings");
- if (input.op === "deactivate" && !schedule.grant_template) throw new Error("v2 schedule has no legacy template; after drain, restore the P4 backup to return to per-fire grants");
  if (input.op === "deactivate" && runs.openRun(schedule.id)) throw new Error(`schedule ${schedule.id} has an open run; deactivate once it closes`);
  if ((input.op === "adopt" || (input.op === "save" && record?.active_revision == null)) && (runs.openRun(schedule.id) || (await input.ledger.list({labels:[`schedule:${schedule.id}`]})).length)) throw new Error(`schedule ${schedule.id} has an open legacy/run job; adopt once every job closes`);
  const used = action.provenance.quote_sha;
  if (used && record?.revisions.some(p=>p.provenance.quote_sha === used)) throw new Error("the operator message behind this quote was already used for this schedule");
- const seed = schedule.grant_template ? input.mandates.get(schedule.grant_template.seed_mandate_id) : undefined;
- const legacy = schedule.grant_template ? policyFromLegacy(schedule,schedule.grant_template,seed) : undefined;
- const baseline = latest ?? legacy;
- if (!baseline) throw new Error(`schedule ${schedule.id} has no saved policy or legacy template`);
- const draft = input.draft ?? baseline;
+ const given = input.draft ?? latest;
+ // The editor opens a legacy schedule on its read-only snapshot: the operator's save re-expresses it, narrowest, natively.
+ const draft = input.op === "save" && given && !isNativePolicy(given) ? nativePolicyDraft({schedule_id:given.schedule_id,project:given.project,recipe:given.recipe,recipe_config:given.recipe_config,trigger:given.trigger,limits:given.limits,model_policy:given.model_policy,exclusions:given.exclusions}, {revision:given.revision,saved_at:given.saved_at,saved_by:given.saved_by,provenance:given.provenance}) : given;
+ if (!draft) throw new Error(`schedule ${schedule.id} has no saved policy; save a native one`);
+ // Legacy grant-shaped revisions stay readable for audit and open runs, but none is adopted again.
+ if (input.op !== "deactivate" && !isNativePolicy(draft)) throw new Error("only a native policy revision is saved or adopted; a legacy grant-shaped revision is read-only");
  const errors = schedulePolicyErrors(draft);
  if (errors.length) throw new Error(`invalid schedule policy: ${errors.join("; ")}`);
  if (draft.schedule_id !== schedule.id || draft.project !== schedule.project) throw new Error("policy must name this schedule and project");
- if (draft.recipe.delivery === "pipeline" && !isNativePolicy(draft)) throw new Error("legacy pipeline schedules remain on per-fire grants; save a native policy");
- // A native save is the operator's explicit edit, so it authorizes its own effects; native never reverts to legacy.
- if (isNativePolicy(baseline) && !isNativePolicy(draft)) throw new Error("a native schedule policy never returns to the legacy grant shape");
- if (!isNativePolicy(draft) && draft.effects.includes("org_review_approve") && !baseline.effects.includes("org_review_approve")) throw new Error("org-review approval requires the existing dashboard-only seed clearance");
- const stamped = {...structuredClone(draft),revision:(latest?.revision ?? 0)+1,saved_at:isoTimestamp(now),saved_by:action.saved_by,provenance:structuredClone(action.provenance)};
- const policy:SchedulePolicy = isNativePolicy(stamped) || isNativePolicy(baseline) ? stamped : {...stamped,approval:structuredClone(baseline.approval)};
- // Deactivation removes authority; live admission checks must not prevent rollback after drain.
+ const policy:SchedulePolicy = {...structuredClone(draft),revision:(latest?.revision ?? 0)+1,saved_at:isoTimestamp(now),saved_by:action.saved_by,provenance:structuredClone(action.provenance)};
+ // Deactivation removes authority: no new run starts until a native revision is adopted; open runs drain.
  if (input.op === "deactivate") return runs.deactivatePolicy(schedule.id,policy);
  if (!input.context) throw new Error("live policy bounds are not wired");
  input.validate(policySchedule(schedule,policy));

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isoTimestamp, type FleetRecord, type Job } from "./contracts.ts";
 import { PACKAGE_ROOT } from "./home.ts";
-import { wasDropped, type Ledger } from "./ledger.ts";
+import type { Ledger } from "./ledger.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
 import { isNativePolicy } from "./viewer/schedule-policy.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
@@ -125,10 +125,12 @@ export async function advanceSelfReview(ports: SelfReviewPorts, runId: string): 
 	const unstarted = (id: string): boolean => jobs.get(id)?.status === "open" && !fleet.has(id);
 	const cap = run.cap_notices.find((key) => key.endsWith(":1"));
 	const stop = isoTimestamp(ports.now()) >= run.deadline_at ? "deadline passed" : cap ? `${cap.split(":")[0]} cap reached` : undefined;
-	const lost = readerIds.filter((id) => wasDropped(jobs.get(id)!));
+	// A report exists only behind a teardown's delivery close; any other close (dropped:, failed:, …) lost it.
+	const delivered = (id: string): boolean => jobs.get(id)?.status === "closed" && /^(researched|gated):/.test(jobs.get(id)?.close_reason ?? "");
+	const lost = readerIds.filter((id) => jobs.get(id)?.status === "closed" && !delivered(id));
 	for (const id of [...readerIds, s1].filter(unstarted)) {
 		if (stop) await ledger.drop(id, `run ${run.id}: ${stop}; not started`);
-		else if (id === s1 && lost.length) await ledger.drop(id, `run ${run.id}: required reader(s) ${lost.join(", ")} dropped; no synthesis without all six reports`);
+		else if (id === s1 && lost.length) await ledger.drop(id, `run ${run.id}: required reader(s) ${lost.join(", ")} not delivered (dropped or failed); no synthesis without all six reports`);
 	}
 	jobs = new Map(ledger.read().jobs.map((job) => [job.id, job]));
 	let live = [...readerIds, s1].filter((id) => LIVE.includes(fleet.get(id)?.phase ?? "")).length;
@@ -140,13 +142,13 @@ export async function advanceSelfReview(ports: SelfReviewPorts, runId: string): 
 		live++;
 		await ports.dispatch({ jobId: id, task: readerTask(run, anchor, reader), wallClockSeconds: SELF_REVIEW_WALL_CLOCK_SECONDS });
 	}
-	if (live < parallelism && unstarted(s1) && readerIds.every((id) => jobs.get(id)?.status === "closed" && !wasDropped(jobs.get(id)!))) {
+	if (live < parallelism && unstarted(s1) && readerIds.every(delivered)) {
 		const readers = SELF_REVIEW_READERS.map((reader) => ({ role: reader.role, id: roleIds.get(reader.role)! }));
 		await ports.dispatch({ jobId: s1, task: synthesisTask(run, anchor, readers, s1), wallClockSeconds: SELF_REVIEW_WALL_CLOCK_SECONDS });
 	}
 	const synthesis = jobs.get(s1)!;
 	if (![...readerIds, s1].every((id) => jobs.get(id)?.status === "closed")) return;
 	const board = fleet.get(s1)?.receipts?.find((receipt) => receipt.kind === "board")?.url;
-	if (wasDropped(synthesis)) await ledger.drop(anchor.id, `self-review run ${run.id} ended without a synthesis (${synthesis.close_reason})`);
+	if (!delivered(s1)) await ledger.drop(anchor.id, `self-review run ${run.id} ended without a synthesis (${synthesis.close_reason})`);
 	else await ledger.close(anchor.id, `researched: synthesis ${s1}${board ? ` ${board}` : ""} (self-review run ${run.id})`);
 }

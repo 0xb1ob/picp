@@ -1,6 +1,6 @@
 /**
  * cp-hhuf P6, the parent's half: the Schedules page's journaled requests (`state/schedule-control.jsonl`) are
- * claimed before they act, applied through the one Scheduler (grant checks included), and answered with one outcome.
+ * claimed before they act, applied through the one Scheduler (policy checks included), and answered with one outcome.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ import { handleScheduleControlStatus } from "../src/viewer/control-api.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
 import { controlConfigFile, readScheduleControl, scheduleControlFile, type ScheduleControlLine } from "../src/viewer/control-files.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
-import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
 
 const T0 = new Date("2026-07-01T07:03:00Z");
 
@@ -29,14 +29,15 @@ function bench(t: import("node:test").TestContext) {
 	t.after(() => home.cleanup());
 	const clock = { now: T0 };
 	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const mandates = new MandateStore(home.path, { now: () => clock.now });
+	const runs = openScheduleRunStore(home.path);
+	const mandates = new MandateStore(home.path, { runs, now: () => clock.now });
 	const fleet = new FleetStore({ home: home.path });
 	const scheduler = new Scheduler({
-		home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path, now: () => clock.now, startedAt: T0,
+		home: home.path, ledger: () => ledger, mandates, runs, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path, now: () => clock.now, startedAt: T0,
 		mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }),
 	});
 	const stateDir = join(home.path, LAYOUT.state);
-	const grant = () => mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true });
+	const native = { action: { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } }, limits: {} };
 	const logs: string[] = [];
 	const control = (extra: Partial<ConstructorParameters<typeof ScheduleControl>[0]> = {}) => new ScheduleControl({ stateDir, scheduler, now: () => clock.now, pid: 4242, log: (line) => logs.push(line), ...extra });
 	let n = 0;
@@ -47,18 +48,15 @@ function bench(t: import("node:test").TestContext) {
 	};
 	const lines = (): ScheduleControlLine[] => existsSync(scheduleControlFile(stateDir)) ? readFileSync(scheduleControlFile(stateDir), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
 	const state = (id: string) => readScheduleControl(stateDir).requests.find((entry) => entry.id === id);
-	return { clock, ledger, mandates, scheduler, stateDir, grant, control, request, lines, state, logs };
+	return { clock, ledger, mandates, scheduler, stateDir, native, control, request, lines, state, logs };
 }
 
 
 test("parent claims a stale revision-bound start before refusing it, without creating a job",async(t)=>{
- const b=bench(t), schedule=await b.scheduler.add({name:"nightly",project:"demo",mandate_id:b.grant().id,manual:true,title:"Report",kind:"research",delivery:"answer"});
- const runs=b.mandates.scheduleRuns;
- await runs.savePolicyRevision(policyFromLegacy(schedule,schedule.grant_template!),{at:T0.toISOString().replace(/\.\d{3}Z$/,"Z"),provenance:{channel:"dashboard"}});
- const scheduler=new Scheduler({home:b.mandates.home,ledger:()=>b.ledger,mandates:b.mandates,runs,usageJobs:()=>[],now:()=>T0,cloneOf:()=>b.mandates.home});
+ const b=bench(t), schedule=await b.scheduler.add({name:"nightly",project:"demo",native:b.native,manual:true,title:"Report",kind:"research",delivery:"answer"});
  const id="sc-20260701070300-abcdef12";
  appendScheduleControlLine(b.stateDir,{type:"request",by:"viewer",id,at:T0.toISOString(),peer:null,op:"run_now",schedule_id:schedule.id,revision:0});
- await b.control({scheduler}).pass();
+ await b.control().pass();
  assert.deepEqual(b.lines().filter(l=>l.id===id).map(l=>l.type),["request","claimed","outcome"]);
  assert.equal(b.state(id)?.state,"refused");assert.match(b.state(id)?.reason!,/Schedule changed/);
  assert.deepEqual(await b.ledger.list(),[]);
@@ -67,8 +65,8 @@ test("parent claims a stale revision-bound start before refusing it, without cre
 const job = { title: "nightly report", kind: "research" as const, delivery: "answer" as const };
 
 test("enable, disable, remove and run now are claimed before they act and answered with one outcome each", async (t) => {
-	const { ledger, scheduler, grant, control, request, lines, state, logs } = bench(t);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: grant().id, cron: "0 9 * * *", tz: "UTC", ...job });
+	const { ledger, scheduler, native, control, request, lines, state, logs } = bench(t);
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native, cron: "0 9 * * *", tz: "UTC", ...job });
 	const parent = control();
 	const off = request("disable", schedule.id);
 	assert.deepEqual(await parent.pass(), []);
@@ -88,12 +86,12 @@ test("enable, disable, remove and run now are claimed before they act and answer
 	assert.equal(state(run)?.job_id, fired?.job_id);
 	assert.match((await ledger.show(fired?.job_id as string)).title, /nightly run now 2026-07-01T07:03Z/);
 	assert.equal(fired?.manual_via, "dashboard");
-	assert.match((await ledger.show(fired?.job_id as string)).notes ?? "", new RegExp(`^run now from the dashboard \\(${run}\\) for ${schedule.id} \\(nightly\\) under fire grant ${fired?.mandate_id} \\(minted from the template approved by operator-delegated\\); peer 127\\.0\\.0\\.1$`));
+	assert.match((await ledger.show(fired?.job_id as string)).notes ?? "", new RegExp(`^run now from the dashboard \\(${run}\\) for ${schedule.id} \\(nightly\\) under run ${fired?.run_id} \\(native policy rev 1; start dashboard:${run}\\)$`));
 	assert.equal(scheduler.list()[0]?.last_fire, undefined, "a run now never writes last_fire");
 	const again = request("run_now", schedule.id);
 	assert.deepEqual(await parent.pass(), []);
 	assert.equal(state(again)?.state, "refused");
-	assert.match(state(again)?.reason ?? "", /still open/);
+	assert.match(state(again)?.reason ?? "", /already_running/);
 
 	const size = readFileSync(scheduleControlFile(dirname(scheduler.file))).length;
 	assert.deepEqual(await parent.pass(), [], "a second pass is a no-op");
@@ -102,30 +100,29 @@ test("enable, disable, remove and run now are claimed before they act and answer
 	const gone = request("remove", schedule.id);
 	await parent.pass();
 	assert.deepEqual(scheduler.list(), []);
-	assert.deepEqual([state(gone)?.state, state(gone)?.reason], ["done", `removed ${schedule.id}; revoked its grant ${fired?.mandate_id} (in-flight workers were not killed)`]);
+	assert.deepEqual([state(gone)?.state, state(gone)?.reason], ["done", `removed ${schedule.id}`]);
 	assert.ok(logs.some((line) => line.includes(`schedule control ${gone} remove ${schedule.id}: done`)));
 	const shown = handleScheduleControlStatus({} as IncomingMessage, { home: dirname(dirname(scheduler.file)), stateDir: dirname(scheduler.file), host: "127.0.0.1", port: 0, requireTailnet: true }, T0).body as ScheduleControlStatusResponse;
 	assert.deepEqual(shown.requests.map((entry) => [entry.op, entry.state]), [["disable", "done"], ["enable", "done"], ["run_now", "done"], ["run_now", "refused"], ["remove", "done"]]);
 	assert.equal(shown.requests[2]?.job_id, fired?.job_id);
 });
 
-test("enable without an active grant is refused and the schedule stays disabled", async (t) => {
-	const { mandates, scheduler, grant, control, request, state } = bench(t);
-	const mandate = grant();
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: mandate.id, cron: "0 9 * * *", tz: "UTC", ...job });
+test("enable without an active native revision is refused and the schedule stays disabled", async (t) => {
+	const { scheduler, native, control, request, state } = bench(t);
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native, cron: "0 9 * * *", tz: "UTC", ...job });
+	await scheduler.deactivatePolicy(schedule.id, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tc-off", quote_sha: "0123456789ab" } });
 	await scheduler.setEnabled(schedule.id, false);
-	mandates.pause(mandate.id);
 	const before = readFileSync(scheduler.file, "utf8");
 	const id = request("enable", schedule.id);
 	await control().pass();
 	assert.equal(state(id)?.state, "refused");
-	assert.match(state(id)?.reason ?? "", new RegExp(`enable ${schedule.id} refused: ${mandate.id} is paused`));
+	assert.match(state(id)?.reason ?? "", new RegExp(`enable ${schedule.id} refused: schedule ${schedule.id} has no active native policy`));
 	assert.equal(readFileSync(scheduler.file, "utf8"), before, "schedules.json unchanged");
 });
 
 test("a claim that cannot be journaled acts on nothing and records no outcome", async (t) => {
-	const { stateDir, scheduler, grant, control, request, state, lines } = bench(t);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: grant().id, cron: "0 9 * * *", tz: "UTC", ...job });
+	const { stateDir, scheduler, native, control, request, state, lines } = bench(t);
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native, cron: "0 9 * * *", tz: "UTC", ...job });
 	const id = request("disable", schedule.id);
 	const failing = control({ append: (line) => (line.type === "claimed" ? { ok: false, error: "ENOSPC" } : appendScheduleControlLine(stateDir, line)) });
 	await failing.pass();
@@ -137,8 +134,8 @@ test("a claim that cannot be journaled acts on nothing and records no outcome", 
 });
 
 test("an old request is expired, a foreign claim is interrupted and never re-applied, and the opt-out refuses", async (t) => {
-	const { clock, stateDir, scheduler, grant, control, request, state } = bench(t);
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: grant().id, cron: "0 9 * * *", tz: "UTC", ...job });
+	const { clock, stateDir, scheduler, native, control, request, state } = bench(t);
+	const schedule = await scheduler.add({ name: "nightly", project: "demo", native, cron: "0 9 * * *", tz: "UTC", ...job });
 	const old = request("disable", schedule.id, new Date(clock.now.getTime() - 121_000));
 	const claimed = request("disable", schedule.id);
 	appendScheduleControlLine(stateDir, { type: "claimed", by: "parent", id: claimed, at: clock.now.toISOString(), pid: 999_999 });

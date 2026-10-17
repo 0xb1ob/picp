@@ -1,16 +1,17 @@
 /**
- * S2: `cp_schedule run_now` fires a schedule only on one verbatim operator sentence that names it, from the session that
- * holds the parent lock, once per source message. The real host (registerScheduleTools), a real ledger, grant and scheduler.
+ * `cp_schedule run_now` starts a run of the schedule's active native revision from the session that holds the parent
+ * lock: no quote, grant or ask (PR4 retired the legacy quote-per-run path). The real host (registerScheduleTools),
+ * a real ledger, run store and scheduler.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerScheduleTools } from "../extensions/command-post/tools-schedule.ts";
-import { isoTimestamp, type Delivery } from "../src/contracts.ts";
+import type { Delivery } from "../src/contracts.ts";
 import { ParentCompactHold } from "../src/parent-compact-hold.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { sendMarker } from "../src/parent-outbox.ts";
+import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 
@@ -20,11 +21,8 @@ async function bench(t: { after(fn: () => void): void }, delivery: Delivery = "p
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const mandates = new MandateStore(home.path);
-	const grant = mandates.issue({ projects: ["demo"], objective: "nightly", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, schedule_grant: true });
+	const mandates = new MandateStore(home.path, { runs: openScheduleRunStore(home.path) });
 	const fleet = new FleetStore({ home: home.path });
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path });
-	const schedule = await scheduler.add({ name: "nightly", project: "demo", mandate_id: grant.id, manual: true, title: "Nightly fix", kind: "ship", delivery });
 	const dispatched: Array<{ jobId: string; task?: string }> = [];
 	const post = { home: home.path, ledger: () => ledger, mandates, fleet, registry: { pathOf: () => home.path, archivedNames: () => [], get: (name: string) => (name === "demo" ? {} : undefined) }, dispatchQueue: { drain: async () => {} }, dispatch: async (request: { jobId: string; task?: string }) => { dispatched.push(request); } };
 	const lock = { held: true };
@@ -37,156 +35,102 @@ async function bench(t: { after(fn: () => void): void }, delivery: Delivery = "p
 		() => lock.held, () => {}, () => {}, deferParentWake,
 	);
 	const said: string[] = [];
-	const run = async (quote: string, id = schedule.id, call = "call-1") => {
-		const ctx = { sessionManager: { getEntries: () => said.map((content) => ({ type: "message", message: { role: "user", content } })) } };
-		return (await execute!(call, { action: "run_now", id, operator_quote: quote }, undefined, undefined, ctx)).content[0]!.text;
-	};
-	const jobs = () => ledger.list({ labels: [`schedule:${schedule.id}`], all: true });
 	const call = async (params: Record<string, unknown>, id = "call-x") => {
 		const ctx = { sessionManager: { getEntries: () => said.map((content) => ({ type: "message", message: { role: "user", content } })) } };
 		return (await execute!(id, params, undefined, undefined, ctx)).content[0]!.text;
 	};
-	return { ledger, mandates, scheduler, schedule, lock, said, run, call, jobs, sent, options, dispatched };
+	said.push("Add the nightly schedule.");
+	const kind = delivery === "answer" || delivery === "board" ? "research" : "ship"; // native ship never answers or publishes a board
+	const added = await call({ action: "add", name: "nightly", project: "demo", manual: true, title: "Nightly fix", kind, delivery, operator_quote: "Add the nightly schedule." }, "call-add");
+	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, runs: mandates.scheduleRuns, usageJobs: () => fleet.read().jobs, cloneOf: () => home.path });
+	const schedule = scheduler.list().find((entry) => added.includes(entry.id))!;
+	const run = async (id = schedule.id, callId = "call-1", extra: Record<string, unknown> = {}) => call({ action: "run_now", id, ...extra }, callId);
+	const jobs = () => ledger.list({ labels: [`schedule:${schedule.id}`], all: true });
+	return { ledger, mandates, scheduler, schedule, added, lock, said, run, call, jobs, sent, options, dispatched };
 }
 
-
-test("adopt/deactivate tools require one naming quote, bind revisions and never mint a grant for a run",async(t)=>{
- const b=await bench(t,"pr");
- const adopt=`Adopt ${b.schedule.id}.`;
- await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/quote not found/);
- b.said.push(adopt,"Yes, please.");
- await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:"Yes, please.",revision:0}),/whole token/);
- b.lock.held=false;await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/fleet lock/);b.lock.held=true;
- await assert.rejects(b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt}),/needs revision/);
- assert.match(await b.call({action:"adopt",id:b.schedule.id,operator_quote:adopt,revision:0}),/revision 1/);
- await assert.rejects(b.call({action:"deactivate",id:b.schedule.id,operator_quote:adopt}),/already used/);
- b.said.push(`Run ${b.schedule.id}.`);
- const grants=JSON.stringify(b.mandates.list());
- await assert.rejects(b.call({action:"run_now",id:b.schedule.id,operator_quote:`Run ${b.schedule.id}.`,revision:0}),/Schedule changed/);
- assert.match(await b.call({action:"run_now",id:b.schedule.id,operator_quote:`Run ${b.schedule.id}.`,revision:1}),/no grant minted/);
- assert.equal(JSON.stringify(b.mandates.list()),grants);
- assert.equal(b.mandates.scheduleRuns.openRun(b.schedule.id)?.policy_revision,1);
+test("adopt/deactivate tools require one naming quote, bind revisions and never mint a grant for a run", async (t) => {
+	const b = await bench(t, "pr");
+	const adopt = `Adopt ${b.schedule.id}.`;
+	await assert.rejects(b.call({ action: "adopt", id: b.schedule.id, operator_quote: adopt, revision: 1 }), /quote not found/);
+	b.said.push(adopt, "Yes, please.");
+	await assert.rejects(b.call({ action: "adopt", id: b.schedule.id, operator_quote: "Yes, please.", revision: 1 }), /whole token/);
+	b.lock.held = false; await assert.rejects(b.call({ action: "adopt", id: b.schedule.id, operator_quote: adopt, revision: 1 }), /fleet lock/); b.lock.held = true;
+	await assert.rejects(b.call({ action: "adopt", id: b.schedule.id, operator_quote: adopt }), /needs revision/);
+	assert.match(await b.call({ action: "adopt", id: b.schedule.id, operator_quote: adopt, revision: 1 }), /revision 2/);
+	await assert.rejects(b.call({ action: "deactivate", id: b.schedule.id, operator_quote: adopt }), /already used/);
+	await assert.rejects(b.run(b.schedule.id, "call-1", { revision: 1 }), /Schedule changed/);
+	assert.match(await b.run(b.schedule.id, "call-2", { revision: 2 }), /no grant minted/);
+	assert.deepEqual(b.mandates.list(), []);
+	assert.equal(b.mandates.scheduleRuns.openRun(b.schedule.id)?.policy_revision, 2);
 });
 
-test("run_now fires on a verified quote naming the schedule, records it verbatim, and refuses a replay of the same message", async (t) => {
-	const { ledger, schedule, said, run, jobs, sent } = await bench(t);
-	const quote = `Run ${schedule.id} now.`;
-	said.push(`Please. ${quote}`);
-	const text = await run(quote);
-	assert.match(text, new RegExp(`schedule nightly \\(${schedule.id}\\) fired: created cp-\\S+ .*run now via cp_schedule on a verified operator quote \\(call-1\\)`));
+test("run_now starts a native run with no quote, wakes the parent for a pr fire, and replays its own tool call", async (t) => {
+	const { schedule, added, run, jobs, sent, mandates } = await bench(t);
+	assert.match(added, /native policy revision 1 saved and active/);
+	const text = await run(schedule.id, "call-1", { operator_quote: "Run it." });
+	assert.match(text, new RegExp(`schedule nightly \\(${schedule.id}\\) fired: created cp-\\S+ under run .*run now via cp_schedule \\(call-1\\)`));
+	assert.match(text, /operator_quote is ignored; the saved native policy authorizes the run/);
 	const [job] = await jobs();
-	assert.ok(job);
-	assert.match(job.notes ?? "", new RegExp(`run now via cp_schedule \\(call-1\\) for ${schedule.id} \\(nightly\\).*authorized by operator-quote; run-now quote sha [0-9a-f]{12}$`));
-	const sha = /run-now quote sha ([0-9a-f]{12})/.exec(job.notes ?? "")![1];
-	assert.deepEqual(job.comments.map((comment) => comment.text), [`run-now quote sha ${sha}: ${quote}`]);
+	assert.match(job!.notes ?? "", new RegExp(`run now via cp_schedule \\(call-1\\) for ${schedule.id} \\(nightly\\) under run`));
+	assert.deepEqual(job!.comments, [], "no quote is recorded: none authorized the run");
 	assert.equal(sent.length, 1, "a pr fire wakes the parent like any other fire");
 	assert.equal(sent[0]!.customType, "cp-schedule");
-
-	// (d) the same source message never authorizes a second run now, even after the first fire closed.
-	await ledger.close(job.id, "done");
-	assert.match(await run(quote, schedule.id, "call-2"), new RegExp(`skipped: run now not recorded: the operator message behind this quote already authorized run now ${job.id}`));
-	assert.equal((await jobs()).length, 1, "no job created");
-	// A new operator message naming the schedule (by name) does.
-	said.push("Fire the nightly schedule again, please.");
-	assert.match(await run("Fire the nightly schedule again, please.", schedule.id, "call-3"), /fired: created cp-/);
-	assert.equal((await jobs()).length, 2);
+	assert.match(await run(schedule.id, "call-1"), /replayed/);
+	assert.match(await run(schedule.id, "call-2"), /run now not recorded: already_running/);
+	assert.equal((await jobs()).length, 1);
+	assert.deepEqual(mandates.list(), []);
 });
 
 test("run_now refusals are each named and create no job", async (t) => {
-	const { scheduler, schedule, lock, said, run, jobs } = await bench(t);
-	said.push(`Run ${schedule.id} now.`, "Go ahead with it.");
-	// (b) not in any operator message
-	await assert.rejects(run(`Run ${schedule.id} immediately.`), /quote not found/);
-	// (c) verbatim, but names neither the id nor the name
-	await assert.rejects(run("Go ahead with it."), new RegExp(`the quote names neither ${schedule.id} nor "nightly"`));
-	// S3 amendment: the name only inside a longer word names nothing (whole tokens only)
-	said.push("Run the nightlyish check now.");
-	await assert.rejects(run("Run the nightlyish check now."), new RegExp(`the quote names neither ${schedule.id} nor "nightly"`));
-	// (e) the session does not hold the parent lock
+	const { scheduler, schedule, lock, run, jobs } = await bench(t);
 	lock.held = false;
-	await assert.rejects(run(`Run ${schedule.id} now.`), /does not hold the parent lock/);
+	await assert.rejects(run(), /does not hold the parent lock/);
 	lock.held = true;
-	// unknown schedule, and a missing quote
-	await assert.rejects(run(`Run ${schedule.id} now.`, "sch-ffffff"), /no schedule sch-ffffff/);
-	await assert.rejects(run(""), /run_now needs operator_quote/);
-	// (f) a disabled schedule
+	await assert.rejects(run("sch-ffffff"), /no schedule sch-ffffff/);
 	await scheduler.setEnabled(schedule.id, false);
-	await assert.rejects(run(`Run ${schedule.id} now.`), new RegExp(`schedule ${schedule.id} is disabled`));
+	await assert.rejects(run(), new RegExp(`schedule ${schedule.id} is disabled`));
 	assert.deepEqual(await jobs(), []);
 });
 
-test("run_now: an open previous fire refuses; a delegated quote is recorded as operator-delegated with its send", async (t) => {
-	const { schedule, said, run, jobs } = await bench(t);
-	const send = "ps-20260701070300-0a1b2c3d";
-	said.push(`Run nightly now.\n\n${sendMarker(send, { delegated: true, delegation_rule: "main session relays run-now asks" })}`);
-	assert.match(await run("Run nightly now."), /fired/);
-	const [job] = await jobs();
-	assert.match(job!.notes ?? "", new RegExp(`authorized by operator-delegated \\(send ${send}, rule: main session relays run-now asks\\)`));
-	// (g) a new sentence, but the previous fire is still open
-	said.push(`Run ${schedule.id} once more.`);
-	assert.match(await run(`Run ${schedule.id} once more.`, schedule.id, "call-2"), new RegExp(`run now not recorded: the previous fire ${job!.id} is still open`));
-	assert.equal((await jobs()).length, 1);
-});
-
-test("fresh grant per fire: the removed refire/approval_quote params are refused as unknown; a plain add saves the template and run_now fires under a freshly minted grant", async (t) => {
+test("cp_schedule add: removed params (refire, approval_quote, mandate_id) are refused as unknown, and a quote is required", async (t) => {
 	const { mandates, said, call } = await bench(t);
-	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 500_000 }, job_cap: 2, schedule_grant: true });
-	const add = { action: "add", name: "triage", project: "demo", mandate_id: seed.id, manual: true, title: "Triage", kind: "research", delivery: "answer" };
+	said.push("Add triage.");
+	const add = { action: "add", name: "triage", project: "demo", manual: true, title: "Triage", kind: "research", delivery: "answer", operator_quote: "Add triage." };
 	await assert.rejects(call({ ...add, refire: true }), /cp_schedule add refused: unknown parameter refire; a schedule's bounds are its saved policy/);
-	await assert.rejects(call({ ...add, approval_quote: "Yes, refire triage." }), /cp_schedule add refused: unknown parameter approval_quote/);
-	await assert.rejects(call({ ...add, refire: true, approval_quote: "Yes." }), /unknown parameter refire, approval_quote/);
-	assert.equal(mandates.list().filter((m) => m.status === "active").length, 2, "a refused add touched no grant");
-	const added = await call(add);
-	assert.match(added, /fire grant template: each fire mints a fresh grant .*approved "triage" \(operator-delegated\)/);
-	const id = /added (sch-[0-9a-f]{6})/.exec(added)![1]!;
-	said.push("Run triage now.");
-	const fired = await call({ action: "run_now", id, operator_quote: "Run triage now." }, "call-r");
-	assert.match(fired, new RegExp(`minted fire grant md-[0-9a-f]{6} from the template of ${seed.id}`));
-	const fire = mandates.list().find((m) => m.schedule_fire?.schedule_id === id)!;
-	assert.equal(fire.schedule_fire?.approval.operator_quote, "triage", "the seed's objective, quoted verbatim");
-	assert.equal(fire.schedule_fire?.trigger.via === "cp_schedule" && fire.schedule_fire.trigger.operator_quote, "Run triage now.");
-	assert.equal(mandates.get(seed.id)?.status, "revoked");
+	await assert.rejects(call({ ...add, approval_quote: "Yes." }), /cp_schedule add refused: unknown parameter approval_quote/);
+	await assert.rejects(call({ ...add, mandate_id: "md-123456" }), /unknown parameter mandate_id/);
+	await assert.rejects(call({ ...add, operator_quote: undefined }), /needs operator_quote/);
+	assert.match(await call(add), /added sch-[0-9a-f]{6}.*\nnative policy revision 1 saved and active/s);
+	assert.deepEqual(mandates.list(), [], "no seed, no grant");
 });
 
-for (const delivery of ["pr", "pipeline"] as const) test(`held ${delivery} wake delays transport only: quote, job and fresh grant exist before release`, async (t) => {
+test("held pr wake delays transport only: the job and run exist before release", async (t) => {
 	const hold = new ParentCompactHold({ timer: () => () => {} });
 	hold.settled({ over: true, raw: 210000, effective: 210000, threshold: 200000 });
-	const b = await bench(t, delivery, (deliver) => { if (hold.offer(deliver) === "send") deliver(); });
-	const quote = `Run ${b.schedule.id} now.`;
-	b.said.push(quote);
-	const text = await b.run(quote);
+	const b = await bench(t, "pr", (deliver) => { if (hold.offer(deliver) === "send") deliver(); });
+	const text = await b.run();
 	assert.match(text, /fired: created cp-/);
-	assert.deepEqual(b.sent, [], "no parent transport during compaction hold");
+	assert.equal(b.sent.length, 0, "no parent transport during compaction hold");
 	const [job] = await b.jobs();
 	assert.ok(job);
-	assert.match(job.comments[0]!.text, new RegExp(`run-now quote sha [0-9a-f]{12}: ${quote}`));
-	const fire = b.mandates.list().find((grant) => grant.schedule_fire?.schedule_id === b.schedule.id)!;
-	assert.equal(b.scheduler.list()[0]!.mandate_id, fire.id);
-	assert.notEqual(fire.id, b.schedule.mandate_id);
-	assert.match(await b.run(quote), /already authorized run now/);
-	b.said.push("Run nightly again.");
-	assert.match(await b.run("Run nightly again."), /previous fire .* is still open/);
+	assert.match(await b.run(b.schedule.id, "call-2"), /already_running/);
 	assert.equal((await b.jobs()).length, 1);
-	const grants = b.mandates.list();
 	hold.compacted();
-	assert.deepEqual(b.sent, [{ customType: "cp-schedule", content: text, display: true, details: {
-		schedule_id: b.schedule.id, name: "nightly", project: "demo", mandate_id: fire.id,
-		outcome: "fired", job_id: job.id, delivery, reason: text.slice(text.indexOf("created "), text.indexOf("; run now via")),
-		manual: "call-1", manual_via: "cp_schedule",
-	} }]);
+	assert.equal(b.sent.length, 1);
+	assert.deepEqual([b.sent[0]!.customType, b.sent[0]!.content, b.sent[0]!.details.job_id], ["cp-schedule", text, job.id]);
 	assert.deepEqual(b.options, [{ deliverAs: "followUp", triggerTurn: true }]);
 	hold.compacted();
 	assert.equal(b.sent.length, 1);
-	assert.deepEqual(b.mandates.list(), grants, "release mints no second grant");
+	assert.deepEqual(b.mandates.list(), [], "release mints no grant");
 });
 
 for (const delivery of ["answer", "board", "local"] as const) test(`held parent still dispatches runner-owned ${delivery} fire immediately`, async (t) => {
 	const offered: Array<() => void> = [];
 	const b = await bench(t, delivery, (deliver) => { offered.push(deliver); });
-	b.said.push("Run nightly now.");
-	assert.match(await b.run("Run nightly now."), /fired: created cp-/);
+	assert.match(await b.run(), /fired: created cp-/);
 	const [job] = await b.jobs();
-	assert.deepEqual(b.dispatched, [{ jobId: job!.id, task: "Nightly fix" }]);
+	assert.deepEqual(b.dispatched.map((request) => [request.jobId, request.task]), [[job!.id, "Nightly fix"]]);
 	assert.deepEqual(offered, []);
 	assert.deepEqual(b.sent, []);
 });

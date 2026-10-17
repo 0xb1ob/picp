@@ -15,7 +15,8 @@ import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { formatScheduleMigration, formatSchedulePolicyImport, policyImportBackups, scheduleMigrationMarkerPath, sweepScheduleGrantTemplates, sweepSchedulePolicyImport } from "../src/schedule-migrations.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
-import { object, oneOf, readScheduleFile, scheduleFileErrors, SchedulerError } from "../src/viewer/schedule-core.ts";
+import { object, oneOf, readScheduleFile, scheduleFileErrors, SchedulerError, type Schedule } from "../src/viewer/schedule-core.ts";
+import { refused, synthesizedApproval, templateFromSeed } from "../src/schedule-grant.ts";
 import { policyFromLegacy, type LegacySchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import type { Ledger } from "../src/ledger.ts";
@@ -76,19 +77,11 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 	assert.ok(existsSync(scheduleMigrationMarkerPath(home.path)));
 	assert.match(formatScheduleMigration(report), /5 migrated, 3 skipped/);
 
-	// The template is derived either way; firing still honours the pointer: an expired seed re-mints, an operator-revoked
-	// one (revoked with the operator's quote) stops until the schedule is moved to a fresh schedule grant.
+	// PR4: the template still derives (the native migration reads it), but no fire mints from it: every fire refuses.
+	const grants = mandates.list().length;
 	const fired = await scheduler.fireNow("sch-aaaaa2", "req-1");
-	assert.equal(fired.outcome, "fired", fired.reason);
-	assert.notEqual(fired.mandate_id, expired.id);
-	assert.match((await scheduler.fireNow("sch-aaaaa1", "req-3")).reason, /was revoked by the operator \(operator-quote\); a schedule never re-mints past an operator revoke/);
-	// A legacy revoke (no revoked_by) is the safe default: stopped until cp_schedule move.
-	assert.match((await scheduler.fireNow("sch-aaaaa7", "req-4")).reason, /was revoked with no recorded provenance \(a legacy revoke\), treated as the operator's; a schedule never re-mints past it: cp_schedule move it/);
-	// Every later refusal repeats the migration's reason, a cron tick included: never overwritten, never hidden.
-	await assert.rejects(scheduler.fireNow("sch-aaaaa5", "req-2"), /has no grant template \(migration: seed grant md-ffffff is missing\)/);
-	clock.now = new Date("2026-11-03T09:00:30Z");
-	await scheduler.tick();
-	assert.match(scheduler.list()[7]?.last_skip?.reason ?? "", /has no grant template \(migration: .* is not a schedule grant\)/);
+	assert.equal(fired.outcome, "skipped"); assert.match(fired.reason, /no active native policy/);
+	assert.equal(mandates.list().length, grants, "no fire grant minted");
 
 	const before = readFileSync(scheduler.file, "utf8");
 	const again = sweepScheduleGrantTemplates({ home: home.path, mandates, now: new Date("2026-11-03T00:00:00Z") });
@@ -97,27 +90,7 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 	assert.equal(formatScheduleMigration(again), "");
 });
 
-test("two pre-rule schedules sharing one seed: each fire mints its own grant and never revokes the seed the other still names", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const mandates = new MandateStore(home.path, { now: () => T0 });
-	const seed = mandates.issue({ projects: ["demo"], objective: "shared", expiry: "2026-12-01T00:00:00Z", spend_cap: { usd: 20, tokens: 2_000_000 }, job_cap: 3, at: "2026-11-01T00:00:00Z", schedule_grant: true });
-	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => [], cloneOf: () => home.path, now: () => T0, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
-	const manual = (id: string) => ({ id, name: id, project: "demo", mandate_id: seed.id, trigger: { type: "manual" }, job, enabled: true, created_at: "2026-11-01T00:00:00Z" });
-	writeFileSync(scheduler.file, JSON.stringify({ schema_version: SCHEMA_VERSION, schedules: [manual("sch-bbbbb1"), manual("sch-bbbbb2")] }));
-	assert.equal(sweepScheduleGrantTemplates({ home: home.path, mandates, now: T0 }).migrated.length, 2);
-	const first = await scheduler.fireNow("sch-bbbbb1", "req-1");
-	assert.equal(first.outcome, "fired", first.reason);
-	assert.equal(mandates.get(seed.id)?.status, "active", "sch-bbbbb2 still names it");
-	const second = await scheduler.fireNow("sch-bbbbb2", "req-2");
-	assert.equal(second.outcome, "fired", second.reason);
-	assert.notEqual(first.mandate_id, second.mandate_id);
-	assert.equal(mandates.get(first.mandate_id)?.status, "active", "one schedule's fire never revokes another's fire grant");
-	assert.equal(mandates.get(seed.id)?.status, "revoked", "retired once no schedule names it");
-});
-
-test("a seed revoked by the parent (revoked_by parent, as cp_mandate revoke with no operator_quote records) migrates and its schedule still fires under a fresh grant", async (t) => {
+test("a seed revoked by the parent (revoked_by parent, as cp_mandate revoke with no operator_quote records) still derives a template", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const mandates = new MandateStore(home.path, { now: () => T0 });
@@ -127,9 +100,7 @@ test("a seed revoked by the parent (revoked_by parent, as cp_mandate revoke with
 	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => [], cloneOf: () => home.path, now: () => T0, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
 	writeFileSync(scheduler.file, JSON.stringify({ schema_version: SCHEMA_VERSION, schedules: [{ id: "sch-ccccc1", name: "triage", project: "demo", mandate_id: seed.id, trigger: { type: "manual" }, job, enabled: true, created_at: "2026-11-01T00:00:00Z" }] }));
 	assert.equal(sweepScheduleGrantTemplates({ home: home.path, mandates, now: T0 }).migrated.length, 1);
-	const fired = await scheduler.fireNow("sch-ccccc1", "req-1");
-	assert.equal(fired.outcome, "fired", fired.reason);
-	assert.notEqual(fired.mandate_id, seed.id);
+	assert.equal(scheduler.list()[0]?.grant_template?.seed_mandate_id, seed.id);
 });
 
 test("migration with no schedules file writes only the marker", (t) => {
@@ -148,9 +119,17 @@ async function importBench(t: { after(fn: () => void): void }) {
 	const runs = new ScheduleRunStore({ home: home.path });
 	const mandates = new MandateStore(home.path, { runs, now: () => T0 });
 	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, runs, usageJobs: () => [], cloneOf: () => home.path, now: () => T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
-	const add = async (name: string, extra: Partial<Parameters<Scheduler["add"]>[0]> = {}, seedExtra: Partial<Parameters<MandateStore["issue"]>[0]> = {}) => {
+	let n = 0;
+	// PR4: scheduler.add is native-only, so a legacy fixture is written as the pre-PR4 add persisted it.
+	const add = async (name: string, extra: Partial<Schedule["job"]> = {}, seedExtra: Partial<Parameters<MandateStore["issue"]>[0]> = {}): Promise<Schedule> => {
 		const seed = mandates.issue({ projects: ["demo"], objective: name, expiry: "2026-12-01T00:00:00Z", spend_cap: { usd: 20, tokens: 2_000_000 }, job_cap: 8, dispatch_parallelism: 3, at: "2026-11-01T00:00:00Z", schedule_grant: true, ...seedExtra });
-		return scheduler.add({ name, project: "demo", mandate_id: seed.id, manual: true, ...job, ...extra });
+		const jobOf = { ...job, ...extra } as Schedule["job"];
+		const derived = templateFromSeed(seed, synthesizedApproval(seed, "cp_schedule add"), "2026-11-01T00:00:00Z", jobOf);
+		if (refused(derived)) throw new Error(derived.refusal);
+		const schedule: Schedule = { id: `sch-${(0xabc000 + ++n).toString(16)}`, name, project: "demo", mandate_id: seed.id, grant_template: derived.template, trigger: { type: "manual" }, job: jobOf, enabled: true, created_at: "2026-11-01T00:00:00Z" };
+		const schedules = existsSync(scheduler.file) ? readScheduleFile(scheduler.file) : [];
+		writeFileSync(scheduler.file, JSON.stringify({ schema_version: SCHEMA_VERSION, schedules: [...schedules, schedule] }));
+		return schedule;
 	};
 	const v1 = () => { const schedules = readScheduleFile(scheduler.file); writeFileSync(scheduler.file, JSON.stringify({ schema_version: 1, schedules })); return readFileSync(scheduler.file); };
 	const sweep = () => sweepSchedulePolicyImport({ home: home.path, mandates, runs, now: T0 });

@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT, type RiskPreapproval, type RiskPreapprovedRow } from "../src/contracts.ts";
-import { MandateStore } from "../src/mandate.ts";
-import { loadMandateDefaults } from "../src/mandate-defaults.ts";
-import type { Ledger } from "../src/ledger.ts";
-import { Scheduler } from "../src/scheduler.ts";
-import { openScheduleRunStore, reconcileRun, runIsSettled, runSpend, ScheduleRunStore, ScheduleRunsInactiveError, SCHEDULE_RUNS_ACTIVE } from "../src/schedule-runs.ts";
+import { type RiskPreapproval, type RiskPreapprovedRow } from "../src/contracts.ts";
+import { reconcileRun, runIsSettled, runSpend, ScheduleRunStore, ScheduleRunsInactiveError, SCHEDULE_RUNS_ACTIVE } from "../src/schedule-runs.ts";
 import { policyFromLegacy, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { readSchedulePolicies, readScheduleRuns, ScheduleRunError, scheduleRunErrors, type ScheduleRun } from "../src/viewer/schedule-run-core.ts";
-import { createScratchHome, createScratchLedger } from "./harness/index.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const at = "2026-07-01T06:00:00Z";
 function policy(): SchedulePolicy {
@@ -161,19 +156,3 @@ test("spend includes worker and reviewer non-cached usage, settlement is members
 	assert.equal(fresh.members[0]?.job_id, "cp-anchor");
 });
 
-test("S1: full legacy Scheduler fire mints normally and leaves both new files absent", async (t) => {
-	const home = createScratchHome(); t.after(() => home.cleanup());
-	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	let now = new Date(at);
-	const mandates = new MandateStore(home.path, { now: () => now });
-	const seed = mandates.issue({ projects: ["demo"], objective: "nightly", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, at: "2026-06-01T00:00:00Z", schedule_grant: true });
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => [], cloneOf: () => home.path, now: () => now, startedAt: now, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
-	await scheduler.add({ name: "nightly", project: "demo", mandate_id: seed.id, cron: "0 7 * * *", tz: "UTC", title: "Nightly report", kind: "research", delivery: "answer" });
-	now = new Date("2026-07-01T07:00:20Z");
-	const [event] = await scheduler.tick();
-	assert.equal(event?.outcome, "fired"); assert.notEqual(event?.mandate_id, seed.id);
-	assert.match((await ledger.show(event!.job_id!)).notes ?? "", /under fire grant/);
-	const store = openScheduleRunStore(home.path);
-	assert.equal(existsSync(join(home.path, LAYOUT.state, "schedule-runs.json")), false);
-	assert.equal(existsSync(store.policiesFile), false); assert.deepEqual(store.runs(), []);
-});
