@@ -8418,7 +8418,7 @@ availability validation belongs to P2b.
 | research/local (including cp-org-pr-review report) | `report` | permitted start channels |
 | ship/local | `branch_push` | permitted start channels |
 | ship/pr | `pull_request` | permitted start channels |
-| pipeline delivery | `pipeline` | legacy fire path remains |
+| pipeline delivery | `pipeline` | legacy: legacy fire path remains; native: host-started pipeline (below) |
 | cp-org-pr-review with saved approval effect | `org_review_approve` (in addition to report) | exactly `["dashboard"]` in effect channels |
 
 `permitted_start_channels` records slot, dashboard and cp_schedule booleans.
@@ -8445,6 +8445,41 @@ never widened by live defaults. Merge is absent from allowed actions;
 `risk:high` and `merge` are always in `ask_on`. Review and repository merge
 bounds remain binding, and the selected-grant policy and supplement
 selection rule are unchanged.
+
+#### Native policies (PR2 of the schedules refactor)
+
+A policy with `authority: "native"` is the authorization itself: it has no `approval`, `ask_on`,
+`allowed_actions`, `permitted_start_channels` or `effect_channels`, and instead declares `mode`
+(`report-only` | `write`, which must equal the mode its effects imply) and `kinds` (the job kinds its runs may
+admit). A native pipeline recipe is the research stage (`kind: research`, `delivery: pipeline`), declares
+exactly one terminal `pull_request` or `branch_push` effect and `kinds` ⊇ {research, ship}; report-only
+admits no ship. `org_review_approve` requires cp-org-pr-review. A legacy policy may be replaced by a native
+revision; a native schedule never returns to the legacy shape.
+
+`cp_schedule add` without `mandate_id` saves and activates native revision 1 on the operator's verbatim
+sentence naming the schedule, with optional `limits` (each omitted cap from the project override, then
+`data/mandate-defaults.json`, narrowed like any live bound); no grant is issued. Its runs carry no per-run
+quote, grant or risk:high ask: authority refuses a merge (`action_not_allowed`), a kind outside `kinds`
+(`kind_not_declared`), implementation under report-only (`mode_refused`), a script job other than the
+recipe's `script_path`, and any hard stop (`hard_stop`: credential handling, data deletion, force push,
+external publishing) outright. Caps, deadline, exclusions, flagged/final-fix checkpoints, review and the
+repository's merge rules apply unchanged; risk is routing and audit information only.
+
+A native run records `start_key` (`dashboard:<request>`, `cp_schedule:<call>`, `slot:<iso>` or
+`watch:<iso>`; unique in `state/schedule-runs.json`) and `execution` `{requested, effective}`:
+`run_now` overrides `{model?, thinking?, parallelism?}` (provider/model ≤200 chars, a routing thinking level,
+parallelism 1–32; model and thinking refused for a script recipe) are validated before the run exists and
+frozen for it, never written to the policy. A repeated start key returns the original run (`replayed`);
+another start while a run is open is refused (`already_running`). Every member dispatch and review uses the
+run's model (override, else the policy's pinned role, else routing) and thinking; dispatch parallelism is
+`execution.effective.parallelism`, and a full run keeps a queued dispatch at its head. A native run_now needs
+no revision (a stale explicit one refuses) and ignores a supplied operator quote; a legacy run_now still needs
+its quote and takes no overrides. The dashboard journals `overrides` on `run_now` requests only.
+
+A native pipeline is started by the schedule host in code on the run's fired research anchor: the ship job is
+titled `ship: <title> (<run id>)`, labelled `schedule:<id>` and admitted to the run before its dependency is
+recorded; a replay after a crash finds that ship again by title and never starts a second pipeline. Only a
+failed start wakes the parent.
 
 **`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
 `schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
