@@ -74,8 +74,9 @@ test("(1) a task-named file deleted on the branch is included from the fork and 
 	assert.equal(result.status, "ok");
 	assert.equal(result.fork_point, f.fork);
 	assert.equal(result.head_sha, f.headSha);
-	assert.deepEqual(entry(result, "docs/legacy.md", "fork"), { ...entry(result, "docs/legacy.md", "fork"), reason: "task-named", state: "included" });
-	assert.deepEqual(entry(result, "docs/legacy.md", "head"), { path: "docs/legacy.md", side: "head", reason: "task-named", state: "absent" });
+	// A task-named path that also changed is queued as changed (cp-c1ur N11: changed sources fill the budget first).
+	assert.deepEqual(entry(result, "docs/legacy.md", "fork"), { ...entry(result, "docs/legacy.md", "fork"), reason: "changed", state: "included" });
+	assert.deepEqual(entry(result, "docs/legacy.md", "head"), { path: "docs/legacy.md", side: "head", reason: "changed", state: "absent" });
 	const context = f.context();
 	assert.ok(context.includes(`### fork ${f.fork.slice(0, 12)} docs/legacy.md (`));
 	assert.ok(context.includes("legacy fork_only_body"));
@@ -148,13 +149,14 @@ test("(7) order and sha256 are stable across runs", async (t) => {
 	const second = await f.run({ scratch: other });
 	assert.deepEqual(second, first);
 	assert.equal(f.context(other), f.context());
-	assert.deepEqual(first.entries.slice(0, 6).map((item) => `${item.reason}:${item.side}:${item.path}`), [
-		"task-named:head:README.md",
-		"task-named:fork:README.md",
+	assert.deepEqual(first.entries.map((item) => `${item.reason}:${item.side}:${item.path}`), [
 		"changed:head:AGENTS.md",
 		"changed:head:src/a.ts",
 		"changed:head:src/b.ts",
 		"changed:fork:AGENTS.md",
+		"changed:fork:src/a.ts",
+		"changed:fork:src/b.ts",
+		"task-named:head:README.md",
 	]);
 	assert.match(entry(first, "src/a.ts", "head")?.sha256 ?? "", /^[0-9a-f]{64}$/);
 });
@@ -175,4 +177,24 @@ test("(9) the pointer names both SHAs and says absent is not omitted", async (t)
 	assert.match(pointer, /read context-manifest\.json first, then only the context\.md sections you need/);
 	assert.match(pointer, /`absent` means git confirmed the path does not exist at that sha/);
 	assert.match(pointer, /`omitted-budget`\/`unreadable`\/`unresolved` mean unknown — never treat them as absent\./);
+});
+
+test("(10) cp-c1ur N11: changed sources fill the budget before large task-named fixtures; no duplicate fork side", async (t) => {
+	// Pins the rqx3 manifest: two ~94 KB task-named fixtures took the budget, changed sources went omitted-budget,
+	// an unchanged file was emitted twice with one sha256, and picp invariants showed `absent` in another repo.
+	const fixtureBody = `${"f".repeat(39_999)}\n`;
+	const f = fixture(
+		t,
+		{ "tests/fixtures/big.json": fixtureBody, "lib/core.py": "core = 1\n" },
+		{ "src/run.py": `${"r".repeat(99)}\n` },
+		[],
+		"Use tests/fixtures/big.json and lib/core.py.\n",
+	);
+	// Room for run.py plus either big.json or core.py: the large fixture is the one deferred.
+	const result = await f.run({ maxBytes: 40_105 });
+	assert.equal(entry(result, "src/run.py", "head")?.state, "included");
+	assert.equal(entry(result, "tests/fixtures/big.json", "head")?.state, "omitted-budget");
+	assert.equal(entry(result, "lib/core.py", "head")?.state, "included");
+	assert.equal(entry(result, "lib/core.py", "fork"), undefined, "an unchanged path's fork side is its head side");
+	assert.equal(result.entries.some((item) => item.reason === "invariant"), false, "invariants missing from the tree are not listed");
 });

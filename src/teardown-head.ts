@@ -71,6 +71,21 @@ export function leaseReturnFailed(jobId: string, error: string): GateFailure {
 	};
 }
 
+/** Dependency installs a recycled worktree may keep; every other ignored entry is reported. */
+const KEPT_IGNORED = new Set(["node_modules", ".venv", "venv", "__pycache__"]);
+
+/**
+ * cp-c1ur N18: gitignored paths `treehouse return` hands to the next lease, minus any through a KEPT_IGNORED
+ * segment. Reported, never removed: they may be the only copy.
+ */
+export async function ignoredEntries(git: GitRun, worktree: string): Promise<{ entries: string[] } | { error: string }> {
+	const status = await git(worktree, ["status", "--ignored", "--porcelain", "-z"]);
+	if (status.status !== 0) return { error: `git status --ignored failed: ${firstLine(status.stderr || `exit ${status.status}`)}` };
+	const entries = status.stdout.split("\0").filter((record) => record.startsWith("!! ")).map((record) => record.slice(3))
+		.filter((path) => !path.replace(/\/$/, "").split("/").some((segment) => KEPT_IGNORED.has(segment)));
+	return { entries: entries.sort() };
+}
+
 // cp-a9fq: `defaultGit` and `formatTeardown` live here, not in teardown.ts, only
 // to keep teardown.ts under the 800-line per-module cap (tests/structure.test.ts)
 // without raising it; teardown.ts imports the one and re-exports the other, so
@@ -97,7 +112,10 @@ export function formatTeardown(result: TeardownResult): string {
 		const landing = result.landing
 			? ` — git proof: HEAD ${result.landing.head.slice(0, 12)} content found in origin/${result.landing.base_branch} at ${result.landing.witness.slice(0, 12)} (${result.landing.method}); no PR/MR merge is claimed, so close the job with cp_job close ${result.job_id} and that reason`
 			: "";
-		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${landing}${note}${ledger}`;
+		const ignored = result.ignored
+			? ` — gitignored entries stay in the recycled worktree for its next lease: ${result.ignored.join(", ")} (not removed)`
+			: result.ignored_error ? ` — ignored entries unknown (${result.ignored_error})` : "";
+		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${landing}${note}${ledger}${ignored}`;
 	}
 	if (result.failure) {
 		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
