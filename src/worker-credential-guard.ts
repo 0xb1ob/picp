@@ -246,8 +246,13 @@ export function ghAuthStatusRefusal(finding: GhAuthStatusFinding): string {
 const SEARCH_RE = new RegExp(`${CMD_POS}(?:command\\s+|\\\\)?(?:grep|egrep|fgrep|rg|ag|ack|find|fd)\\b[^;&|\\n]*`, "gi");
 const HOME_SCOPE_RE =
 	/^(?:~|\$\{?HOME\}?|\/home\/[^/\s]+|\/root)(?:\/*|\/+\.(?:pi|pi-command-post|config|ssh|aws|gnupg|docker|netrc|npmrc|env)(?:[/.-]\S*)?)$/;
-// An env-var name is upper case, so a lowercase `token` (usage stats in a transcript) stays searchable.
-const KEY_SHAPE_RES = [/[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)\b/, /\.env\b|auth\.json|api[_-]?key|secret|passw/i];
+// An env-var name is upper case, so a lowercase `token` (usage stats in a transcript) stays searchable;
+// a raw key prefix counts only at a word start, so `task-files` is not `sk-`.
+const KEY_SHAPE_RES = [
+	/[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)\b/,
+	/\.env\b|auth\.json|api[_-]?key|secret|passw/i,
+	/(?:^|[^A-Za-z0-9])(?:sk-|ghp_|github_pat_)/,
+];
 
 export interface CredentialSearchFinding {
 	/** The search fragment, trimmed and bounded — quoted back to the worker. */

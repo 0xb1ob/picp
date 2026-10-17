@@ -40,7 +40,7 @@ export const GUARD_CODES = [
 	"review_approval_read",
 	/** Parent git may not rewrite a live worker lease. */
 	"leased_git_mutation",
-	/** Parent git fetch/pull in a canonical clone under `projects/`: the tools own its refs (N12). */
+	/** Parent git fetch/pull/reset/clean/checkout/force push in a canonical clone under `projects/` (N12). */
 	"canonical_git_mutation",
 	/** A tool call that would put a diff-review body into the parent's context. */
 	"diff_body_read",
@@ -194,7 +194,7 @@ function isReviewPathString(path: string): boolean {
 
 /** git subcommands that can put a path into a commit or send one to a remote. */
 const GIT_PUBLISHING_SUBCOMMANDS = new Set(["add", "stage", "commit", "rm", "stash", "push"]);
-/** git subcommands that rewrite remote-tracking refs: refused in a live lease and in a canonical clone (N12). */
+/** git subcommands that rewrite remote-tracking refs: refused, like isDestructiveGit, in a lease and a canonical clone. */
 const GIT_REF_FETCHES = new Set(["fetch", "pull"]);
 /** Where a canonical clone's refs move instead, for the parent and the operator refusals. */
 const CANONICAL_FETCH_FIX =
@@ -444,7 +444,9 @@ export class ContextGuard {
 				reason: `blocked: parent git ${subcommand} may target a live worker lease. Use cp_send/cp_revive for worker changes or cp_integrate for merge and sync; keep the lease intact.`,
 			};
 			const clones = [resolve(this.#home, LAYOUT.projects), resolve(this.#canonicalHome, LAYOUT.projects)];
-			if (fetches && clones.some((root) => gitTargetInside(where, canonicalDir(root)))) return {
+			// preflight's own fix is `git -C <clone> switch <base>`: a plain switch refuses a dirty tree, so it stays allowed.
+			const plainSwitch = subcommand === "switch" && args.length === 1 && !(args[0] ?? "-").startsWith("-");
+			if (!plainSwitch && clones.some((root) => gitTargetInside(where, canonicalDir(root)))) return {
 				code: "canonical_git_mutation",
 				subject: segment.trim(),
 				reason: `blocked: parent git ${subcommand} may target a canonical clone under ${LAYOUT.projects}/. ${CANONICAL_FETCH_FIX}`,

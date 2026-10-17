@@ -454,7 +454,8 @@ smaller); one named `state/runs/<id>/` and single files stay allowed — and `gh
 `gh auth token`, which print the stored token (`gh api user --jq .login` is the login check).
 `detectCredentialSearch` (N5) refuses a command-position `grep`/`rg`/`find`/… with a home root or a credential dotdir
 (`~/.pi`, `~/.config`, `~/.pi-command-post`, `~/.ssh`, …) as an operand and a key-shaped word (an upper-case
-`*_KEY`/`*TOKEN`/`*SECRET` name, `.env`, `auth.json`, `api_key`); a worktree search passes. A credential comes only from
+`*_KEY`/`*TOKEN`/`*SECRET` name, `.env`, `auth.json`, `api_key`, or a raw key prefix `sk-`/`ghp_`/`github_pat_` at a word
+start); a worktree search passes. A credential comes only from
 the env var or file the task names (brief-ship *Agent isolation*); unset or unnamed, the worker reports `blocked`.
 Bash tool results pass through `redactGithubTokens` in the worker-reporter `tool_result` hook,
 so a GitHub token shape reaches the model and the pi session transcript only as `[REDACTED]`;
@@ -3869,7 +3870,7 @@ move is the right one.
 | `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`, and `.beads/` in multi mode) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
-| `canonical_git_mutation` | parent bash `git fetch`/`pull` in a canonical clone under `projects/` (N12; `git -C <clone> switch <base>`, the preflight fix, stays allowed) | `cp_check`/`cp_dispatch` fetch the clone themselves, `cp_integrate` syncs after a merge |
+| `canonical_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push in a canonical clone under `projects/` (N12); a plain `git -C <clone> switch <branch>`, the preflight fix, stays allowed | `cp_check`/`cp_dispatch` fetch the clone themselves, `cp_integrate` syncs after a merge |
 | `ci_checks_read` | parent bash `gh [flags] pr checks`, or a `gh` `--json`/`gh api` argument naming `statusCheckRollup` (the checks API is refused in this home; prose mentioning it is allowed) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
 | `schedule_control_write` | parent `write`/`edit` of a `schedule-control.jsonl` path, or a bash statement naming it with a stage that is not a plain reader (`cat`, `head`, `tail`, `less`, `more`, `grep`, `rg`, `jq`, `wc`, `ls`, `stat`), an output redirect or a substitution | the operator clicks Run now, or `cp_schedule run_now` with their verbatim sentence (*Run now clearance*) |
 

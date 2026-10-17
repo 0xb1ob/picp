@@ -512,16 +512,28 @@ test("parent git mutations cannot target a live lease, including -C and compound
 });
 
 // N12: the parent fetched in canonical clones and raced cp_check/cp_dispatch ref locks; their tools own those refs.
-test("parent git fetch/pull in a canonical clone is refused; the sanctioned switch fix and other dirs stay allowed", (t) => {
+// Every ref move is refused there, as on the operator path, except preflight's own `git -C <clone> switch <base>`.
+test("parent ref moves in a canonical clone are refused; the sanctioned switch fix and other dirs stay allowed", (t) => {
 	const b = bench(t);
 	const clone = join(b.home, LAYOUT.projects, "demo");
 	mkdirSync(clone, { recursive: true });
-	for (const [command, cwd] of [["git fetch origin", clone], ["git pull", clone], [`git -C ${clone} fetch origin main`, b.home], [`cd ${clone} && git fetch`, b.home]] as const) {
+	for (const [command, cwd] of [
+		["git fetch origin", clone],
+		["git pull", clone],
+		[`git -C ${clone} fetch origin main`, b.home],
+		[`cd ${clone} && git fetch`, b.home],
+		["git reset --hard origin/main", clone],
+		[`git -C ${clone} clean -fdx`, b.home],
+		[`git -C ${clone} checkout main`, b.home],
+		[`git -C ${clone} switch -C main origin/main`, b.home],
+		[`git -C ${clone} switch --discard-changes main`, b.home],
+		[`cd ${clone} && git push --force origin main`, b.home],
+	] as const) {
 		const decision = b.bash(command, cwd);
 		assert.equal(decision?.code, "canonical_git_mutation", command);
 		assert.match(decision.reason, /cp_check and cp_dispatch fetch/);
 	}
-	for (const command of [`git -C ${clone} switch main`, `git -C ${clone} status`, "git -C /tmp fetch origin"]) {
+	for (const command of [`git -C ${clone} switch main`, `git -C ${clone} status`, "git -C /tmp fetch origin", "git -C /tmp reset --hard HEAD"]) {
 		assert.equal(b.bash(command), undefined, command);
 	}
 });

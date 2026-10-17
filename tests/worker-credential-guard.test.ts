@@ -147,6 +147,10 @@ test("a search of the home or a credential dotdir for a key is refused; worktree
 		"cd /wt && rg -l OPENAI_API_KEY $HOME/.pi/agent",
 		'grep -r "api_key" /home/someone/.config/',
 		"find /root -name auth.json",
+		// Raw key prefixes, built at runtime: the addendum to N5.
+		`grep -rlE '${"s" + "k-"}[A-Za-z0-9]{20,}' ~/.config ~/.pi`,
+		`rg -l "${"gh" + "p_"}" $HOME`,
+		`grep -r ${"github" + "_pat_"} /home/someone/.pi-command-post/data`,
 	]) {
 		assert.ok(detectCredentialSearch(command), command);
 	}
@@ -159,6 +163,8 @@ test("a search of the home or a credential dotdir for a key is refused; worktree
 		"grep -rn TOKEN /home/someone/.treehouse/picp/3/picp/src",
 		'grep -c "totalTokens" ~/.pi/agent/sessions/x.jsonl',
 		"find ~/.pi-command-post/state/runs -name events.jsonl",
+		"find ~/.pi-command-post/state/task-files -name brief.md",
+		`rg -n "${"s" + "k-"}" src/`,
 		"printenv EXAMPLE_API_KEY >/dev/null && echo set",
 		"echo 'grep -r API_KEY ~/.config'",
 		"",
