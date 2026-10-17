@@ -28,7 +28,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -189,8 +189,13 @@ export function localChecks(
 			errors.push(
 				`artifact_path: must be the predeclared path "${context.artifactPath}", got "${envelope.artifact_path}"`,
 			);
+		} else if (!isAbsolute(envelope.artifact_path)) {
+			// cp-c1ur N7: intake resolves it from the parent's cwd, not this worktree.
+			errors.push(`artifact_path: must be absolute, got "${envelope.artifact_path}" — name the full path`);
 		} else if (!existsSync(envelope.artifact_path)) {
 			errors.push(`artifact_path: "${envelope.artifact_path}" does not exist — write the findings before reporting`);
+		} else if (!statSync(envelope.artifact_path).isFile()) {
+			errors.push(`artifact_path: "${envelope.artifact_path}" is not a regular file — name one file, not a directory`);
 		} else if (statSync(envelope.artifact_path).size === 0) {
 			errors.push(`artifact_path: "${envelope.artifact_path}" is empty — the artifact is the deliverable`);
 		} else if (context.delivery === "answer") {

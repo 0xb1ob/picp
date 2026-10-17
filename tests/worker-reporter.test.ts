@@ -433,6 +433,12 @@ test("local checks protect the artifact and research porcelain", () => {
 		writeFileSync(artifact, "# findings\n");
 		assert.deepEqual(localChecks(envelope, context), []);
 
+		// cp-c1ur N7: intake stats in the parent's cwd and needs a regular file; refuse here, while the slot is open.
+		assert.match(localChecks({ ...envelope, artifact_path: "report.md" }, context).join(";"), /must be absolute/);
+		const dir = join(home.path, "report-dir");
+		mkdirSync(dir);
+		assert.match(localChecks({ ...envelope, artifact_path: dir }, context).join(";"), /not a regular file/);
+
 		// A predeclared path is the only acceptable path.
 		assert.match(
 			localChecks(envelope, { ...context, artifactPath: "/elsewhere/report.md" }).join(";"),

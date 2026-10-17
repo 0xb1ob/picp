@@ -8,7 +8,7 @@
     "package_version": "0.1.0",
     "prompts": {
       "profiles/gate-reviewer.md": "sha256:56fea35c51e770a6880061b49da7f4e1ddf8916d4da00488dcea49858ea60194",
-      "profiles/implementer.md": "sha256:c808959287be450989b2215736c439ad316a19719586ec69a05d8d4e01ad4afa",
+      "profiles/implementer.md": "sha256:3dcd1f49cd78c298831788c394c0abecf8e9d00d514c28a6c6ab4a934d910a87",
       "profiles/ops.md": "sha256:ebb6be1c10ee32c05c45efd50a13b7c4e479c4c8599dcc29fb52b0bb84d9ccdf",
       "profiles/planner.md": "sha256:76198d695a70a7dbaa3ae7c7767e0dbbe726673d8dcbd4023831f324f9dd5cfe",
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",

@@ -1125,6 +1125,26 @@ test("a normal (gated) teardown is marked closed_reason:gated, never left ambigu
 	assert.equal(b.fleet.require("cp-gated").closed_reason, "gated");
 });
 
+test("cp-c1ur N18: teardown names gitignored data the recycled worktree keeps; dependency installs are not named", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const worktree = b.worktree("cp-ign");
+	await b.addJob("cp-ign", worktree);
+	writeFileSync(join(worktree, ".gitignore"), "backtest/\nnode_modules/\n");
+	git(worktree, "add", ".gitignore");
+	git(worktree, "commit", "--quiet", "-m", "ignore");
+	git(worktree, "push", "--quiet", "-u", "origin", "cp-ign");
+	for (const dir of ["backtest", "node_modules"]) {
+		mkdirSync(join(worktree, dir));
+		writeFileSync(join(worktree, dir, "x"), "x\n");
+	}
+
+	const result = await b.teardown.teardown("cp-ign");
+	assert.equal(result.torn_down, true, formatTeardown(result));
+	assert.deepEqual(result.ignored, ["backtest"]);
+	assert.match(formatTeardown(result), /gitignored entries stay in the recycled worktree for its next lease: backtest \(not removed\)/);
+	assert.ok(existsSync(join(worktree, "backtest", "x")), "reported, never removed");
+});
+
 test("picp-pvo: closing a job withdraws its open human-review row and nothing else", { timeout: 60_000 }, async (t) => {
 	const b = benchOf(t);
 	const worktree = b.worktree("cp-handoff");

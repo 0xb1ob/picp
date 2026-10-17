@@ -73,7 +73,7 @@ import { type LandingEvidence, remoteTip } from "./landing-proof.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
-	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, jobInFlight, killedUnreportedWakeup, landingGate, landingMoved, leaseReturnFailed, type LedgerCloseOutcome,
+	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, ignoredTopLevel, jobInFlight, killedUnreportedWakeup, landingGate, landingMoved, leaseReturnFailed, type LedgerCloseOutcome,
 	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker, withdrawHumanReview,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -165,6 +165,10 @@ export interface TeardownResult {
 	ledger_close_error?: string;
 	/** A re-run teardown of a done job closed its ledger row. */
 	ledger_closed?: true;
+	/** cp-c1ur N18: gitignored top-level entries the returned worktree still holds (dependency installs excepted). */
+	ignored?: string[];
+	/** Why those entries could not be listed. */
+	ignored_error?: string;
 }
 
 export interface TeardownOptions {
@@ -294,6 +298,7 @@ export class Teardown {
 			exitCode = record.worker.exit_code ?? null;
 		}
 
+		const ignored = isDirectory(record.worktree) ? await ignoredTopLevel((c, args) => this.#git(c, args), record.worktree) : undefined;
 		// --- then the lease: nothing is left inside the worktree to terminate -
 		const lease: Lease = leaseFromRecord({
 			worktree: record.worktree,
@@ -351,6 +356,8 @@ export class Teardown {
 			...(unreported ? { killed_unreported: true as const } : {}),
 			...(!isScriptFleetRecord(record) && record.reported_at === undefined ? { unreported: true as const } : {}),
 			...(ledgerClose.failed[0] ? { ledger_close_error: ledgerClose.failed[0].error } : {}),
+			...(ignored && "error" in ignored ? { ignored_error: ignored.error } : {}),
+			...(ignored && "entries" in ignored && ignored.entries.length ? { ignored: ignored.entries } : {}),
 			...(exitCode !== undefined ? { exit_code: exitCode } : {}),
 			lease_returned: true,
 			artifacts_removed: artifactsRemoved,

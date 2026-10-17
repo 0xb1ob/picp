@@ -30,6 +30,9 @@ const MAX_CANDIDATES = 5;
 const MAX_CONSUMERS = 5;
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const TEST_PATH = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[^/]+$/;
+/** Large fixtures and data files fill the budget only after every other candidate (cp-c1ur N11). */
+const DATA_PATH = /(?:^|\/)(?:fixtures?|__fixtures__|testdata|data)\/|\.(?:jsonl?|ndjson|csv|tsv|txt|log|xml|ya?ml|snap)$/i;
+const LARGE_DATA_BYTES = 32_000;
 
 export type ReviewContextSide = "fork" | "head";
 export type ReviewContextReason = "task-named" | "changed" | "invariant" | "consumer";
@@ -146,9 +149,10 @@ async function collect(request: ReviewContextRequest, result: ReviewContextResul
 		seen.add(key);
 		candidates.push({ path, side, reason });
 	};
-	for (const side of ["head", "fork"] as const) for (const path of named) add(path, side, "task-named");
+	// cp-c1ur N11: changed sources first. A task-named path's fork side equals its head unless the path changed.
 	for (const side of ["head", "fork"] as const) for (const path of changed) add(path, side, "changed");
-	for (const path of REVIEW_CONTEXT_INVARIANTS) add(path, "head", "invariant");
+	for (const path of named) add(path, "head", "task-named");
+	for (const path of REVIEW_CONTEXT_INVARIANTS) if (trees.head.has(path)) add(path, "head", "invariant");
 	const consumerErrors: ReviewContextEntry[] = [];
 	for (const path of changed.filter((changedPath) => !TEST_PATH.test(changedPath))) {
 		const grep = await read(git, clone, ["grep", "-l", "-F", "-e", basename(path), headSha, "--"], [0, 1]);
@@ -162,37 +166,44 @@ async function collect(request: ReviewContextRequest, result: ReviewContextResul
 	}
 
 	const sections: string[] = [];
+	type Candidate = (typeof candidates)[number];
+	const include = async (candidate: Candidate, bytes: number): Promise<void> => {
+		const sha = candidate.side === "head" ? headSha : fork;
+		if (bytes > result.budget_bytes - result.used_bytes) {
+			result.entries.push({ ...candidate, state: "omitted-budget", bytes });
+			return;
+		}
+		const blob = await read(git, clone, ["cat-file", "blob", `${sha}:${candidate.path}`]);
+		if (!blob.ok) {
+			result.entries.push({ ...candidate, state: "unreadable", error: blob.error });
+			return;
+		}
+		if (blob.out.includes("\0")) {
+			result.entries.push({ ...candidate, state: "binary", bytes });
+			return;
+		}
+		const sha256 = createHash("sha256").update(blob.out).digest("hex");
+		result.used_bytes += bytes;
+		result.entries.push({ ...candidate, state: "included", bytes, sha256 });
+		sections.push(`### ${candidate.side} ${sha.slice(0, 12)} ${candidate.path} (${bytes} bytes, sha256:${sha256})\n\n${fenced(blob.out)}\n`);
+	};
+	const deferred: Array<{ candidate: Candidate; bytes: number }> = [];
 	for (const candidate of candidates) {
 		const sha = candidate.side === "head" ? headSha : fork;
 		if (!trees[candidate.side].has(candidate.path)) {
 			result.entries.push({ ...candidate, state: "absent" });
 			continue;
 		}
-		const object = `${sha}:${candidate.path}`;
-		const size = await read(git, clone, ["cat-file", "-s", object]);
+		const size = await read(git, clone, ["cat-file", "-s", `${sha}:${candidate.path}`]);
 		const bytes = size.ok ? Number(size.out.trim()) : Number.NaN;
 		if (!size.ok || !Number.isSafeInteger(bytes)) {
 			result.entries.push({ ...candidate, state: "unreadable", error: size.ok ? `git cat-file -s gave ${JSON.stringify(firstLine(size.out))}` : size.error });
 			continue;
 		}
-		if (bytes > result.budget_bytes - result.used_bytes) {
-			result.entries.push({ ...candidate, state: "omitted-budget", bytes });
-			continue;
-		}
-		const blob = await read(git, clone, ["cat-file", "blob", object]);
-		if (!blob.ok) {
-			result.entries.push({ ...candidate, state: "unreadable", error: blob.error });
-			continue;
-		}
-		if (blob.out.includes("\0")) {
-			result.entries.push({ ...candidate, state: "binary", bytes });
-			continue;
-		}
-		const sha256 = createHash("sha256").update(blob.out).digest("hex");
-		result.used_bytes += bytes;
-		result.entries.push({ ...candidate, state: "included", bytes, sha256 });
-		sections.push(`### ${candidate.side} ${sha.slice(0, 12)} ${candidate.path} (${bytes} bytes, sha256:${sha256})\n\n${fenced(blob.out)}\n`);
+		if (bytes > LARGE_DATA_BYTES && DATA_PATH.test(candidate.path)) deferred.push({ candidate, bytes });
+		else await include(candidate, bytes);
 	}
+	for (const { candidate, bytes } of deferred) await include(candidate, bytes);
 	result.entries.push(...consumerErrors, ...unknown);
 	const header = `# Review context\n\nFork point ${fork}, head ${headSha}. Entry states are in ${REVIEW_CONTEXT_MANIFEST}; this file holds only the \`included\` ones (${sections.length}).\n`;
 	writeFileSync(join(request.scratch, REVIEW_CONTEXT_FILE), [header, ...sections].join("\n"));
