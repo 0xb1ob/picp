@@ -100,7 +100,8 @@ export function answersView(state: ViewerState): AnswersView {
   for (const path of localPaths(a.answer)) { const href = evidenceLink(state,path,a.project,boards).href; if (href) links[path] = href; }
   return {id:a.id, project:a.project, question:a.question, answer:a.answer, short:paragraph.length > SHORT_MAX ? `${paragraph.slice(0,SHORT_MAX)}…` : paragraph, posted_at:a.posted_at, acked_at:a.acked_at,
    job:a.job_id && isSafeId(a.job_id) ? {id:a.job_id, href:`#job/${encodeURIComponent(a.job_id)}`, read:jobArtifact(state,a.job_id)?.href ?? null} : null,
-   evidence:a.evidence_paths.map(path => evidenceLink(state,path,a.project,boards)), links};
+   evidence:a.evidence_paths.map(path => evidenceLink(state,path,a.project,boards)), links,
+   ...(a.source ? {schedule:{schedule_id:a.source.schedule_id, run_id:a.source.run_id, outcome:a.source.outcome}} : {})};
  };
  const open = read.answers.filter(a => a.acked_at === null).reverse();
  const history = read.answers.filter(a => a.acked_at !== null).sort((a,b) => b.acked_at!.localeCompare(a.acked_at!));

@@ -95,6 +95,9 @@ test("activated projection uses durable membership and preserves legacy history 
  assert.equal(view.run_count,2);assert.equal(view.job_count,2);
  assert.deepEqual(view.runs.map(r=>r.run_id),[id,"cp-fire1"]);
  assert.equal(view.history.find(j=>j.id==="cp-fire2")?.run_id,id);
+ assert.equal(view.runs[0]?.card,undefined,"no result queued yet");
+ runs.editRun(id,row=>{row.result={source_key:`${id}:cp-fire2:1`,job_id:"cp-fire2",generation:1,outcome:"completed",headline:"done",at:"2026-09-21T04:05:00Z",links:[],answer_id:null,delivered_at:null,error:"answers journal unwritable: EACCES"};});
+ assert.deepEqual(schedulesView(state,()=>{},NOW).schedules[0]!.runs[0]?.card,{state:"pending",answer_id:null,error:"answers journal unwritable: EACCES"});
  writeFileSync(runs.runsFile,"{");assert.match(schedulesView(state,()=>{},NOW).error!,/JSON/);
 });
 
@@ -566,6 +569,12 @@ test("P4 viewer renders policy-only v2 with long text and retains legacy v2 proj
 	assert.doesNotMatch(card.textContent ?? "", /no grant template|every fire is refused|undefined/);
 	assert.match(card.querySelector(".schedule-policy-line")?.textContent ?? "", /\$10\/run/);
 	assert.equal(card.querySelectorAll("[style], form").length, 0);
+	assert.match(card.querySelector(".schedule-result")?.textContent ?? "", /Each run also posts one result card to Answers/);
+	const run = (card: NonNullable<(typeof data.schedules)[0]["runs"][0]["card"]>, n: number) => ({ run_id: `run-2026092104000${n}-abcdef`, anchor_id: `cp-fire${n}`, via: "slot" as const, at: "2026-09-21T04:00:10Z", missed: false, status: "closed" as const, jobs_open: 0, jobs_total: 1, job_ids: [`cp-fire${n}`], result: null, card });
+	data.schedules[0]!.runs = [run({ state: "posted", answer_id: "ans-aaaaaaaaaaaa", error: null }, 1), run({ state: "pending", answer_id: null, error: `answers journal unwritable: ${"x".repeat(900)}` }, 2)];
+	const heads = [...parseHTML(screen(data)).document.querySelectorAll(".schedule-card")[0]!.querySelectorAll(".schedule-run-head")].map((head) => head.textContent ?? "");
+	assert.match(heads[0] ?? "", /Result card in Answers/);
+	assert.match(heads[1] ?? "", /Result card pending: answers journal unwritable: x{900}/, "a long error is text in the wrapping run head");
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/schedules.css"), "utf8");
 	assert.match(css, /overflow-wrap: anywhere/); // Existing responsive wrap remains; no CSS/layout change in P4.
 });

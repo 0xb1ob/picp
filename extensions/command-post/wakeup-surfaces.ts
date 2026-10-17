@@ -38,8 +38,8 @@ export type WakeupSurfaces = ReturnType<typeof createWakeupSurfaces>;
 export const WAKEUP_NUDGE_TYPE = "cp-wakeup-nudge";
 
 /**
- * Where the answer-card sink shows a card. cp-hhuf P1: a scheduled job's answer goes to the
- * Schedules page, never the operator transcript. Entries are TUI-only session data (see
+ * Where the answer-card sink shows a card. cp-hhuf P1: a scheduled job's answer goes to the Schedules page (its
+ * run's Answers card is src/schedule-results.ts, not this sink), never the transcript. Entries are TUI-only (see
  * `chooseOutputChannel`'s two exclusions), so other UI modes get the pointer as a notice. With no
  * operator surface at all (print/json, or a re-entry with no ctx yet) the card stays queued:
  * writing it to stderr would mark it delivered and the operator's terminal would never show it.

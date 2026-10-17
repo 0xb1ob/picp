@@ -11,6 +11,7 @@ import { AnsweredOutbox, isSelfAnswered } from "./answered.ts";
 import { boundedCauseId, boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
 import { observeMandateUsage } from "./mandate-usage.ts";
 import { observeRunUsage, runAuthority } from "./schedule-authority.ts";
+import { openScheduleResults, ScheduleResults } from "./schedule-results.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { ghCiConfigured } from "./ci-configured.ts";
@@ -301,6 +302,8 @@ export class CommandPost {
 	 * phase-keyed surface correctly calls that report history.
 	 */
 	readonly answerCards: AnswerCardOutbox;
+	/** Schedules refactor PR1: a run's result card, queued at intake before teardown (src/schedule-results.ts). */
+	readonly scheduleResults: ScheduleResults;
 	/**
 	 * cp-e2d: the CI/PR watch. Built here, ticked by the extension's own slow
 	 * unref'd interval — this object owns no timer; the extension starts one in
@@ -397,6 +400,7 @@ export class CommandPost {
 		// it and a card that is only queued when a live extension happens to be
 		// listening is exactly the card that got lost.
 		this.answerCards = new AnswerCardOutbox({ home: options.home });
+		this.scheduleResults = openScheduleResults(options.home, this.mandates.scheduleRuns, this.fleet, () => this.ledger());
 		this.durableWakeups = new DurableWakeupOutbox({ home: options.home });
 		this.#announcer = new FailureAnnouncer({
 			fleet: this.fleet,
@@ -427,6 +431,7 @@ export class CommandPost {
 			// failing the report that earned it.
 			onReported: (result) => {
 				this.#queueAnswerCard(result);
+				this.scheduleResults.accepted(result);
 				options.onReported?.(result);
 				this.continuation.onEnvelope(result);
 			},

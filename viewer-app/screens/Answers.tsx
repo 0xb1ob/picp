@@ -13,6 +13,7 @@ function AnswerText({item}: {item: AnswerItem}) {
 
 function AnswerMeta({item, at}: {item: AnswerItem; at: string}) {
  return <p class="answers-meta"><span class="answers-project">[{item.project}]</span><time dateTime={at}>{observedTime(at)}</time>
+  {item.schedule && <span class="answers-schedule">Schedule result · <a href="#schedules"><code>{item.schedule.run_id}</code></a> · {item.schedule.outcome}</span>}
   {item.job && <a href={item.job.href}>{item.job.id}</a>}{item.job?.read && <a href={item.job.read}>read</a>}</p>;
 }
 

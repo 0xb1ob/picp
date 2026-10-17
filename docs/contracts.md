@@ -1245,6 +1245,27 @@ and the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-fil
 ignored, bad lines count as skipped, the first `job_id` wins, a repeat ack is ignored). The dashboard list and the
 acknowledge route are §Answers to acknowledge.
 
+**Schedule result cards** (schedules refactor PR1, `src/schedule-results.ts`). A durable schedule run's final result
+is a second producer on the same journal: a `posted` line with `by:"schedule"` and `source: {kind:"schedule",
+schedule_id, run_id, source_key, outcome}` (exactly those keys; `readAnswers` skips any other shape). It is never an
+operator question, so `cp_parent answer`'s question and job rules do not apply; the same redaction and
+`SECRET_PATTERNS` refusal do. The id is `ans-` plus 12 hex of sha256(`source_key`), so a repost after a crash returns
+the first card (`duplicate`), and the first `job_id` still wins. The card is queued first on the run record
+(`ScheduleRun.result`: `source_key`, `job_id`, `generation`, `outcome` of `completed|partial|refused|blocked|failed`,
+`headline` ≤4,000, `at`, `links` ≤10, `answer_id`, `delivered_at`, optional `error`), then posted, then marked
+`delivered_at`; a failed post stays queued with its `error` and retries on the 30 s scheduler tick. The first result
+wins and is never overwritten. Owner: an ordinary run's anchor; a skill run's S1 named by the anchor's `expanded:`
+comment, never a sole-child guess. Intake queues it when the owner's envelope is accepted (`pr`/`pipeline` runs wait
+for run close); the tick heals a crash before that from the filed envelope (`state/runs/<id>/envelope.json`) and
+gives a run that closed in the last 7 days without one a run-level card naming dropped members. No parent turn,
+wake, relay or artifact body is involved. The dashboard shows `schedule: {schedule_id, run_id, outcome}` on the
+Answers item and `card: {state, answer_id, error}` on the Schedules run row.
+
+**Run-aware dependencies.** `blockedJobs` takes an optional `runOf` resolver (`openRunOf(scheduleRuns)`): a blocker
+in an open schedule run reads `<id> (run <run id>)`, never "no active grant covers it", and the dependent row carries
+`run_id`. `cp_next` lists such rows under their run's result (a run with only blocked members still shows); a
+dropped dependency of a run member asks once with no `mandate_id` and a clause naming the run.
+
 **Operator threads.** `cp_parent answer` and `cp_parent ask` take an optional top-level `thread` (cp-xmw2 S2): a
 short tag the human named for the topic, never invented and never for relays. It is normalized like the viewer's
 `normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`) and must then be 1-32 of `a-z 0-9 -`, first a

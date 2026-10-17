@@ -22,7 +22,14 @@ export interface ScheduleRun {
 	risk_preapproval?: RiskPreapproval; risk_preapproved: RiskPreapprovedRow[];
 	authority_log: Array<{ at: string; use: string; job_id: string; decision: string; code?: string }>;
 	cap_notices: string[];
+	result?: ScheduleRunResult;
 }
+/** The run's one dashboard result card: queued here first, `delivered_at` only once the Answers journal took it. */
+export interface ScheduleRunResult {
+	source_key: string; job_id: string | null; generation: number | null; outcome: (typeof RESULT_OUTCOMES)[number];
+	headline: string; at: string; links: string[]; answer_id: string | null; delivered_at: string | null; error?: string;
+}
+export const RESULT_OUTCOMES = ["completed", "partial", "refused", "blocked", "failed"] as const;
 export interface PolicyRecord {
 	schedule_id: string; revisions: SchedulePolicy[]; active_revision: number | null; activated_at: string | null;
 	activation: SchedulePolicy["provenance"] | null;
@@ -50,6 +57,10 @@ const runShape = object({
 	"risk_preapproval?": object({ operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), "delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/), "job_ids?": array(jobId, 64, 1), scope: oneOf(["named_jobs", "mandate_jobs"]), granted_at: at }),
 	risk_preapproved: array(object({ at, job_id: jobId, use: oneOf(["dispatch", "promote"]), decided_by: oneOf(["operator-delegated", "operator"]), quote_sha: pattern(/^[0-9a-f]{12}$/), evidence: lines(200, 8) }), 200),
 	authority_log: array(object({ at, use: line(100), job_id: jobId, decision: line(100), "code?": line(200) }), 200), cap_notices: lines(200, Number.MAX_SAFE_INTEGER),
+	"result?": object({
+		source_key: line(300), job_id: nullable(jobId), generation: nullable(positive), outcome: oneOf(RESULT_OUTCOMES), headline: text(4000), at,
+		links: lines(1000, 10), answer_id: nullable(pattern(/^ans-[a-f0-9]{12}$/)), delivered_at: nullable(at), "error?": text(1000),
+	}),
 });
 export function scheduleRunErrors(value: unknown): string[] {
 	const errors: string[] = [];
