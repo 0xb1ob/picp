@@ -495,18 +495,47 @@ test("parent git mutations cannot target a live lease, including -C and compound
 	assert.equal(check("cd ~/leases/cp-live && git reset --hard HEAD")?.code, "leased_git_mutation", "shell tilde expansion cannot be treated as a literal cwd");
 	assert.equal(check("git -C ~/leases/cp-live reset --hard HEAD")?.code, "leased_git_mutation", "git -C expands tilde before git runs");
 	assert.equal(check("git -C~/leases/cp-live reset --hard HEAD")?.code, "leased_git_mutation", "combined -C must fail closed too");
-	assert.equal(check("cd $LEASE && git fetch origin"), undefined, "read-only git stays allowed");
+	assert.equal(check("cd $LEASE && git fetch origin")?.code, "leased_git_mutation", "N12: a fetch moves a lease's refs too");
+	assert.equal(check("cd $LEASE && git status"), undefined, "read-only git stays allowed");
 	assert.equal(check("cd $LEASE && cd /tmp && git reset --hard HEAD"), undefined, "a later known cwd outside clears uncertainty");
 	assert.equal(check(`GIT_DIR=${lease}/.git git reset --hard HEAD`)?.code, "leased_git_mutation");
 	assert.equal(check("GIT_DIR=/tmp/other.git git reset --hard HEAD"), undefined);
 	assert.equal(check("git -C '$LEASE' reset --hard HEAD")?.code, "leased_git_mutation", "unresolved target cannot prove it is outside a lease");
-	for (const command of ["git status", "git log -1", "git fetch origin", "git push origin main"]) {
+	for (const command of ["git fetch origin", "git pull --ff-only"]) assert.equal(check(command, lease)?.code, "leased_git_mutation", command);
+	for (const command of ["git status", "git log -1", "git push origin main"]) {
 		assert.equal(check(command, lease), undefined, command);
 	}
 	assert.equal(check("git reset --hard HEAD", b.home), undefined);
 	assert.equal(check("git -C /tmp reset --hard HEAD"), undefined);
 	const returned = new ContextGuard({ home: b.home, artifacts: b.artifacts, leases: () => [] });
 	assert.equal(returned.check({ toolName: "bash", input: { command: "git reset --hard HEAD" }, cwd: lease }), undefined);
+});
+
+// N12: the parent fetched in canonical clones and raced cp_check/cp_dispatch ref locks; their tools own those refs.
+// Every ref move is refused there, as on the operator path, except preflight's own `git -C <clone> switch <base>`.
+test("parent ref moves in a canonical clone are refused; the sanctioned switch fix and other dirs stay allowed", (t) => {
+	const b = bench(t);
+	const clone = join(b.home, LAYOUT.projects, "demo");
+	mkdirSync(clone, { recursive: true });
+	for (const [command, cwd] of [
+		["git fetch origin", clone],
+		["git pull", clone],
+		[`git -C ${clone} fetch origin main`, b.home],
+		[`cd ${clone} && git fetch`, b.home],
+		["git reset --hard origin/main", clone],
+		[`git -C ${clone} clean -fdx`, b.home],
+		[`git -C ${clone} checkout main`, b.home],
+		[`git -C ${clone} switch -C main origin/main`, b.home],
+		[`git -C ${clone} switch --discard-changes main`, b.home],
+		[`cd ${clone} && git push --force origin main`, b.home],
+	] as const) {
+		const decision = b.bash(command, cwd);
+		assert.equal(decision?.code, "canonical_git_mutation", command);
+		assert.match(decision.reason, /cp_check and cp_dispatch fetch/);
+	}
+	for (const command of [`git -C ${clone} switch main`, `git -C ${clone} status`, "git -C /tmp fetch origin", "git -C /tmp reset --hard HEAD"]) {
+		assert.equal(b.bash(command), undefined, command);
+	}
 });
 
 // -- shape ------------------------------------------------------------------

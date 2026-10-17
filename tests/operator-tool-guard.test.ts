@@ -24,15 +24,31 @@ test("operator bash: a CI poll loop and an updater sleep loop are refused; one-s
 		"for i in $(seq 1 60); do sleep 20; jq .state state/update.json; done",
 		"sleep 120; gh run list --branch main",
 		"gh run watch 123",
+		// N3: a wrapper prefix held the operator turn 41 min.
+		"timeout 1500 gh run watch 123",
 	]) {
 		const reason = refuse(command);
 		assert.ok(reason, `missed: ${command}`);
 		assert.match(reason, /cp-bridge wake/);
 		assert.match(reason, /state\/update\.json/);
 	}
-	for (const command of ["gh run list --branch main --limit 3 --json conclusion,status,headSha", "sleep 5", 'grep -rn "sleep 20" operator/', "cat state/update.json"]) {
+	for (const command of ["gh run list --branch main --limit 3 --json conclusion,status,headSha", "sleep 5", 'grep -rn "sleep 20" operator/', "cat state/update.json", "timeout 60 ssh host true"]) {
 		assert.equal(refuse(command), undefined, `wrongly refused: ${command}`);
 	}
+});
+
+// N12: the operator ran 42 `git fetch` in canonical clones; their refs move only through cp_parent's tools.
+test("operator bash: git fetch/pull/reset in a canonical clone is refused, git elsewhere is not", (t) => {
+	const target = scratch(t);
+	const clone = join(target.home, layoutForHome(target.mode, target.home).projects, "demo");
+	const refuse = (command: string, cwd = target.home) => operatorToolRefusal("bash", { command }, cwd, () => target);
+	for (const [command, cwd] of [["git fetch origin", clone], [`cd ${clone} && git pull`, target.home], [`git -C ${clone} reset --hard origin/main`, target.home]] as const) {
+		assert.match(refuse(command, cwd) ?? "", /canonical clone.*cp_parent/, `missed: ${command}`);
+	}
+	for (const command of [`git -C ${clone} status`, `git -C ${clone} log -1`, "git -C /tmp/other fetch origin"]) {
+		assert.equal(refuse(command), undefined, `wrongly refused: ${command}`);
+	}
+	assert.match(operatorToolRefusal("bash", { command: "git fetch" }, clone, () => { throw new Error("no home"); }) ?? "", /no command-post home.*no home/);
 });
 
 test("operator write/edit: only operator/, state/task-files/ and exactly data/standing-orders.md", (t) => {

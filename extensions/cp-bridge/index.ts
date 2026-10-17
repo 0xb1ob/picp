@@ -50,6 +50,7 @@ import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
 import { detectCiWait, detectSleepLoop } from "../../src/ci-wait.ts";
+import { canonicalCloneRefusal } from "../../src/guards.ts";
 
 export const BRIDGE_TOOL = "cp_parent";
 
@@ -194,7 +195,10 @@ export function operatorToolRefusal(toolName: string, input: unknown, cwd: strin
 		if (typeof command !== "string") return undefined;
 		const wait = detectCiWait(command);
 		const loop = wait ? undefined : detectSleepLoop(command);
-		if (!wait && !loop) return undefined;
+		if (!wait && !loop) {
+			try { return canonicalCloneRefusal(command, cwd, () => { const t = target(); return resolve(t.home, layoutForHome(t.mode, t.home).projects); }); }
+			catch (error) { return `Refused: no command-post home resolves for the canonical-clone git check (${(error as Error).message}).`; }
+		}
 		return `Refused: ${wait ? `${wait.what} (${wait.shape}: ${wait.matched})` : `this sleep loop holds the operator turn (${loop})`}. ` +
 			"Dashboard answers queue behind a running turn. Do not poll CI or state/update.json: end the turn and wait for the cp-bridge wake (CI, merge and update outcomes arrive as messages). " +
 			"A single non-blocking `gh run list` is still allowed.";
