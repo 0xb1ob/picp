@@ -8520,7 +8520,7 @@ A native run records `start_key` (`dashboard:<request>`, `cp_schedule:<call>`, `
 parallelism 1–32; model and thinking refused for a script recipe) are validated before the run exists and
 frozen for it, never written to the policy. A repeated start key returns the original run (`replayed`);
 another start while a run is open is refused (`already_running`). Every member dispatch and review uses the
-run's model (override, else the policy's pinned role, else routing) and thinking; dispatch parallelism is
+run's model (override, else the policy's pinned role, even over an explicit model; else routing) and thinking; dispatch parallelism is
 `execution.effective.parallelism`, and a full run keeps a queued dispatch at its head. A native run_now needs
 no revision (a stale explicit one refuses) and ignores a supplied operator quote; a legacy run_now still needs
 its quote and takes no overrides. The dashboard journals `overrides` on `run_now` requests only.

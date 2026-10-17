@@ -288,19 +288,19 @@ export class Scheduler {
 		});
 	}
 
-	/** Native add, in the fire lane: name checked, revision 1 saved and activated, then the schedule written. */
+	/** Native add, in the fire lane: schedule written, then revision 1 saved and activated; a failed save removes it. */
 	#nativeAdd(schedule: Schedule, native: ScheduleInput["native"], now: Date): Promise<Schedule> {
 		return this.#serial(async () => {
 			const runs = this.#ports.runs;
 			if (!native || !runs?.active) throw new SchedulerError("cp_schedule add without mandate_id needs the operator's quote and an active schedule run store");
 			const taken = (schedules: readonly Schedule[]) => { if (schedules.some((entry) => entry.name === schedule.name && entry.project === schedule.project)) throw new SchedulerError(`project ${schedule.project} already has a schedule named ${JSON.stringify(schedule.name)}`); };
-			taken(this.list());
-			let context: MintContext | Refusal;
+			taken(this.list()); let context: MintContext | Refusal;
 			try { context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "live policy bounds are not wired" }; } catch (error) { context = { refusal: `live policy bounds unreadable (${(error as Error).message})` }; }
 			const policy = refused(context) ? context : nativeAddPolicy({ schedule, limits: native.limits, context, action: native.action, now });
 			if (refused(policy)) throw new SchedulerError(`cp_schedule add refused: ${policy.refusal}`);
-			await runs.savePolicyRevision(policy, { at: isoTimestamp(now), provenance: policy.provenance });
-			return this.#mutate((schedules) => { taken(schedules); schedules.push(schedule); return schedule; });
+			await this.#mutate((schedules) => { taken(schedules); schedules.push(schedule); });
+			try { await runs.savePolicyRevision(policy, { at: isoTimestamp(now), provenance: policy.provenance }); } catch (error) { await this.#mutate((schedules) => { const at = schedules.findIndex((entry) => entry.id === schedule.id); if (at >= 0) schedules.splice(at, 1); }); throw error; }
+			return schedule;
 		});
 	}
 

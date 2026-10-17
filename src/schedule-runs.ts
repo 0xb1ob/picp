@@ -79,6 +79,7 @@ export class ScheduleRunStore {
 			run.anchor_job_id = member.job_id;
 		});
 	}
+	/** Idempotent: an existing member is a no-op, so a replayed start never admits a job twice. */
 	admitMember(id: string, member: ScheduleRunMember): Promise<ScheduleRun> { return this.#update(id, (run) => this.#member(run, member)); }
 	setPhase(id: string, phase: ScheduleRun["phase"]): Promise<ScheduleRun> {
 		return this.#update(id, (run) => {

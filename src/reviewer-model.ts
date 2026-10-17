@@ -23,12 +23,14 @@ export function selectReviewerModel(input: {
 	mandates?: Pick<MandateStore, "list" | "scheduleOf" | "scheduleMandates"> & { scheduleRuns?: ScheduleRunStore };
 	now?: Date;
 }): ReviewerModelSelection | undefined {
-	if (input.model !== undefined) return { model: input.model, source: "explicit" };
 	const { record, mandates } = input;
-	if (!record) return undefined;
-	const run = nativeRunOf(mandates?.scheduleRuns, record.job_id);
+	// A native run member's frozen model beats an explicit one, as in dispatch's withRunExecution.
+	const run = record ? nativeRunOf(mandates?.scheduleRuns, record.job_id) : undefined;
 	const runModel = run && runModelFor(run, "reviewer"), thinking = run?.execution?.effective.thinking as ThinkingLevel | undefined;
-	if (run && (runModel || thinking)) return { ...(runModel ? { model: runModel } : {}), source: "schedule-run", run_id: run.id, ...(thinking ? { thinking } : {}) };
+	const chosenModel = runModel ?? input.model;
+	if (run && (runModel || thinking)) return { ...(chosenModel ? { model: chosenModel } : {}), source: "schedule-run", run_id: run.id, ...(thinking ? { thinking } : {}) };
+	if (input.model !== undefined) return { model: input.model, source: "explicit" };
+	if (!record) return undefined;
 	if (mandates) {
 		const subject = {
 			jobId: record.job_id, project: record.project, jobKind: record.kind,

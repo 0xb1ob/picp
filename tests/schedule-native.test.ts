@@ -42,6 +42,13 @@ test("native add saves an activated native revision 1 and writes no grant", asyn
 	assert.equal("approval" in policy || "ask_on" in policy || "allowed_actions" in policy, false);
 	await assert.rejects(b.scheduler.add({ name: "nightly", project: "demo", native: { action: ACTION, limits: {} }, manual: true, title: "x", kind: "research", delivery: "answer" }), /already has a schedule named/);
 	await assert.rejects(b.scheduler.add({ name: "quoteless", project: "demo", manual: true, title: "x", kind: "research", delivery: "answer" }), /needs the operator's quote/);
+	// The schedule is written first; a failed policy save removes it again, leaving neither schedule nor policy.
+	const save = b.runs.savePolicyRevision.bind(b.runs);
+	b.runs.savePolicyRevision = async () => { throw new Error("policy journal unwritable"); };
+	await assert.rejects(b.scheduler.add({ name: "broken", project: "demo", native: { action: ACTION, limits: {} }, manual: true, title: "x", kind: "research", delivery: "answer" }), /unwritable/);
+	b.runs.savePolicyRevision = save;
+	assert.deepEqual(b.scheduler.list().map((entry) => entry.name), ["nightly"]);
+	assert.ok((await b.scheduler.add({ name: "broken", project: "demo", native: { action: ACTION, limits: {} }, manual: true, title: "x", kind: "research", delivery: "answer" })).id);
 });
 
 test("native run_now needs no quote, freezes overrides, replays a start key and refuses stale or invalid input first", async (t) => {
@@ -93,7 +100,8 @@ test("run execution reaches dispatch and the reviewer; a script recipe refuses m
 	assert.equal(request.model, "mock/run"); assert.equal((request as { thinking?: string }).thinking, "high");
 	const record = { job_id: fired.job_id!, project: "demo", kind: "research" } as Parameters<typeof selectReviewerModel>[0]["record"];
 	assert.deepEqual(selectReviewerModel({ record, mandates: b.mandates }), { model: "mock/run", source: "schedule-run", run_id: fired.run_id, thinking: "high" });
-	assert.equal(selectReviewerModel({ model: "mock/explicit", record, mandates: b.mandates })?.source, "explicit");
+	// The frozen run model beats an explicit reviewer model, as dispatch's withRunExecution does for the worker.
+	assert.deepEqual(selectReviewerModel({ model: "mock/explicit", record, mandates: b.mandates }), { model: "mock/run", source: "schedule-run", run_id: fired.run_id, thinking: "high" });
 	const policy = { ...structuredClone(b.runs.activePolicy(b.schedule.id) as NativeSchedulePolicy), recipe: { ...b.schedule.job, skill: null, script_path: "scripts/x.sh" } };
 	assert.match(String((resolveExecution(policy, { model: "mock/x" }) as { refusal?: string }).refusal), /script/);
 });
@@ -106,14 +114,21 @@ test("a native pipeline starts in code: one bound ship, labelled and admitted, n
 	const dispatched: string[] = [];
 	const runner = new PipelineRunner({ home: b.home.path, ledger: b.ledger, dispatcher: () => ({ dispatch: async (r: { jobId: string }) => { dispatched.push(r.jobId); return { job_id: r.jobId }; } }) } as unknown as PipelineOptions);
 	const starter = { start: runner.start.bind(runner), started: (id: string) => runner.store.get(id) !== undefined };
-	// A crash after the ship create: the replay finds that ship by its run-suffixed title instead of creating another.
+	// A crash after admitMember and addDep but before the pipeline store write: the replay finds that ship by its
+	// run-suffixed title, admits it no second time and creates no other ship.
 	const title = `ship: ${policy.recipe.title} (${fired.run_id})`;
 	const early = await b.ledger.create({ title, project: "demo", kind: "ship", delivery: "pr", labels: [`schedule:${b.schedule.id}`] });
+	await b.runs.admitMember(fired.run_id!, { job_id: early.id, role: "ship", admitted_at: early.created_at });
+	await b.ledger.addDep(early.id, fired.job_id!);
+	const membersBefore = b.runs.run(fired.run_id!)!.members.length;
 	assert.match(await startScheduledPipeline(starter, b.runs, b.schedule, fired), /pipeline started/);
 	const ships = (await b.ledger.list({ all: true })).filter((job) => job.title === title);
 	assert.deepEqual(ships.map((job) => job.id), [early.id]);
 	assert.deepEqual(dispatched, [fired.job_id]);
-	assert.ok(b.runs.run(fired.run_id!)!.members.some((member) => member.job_id === early.id && member.role === "ship"));
+	const members = b.runs.run(fired.run_id!)!.members;
+	assert.equal(members.length, membersBefore, "the replay admits nothing twice");
+	assert.deepEqual(members.filter((member) => member.job_id === early.id).map((member) => member.role), ["ship"]);
+	assert.deepEqual((await b.ledger.show(early.id))?.blocked_by, [fired.job_id], "one dependency, not two");
 	assert.match(await startScheduledPipeline(starter, b.runs, b.schedule, fired), /already started/);
 	assert.deepEqual(dispatched, [fired.job_id], "a replay dispatches nothing");
 	// The plan checkpoint auto-authorizes under the write-mode policy; a flagged one and a merge still need a human.
