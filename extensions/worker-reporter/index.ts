@@ -44,6 +44,7 @@ import {
 	redactGithubTokens,
 } from "../../src/worker-credential-guard.ts";
 import { webEgressRefusal } from "../../src/web-egress.ts";
+import { workerHostGuard } from "../../src/worker-host-guard.ts";
 import { createEditResultEnricher, enrichSilentBashFailure } from "./edit-failures.ts";
 import { registerWorkerCompactionGuard } from "./compaction.ts";
 import { headShaErrors, type ObservedHead, worktreeHead } from "./head.ts";
@@ -495,6 +496,9 @@ export default function (pi: ExtensionAPI): void {
 		}
 		const web = webEgressRefusal(event.toolName, event.input);
 		if (web) return { block: true, reason: web };
+		// Last: only a call every other guard let through is written to the host audit.
+		const host = workerHostGuard(event.toolName, event.input, context.runDir);
+		if (host) return { block: true, reason: host };
 		return undefined;
 	});
 

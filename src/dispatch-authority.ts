@@ -12,10 +12,12 @@ export interface DispatchAuthorityJob {
 	evidence?: readonly string[]; promotion?: boolean; script?: boolean;
 	/** The resolved profile's `readOnly` frontmatter, set only by dispatch.ts where the profile is resolved. */
 	readOnly?: boolean;
+	/** An `ops:` job (src/ops-jobs.ts): it acts on a remote host, so a read-only profile never exempts it. */
+	ops?: boolean;
 }
 /** Read-only planning never edits code, so risk:high never gates it; the ship job that implements the plan is. */
-export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script">): boolean =>
-	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script;
+export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script" | "ops">): boolean =>
+	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script && !job.ops;
 export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
 	try {
 		const verdict = scheduleRunVerdict(store.runContext(), job.promotion ? "promote" : "dispatch", job, jobs, store.authorityNow());

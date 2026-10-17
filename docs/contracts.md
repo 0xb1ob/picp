@@ -33,6 +33,7 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
 - [Teardown (`cp_teardown`)](#teardown-cp_teardown)
 - [Integration (`cp_integrate`)](#integration-cp_integrate-cp-uug)
 - [Artifacts and parent context guards](#artifacts-and-parent-context-guards)
+- [Ops jobs (remote-host work)](#ops-jobs-remote-host-work)
 - [Q&A answers (`delivery:answer`)](#qa-answers-deliveryanswer)
 - [Pipeline and checkpoint](#pipeline-and-checkpoint)
 - [Escalation](#escalation-one-schema-for-ask-the-human)
@@ -453,6 +454,16 @@ smaller); one named `state/runs/<id>/` and single files stay allowed — and `gh
 Bash tool results pass through `redactGithubTokens` in the worker-reporter `tool_result` hook,
 so a GitHub token shape reaches the model and the pi session transcript only as `[REDACTED]`;
 the run log's streamed `tool_execution_update` is not covered (docs/storage.md Known gaps).
+`src/worker-host-guard.ts` (wired last in the same `tool_call` hook) refuses a private ssh key, a `.ssh` directory or
+a `*.pem` file: a bash word naming a `.ssh` dir (`~/.ssh`, `$HOME/.ssh/`, `.ssh` — so `ls`, `find` and `cd` into it),
+a key-type name in any position (`id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`, their `_sk` forms, with any suffix such as
+`.bak` or `~` but not `.pub`; a generic `id_*` like `id_token` passes outside `.ssh/` so code work is not refused),
+`.ssh/id_*` (not `*.pub`), `.ssh/*.key`, a `.ssh/` glob or
+any `*.pem` path, outside heredoc bodies and an `ssh`/`scp`/`sftp` `-i` value, and the same paths as any tool's `path`
+input (`read`, `grep`, `find`, `ls`). Every
+bash call with `ssh`/`scp`/`sftp`/`rsync` in command position is appended, before it runs, to
+`state/runs/<id>/host-audit.jsonl` as `{at, command}` (GitHub-redacted, 500 chars); an append that fails refuses
+the call. A floor, not a sandbox: an obfuscated command passes, and the run log stays the backstop.
 
 Why this option and not the alternatives the issue weighed: a per-tool-call
 timeout cannot distinguish a 6-minute suite from a 6-minute sleep (the 30-minute
@@ -3893,6 +3904,29 @@ the ledger is machine-local like `data/`, `state/` and `projects/`, the
 the build's own history is rendered once into
 [docs/build-history.md](build-history.md) instead of shipped as a database.
 
+## Ops jobs (remote-host work)
+
+A data pull, a deploy or process control on a remote host is a worker job, not main-session work, and it needs no
+operator-maintained file: any alias in the CP host's own `~/.ssh/config` is reachable, and a worker inherits that
+config and agent. An ops job is `kind:research` + `delivery:local` with **exactly one** `ops:<pull|deploy|process>`
+label (`cp_job create labels`), plus zero or more `resource:<name>` labels; `src/ops-jobs.ts` owns the rules.
+
+| rule | where |
+|---|---|
+| an `ops:` label selects `profiles/ops.md` (role `planner`, `readOnly`, no packages, brief `brief-ops`), like `delivery:answer` selects `qa`; another explicit profile, the `ops` profile without an `ops:` label, or a kind/delivery other than research/local is refused | `opsRequest`, both `dispatch` and the dry run |
+| `ops:deploy` and `ops:process` dispatch as `risk:high` whatever risk was asked; `ops:pull` defaults to `low` (a recorded `risk:high` label still wins) | `opsRequest` |
+| an ops job is never `riskGateExempt`, so `ask_on: risk:high` gates deploy/process; the existing risk:high decision path approves it (no new human step) | `DispatchAuthorityJob.ops` |
+| a `resource:<name>` label is refused, before the lease, while another job whose fleet record is not `done` carries the same label; teardown (phase `done`) releases it; there is no static list | `assertResourcesFree` |
+| a worker never reads a private ssh key or a `*.pem` file, and every `ssh`/`scp`/`sftp`/`rsync` call is audited to `state/runs/<id>/host-audit.jsonl` | `src/worker-host-guard.ts` |
+
+The profile hard-codes the job's rules: check what is live on the host (processes, sessions, scheduled tasks)
+before using it; never kill or attach to a process the job did not start; verify a deploy (sha256), keep a tagged
+backup and roll back on failure; never print a secret value; pulled files go in the artifact directory. It also
+hard-codes the **operator-only acts** — Telegram login codes, broker or account logins, enabling live trading
+(`DRY_RUN=0`, AlgoTrading on a live account), and DNS/ACL/tunnel changes: the worker reports `blocked` naming the
+act, and the parent escalates it. The parent's CI read is unchanged: `gh run view --log-failed` stays refused
+(`ci_checks_read`, `src/guards.ts`), so the parent still has no run id to `gh run rerun`.
+
 ## Q&A answers (`delivery:answer`)
 
 A small question about an onboarded project is not research and not ship: the
@@ -4395,7 +4429,8 @@ Read-only planning (research with a readOnly profile) is never gated: planners c
 job that implements a plan is. A fresh `cp_dispatch` of a `kind:research` job whose resolved profile
 frontmatter says `readOnly: true` (planner, qa) skips this gate and `wouldAskRiskHigh` whatever `ask_on`
 says (`riskGateExempt`, `src/dispatch-authority.ts`); a ship, script or promotion dispatch, or a research job
-with a writing profile, is gated as above. The same exemption holds inside a schedule run (`scheduleRunVerdict`
+with a writing profile, is gated as above; so is an [ops job](#ops-jobs-remote-host-work) (`ops:` label, the read-only
+`ops` profile), which acts on a remote host. The same exemption holds inside a schedule run (`scheduleRunVerdict`
 skips its risk:high and hard-stop escalation for an exempt job). Checkpoint decides are unchanged: their kinds
 (`ship`, `diff`, `merge`, `final_fix`) only ever name ship jobs, never a read-only research job.
 

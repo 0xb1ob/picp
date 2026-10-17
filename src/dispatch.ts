@@ -72,6 +72,8 @@ import { cleanupCreatedJobBranch, lastLine } from "./job-branch-cleanup.ts";
 import { resolveJobSkills, skillsBriefNote } from "./job-skills.ts";
 import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
+import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
+import { DispatchError } from "./dispatch-error.ts";
 export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
 
 /** A git invocation, injectable so the branch paths are testable without a repo. */
@@ -80,13 +82,7 @@ export type GitRunner = (
 	args: readonly string[],
 ) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
-export class DispatchError extends Error {
-	readonly result: PreflightResult | undefined;
-	constructor(message: string, result?: PreflightResult) {
-		super(message);
-		this.result = result;
-	}
-}
+export { DispatchError } from "./dispatch-error.ts";
 
 /** Refused only because open blockers remain: `cp_dispatch` arms it (src/dependency-dispatch.ts). */
 export class BlockedDispatchError extends DispatchError {
@@ -463,6 +459,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
+		request = opsRequest(request, issue, kind, delivery);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		const profile = selectProfile(options.profilesDir, request, { kind, delivery });
 		const { skills } = this.#skills(request, profile);
@@ -517,7 +514,7 @@ export class Dispatcher {
 				...(request.taskFile === undefined ? {} : { path: request.taskFile }),
 			},
 			...(blockers.length > 0 ? { blockers } : {}),
-			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], readOnly: profile.frontmatter.readOnly === true }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], readOnly: profile.frontmatter.readOnly === true, ops: request.profile === OPS_PROFILE_NAME }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
 			...(skills.length ? { skills } : {}),
 		};
 	}
@@ -534,6 +531,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
+		request = opsRequest(request, issue, kind, delivery);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		if (blockers.length > 0) {
 			throw new BlockedDispatchError(`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`, blockers);
@@ -610,14 +608,15 @@ export class Dispatcher {
 		const bound = request.pr ? await (options.bindPr ?? bindFromOrigin((p) => options.registry.originUrl(p)))({ ref: request.pr, project: labels.project, clone, base }) : undefined;
 		if (bound && before && bound.number !== before.number) throw new DispatchError(`${issue.id} was bound to ${before.url}, not ${bound.url}; re-dispatch it with pr ${before.number}`);
 		if (bound) assertBranchFree(options.fleet.read().jobs, issue.id, bound.head);
+		assertResourcesFree(issue, options.fleet.read().jobs, options.ledger.read().jobs);
 		const branch = bound?.head ?? issue.id;
 
-		const readOnly = profile.frontmatter.readOnly === true;
-		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, readOnly }, inputs, options.fleet.read().jobs);
+		const readOnly = profile.frontmatter.readOnly === true, ops = request.profile === OPS_PROFILE_NAME;
+		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, readOnly, ops }, inputs, options.fleet.read().jobs);
 		let mandateId: string | undefined, startedBy: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(
-				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, readOnly, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
+				{ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], risk: gate.risk, readOnly, ops, evidence: gate.evidence ? [...inputs.reasons, gate.evidence] : inputs.reasons },
 				options.fleet.read().jobs,
 			);
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;

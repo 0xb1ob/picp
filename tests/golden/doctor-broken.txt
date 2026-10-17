@@ -1,4 +1,4 @@
-DOCTOR BROKEN · 3 error · 6 warn · 33 ok (at 2026-08-27T12:00:00Z)
+DOCTOR BROKEN · 3 error · 6 warn · 34 ok (at 2026-08-27T12:00:00Z)
 home: <HOME>
 package: <PKG>
 
@@ -37,17 +37,18 @@ package: <PKG>
 ✓ [mcp.operator] MCP: no servers configured (optional)
     operator session: builtin:mcp, codemode, tool-search; servers from <HOME>/pi-agent/mcp.json
 ✓ [mcp.workers] read-only workers: no MCP servers configured
-    gate-reviewer, planner, qa via mcp_call (servers read in place from <HOME>/pi-agent/mcp.json); implementer, ship workers and the CP parent: no MCP (by design)
+    gate-reviewer, ops, planner, qa via mcp_call (servers read in place from <HOME>/pi-agent/mcp.json); implementer, ship workers and the CP parent: no MCP (by design)
 ✓ [session.tools] parent session tools not recorded (not a live parent)
 ✓ [package.worker_reporter] worker-reporter extension present
-✓ [package.profiles] 4 profile(s) load and validate
-    gate-reviewer (gate-reviewer), implementer (implementer), planner (planner), qa (planner)
+✓ [package.profiles] 5 profile(s) load and validate
+    gate-reviewer (gate-reviewer), implementer (implementer), ops (planner), planner (planner), qa (planner)
 ✓ [package.briefs] every profile's brief template exists
 ✓ [config.routing] no .pi-command-post/data/routing.json (profile defaults only)
 ✓ [config.budgets] no .pi-command-post/data/budgets.json (defaults)
 ✓ [config.projects] no .pi-command-post/data/projects.json (defaults)
 ✓ [config.budget.gate-reviewer] gate-reviewer effective budget: 10000000 tokens / $50 (not clamped)
 ✓ [config.budget.implementer] implementer effective budget: 50000000 tokens / $50 (not clamped)
+✓ [config.budget.ops] ops effective budget: 20000000 tokens / $50 (not clamped)
 ✓ [config.budget.planner] planner effective budget: 50000000 tokens / $50 (not clamped)
 ✓ [config.budget.qa] qa effective budget: 4000000 tokens / $50 (not clamped)
 ✓ [config.gate] no .pi-command-post/data/gate.json (defaults)
@@ -55,7 +56,7 @@ package: <PKG>
 ✓ [config.bounds.wall_clock] per-job wall-clock cap: 5400s
 ✓ [config.bounds.tool_call_cap] per-job tool-call cap: 900 starts
 ✓ [models.probe] model availability not probed (no live model registry in this context)
-    gate-reviewer: anthropic/claude-opus-5-5, implementer: anthropic/claude-opus-5-5, planner: anthropic/claude-opus-5-5, qa: anthropic/claude-opus-5-5
+    gate-reviewer: anthropic/claude-opus-5-5, implementer: anthropic/claude-opus-5-5, ops: anthropic/claude-opus-5-5, planner: anthropic/claude-opus-5-5, qa: anthropic/claude-opus-5-5
 ✓ [mode] multi-project mode, home <HOME> (source: checkout; no runtime supplied; multi mode on the given home)
 ✓ [home.location] home (checkout): <HOME>
     running from a source checkout; the package root is the home

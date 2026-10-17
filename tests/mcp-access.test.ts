@@ -47,7 +47,7 @@ test("servers: one live `pi mcp list --json`, all N servers for read-only worker
 	assert.deepEqual(calls, [["pi", "mcp", "list", "--json"]]);
 	assert.equal(workers?.check, "mcp.workers");
 	assert.equal(workers?.what, "read-only workers: all 2 servers, read-only tools only");
-	assert.match(String(workers?.detail), /gate-reviewer, planner, qa via mcp_call/);
+	assert.match(String(workers?.detail), /gate-reviewer, ops, planner, qa via mcp_call/);
 	assert.doesNotMatch(String(workers?.what) + String(workers?.detail), /allowlist/);
 	assert.equal(operator?.severity, "warn");
 	assert.ok(operator?.fix);

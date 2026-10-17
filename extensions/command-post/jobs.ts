@@ -72,7 +72,7 @@ export const JobActionSchema = Type.Object(
 		),
 		script_path: Type.Optional(Type.String({ description: "create only: checked-in POSIX repository-relative shell script; requires kind:ship delivery:local" })),
 		slug: Type.Optional(Type.String({ description: "create: optional readable stem, e.g. fix-login -> cp-fix-login-a1b2" })),
-		labels: Type.Optional(Type.Array(Type.String(), { description: "create: extra labels; list: AND filter" })),
+		labels: Type.Optional(Type.Array(Type.String(), { description: "create: extra labels (remote-host ops job: one ops:<pull|deploy|process>, any resource:<name>, kind research, delivery local); list: AND filter" })),
 		status: Type.Optional(StringEnum([...JOB_STATUSES], { description: "update: open|in_progress|deferred (never closed); list: filter" })),
 		all: Type.Optional(Type.Boolean({ description: "list: include closed jobs" })),
 		limit: Type.Optional(Type.Integer({ minimum: 0, description: "list: page size; 0 or absent = unlimited" })),

@@ -773,6 +773,26 @@ test("risk:high under ask_on never gates read-only planning; ship and a writing 
 	assert.deepEqual(escalations.open().map((entry) => entry.job_ids).sort(), [[ship.id], [writer.id]].sort(), "one escalation per gated job");
 });
 
+// picp ops jobs: an ops:<class> label selects the read-only ops profile, yet deploy/process always gate as
+// risk:high (riskGateExempt never applies), a pull stays low, and a resource held by a live job refuses before a lease.
+test("ops jobs: ops profile by label, deploy gates even when asked low, pull dispatches, a held resource refuses", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "vm ops", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const ops = (slug: string, labels: string[]) => b.ledger.create({ title: `ops ${slug}`, project: "demo", delivery: "local", kind: "research", slug, labels });
+	const pull = await ops("pull-ticks", ["ops:pull", "resource:tg-session"]);
+	const pulled = await dispatcher.dispatch({ jobId: pull.id, task: "Pull 60 days of ticks with the session token.", model: b.model, fetch: false });
+	assert.equal(pulled.state, "dispatched");
+	assert.equal(pulled.profile, "ops");
+
+	const deploy = await ops("deploy-exe", ["ops:deploy"]);
+	await assert.rejects(() => dispatcher.dispatch({ jobId: deploy.id, task: "Deploy the build.", risk: "low", model: b.model, fetch: false }), /risk:high under ask_on/);
+	const again = await ops("pull-history", ["ops:pull", "resource:tg-session"]);
+	await assert.rejects(() => dispatcher.dispatch({ jobId: again.id, task: "Pull history.", model: b.model, fetch: false }), new RegExp(`resource:tg-session is leased by live job ${pull.id}`));
+	assert.deepEqual(b.fleet.read().jobs.map((job) => job.job_id), [pull.id], "refusals take no lease");
+});
+
 // cp-7re9: deny_projects refuses a model dispatch at preflight (project_denied), which runs
 // before the mandate's risk:high gate and before the lease (src/dispatch.ts: routing → bounds → preflight → assertDispatchAllowed → lease).
 test("cp-7re9: a denied project refuses a model dispatch with project_denied, before the risk:high gate and before any lease", { skip: SKIP, timeout: 180_000 }, async (t) => {

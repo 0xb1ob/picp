@@ -25,7 +25,7 @@
 
 import { GITHUB_TOKEN_RE } from "./secret-patterns.ts";
 
-const CMD_POS = "(?:^|[;&|(\\n]|\\bdo\\b|\\bthen\\b|\\bwhile\\b|\\buntil\\b)[ \\t]*";
+export const CMD_POS = "(?:^|[;&|(\\n]|\\bdo\\b|\\bthen\\b|\\bwhile\\b|\\buntil\\b)[ \\t]*";
 const AUTH = "\\.pi/agent/(?:mcp-)?auth\\.json\\b";
 const DIRECT_RE = new RegExp(`${CMD_POS}(?:command\\s+)?cp\\b[^;&|\\n]*${AUTH}[^;&|\\n]*`, "i");
 // `for f in auth.json …; do [stmts;] cp ~/.pi/agent/$f` — \1 is the loop variable.
@@ -34,7 +34,7 @@ const LOOP_RE = new RegExp(
 	"i",
 );
 // Same heredoc-body blanking as src/ci-wait.ts: a report may quote the copy.
-const HEREDOC_BODY_RE = /(?<!<)(<<-?\s*(['"]?)(\w+)\2[^\n]*\n)[\s\S]*?(?:\n[ \t]*\3[ \t]*(?=\n|$)|$)/g;
+export const HEREDOC_BODY_RE = /(?<!<)(<<-?\s*(['"]?)(\w+)\2[^\n]*\n)[\s\S]*?(?:\n[ \t]*\3[ \t]*(?=\n|$)|$)/g;
 
 export interface HostAuthCopyFinding {
 	/** The copy fragment, trimmed and bounded — quoted back to the worker. */
