@@ -223,6 +223,19 @@ test("watch sweep: observeCi sees open snapshots (a moved head included), never 
 	assert.deepEqual(readWatchFile(b.home).prs.map((pr) => [pr.job_id, pr.cursors.comments]), [["cp-park", "C1"], ["cp-two", "C1"]]);
 });
 
+test("N20: the sweep withdraws a done job's open human-review row (merged before any teardown withdrew it), nothing else", async (t) => {
+	const closed: FleetRecord = { ...parked("cp-dsuj"), phase: "done" };
+	delete closed.awaiting_merge;
+	const b = await bench(t, [parked(), closed]);
+	const awaiting = new AwaitingStore({ home: b.home });
+	const row = async (job_id: string, subject: string) => (await awaiting.declareGated({ type: "approval", subject, decision: `${subject} at abc`, why: "w", blocks: "b", job_id })).item;
+	const stale = await row("cp-dsuj", "human-review pr https://github.com/o/r/pull/78");
+	const reminder = await row("cp-dsuj", "merge-pending pr https://github.com/o/r/pull/78");
+	const parkedRow = await row("cp-park", "human-review pr https://github.com/o/r/pull/7");
+	await new AwaitingMergeWatch({ ...b.ports, home: b.home, runner: async () => ({ data: { p0: { pullRequest: rawPr() } } }) }).sweep();
+	assert.deepEqual([stale, reminder, parkedRow].map((item) => awaiting.get(item.id)?.state), ["withdrawn", "open", "open"]);
+});
+
 test("checkWakeup: a pending-exit wake is stale once its job left that parking cycle", () => {
 	const stamp = { kind: "recovery" as const, job_id: "cp-park", keys: ["parked-cycle:1"], issued_at: HANDED };
 	const facts = (phase: FleetRecord["phase"], parked_cycle?: number) => ({ job: () => ({ phase, generation: 1, ...(parked_cycle ? { parked_cycle } : {}) }) });

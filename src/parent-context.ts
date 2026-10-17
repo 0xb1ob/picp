@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LAYOUT, layoutForHome, ReviewerModelSchema, validate } from "./contracts.ts";
+import { LAYOUT, layoutForHome, type Mandate, ReviewerModelSchema, validate } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
 import { EscalationStore } from "./escalation.ts";
 import { FleetStore } from "./fleet.ts";
@@ -159,6 +159,9 @@ export function parentContextLog(home: string, source: string, line: string): vo
 export interface ParentContextOutcome {
 	rotated?: string;
 	rotateFailed?: string;
+	/** The mission a rotation was attempted for, and what ended it (N17). */
+	mission?: string;
+	trigger?: string;
 	event?: "compacted" | "refused" | "failed" | "timed_out" | "skipped_length_stop";
 	raw?: number;
 	effective?: number;
@@ -171,21 +174,37 @@ export interface ParentContextOutcome {
 
 const COMPACT_TIMEOUT = /^timeout after \d+ms waiting for response to compact/;
 
+/**
+ * N17: the ended mission a rotation is owed for, and its true trigger. cp_next's mission_end counts only while its grant
+ * is the one open grant (or unknown to the store); else, with none active, the newest end since the last rotation.
+ */
+export function missionRotation(mandates: readonly Mandate[], missionEnd: string | undefined, last: { lastMissionEnd?: string; lastRotateAt?: string }): { id: string; trigger: string } | undefined {
+	const active = mandates.filter((m) => m.status === "active");
+	if (active.some((m) => m.id !== missionEnd)) return undefined;
+	const endedAt = (m: Mandate) => Date.parse(m.revoked_at ?? m.expiry);
+	const rotatedAt = Date.parse(last.lastRotateAt ?? "");
+	const ended = mandates.filter((m) => (m.status === "revoked" || m.status === "expired") && (Number.isNaN(rotatedAt) || endedAt(m) > rotatedAt))
+		.reduce<Mandate | undefined>((newest, m) => (!newest || endedAt(m) > endedAt(newest) ? m : newest), undefined);
+	const owed = missionEnd && (active.length || !mandates.some((m) => m.id === missionEnd)) ? { id: missionEnd, trigger: "cp_next mission_end" }
+		: ended ? { id: ended.id, trigger: ended.status === "expired" ? "expired" : `revoked by ${ended.revoked_by?.by ?? "unknown"}` } : undefined;
+	return owed && owed.id !== last.lastMissionEnd ? owed : undefined;
+}
+
 /** Never rejects: every failure is an outcome the caller logs. A failed mission-end rotate falls through to the threshold check. */
 export async function autoParentContext(home: string, missionEnd: string | undefined, lastAssistant: AssistantLike | undefined, control: {
 	/** Why the parent cannot compact now, or undefined when it can. */
 	unsettled: () => string | undefined;
 	status: () => Promise<ParentStatus>;
-	rotate: () => Promise<unknown>;
+	rotate: (mission: string) => Promise<unknown>;
 	compact: () => Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }>;
 }): Promise<ParentContextOutcome> {
 	const outcome: ParentContextOutcome = {};
-	const active = new MandateStore(home).list().filter((m) => m.status === "active");
-	if (missionEnd && parentContextStatus(home).lastMissionEnd !== missionEnd && active.every((m) => m.id === missionEnd)) {
+	const owed = missionRotation(new MandateStore(home).list(), missionEnd, parentContextStatus(home));
+	if (owed) {
 		try {
-			await control.rotate();
-			return { rotated: missionEnd };
-		} catch (error) { outcome.rotateFailed = (error as Error).message; }
+			await control.rotate(owed.id);
+			return { rotated: owed.id, trigger: owed.trigger };
+		} catch (error) { Object.assign(outcome, { rotateFailed: (error as Error).message, mission: owed.id, trigger: owed.trigger }); }
 	}
 	let raw: number | null | undefined;
 	try { raw = (await control.status()).contextTokens; } catch (error) { return { ...outcome, event: "failed", error: (error as Error).message }; }

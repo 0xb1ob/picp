@@ -206,6 +206,18 @@ export async function withdrawHumanReview(home: string, record: FleetRecord, jou
 	}
 }
 
+/** N20: the watch's backstop for rows a teardown never withdrew (older ones included); returns the withdrawn ids. */
+export async function withdrawDoneHumanReviews(home: string, jobs: readonly FleetRecord[]): Promise<string[]> {
+	const done = new Set(jobs.filter((job) => job.phase === "done").map((job) => job.job_id));
+	const store = new AwaitingStore({ home });
+	const withdrawn: string[] = [];
+	for (const item of store.list()) {
+		if (!item.job_id || !done.has(item.job_id) || !item.subject?.startsWith(HUMAN_REVIEW_SUBJECT)) continue;
+		if (item.state === "open" || item.state === "deferred") withdrawn.push((await store.withdraw(item.id)).id);
+	}
+	return withdrawn;
+}
+
 /**
  * issue #2: a live (or mid-turn) worker that has filed no report for this
  * generation. Liveness is the reconcile rule (src/fleet.ts): owned and alive, or

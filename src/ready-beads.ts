@@ -27,6 +27,8 @@ export async function readReadyBeads(registry: ProjectRegistry, ledger: Ledger, 
 				results.push({ project: entry.name, ids: [], error: notImplemented("github") });
 				continue;
 			}
+			// N15: intake off means its ready beads are not job candidates, so neither cp_next nor the idle notice nags.
+			if (tracker.source === "connection" && !tracker.intake) continue;
 			const db = tracker.db;
 			const clone = registry.pathOf(entry.name);
 			const cwd = existsSync(clone) ? clone : dirname(db);
@@ -75,9 +77,10 @@ export function formatReadyBeads(rows: readonly ReadyBeads[]): string[] {
  */
 export function idleBeadObserver(read: () => Promise<ReadyBeads[]>, emit: (text: string) => void, fleetNow: () => readonly FleetRecord[]) {
 	let generation = 0;
-	// The last successful summary emitted: an unchanged ready set is not news after the next working period.
+	// The last successful ready set emitted: an unchanged set is not news after the next working period.
 	let lastSuccess: string | undefined;
-	const working = (jobs: readonly FleetRecord[]) => jobs.some((job) => job.phase === "waiting" || job.phase === "launching");
+	// N15: a held or parked PR is work in flight; the fleet is idle only once nothing is waiting on it.
+	const working = (jobs: readonly FleetRecord[]) => jobs.some((job) => ["launching", "waiting", "held", "awaiting_merge"].includes(job.phase));
 	// A fleet read that throws propagates to the caller (it logs); it never reads as idle.
 	const stillIdle = (own: number) => generation === own && !working(fleetNow());
 	return async (before: readonly FleetRecord[], after: readonly FleetRecord[]): Promise<void> => {
@@ -97,10 +100,11 @@ export function idleBeadObserver(read: () => Promise<ReadyBeads[]>, emit: (text:
 		// An empty successful read forgets the last summary, so work that disappears and returns announces again.
 		if (!lines.length) { lastSuccess = undefined; return; }
 		const text = `${count ? `fleet idle with ${count} ready beads\n` : "fleet idle; ready beads could not be read\n"}${lines.join("\n")}`;
-		// Read failures always surface and never count as the remembered success.
+		// Read failures always surface and never count as the remembered success; dedupe is on the bead-id set, not its order.
 		const failed = rows.some((row) => row.error);
-		if (!failed && text === lastSuccess) return;
+		const key = JSON.stringify(rows.map((row) => [row.project, [...row.ids].sort()]).sort());
+		if (!failed && key === lastSuccess) return;
 		emit(text);
-		if (!failed) lastSuccess = text;
+		if (!failed) lastSuccess = key;
 	};
 }
