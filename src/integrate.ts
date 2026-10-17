@@ -1930,9 +1930,8 @@ export function ciFailedMessage(input: { jobId: string; branch: string; prUrl: s
 	return [
 		`${input.jobId}: CI is red on the pushed head of ${input.prUrl} — ${input.reason}.`,
 		"",
-		`First, \`git fetch origin\`. Only if \`git rev-list --count HEAD..origin/${input.branch}\` is not 0 (someone pushed`,
-		`after you), \`git fetch origin && git merge origin/${input.branch}\` — never a reset: the merge keeps your unpushed`,
-		`commits, which \`git rev-list --count origin/${input.branch}..HEAD\` counts.`,
+		`First, \`git fetch origin\`. Only if \`git rev-list --count HEAD..origin/${input.branch}\` is not 0 (someone pushed after you), ` +
+			`\`git fetch origin && git merge origin/${input.branch}\` — never a reset: the merge keeps your unpushed commits, which \`git rev-list --count origin/${input.branch}..HEAD\` counts.`,
 		"",
 		"Then fix the cause on this same branch with one more commit, run the project's checks, and a plain",
 		"`git push` — never a force push. Do not wait for or poll CI: the parent verifies it against the sha you report.",
