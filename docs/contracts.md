@@ -456,7 +456,9 @@ so a GitHub token shape reaches the model and the pi session transcript only as 
 the run log's streamed `tool_execution_update` is not covered (docs/storage.md Known gaps).
 `src/worker-host-guard.ts` (wired last in the same `tool_call` hook) refuses a private ssh key, a `.ssh` directory or
 a `*.pem` file: a bash word naming a `.ssh` dir (`~/.ssh`, `$HOME/.ssh/`, `.ssh` — so `ls`, `find` and `cd` into it),
-a bare key name (`id_*` with no extension, in any position), `.ssh/id_*` (not `*.pub`), `.ssh/*.key`, a `.ssh/` glob or
+a key-type name in any position (`id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`, their `_sk` forms, with any suffix such as
+`.bak` or `~` but not `.pub`; a generic `id_*` like `id_token` passes outside `.ssh/` so code work is not refused),
+`.ssh/id_*` (not `*.pub`), `.ssh/*.key`, a `.ssh/` glob or
 any `*.pem` path, outside heredoc bodies and an `ssh`/`scp`/`sftp` `-i` value, and the same paths as any tool's `path`
 input (`read`, `grep`, `find`, `ls`). Every
 bash call with `ssh`/`scp`/`sftp`/`rsync` in command position is appended, before it runs, to

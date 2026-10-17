@@ -26,10 +26,13 @@ test("a .ssh directory and a bare private-key name are refused for bash and for 
 			assert.match(workerHostGuard(tool, { path: dir }, "/nonexistent") ?? "", /a \.ssh directory/, `${tool} ${dir}`);
 		}
 	}
-	for (const command of ["cd ~/.ssh; cat id_rsa", "cat id_ed25519", "cp id_ecdsa /tmp", "base64 < id_dsa", "cat id_*", "cat ./id_custom"]) {
-		assert.ok(keyPathIn(command), command);
+	const keys = ["cd ~/.ssh; cat id_rsa", "cat id_ed25519", "cp id_ecdsa /tmp", "base64 < id_dsa", "cat id_ed25519_sk", "cat id_rsa.bak",
+		"cat id_ed25519.old", "cat id_rsa~", "cat ~/.ssh/id_custom", "cat ~/.ssh/id_*"];
+	for (const command of keys) assert.ok(keyPathIn(command), command);
+	// Outside .ssh/ only key-type names are keys: ordinary code work naming id_* identifiers or files passes.
+	for (const command of ["grep -rn id_token src", "cat src/id_map.ts", "cat id_rsa.pub", "cat id_ed25519_sk.pub", "cat ./id_custom"]) {
+		assert.equal(keyPathIn(command), undefined, command);
 	}
-	assert.equal(keyPathIn("cat id_rsa.pub"), undefined);
 	assert.ok(workerHostGuard("read", { path: "id_rsa" }, "/nonexistent"));
 	assert.equal(workerHostGuard("ls", { path: "/home/u/.sshd" }, "/nonexistent"), undefined);
 });

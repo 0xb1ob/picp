@@ -12,12 +12,14 @@ const REMOTE_RE = new RegExp(`${CMD_POS}(?:(?:command|env|exec|nohup|sudo)\\s+)?
 // `ssh -i <key>` hands the key to ssh without printing it; only that value is exempt.
 const IDENTITY_RE = new RegExp(`(${CMD_POS}(?:command\\s+)?(?:ssh|scp|sftp)(?![\\w-])[^;&|\\n]*?)\\s-i\\s*\\S+`, "gi");
 
-/** True for a `.ssh` dir, a bare private-key name (`id_*`, no extension), a key in `.ssh/`, or any `*.pem` path. */
+/** True for a `.ssh` dir, a key-type name anywhere (`id_rsa*`, not `*.pub`), a key in `.ssh/`, or a `*.pem` path. */
 export function isKeyPath(path: string): boolean {
 	if (/[^/]\.pem$/i.test(path) || /(?:^|\/)\.ssh\/*$/.test(path)) return true;
 	const name = path.slice(path.lastIndexOf("/") + 1);
-	if (/^id_[\w*?-]+$/.test(name)) return true;
-	if (!/(?:^|\/)\.ssh\/+[^/]*$/.test(path) || name.endsWith(".pub")) return false;
+	if (name.endsWith(".pub")) return false;
+	// Outside .ssh/ only ssh key-type names count, so `grep id_token src` stays allowed.
+	if (/^id_(?:rsa|ed25519|ecdsa|dsa)(?![a-z0-9])/.test(name)) return true;
+	if (!/(?:^|\/)\.ssh\/+[^/]*$/.test(path)) return false;
 	return name.startsWith("id_") || /\.key$/i.test(name) || /[*?[{]/.test(name);
 }
 
