@@ -75,18 +75,15 @@ export function leaseReturnFailed(jobId: string, error: string): GateFailure {
 const KEPT_IGNORED = new Set(["node_modules", ".venv", "venv", "__pycache__"]);
 
 /**
- * cp-c1ur N18: top-level gitignored entries the clean-porcelain gate cannot see, which `treehouse return`
- * hands to the next lease as they are. Reported, never removed: they may be the only copy.
+ * cp-c1ur N18: gitignored paths `treehouse return` hands to the next lease, minus any through a KEPT_IGNORED
+ * segment. Reported, never removed: they may be the only copy.
  */
-export async function ignoredTopLevel(git: GitRun, worktree: string): Promise<{ entries: string[] } | { error: string }> {
-	const status = await git(worktree, ["status", "--ignored", "--porcelain"]);
+export async function ignoredEntries(git: GitRun, worktree: string): Promise<{ entries: string[] } | { error: string }> {
+	const status = await git(worktree, ["status", "--ignored", "--porcelain", "-z"]);
 	if (status.status !== 0) return { error: `git status --ignored failed: ${firstLine(status.stderr || `exit ${status.status}`)}` };
-	const entries = new Set<string>();
-	for (const line of status.stdout.split("\n")) {
-		const top = line.startsWith("!! ") ? line.slice(3).replace(/^"|"$/g, "").split("/")[0] : undefined;
-		if (top && !KEPT_IGNORED.has(top)) entries.add(top);
-	}
-	return { entries: [...entries].sort() };
+	const entries = status.stdout.split("\0").filter((record) => record.startsWith("!! ")).map((record) => record.slice(3))
+		.filter((path) => !path.replace(/\/$/, "").split("/").some((segment) => KEPT_IGNORED.has(segment)));
+	return { entries: entries.sort() };
 }
 
 // cp-a9fq: `defaultGit` and `formatTeardown` live here, not in teardown.ts, only

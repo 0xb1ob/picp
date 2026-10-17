@@ -73,7 +73,7 @@ import { type LandingEvidence, remoteTip } from "./landing-proof.ts";
 import { PipelineStore } from "./pipeline.ts";
 import { readStatusFile } from "./run-artifacts.ts";
 import {
-	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, ignoredTopLevel, jobInFlight, killedUnreportedWakeup, landingGate, landingMoved, leaseReturnFailed, type LedgerCloseOutcome,
+	acceptedHeadFailure, closeResearchLedgers, defaultGit, forcedShutdownFacts, ignoredEntries, jobInFlight, killedUnreportedWakeup, landingGate, landingMoved, leaseReturnFailed, type LedgerCloseOutcome,
 	type TeardownCallOptions, type TeardownLedger, unmanagedLiveWorker, unreportedLiveWorker, withdrawHumanReview,
 } from "./teardown-head.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -165,7 +165,7 @@ export interface TeardownResult {
 	ledger_close_error?: string;
 	/** A re-run teardown of a done job closed its ledger row. */
 	ledger_closed?: true;
-	/** cp-c1ur N18: gitignored top-level entries the returned worktree still holds (dependency installs excepted). */
+	/** cp-c1ur N18: gitignored paths the returned worktree still holds (dependency installs excepted). */
 	ignored?: string[];
 	/** Why those entries could not be listed. */
 	ignored_error?: string;
@@ -298,7 +298,7 @@ export class Teardown {
 			exitCode = record.worker.exit_code ?? null;
 		}
 
-		const ignored = isDirectory(record.worktree) ? await ignoredTopLevel((c, args) => this.#git(c, args), record.worktree) : undefined;
+		const ignored = isDirectory(record.worktree) ? await ignoredEntries((c, args) => this.#git(c, args), record.worktree) : undefined;
 		// --- then the lease: nothing is left inside the worktree to terminate -
 		const lease: Lease = leaseFromRecord({
 			worktree: record.worktree,

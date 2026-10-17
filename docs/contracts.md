@@ -2871,8 +2871,9 @@ Measured against real treehouse, because the whole gate depends on it:
    slot to the pool, and the **next lease reuses that same path**, reset onto the
    base. Uncommitted work is gone, and the files there belong to the next job.
    Gitignored files are **not** reset: the next lease inherits them. A passing
-   teardown lists the top-level ignored entries it leaves behind (`ignored`,
-   dependency installs such as `node_modules` excepted) and never removes them
+   teardown lists the full ignored paths it leaves behind (`ignored`; any path
+   through a dependency install such as `node_modules` is skipped, at any depth)
+   and never removes them
    — they may be the only copy (cp-c1ur N18).
 3. `refs/heads/<job-id>` **survives** in `projects/<name>`, and its commits are
    readable there afterwards.

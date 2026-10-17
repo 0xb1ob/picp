@@ -1925,7 +1925,7 @@ export function conflictMessage(input: { jobId: string; branch: string; prUrl: s
 	].join("\n");
 }
 
-/** A red head, handed back: the branch was not moved here, so a plain push follows the fix (cp-c1ur N6). */
+/** A red head, handed back: merge origin only if it moved, never reset, then a plain push (cp-c1ur N6). */
 export function ciFailedMessage(input: { jobId: string; branch: string; prUrl: string; reason: string }): string {
 	return [
 		`${input.jobId}: CI is red on the pushed head of ${input.prUrl} — ${input.reason}.`,
