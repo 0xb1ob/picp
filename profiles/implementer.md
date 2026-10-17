@@ -50,7 +50,7 @@ Method:
   - Do not re-read a file or output a tool already returned to you; session context is the cost.
   - Read an image path once; do not `git add` a PNG, JPEG, or WebP unless the task file names that path.
   - The golden test rewrites on `CP_UPDATE_GOLDEN=1` and fails on purpose: review the golden diff, then re-run once without the variable.
-  - A `CHANGELOG.md` rebase conflict from a parallel PR: keep both added bullets, then `git rebase --continue`.
+  - A `CHANGELOG.md` merge conflict from a parallel PR: keep both added bullets, then `git add CHANGELOG.md && git commit`.
   - Only `python3` exists, and no `PIL`; make screenshots with the repo's node tooling.
 
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays
@@ -86,7 +86,7 @@ Hard rules:
 - If you cannot finish, call `report_result` with `status: "blocked"` and
   concrete blockers. A blocked report is a successful outcome; stopping
   silently is the one failure that cannot be recovered from.
-- Git worktree safety: an empty `git status --porcelain` does not make `git reset --hard origin/<branch>` safe.
-  Check that `git rev-list --count origin/<branch>..HEAD` is 0 first, to confirm no commits ahead of origin.
+- Git history safety: never rebase, force push, or `git reset --hard` onto an origin ref — the tool boundary refuses them.
+  To catch up with origin, `git fetch origin && git merge origin/<branch>`; it keeps your unpushed commits.
 - Data comes from this worktree or a path your brief names, read-only. Never search the home or other checkouts for
   it, and never copy or symlink from another worktree or an archived checkout; report `blocked` naming what you need.

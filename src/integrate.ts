@@ -1896,30 +1896,22 @@ export class Integrator {
 // ---------------------------------------------------------------------------
 
 /**
- * The first line of a conflict hand-back: **resync the clone**. A server-side rebase
- * (`gh pr update-branch`) advances `origin/<branch>` and leaves the worker's
- * own clone behind it, so a worker that rebases without resetting first will
- * conflict with its own already-rebased commits.
+ * A conflicting PR, handed back to the author who knows both sides: merge, never rebase, reset or force push.
+ * A server-side `gh pr update-branch --rebase` may have rewritten origin/<branch>; merging it in carries the same
+ * changes on both sides, so it normally merges cleanly and keeps unpushed commits; the plain push fast-forwards.
  */
-function resyncPreamble(branch: string): string[] {
-	return [
-		`First, resync: \`git fetch origin && git reset --hard origin/${branch}\`. The branch was advanced on the server,`,
-		"so your clone is behind origin and a rebase from where you are would conflict with your own commits.",
-	];
-}
-
-/** A conflicting PR, handed back to the author who knows both sides. */
 export function conflictMessage(input: { jobId: string; branch: string; prUrl: string; base: string }): string {
 	return [
 		`${input.jobId}: ${input.prUrl} conflicts with ${input.base} and cannot be merged.`,
 		"",
-		...resyncPreamble(input.branch),
+		`First, \`git fetch origin\`. Only if \`git rev-list --count HEAD..origin/${input.branch}\` is not 0 (the branch moved on the server), ` +
+			`\`git merge origin/${input.branch}\` — never a reset: the merge keeps your unpushed commits.`,
 		"",
-		`Then \`git rebase origin/${input.base}\` and resolve the conflicts so **both sides survive**. Never weaken a test`,
-		"or delete code to make a conflict go away; if you cannot keep both, stop and report blocked with the exact",
-		"conflict and what you tried.",
+		`Then \`git fetch origin && git merge origin/${input.base}\` and resolve the conflicts so **both sides survive**. Never weaken a test`,
+		"or delete code to make a conflict go away; if you cannot keep both, `git merge --abort`, stop and report blocked",
+		"with the exact conflict and what you tried. Never rebase.",
 		"",
-		`Run the project's checks on the rebased tree, then \`git push --force-with-lease\` to ${input.branch} — never a`,
+		`Commit the merge, run the project's checks, then a plain \`git push\` to ${input.branch} — never a force push, never a`,
 		"second PR, never a new branch. Reply with one line naming the new head sha.",
 		"Your envelope slot was reopened when this was delivered, so you may call report_result once more.",
 	].join("\n");

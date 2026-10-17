@@ -181,7 +181,7 @@ export function recoveryPromptText(
 		"",
 		"Finish the delivery from exactly that state, and nothing more:",
 		`  1. commit what is there on branch ${record.branch} (git add -A, then git commit -F <file> or -m "…"; never a detached HEAD).`,
-		"  2. push it (git push, or --force-with-lease if you rebased), then verify: git status --porcelain empty, git rev-parse HEAD.",
+		"  2. push it (a plain git push, never a force push), then verify: git status --porcelain empty, git rev-parse HEAD.",
 		`  3. call report_result exactly once — status "done" with head_sha (and the PR url for delivery: ${record.delivery}),`,
 		'     or status "blocked" with the exact command and error that stopped you.',
 		"",

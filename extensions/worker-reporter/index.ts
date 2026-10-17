@@ -34,6 +34,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../../src/ci-wait.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../../src/worker-merge-guard.ts";
+import { detectWorkerHistoryRewrite, workerHistoryRefusal } from "../../src/worker-history-guard.ts";
 import {
 	credentialSearchRefusal,
 	detectCredentialSearch,
@@ -489,6 +490,8 @@ export default function (pi: ExtensionAPI): void {
 			if (finding) return { block: true, reason: ciWaitRefusal(finding) };
 			const merge = typeof command === "string" ? detectWorkerMerge(command) : undefined;
 			if (merge) return { block: true, reason: workerMergeRefusal(merge) };
+			const rewrite = typeof command === "string" ? detectWorkerHistoryRewrite(command) : undefined;
+			if (rewrite) return { block: true, reason: workerHistoryRefusal(rewrite) };
 			const authCopy = typeof command === "string" ? detectHostAuthCopy(command) : undefined;
 			if (authCopy) return { block: true, reason: hostAuthCopyRefusal(authCopy) };
 			const homeCopy = typeof command === "string" ? detectHomeBulkCopy(command) : undefined;

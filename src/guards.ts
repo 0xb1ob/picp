@@ -617,13 +617,13 @@ export function tokenize(segment: string): string[] {
 	return tokens;
 }
 
-function stripEnvAssignments(tokens: readonly string[]): string[] {
+export function stripEnvAssignments(tokens: readonly string[]): string[] {
 	let index = 0;
 	while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index] ?? "")) index += 1;
 	return tokens.slice(index);
 }
 
-function basename(token: string): string {
+export function basename(token: string): string {
 	const cleaned = token.replace(/\.exe$/i, "");
 	const slash = cleaned.lastIndexOf("/");
 	return slash >= 0 ? cleaned.slice(slash + 1) : cleaned;
@@ -667,9 +667,14 @@ function shellPathUnresolved(path: string): boolean {
 	return /^~|[$`*?{}]/.test(path);
 }
 
+/** `-f`, `--force`, `--force-with-lease[=…]` or a `+ref` refspec among `git push` args. */
+export function isForcePush(args: readonly string[]): boolean {
+	return args.some((arg) => arg === "-f" || arg === "--force" || arg.startsWith("--force-with-lease") || arg.startsWith("+"));
+}
+
 function isDestructiveGit(subcommand: string, args: readonly string[]): boolean {
 	return subcommand === "checkout" || subcommand === "switch" || subcommand === "reset" || subcommand === "clean" ||
-		(subcommand === "push" && args.some((arg) => arg === "-f" || arg === "--force" || arg.startsWith("--force-with-lease") || arg.startsWith("+")));
+		(subcommand === "push" && isForcePush(args));
 }
 
 /** Where one `git` call acts; `unresolved` when a shell path (`~`, `$X`, a glob) hides it, so it fails closed. */

@@ -35,7 +35,7 @@ Don't chain checks with `&&`/`;` into silence: run them separately, or `|| echo 
 
 **Agent isolation.** Any pi/agent run your task needs gets a throwaway agent directory, never `~/.pi` or the installed home. Copy only `models.json` into it; add authentication only if the run truly needs it. Create it outside the worktree (`mktemp -d`, mode `0700`) and remove it in a `trap ... EXIT` or `finally`. Name that path and its cleanup in the PR body. A credential comes only from the env var or file your task names (`printenv NAME >/dev/null && echo set`); never search files or the home for keys — unset or unnamed, report `blocked` naming it. Before pushing, audit `git log -p origin/${base}..HEAD` for credential material with `grep -cEi … || true` (a printed 0 is clean), never printing a matched line.
 
-**Test cadence:** Before and after rebase, run only touched test files with `npm run test:one -- tests/<x>.test.ts` and `npm run typecheck`; never run full `npm test` locally. Nomad CI runs the full suite on the pushed head. A timeout-only failure under load is not evidence; rerun that focused file serially. In another project every npm command here means its own equivalent from its `AGENTS.md`, and a whole-suite command it names as the pre-push check runs once, after the rebase.
+**Test cadence:** Before and after merging the base, run only touched test files with `npm run test:one -- tests/<x>.test.ts` and `npm run typecheck`; never run full `npm test` locally. Nomad CI runs the full suite on the pushed head. A timeout-only failure under load is not evidence; rerun that focused file serially. In another project every npm command here means its own equivalent from its `AGENTS.md`, and a whole-suite command it names as the pre-push check runs once, after the merge.
 
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays
 
@@ -70,19 +70,19 @@ Run it in order, once the change is complete. This list is authoritative.
    failing checks.
 2. **Inspect the diff, then commit.** Read `git diff` hunk by hunk and map it to
    every requirement of the job. Then commit everything you meant to keep on
-   `${branch}`, with `git commit -F <file>`. Committing before the rebase is
-   what makes the rest of this list possible: a rebase refuses an unstaged
-   tree, and uncommitted work in a recycled worktree is lost work.
-3. **Rebase onto the resolved base.** `git fetch origin`, then
-   `git rebase origin/${base}`. On conflict, resolve so both sides survive:
+   `${branch}`, with `git commit -F <file>`. Committing before the merge is
+   what makes the rest of this list possible: uncommitted work in a recycled
+   worktree is lost work.
+3. **Merge the resolved base.** `git fetch origin`, then
+   `git merge origin/${base}`. On conflict, resolve so both sides survive:
    never weaken a test or delete code to make a conflict go away. If you cannot,
    report `blocked` with the exact conflict and the resolution you tried.
-   If `npm run typecheck` reports TS2307/TS7016 after a rebase, run `npm ci`
-   once, then re-run it.
+   Never rebase, reset onto origin or force push (refused). If `npm run typecheck`
+   reports TS2307/TS7016 after the merge, run `npm ci` once, then re-run it.
 4. **Run focused checks.** Run `npm run typecheck` and touched test files with
    `npm run test:one -- tests/<x>.test.ts`; never run the full `npm test` locally.
    Nomad CI runs the full suite on the pushed head.
-5. **Push** with `git push --force-with-lease`. Every ship job pushes: the
+5. **Push** with a plain `git push`, never a force push. Every ship job pushes: the
    worktree is a lease and is recycled, so an unpushed branch is lost work.
 6. **Deliver.** `delivery: pr` — unless Review scope applies, open exactly one
    PR from this branch, `--draft`, if none exists (reuse it as is; title as an
@@ -120,7 +120,7 @@ report_result(
   status: "done",                       # or "blocked" with concrete blockers
   pr_url: "https://github.com/<owner>/<repo>/pull/<n>",   # delivery: pr only
   # summary: at most 3 lines and at most 600 characters
-  summary: "focused checks passed on the rebased tree; never a diff, a transcript or findings",
+  summary: "focused checks passed on the merged tree; never a diff, a transcript or findings",
   # when blocked, required and non-empty:
   blockers: ["<exact path or command that failed, one per item>"],
 )

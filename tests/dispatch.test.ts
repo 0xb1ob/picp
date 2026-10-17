@@ -456,12 +456,12 @@ test("dispatch: ledger -> routing -> lease -> branch -> brief -> worker -> fleet
 
 	// Default base: the same brief names origin/main, because that is what this
 	// clone resolves to — the placeholder is resolved, never hardcoded.
-	assert.ok(brief.includes("git rebase origin/main"), "a main-based repo still gets origin/main");
+	assert.ok(brief.includes("git merge origin/main"), "a main-based repo still gets origin/main");
 	assert.ok(brief.includes("git rev-parse origin/main"));
 });
 
 // The base is per repository, not per fleet: a clone whose origin/HEAD is not
-// `main` must get a brief that rebases and reports `base_sha` against ITS base.
+// `main` must get a brief that merges and reports `base_sha` against ITS base.
 // Hardcoded `origin/main` prose in the ship template made a non-main worker
 // rebase onto a branch that may not even exist.
 test("dispatch: a non-main base reaches the ship brief, with no origin/main residue", { skip: SKIP, timeout: 180_000 }, async (t) => {
@@ -475,7 +475,7 @@ test("dispatch: a non-main base reaches the ship brief, with no origin/main resi
 
 	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 	assert.ok(!brief.includes("${"), "no unsubstituted placeholders reach a worker");
-	assert.ok(brief.includes("git rebase origin/trunk"), "the rebase names the resolved base");
+	assert.ok(brief.includes("git merge origin/trunk"), "the merge names the resolved base");
 	assert.ok(brief.includes("git rev-parse origin/trunk"), "base_sha is read from the resolved base");
 	assert.ok(!brief.includes("origin/main"), "no origin/main residue in a non-main-base brief");
 });

@@ -8,14 +8,14 @@
     "package_version": "0.1.0",
     "prompts": {
       "profiles/gate-reviewer.md": "sha256:56fea35c51e770a6880061b49da7f4e1ddf8916d4da00488dcea49858ea60194",
-      "profiles/implementer.md": "sha256:81f35f7e5c76c5abfc1deaee7f9dcd5046b6dbe34b0b64fa7c09e462d1d9fa45",
+      "profiles/implementer.md": "sha256:15c7a8a9794b2869d31c2c8124b3b6cdfd859d15d48201d8631acd9a6a963a23",
       "profiles/ops.md": "sha256:ebb6be1c10ee32c05c45efd50a13b7c4e479c4c8599dcc29fb52b0bb84d9ccdf",
       "profiles/planner.md": "sha256:76198d695a70a7dbaa3ae7c7767e0dbbe726673d8dcbd4023831f324f9dd5cfe",
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-ops.md": "sha256:bcdf5f310a27eef18e7fa0069ea6f2b500e8892fdd4755510cc03e7411732f5e",
       "prompts/briefs/brief-qa.md": "sha256:bdeb191091274f5f218b4e9c1b5cf3b368fab137ce3757af2a3eca5e115e5d82",
       "prompts/briefs/brief-research.md": "sha256:b187f9c84150748ae3a3513193fb97b277a2368032f86e4fb5ca9c7fd8702a90",
-      "prompts/briefs/brief-ship.md": "sha256:317e7ea1d2bde9338dae8479a1f62184bd747581501be3537a655943b62b64f2",
+      "prompts/briefs/brief-ship.md": "sha256:ef413c07f79de513eadb02cf156a6b464e444b21e454b8ebfa354eada513cb88",
       "prompts/briefs/diff-review-rubric.md": "sha256:aee3874d810c0aa87b0eb929ece65d5480e59b34466441f1af2a5d32f8aab95a",
       "prompts/briefs/gate-rubric.md": "sha256:908ba286759f2ab16dd55e180be93004bf9be5cc839407141c6d64b16ed33431",
       "prompts/briefs/quality-completeness.md": "sha256:ab88d30ce35a3e261d0171307a5b91734fbb0bc3f43324b6e48a408782fd79c8",
@@ -25,7 +25,7 @@
   "corpus": {
     "version": 1,
     "cases": 50,
-    "sha": "sha256:c92e9d13fddacf3e2c870c99fb6bd57cb7875d1cc8ccb5910c19001924ac2011"
+    "sha": "sha256:24182bf872f8d298cbfbeb29078354d8f6c51cc65eba0d542e3ded407295ba32"
   },
   "metrics": {
     "cases_scored": 22,
@@ -133,7 +133,7 @@
       "status": "passed",
       "checks": [
         {
-          "name": "includes \"git push --force-with-lease\"",
+          "name": "includes \"a plain `git push`, never a force push\"",
           "bucket": "contract",
           "ok": true
         },
@@ -183,7 +183,7 @@
       "status": "passed",
       "checks": [
         {
-          "name": "includes \"git rebase origin/trunk\"",
+          "name": "includes \"git merge origin/trunk\"",
           "bucket": "contract",
           "ok": true
         },

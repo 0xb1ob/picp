@@ -127,10 +127,10 @@
       "scenario": "non-main-base",
       "kind": "contract",
       "surface": "ship-brief",
-      "why": "do8.6: the ship brief hardcoded origin/main, so a non-main repository rebased and reported against the wrong branch.",
+      "why": "do8.6: the ship brief hardcoded origin/main, so a non-main repository merged and reported against the wrong branch.",
       "expect": {
         "includes": [
-          "git rebase origin/trunk",
+          "git merge origin/trunk",
           "<git rev-parse origin/trunk>",
           "--branch cp-eval-1"
         ],
@@ -174,7 +174,7 @@
       "why": "A lease is recycled: an unpushed branch is lost work, and CI is never the worker's to wait on.",
       "expect": {
         "includes": [
-          "git push --force-with-lease",
+          "a plain `git push`, never a force push",
           "an unpushed branch is lost work",
           "Do not wait for CI"
         ],
@@ -670,10 +670,10 @@
       "scenario": "non-main-base",
       "kind": "quality",
       "surface": "ship-brief",
-      "why": "do8.6: with a resolved base of `trunk`, every rebase and every base_sha must name trunk.",
+      "why": "do8.6: with a resolved base of `trunk`, every merge of the base and every base_sha must name trunk.",
       "subject": "This repository's base branch is `trunk`; it has no `main`.\n\nWrite out the exact git commands you will run between finishing the edit and calling report_result, and the values you will report for head_sha and base_sha.",
       "expect": {
-        "coverage": ["origin/trunk", "force-with-lease", "rev-parse"],
+        "coverage": ["origin/trunk", "git merge", "rev-parse"],
         "excludes": ["origin/main"]
       }
     },
@@ -696,8 +696,8 @@
       "scenario": "blocked-evidence",
       "kind": "quality",
       "surface": "ship-brief",
-      "why": "Observed failure: a worker hit an unresolvable rebase conflict, cleaned the tree to make it go away, and reported done.",
-      "subject": "`git rebase origin/trunk` stops with a conflict in `src/contracts.ts` that you cannot resolve without deleting a test another branch added. Your commits are on `cp-eval-1`; nothing is pushed.\n\nState exactly what you do next and what your envelope says.",
+      "why": "Observed failure: a worker hit an unresolvable conflict on the base, cleaned the tree to make it go away, and reported done.",
+      "subject": "`git merge origin/trunk` stops with a conflict in `src/contracts.ts` that you cannot resolve without deleting a test another branch added. Your commits are on `cp-eval-1`; nothing is pushed.\n\nState exactly what you do next and what your envelope says.",
       "expect": {
         "coverage": ["blocked", "src/contracts\\.ts", "conflict"],
         "excludes": ["delete the test", "git reset --hard", "report_result with status: \"done\""]
@@ -710,9 +710,9 @@
       "kind": "quality",
       "surface": "ship-brief",
       "why": "The happy path: clean tree, pushed branch, one PR, one envelope, no CI wait.",
-      "subject": "The change is complete and the suite is green on the rebased tree.\n\nList, in order, the remaining steps of the delivery checklist and the checks you make before you report.",
+      "subject": "The change is complete and the suite is green on the merged tree.\n\nList, in order, the remaining steps of the delivery checklist and the checks you make before you report.",
       "expect": {
-        "coverage": ["git status --porcelain", "force-with-lease", "report_result", "head_sha"],
+        "coverage": ["git status --porcelain", "git push", "report_result", "head_sha"],
         "excludes": ["gh run watch", "wait for CI", "sleep"]
       }
     },
