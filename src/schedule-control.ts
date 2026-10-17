@@ -170,7 +170,7 @@ export class ScheduleControl {
 				const action = { saved_by: "dashboard" as const, provenance: { channel: "dashboard" as const, request_id: request.id } };
 				const record = request.op === "save_policy" ? await scheduler.savePolicy!(id, request.policy!, action, request.revision!)
 					: request.op === "adopt" ? await scheduler.activatePolicy!(id, action, request.revision!) : await scheduler.deactivatePolicy!(id, action);
-				this.#outcome(request, "done", request.op === "deactivate" ? "Back on per-fire grants" : `Settings saved · revision ${record.active_revision} (applies to the next run)`);
+				this.#outcome(request, "done", request.op === "deactivate" ? "Deactivated · no new runs until a revision is adopted" : `Settings saved · revision ${record.active_revision} (applies to the next run)`);
 			} else {
 				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer, ...(request.revision !== undefined ? { revision: request.revision } : {}), ...(request.overrides ? { overrides: request.overrides } : {}) });
 				if (event.outcome !== "fired") {
