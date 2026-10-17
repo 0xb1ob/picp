@@ -7,12 +7,14 @@ import { refused, type MintContext, type Refusal } from "./schedule-grant.ts";
 import { verifiedRunNowClick } from "./schedule-control.ts";
 import type { Ledger } from "./ledger.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
-import { policyFromLegacy, schedulePolicyErrors, type SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { isNativePolicy, policyFromLegacy, schedulePolicyErrors, type LegacySchedulePolicy, type SchedulePolicy } from "./viewer/schedule-policy.ts";
 import type { Schedule } from "./viewer/schedule-core.ts";
 import type { FireTrigger } from "./scheduler.ts";
 
-export async function startRun(input: {runs:ScheduleRunStore; ledger:Ledger; schedule:Schedule; policy:SchedulePolicy; context:MintContext; title:string; now:Date; slot:Date; missed:boolean; missedAt:Date; manual?:FireTrigger; controlPid?:number}): Promise<{job_id:string; run_id:string; reason:string} | Refusal> {
+/** Legacy-generation runs only: native policies start through src/schedule-native.ts. */
+export async function startRun(input: {runs:ScheduleRunStore; ledger:Ledger; schedule:Schedule; policy:LegacySchedulePolicy; context:MintContext; title:string; now:Date; slot:Date; missed:boolean; missedAt:Date; manual?:FireTrigger; controlPid?:number}): Promise<{job_id:string; run_id:string; reason:string} | Refusal> {
  const {runs,ledger,schedule,policy,now,manual} = input;
+ if (manual?.via === "cp_schedule" && (!manual.operator_quote || !manual.source_sha)) return {refusal:"a legacy run_now needs a verified operator quote"};
  if (runs.openRun(schedule.id)) return {refusal:`schedule ${schedule.id} already has open run ${runs.openRun(schedule.id)!.id}`};
  if (schedule.job.delivery === "pipeline") return {refusal:"pipeline schedules remain legacy"};
  const channel = manual?.via ?? "slot";
@@ -25,7 +27,7 @@ export async function startRun(input: {runs:ScheduleRunStore; ledger:Ledger; sch
  const snapshot = {...structuredClone(policy),limits:bounds.limits,exclusions:bounds.exclusions};
  const verified = manual?.via === "cp_schedule" || (manual?.via === "dashboard" && verifiedRunNowClick(dirname(runs.runsFile),manual.request_id,schedule.id,input.controlPid ?? process.pid).ok);
  const preapproval = !verified ? undefined : manual?.via === "cp_schedule"
-  ? {operator_quote:manual.operator_quote,decided_by:manual.decided_by === "operator-delegated" ? "operator-delegated" as const : "operator-quote" as const,scope:"mandate_jobs" as const,granted_at:stamp,...(manual.delegation_rule ? {delegation_rule:manual.delegation_rule} : {}),...(manual.send_id ? {send_id:manual.send_id} : {})}
+  ? {operator_quote:manual.operator_quote!,decided_by:manual.decided_by === "operator-delegated" ? "operator-delegated" as const : "operator-quote" as const,scope:"mandate_jobs" as const,granted_at:stamp,...(manual.delegation_rule ? {delegation_rule:manual.delegation_rule} : {}),...(manual.send_id ? {send_id:manual.send_id} : {})}
   : {operator_quote:policy.approval.operator_quote,decided_by:policy.approval.decided_by,scope:"mandate_jobs" as const,granted_at:stamp,...(policy.approval.delegation_rule ? {delegation_rule:policy.approval.delegation_rule} : {}),...(policy.approval.send_id ? {send_id:policy.approval.send_id} : {})};
  await runs.createRun({schema_version:1,id,schedule_id:schedule.id,policy_revision:policy.revision,policy:snapshot,trigger:{via:manual?.via ?? (schedule.trigger.type === "watch" ? "watch" : "slot"),at:stamp,slot:isoTimestamp(input.slot),missed:input.missed,...(manual?.via === "dashboard" ? {request_id:manual.request_id} : manual ? {tool_call_id:manual.tool_call_id,quote_sha:manual.source_sha} : {})},anchor_job_id:null,members:[],phase:"accepted",outcome:null,started_at:stamp,deadline_at:isoTimestamp(new Date(now.getTime()+snapshot.limits.run_hours*3_600_000)),risk_preapproved:[],authority_log:[],cap_notices:[],...(preapproval ? {risk_preapproval:preapproval} : {})});
  const created = await ledger.create({title:input.title,project:schedule.project,kind:schedule.job.kind,delivery:schedule.job.delivery,labels:[`schedule:${schedule.id}`],...(schedule.job.description ? {description:schedule.job.description} : {}),...(schedule.job.script_path !== undefined ? {scriptPath:schedule.job.script_path} : {})});
@@ -57,7 +59,7 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  const {schedule,runs,action,now} = input;
  const record = runs.policyRecord(schedule.id);
  const latest = record?.revisions.at(-1);
- if (schedule.job.delivery === "pipeline") throw new Error("pipeline schedules remain on per-fire grants");
+ if (schedule.job.delivery === "pipeline" && !isNativePolicy(input.draft ?? latest)) throw new Error("legacy pipeline schedules remain on per-fire grants; save a native policy");
  if (input.op !== "deactivate" && input.base !== (latest?.revision ?? 0)) throw new Error("Schedule changed; review updated settings");
  if (input.op === "deactivate" && !schedule.grant_template) throw new Error("v2 schedule has no legacy template; after drain, restore the P4 backup to return to per-fire grants");
  if (input.op === "deactivate" && runs.openRun(schedule.id)) throw new Error(`schedule ${schedule.id} has an open run; deactivate once it closes`);
@@ -72,9 +74,12 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  const errors = schedulePolicyErrors(draft);
  if (errors.length) throw new Error(`invalid schedule policy: ${errors.join("; ")}`);
  if (draft.schedule_id !== schedule.id || draft.project !== schedule.project) throw new Error("policy must name this schedule and project");
- if (draft.recipe.delivery === "pipeline") throw new Error("pipeline schedules remain on per-fire grants");
- if (draft.effects.includes("org_review_approve") && !baseline.effects.includes("org_review_approve")) throw new Error("org-review approval requires the existing dashboard-only seed clearance");
- const policy:SchedulePolicy = {...structuredClone(draft),revision:(latest?.revision ?? 0)+1,saved_at:isoTimestamp(now),saved_by:action.saved_by,provenance:structuredClone(action.provenance),approval:structuredClone(baseline.approval)};
+ if (draft.recipe.delivery === "pipeline" && !isNativePolicy(draft)) throw new Error("legacy pipeline schedules remain on per-fire grants; save a native policy");
+ // A native save is the operator's explicit edit, so it authorizes its own effects; native never reverts to legacy.
+ if (isNativePolicy(baseline) && !isNativePolicy(draft)) throw new Error("a native schedule policy never returns to the legacy grant shape");
+ if (!isNativePolicy(draft) && draft.effects.includes("org_review_approve") && !baseline.effects.includes("org_review_approve")) throw new Error("org-review approval requires the existing dashboard-only seed clearance");
+ const stamped = {...structuredClone(draft),revision:(latest?.revision ?? 0)+1,saved_at:isoTimestamp(now),saved_by:action.saved_by,provenance:structuredClone(action.provenance)};
+ const policy:SchedulePolicy = isNativePolicy(stamped) || isNativePolicy(baseline) ? stamped : {...stamped,approval:structuredClone(baseline.approval)};
  // Deactivation removes authority; live admission checks must not prevent rollback after drain.
  if (input.op === "deactivate") return runs.deactivatePolicy(schedule.id,policy);
  if (!input.context) throw new Error("live policy bounds are not wired");

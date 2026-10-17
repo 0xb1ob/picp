@@ -23,6 +23,7 @@ import type { DispatchRequest } from "./dispatch.ts";
 import { assertNotDraining, readDrain } from "./drain.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { MandateError } from "./mandate-accounting.ts";
+import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 import { SpawnSafetyError, type WorkerManager } from "./worker-manager.ts";
 
@@ -44,7 +45,8 @@ export interface DispatchQueueOptions {
 
 /** Still full: keep the entry at the head, untouched, and stop the drain. */
 export function keepsHead(error: unknown): boolean {
-	return (error instanceof SpawnSafetyError && error.code === "spawn_cap") || (error instanceof MandateError && error.code === "parallelism_full");
+	if (error instanceof SpawnSafetyError) return error.code === "spawn_cap";
+	return (error instanceof MandateError || error instanceof ScheduleAuthorityError) && error.code === "parallelism_full";
 }
 
 export function toDispatchRequest(entry: Pick<DispatchQueueEntry, "job_id" | "request">): DispatchRequest {

@@ -16,7 +16,7 @@ import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { formatScheduleMigration, formatSchedulePolicyImport, policyImportBackups, scheduleMigrationMarkerPath, sweepScheduleGrantTemplates, sweepSchedulePolicyImport } from "../src/schedule-migrations.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
 import { object, oneOf, readScheduleFile, scheduleFileErrors, SchedulerError } from "../src/viewer/schedule-core.ts";
-import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
+import { policyFromLegacy, type LegacySchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
@@ -178,7 +178,8 @@ test("P4 v1→v2: backup every rewritten store before policy activation/retireme
 	assert.equal(doc.schema_version, 2); assert.equal(doc.schedules[0].mandate_id, undefined); assert.equal(doc.schedules[0].grant_template, undefined);
 	const active = b.runs.activePolicy(schedule.id)!;
 	assert.deepEqual(active.limits, { usd: 20, tokens: 2_000_000, child_jobs: 8, parallelism: 3, run_hours: 168 });
-	assert.deepEqual(active.approval, schedule.grant_template!.approval); assert.deepEqual(active.ask_on, schedule.grant_template!.ask_on);
+	const legacy = active as LegacySchedulePolicy;
+	assert.deepEqual(legacy.approval, schedule.grant_template!.approval); assert.deepEqual(legacy.ask_on, schedule.grant_template!.ask_on);
 	assert.deepEqual(active.exclusions, schedule.grant_template!.exclusions ?? {});
 	assert.deepEqual(active.provenance, { channel: "migration", legacy_seed: schedule.grant_template!.seed_mandate_id });
 	assert.equal(b.mandates.get(schedule.mandate_id)?.revoked_by?.by, "system");
@@ -299,7 +300,7 @@ test("P4 import keeps dashboard-only org-review clearance under the legacy seed 
 	b.mandates.revoke(stopped.mandate_id!, { by: "operator", operator_quote: "stop org", decided_by: "operator-quote" });
 	b.v1(); await b.sweep();
 	const policy = b.runs.activePolicy(cleared.id)!;
-	assert.ok(policy.effects.includes("org_review_approve")); assert.deepEqual(policy.effect_channels.org_review_approve, ["dashboard"]);
+	assert.ok(policy.effects.includes("org_review_approve")); assert.deepEqual((policy as LegacySchedulePolicy).effect_channels.org_review_approve, ["dashboard"]);
 	assert.equal(policy.recipe_config?.max_reviewers, 3); assert.equal(policy.limits.parallelism, 3); assert.equal(policy.limits.child_jobs, 8);
 	for (const id of [plain.id, stopped.id]) assert.equal(b.runs.policyRecord(id)?.revisions[0]?.effects.includes("org_review_approve"), false);
 });

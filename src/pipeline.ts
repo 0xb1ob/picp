@@ -699,6 +699,8 @@ export interface StartRequest {
 	quality?: QualityConfig;
 	/** Per-job opt-in for the post-implementation diff gate. Off by default. */
 	review?: DiffReviewConfig;
+	/** Internal only, never a tool parameter: binds both stages to a native schedule run, reusing its fired anchor. */
+	run?: { runs: import("./schedule-runs.ts").ScheduleRunStore; runId: string; anchorId: string; scheduleId: string };
 }
 
 export interface StartResult {
@@ -837,7 +839,10 @@ export class PipelineRunner {
 		const title = request.title.trim();
 		if (title.length === 0) throw new PipelineError("a pipeline needs a title");
 
-		const research = await ledger.create({
+		const bound = request.run;
+		if (bound && this.store.get(bound.anchorId)) throw new PipelineError(`${bound.anchorId} already started its pipeline (run ${bound.runId})`);
+		// A native run reuses its fired research anchor; a crash after the ship create finds that ship again by title.
+		const research = bound ? await ledger.show(bound.anchorId) : await ledger.create({
 			title: `research: ${title}`,
 			project: request.project,
 			delivery: "pipeline",
@@ -846,15 +851,18 @@ export class PipelineRunner {
 			...(request.risk ? { risk: request.risk } : {}),
 			...(request.slug ? { slug: `${request.slug}-research` } : {}),
 		});
-		const ship = await ledger.create({
-			title: `ship: ${title}`,
+		const shipTitle = bound ? `ship: ${title} (${bound.runId})` : `ship: ${title}`;
+		const ship = (bound ? ledger.findDuplicate({ title: shipTitle, project: request.project }) : undefined) ?? await ledger.create({
+			title: shipTitle,
 			project: request.project,
 			delivery,
 			kind: "ship",
 			description: request.task,
 			...(request.risk ? { risk: request.risk } : {}),
 			...(request.slug ? { slug: `${request.slug}-ship` } : {}),
+			...(bound ? { labels: [`schedule:${bound.scheduleId}`] } : {}),
 		});
+		if (bound) await bound.runs.admitMember(bound.runId, { job_id: ship.id, role: "ship", admitted_at: ship.created_at });
 		await ledger.addDep(ship.id, research.id);
 
 		const at = this.#now();
