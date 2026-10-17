@@ -30,7 +30,7 @@ function process_(home: string, ledger: Ledger, mandates: MandateStore, t: TestC
 	const post = {
 		home, ledger: () => ledger, mandates, fleet: new FleetStore({ home }),
 		registry: { pathOf: () => home, archivedNames: () => [], get: (name: string) => (name === "demo" ? {} : undefined) },
-		dispatchQueue: { drain: async () => {} }, armedDispatches: { release: async () => {} },
+		dispatchQueue: { drain: async () => {} }, armedDispatches: { release: async () => {} }, scheduleResults: { sync: () => {} },
 		dispatch: async (request: { jobId: string }) => { dispatched.push(request.jobId); },
 	};
 	registerScheduleTools(

@@ -5,7 +5,8 @@
  * inbox (`state/operator/inbox.jsonl`, cp-daemon P3) takes lines the same way: the viewer's `held`, the
  * session's `delivered`/`dropped`. `state/schedule-control.jsonl` (cp-hhuf P6) has two writers too: the viewer's
  * `request` lines and the parent's `claimed`/`outcome` lines (src/schedule-control.ts). `state/operator/answers.jsonl`
- * (cp-mxk4) too: the session's `posted` lines (src/operator-answers.ts) and the viewer's `acked` lines.
+ * (cp-mxk4) too: the session's `posted` lines (src/operator-answers.ts: bridge answers and schedule result cards) and
+ * the viewer's `acked` lines.
  * `state/operator/threads.jsonl` (cp-xmw2) too: `open`/`bind` lines from the session's bridge and the viewer, `done`
  * lines from the viewer.
  *
@@ -34,7 +35,7 @@ export function appendScheduleControlLine(stateDir: string, line: ScheduleContro
 	return appendLine(scheduleControlFile(stateDir), line);
 }
 
-/** cp-mxk4: one line to `state/operator/answers.jsonl`, same discipline (the session's `posted`, the viewer's `acked`). */
+/** cp-mxk4: one line to `state/operator/answers.jsonl`: bridge or schedule `posted`, the viewer's `acked`. */
 export function appendAnswerLine(stateDir: string, line: AnswerLine): { ok: true } | { ok: false; error: string } {
 	return appendLine(operatorAnswersFile(stateDir), line);
 }

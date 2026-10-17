@@ -154,6 +154,8 @@ test("projection: board and run evidence resolve to links, the rest is plain; sh
 	const long = `${"word ".repeat(100)}end\nsecond line\n\nsecond paragraph`;
 	appendAnswerLine(stateDir, posted(A, "2026-07-01T00:00:00Z", { answer: long, evidence_paths: [`${stateDir}/boards/alpha/index.html`, "/nowhere/else.md"], job_id: "cp-demo" }));
 	appendAnswerLine(stateDir, posted(B, "2026-07-01T00:00:01Z", { answer: "see https://example.com/x and javascript:alert(1)" }));
+	const source = { kind: "schedule" as const, schedule_id: "sch-123456", run_id: "run-20260701060000-abcdef", source_key: "run-20260701060000-abcdef:closed", outcome: "partial" };
+	appendAnswerLine(stateDir, posted("ans-cccccccccccc", "2026-07-01T00:00:02Z", { by: "schedule", source }));
 	appendFileGarbage(operatorAnswersFile(stateDir));
 	const view = await decisions();
 	assert.equal(view.availability, "ok");
@@ -166,6 +168,8 @@ test("projection: board and run evidence resolve to links, the rest is plain; sh
 	assert.equal(item.answer, long, "the full answer is kept");
 	assert.deepEqual(item.evidence, [{ path: `${stateDir}/boards/alpha/index.html`, href: "#reports", read: "/boards/alpha/" }, { path: "/nowhere/else.md", href: null, read: null }]);
 	assert.deepEqual(item.job, { id: "cp-demo", href: "#job/cp-demo", read: null });
+	assert.equal(item.schedule, undefined, "a bridge answer carries no schedule identity");
+	assert.deepEqual(view.open.find((o) => o.id === "ans-cccccccccccc")?.schedule, { schedule_id: "sch-123456", run_id: source.run_id, outcome: "partial" });
 
 	rmSync(operatorAnswersFile(stateDir));
 	mkdirSync(operatorAnswersFile(stateDir));

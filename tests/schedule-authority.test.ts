@@ -144,6 +144,26 @@ test("run queue advice and 80 percent/cap notices write only run notices",async(
  assert.equal(JSON.stringify(mandates.list()),before);
 });
 
+test("PR1: a run with only blocked members is shown under its run, never as uncovered by a grant",async(t)=>{
+ const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
+ const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
+ const blocker = await ledger.create({title:"run reader",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
+ const dependent = await ledger.create({title:"run synthesis",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
+ await ledger.addDep(dependent.id,blocker.id);await ledger.claim(blocker.id,"worker");
+ for (const job of [blocker,dependent]) await runs.admitMember(run.id,{job_id:job.id,role:null,admitted_at:job.created_at});
+ const view = await cpNext({ledger,mandates,fleet:new FleetStore({home:home.path}),escalations:new EscalationStore({home:home.path}),now:()=>new Date(now)},"demo");
+ const own = [view,...(view.others ?? [])].find((entry)=>entry.run?.id===run.id);
+ assert.equal(own?.blocked?.[0]?.run_id,run.id);
+ assert.match(own?.action.reason ?? "",new RegExp(`run ${run.id}: ${dependent.id}: waiting on ${blocker.id} \\(run ${run.id}\\)`));
+ assert.doesNotMatch(formatNext(view),/no active grant covers/);
+ await ledger.drop(blocker.id,"source gone");
+ const escalations = new EscalationStore({home:home.path});
+ await cpNext({ledger,mandates,fleet:new FleetStore({home:home.path}),escalations,now:()=>new Date(now)},"demo");
+ const asked = escalations.open().filter((item)=>item.dropped_dependency?.job_id===dependent.id);
+ assert.equal(asked.length,1,"a run member's dropped dependency still asks once, without a grant");
+ assert.match(asked[0]!.mandate_clause ?? "",new RegExp(`schedule run ${run.id}`));
+});
+
 test("run exclusions, risk, deadline, parallelism and token caps audit their refusal codes",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"low" as const};

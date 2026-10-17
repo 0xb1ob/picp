@@ -21,7 +21,7 @@ import { type Escalation, type FleetRecord, isoTimestamp, type Mandate } from ".
 import { raiseMissionEnd } from "./escalation.ts";
 import type { EscalationStore } from "./escalation.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
-import { type BlockedJob, blockedJobs, raiseDroppedDependencies } from "./blocked-jobs.ts";
+import { type BlockedJob, blockedJobs, openRunOf, raiseDroppedDependencies } from "./blocked-jobs.ts";
 import { type Job, type Ledger, parseJobLabels, wasDropped } from "./ledger.ts";
 import { covers, jobCapRefuses, mandateSpend, type MandateStore, type ScheduleScope, scheduleIdOf, scheduleScope } from "./mandate.ts";
 import { inFlightRecord, selectGrant } from "./mandate-permission.ts";
@@ -36,6 +36,7 @@ import { runnerOwns } from "./schedule-runner.ts";
 import { readParentExpanded } from "./schedule-expand.ts";
 import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedule-authority.ts";
 import { runSpend } from "./schedule-runs.ts";
+import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -150,7 +151,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	});
 	const schedules = ports.mandates.scheduleMandates();
 	const scopeOf = (job: Job) => scheduleScope(scheduleIdOf(job.labels), schedules);
-	const blocked = blockedJobs(ports.ledger, grants, now, project, schedules);
+	const blocked = blockedJobs(ports.ledger, grants, now, project, schedules, openRunOf(ports.mandates.scheduleRuns));
 	await raiseDroppedDependencies(blocked, grants, ports.escalations, now, schedules);
 	const candidates = grants
 		.filter((mandate) => mandate.status === "active" || mandate.status === "paused")
@@ -161,17 +162,21 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const runResults: NextResult[] = [];
 	const readyAll: Job[] = [];
 	const ctx = ports.mandates.runContext();
+	const runResultOf = (run: ScheduleRun): NextResult => {
+		let result = runResults.find((row) => row.run?.id === run.id);
+		if (!result) {
+			const spend = runSpend(run, withRunReviewerSpend(ctx.home, fleetJobs, run));
+			result = { run: { id: run.id, schedule_id: run.schedule_id, spend_usd: spend.usd, tokens: spend.tokens, live_workers: spend.inFlight, parallelism: run.policy.limits.parallelism }, ready: [], action: { kind: "wait", reason: `run ${run.id}: no ready admission` } };
+			runResults.push(result);
+		}
+		return result;
+	};
 	for (const job of readyJobs) {
 		try {
 			const authority = runAuthority(ctx, job.id);
 			if (authority.source === "mandate") { readyAll.push(job); continue; }
 			const run = authority.run;
-			let result = runResults.find((row) => row.run?.id === run.id);
-			if (!result) {
-				const spend = runSpend(run, withRunReviewerSpend(ctx.home, fleetJobs, run));
-				result = { run: { id: run.id, schedule_id: run.schedule_id, spend_usd: spend.usd, tokens: spend.tokens, live_workers: spend.inFlight, parallelism: run.policy.limits.parallelism }, ready: [], action: { kind: "wait", reason: `run ${run.id}: no ready admission` } };
-				runResults.push(result);
-			}
+			const result = runResultOf(run);
 			if (runnerOwns(job, readParentExpanded(ctx.home)) || ports.queued?.().includes(job.id)) continue;
 			result.ready.push(job);
 			if (result.run!.live_workers + run.members.filter((member) => ports.queued?.().includes(member.job_id)).length >= run.policy.limits.parallelism) {
@@ -182,6 +187,16 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 				scheduleRunVerdict(ctx, "dispatch", { jobId: job.id, project: jobProject(job) ?? "", kind: jobKind(job), risk: parseJobLabels(job.labels).risk, advice: true }, fleetJobs, now);
 				result.action = { kind: "dispatch", job_id: result.action.job_id ?? job.id, reason: `dispatch under run ${run.id}` };
 			} catch (error) { if (result.action.kind !== "dispatch") result.action.reason = (error as Error).message; }
+		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
+	}
+	// A blocked run member is explained under its run, so a run with nothing ready never reads as "no mandate".
+	for (const row of blocked) {
+		try {
+			const run = row.run_id ? ctx.runs.run(row.run_id) : undefined;
+			if (!run) continue;
+			const result = runResultOf(run);
+			result.blocked = [...(result.blocked ?? []), row];
+			if (result.action.kind === "wait" && result.ready.length === 0) result.action.reason = `run ${run.id}: ${blockedReason(result.blocked)}`;
 		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
 	}
 	if (candidates.length === 0 && runResults.length === 0) {
@@ -196,13 +211,13 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const results: NextResult[] = [...runResults];
 	const expanded = readParentExpanded(ports.fleet.home);
 	for (const mandate of candidates) {
-		const ownBlocked = blocked.filter(({ job }) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) }));
+		const ownBlocked = blocked.filter(({ job, run_id }) => !run_id && covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) }));
 		const result = await nextForMandate(ports, mandate, readyAll, fleetJobs, selected, queued, expanded);
 		if (result.action.kind === "wait" && result.ready.length === 0 && ownBlocked.length) result.action.reason = blockedReason(ownBlocked);
 		results.push({ ...result, blocked: ownBlocked });
 	}
 	// Uncovered dependencies still need a visible explanation, but never an automatic question.
-	const uncovered = blocked.filter(({ job }) => !candidates.some((mandate) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) })));
+	const uncovered = blocked.filter(({ job, run_id }) => !run_id && !candidates.some((mandate) => covers(mandate, { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) })));
 	// The manager refuses a non-reviewer spawn at its cap (held authors keep their process); 4b-2: cp_dispatch then
 	// queues the job and starts it when a slot frees, so `dispatch` stays the recommendation and the reason says so.
 	// `pipeline` is left as is: `cp_pipeline advance` spawns a gate-reviewer (inside the +3 review reserve) or nothing.

@@ -240,6 +240,8 @@ export interface ScheduleRunView {
 	run_id: string; anchor_id: string; via: "slot" | "dashboard" | "cp_schedule"; at: string; missed: boolean;
 	status: "open" | "closed"; jobs_open: number; jobs_total: number; job_ids: string[];
 	result: { kind: "board" | "pull_request" | "answer" | "report" | "branch" | "job"; job_id: string; href: string } | null;
+	/** A durable run's dashboard result card: queued, posted (answer id) or pending with its last error. */
+	card?: { state: "posted" | "pending"; answer_id: string | null; error: string | null };
 }
 /** One ledger job a schedule fired (labelled `schedule:<id>`), newest first. */
 export interface ScheduleHistoryJob {
@@ -338,6 +340,8 @@ export interface AnswerItem {
  job: {id: string; href: string; read: string | null} | null;
  evidence: AwaitingDetail["evidence"];
  links: Record<string, string>;
+ /** A schedule run's result card (src/schedule-results.ts), never an operator question; absent on a bridge answer. */
+ schedule?: {schedule_id: string; run_id: string; outcome: string};
 }
 export interface AnswersView {
  availability: SourceAvailability; open: AnswerItem[]; open_count: number | null;

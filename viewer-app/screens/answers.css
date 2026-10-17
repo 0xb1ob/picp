@@ -7,7 +7,7 @@
 .answers-done { border-color: var(--divider); }
 .answers-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; color: var(--muted); }
 .answers-project { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-.answers-meta a, .answers-evidence a { overflow-wrap: anywhere; }
+.answers-meta a, .answers-evidence a, .answers-schedule { overflow-wrap: anywhere; min-width: 0; }
 .answers-question { font-size: 13px; color: var(--dim); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .answers-short { font-size: 15px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .answers-full summary, .answers-history > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: 13px; }

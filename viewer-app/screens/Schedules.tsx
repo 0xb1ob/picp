@@ -66,7 +66,8 @@ function RunHistory({s}: {s:ScheduleItem}) {
  const jobs = (ids: (string|null)[]) => s.history.filter(j => ids.includes(j.run_id));
  const loose = s.history.filter(j => j.run_id === null);
  return <ul class="schedule-history">{s.runs.map(r => <li key={r.run_id} class="job-meta">
-  <p class="schedule-run-head"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a> · {TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status} ({r.jobs_open} of {r.jobs_total} jobs open){r.result && <> · <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a></>}</p>
+  <p class="schedule-run-head"><a href={jobHref(r.anchor_id)}><code>{r.anchor_id}</code></a> · {TRIGGER_TEXT[r.via]}{r.missed && " (missed)"} · {observedTime(r.at)} · {r.status} ({r.jobs_open} of {r.jobs_total} jobs open){r.result && <> · <a href={r.result.href}>{RESULT_TEXT[r.result.kind]}</a></>}
+   {r.card && <> · {r.card.state === "posted" ? <a href="#answers">Result card in Answers</a> : `Result card pending${r.card.error ? `: ${r.card.error}` : ""}`}</>}</p>
   <ul class="schedule-run-jobs">{jobs([r.run_id]).map(j => <JobRow key={j.id} j={j}/>)}</ul>
  </li>)}
   {loose.length > 0 && <li class="job-meta"><p class="schedule-run-head">Unattributed jobs</p><ul class="schedule-run-jobs">{loose.map(j => <JobRow key={j.id} j={j}/>)}</ul></li>}
@@ -88,7 +89,7 @@ function Schedule({s, control}: {s:ScheduleItem; control?:ScheduleControlView}) 
  return <article class="schedule-card">
   <div class="schedule-card-heading"><h2>{s.name}</h2><span class={`schedule-pill${s.enabled ? " schedule-pill-on" : ""}`}>{s.enabled ? "enabled" : "disabled"}</span><span class="schedule-project">{s.project}</span></div>
   <p class="schedule-identity">{s.job.title} · {s.trigger.type} · {s.policy ? `policy revision ${s.policy.active_revision}` : <code>{s.mandate_id ?? "needs setup"}</code>}</p>
-  <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS_TEXT[s.lands]}.</p>
+  <p class="schedule-result">Records a job “{s.job.title}”. Its result lands as {LANDS_TEXT[s.lands]}.{s.policy && " Each run also posts one result card to Answers on its own, with no operator session needed."}</p>
   <dl class="schedule-facts">
    <dt>Trigger</dt><dd>{s.trigger.type === "manual" ? "manual · Run now only" : s.trigger.type === "watch" ? `Watch · every ${s.trigger.every_seconds} s · ${s.trigger.on === "changed" ? "changed output" : "exit 0"}` : <code>{triggerText(s)}</code>}{(!s.enabled || s.trigger.type !== "manual") && <p class="job-meta">{s.enabled ? next : "Disabled: nothing fires until it is enabled"}</p>}</dd>
    <dt>Recipe</dt><dd>{s.job.skill ? <><code>{s.job.skill}</code> skill</> : "Saved job"}</dd>

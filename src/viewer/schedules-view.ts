@@ -157,7 +157,8 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			const {skill,...recipe} = r.policy.recipe;
 			const inferred = groupScheduleRuns(members,{...schedule,job:{...recipe,...(skill ? {skill} : {})}},schedule.last_fire,facts).runs.find(v=>v.anchor_id === r.anchor_job_id);
 			return {run_id:r.id,anchor_id:r.anchor_job_id ?? r.id,via:r.trigger.via === "watch" ? "slot" as const : r.trigger.via,at:r.started_at,missed:r.trigger.missed ?? false,
-				status:r.phase === "closed" ? "closed" as const : "open" as const,jobs_open:r.members.filter(m=>!members.some(j=>j.id === m.job_id && j.status === "closed")).length,jobs_total:r.members.length,job_ids:r.members.map(m=>m.job_id),result:inferred?.result ?? null};
+				status:r.phase === "closed" ? "closed" as const : "open" as const,jobs_open:r.members.filter(m=>!members.some(j=>j.id === m.job_id && j.status === "closed")).length,jobs_total:r.members.length,job_ids:r.members.map(m=>m.job_id),result:inferred?.result ?? null,
+				...(r.result ? {card:{state:r.result.delivered_at ? "posted" as const : "pending" as const,answer_id:r.result.answer_id,error:r.result.error ?? null}} : {})};
 		});
 		const views = [...storedViews,...groups.runs].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,5);
 		const runOf = new Map(views.flatMap((r) => r.job_ids.map((id): [string, string] => [id, r.run_id])));

@@ -10,7 +10,7 @@
  *   state/operator/inbox.jsonl      0600: messages held while no operator session runs (cp-daemon P3)
  *   state/schedule-control.jsonl    0600: Schedules page requests (viewer request lines) and the parent's
  *                                   claimed/outcome lines (cp-hhuf P6)
- *   state/operator/answers.jsonl    0600: answers the operator asked for (bridge posted lines, viewer acked lines)
+ *   state/operator/answers.jsonl    0600: answers the operator asked for and schedule result cards (posted), viewer acks
  *   state/operator/threads.jsonl    0600: operator threads (cp-xmw2): tags and dc-/ask-/ans-/job bindings, never text
  *                                   (bridge and viewer open/bind lines, viewer done lines)
  *
@@ -132,8 +132,11 @@ export const ANSWER_TEXT_MAX = 8000;
 export const ANSWER_EVIDENCE_MAX = 10;
 export const ANSWER_PROJECT_MAX = 120;
 export const ANSWERS_MAX_BYTES = 16 * 1024 * 1024;
+/** Where a `by:"schedule"` posted line came from: one schedule run's result card (src/schedule-results.ts). */
+export interface AnswerSource { kind: "schedule"; schedule_id: string; run_id: string; source_key: string; outcome: string }
 export type AnswerLine =
 	| { type: "posted"; by: "bridge"; id: string; at: string; project: string; question: string; answer: string; evidence_paths: string[]; job_id: string | null }
+	| { type: "posted"; by: "schedule"; id: string; at: string; project: string; question: string; answer: string; evidence_paths: string[]; job_id: string | null; source: AnswerSource }
 	| { type: "acked"; by: "viewer"; id: string; at: string; peer: string | null };
 export interface RecordedAnswer {
 	id: string;
@@ -145,11 +148,16 @@ export interface RecordedAnswer {
 	posted_at: string;
 	acked_at: string | null;
 	acked_peer: string | null;
+	/** Set only on a schedule result card; a bridge answer has none. */
+	source?: AnswerSource;
 }
 // Kept inline: this module may not import src/viewer/overview-read.ts.
 const ANSWER_TIME_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
 const isText = (value: unknown): value is string => typeof value === "string";
-
+const answerSource = (v: unknown): AnswerSource | undefined => {
+	const s = v as Record<string, unknown> | null;
+	return s?.kind === "schedule" && [s.schedule_id, s.run_id, s.source_key, s.outcome].every(isText) && Object.keys(s).length === 5 ? (s as unknown as AnswerSource) : undefined;
+};
 /**
  * Fold the answers journal, oldest first. An unterminated last line (torn) is ignored; a complete line that is not
  * JSON or not a valid line, a repeated `posted` id or `job_id` (the first wins) and an `acked` for an unknown id count
@@ -183,7 +191,8 @@ export function readAnswers(stateDir: string): { exists: boolean; answers: Recor
 			skipped++;
 			continue;
 		}
-		if (line.type === "posted" && line.by === "bridge") {
+		const source = line.by === "schedule" ? answerSource(line.source) : undefined;
+		if (line.type === "posted" && (line.by === "bridge" || source)) {
 			const evidence = line.evidence_paths;
 			const job = line.job_id === null ? null : isText(line.job_id) ? line.job_id : undefined;
 			if (!isText(line.project) || !isText(line.question) || !isText(line.answer) || !Array.isArray(evidence) || !evidence.every(isText) || job === undefined || byId.has(line.id) || (job !== null && jobs.has(job))) {
@@ -191,7 +200,7 @@ export function readAnswers(stateDir: string): { exists: boolean; answers: Recor
 				continue;
 			}
 			if (job !== null) jobs.add(job);
-			byId.set(line.id, { id: line.id, project: line.project, question: line.question, answer: line.answer, evidence_paths: evidence, job_id: job, posted_at: line.at, acked_at: null, acked_peer: null });
+			byId.set(line.id, { id: line.id, project: line.project, question: line.question, answer: line.answer, evidence_paths: evidence, job_id: job, posted_at: line.at, acked_at: null, acked_peer: null, ...(source ? { source } : {}) });
 		} else if (line.type === "acked" && line.by === "viewer" && (line.peer === null || isText(line.peer))) {
 			const known = byId.get(line.id);
 			if (!known) skipped++;

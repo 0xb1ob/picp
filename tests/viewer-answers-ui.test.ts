@@ -37,6 +37,15 @@ test("a hostile question and answer render as text: no markup, no inline style, 
 	assert.match(doc.querySelector(".answers-header")?.textContent ?? "", /Answers to acknowledge1/);
 });
 
+test("PR1: a schedule result card names its run and outcome; a bridge answer shows none", () => {
+	const runId = `run-20260701060000-${"a".repeat(6)}`;
+	const doc = parseHTML(`<body>${html(view([item(A, { schedule: { schedule_id: "sch-123456", run_id: runId, outcome: "partial" } }), item("ans-bbbbbbbbbbbb")]), control())}</body>`).document;
+	const metas = [...doc.querySelectorAll(".answers-meta")];
+	assert.match(metas[0]?.querySelector(".answers-schedule")?.textContent ?? "", new RegExp(`Schedule result · ${runId} · partial`));
+	assert.equal(metas[0]?.querySelector(".answers-schedule a")?.getAttribute("href"), "#schedules");
+	assert.equal(metas[1]?.querySelector(".answers-schedule"), null);
+});
+
 test("the tick is disabled with the reason when control is not ready; a click acknowledges; an acked id is hidden", async t => {
 	const off = parseHTML(`<body>${html(view([item(A)]), control({ status: { ...ready, enabled: false, token: null, reason: "Dashboard control is off: opt-out" } }))}</body>`).document;
 	assert.equal(off.querySelector("button.answers-ack")?.hasAttribute("disabled"), true);
