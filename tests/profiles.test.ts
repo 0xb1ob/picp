@@ -50,7 +50,7 @@ test("the shipped profiles load and every role resolves to exactly one default",
 	// is asked for by name.
 	assert.deepEqual(
 		profiles.map((profile) => profile.frontmatter.name).sort(),
-		["gate-reviewer", "implementer", "planner", "qa"],
+		["gate-reviewer", "implementer", "ops", "planner", "qa"],
 	);
 	for (const role of ROLES) {
 		const profile = profileForRole(PROFILES_DIR, role);
@@ -326,7 +326,7 @@ test("brief assembly substitutes every placeholder and fails closed", () => {
 // extra turn at the end of a session. Every surface that shows the envelope
 // must state the bounds it is validated against.
 test("every brief that shows report_result states the envelope's bounds", () => {
-	for (const name of ["brief-ship", "brief-research", "brief-qa"] as const) {
+	for (const name of ["brief-ship", "brief-research", "brief-qa", "brief-ops"] as const) {
 		const brief = readBriefTemplate(BRIEFS_DIR, name);
 		assert.ok(
 			brief.includes(`at most ${SUMMARY_MAX_LINES} lines and at most ${SUMMARY_MAX_CHARS} characters`),
@@ -353,7 +353,7 @@ test("every profile that names report_result states the summary bound", () => {
 	const named = listProfiles(PROFILES_DIR).filter((profile) => profile.systemPrompt.includes("report_result"));
 	assert.deepEqual(
 		named.map((profile) => profile.frontmatter.name).sort(),
-		["implementer", "planner", "qa"],
+		["implementer", "ops", "planner", "qa"],
 		"the profiles that finish with report_result; gate-reviewer has report_verdict",
 	);
 	// Both numbers, from the constants — and whitespace-tolerant, because markdown

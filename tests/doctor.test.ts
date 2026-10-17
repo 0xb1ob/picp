@@ -229,7 +229,7 @@ test("doctor warns about profiles updated after code load, not older profiles", 
 	const home = fixture(t);
 	const root = join(home.home.path, "package");
 	cpSync(join(REPO_ROOT, "profiles"), join(root, "profiles"), { recursive: true });
-	for (const name of ["implementer", "planner", "qa", "gate-reviewer"]) {
+	for (const name of ["implementer", "planner", "qa", "ops", "gate-reviewer"]) {
 		utimesSync(join(root, "profiles", `${name}.md`), new Date(0), new Date(0));
 	}
 	assert.deepEqual(find(await home.doctor({ packageRoot: root }), "package.profiles_newer"), []);

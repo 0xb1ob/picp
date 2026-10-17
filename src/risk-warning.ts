@@ -137,7 +137,7 @@ export function recordedProvenance(from: RoutingProvenance | undefined): boolean
 export function inferredRiskGate(input: {
 	mandates?: MandateStore;
 	jobs?: readonly MandateUsageJob[];
-	job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; readOnly?: boolean };
+	job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; readOnly?: boolean; ops?: boolean };
 	routed: Risk;
 	routedFrom: RoutingProvenance;
 	recorded?: Risk;

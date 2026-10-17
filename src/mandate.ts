@@ -682,7 +682,7 @@ export class MandateStore {
 	 * A `dry_run` reads this instead of calling `assertDispatchAllowed`: the
 	 * same predicate, with no escalation raised and nothing taken.
 	 */
-	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean; readOnly?: boolean }, risk: Risk | undefined, jobs: readonly MandateUsageJob[] = []): boolean {
+	wouldAskRiskHigh(job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[]; script?: boolean; readOnly?: boolean; ops?: boolean }, risk: Risk | undefined, jobs: readonly MandateUsageJob[] = []): boolean {
 		if (risk !== "high") return false;
 		const run = runAuthority(this.runContext(), job.jobId);
 		if (riskGateExempt(job)) return false;
