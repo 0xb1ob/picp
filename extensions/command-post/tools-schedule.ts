@@ -97,7 +97,7 @@ export function registerScheduleTools(
 		woken.add(anchorId);
 		sendParent(text, details);
 	};
-	const handle = (event: ScheduleEvent, active: ScheduleRunner): void => {
+	const handle = (event: ScheduleEvent, active: ScheduleRunner): Promise<void> | void => {
 		const text = formatScheduleEvent(event);
 		if (event.native && event.delivery === "pipeline" && event.outcome === "fired") return startPipeline(event, text);
 		// A native self-review run is the runner's in code: no expansion wake, no parent turn (a replay heals there too).
@@ -112,13 +112,13 @@ export function registerScheduleTools(
 			void active.onFired(event);
 		} else sendParent(text, { ...event });
 	};
-	/** A native pipeline starts in code (a replay heals an interrupted start); only a failure wakes the parent. */
-	const startPipeline = (event: ScheduleEvent, text: string): void => {
+	/** A native pipeline starts in code (a replay heals an interrupted start); only a failure wakes the parent. Never rejects. */
+	const startPipeline = (event: ScheduleEvent, text: string): Promise<void> => {
 		log(text);
 		const post = deps.commandPost(), schedule = (scheduler ??= build()).list().find((entry) => entry.id === event.schedule_id);
 		const pipeline = post.pipeline();
 		const starter = { start: (request: Parameters<typeof pipeline.start>[0]) => pipeline.start(request), started: (id: string) => pipeline.store.get(id) !== undefined };
-		void (schedule ? startScheduledPipeline(starter, post.mandates.scheduleRuns, schedule, event) : Promise.reject(new Error(`no schedule ${event.schedule_id}`)))
+		return (schedule ? startScheduledPipeline(starter, post.mandates.scheduleRuns, schedule, event) : Promise.reject(new Error(`no schedule ${event.schedule_id}`)))
 			.then((line) => log(`[${event.project}] schedule ${event.schedule_id}: ${line}`))
 			.catch((error: Error) => sendParent(`[${event.project}] schedule ${event.name} (${event.schedule_id}) could not start its pipeline on ${event.job_id} (${event.run_id}): ${error.message}`, { ...event }));
 	};
@@ -283,7 +283,8 @@ export function registerScheduleTools(
 					via: "cp_schedule", tool_call_id: toolCallId,
 					...(params.revision !== undefined ? { revision: params.revision } : {}), ...(params.overrides ? { overrides: params.overrides } : {}),
 				});
-				handle(event, (runner ??= buildRunner()));
+				// Awaited here so the reply follows the pipeline start (or its failure wake), never races it.
+				await handle(event, (runner ??= buildRunner()));
 				text = formatScheduleEvent(event) + ignored;
 			}
 			else if (params.action === "policy") text = JSON.stringify(schedulePolicyView(dirname(s.file),need("id")),null,2);
