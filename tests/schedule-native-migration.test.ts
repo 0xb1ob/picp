@@ -146,6 +146,19 @@ test("old grant-backed fixtures: cron, watch, manual, script, PR, pipeline, disa
 	assert.equal(b.mandates.list().length, grants, "neither a refused nor a native fire mints a grant");
 });
 
+test("a migration-skipped schedule saved natively later keeps no grant pointer, template or migration skip", async (t) => {
+	// Review 2 of PR4a: the marker is written past skips, so no later sweep heals the row; the native save must.
+	const b = bench(t);
+	const gated = b.legacy("gated", { job: { title: "gated", kind: "research", delivery: "pipeline" } }, { ask_on: ["plan_approval", "merge", "risk:high"] });
+	assert.equal((await b.sweep()).skipped.length, 1);
+	const draft = policyFromLegacy(gated, gated.grant_template!, b.mandates.get(gated.mandate_id)!);
+	const saved = await b.scheduler.savePolicy(gated.id, draft, { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "tool", quote_sha: "123456abcdef" } }, 0);
+	assert.ok(isNativePolicy(b.runs.activePolicy(gated.id)!), `active ${saved.active_revision}`);
+	const row = readScheduleFile(b.scheduler.file)[0]!;
+	assert.deepEqual([row.mandate_id, row.grant_template, row.last_skip], [undefined, undefined, undefined]);
+	assert.equal(b.mandates.get(gated.mandate_id)?.status, "revoked", "the retired pointer is revoked");
+});
+
 test("an open legacy run or job defers its schedule under its original authority; a later sweep converts it and writes the marker", async (t) => {
 	const b = bench(t);
 	const byRun = b.legacy("open run"), byJob = b.legacy("open job"), ready = b.legacy("ready");

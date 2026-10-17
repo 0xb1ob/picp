@@ -25,7 +25,7 @@ import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEve
 import type { ExtensionDeps } from "./shared.ts";
 
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
-import { isNativePolicy, RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
+import { RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
 import { startScheduledPipeline } from "../../src/schedule-native.ts";
 import { SELF_REVIEW_SKILL } from "../../src/schedule-self-review.ts";
 import { formatNativeMigration, nativeMigrationMarker, sweepNativeScheduleMigration } from "../../src/schedule-native-migration.ts";

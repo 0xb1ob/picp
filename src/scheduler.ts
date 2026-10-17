@@ -336,7 +336,15 @@ export class Scheduler {
 			if (context && refused(context)) throw new SchedulerError(context.refusal);
 			const record = await changePolicy({ op, schedule, runs, ledger: this.#ports.ledger(), mandates: this.#ports.mandates, context, action, now: this.#now(), base, draft,
 				validate: s => { this.#validateSkill(s.job, s.trigger.type === "manual", s.project); assertScriptIntake({kind:s.job.kind,delivery:s.job.delivery,...(s.job.script_path ? {scriptPath:s.job.script_path} : {})}); } });
-			if (op !== "deactivate") this.#retire(schedule.mandate_id, this.list().filter(s => s.id !== id).map(s => s.mandate_id));
+			if (op === "deactivate") return record;
+			this.#retire(schedule.mandate_id, this.list().filter(s => s.id !== id).map(s => s.mandate_id));
+			// A native save or adopt leaves no standing grant authority behind (a migration-skipped schedule included).
+			if (schedule.mandate_id || schedule.grant_template || nativeMigrationReason(schedule)) await this.#mutate((schedules) => {
+				const entry = schedules.find((candidate) => candidate.id === id);
+				if (!entry) return;
+				delete entry.mandate_id; delete entry.grant_template;
+				if (nativeMigrationReason(entry)) delete entry.last_skip;
+			});
 			return record;
 		});
 	}

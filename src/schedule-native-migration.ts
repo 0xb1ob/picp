@@ -1,8 +1,6 @@
 /**
- * Schedules refactor PR4: at startup (and on each tick until drained), every schedule still on a legacy generation — an
- * active grant-shaped policy or a grant template — gains a native revision converted from it, with no new grant or ask
- * (docs/contracts.md, *Native schedule migration*). Backups are verified before the first write; a schedule with an
- * open run or job is deferred, never converted under it. The marker is written once nothing is deferred.
+ * Schedules refactor PR4: each legacy schedule gains a native revision with no grant or ask (docs/contracts.md,
+ * *Native schedule migration*): verified backups first, open work deferred, marker once nothing is deferred.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
