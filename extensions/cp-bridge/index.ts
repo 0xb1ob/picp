@@ -295,7 +295,9 @@ export default function (pi: ExtensionAPI): void {
 			deferredRelays += 1;
 			compaction.whenIdle(() => {
 				deferredRelays -= 1;
-				pi.sendMessage({ customType: "cp-bridge", content: message.content, display: true, details: message.details }, { deliverAs: "followUp", triggerTurn: true });
+				const appMessage = { customType: "cp-bridge", content: message.content, display: true, details: message.details };
+				pi.sendMessage(appMessage, message.quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true });
+				if (message.quiet) consumer.ack(appMessage); // N9: a quiet append may fire no message hook; it is in context
 			});
 		},
 		status: (line) => setStatusLine(sessionCtx, "cp-relays", line),

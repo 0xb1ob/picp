@@ -13,6 +13,7 @@ import { type AnswerCardData, answerCardView } from "../../src/answer-card.ts";
 import { applyPromptWorking } from "../../src/awaiting-ui.ts";
 import { ciWatchIntervalMs } from "../../src/ci-watch.ts";
 import { keepUserTail } from "../../src/context-tail.ts";
+import { isWithheldFindings } from "../../src/withheld-findings.ts";
 import { ANSWER_ENTRY_TYPE, ANSWER_MAX_BYTES, FLEET_MUTATING_TOOLS, type Runtime } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { setRunningVersion } from "../../src/drain.ts";
@@ -22,7 +23,7 @@ import { pendingNotice } from "../../src/curation.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { computeInstallNudge } from "../../src/install-nudge.ts";
 import { formatIntake } from "../../src/intake.ts";
-import { contractInjectionOrNone, ModeError, packageContractLoaded } from "../../src/mode.ts";
+import { CONTRACT_SECTION, contractInjectionOrNone, ModeError, packageContractLoaded } from "../../src/mode.ts";
 import { acquireParentLock, formatParentLock, readParentLock } from "../../src/parent-lock.ts";
 import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
 import { recordModelWindows } from "../../src/model-windows.ts";
@@ -447,10 +448,14 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		// in `session_start`; `contractInjectionOrNone` is what keeps this hook —
 		// which runs on every prompt afterwards — from re-raising that decision.
 		const result = contractInjectionOrNone(
-			{ systemPrompt: event.systemPrompt, contextFiles: event.systemPromptOptions.contextFiles ?? [] },
+			{ contextFiles: event.systemPromptOptions.contextFiles ?? [] },
 			{ packageRoot: PACKAGE_ROOT, runtime: currentRuntime },
 		);
-		if (result) return result;
+		// N1: a persisted section, never a returned systemPrompt, so wake turns (no hook) replay the same bytes.
+		if (result) {
+			event.systemPromptOptions.sections[CONTRACT_SECTION] = result.contract;
+			return undefined;
+		}
 		// Realpath, never a basename: a project's own AGENTS.md is a different
 		// file, and letting it stand in for this package's contract would silence
 		// the one warning that says the parent is running without its contract.
@@ -501,8 +506,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		}
 		const reviewed = reviewWakeupsInContext(messages as WakeupCarrier[]);
 		if (!reviewed) return;
-		// Review preserves order and fresh object identities; only withheld entries are replaced.
-		const fresh = reviewed.filter((message, index) => message === messages[index]);
+		// Review preserves order and fresh object identities; withheld entries drop, verdict findings stay (N2).
+		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message));
 		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
 		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
 		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };

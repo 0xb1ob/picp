@@ -43,6 +43,8 @@ export interface RelayMessage {
 	details: { relay_ids: string[]; send_id?: string };
 	/** The relays in this message, for the caller's own bookkeeping (the backstop ledger). */
 	relays: BridgeRelay[];
+	/** N9: every relay is `informational`; the caller appends it without a turn and acks it on hand-off. */
+	quiet?: boolean;
 }
 
 export interface RelayConsumerPorts {
@@ -313,7 +315,8 @@ export class OperatorRelayConsumer {
 			const staleBody = old.length > 0
 				? `stale — do not act (older than ${RELAY_STALE_SECONDS / 60} min; headlines only):\n${old.map((item) => `- [${item.relay.kind}${item.relay.jobId ? ` job=${item.relay.jobId}` : ""}] ${headline(item.relay.text)}`).join("\n")}`
 				: "";
-			out.push({ content: `${[body, staleBody].filter(Boolean).join("\n\n")}${retiredLine}`, details: { relay_ids: rest.map((item) => item.id) }, relays: fresh.map((item) => item.relay) });
+			const quiet = rest.every((item) => item.relay.informational === true);
+			out.push({ content: `${[body, staleBody].filter(Boolean).join("\n\n")}${retiredLine}`, details: { relay_ids: rest.map((item) => item.id) }, relays: fresh.map((item) => item.relay), ...(quiet ? { quiet } : {}) });
 		} else if (out[0] && retiredLine) out[0].content += retiredLine;
 		return out;
 	}

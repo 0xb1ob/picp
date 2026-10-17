@@ -104,6 +104,8 @@ export interface AssistantLike {
 	stopReason?: string;
 	usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
 	content?: unknown;
+	/** Epoch ms; read only by the `cache_rebuild` line. */
+	timestamp?: number;
 }
 
 const usageTokens = (usage: AssistantLike["usage"]): number =>
