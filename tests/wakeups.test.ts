@@ -19,7 +19,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
 import { acquireParentLock } from "../src/parent-lock.ts";
@@ -73,6 +73,8 @@ import {
 	verdictStamp,
 	type ReviewWakeupFacts,
 } from "../src/wakeups.ts";
+import { isWithheldFindings } from "../src/withheld-findings.ts";
+import { isQuietWakeup } from "../src/wakeup-outbox.ts";
 import { createScratchHome, readRunEvents, type ScratchHome } from "./harness/index.ts";
 import { answerActions, type FakeRun } from "./harness/actions-api.ts";
 
@@ -1423,7 +1425,11 @@ test("cp-gjva: a decided gate verdict is fresh while waiting and 'already done' 
 	};
 	assert.equal(surface.reviewWakeupsInContext([message]), undefined, "a decided attempt on a waiting job is fresh");
 	await b.fleet.patch("cp-gjva", { phase: "done", closed_at: isoTimestamp() });
-	const after = surface.reviewWakeupsInContext([message])?.[0]?.content as string;
+	assert.equal(surface.reviewWakeupsInContext([message]), undefined, "N2: a wake an earlier request carried stays as read");
+	// A context that never delivered it (no replay memory, no carried set) gets the stale reason.
+	rmSync(join(b.home.path, LAYOUT.state, "wakeup-replay.json"), { force: true });
+	const unseen = createWakeupSurfaces({} as ExtensionAPI, createSessionState(), { commandPost: () => post, repaintWidget: () => {} });
+	const after = unseen.reviewWakeupsInContext([message])?.[0]?.content as string;
 	assert.match(after, /is already done: the review it describes is history/);
 	assert.doesNotMatch(after, /no decision on disk/);
 });
@@ -1783,6 +1789,44 @@ test("withheld identity keeps its first reason across contexts", () => {
 	assert.match(reviewWakeups([message], done, new Date(), legacy).messages[0]?.content as string, /\(original reason not recorded\)/);
 });
 
+// N2 (cp-c1ur): the review re-ran on every provider request and projected out wakes an earlier request had already
+// carried, so the parent "never saw" verdicts it had read and every later cache breakpoint was invalidated.
+test("N2: a wake an earlier request carried unchanged is never withheld; a new copy still is", () => {
+	const message: WakeupCarrier = {
+		role: "custom", customType: "cp-envelope", content: "Report body", timestamp: 1_000,
+		details: { cp_wakeup: { kind: "envelope", job_id: "cp-n2", issued_at: "2026-10-02T15:41:47Z" } },
+	};
+	const live = wakeupFacts({ record: () => ({ phase: "held", reported_at: "2026-10-02T15:41:40Z" }) });
+	const done = wakeupFacts({ record: () => ({ phase: "done", reported_at: "2026-10-02T15:41:40Z" }) });
+	const memory: WakeupReplayMemory = new Map();
+	const seen = new Set<string>();
+	assert.equal(reviewWakeups([message], live, new Date(), memory, seen).changed, false, "delivered fresh");
+	const later = reviewWakeups([message], done, new Date(), memory, seen);
+	assert.equal(later.changed, false, "the job moved on, but the parent already read this one");
+	assert.equal(later.messages[0], message);
+	const copy = reviewWakeups([{ ...message, timestamp: 2_000 }], done, new Date(), memory, seen);
+	assert.match(copy.messages[0]?.content as string, /STALE WAKE-UP/, "an unread copy is still withheld");
+	assert.equal(copy.superseded[0]?.repeat, undefined, "journaled the first time");
+	assert.equal(reviewWakeups([{ ...message, timestamp: 2_000 }], done, new Date(), memory, new Set()).superseded[0]?.repeat, true, "not again");
+});
+
+test("N2: a superseded verdict keeps its review findings, never its verdict or next step", () => {
+	const stamp = { kind: "verdict", job_id: "cp-n2v", keys: ["review", "1", "a".repeat(40)], issued_at: "2026-10-02T15:41:47Z" };
+	const message: WakeupCarrier = {
+		role: "custom", customType: VERDICT_MESSAGE_TYPE, content: "VERDICT pass — proceed: call cp_integrate", timestamp: 1_000,
+		details: { cp_wakeup: stamp, next: "proceed", verdict: { verdict: "pass", reasons: ["medium: rename the flag", "low: typo"] } },
+	};
+	const done = wakeupFacts({ record: () => ({ phase: "done", closed_at: "2026-10-02T15:42:00Z" }) });
+	const review = reviewWakeups([message], done, new Date(), new Map(), new Set());
+	const standIn = review.messages[0]!;
+	assert.equal(review.superseded.length, 1);
+	assert.ok(isWithheldFindings(standIn));
+	assert.match(standIn.content as string, /WITHHELD VERDICT for cp-n2v \(review attempt 1\)[\s\S]*medium: rename the flag[\s\S]*low: typo/);
+	assert.doesNotMatch(standIn.content as string, /cp_integrate|VERDICT pass/, "no verdict, no directive");
+	assert.equal(reviewWakeups([message], done, new Date(), new Map(), new Set()).messages[0]?.content, standIn.content, "same bytes");
+	assert.equal(isWithheldFindings(message), false);
+});
+
 test("Rank 3: replay persistence failures are visible and never restore a stale body", async (t) => {
 	const b = benchOf(t);
 	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
@@ -1940,6 +1984,12 @@ test("a durable landed notice retries failed sends without repeating the UI noti
 	assert.equal(post.durableWakeups.pending().length, 0);
 	assert.equal(notices.length, 2);
 	assert.equal(sent.length, 2);
+	// N9: a review-window WAITING notice is news, not work: it rides along, no turn and no UI notice.
+	post.durableWakeups.enqueue({ id: "continuation:window:cp-land:abc", kind: "recovery", job_id: "cp-land", content: "HELD PR WAITING — cp-land" });
+	surface.surfaceDurableWakeups();
+	assert.equal(sent.at(-1)?.options.triggerTurn, false);
+	assert.equal(notices.length, 2);
+	assert.equal(isQuietWakeup("continuation:cp-land:1:stop:x"), false, "a stop still wakes the parent");
 });
 
 // k52: the origin/main half of the CI-watch tick, through the real `surfaceCi` wiring.

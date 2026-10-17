@@ -16,12 +16,10 @@
  *     <the exact summary of the archived 12:45:43 envelope>
  *     PR: https://github.com/.../44
  *
- * On disk at that moment: no `envelope.json`, `reported_at` absent, phase
- * `waiting`, and the worker alive inside the very rebase it had just been
- * asked for. Acting on that message meant merging an unrebased PR, or tearing
- * down a worker mid-rebase. Two more of the same shape followed the same
- * session: a `cp-envelope` for a job already merged, torn down and closed, and
- * a `cp-answered` for a decision already acted on.
+ * On disk: no `envelope.json`, no `reported_at`, phase `waiting`, the worker
+ * mid-rebase. Acting on it meant merging an unrebased PR or tearing down a
+ * worker mid-rebase. A `cp-envelope` for a closed job and a `cp-answered` for a
+ * decision already acted on followed the same session.
  *
  * Every one of them was *indistinguishable in form from a fresh one*. That is
  * the defect, and it is in the notification path — not in how carefully the
@@ -46,6 +44,7 @@
  * A stale wake-up's body does not travel. It is replaced with a short notice
  * naming the job, what the message claimed and what is true now, because a
  * superseded summary that is still readable is a summary somebody will act on.
+ * A verdict keeps its review findings only (N2, `src/withheld-findings.ts`).
  *
  * ## Why `cp-answered` is annotated and never suppressed
  *
@@ -58,13 +57,10 @@
  * `cp-answered` wake-up is stamped and (when it is late) annotated, and it is
  * never dropped by this module.
  *
- * That is also what makes this compose with cp-nx7's delivery, rather than
- * fighting it. This module decides *what a message may say*; cp-nx7 decides
- * *when a message counts as delivered* (on observed arrival, never at enqueue)
- * and sends the due answers coalesced. Nothing here marks anything
- * delivered, nothing here drops an id out of a coalesced batch, and the
- * `details` a caller passes — including `details.answered`, which is the
- * arrival evidence — travel untouched beside the stamp.
+ * That composes with cp-nx7's delivery: this module decides *what a message may
+ * say*; cp-nx7 decides *when it counts as delivered* (on observed arrival).
+ * Nothing here marks anything delivered or drops an id from a coalesced batch,
+ * and caller `details` (incl. `details.answered`) travel untouched.
  *
  * ## The one thing an answered wake-up may not do twice (cp-5mgg)
  *
@@ -84,9 +80,6 @@
  * decision — is untouched. What it removes is only the second and third
  * instruction to act on a decision already acted on.
  *
- * Nothing here polls, kills, or changes a phase. It only decides what a
- * message is allowed to say.
- *
  * ## Why wedged and unreported can never both be fresh for one job (cp-m44c)
  *
  * `AGENTS.md` states the property in prose: wedged is mid-call (`working`,
@@ -101,21 +94,17 @@
  * the exclusion is mechanical here, at the one place both kinds are checked,
  * rather than trusted to stay true because two other modules happen to agree.
  *
- * An unreadable or absent `run_phase` (the status projection could not be
- * read) is treated as "not currently working" by both checks, on purpose:
- * `wedged` requires `run_phase === "working"` to stay fresh, so an unknown
- * phase withholds it — a wedge cannot be confirmed, so it does not fire.
- * `unreported` requires `run_phase === "working"` to go stale, so the same
- * unknown phase leaves it fresh — an unreported notice is already the
- * fail-safe direction (it withholds nothing; it only says the run settled
- * with no envelope), so an unreadable phase does not block it. Same
- * interpretation of the missing fact ("not confirmed working"), opposite
- * consequence, because the two checks are asking opposite questions of it.
+ * An unreadable or absent `run_phase` reads as "not confirmed working" in both
+ * checks, on purpose, with opposite consequences: `wedged` needs "working" to
+ * stay fresh, so a wedge that cannot be confirmed does not fire; `unreported`
+ * needs "working" to go stale, so it stays fresh — it is already the fail-safe
+ * direction (it withholds nothing, it only says the run settled unreported).
  */
 
 import { answeredIdsFromMessage } from "./answered.ts";
 import { ciKeysFromMessage } from "./ci-watch.ts";
 import { durableIdsFromMessage } from "./wakeup-outbox.ts";
+import { withheldVerdictFindings } from "./withheld-findings.ts";
 import {
 	ANSWERED_MESSAGE_TYPE,
 	isoTimestamp,
@@ -1062,26 +1051,27 @@ export interface WakeupReview<T> {
 	/** True when at least one message was rewritten. */
 	changed: boolean;
 	/** One entry per rewritten message, for the run log and for tests. */
-	superseded: { stamp: WakeupStamp; verdict: WakeupVerdict }[];
+	superseded: WakeupSuperseded[];
 }
+
+/** `repeat`: withheld in an earlier context already, so it is not journaled again. */
+export type WakeupSuperseded = { stamp: WakeupStamp; verdict: WakeupVerdict; repeat?: true };
 
 const DURABLE_KINDS: ReadonlySet<string> = new Set<string>(DURABLE_WAKEUP_KINDS);
 
 /**
- * The delivery-time half: re-check stamps immediately before model delivery.
- * Rewriting is remembered by stamp identity: a phase can return to an earlier
- * value, but an already-withheld notice must not regain its actionable body.
- *
- * Never mutates its input, never throws for a shape it does not recognise.
+ * Delivery-time re-check before model delivery; never mutates input or throws on odd shapes. A withheld notice
+ * never regains its body (`memory`); a wake an earlier request carried unchanged is never withheld (`seen`, N2).
  */
 export function reviewWakeups<T extends WakeupCarrier>(
 	messages: readonly T[],
 	facts: WakeupFacts,
 	now: Date = new Date(),
 	memory: WakeupReplayMemory = new Map(),
+	seen: Set<string> = new Set(),
 ): WakeupReview<T> {
 	const reviewed: T[] = [];
-	const superseded: { stamp: WakeupStamp; verdict: WakeupVerdict }[] = [];
+	const superseded: WakeupSuperseded[] = [];
 	let changed = false;
 	// cp-5mgg: which answered ids this context has already delivered, in order.
 	// Positional, not a cache: the evidence is the conversation itself, so it
@@ -1157,10 +1147,16 @@ export function reviewWakeups<T extends WakeupCarrier>(
 				}
 			}
 		}
-		const verdict = checkWakeup(stamp, facts, now);
 		// A later phase read must not resurrect a notice already withheld. A new
 		// issue time is a new notice; the key stores no body or project prose.
-		const withheldKey = `withheld:${JSON.stringify([stamp.kind, stamp.job_id, stamp.generation, stamp.reported_at, stamp.keys, stamp.issued_at])}`;
+		const identity = JSON.stringify([stamp.kind, stamp.job_id, stamp.generation, stamp.reported_at, stamp.keys, stamp.issued_at]);
+		const seenKey = `${identity}#${typeof message.timestamp === "number" ? message.timestamp : ""}`;
+		if (seen.has(seenKey)) {
+			reviewed.push(message);
+			continue;
+		}
+		const verdict = checkWakeup(stamp, facts, now);
+		const withheldKey = `withheld:${identity}`;
 		const withheldBefore = memory.get(withheldKey);
 		if (withheldBefore !== undefined) {
 			verdict.state = "superseded";
@@ -1174,6 +1170,8 @@ export function reviewWakeups<T extends WakeupCarrier>(
 				reviewed.push({ ...message, content: `${message.content}\n${note}` });
 			} else {
 				reviewed.push(message);
+				if (seen.size >= WAKEUP_SOURCE_FAILURE_MEMORY) seen.delete(seen.values().next().value!);
+				seen.add(seenKey);
 			}
 			continue;
 		}
@@ -1182,8 +1180,8 @@ export function reviewWakeups<T extends WakeupCarrier>(
 			memory.set(withheldKey, (verdict.reason ?? "").slice(0, WAKEUP_WITHHELD_REASON_MAX_CHARS));
 		}
 		changed = true;
-		superseded.push({ stamp, verdict });
-		reviewed.push({ ...message, content: formatStaleWakeup(stamp, verdict) });
+		superseded.push({ stamp, verdict, ...(withheldBefore !== undefined ? { repeat: true as const } : {}) });
+		reviewed.push(withheldVerdictFindings(stamp, message) ?? { ...message, content: formatStaleWakeup(stamp, verdict) });
 	}
 	return { messages: changed ? reviewed : [...messages], changed, superseded };
 }
