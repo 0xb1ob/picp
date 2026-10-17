@@ -88,16 +88,17 @@ export class ScheduleResults {
 	reconcile(): void {
 		const jobs = this.#ports.ledgerJobs();
 		const now = this.#now().getTime();
-		for (const run of this.#ports.runs.runs()) {
-			if (run.result) continue;
+		// Per run: one run's invalid edit must not stop every later run's card.
+		for (const run of this.#ports.runs.runs()) this.#safely(`reconcile the result of ${run.id}`, () => {
+			if (run.result) return;
 			if (run.phase === "closed") {
 				if (now - Date.parse(run.closed_at!) <= RESULT_RECONCILE_WINDOW_MS) this.#queue(run, this.#closed(run, jobs));
-				continue;
+				return;
 			}
 			const owner = AT_CLOSE.includes(run.policy.recipe.delivery) ? null : resultOwner(run, jobs);
 			const facts = owner ? this.#ports.facts(owner) : undefined;
 			if (owner && facts) this.#queue(run, this.#fromFacts(run, owner, facts));
-		}
+		});
 	}
 
 	/** Post every queued, undelivered card; a failure stays queued with its named error for the next pass. */
