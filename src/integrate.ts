@@ -1896,7 +1896,7 @@ export class Integrator {
 // ---------------------------------------------------------------------------
 
 /**
- * The first line of any hand-back: **resync the clone**. A server-side rebase
+ * The first line of a conflict hand-back: **resync the clone**. A server-side rebase
  * (`gh pr update-branch`) advances `origin/<branch>` and leaves the worker's
  * own clone behind it, so a worker that rebases without resetting first will
  * conflict with its own already-rebased commits.
@@ -1925,15 +1925,16 @@ export function conflictMessage(input: { jobId: string; branch: string; prUrl: s
 	].join("\n");
 }
 
-/** A red head, handed back. Never a merge, and never a merge ask (cp-gmy). */
+/** A red head, handed back: merge origin only if it moved, never reset, then a plain push (cp-c1ur N6). */
 export function ciFailedMessage(input: { jobId: string; branch: string; prUrl: string; reason: string }): string {
 	return [
 		`${input.jobId}: CI is red on the pushed head of ${input.prUrl} — ${input.reason}.`,
 		"",
-		...resyncPreamble(input.branch),
+		`First, \`git fetch origin\`. Only if \`git rev-list --count HEAD..origin/${input.branch}\` is not 0 (someone pushed after you), ` +
+			`\`git fetch origin && git merge origin/${input.branch}\` — never a reset: the merge keeps your unpushed commits, which \`git rev-list --count origin/${input.branch}..HEAD\` counts.`,
 		"",
-		"Then fix the cause on this same branch with one more commit, run the project's checks, and",
-		"`git push --force-with-lease`. Do not wait for or poll CI: the parent verifies it against the sha you report.",
+		"Then fix the cause on this same branch with one more commit, run the project's checks, and a plain",
+		"`git push` — never a force push. Do not wait for or poll CI: the parent verifies it against the sha you report.",
 		"Reply with one line naming what you changed and the new head sha.",
 		"Your envelope slot was reopened when this was delivered, so you may call report_result once more.",
 	].join("\n");

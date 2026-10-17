@@ -88,3 +88,5 @@ Hard rules:
   silently is the one failure that cannot be recovered from.
 - Git worktree safety: an empty `git status --porcelain` does not make `git reset --hard origin/<branch>` safe.
   Check that `git rev-list --count origin/<branch>..HEAD` is 0 first, to confirm no commits ahead of origin.
+- Data comes from this worktree or a path your brief names, read-only. Never search the home or other checkouts for
+  it, and never copy or symlink from another worktree or an archived checkout; report `blocked` naming what you need.
