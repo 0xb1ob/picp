@@ -259,7 +259,7 @@ export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	mandate_status: "active" | "paused" | "expired" | "revoked" | "missing";
 	/** The grant's `pause_reason` while paused, else null: a schedule's pointer re-mints past a cap pause, never an operator one. */
 	mandate_pause_reason: string | null;
-	/** Whether the pointer carries an operator stop (`operatorStop`) that the native migration preserves. */
+	/** Whether the fire path refuses the next fire on this pointer (`operatorStop`, the predicate `pointerRefusal` uses). */
 	grant_stopped: boolean;
 	/** cp-org-pr-review only (else null): what one Run now fans out to, from the description config; `error` names a bad config. */
 	fan_out: { reviewers: number; org: string | null; user: string | null; teams: string[]; holds: number; error: string | null } | null;

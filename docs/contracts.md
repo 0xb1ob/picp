@@ -8385,15 +8385,15 @@ kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewer
 `cp-org-pr-review` as invalid (fail closed): `cp_schedule remove` it first; a fire grant carrying `risk_preapproval`
 validates on older binaries (the field is already in `MandateSchema`). No data migration.
 
-**Scheduled runs: activation (P3a).** The production lock is `SCHEDULE_RUNS_ACTIVE=true`, landed together with the first authenticated policy writer. Only an authenticated adopt/save activates a schedule; unadopted schedules and pipelines kept per-fire grants until PR4 retired them (*Native schedule migration*). Activated fires start one durable run and mint no grant. P2b landed the consumers inert with the lock false; the approved P3a addendum corrects A1's attribution of that false lock to the plan.
+**Scheduled runs: activation (P3a).** The production lock is `SCHEDULE_RUNS_ACTIVE=true`, landed together with the first authenticated policy writer. Only an authenticated adopt/save activates a schedule; unadopted schedules and pipelines keep per-fire grants. Activated fires start one durable run and mint no grant. P2b landed the consumers inert with the lock false; the approved P3a addendum corrects A1's attribution of that false lock to the plan.
 
 Run authority intercepts dispatch, promotion, implementation, reviewer start, repair, merge and checkpoint auto-decision before grant selection. The saved policy snapshot binds actions, exclusions, risk, USD/token caps, child admission and parallelism. A post-activation scheduled job without membership fails closed (`not_member`); legacy jobs created before activation continue under mandates. Missing/corrupt policies fail closed. Other named refusals are `run_closed`, `run_usd_cap`, `run_token_cap`, `child_cap`, `parallelism_full`, `deadline_passed`, `action_not_allowed`, `kind_excluded`, `path_excluded`, `subsystem_excluded`, `risk_high` and `hard_stop`. Only same-kind continuation is permitted after the deadline, and caps still bind it.
 
 A run checkpoint cites the closed basis `{run, clause}`, with clause `schedule-run <run-id> (policy rev N)` and attribution `schedule-run:<run-id>`. No synthetic mandate is created. Permits/refusals journal only to the run's `authority_log`; risk pre-approval covers run members only, never scripts, and hard stops still ask. Advice reads write nothing. Worker and reviewer non-cached usage count together; 80%/cap notices say no new admission, in-flight work continues, and the run closes partial, with no raise advice.
 
-A verified operator start of a legacy-policy run (PR4 starts none; open ones keep this rule) — a dashboard Run now whose `verifiedRunNowClick` passes at fire time, or `cp_schedule run_now` on a verified operator quote — records `risk_preapproval` on that run (the policy approval quote for a click, the run-now quote for cp_schedule). It opens the `ask_on: risk:high` gate for that run's members for every use (dispatch, promotion, reviewer start, repair, implementation): the operator who triggers a run also runs it. Each dispatch or promotion pass appends one `risk_preapproved` row (`decided_by: operator`, first evidence `fire run_now <request or call id>`); other uses journal to `authority_log` only. Hard stops, scripts, exclusions, caps, allowed actions, final_fix/gate flags, `ask_on: merge`/`plan_approval` and slot/watch runs are unchanged. A cp-org-pr-review run uses it only for a dashboard click with the `org_review_approve` effect. Run briefs carry `Started by …`. A run risk escalation names the run as `mandate_id`, `<run> (schedule <id>, policy rev N): …` as the clause, and the starter in the question.
+A verified operator start — a dashboard Run now whose `verifiedRunNowClick` passes at fire time, or `cp_schedule run_now` on a verified operator quote — records `risk_preapproval` on that run (the policy approval quote for a click, the run-now quote for cp_schedule). It opens the `ask_on: risk:high` gate for that run's members for every use (dispatch, promotion, reviewer start, repair, implementation): the operator who triggers a run also runs it. Each dispatch or promotion pass appends one `risk_preapproved` row (`decided_by: operator`, first evidence `fire run_now <request or call id>`); other uses journal to `authority_log` only. Hard stops, scripts, exclusions, caps, allowed actions, final_fix/gate flags, `ask_on: merge`/`plan_approval` and slot/watch runs are unchanged. A cp-org-pr-review run uses it only for a dashboard click with the `org_review_approve` effect. Run briefs carry `Started by …`. A run risk escalation names the run as `mandate_id`, `<run> (schedule <id>, policy rev N): …` as the clause, and the starter in the question.
 
-**Downgrade:** disable adopted schedules, drain every open run and its jobs, then deactivate each schedule before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize open members. Preserve both policy and run stores as audit history; before PR4, deactivation restored the legacy mint without a bulk migration (since PR4 a deactivated schedule does not fire until a native revision is adopted).
+**Downgrade:** disable adopted schedules, drain every open run and its jobs, then deactivate each schedule before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize open members. Preserve both policy and run stores as audit history; deactivation restores legacy mint without a bulk migration.
 
 **Fresh grant per fire** (historical: retired by PR4, *Native schedule migration* below; kept for the legacy records it
 explains). Every fire of a schedule without an activated policy — a cron slot, a watch fire, the page's Run now and
@@ -8440,9 +8440,10 @@ paused on a cap records no cap entry in its own `escalations` either. The job's
 notes say `under fire grant <id> (minted from the template approved by <decided_by>)`; the event names the minted
 grant, its expiry, every note and every revoked grant. `cp_schedule enable` re-evaluates the template the same way;
 `remove` revokes the schedule's current grant unless another schedule names it (in-flight workers are not killed).
-Before PR4 the Schedules page showed the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the
-fire path would refuse — and the template with its verbatim approval; since PR4 it shows the legacy pointer as
-*Native schedule migration* describes, and the template stays visible as read-only history.
+The Schedules page shows the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the fire path
+would refuse: "move the schedule to a new grant" for a revoke, "resume it, or move the schedule to a new grant" for a
+pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
+template with its verbatim approval, or that the schedule has no template with the migration's reason.
 
 ### Schedule policy (authoritative for adopted schedules)
 
@@ -8567,8 +8568,10 @@ never does. Only a native revision is adopted; a legacy grant-shaped revision is
 and model policy as a native revision with the narrowest mode, kinds and effects (`nativePolicyDraft`); deactivate
 needs no template. The *Fresh grant per fire* text above and its `cp_schedule move` references are historical: legacy
 `grant_template`/`mandate_id` rows, `schedule_fire` grants and legacy policy revisions stay readable for audit and for
-runs that froze them. Native fires do not consult `deny_projects` (`projectDenial`) at start; the dispatch preflight
-still refuses a denied project's members (the legacy mint refused it before the fire).
+runs that froze them, and the run-now `risk_preapproval`, *Scheduled runs: activation (P3a)* and *Downgrade* text
+above applies only to legacy runs still open (a deactivated schedule fires only once a native revision is adopted).
+Native fires do not consult `deny_projects` (`projectDenial`) at start; the dispatch preflight still refuses a denied
+project's members (the legacy mint refused it before the fire).
 
 **The migration.** `sweepNativeScheduleMigration` (`src/schedule-native-migration.ts`) runs at `session_start` after
 the P4 import and again on every scheduler tick until done. Every schedule whose active policy is not native — an
@@ -8601,9 +8604,7 @@ Skipped schedules never hold the marker. The parent prints one line per migrated
 stores aside as audit, restore each manifest snapshot over its source (removing sources recorded absent), remove the
 marker, then downgrade. Restoring `schedule-runs.json` drops runs started after the snapshot from the live store.
 
-The Schedules page shows a legacy pointer as `Legacy grant <id> · <status> · no fire mints a grant: <last_skip, or
-"the operator pause/revoke is kept when it migrates to a native policy", or "it migrates to a native policy once no
-legacy run is open">`; a schedule with neither template nor policy says `open the editor to set up this schedule`.
+The Schedules page keeps its pre-PR4 grant wording until PR4b (a viewer-only follow-up) states that no fire mints a grant.
 
 **`cp_schedule update id [skill] [description] [title] [kind] [delivery]`** changes a schedule's job — at least one
 field — under the add rules (a known skill on a manual schedule with the anchor's kind and delivery and no script, its

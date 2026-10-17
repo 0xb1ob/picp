@@ -36,17 +36,22 @@ test("live bounds: exclusions only grow, tokens clamp to the ceiling, an exclude
 	}
 });
 
-test("PR4: no fire mints a grant — only the mandate store writes schedule_fire, and #fireOnce never issues one", () => {
+test("PR4: no fire mints a grant — nothing calls the legacy mint, and #fireOnce never issues one", () => {
 	const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]);
 	const writers = [...files(join(REPO_ROOT, "src")), ...files(join(REPO_ROOT, "extensions"))]
 		.filter((file) => /\.ts$/.test(file) && /\bschedule_fire\s*:/.test(readFileSync(file, "utf8")))
 		.map((file) => file.slice(REPO_ROOT.length + 1));
-	assert.deepEqual(writers.sort(), ["src/contracts/mandates.ts", "src/mandate.ts"]);
+	// PR4b deletes the dead legacy mint (schedule-grant.ts, Scheduler #mint/#fireBounds/move); until then it is uncalled.
+	assert.deepEqual(writers.sort(), ["src/contracts/mandates.ts", "src/mandate.ts", "src/schedule-grant.ts"]);
+	const callers = [...files(join(REPO_ROOT, "src")), ...files(join(REPO_ROOT, "extensions"))]
+		.filter((file) => /\.ts$/.test(file) && !file.endsWith("schedule-grant.ts") && /\b(mintFireGrant|pointerRefusal|carriedPreapproval)\(/.test(readFileSync(file, "utf8")));
+	assert.deepEqual(callers.map((file) => file.slice(REPO_ROOT.length + 1)), ["src/scheduler.ts"], "only the uncalled #mint");
 	const source = readFileSync(join(REPO_ROOT, "src/scheduler.ts"), "utf8");
 	const start = source.indexOf("async #fireOnce(");
 	assert.ok(start > 0);
 	assert.doesNotMatch(source.slice(start, source.indexOf("\n\t}\n", start)), /\.issue\(|#mint|grant_template/);
-	assert.doesNotMatch(source, /async #mint\(|async move\(/, "the mint and move paths are gone");
+	assert.doesNotMatch(source, /this\.#mint\(/, "the legacy mint has no caller (PR4b deletes it)");
+	assert.doesNotMatch(readFileSync(join(REPO_ROOT, "extensions/command-post/tools-schedule.ts"), "utf8"), /\.move\(/);
 });
 
 test("run_now names a schedule only as a whole token", () => {

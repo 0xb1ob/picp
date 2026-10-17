@@ -22,7 +22,7 @@ export function schedulePolicyView(stateDir: string, id: string): SchedulePolicy
  if (!selected) blocking.push("no saved policy or legacy template; needs setup");
  else {
   blocking.push(...schedulePolicyErrors(selected));
-  if (!isNativePolicy(selected)) blocking.push("a legacy grant-shaped policy is read-only; save a native policy");
+  if (selected.recipe.delivery === "pipeline" && !isNativePolicy(selected)) blocking.push("legacy pipeline schedules remain on per-fire grants; save a native policy");
   try {
    const dataDir = join(dirname(stateDir),"data");
    const defaultsFile = join(dataDir,"mandate-defaults.json"), projectsFile = join(dataDir,"projects.json");

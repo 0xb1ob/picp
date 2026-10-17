@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { type FleetRecord, LAYOUT, paths } from "../src/contracts.ts";
 import type { IntakeResult } from "../src/intake.ts";
 import { OperatorAnswers } from "../src/operator-answers.ts";
-import { type ResultFacts, type ResultLedgerJob, reportedFacts, resultOwner, ScheduleResults } from "../src/schedule-results.ts";
+import { type ResultFacts, type ResultLedgerJob, reportedFacts, ScheduleResults } from "../src/schedule-results.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
 import { readAnswers } from "../src/viewer/control-files.ts";
 import { policyFromLegacy, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
@@ -144,22 +144,6 @@ test("a skill run's result owner is S1 from the anchor's expanded comment, never
 	b.jobs[0]!.comments = [{ text: "expanded: L1 cp-l1, S1 cp-s1" }];
 	results.accepted(accepted("cp-l1"));
 	results.accepted(accepted("cp-s1"));
-	assert.deepEqual(b.cards().map((card) => card.job_id), ["cp-s1"]);
-});
-
-// PR3 review medium: a runner-driven run admits S1 by role and its anchor's marker may lag or name an older S1;
-// the admitted role wins, and a marker naming a non-member never makes a stranger the owner.
-test("resultOwner picks the S1 admitted by role over the expanded: marker; a marker naming a non-member owns nothing", async (t) => {
-	const b = await bench(t, { skill: "cp-org-pr-review", delivery: "local", description: "org: example-org" });
-	await b.runs.admitMember(b.run.id, { job_id: "cp-l1", role: "L1", admitted_at: at });
-	await b.runs.admitMember(b.run.id, { job_id: "cp-s1", role: "S1", admitted_at: at });
-	b.jobs[0]!.comments = [{ text: "expanded: L1 cp-l1, S1 cp-stale" }];
-	assert.equal(resultOwner(b.runs.run(b.run.id)!, b.jobs), "cp-s1");
-	const legacy = { ...b.runs.run(b.run.id)!, members: [member("cp-anchor"), member("cp-l1")] };
-	assert.equal(resultOwner(legacy, b.jobs), null, "cp-stale is not a member");
-	assert.equal(resultOwner(legacy, [{ id: "cp-anchor", status: "in_progress", comments: [{ text: "expanded: S1 cp-l1" }] }]), "cp-l1");
-	const results = b.make();
-	results.accepted(accepted("cp-l1")); results.accepted(accepted("cp-s1"));
 	assert.deepEqual(b.cards().map((card) => card.job_id), ["cp-s1"]);
 });
 

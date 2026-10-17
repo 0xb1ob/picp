@@ -20,12 +20,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isoTimestamp, isSafeScriptPath, LAYOUT, type Delivery, type JobKind } from "./contracts.ts";
+import { isoTimestamp, isSafeScriptPath, LAYOUT, type Delivery, type JobKind, type Mandate } from "./contracts.ts";
 import { atomicWriteJson, queued } from "./json-store.ts";
 import { assertScriptIntake, type Ledger } from "./ledger.ts";
-import type { MandateStore, MandateUsageJob } from "./mandate.ts";
-import { type MintContext, parallelismNote, prReviewLines, type Refusal, refused, withSkillJobFloor } from "./schedule-grant.ts";
-import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, orgReviewConfig, parseCron, readScheduleFile, type Schedule, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
+import { covers, isActive, type MandateStore, type MandateUsageJob } from "./mandate.ts";
+import { carriedPreapproval, liveFireBounds, mintFireGrant, type MintContext, parallelismNote, pointerRefusal, prReviewLines, type Refusal, refused, synthesizedApproval, templateFromSeed, withSkillJobFloor } from "./schedule-grant.ts";
+import { assertTimeZone, type GrantTemplate, latestCronSlot, localMinuteKey, noTemplateReason, orgReviewConfig, parseCron, readScheduleFile, type Schedule, SCHEDULE_SCHEMA_VERSION, SCHEDULE_SKILL_ANCHOR, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 import { parsePrUrl } from "./ci-watch.ts";
 import { verifiedRunNowClick } from "./schedule-control.ts";
 import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
@@ -151,6 +151,7 @@ export interface ScheduleEvent {
 export type FireTrigger =
 	| { via: "dashboard"; request_id: string; peer: string | null; revision?: number; overrides?: RunOverrides }
 	| { via: "cp_schedule"; tool_call_id: string; revision?: number; overrides?: RunOverrides };
+type LegacyFireTrigger = Exclude<FireTrigger, { via: "cp_schedule" }> | { via: "cp_schedule"; tool_call_id: string; operator_quote: string; decided_by: string; source_sha: string; send_id?: string; delegation_rule?: string };
 
 /** Tracked file only (the X1 script rules), in the canonical clone, with the script runner's bare environment. */
 export async function runWatchScript(cwd: string, scriptPath: string, timeoutMs: number): Promise<WatchRun> {
@@ -162,6 +163,22 @@ export async function runWatchScript(cwd: string, scriptPath: string, timeoutMs:
 	});
 }
 
+// Legacy: no caller since PR4; PR4b deletes it with the mint.
+/**
+ * Why `mandate` cannot carry a fire of schedule `scheduleId` (a placeholder before `add` mints one) for `project`/`kind`,
+ * or undefined when it can. Only a `schedule_grant` carries a schedule, and only one schedule: `schedules` are the saved
+ * ones, and a grant another schedule already names is refused (schedlater S3).
+ */
+export function mandateRefusal(mandate: Mandate | undefined, id: string, project: string, kind: JobKind, now: string, scheduleId = "sch-000000", schedules: readonly Schedule[] = []): string | undefined {
+	if (!mandate) return `no mandate ${id}`;
+	if (!mandate.schedule_grant) return `${id} is not a schedule grant; a schedule runs only under its own grant: cp_mandate issue with schedule_grant:true`;
+	if (mandate.job_ids?.length) return `${id} names job_ids; a schedule grant never does, because every fire is a new job id`;
+	const other = schedules.find((entry) => entry.id !== scheduleId && entry.mandate_id === id);
+	if (other) return `${id} is already the grant of schedule ${other.id} (${other.name}); one grant per schedule`;
+	if (!covers(mandate, { jobId: "scheduled", project, jobKind: kind, scheduleId, scheduleMandate: id })) return `${id} does not cover ${kind} jobs in project ${project}`;
+	if (!isActive(mandate, now)) return `${id} is ${mandate.status === "active" ? "expired" : mandate.status}${mandate.pause_reason ? ` (${mandate.pause_reason})` : ""}`;
+	return undefined;
+}
 
 const minuteIso = (at: Date): string => `${at.toISOString().slice(0, 16)}Z`;
 
@@ -170,6 +187,12 @@ const archivedRefusal = (project: string, prefix?: string): string => `${prefix 
 /** A derived template's notes, then its job-cap raise, then (cp-org-pr-review) its parallelism note: never applied silently. */
 const templateNotes = (notes: readonly string[], floored: { template: GrantTemplate; note?: string }, job: Schedule["job"]): string[] =>
 	[...notes, floored.note, parallelismNote(floored.template, job)].filter((note): note is string => note !== undefined);
+
+/** A template-less schedule's refusal: the migration's saved reason when it has one (never overwritten, never hidden). */
+const noTemplate = (schedule: Schedule): string => {
+	const saved = schedule.last_skip?.reason;
+	return saved?.startsWith(`schedule ${schedule.id} has no grant template (migration: `) ? saved : noTemplateReason(schedule.id);
+};
 
 /** Why a schedule without an active native revision does not fire: the migration's saved reason, else needs setup. */
 const notNative = (schedule: Schedule): string =>
@@ -318,6 +341,37 @@ export class Scheduler {
 		});
 	}
 
+
+	/**
+	 * Retargets a schedule to a fresh seed grant (`cp_schedule move`): the template is re-derived from the new seed and
+	 * written with the pointer in one write, in the fire lane, so the id, its `schedule:<id>` label and any open run are
+	 * kept. The old pointer is revoked unless another schedule names it.
+	 */
+	move(id: string, mandateId: string): Promise<{ schedule: Schedule; note: string; notes: string[] }> {
+		return this.#serial(async () => {
+			const found = this.list().find((entry) => entry.id === id);
+			if (!found) throw new SchedulerError(`no schedule ${id}`);
+			const stamp = isoTimestamp(this.#now());
+			const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === mandateId);
+			const refusal = mandateRefusal(mandate, mandateId, found.project, found.job.kind, stamp, found.id, this.list());
+			if (refusal) throw new SchedulerError(`cp_schedule move refused: ${refusal}`);
+			const seeded = templateFromSeed(mandate as Mandate, synthesizedApproval(mandate as Mandate, "cp_schedule move"), stamp, found.job);
+			if (refused(seeded)) throw new SchedulerError(`cp_schedule move refused: ${seeded.refusal}`);
+			const floored = withSkillJobFloor(seeded.template, found.job);
+			let named: (string | undefined)[] = [];
+			const schedule = await this.#mutate((schedules) => {
+				const entry = schedules.find((candidate) => candidate.id === id);
+				if (!entry) throw new SchedulerError(`no schedule ${id}`);
+				entry.mandate_id = mandateId;
+				entry.grant_template = floored.template;
+				delete entry.last_skip;
+				named = schedules.map((candidate) => candidate.mandate_id);
+				return entry;
+			});
+			const note = found.mandate_id === mandateId ? "" : this.#retire(found.mandate_id, named);
+			return { schedule, note, notes: templateNotes(seeded.notes, floored, found.job) };
+		});
+	}
 
 	/** Add's skill rules, shared with `update`: a known skill, a manual trigger, the anchor's kind/delivery, no script, valid targets. */
 	#validateSkill(job: { kind: JobKind; delivery: Delivery; description?: string; script_path?: string; skill?: string }, manual: boolean, project: string): void {
@@ -531,6 +585,79 @@ export class Scheduler {
 		return { ...base, outcome: "fired", ...started, delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...(missed ? { missed_at: minuteIso(missedAt) } : {}), ...manualFields };
 	}
 
+
+	// Legacy per-fire mint and move: no caller since PR4 (no fire mints a grant); PR4b deletes them.
+	/**
+	 * The schedule's template, or a throw: a schedule without one never fires, and a template seeded by a fire grant
+	 * (a previous fire's grant reused as a seed) is refused — every fire's grant is minted fresh from an operator-issued
+	 * seed's bounds, never carried over.
+	 */
+	#template(schedule: Schedule): GrantTemplate {
+		const template = schedule.grant_template;
+		if (!template) throw new SchedulerError(noTemplate(schedule));
+		const seed = this.#ports.mandates.get(template.seed_mandate_id);
+		if (seed?.schedule_fire) throw new SchedulerError(`schedule ${schedule.id}'s template is seeded by fire grant ${seed.id}; a fire grant is never reused: cp_schedule move it to a fresh schedule grant`);
+		return template;
+	}
+
+	/** A schedule's next fire bounds: its template re-evaluated against the live home (`mintContext`), fail closed. */
+	#fireBounds(schedule: Schedule, now: Date): ReturnType<typeof liveFireBounds> {
+		const template = schedule.grant_template as GrantTemplate;
+		let context: MintContext | Refusal;
+		try {
+			context = this.#ports.mintContext ? this.#ports.mintContext(schedule.project) : { refusal: "this host does not wire the fire grant mint context (data/mandate-defaults.json and the project override)" };
+		} catch (error) {
+			context = { refusal: `the live mandate defaults or project override are unreadable (${(error as Error).message})` };
+		}
+		return refused(context) ? context : liveFireBounds(template, context, schedule.project, schedule.job.kind, now);
+	}
+
+	/**
+	 * Steps 3-10 of every fire (src/schedule-grant.ts): re-read, sweep, pointer check (an operator revoke or pause
+	 * only), live bounds, mint in this lane, sanity check. Whatever the pointer's state — expired, cap-paused, spent —
+	 * the fire's caps come from the template, never from it.
+	 */
+	async #mint(queued: Schedule, now: Date, stamp: string, slot: Date, missed: boolean, manual: LegacyFireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
+		// Re-read in the lane: a fire queued behind another sees the pointer that fire moved, and a removal in between refuses.
+		const schedule = this.list().find((entry) => entry.id === queued.id);
+		if (!schedule?.enabled) return { refusal: `schedule ${queued.id} was removed or disabled before this fire ran` };
+		const template = this.#template(schedule);
+		const pointer = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === schedule.mandate_id);
+		const stuck = pointerRefusal(pointer);
+		if (stuck) return { refusal: stuck };
+		const bounds = this.#fireBounds(schedule, now);
+		if (refused(bounds)) return bounds;
+		const trigger = manual?.via === "dashboard"
+			? { via: manual.via, request_id: manual.request_id, peer: manual.peer }
+			: manual?.via === "cp_schedule"
+				? { via: manual.via, operator_quote: manual.operator_quote, decided_by: manual.decided_by as "operator-quote" | "operator-delegated", source_sha: manual.source_sha, ...(manual.send_id ? { send_id: manual.send_id } : {}), ...(manual.delegation_rule ? { delegation_rule: manual.delegation_rule } : {}) }
+				: schedule.trigger.type === "watch"
+					? { via: "watch" as const, at: stamp, ...(schedule.last_output_sha ? { output_sha: schedule.last_output_sha } : {}) }
+					: { via: "cron" as const, slot: isoTimestamp(slot), missed };
+		// cp-org-pr-review: the seed's operator pre-approval is read before the mint (which retires the seed), and carried
+		// only for a verified dashboard Run now click; every other fire stays gated (src/schedule-grant.ts carriedPreapproval).
+		const carry = carriedPreapproval({
+			skill: schedule.job.skill, scheduleId: schedule.id, trigger, at: stamp,
+			seed: this.#ports.mandates.list().find((entry) => entry.id === template.seed_mandate_id),
+			click: trigger.via === "dashboard" && schedule.job.skill === "cp-org-pr-review" ? verifiedRunNowClick(dirname(this.file), trigger.request_id, schedule.id, this.#ports.controlPid ?? process.pid) : undefined,
+		});
+		let fire: Awaited<ReturnType<typeof mintFireGrant>>;
+		try {
+			fire = await mintFireGrant({
+				mandates: this.#ports.mandates, usageJobs: this.#ports.usageJobs, scheduleId: schedule.id, template,
+				previousId: schedule.mandate_id ?? template.seed_mandate_id, bounds: carry && "record" in carry ? { ...bounds.input, risk_preapproval: carry.record } : bounds.input, trigger, at: stamp,
+				movePointer: async (id) => void (await this.#patch(schedule.id, { mandate_id: id }, true)),
+				named: (id) => this.list().some((entry) => entry.id !== schedule.id && entry.mandate_id === id),
+			});
+		} catch (error) {
+			return { refusal: `no fire grant minted (${(error as Error).message}); the next fire re-mints` };
+		}
+		if (fire.grant.id === schedule.mandate_id) throw new SchedulerError(`schedule ${schedule.id} would reuse ${fire.grant.id}; every fire files under a fresh grant`);
+		const refusal = mandateRefusal(fire.grant, fire.grant.id, schedule.project, schedule.job.kind, stamp, schedule.id, this.list());
+		if (refusal) return { refusal: `the minted fire grant refuses the fire: ${refusal}` };
+		const carried = carry ? ["record" in carry ? carry.note : carry.gated] : [];
+		return { grant: fire.grant, notes: [...bounds.notes, ...carried, ...(fire.revoked.length ? [`revoked ${fire.revoked.join(", ")}`] : [])] };
+	}
 
 	/** Recorded on the schedule every time; reported only when the reason changed, so a paused grant is news once. */
 	async #skip(schedule: Schedule, now: Date, reason: string): Promise<ScheduleEvent | undefined> {

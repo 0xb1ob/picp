@@ -81,7 +81,7 @@ test("requestLine: queued, applying and accepted read as accepted, never complet
 	assert.equal(requestLine(req("run_now", "applying", null)), "Starting run…");
 	assert.equal(requestLine(req("disable", "done", null)), "Done · Disable");
 	assert.equal(requestLine(req("save_policy", "done", null, "Settings saved · revision 2 (applies to the next run)")), "Settings saved · revision 2 (applies to the next run)");
-	assert.equal(requestLine(req("deactivate", "done", null)), "Deactivated · no new runs until a revision is adopted");
+	assert.equal(requestLine(req("deactivate", "done", null)), "Back on per-fire grants");
 	assert.equal(readinessLine(null), "Checking readiness");
 	assert.equal(readinessLine({ error: "x" }), "Blocked: x");
 	assert.equal(readinessLine({ policy: null, active_revision: null, legacy: null, effective: null, blocking: ["a", "b"] }), "Blocked: a; b");

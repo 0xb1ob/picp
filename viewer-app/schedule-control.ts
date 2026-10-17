@@ -77,7 +77,7 @@ export function scheduleControlLine(status: ScheduleControlStatus | null | undef
  if (!answered(status) || status.error) return `Controls not available: ${status.error}`;
  if (!status.enabled) return status.reason ?? "Dashboard control is off";
  if (!status.parent.running) return status.reason ?? `Parent not running: ${status.parent.reason}`;
- return "Controls ready: the parent applies each request within seconds, under the schedule's saved policy";
+ return "Controls ready: the parent applies each request within seconds, under the schedule's own grant";
 }
 
 /** The newest request for one schedule. */
@@ -97,7 +97,7 @@ export function requestLine(request: ScheduleControlRequestView): string {
   case "applying": return request.op === "run_now" ? "Starting run…" : `Applying · ${op} · ${request.id}`;
   case "done":
    if (request.op === "run_now") return request.job_id ? `Run accepted · ${request.job_id} · view run` : "Run accepted";
-   if (request.op === "deactivate") return "Deactivated · no new runs until a revision is adopted";
+   if (request.op === "deactivate") return "Back on per-fire grants";
    if (request.op === "save_policy" || request.op === "adopt") return request.reason ?? "Settings saved (applies to the next run)";
    return `Done · ${op}${request.job_id ? ` → ${request.job_id}` : ""}`;
   case "refused": return `Refused: ${request.reason ?? "unknown"}`;

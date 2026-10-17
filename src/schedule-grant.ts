@@ -1,12 +1,11 @@
 /**
- * Legacy grant-template helpers, kept for the one-shot migrations and old-run readers only: no fire mints a grant
- * since the native schedule migration (docs/contracts.md, *Native schedule migration*). `templateFromSeed` and
- * `liveFireBounds` still shape a legacy template and a saved policy's live bounds.
+ * Legacy grant templates. No fire mints a grant since PR4 (docs/contracts.md, *Native schedule migration*):
+ * `mintFireGrant`, `pointerRefusal` and `carriedPreapproval` have no caller and PR4b deletes them.
  */
-import { isoTimestamp, type JobKind, type Mandate, type MandateDefaults, type ProjectMandateOverride } from "./contracts.ts";
-import type { IssueMandateInput } from "./mandate.ts";
+import { isoTimestamp, type JobKind, type Mandate, type MandateDefaults, type ProjectMandateOverride, type RiskPreapproval, type ScheduleFire } from "./contracts.ts";
+import type { IssueMandateInput, MandateStore, MandateUsageJob } from "./mandate.ts";
 import { quoteSha } from "./risk-preapproval.ts";
-import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate, orgReviewMaxReviewers, type Schedule } from "./viewer/schedule-core.ts";
+import { GRANT_TEMPLATE_ACTIONS, GRANT_TEMPLATE_FORCED_ASK_ON, GRANT_TEMPLATE_MAX_HOURS, type GrantTemplate, operatorStop, orgReviewMaxReviewers, type Schedule } from "./viewer/schedule-core.ts";
 
 export interface Refusal { refusal: string }
 export const refused = <T extends object>(value: T | Refusal): value is Refusal => "refusal" in value;
@@ -23,7 +22,7 @@ const MAX_EXCLUDED_PATHS = 32;
  * 1-168 h. Its status is not read (a migration derives from an expired, revoked or cap-paused seed alike). A seed that
  * is no schedule grant, is itself a fire grant, or names job_ids, is refused; so is one carrying a risk:high
  * pre-approval, unless `job` is a cp-org-pr-review schedule's and the pre-approval covers the grant's jobs
- * (`mandate_jobs`). Even then the template never holds it (PR4 retired the per-fire carry; templates are legacy records).
+ * (`mandate_jobs`). Even then the template never holds it: only `carriedPreapproval` reads it, per fire.
  */
 export function templateFromSeed(seed: Mandate, approval: Omit<GrantTemplate["approval"], "approved_at">, at: string, job?: Schedule["job"]): { template: GrantTemplate; notes: string[] } | Refusal {
 	if (!seed.schedule_grant) return { refusal: `${seed.id} is not a schedule grant` };
@@ -93,7 +92,7 @@ export function skillJobFloor(job: Schedule["job"]): number | undefined {
 export function parallelismNote(template: GrantTemplate, job: Schedule["job"]): string | undefined {
 	if (job.skill !== "cp-org-pr-review" || template.dispatch_parallelism === undefined) return undefined;
 	const max = orgReviewMaxReviewers(job.description);
-	return template.dispatch_parallelism < max ? `dispatch_parallelism ${template.dispatch_parallelism} is below max_reviewers ${max}: at most ${template.dispatch_parallelism} reviewers run at once and the rest wait (code never raises it; save a native policy with parallelism ${max} to change it)` : undefined;
+	return template.dispatch_parallelism < max ? `dispatch_parallelism ${template.dispatch_parallelism} is below max_reviewers ${max}: at most ${template.dispatch_parallelism} reviewers run at once and the rest wait (code never raises it; issue a seed with dispatch_parallelism ${max} and cp_schedule move to change it)` : undefined;
 }
 
 /** A skill schedule's template with its job cap raised to `skillJobFloor`, the raise named; never a refusal. */
@@ -141,7 +140,111 @@ export function liveFireBounds(template: GrantTemplate, context: MintContext, pr
 	};
 }
 
+/**
+ * Whether the schedule's current grant stops the next fire: only an operator stop (`operatorStop`, the one predicate
+ * the Schedules page shares) — a revoke recorded as the operator's (`cp_mandate revoke operator_quote`), a legacy revoke
+ * with no recorded provenance, or a pause by anything but a cap — sticks until the schedule is moved to (or re-added
+ * under) a fresh schedule grant, or a pause is resumed. A revoke recorded as the parent's or the system's, expired,
+ * cap-paused, active or missing (a crash between pointer move and issue) is minted past.
+ */
+export function pointerRefusal(grant: Mandate | undefined): string | undefined {
+	const stop = operatorStop(grant);
+	if (!grant || !stop) return undefined;
+	const resume = "cp_schedule move it to a fresh schedule grant (or remove and re-add it) to resume";
+	if (stop === "revoked") {
+		return grant.revoked_by?.by === "operator"
+			? `${grant.id} was revoked by the operator (${grant.revoked_by.decided_by}); a schedule never re-mints past an operator revoke: ${resume}`
+			: `${grant.id} was revoked with no recorded provenance (a legacy revoke), treated as the operator's; a schedule never re-mints past it: ${resume}`;
+	}
+	return `${grant.id} is paused (${grant.pause_reason ?? "operator"}); a schedule never re-mints past an operator pause: resume the grant, or ${resume}`;
+}
 
 /** A dashboard run_now record as `verifiedRunNowClick` (src/schedule-control.ts) read it from the journal. */
 export type RunNowClick = { ok: true; peer: string } | { ok: false; why: string };
 
+/**
+ * Whether this cp-org-pr-review fire carries its seed's standing risk:high pre-approval onto its fresh fire grant
+ * (docs/contracts.md, *Org PR-review schedules*). Only both together carry it: (a) the seed — an active-or-system-retired
+ * schedule grant, never a fire grant, with no operator stop — records an operator pre-approval (`cp_mandate issue` or
+ * `preapprove_risk`, `requireOperatorQuote`) for the grant's jobs (`mandate_jobs`), and (b) this fire was started by a
+ * dashboard Run now whose journal record verified (`click`). The carried record quotes the seed's operator words
+ * verbatim, names the run_now record id as its evidence, and covers only that fire grant's jobs. Any other skill gets
+ * undefined (no note, nothing changes); every other cp-org-pr-review fire gets `gated` (the fire still happens, its
+ * reviewers wait for a risk:high approval as before). Pure: the template never holds a pre-approval.
+ */
+export function carriedPreapproval(input: { skill: string | undefined; scheduleId: string; seed: Mandate | undefined; trigger: ScheduleFire["trigger"]; click: RunNowClick | undefined; at: string }): { record: RiskPreapproval; note: string } | { gated: string } | undefined {
+	if (input.skill !== "cp-org-pr-review") return undefined;
+	const { seed, trigger } = input;
+	const gated = (why: string) => ({ gated: `no risk:high pre-approval carried (${why}): this fire's reviewers wait for a risk:high approval` });
+	if (!seed) return gated("the template's seed grant is missing");
+	if (!seed.schedule_grant || seed.schedule_fire) return gated(`${seed.id} is no seed schedule grant`);
+	const pre = seed.risk_preapproval;
+	if (!pre) return gated(`seed ${seed.id} records no operator pre-approval`);
+	if (pre.scope !== "mandate_jobs") return gated(`seed ${seed.id}'s pre-approval names jobs, not the grant's jobs`);
+	const stop = operatorStop(seed);
+	if (stop) return gated(`seed ${seed.id} was ${stop} by the operator`);
+	if (trigger.via !== "dashboard") return gated(`not a dashboard Run now (${trigger.via})`);
+	if (!input.click?.ok) return gated(`run_now ${trigger.request_id} is not a verified dashboard click: ${input.click?.why ?? "not checked"}`);
+	const sha = quoteSha(pre.operator_quote);
+	return {
+		record: {
+			operator_quote: pre.operator_quote,
+			decided_by: "operator-delegated",
+			delegation_rule: `run_now ${trigger.request_id} (peer ${input.click.peer}): seed ${seed.id} pre-approval [${sha}] carried to this fire's schedule:${input.scheduleId} jobs`.slice(0, 300),
+			...(pre.send_id ? { send_id: pre.send_id } : {}),
+			scope: "mandate_jobs",
+			granted_at: input.at,
+		},
+		note: `risk:high pre-approval of seed ${seed.id} [${sha}] carried for run_now ${trigger.request_id}: this fire's jobs only`,
+	};
+}
+
+export interface MintPorts {
+	mandates: MandateStore;
+	usageJobs: () => readonly MandateUsageJob[];
+	/** Rewrites the schedule's `mandate_id` (in the fire lane). */
+	movePointer: (id: string) => Promise<void>;
+	scheduleId: string;
+	template: GrantTemplate;
+	/** The pointer before this fire. */
+	previousId: string;
+	bounds: FireBounds;
+	trigger: ScheduleFire["trigger"];
+	at: string;
+	/** Whether another schedule still names `id` (a pre-rule shared seed): such a grant is never revoked here. */
+	named: (id: string) => boolean;
+}
+
+/**
+ * Steps 6-9 of a fire: mint the id, move the schedule's pointer to it, then issue — so `usage_baseline` already
+ * captures every earlier fire's fleet records (the pointer names the new grant) and spend from earlier fires is never
+ * charged to it — then revoke the previous pointer, the seed and any orphan fire grant of this schedule (a crash after
+ * an earlier issue), except a grant another schedule still names. A refused issue leaves the pointer on an id with no
+ * file, which the next fire re-mints.
+ */
+export async function mintFireGrant(ports: MintPorts): Promise<{ grant: Mandate; revoked: string[] }> {
+	const id = ports.mandates.mintId();
+	await ports.movePointer(id);
+	const grant = ports.mandates.issue({
+		...ports.bounds,
+		id,
+		at: ports.at,
+		schedule_fire: {
+			schedule_id: ports.scheduleId,
+			seed_mandate_id: ports.template.seed_mandate_id,
+			previous_mandate_id: ports.previousId,
+			fired_at: ports.at,
+			approval: { ...ports.template.approval },
+			trigger: ports.trigger,
+		},
+	}, ports.usageJobs());
+	const revoked: string[] = [];
+	for (const mandate of ports.mandates.list()) {
+		if (mandate.id === grant.id || (mandate.status !== "active" && mandate.status !== "paused") || ports.named(mandate.id)) continue;
+		if (mandate.id === ports.previousId || mandate.id === ports.template.seed_mandate_id || mandate.schedule_fire?.schedule_id === ports.scheduleId) {
+			ports.mandates.revoke(mandate.id, { by: "system" });
+			revoked.push(mandate.id);
+		}
+	}
+	return { grant, revoked };
+}

@@ -88,7 +88,7 @@ test("scheduleLabelRefusal: a cp-org-pr-review run holds at most max_reviewers r
 test("all expansion recipes document durable run membership without new authority",()=>{
  for(const skill of ["cp-self-review","cp-pr-review","cp-org-pr-review"]) {
   const text=readFileSync(join(REPO_ROOT,`skills/${skill}/SKILL.md`),"utf8");
-  for(const part of ["anchor names its durable run","admitted members","no grant is minted","no standing order"]) assert.ok(text.replace(/\s+/g," ").includes(part),`${skill}: ${part}`);
+  for(const part of ["anchor names its durable run","admitted members","no grant is minted","no standing order"]) assert.ok(text.includes(part),`${skill}: ${part}`);
  }
 });
 test("the cp-self-review skill documents the recipe the plan fixes", () => {
@@ -98,7 +98,7 @@ test("the cp-self-review skill documents the recipe the plan fixes", () => {
 		"[REDACTED]", "schedule:<id>", "expanded:", "window_hours", "never bare `br`", "no builds",
 		"Context usage", "Context & compaction", "compactAtTokens", "self_compact", "cp-parent-control.json",
 		"L1-L6 are always delivery `local`", "S1 is\nalways delivery `board`", "board.json", "site/index.html", "/#job/<L-id>", "/boards/<S1-id>/",
-		"run's frozen policy", "child jobs at least 8", "never ask the\noperator about its budget", "no fire mints a grant",
+		"own fire grant", "job cap at least 8", "never ask\nthe operator about its budget",
 	]) assert.ok(text.includes(part), `SKILL.md mentions ${part}`);
 });
 
@@ -108,7 +108,7 @@ test("the cp-pr-review skill documents the recipe, and its reviewer brief is rea
 		"name: cp-pr-review", "R1…Rn", "S1", "external_ref", "schedule:<id>", "expanded:", "skipped:", "conflicting_acceptance", "dep_add",
 		"pr: https://github.com/<owner>/<repo>/pull/<n>", "routing default", "armed", "foreign-CI wait", "never re-dispatch it",
 		"board.json", "site/index.html", "/#job/<R-id>", "/boards/<S1-id>/", "report-only",
-		"run's frozen policy", "child jobs at least N + 2", "never ask the operator about its budget", "no fire mints a grant",
+		"own fire grant", "job cap at least N + 2", "never ask the operator about its budget",
 	]) assert.ok(text.includes(part), `SKILL.md mentions ${part}`);
 	// Binding decision es-314c8e d: the brief each reviewer is dispatched with (the expanded task) carries the read-only rules verbatim.
 	const brief = text.slice(text.indexOf("## Reviewer task template"), text.indexOf("## S1 task template"));
@@ -125,8 +125,8 @@ test("the cp-org-pr-review skill documents the fan-out, the approve-only reviewe
 	for (const part of [
 		"name: cp-org-pr-review", "R1…Rk", "S1", "schedule:<id>", "expanded:", "assignment: none", "dep_add", "risk: \"high\"",
 		"k = min(N, max_reviewers)", "disjoint", "round-robin", "max_reviewers + 2", "--review-requested", "--checks success", "--archived=false",
-		"`hold:", "`team:", "`org:", "refused: user:", "run's frozen policy", "never ask the operator about its budget", "no fire mints a grant",
-		"Under a native run the saved policy is the authorization", "risk_high_irreversible", "cp_schedule update", "report-only",
+		"`hold:", "`team:", "`org:", "refused: user:", "own fire grant", "never ask the operator about its budget", "carried for run_now",
+		"no risk:high pre-approval carried", "cp_schedule update", "report-only",
 	]) assert.ok(text.includes(part) || text.replace(/\n/g, " ").includes(part), `SKILL.md mentions ${part}`);
 	const brief = text.slice(text.indexOf("## Reviewer task template"), text.indexOf("## S1 task template"));
 	assert.ok(brief.length > 0, "the reviewer task template section exists");

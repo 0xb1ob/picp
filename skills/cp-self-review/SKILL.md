@@ -14,14 +14,15 @@ description: >-
 
 Only on a `cp-schedule` wake that names a parent-expanded run (an anchor job, a schedule id and this skill), or on the
 restart re-wake of the same anchor. Never on your own initiative, never for unlabelled review jobs, never a second
-expansion of a closed anchor. This skill grants nothing: the anchor names its durable run (`under run <id>`), and that
-run's frozen policy (child jobs at least 8: these seven jobs plus the anchor) is the only authority; every dispatch below
-is still gated by `cp_dispatch` (run limits, parallelism, risk). Expand under that run as it stands: never ask the
-operator about its budget or cap, never raise one, and never issue a grant for the run.
+expansion of a closed anchor. This skill grants nothing: the schedule's own fire grant (freshly minted from its template on
+every fire, job cap at least 8: these seven jobs plus the anchor) is the only authority, and every dispatch below is
+still gated by `cp_dispatch` (mandate, job cap, parallelism, risk). Expand under that fire grant as it stands: never ask
+the operator about its budget or cap, never raise one, and never issue another grant for the run.
 
-Children are admitted members of that run, under its frozen policy limits and validated model pins: no grant is
-minted and no standing order is needed for fan-out. Follow a refused pin; never substitute a model. A schedule with no
-active native policy never fires (docs/contracts.md, *Native schedule migration*); no fire mints a grant.
+For an activated schedule, the anchor names its durable run (`under run <id>`). Children are admitted members of
+that run, under its frozen policy limits and validated model pins: no grant is minted and no standing order is
+needed for fan-out. Follow a refused pin; never substitute a model. The legacy fire-grant rules above apply only
+to schedules without an activated policy.
 
 A **native** run (the fire says the schedule runner drives the recipe in code) is never yours: the runner creates the
 seven jobs below with their roles, wires S1, dispatches within the run's parallelism, tears each down and closes the
