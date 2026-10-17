@@ -404,7 +404,7 @@ export class CpBridge {
 		if (!home || this.#unsettled(true) === "not_running") return Promise.resolve();
 		return this.#autoControl ??= runAutoControl(home, this.#missionEnd, this.#lastAssistant, {
 			unsettled: () => this.#unsettled(true), status: () => this.statusWithContext(),
-			rotate: async () => this.#rotate(this.#settledProc(true)), compact: async () => this.#compact(this.#settledProc(true)),
+			rotate: async (mission) => this.#rotate(this.#settledProc(true), mission), compact: async () => this.#compact(this.#settledProc(true)),
 		}, (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] })).finally(() => { this.#autoControl = undefined; });
 	}
 	#settledProc(allowQueued = false): WorkerProcess {
@@ -456,7 +456,7 @@ export class CpBridge {
 	async rotate(): Promise<{ sessionFile: string; archivedFile: string }> {
 		return this.#rotate(this.#settledProc());
 	}
-	async #rotate(proc: WorkerProcess): Promise<{ sessionFile: string; archivedFile: string }> {
+	async #rotate(proc: WorkerProcess, mission = this.#missionEnd): Promise<{ sessionFile: string; archivedFile: string }> {
 		const old = this.#sessionFile;
 		if (!old || !this.#home) throw new CpBridgeError("parent session is missing");
 		this.#controlBusy = true;
@@ -471,7 +471,7 @@ export class CpBridge {
 			const archivedFile = join(dirname(old), `cp-parent-${Date.now()}-${randomUUID().slice(0, 8)}.jsonl`);
 			if (!existsSync(old)) throw new CpBridgeError(`session file missing; cannot archive ${old}`);
 			renameSync(old, archivedFile);
-			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(this.#missionEnd ? { lastMissionEnd: this.#missionEnd } : {}) });
+			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(mission ? { lastMissionEnd: mission } : {}) });
 			// dashboard Settings: a configured parent model applies at rotation, as at a start without an explicit model;
 			// an explicit start model or a live `cp_parent model` switch stays (modelExplicit). A refusal keeps the running one.
 			const configured = this.#options?.modelExplicit ? undefined : parentModelSetting(this.#home);

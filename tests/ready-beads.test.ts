@@ -79,7 +79,7 @@ test("a project without a connection or its own .beads never inherits the home's
 	assert.doesNotMatch(formatNext(result), /demo\].*beads/);
 	const notices: string[] = [];
 	const observe = idleBeadObserver(() => readReadyBeads(registry, ledger, undefined, never), (text) => notices.push(text), () => []);
-	await observe([worker("cp-one")], [{ ...worker("cp-one"), phase: "held" }]);
+	await observe([worker("cp-one")], [{ ...worker("cp-one"), phase: "done" }]);
 	assert.deepEqual(notices, [], "no idle notice lists the home's beads under an unconnected project");
 });
 
@@ -93,11 +93,11 @@ test("connection, clone-local and unconnected projects resolve separately", asyn
 	writeFileSync(connectedDb, "");
 	const localDb = cloneDb(registry, "local");
 	const at = isoTimestamp();
-	const connection = (id: string, project: string, adapter: string, endpoint: string) =>
-		({ id, project, adapter, endpoint, intake_enabled: false, write_enabled: false, status: "active", connected_at: at });
+	const connection = (id: string, project: string, adapter: string, endpoint: string, intake = false) =>
+		({ id, project, adapter, endpoint, intake_enabled: intake, write_enabled: false, status: "active", connected_at: at });
 	mkdirSync(dirname(trackersFile(home.path)), { recursive: true });
 	writeFileSync(trackersFile(home.path), JSON.stringify({ schema_version: 1, connections: [
-		connection("connected-beads", "connected", "beads", connectedDb), connection("gh-github", "gh", "github", "o/r"),
+		connection("connected-beads", "connected", "beads", connectedDb, true), connection("gh-github", "gh", "github", "o/r"),
 	] }));
 	const calls: string[] = [];
 	ports.beadExec = async (_command, args) => {
@@ -184,9 +184,9 @@ test("fleet settling emits once per idle period, not per mutation, and cancels s
 	const fleet = new FleetStore({ home: home.path, onChanged: (before, after) => { pending.push(observe(before, after)); } });
 	await fleet.add(worker("cp-one"));
 	await fleet.add(worker("cp-two"));
-	await fleet.patch("cp-one", { phase: "held", reported_at: isoTimestamp() });
+	await fleet.patch("cp-one", { phase: "done", reported_at: isoTimestamp() });
 	assert.equal(resolveRead, undefined, "another worker still occupies a slot");
-	await fleet.patch("cp-two", { phase: "held", reported_at: isoTimestamp() });
+	await fleet.patch("cp-two", { phase: "done", reported_at: isoTimestamp() });
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	resolveRead!(JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }]));
 	await Promise.all(pending);
@@ -194,13 +194,13 @@ test("fleet settling emits once per idle period, not per mutation, and cancels s
 	assert.equal(notices.length, 1);
 	assert.match(notices[0]!, /fleet idle with 1 ready beads/);
 	await fleet.patch("cp-one", { phase: "waiting" });
-	await fleet.patch("cp-one", { phase: "held" });
+	await fleet.patch("cp-one", { phase: "done" });
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	await fleet.patch("cp-two", { phase: "waiting" });
 	resolveRead!(JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }]));
 	await Promise.all(pending);
 	assert.equal(notices.length, 1, "a stale idle observation must not wake a busy fleet");
-	await fleet.patch("cp-two", { phase: "held" });
+	await fleet.patch("cp-two", { phase: "done" });
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	resolveRead!(JSON.stringify([{ id: "b-ready", issue_type: "task", labels: [] }, { id: "b-new", issue_type: "task", labels: [] }]));
 	await Promise.all(pending);
@@ -213,7 +213,7 @@ test("S12: an unchanged successful summary is announced once; changes, reappeara
 	let next: () => ReadyBeads[] = () => [];
 	const observe = idleBeadObserver(async () => next(), (text) => notices.push(text), () => []);
 	const busy = [worker("cp-one")];
-	const idle = [{ ...worker("cp-one"), phase: "held" as const }];
+	const idle = [{ ...worker("cp-one"), phase: "done" as const }];
 	const cycle = async (rows: () => ReadyBeads[]) => { next = rows; await observe(busy, idle); };
 	const ready = (...ids: string[]) => () => [{ project: "demo", ids }];
 
@@ -248,13 +248,38 @@ test("S12: an unchanged successful summary is announced once; changes, reappeara
 	assert.equal(delivered.length, 1);
 });
 
+test("N15: a held or parked PR keeps the fleet busy, a reordered set is not news, intake off reads no beads", async (t) => {
+	const notices: string[] = [];
+	let next: ReadyBeads[] = [{ project: "demo", ids: ["b-1", "b-2"] }];
+	const observe = idleBeadObserver(async () => next, (text) => notices.push(text), () => []);
+	const busy = [worker("cp-one")];
+	for (const phase of ["held", "awaiting_merge"] as const) await observe(busy, [{ ...worker("cp-one"), phase }]);
+	assert.deepEqual(notices, [], "a PR still held or parked with the team is not an idle fleet");
+	await observe(busy, [{ ...worker("cp-one"), phase: "done" }]);
+	next = [{ project: "demo", ids: ["b-2", "b-1"] }];
+	await observe(busy, [{ ...worker("cp-one"), phase: "done" }]);
+	assert.equal(notices.length, 1, "the same bead ids in another order are announced once");
+
+	const { home, ports, registry } = await bench(t);
+	const db = join(home.path, "dbs", "demo.db");
+	mkdirSync(dirname(db), { recursive: true });
+	writeFileSync(db, "");
+	mkdirSync(dirname(trackersFile(home.path)), { recursive: true });
+	writeFileSync(trackersFile(home.path), JSON.stringify({ schema_version: 1, connections: [
+		{ id: "demo-beads", project: "demo", adapter: "beads", endpoint: db, intake_enabled: false, write_enabled: false, status: "active", connected_at: isoTimestamp() },
+	] }));
+	ports.beadExec = async () => { throw new Error("br must not run for a connection with intake off"); };
+	assert.deepEqual(await readReadyBeads(registry, ports.ledger, undefined, ports.beadExec), []);
+	assert.doesNotMatch(formatNext(await cpNext(ports)), /ready beads/);
+});
+
 test("a bead linked while br ready runs is not 'no job' when the idle probe emits (cp-05wj race)", async (t) => {
 	const { registry, ledger } = await bench(t);
 	cloneDb(registry, "demo");
 	const notices: string[] = [];
 	let resolveRead: ((value: string) => void) | undefined;
 	const observe = idleBeadObserver(() => readReadyBeads(registry, ledger, undefined, async () => new Promise<string>((resolve) => { resolveRead = resolve; })), (text) => notices.push(text), () => []);
-	const probe = observe([worker("cp-7w8j")], [{ ...worker("cp-7w8j"), phase: "held" }]);
+	const probe = observe([worker("cp-7w8j")], [{ ...worker("cp-7w8j"), phase: "done" }]);
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	// The job is created and linked mid-probe; no fleet change cancels the probe.
 	const job = await ledger.create({ title: "linked mid-probe", project: "demo", delivery: "pr" });
@@ -278,7 +303,7 @@ test("no idle notice when a worker is live at emit time, even one recorded outsi
 	// A second store over the same file fires no callback here, like another CommandPost instance.
 	const other = new FleetStore({ home: home.path });
 	await observed.add(worker("cp-7w8j"));
-	await observed.patch("cp-7w8j", { phase: "held", reported_at: isoTimestamp() });
+	await observed.patch("cp-7w8j", { phase: "done", reported_at: isoTimestamp() });
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	await other.add(worker("cp-hhuf"));
 	resolveRead!(ready);
@@ -286,9 +311,9 @@ test("no idle notice when a worker is live at emit time, even one recorded outsi
 	assert.deepEqual(notices, [], "a worker spawned while the probe ran keeps the notice silent");
 
 	// Control: the same probe with no live worker at emit time does fire.
-	await other.patch("cp-hhuf", { phase: "held", reported_at: isoTimestamp() });
+	await other.patch("cp-hhuf", { phase: "done", reported_at: isoTimestamp() });
 	await observed.patch("cp-7w8j", { phase: "waiting" });
-	await observed.patch("cp-7w8j", { phase: "held" });
+	await observed.patch("cp-7w8j", { phase: "done" });
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	resolveRead!(ready);
 	await Promise.all(pending);

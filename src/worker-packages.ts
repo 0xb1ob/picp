@@ -122,7 +122,9 @@ export const ROLE_NEVER: Readonly<Record<Role, readonly string[]>> = Object.free
  * `tests/pi-lens-headless.test.ts` proves both flags against the installed package.
  */
 export const PACKAGE_FLAGS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-	"pi-lens": Object.freeze(["--no-read-guard", "--no-lazy-tools"]) as readonly string[],
+	// N19: lens findings injected into one request only change the next request's prefix, so the API drops the thinking
+	// signed on it (prefix_binding_mismatch); findings still reach tool results and lens_diagnostics.
+	"pi-lens": Object.freeze(["--no-read-guard", "--no-lazy-tools", "--no-lens-context"]) as readonly string[],
 });
 
 /**

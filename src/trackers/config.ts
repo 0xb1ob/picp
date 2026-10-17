@@ -144,12 +144,13 @@ export function formatTrackers(connections: readonly TrackerConnection[], linked
 	].join(" ")).join("\n");
 }
 
-export type ProjectTracker = { adapter: "beads"; db: string; source: "connection" | "clone" } | { adapter: "github"; connection_id: string };
+export type ProjectTracker = { adapter: "beads"; db: string; source: "connection"; intake: boolean } | { adapter: "beads"; db: string; source: "clone" } |
+	{ adapter: "github"; connection_id: string };
 
 /** Active connection, else `<clone>/.beads/beads.db` when it exists, else none. Never the home's `.beads`. */
 export function projectTracker(home: string, project: string, clonePath: () => string): ProjectTracker | undefined {
 	const active = readConnections(trackersFile(home)).find((connection) => connection.project === project && connection.status === "active");
-	if (active) return active.adapter === "beads" ? { adapter: "beads", db: active.endpoint, source: "connection" } : { adapter: "github", connection_id: active.id };
+	if (active) return active.adapter === "beads" ? { adapter: "beads", db: active.endpoint, source: "connection", intake: active.intake_enabled } : { adapter: "github", connection_id: active.id };
 	let db: string;
 	try { db = join(clonePath(), ".beads", "beads.db"); } catch { return undefined; }
 	return existsSync(db) ? { adapter: "beads", db, source: "clone" } : undefined;

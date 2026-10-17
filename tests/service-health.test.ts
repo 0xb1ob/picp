@@ -12,7 +12,8 @@ import { EscalationStore } from "../src/escalation.ts";
 import { OperatorAsks } from "../src/operator-asks.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { initPush } from "../src/push/keys.ts";
-import { HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, hostProbes, type Observation, readHealth, runHealth, viewerDown } from "../src/service/health.ts";
+import { HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, healthSummary, hostProbes, type Observation, readHealth, runHealth, viewerDown } from "../src/service/health.ts";
+import { serviceAlerts } from "../src/service-alerts.ts";
 import { tunnelConfigFile } from "../src/service/daemon-tunnel-files.ts";
 import { startDeviceControl } from "../src/viewer/device-control.ts";
 import type { DeviceRoutes } from "../src/viewer/devices-api.ts";
@@ -321,6 +322,16 @@ test("relay: a relay unacked 599 s is ok, 600 s fails under relay:<id>; acking i
 	b.acks.append([{ type: "ack", id, at: "2026-09-28T10:11:00Z" }]);
 	await b.track("relay", { relay: await b.probe(660) });
 	assert.deepEqual(b.states, [`fail relay:${id}`, `fail relay:${id}`, "ok"], "one key while unseen; acking it recovers");
+});
+
+test("N16: a relay failure is dated from queue time, so its alert is due at once; the log line keeps key and detail", async (t) => {
+	const b = relayBench(t);
+	const id = b.enqueue(b.relay("[demo] cp-1: wake"));
+	const record = await b.run({ relay: await b.probe(600) });
+	assert.equal(Date.parse(record.checks.relay!.since), b.T0, "since is the oldest relay's queued_at, not the run that saw it");
+	assert.deepEqual(serviceAlerts(record, new Date(b.T0 + 600_000)).map((alert) => alert.key), [`relay:${id}`]);
+	assert.match(healthSummary(record), new RegExp(`^failing: relay \\[relay:${id}\\] 1 relay\\(s\\) unseen by the main session`));
+	assert.equal(healthSummary(await b.run()), "all ok");
 });
 
 test("relay: a discarded relay is closed; no consumer line names the relaunch, a newer one does not", async (t) => {

@@ -45,8 +45,8 @@ const CONSECUTIVE: Partial<Record<HealthCheck, number>> = { parent: 2, viewer: 2
 export const UPDATE_FAILURES = ["failed", "drain_timeout", "rolled_back", "rollback_failed", "config_invalid", "migration_required"];
 const DETAIL_MAX = 200;
 
-/** One probe's answer: ok, failing (with its dedupe key), or no signal this run (the check keeps its state). */
-export type Observation = { ok: true } | { ok: false; key: string; detail: string } | { skip: string };
+/** One probe's answer: ok, failing (its dedupe key; `since` when it began before this run saw it), or no signal. */
+export type Observation = { ok: true } | { ok: false; key: string; detail: string; since?: string } | { skip: string };
 
 export interface CheckRecord {
 	status: "ok" | "fail";
@@ -82,7 +82,7 @@ export function observe(name: HealthCheck, prior: CheckRecord | undefined, seen:
 	if (seen.ok) return { ...base, status: "ok", key: null, detail: "ok", fails: 0, since: base.status === "ok" ? base.since : at, checked_at: at };
 	const fails = base.fails + 1;
 	if (fails < (CONSECUTIVE[name] ?? 1)) return { ...base, fails, checked_at: at };
-	return { ...base, status: "fail", key: seen.key, detail: clip(seen.detail, DETAIL_MAX), fails, since: base.status === "fail" ? base.since : at, checked_at: at };
+	return { ...base, status: "fail", key: seen.key, detail: clip(seen.detail, DETAIL_MAX), fails, since: base.status === "fail" ? base.since : seen.since ?? at, checked_at: at };
 }
 
 export type HealthProbes = Record<HealthCheck, (prior: CheckRecord | undefined) => Promise<Observation> | Observation>;
@@ -219,7 +219,8 @@ function relayObservation(home: string, stateDir: string, now: Date): Observatio
 			// An ack-capable session wrote a `consumer` line at its start; an old bridge never does, and a dead one cannot ack.
 			const newer = fold.consumer !== undefined && Date.parse(fold.consumer.at) >= Date.parse(entry.queued_at);
 			const capable = newer || (fold.consumer !== undefined && isPidAlive(fold.consumer.pid));
-			return { ok: false, key: `relay:${entry.id}`, detail: `${pendingRelays(outbox, fold).length} relay(s) unseen by the main session, oldest ${entry.id} ${Math.floor(oldest.ageSeconds / 60)} min (${entry.relay.kind})${capable ? "" : " — no ack-capable operator session; relaunch it (dashboard: Restart session)"}` };
+			// N16: dated from queue time, so the alert floor counts the whole delay, not the 10 min before it was seen.
+			return { ok: false, key: `relay:${entry.id}`, since: entry.queued_at, detail: `${pendingRelays(outbox, fold).length} relay(s) unseen by the main session, oldest ${entry.id} ${Math.floor(oldest.ageSeconds / 60)} min (${entry.relay.kind})${capable ? "" : " — no ack-capable operator session; relaunch it (dashboard: Restart session)"}` };
 		}
 		const settled = [...fold.acked.keys(), ...fold.discarded.keys()];
 		const represented = new Set(new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open().map((ask) => ask.source_escalation));
@@ -274,6 +275,15 @@ export async function viewerDown(home: string, env: NodeJS.ProcessEnv, fetcher: 
 	}
 }
 
+/** The daemon.log line for a run: each failing check with its key and detail (N16), so the log alone says what failed. */
+export function healthSummary(record: HealthRecord): string {
+	const failing = HEALTH_CHECKS.flatMap((name) => {
+		const check = record.checks[name];
+		return check?.status === "fail" ? [`${name} [${check.key}] ${check.detail}`] : [];
+	});
+	return failing.length ? `failing: ${failing.join("; ")}` : "all ok";
+}
+
 function readJson(file: string): Record<string, unknown> | undefined {
 	if (!existsSync(file)) return undefined;
 	try {
@@ -290,8 +300,7 @@ if (import.meta.main) {
 	const layout = layoutForHome("multi", home);
 	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }) }).then(
 		(record) => {
-			const failing = HEALTH_CHECKS.filter((name) => record.checks[name]?.status === "fail");
-			console.error(`health: ${failing.length ? `failing: ${failing.join(", ")}` : "all ok"}`);
+			console.error(`health: ${healthSummary(record)}`);
 			process.exit(0);
 		},
 		(error: Error) => {

@@ -118,7 +118,7 @@ test("projectTracker: connection beats clone DB, disconnected falls back to clon
 	writeFileSync(join(clone, ".beads", "beads.db"), "");
 	assert.deepEqual(projectTracker(home, "demo", () => clone), { adapter: "beads", db: join(clone, ".beads", "beads.db"), source: "clone" });
 	await store.connect({ project: "demo", adapter: "beads", endpoint: "/dbs/demo.db" });
-	assert.deepEqual(projectTracker(home, "demo", () => clone), { adapter: "beads", db: "/dbs/demo.db", source: "connection" });
+	assert.deepEqual(projectTracker(home, "demo", () => clone), { adapter: "beads", db: "/dbs/demo.db", source: "connection", intake: false });
 	assert.equal(projectBeadsDb(home, "demo", () => clone), "/dbs/demo.db");
 	await store.disconnect("demo");
 	assert.equal(projectBeadsDb(home, "demo", () => clone), join(clone, ".beads", "beads.db"));
