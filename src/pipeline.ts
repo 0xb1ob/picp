@@ -852,7 +852,11 @@ export class PipelineRunner {
 			...(request.slug ? { slug: `${request.slug}-research` } : {}),
 		});
 		const shipTitle = bound ? `ship: ${title} (${bound.runId})` : `ship: ${title}`;
-		const ship = (bound ? ledger.findDuplicate({ title: shipTitle, project: request.project }) : undefined) ?? await ledger.create({
+		const found = bound ? ledger.findDuplicate({ title: shipTitle, project: request.project }) : undefined;
+		const run = bound && !found ? bound.runs.run(bound.runId) : undefined;
+		// Admission is checked before the ship exists, so a full or closed run never leaves an orphan ship job.
+		if (run && (run.phase === "closed" || run.members.length >= run.policy.limits.child_jobs)) throw new PipelineError(`${run.id}: cannot admit the ship (closed, or limits.child_jobs reached, anchor included)`);
+		const ship = found ?? await ledger.create({
 			title: shipTitle,
 			project: request.project,
 			delivery,

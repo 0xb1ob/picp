@@ -12,6 +12,7 @@ import { parseJobLabels } from "./ledger.ts";
 
 import { readSchedulePolicies, readScheduleRuns } from "./viewer/schedule-run-core.ts";
 import { policySchedule } from "./schedule-run-fire.ts";
+import { isSelfReviewRun } from "./schedule-self-review.ts";
 export const EXPANDED_MARKER = "expanded:";
 const SCHEDULE_LABEL = "schedule:";
 const ID_PATTERN = /^sch-[0-9a-f]{6}$/;
@@ -34,13 +35,15 @@ export const readParentExpanded = (home: string): Set<string> => parentExpandedI
 
 const anchorOpen = (job: Job, id: string): boolean => job.status === "deferred" && job.labels.includes(`${SCHEDULE_LABEL}${id}`);
 
-/** Deferred anchors of parent-expanded schedules the parent has not yet marked `expanded:`. */
-export function pendingExpansions(jobs: readonly Job[], schedules: readonly Schedule[]): { anchor: Job; schedule: Schedule }[] {
+/** Deferred skill-run anchors not yet marked `expanded:`; a native self-review run is the runner's, never listed. */
+export function pendingExpansions(jobs: readonly Job[], schedules: readonly Schedule[], runs?: ScheduleRunStore): { anchor: Job; schedule: Schedule }[] {
 	const out: { anchor: Job; schedule: Schedule }[] = [];
 	for (const schedule of schedules) {
 		if (!schedule.job.skill) continue;
 		for (const anchor of jobs) {
-			if (anchorOpen(anchor, schedule.id) && !anchor.comments.some((comment) => comment.text.startsWith(EXPANDED_MARKER))) out.push({ anchor, schedule });
+			if (!anchorOpen(anchor, schedule.id) || anchor.comments.some((comment) => comment.text.startsWith(EXPANDED_MARKER))) continue;
+			if (runs?.active && isSelfReviewRun(runs.runOfJob(anchor.id))) continue;
+			out.push({ anchor, schedule });
 		}
 	}
 	return out;
@@ -90,7 +93,9 @@ export function scheduleLabelRefusal(labels: readonly string[], jobs: readonly J
 		if (options.runs?.active && options.runs.activePolicy(id)) {
 			const run = options.runs.openRun(id);
 			if (!run) return `schedule ${id} needs an open run (Run now first)`;
-			if (!run.members.some((member) => member.job_id === options.reuseId) && run.members.length >= run.policy.limits.child_jobs) return `${run.id}: child cap reached (anchor included)`;
+			const member = run.members.some((entry) => entry.job_id === options.reuseId);
+			if (isSelfReviewRun(run) && !member) return `${run.id}: the schedule runner creates this self-review run's jobs in code; the parent never adds them`;
+			if (!member && run.members.length >= run.policy.limits.child_jobs) return `${run.id}: child cap reached (anchor included)`;
 		}
 		const anchor = jobs.find((job) => anchorOpen(job, id));
 		if (!anchor) return `no open run of schedule ${id} (Run now first)`;

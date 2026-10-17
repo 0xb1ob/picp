@@ -26,6 +26,7 @@ import type { ExtensionDeps } from "./shared.ts";
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 import { isNativePolicy, RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
 import { startScheduledPipeline } from "../../src/schedule-native.ts";
+import { SELF_REVIEW_SKILL } from "../../src/schedule-self-review.ts";
 /** The quote is written verbatim as one ledger comment (≤4000 chars) after its `run-now quote sha <12 hex>: ` prefix. */
 const RUN_NOW_QUOTE_MAX = 3900;
 
@@ -97,6 +98,11 @@ export function registerScheduleTools(
 	const handle = (event: ScheduleEvent, active: ScheduleRunner): void => {
 		const text = formatScheduleEvent(event);
 		if (event.native && event.delivery === "pipeline" && event.outcome === "fired") return startPipeline(event, text);
+		// A native self-review run is the runner's in code: no expansion wake, no parent turn (a replay heals there too).
+		if (event.native && event.skill === SELF_REVIEW_SKILL && event.outcome === "fired") {
+			log(text);
+			return void active.onFired(event);
+		}
 		if (event.outcome !== "fired" || event.replayed) log(text);
 		else if (event.skill && event.job_id) wakeParent(event.job_id, text, { ...event });
 		else if (event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)) {
@@ -127,7 +133,7 @@ export function registerScheduleTools(
 			await runner.sweepReported();
 			await runner.retryPending();
 			// A deferred anchor not yet expanded (a restart before the fan-out finished) re-wakes the parent once per process.
-			for (const { anchor, schedule } of pendingExpansions(deps.commandPost().ledger().read().jobs, scheduler.list())) {
+			for (const { anchor, schedule } of pendingExpansions(deps.commandPost().ledger().read().jobs, scheduler.list(), deps.commandPost().mandates.scheduleRuns)) {
 				wakeParent(anchor.id, formatExpansionWake(anchor, schedule), { schedule_id: schedule.id, job_id: anchor.id, skill: schedule.job.skill });
 			}
 			for (const event of await scheduler.tick()) handle(event, runner);
@@ -218,7 +224,7 @@ export function registerScheduleTools(
 		promptSnippet: "Manage cron/watch schedules that file jobs under a mandate (cp_schedule)",
 		promptGuidelines: [
 			"A cp-schedule wake-up (pr and legacy pipeline schedules) names a created job: call cp_next and act on it like any other ready job; answer/board/local scheduled jobs are the schedule runner's and a native pipeline is started by the host, never dispatch them yourself.",
-			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review, cp-org-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down.",
+			"A cp-schedule wake naming a parent-expanded run is yours: follow the skill it names (cp-self-review, cp-pr-review, cp-org-pr-review) — create its jobs with label schedule:<id>, comment `expanded: …` on the anchor, dispatch them as the skill says; never dispatch the deferred anchor; close it once the synthesis job is torn down. A native cp-self-review run sends no such wake: the schedule runner creates, dispatches and tears down its seven jobs in code, so never create, dispatch or tear them down yourself.",
 			"A native schedule (add without mandate_id, on the operator's sentence naming it) is authorized by its saved policy: its runs need no grant, quote or risk:high ask, and a merge, an undeclared kind or a ship under a report-only policy is refused in code — never ask about them.",
 			"A legacy schedule needs its own active schedule grant (cp_mandate issue with schedule_grant:true, no job_ids, named by no other schedule) as its seed: add saves its bounds as the schedule's template, and every fire mints a fresh grant from that template, so an expired or spent fire grant never stops the next fire and its budget is never yours to raise or ask about.",
 			"A legacy run_now needs the operator's verbatim sentence naming the schedule (its id or name) as operator_quote; never on your own initiative, and never by replaying an earlier sentence. A native run_now needs no quote, but still only when the operator asks for it.",

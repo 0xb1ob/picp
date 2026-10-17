@@ -24,6 +24,11 @@ that run, under its frozen policy limits and validated model pins: no grant is m
 needed for fan-out. Follow a refused pin; never substitute a model. The legacy fire-grant rules above apply only
 to schedules without an activated policy.
 
+A **native** run (the fire says the schedule runner drives the recipe in code) is never yours: the runner creates the
+seven jobs below with their roles, wires S1, dispatches within the run's parallelism, tears each down and closes the
+anchor (`src/schedule-self-review.ts`, task text in `prompts/schedules/`). Never expand, dispatch or tear it down; a
+blocked or failed member still wakes you as its exception. This skill stays the recipe for older, parent-owned runs.
+
 ## Window
 
 `end` = the anchor's `created_at`; `start` = `end` − N hours. N = 36 unless the anchor's description has a line

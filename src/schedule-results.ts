@@ -32,11 +32,11 @@ export interface ScheduleResultPorts {
 	log?: (line: string) => void;
 }
 
-/** Whose accepted envelope is the run's result: a skill run's S1 named on its anchor (`expanded:`), else the anchor. */
+/** Whose envelope is the run's result: a skill run's S1 (admitted role, else named `expanded:`), else the anchor. */
 export function resultOwner(run: ScheduleRun, jobs: readonly ResultLedgerJob[]): string | null {
 	if (!run.policy.recipe.skill) return run.anchor_job_id;
 	const anchor = jobs.find((job) => job.id === run.anchor_job_id);
-	const s1 = expandedRoles(anchor?.comments ?? []).S1;
+	const s1 = run.members.find((member) => member.role === "S1")?.job_id ?? expandedRoles(anchor?.comments ?? []).S1;
 	return s1 && run.members.some((member) => member.job_id === s1) ? s1 : null;
 }
 
