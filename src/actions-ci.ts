@@ -40,15 +40,17 @@ export interface ActionsRun extends CiRun {
 
 export type ActionsCiErrorCategory = "denied" | "rate_limited" | "transport" | "malformed" | "incomplete" | "deadline";
 
-/** Bounded: a category, the Actions endpoint and an HTTP code for a denial; never a raw response body. */
+/** Bounded: a category, the endpoint, an HTTP status and at most a token-free 60-byte body preview, never a raw body. */
 export class ActionsCiError extends Error {
 	readonly category: ActionsCiErrorCategory;
 	readonly endpoint: string;
+	readonly detail: string;
 	constructor(category: ActionsCiErrorCategory, endpoint: string, detail = "") {
 		super(`Actions CI read ${category}: gh api ${endpoint.slice(0, 200)}${detail ? ` (${detail})` : ""}`);
 		this.name = "ActionsCiError";
 		this.category = category;
 		this.endpoint = endpoint;
+		this.detail = detail;
 	}
 }
 
@@ -212,6 +214,8 @@ export interface ActionsReadOptions {
 	/** Total budget for the whole observation, every page included. */
 	timeoutMs?: number;
 	now?: () => number;
+	/** The pause between retries; tests pass a no-op. */
+	sleep?: (ms: number) => Promise<void>;
 }
 
 interface Budget {
@@ -224,17 +228,61 @@ function budgetOf(options: ActionsReadOptions): Budget {
 	return { deadline: now() + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now };
 }
 
-async function get(options: ActionsReadOptions, budget: Budget, endpoint: string): Promise<string> {
-	const remaining = budget.deadline - budget.now();
-	if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
+/** Pauses before each retry of a transient read; the sum stays well inside one tick's budget. */
+export const ACTIONS_RETRY_DELAYS_MS = [250, 750];
+
+const TOKEN = /gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|\b(?:bearer|token)\s+\S+/gi;
+
+/** What came back, for the fault: the HTTP status gh named (exit 0 means a 2xx) and a token-free 60-byte preview. */
+function evidence(status: string, body: string): string {
+	const text = body.slice(0, 4096).replace(TOKEN, "[redacted]").replace(/[^\x20-\x7e]+/g, " ").trim().slice(0, 60);
+	return `${status}; ${text ? `body ${JSON.stringify(text)}` : "empty body"}`;
+}
+
+function isJson(text: string): boolean {
 	try {
-		return await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs: remaining });
+		JSON.parse(text);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** One attempt: the body when it parses as JSON, else a fault and whether a retry may cure it. */
+async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs: number): Promise<string | { fault: ActionsCiError; retry: boolean }> {
+	let stdout: string;
+	try {
+		stdout = await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		if (/rate limit/i.test(message)) throw new ActionsCiError("rate_limited", endpoint);
-		const code = /\bHTTP (40[34])\b/.exec(message)?.[1];
-		if (code) throw new ActionsCiError("denied", endpoint, `HTTP ${code}`);
-		throw new ActionsCiError("transport", endpoint);
+		const body = String((error as { stdout?: unknown })?.stdout ?? "");
+		const code = /\bHTTP (\d{3})\b/.exec(message)?.[1];
+		if (/rate limit/i.test(message)) return { fault: new ActionsCiError("rate_limited", endpoint), retry: false };
+		// GitHub's own denials are JSON; an HTML 403/404 is a proxy or abuse page, not the token's answer.
+		const html = body.trim() !== "" && !isJson(body);
+		if ((code === "403" || code === "404") && !html) return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
+		// "status", not "HTTP": src/ci-access.ts reads any "HTTP 403" as the token's denial.
+		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true };
+	}
+	if (isJson(stdout)) return stdout;
+	return { fault: new ActionsCiError("malformed", endpoint, `not JSON; ${evidence("gh exit 0", stdout)}`), retry: true };
+}
+
+/** A non-JSON body, HTML error page or transport fault retries with backoff in the budget; the last fault throws. */
+async function get(options: ActionsReadOptions, budget: Budget, endpoint: string): Promise<string> {
+	const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	for (let tries = 0; ; tries++) {
+		const remaining = budget.deadline - budget.now();
+		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
+		const result = await attempt(options, endpoint, remaining);
+		if (typeof result === "string") return result;
+		const delay = ACTIONS_RETRY_DELAYS_MS[tries];
+		const left = budget.deadline - budget.now();
+		if (!result.retry || delay === undefined || left <= delay) {
+			if (tries === 0) throw result.fault;
+			throw new ActionsCiError(result.fault.category, endpoint, `${result.fault.detail}; ${tries + 1} attempts`);
+		}
+		await sleep(delay);
 	}
 }
 
@@ -315,7 +363,10 @@ export async function readOlderBranchRuns(options: ActionsReadOptions & { branch
 export function statusRunner(run: StatusRunner): CommandRunner {
 	return async (command, args, options) => {
 		const result = await run(options.cwd, command, args, { timeoutMs: options.timeoutMs });
-		if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+		if (result.status !== 0) {
+			const message = `${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}`;
+			throw Object.assign(new Error(message), { stdout: result.stdout });
+		}
 		return result.stdout;
 	};
 }
