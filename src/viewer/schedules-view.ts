@@ -18,6 +18,7 @@ import { objectList, strings } from "./overview-read.ts";
 import { isSafeId, obj, readObject, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 
 import { readSchedulePolicies, readScheduleRuns } from "./schedule-run-core.ts";
+import { isNativePolicy } from "./schedule-policy.ts";
 export const SCHEDULE_HISTORY = 40;
 
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
@@ -191,7 +192,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			grant_stopped: operatorStop(grants.find((g) => g.id === schedule.mandate_id)) !== undefined,
 			fan_out: fanOut(schedule),
 			run_now_clearance: runNowClearance(grants, schedule),
-			policy: (()=>{ const r = policies.find(p=>p.schedule_id === schedule.id); const p = r?.revisions.find(p=>p.revision === r.active_revision); return r && p ? {active_revision:p.revision,activated_at:r.activated_at!,limits:p.limits,model:p.model_policy} : null; })(),
+			policy: (()=>{ const r = policies.find(p=>p.schedule_id === schedule.id); const p = r?.revisions.find(p=>p.revision === r.active_revision); return r && p ? {active_revision:p.revision,activated_at:r.activated_at!,limits:p.limits,model:p.model_policy,native:isNativePolicy(p)} : null; })(),
 			active_run: durable.find(r=>r.schedule_id === schedule.id && r.phase !== "closed") ?? null,
 			...schedulePage(schedule),
 		})),

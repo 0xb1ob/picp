@@ -1,10 +1,12 @@
 /** Read-only, dependency-free schedule run contracts; P2a writes are inert. */
 import { existsSync, readFileSync } from "node:fs";
 import { boolean, ISO_SECOND, line, lines, number, object, oneOf, pattern, SCHEDULE_ID, text, type Check } from "./schedule-core.ts";
-import { schedulePolicyErrors, type SchedulePolicy } from "./schedule-policy.ts";
+import { isNativePolicy, RUN_THINKING_LEVELS, runOverrideErrors, schedulePolicyErrors, type RunOverrides, type SchedulePolicy } from "./schedule-policy.ts";
 
 export class ScheduleRunError extends Error {}
 export const SCHEDULE_RUN_ID = /^run-[0-9]{14}-[0-9a-f]{6}$/;
+/** One start per key: a dashboard request id, a cp_schedule tool call id, or a slot/watch time. */
+export const RUN_START_KEY = /^(dashboard|cp_schedule|slot|watch):[^\s]{1,200}$/;
 export interface ScheduleRunMember { job_id: string; role: string | null; admitted_at: string }
 // Structural mirrors of RiskPreapproval and RiskPreapprovedRow; no contracts runtime in the viewer.
 export interface RiskPreapproval {
@@ -14,9 +16,12 @@ export interface RiskPreapproval {
 export interface RiskPreapprovedRow {
 	at: string; job_id: string; use: "dispatch" | "promote"; decided_by: "operator-delegated" | "operator"; quote_sha: string; evidence: string[];
 }
+/** Frozen at start: the requested run-only overrides and the choices every dispatch of this run uses. */
+export interface RunExecution { requested: RunOverrides; effective: { model?: string; thinking?: RunOverrides["thinking"]; parallelism: number } }
 export interface ScheduleRun {
 	schema_version: 1; id: string; schedule_id: string; policy_revision: number; policy: SchedulePolicy;
 	trigger: { via: "slot" | "watch" | "dashboard" | "cp_schedule"; at: string; slot?: string; missed?: boolean; request_id?: string; tool_call_id?: string; quote_sha?: string };
+	start_key?: string; execution?: RunExecution;
 	anchor_job_id: string | null; members: ScheduleRunMember[]; phase: "accepted" | "running" | "closed";
 	outcome: "completed" | "partial" | "refused" | null; started_at: string; deadline_at: string; closed_at?: string;
 	risk_preapproval?: RiskPreapproval; risk_preapproved: RiskPreapprovedRow[];
@@ -52,6 +57,11 @@ const member = object({ job_id: jobId, role: nullable(line(200)), admitted_at: a
 const runShape = object({
 	schema_version: oneOf([1]), id: pattern(SCHEDULE_RUN_ID), schedule_id: pattern(SCHEDULE_ID), policy_revision: positive, policy,
 	trigger: object({ via: oneOf(["slot", "watch", "dashboard", "cp_schedule"]), at, "slot?": line(100), "missed?": boolean, "request_id?": line(200), "tool_call_id?": line(200), "quote_sha?": pattern(/^[0-9a-f]{12}$/) }),
+	"start_key?": pattern(RUN_START_KEY),
+	"execution?": object({
+		requested: (v, p, e) => e.push(...runOverrideErrors(v).map((error) => `${p}${error}`)),
+		effective: object({ "model?": line(200), "thinking?": oneOf(RUN_THINKING_LEVELS), parallelism: number(1, 32, true) }),
+	}),
 	anchor_job_id: nullable(jobId), members: array(member), phase: oneOf(["accepted", "running", "closed"]), outcome: oneOf([null, "completed", "partial", "refused"]),
 	started_at: at, deadline_at: at, "closed_at?": at,
 	"risk_preapproval?": object({ operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), "delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/), "job_ids?": array(jobId, 64, 1), scope: oneOf(["named_jobs", "mandate_jobs"]), granted_at: at }),
@@ -75,6 +85,8 @@ export function scheduleRunErrors(value: unknown): string[] {
 	if (run.phase === "closed" ? !run.closed_at || run.outcome === null : run.closed_at !== undefined || run.outcome !== null) errors.push("/phase: only a closed run has closed_at and outcome");
 	if (run.closed_at !== undefined && run.closed_at < run.started_at) errors.push("/closed_at: cannot precede started_at");
 	if (run.risk_preapproval && !(run.trigger.via === "dashboard" ? run.trigger.request_id : run.trigger.via === "cp_schedule" && run.trigger.tool_call_id)) errors.push("/risk_preapproval: requires a verified operator start (dashboard Run now or cp_schedule run_now)");
+	if (isNativePolicy(run.policy) && (!run.start_key || !run.execution)) errors.push("/start_key: a native run records its start key and frozen execution");
+	if (isNativePolicy(run.policy) && run.risk_preapproval) errors.push("/risk_preapproval: a native run never carries a per-run pre-approval");
 	return errors;
 }
 export function policyRecordErrors(value: unknown): string[] {
@@ -96,6 +108,8 @@ export const scheduleRunsFileErrors = (v: unknown): string[] => {
 	if (errors.length) return errors;
 	const runs = (v as { runs: ScheduleRun[] }).runs;
 	if (new Set(runs.map((r) => r.id)).size !== runs.length) errors.push("/runs: duplicate run id");
+	const keys = runs.flatMap((r) => r.start_key ? [r.start_key] : []);
+	if (new Set(keys).size !== keys.length) errors.push("/runs: duplicate start_key");
 	const jobs = runs.flatMap((r) => r.members.map((m) => m.job_id));
 	if (new Set(jobs).size !== jobs.length) errors.push("/runs: a job belongs to only one run");
 	const open = runs.filter((r) => r.phase !== "closed");

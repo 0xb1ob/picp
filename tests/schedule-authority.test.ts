@@ -8,7 +8,7 @@ import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { checkpointAuthority, scheduleRunVerdict, ScheduleAuthorityError } from "../src/schedule-authority.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
-import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
+import { policyFromLegacy, type LegacySchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import type { ScheduleRun } from "../src/viewer/schedule-run-core.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { createScratchLedger } from "./harness/index.ts";
@@ -218,7 +218,7 @@ test("run high-risk asks once under run attribution; scripts never use standing 
 // Read-only planning never edits code, so a run's ask_on risk:high must not gate it; a ship job still is.
 test("a risk:high read-only research dispatch in a schedule run passes with no escalation; ship stays refused",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- await runs.editRun(run.id,(row)=>{row.policy={...row.policy,allowed_actions:[...row.policy.allowed_actions,"plan"]};});
+ await runs.editRun(run.id,(row)=>{const legacy=row.policy as LegacySchedulePolicy;row.policy={...legacy,allowed_actions:[...legacy.allowed_actions,"plan"]};});
  const base = {jobId:"cp-member",project:"demo",risk:"high" as const};
  const store = new EscalationStore({home:home.path});
  assert.equal((await mandates.assertDispatchAllowed({...base,kind:"research",readOnly:true})).run?.id,run.id);
@@ -239,7 +239,7 @@ test("verified operator starts pre-approve risk:high for their run only; timer r
  assert.ok(timer.question.includes(`Started by the timer (slot ${at})`),timer.question);
  await store.withdraw(timer.id);
  const click = "sc-20261010030653-11806a8e";
- runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,slot:at,missed:false,request_id:click};r.risk_preapproval={operator_quote:r.policy.approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
+ runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,slot:at,missed:false,request_id:click};r.risk_preapproval={operator_quote:(r.policy as LegacySchedulePolicy).approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
  const permission = await mandates.assertDispatchAllowed(job);
  assert.equal(permission.run?.started_by,`Started by the operator via dashboard Run now (request ${click}, ${at})`);
  assert.equal(store.list({kind:"risk_high_irreversible",status:"open"}).length,0);
@@ -260,7 +260,7 @@ test("verified operator starts pre-approve risk:high for their run only; timer r
 
 test("a pre-approved run passes review, repair and implement uses of a risk:high member with no escalation",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,request_id:"sc-click"};r.risk_preapproval={operator_quote:r.policy.approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
+ runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,request_id:"sc-click"};r.risk_preapproval={operator_quote:(r.policy as LegacySchedulePolicy).approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
  for (const use of ["review","repair","implement"] as const) assert.equal(scheduleRunVerdict(mandates.runContext(),use,job,[],now).source,"schedule-run");
  assert.equal(new EscalationStore({home:home.path}).list({kind:"risk_high_irreversible"}).length,0);
@@ -280,7 +280,7 @@ test("org-review dashboard run whose org_review_approve channel lacks dashboard 
  const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
  const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
  assert.equal(runRiskPreapproval(run,job),true);
- const other = structuredClone(run);other.policy.effect_channels.org_review_approve = ["cp_schedule"] as unknown as ["dashboard"];
+ const other = structuredClone(run);(other.policy as LegacySchedulePolicy).effect_channels.org_review_approve = ["cp_schedule"] as unknown as ["dashboard"];
  assert.equal(runRiskPreapproval(other,job),false);
  // The runs-file validator refuses to persist this channel list, so the store read serves it in memory.
  const runOfJob = runs.runOfJob.bind(runs);

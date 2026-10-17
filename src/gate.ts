@@ -82,7 +82,7 @@ import { taskAddendaBlock } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { MandateStore } from "./mandate.ts";
 import type { ProjectRegistry } from "./projects.ts";
-import { selectReviewerModel } from "./reviewer-model.ts";
+import { type ReviewerModelSelection, selectReviewerModel } from "./reviewer-model.ts";
 
 export class GateError extends Error {}
 
@@ -846,7 +846,7 @@ export class Gate {
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(jobId);
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
-		const route = await this.#route(profile, jobId, record, selection?.model);
+		const route = await this.#route(profile, jobId, record, selection?.model, selection?.thinking);
 		const model = route.decision.model;
 
 		// The reviewer sees one file, in a directory that contains nothing else.
@@ -1157,7 +1157,7 @@ export class Gate {
 	 * on a different model deliberately, route the role elsewhere in
 	 * data/routing.json, or pass an explicit override (which never falls back).
 	 */
-	async #route(profile: WorkerProfile, jobId: string, record: FleetRecord | undefined, override?: string): Promise<ReviewerRoute> {
+	async #route(profile: WorkerProfile, jobId: string, record: FleetRecord | undefined, override?: string, thinking?: ReviewerModelSelection["thinking"]): Promise<ReviewerRoute> {
 		const inputs = reviewerRoutingInputs(record);
 		const decision = await resolveWithCapacity(
 			{
@@ -1168,6 +1168,7 @@ export class Gate {
 				...(inputs.scope ? { scope: inputs.scope } : {}),
 				...(inputs.risk ? { risk: inputs.risk } : {}),
 				...(override ? { override } : {}),
+				...(thinking ? { thinking } : {}),
 			},
 			this.#options.routing,
 			this.#options.probe,

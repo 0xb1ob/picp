@@ -9,7 +9,7 @@ import { actionForKind, evaluateAuthority, hitsNeedle, type AuthorityDecision, t
 import { hardStops, preapprovalRecordCovers, quoteSha } from "./risk-preapproval.ts";
 import { runSpend, type ScheduleRunStore } from "./schedule-runs.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
-import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { isNativePolicy, type LegacySchedulePolicy, type SchedulePolicy } from "./viewer/schedule-policy.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 
 export interface ScheduleAuthorityContext { home: string; runs: ScheduleRunStore; ledgerJob: (id: string) => Job | undefined }
@@ -20,7 +20,7 @@ export interface RunAuthorityJob {
 	/** From the resolved profile (dispatch.ts); with `promotion`, feeds `riskGateExempt`. */
 	readOnly?: boolean; promotion?: boolean;
 }
-export type ScheduleAuthorityCode = "not_member" | "policy_missing" | "policy_corrupt" | "run_closed" | "run_usd_cap" | "run_token_cap" | "child_cap" | "parallelism_full" | "deadline_passed" | "action_not_allowed" | "kind_excluded" | "path_excluded" | "subsystem_excluded" | "risk_high" | "hard_stop";
+export type ScheduleAuthorityCode = "not_member" | "policy_missing" | "policy_corrupt" | "run_closed" | "run_usd_cap" | "run_token_cap" | "child_cap" | "parallelism_full" | "deadline_passed" | "action_not_allowed" | "kind_excluded" | "kind_not_declared" | "mode_refused" | "path_excluded" | "subsystem_excluded" | "risk_high" | "hard_stop";
 export class ScheduleAuthorityError extends Error {
 	readonly code: ScheduleAuthorityCode;
 	readonly runId?: string;
@@ -63,12 +63,13 @@ export function withRunReviewerSpend(home: string, jobs: readonly MandateUsageJo
 export function runRiskPreapproval(run: ScheduleRun, job: RunAuthorityJob, createdAt?: string): boolean {
 	return job.project === run.policy.project && !job.script && hardStops([...(job.pathHints ?? []), job.text ?? ""].join("\n")).length === 0 &&
 		// Org-review approvals keep the saved dashboard-only clearance.
-		(run.policy.recipe.skill !== "cp-org-pr-review" || (run.trigger.via === "dashboard" && run.policy.effects.includes("org_review_approve") && run.policy.effect_channels.org_review_approve?.includes("dashboard") === true)) &&
+		(run.policy.recipe.skill !== "cp-org-pr-review" || (run.trigger.via === "dashboard" && !isNativePolicy(run.policy) && run.policy.effects.includes("org_review_approve") && run.policy.effect_channels.org_review_approve?.includes("dashboard") === true)) &&
 		preapprovalRecordCovers(run.risk_preapproval, run.members.map((m) => m.job_id), job, createdAt);
 }
 /** Who started a run, in the words a brief and an escalation carry. */
 export function runStartedBy(run: ScheduleRun): string {
 	const { trigger } = run;
+	if (isNativePolicy(run.policy)) return `Started via ${trigger.via === "cp_schedule" ? "cp_schedule run_now" : trigger.via === "dashboard" ? "dashboard Run now" : `the ${trigger.via === "watch" ? "watch trigger" : "timer"}`} (${run.start_key}, ${trigger.at}) under native policy rev ${run.policy_revision}`;
 	if (trigger.via === "dashboard") return run.risk_preapproval ? `Started by the operator via dashboard Run now (request ${trigger.request_id}, ${trigger.at})` : `Started via dashboard Run now (request ${trigger.request_id}, ${trigger.at}); no operator pre-approval recorded`;
 	if (trigger.via === "cp_schedule") return `Started by the operator via cp_schedule run_now (call ${trigger.tool_call_id}, ${trigger.at})`;
 	return trigger.via === "watch" ? `Started by the watch trigger (${trigger.at})` : `Started by the timer (slot ${trigger.slot ?? trigger.at})`;
@@ -105,7 +106,10 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 	const kind = job.kind ?? labels.kind;
 	job = { ...job, kind, risk, text: job.text ?? ledger?.description, script: job.script === true || ledger?.script !== undefined };
 	const stops = hardStops([...(job.pathHints ?? []), job.text ?? ledger?.description ?? ""].join("\n"));
-	if (!riskGateExempt(job) && (stops.length || (risk === "high" && policy.ask_on.includes("risk:high")))) {
+	const native = isNativePolicy(policy) ? policy : undefined;
+	// Native: the saved revision is the authorization; a hard stop is outside any policy, so it refuses without an ask.
+	if (native && stops.length && !riskGateExempt(job)) refuse("hard_stop", `hard stop outside the saved policy: ${stops.join(", ")}`);
+	if (!native && !riskGateExempt(job) && (stops.length || (risk === "high" && (policy as LegacySchedulePolicy).ask_on.includes("risk:high")))) {
 		const escalations = new EscalationStore({ home: ctx.home });
 		const approved = !job.checkpoint && escalations.list({ jobId: job.jobId, kind: "risk_high_irreversible" }).some((row) => row.status === "answered" && (row.answered_by === "operator-quote" || row.answered_by === "operator-delegated") && row.basis && "operator_quote" in row.basis && /^(approve|approved|yes)$/i.test((row.answer ?? "").trim()) && row.question.includes(run.id));
 		// A verified operator start covers every use of its members (the operator triggers and runs it); hard stops never.
@@ -125,9 +129,17 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 	const continuation = record && use !== "implement" && (use !== "dispatch" || record.phase === "failed");
 	if (now >= run.deadline_at && !continuation) refuse("deadline_passed", "deadline passed; only same-kind continuation remains");
 	const action = use === "dispatch" ? (kind === "research" ? "plan" : "implement") : use === "promote" ? "repair" : use;
-	if (!policy.allowed_actions.some((allowed) => allowed === action)) refuse("action_not_allowed", `${action} is not an allowed action`);
+	if (native) {
+		if (use === "merge") refuse("action_not_allowed", "a schedule run never merges; the repository and parent integration own merges");
+		if (kind && !native.kinds.includes(kind)) refuse("kind_not_declared", `${kind} is not a declared kind (${native.kinds.join(", ")})`);
+		if (native.mode === "report-only" && (action === "implement" || kind === "ship")) refuse("mode_refused", "report-only policy admits no implementation");
+		if (job.script && ledger?.script?.path !== native.recipe.script_path) refuse("action_not_allowed", "script job differs from the saved recipe's script_path");
+	} else {
+		const legacy = policy as LegacySchedulePolicy;
+		if (!legacy.allowed_actions.some((allowed) => allowed === action)) refuse("action_not_allowed", `${action} is not an allowed action`);
+		if ((use === "implement" && legacy.ask_on.includes("plan_approval")) || (use === "merge" && legacy.ask_on.includes("merge"))) refuse("action_not_allowed", `ask_on includes ${use === "merge" ? "merge" : "plan_approval"}`);
+	}
 	if (job.checkpoint === "final_fix" || Object.values(job.gateFlags ?? {}).some(Boolean)) refuse("action_not_allowed", "flagged or final-fix checkpoint requires operator text");
-	if ((use === "implement" && policy.ask_on.includes("plan_approval")) || (use === "merge" && policy.ask_on.includes("merge"))) refuse("action_not_allowed", `ask_on includes ${use === "merge" ? "merge" : "plan_approval"}`);
 	if (kind && policy.exclusions.job_kinds?.includes(kind)) refuse("kind_excluded", `${kind} is excluded`);
 	for (const needle of policy.exclusions.paths ?? []) {
 		if ((job.pathHints ?? []).some((path) => hitsNeedle(path, needle)) || (job.text ?? "").includes(needle)) refuse("path_excluded", `path ${needle} is excluded`);
@@ -138,7 +150,8 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 	const spend = runSpend(run, withRunReviewerSpend(ctx.home, jobs, run));
 	if (spend.usd >= policy.limits.usd) refuse("run_usd_cap", "USD cap reached; in-flight work continues");
 	if (spend.tokens >= policy.limits.tokens) refuse("run_token_cap", "token cap reached; in-flight work continues");
-	if (use === "dispatch" && spend.inFlight >= policy.limits.parallelism) refuse("parallelism_full", "run parallelism is full");
+	const parallelism = run.execution?.effective.parallelism ?? policy.limits.parallelism;
+	if (use === "dispatch" && spend.inFlight >= parallelism) refuse("parallelism_full", "run parallelism is full");
 	if (!job.advice) audit(ctx, run, use, { ...job, risk }, now);
 	return verdict;
 }

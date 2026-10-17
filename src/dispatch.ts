@@ -73,6 +73,8 @@ import { resolveJobSkills, skillsBriefNote } from "./job-skills.ts";
 import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
+import { withRunExecution } from "./schedule-native.ts";
+import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { DispatchError } from "./dispatch-error.ts";
 export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
 
@@ -459,7 +461,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
-		request = opsRequest(request, issue, kind, delivery);
+		request = withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		const profile = selectProfile(options.profilesDir, request, { kind, delivery });
 		const { skills } = this.#skills(request, profile);
@@ -531,7 +533,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
-		request = opsRequest(request, issue, kind, delivery);
+		request = withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		if (blockers.length > 0) {
 			throw new BlockedDispatchError(`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`, blockers);
@@ -621,7 +623,7 @@ export class Dispatcher {
 			);
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
 		} catch (error) {
-			throw error instanceof MandateError && error.code ? error : new DispatchError((error as Error).message); // a coded refusal keeps its code (dispatch queue)
+			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
 		}
 
 		// --- 4. lease, then everything that can fail must clean up -----------

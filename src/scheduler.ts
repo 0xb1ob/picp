@@ -32,7 +32,9 @@ import { resolveScriptFile, scriptEnv } from "./script-runner.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
 import { changePolicy, policySchedule, startRun, type PolicyAction } from "./schedule-run-fire.ts";
-import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { isNativePolicy, type NativeSchedulePolicy, type RunOverrides, type SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { nativeAddPolicy, type NativeAddLimits } from "./schedule-native-add.ts";
+import { formatNativeEvent, nativeStart } from "./schedule-native.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
 
 import { policyImportBackups } from "./schedule-migrations.ts";
@@ -50,7 +52,9 @@ const CLOCK_BACK_BOUND_MS = 2 * 3_600_000;
 export interface ScheduleInput {
 	name: string;
 	project: string;
-	mandate_id: string;
+	/** Legacy add: the seed grant. Omitted: a native add, authorized by `native` (the operator's action). */
+	mandate_id?: string;
+	native?: { action: PolicyAction; limits: NativeAddLimits };
 	cron?: string;
 	tz?: string;
 	watch_script?: string;
@@ -134,6 +138,10 @@ export interface ScheduleEvent {
 	manual_via?: FireTrigger["via"];
 	/** A parent-expanded run (manual + skill): `job_id` is a deferred anchor the parent expands with this skill. */
 	skill?: string;
+	/** A native run's start key was already accepted: the original run, nothing new dispatched. */
+	replayed?: boolean;
+	/** Started under a native policy: the saved revision authorized it, nothing was asked. */
+	native?: boolean;
 }
 
 /**
@@ -142,8 +150,11 @@ export interface ScheduleEvent {
  * is 12 hex of sha256 of that quote's source message, which authorizes at most one run now per schedule.
  */
 export type FireTrigger =
-	| { via: "dashboard"; request_id: string; peer: string | null; revision?: number }
-	| { via: "cp_schedule"; tool_call_id: string; operator_quote: string; decided_by: string; source_sha: string; send_id?: string; delegation_rule?: string; revision?: number };
+	| { via: "dashboard"; request_id: string; peer: string | null; revision?: number; overrides?: RunOverrides }
+	// A native run needs no quote; a legacy run_now still refuses without one.
+	| { via: "cp_schedule"; tool_call_id: string; operator_quote?: string; decided_by?: string; source_sha?: string; send_id?: string; delegation_rule?: string; revision?: number; overrides?: RunOverrides };
+type LegacyFireTrigger = Exclude<FireTrigger, { via: "cp_schedule" }> | (Extract<FireTrigger, { via: "cp_schedule" }> & { operator_quote: string; decided_by: string; source_sha: string });
+const legacyTrigger = (manual: FireTrigger | undefined): manual is LegacyFireTrigger | undefined => !(manual && "overrides" in manual && manual.overrides) && (manual?.via !== "cp_schedule" || (!!manual.operator_quote && !!manual.decided_by && !!manual.source_sha));
 
 /** Written on a cp_schedule run now's job (notes and quote comment); finding it on any job of the schedule refuses a replay. */
 export const runNowQuoteMarker = (sourceSha: string): string => `run-now quote sha ${sourceSha}`;
@@ -245,35 +256,28 @@ export class Scheduler {
 		if (this.#ports.archivedProjects?.().includes(input.project)) throw new SchedulerError(archivedRefusal(input.project, "cp_schedule add refused"));
 		const now = this.#now();
 		const stamp = isoTimestamp(now); // MandateStore and the grant checks compare at second precision
-		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
-		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
-		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
-		const seed = mandate as Mandate;
 		const job: Schedule["job"] = {
 			title: input.title.trim(), kind: input.kind, delivery: input.delivery,
 			...(input.description ? { description: input.description } : {}),
 			...(input.script_path !== undefined ? { script_path: input.script_path } : {}),
 			...(input.skill ? { skill: input.skill as (typeof SCHEDULE_SKILLS)[number] } : {}),
 		};
+		const trigger: Schedule["trigger"] = manual
+			? { type: "manual" }
+			: cron
+				? { type: "cron", cron: (input.cron as string).trim(), tz: input.tz as string }
+				: { type: "watch", script_path: input.watch_script as string, every_seconds: input.every_seconds as number, on: input.on as "exit0" | "changed" };
+		const base = { id: `sch-${randomBytes(3).toString("hex")}`, name: input.name.trim(), project: input.project, trigger, job, enabled: true, created_at: now.toISOString() };
+		if (input.mandate_id === undefined) return this.#nativeAdd(base, input.native, now);
+		const mandate = this.#ports.mandates.sweep(stamp, this.#ports.usageJobs()).find((entry) => entry.id === input.mandate_id);
+		const refusal = mandateRefusal(mandate, input.mandate_id, input.project, input.kind, stamp, undefined, this.list());
+		if (refusal) throw new SchedulerError(`cp_schedule add refused: ${refusal}`);
+		const seed = mandate as Mandate;
 		const seeded = templateFromSeed(seed, synthesizedApproval(seed, "cp_schedule add"), stamp, job);
 		if (refused(seeded)) throw new SchedulerError(`cp_schedule add refused: ${seeded.refusal}`);
 		// One fire's whole fan-out plus its anchor runs under its own fire grant: a lower job cap is raised, never refused.
 		const floored = withSkillJobFloor(seeded.template, job);
-		const schedule: Schedule = {
-			id: `sch-${randomBytes(3).toString("hex")}`,
-			name: input.name.trim(),
-			project: input.project,
-			mandate_id: input.mandate_id,
-			trigger: manual
-				? { type: "manual" }
-				: cron
-					? { type: "cron", cron: (input.cron as string).trim(), tz: input.tz as string }
-					: { type: "watch", script_path: input.watch_script as string, every_seconds: input.every_seconds as number, on: input.on as "exit0" | "changed" },
-			job,
-			grant_template: floored.template,
-			enabled: true,
-			created_at: now.toISOString(),
-		};
+		const schedule: Schedule = { id: base.id, name: base.name, project: base.project, mandate_id: input.mandate_id, trigger, job, grant_template: floored.template, enabled: true, created_at: base.created_at };
 		const notes = templateNotes(seeded.notes, floored, job);
 		return this.#mutate((schedules) => {
 			if (schedules.some((entry) => entry.name === schedule.name && entry.project === schedule.project)) throw new SchedulerError(`project ${schedule.project} already has a schedule named ${JSON.stringify(schedule.name)}`);
@@ -281,6 +285,22 @@ export class Scheduler {
 			if (shared) throw new SchedulerError(`cp_schedule add refused: ${schedule.mandate_id} is already the grant of schedule ${shared.id} (${shared.name}); one grant per schedule`);
 			schedules.push(schedule);
 			return notes.length ? { ...schedule, notes } : schedule;
+		});
+	}
+
+	/** Native add, in the fire lane: schedule written, then revision 1 saved and activated; a failed save removes it. */
+	#nativeAdd(schedule: Schedule, native: ScheduleInput["native"], now: Date): Promise<Schedule> {
+		return this.#serial(async () => {
+			const runs = this.#ports.runs;
+			if (!native || !runs?.active) throw new SchedulerError("cp_schedule add without mandate_id needs the operator's quote and an active schedule run store");
+			const taken = (schedules: readonly Schedule[]) => { if (schedules.some((entry) => entry.name === schedule.name && entry.project === schedule.project)) throw new SchedulerError(`project ${schedule.project} already has a schedule named ${JSON.stringify(schedule.name)}`); };
+			taken(this.list()); let context: MintContext | Refusal;
+			try { context = this.#ports.mintContext?.(schedule.project) ?? { refusal: "live policy bounds are not wired" }; } catch (error) { context = { refusal: `live policy bounds unreadable (${(error as Error).message})` }; }
+			const policy = refused(context) ? context : nativeAddPolicy({ schedule, limits: native.limits, context, action: native.action, now });
+			if (refused(policy)) throw new SchedulerError(`cp_schedule add refused: ${policy.refusal}`);
+			await this.#mutate((schedules) => { taken(schedules); schedules.push(schedule); });
+			try { await runs.savePolicyRevision(policy, { at: isoTimestamp(now), provenance: policy.provenance }); } catch (error) { await this.#mutate((schedules) => { const at = schedules.findIndex((entry) => entry.id === schedule.id); if (at >= 0) schedules.splice(at, 1); }); throw error; }
+			return schedule;
 		});
 	}
 
@@ -561,8 +581,12 @@ export class Scheduler {
 		const latestSchedule = this.list().find(s => s.id === schedule.id);
 		if (!latestSchedule?.enabled) throw new SchedulerError(`schedule ${schedule.id} was removed or disabled`);
 		const currentPolicy = this.#ports.runs?.activePolicy(schedule.id);
-		if (manual && ((currentPolicy && manual.revision === undefined) || (manual.revision !== undefined && manual.revision !== (currentPolicy?.revision ?? 0)))) throw new SchedulerError("Schedule changed; review updated settings");
+		const native = isNativePolicy(currentPolicy) ? currentPolicy : undefined;
+		// A native start may omit the revision (no read round trip); an explicit stale one still refuses.
+		if (manual && ((currentPolicy && !native && manual.revision === undefined) || (manual.revision !== undefined && manual.revision !== (currentPolicy?.revision ?? 0)))) throw new SchedulerError("Schedule changed; review updated settings");
 		schedule = policySchedule(latestSchedule, currentPolicy);
+		if (native) return this.#nativeFire(schedule, native, slot, missed, now, missedAt, manual);
+		if (!legacyTrigger(manual)) throw new SchedulerError(`schedule ${schedule.id} is on legacy per-fire grants: run_now needs operator_quote and takes no overrides until it saves a native policy`);
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
 		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };
@@ -588,7 +612,7 @@ export class Scheduler {
 		const early = await ledgerRefusal();
 		if (early) return refuse(early);
 		const runs = this.#ports.runs;
-		const policy = runs?.active && schedule.job.delivery !== "pipeline" ? runs.activePolicy(schedule.id) : undefined;
+		const policy = runs?.active && schedule.job.delivery !== "pipeline" && currentPolicy && !isNativePolicy(currentPolicy) ? currentPolicy : undefined;
 		if (runs && policy) {
 			const latest = this.list().find((entry) => entry.id === schedule.id);
 			if (!latest?.enabled) return refuse(`schedule ${schedule.id} was removed or disabled before this fire ran`);
@@ -653,6 +677,26 @@ export class Scheduler {
 		return template;
 	}
 
+	/** A native start (src/schedule-native.ts): no grant, quote or ask; a replayed start key returns its original run. */
+	async #nativeFire(schedule: Schedule, policy: NativeSchedulePolicy, slot: Date, missed: boolean, now: Date, missedAt: Date, manual?: FireTrigger): Promise<ScheduleEvent | undefined> {
+		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, native: true };
+		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };
+		const refuse = (why: string) => manual !== undefined ? Promise.resolve<ScheduleEvent>({ ...base, outcome: "skipped", reason: `run now not recorded: ${why}`, ...manualFields }) : this.#skip(schedule, now, `fire at ${minuteIso(slot)} not recorded: ${why}`);
+		if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));
+		if (!this.#ports.runs) return refuse("this host does not wire the schedule run store");
+		const title = manual !== undefined ? `${schedule.job.title} (${schedule.name} run now ${minuteIso(now)})` : `${schedule.job.title} (${schedule.name} ${minuteIso(slot)})`;
+		const context = (): MintContext | Refusal => {
+			try { return this.#ports.mintContext?.(schedule.project) ?? { refusal: "this host does not wire live policy bounds" }; }
+			catch (error) { return { refusal: `live policy bounds unreadable (${(error as Error).message})` }; }
+		};
+		const overrides = manual?.overrides ? { overrides: manual.overrides } : {};
+		const trigger = manual === undefined ? {} : { manual: manual.via === "dashboard" ? { via: "dashboard" as const, request_id: manual.request_id, peer: manual.peer, ...overrides } : { via: "cp_schedule" as const, tool_call_id: manual.tool_call_id, ...overrides } };
+		const started = await nativeStart({ runs: this.#ports.runs, ledger: this.#ports.ledger(), schedule, policy, context, title, now, slot, missed, missedAt, ...trigger });
+		if (refused(started)) return refuse(started.refusal);
+		if (!manual && !started.replayed && started.job_id) await this.#patch(schedule.id, { last_fire: { at: now.toISOString(), slot: slot.toISOString(), job_id: started.job_id, missed } });
+		return { ...base, outcome: "fired", ...started, delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...(missed ? { missed_at: minuteIso(missedAt) } : {}), ...manualFields };
+	}
+
 	/** A schedule's next fire bounds: its template re-evaluated against the live home (`mintContext`), fail closed. */
 	#fireBounds(schedule: Schedule, now: Date): ReturnType<typeof liveFireBounds> {
 		const template = schedule.grant_template as GrantTemplate;
@@ -670,7 +714,7 @@ export class Scheduler {
 	 * only), live bounds, mint in this lane, sanity check. Whatever the pointer's state — expired, cap-paused, spent —
 	 * the fire's caps come from the template, never from it.
 	 */
-	async #mint(queued: Schedule, now: Date, stamp: string, slot: Date, missed: boolean, manual: FireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
+	async #mint(queued: Schedule, now: Date, stamp: string, slot: Date, missed: boolean, manual: LegacyFireTrigger | undefined): Promise<{ grant: Mandate; notes: string[] } | Refusal> {
 		// Re-read in the lane: a fire queued behind another sees the pointer that fire moved, and a removal in between refuses.
 		const schedule = this.list().find((entry) => entry.id === queued.id);
 		if (!schedule?.enabled) return { refusal: `schedule ${queued.id} was removed or disabled before this fire ran` };
@@ -725,6 +769,7 @@ export function formatScheduleEvent(event: ScheduleEvent): string {
 	if (event.outcome === "skipped") return `${head} skipped: ${event.reason}`;
 	const via = event.manual ? (event.manual_via === "cp_schedule" ? `; run now via cp_schedule on a verified operator quote (${event.manual})` : `; run now from the dashboard (${event.manual})`) : "";
 	const fired = `${head} fired: ${event.reason}${event.missed_at ? `; missed ${event.missed_at} while no parent was up` : ""}${via}. `;
+	if (event.native) return formatNativeEvent(event, head);
 	if (event.skill) return `${fired}${event.job_id} is a parent-expanded run (deferred anchor): use skill ${event.skill} to expand it — its jobs carry label schedule:${event.schedule_id}; never dispatch the anchor.`;
 	return fired +
 		(event.delivery !== undefined && RUNNER_DELIVERIES.includes(event.delivery)

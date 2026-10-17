@@ -118,6 +118,21 @@ test("closed runs older than the reconcile window never flood Answers", async (t
 	assert.equal(b.runs.run(b.run.id)!.result, undefined);
 });
 
+test("one run whose result edit fails does not block the next run's card (PR1 review medium)", async (t) => {
+	const b = await bench(t);
+	await b.runs.closeRun(b.run.id, "completed", "2026-07-01T06:30:00Z");
+	const next: ScheduleRun = { ...structuredClone(b.run), id: "run-20260701061000-fedcba", anchor_job_id: null, members: [] };
+	await b.runs.createRun(next);
+	await b.runs.closeRun(next.id, "partial", "2026-07-01T06:40:00Z");
+	// The first run's edit is refused (a validation failure); the reconcile must still queue and post the second card.
+	const runs = { get active() { return b.runs.active; }, runs: () => b.runs.runs(), run: (id: string) => b.runs.run(id), runOfJob: (id: string) => b.runs.runOfJob(id),
+		editRun: (id: string, fn: (run: ScheduleRun) => void) => { if (id === b.run.id) throw new Error("invalid run"); return b.runs.editRun(id, fn); } };
+	const logged: string[] = [];
+	new ScheduleResults({ runs: runs as unknown as ScheduleRunStore, answers: new OperatorAnswers(b.stateDir, { now }), ledgerJobs: () => b.jobs, facts: () => undefined, now, log: (line) => logged.push(line) }).sync();
+	assert.deepEqual(b.cards().map((card) => card.source?.run_id), [next.id]);
+	assert.ok(logged.some((line) => line.includes(b.run.id) && line.includes("invalid run")), "the bad run is named");
+});
+
 test("a skill run's result owner is S1 from the anchor's expanded comment, never the anchor or a reader", async (t) => {
 	const b = await bench(t, { skill: "cp-org-pr-review", delivery: "local", description: "org: example-org" });
 	await b.runs.admitMember(b.run.id, member("cp-l1"));

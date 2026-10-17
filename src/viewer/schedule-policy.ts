@@ -10,26 +10,45 @@ import {
 export const SCHEDULE_POLICY_SCHEMA_VERSION = 1;
 export const SCHEDULE_EFFECTS = ["answer", "board_publish", "report", "branch_push", "pull_request", "pipeline", "org_review_approve"] as const;
 export type ScheduleEffect = (typeof SCHEDULE_EFFECTS)[number];
-export interface SchedulePolicy {
+export const SCHEDULE_MODES = ["report-only", "write"] as const;
+export type ScheduleMode = (typeof SCHEDULE_MODES)[number];
+const REPORT_EFFECTS: readonly ScheduleEffect[] = ["answer", "board_publish", "report"];
+/** Mirrors THINKING_LEVELS (src/contracts/routing.ts) without a contracts runtime; parity is pinned by tests. */
+export const RUN_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export interface RunOverrides { model?: string; thinking?: (typeof RUN_THINKING_LEVELS)[number]; parallelism?: number }
+interface PolicyBase {
 	schedule_id: string;
 	revision: number;
 	saved_at: string;
 	saved_by: "operator-quote" | "operator-delegated" | "dashboard" | "migration";
 	provenance: { channel: "dashboard" | "cp_schedule" | "migration"; request_id?: string; tool_call_id?: string; send_id?: string; delegation_rule?: string; quote_sha?: string; legacy_seed?: string; recipe_sha?: string };
-	approval: GrantTemplate["approval"];
 	project: string;
 	recipe: Omit<Schedule["job"], "skill"> & { skill: (typeof SCHEDULE_SKILLS)[number] | null };
 	recipe_config: OrgReviewConfig | null;
 	trigger: Schedule["trigger"];
 	effects: ScheduleEffect[];
-	permitted_start_channels: { slot: boolean; dashboard: boolean; cp_schedule: boolean };
-	effect_channels: { org_review_approve?: ["dashboard"] };
 	limits: { usd: number; tokens: number; child_jobs: number; parallelism: number; run_hours: number };
 	model_policy: { mode: "routing-default" } | { mode: "pinned"; by_role: { implementer?: string; planner?: string; reviewer?: string } };
-	allowed_actions: GrantTemplate["allowed_actions"];
-	ask_on: GrantTemplate["ask_on"];
 	exclusions: NonNullable<GrantTemplate["exclusions"]>;
 }
+/** A grant-shaped revision: still readable and enforced for runs it already froze (docs/contracts.md). */
+export interface LegacySchedulePolicy extends PolicyBase {
+	approval: GrantTemplate["approval"];
+	permitted_start_channels: { slot: boolean; dashboard: boolean; cp_schedule: boolean };
+	effect_channels: { org_review_approve?: ["dashboard"] };
+	allowed_actions: GrantTemplate["allowed_actions"];
+	ask_on: GrantTemplate["ask_on"];
+}
+/** The saved revision is the authorization: no quote, ask_on, start channel or grant is read when a run starts. */
+export interface NativeSchedulePolicy extends PolicyBase {
+	authority: "native";
+	mode: ScheduleMode;
+	kinds: Array<(typeof SCHEDULE_JOB_KINDS)[number]>;
+}
+export type SchedulePolicy = LegacySchedulePolicy | NativeSchedulePolicy;
+export const isNativePolicy = (policy: SchedulePolicy | undefined | null): policy is NativeSchedulePolicy => (policy as { authority?: unknown } | undefined | null)?.authority === "native";
+/** Write mode follows from the declared effects; report-only work publishes artifacts only. */
+export const effectsMode = (effects: readonly ScheduleEffect[]): ScheduleMode => effects.every((effect) => REPORT_EFFECTS.includes(effect)) ? "report-only" : "write";
 
 type Recipe = Omit<Schedule["job"], "skill"> & { skill?: Schedule["job"]["skill"] | null };
 /** Base effects only; org approval requires separate dashboard clearance. */
@@ -49,15 +68,15 @@ export function skillChildFloor(job: Recipe): number | undefined {
 }
 
 const positiveInteger = number(1, Number.MAX_SAFE_INTEGER, true);
-const policyShape = object({
+const sendId = pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/);
+const commonShape = {
 	schedule_id: pattern(SCHEDULE_ID), revision: positiveInteger, saved_at: pattern(ISO_SECOND),
 	saved_by: oneOf(["operator-quote", "operator-delegated", "dashboard", "migration"]),
 	provenance: object({
 		channel: oneOf(["dashboard", "cp_schedule", "migration"]), "request_id?": line(200), "tool_call_id?": line(200),
-		"send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/), "delegation_rule?": text(300),
+		"send_id?": sendId, "delegation_rule?": text(300),
 		"quote_sha?": pattern(/^[0-9a-f]{12}$/), "legacy_seed?": pattern(SCHEDULE_MANDATE_ID), "recipe_sha?": pattern(/^[0-9a-f]{64}$/),
 	}),
-	approval: object({ operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), approved_at: pattern(ISO_SECOND), "delegation_rule?": text(300), "send_id?": pattern(/^ps-[0-9]{14}-[0-9a-f]{8}$/) }),
 	project: line(64),
 	recipe: object({
 		skill: oneOf([null, ...SCHEDULE_SKILLS]), title: line(200), kind: oneOf(SCHEDULE_JOB_KINDS), delivery: oneOf(SCHEDULE_DELIVERIES),
@@ -69,33 +88,59 @@ const policyShape = object({
 	},
 	trigger: (v, path, errors) => (isObject(v) && v.type === "watch" ? watchTrigger : isObject(v) && v.type === "manual" ? manualTrigger : cronTrigger)(v, path, errors),
 	effects: subset(SCHEDULE_EFFECTS, SCHEDULE_EFFECTS.length),
-	permitted_start_channels: object({ slot: boolean, dashboard: boolean, cp_schedule: boolean }),
-	effect_channels: object({ "org_review_approve?": (v, path, errors) => { if (!Array.isArray(v) || v.length !== 1 || v[0] !== "dashboard") errors.push(`${path}: must be exactly [dashboard]`); } }),
 	limits: object({ usd: number(0, Number.MAX_SAFE_INTEGER, false, true), tokens: positiveInteger, child_jobs: positiveInteger, parallelism: number(1, 32, true), run_hours: number(1, GRANT_TEMPLATE_MAX_HOURS, true) }),
 	model_policy: (v, path, errors) => {
 		(isObject(v) && v.mode === "pinned" ? object({ mode: oneOf(["pinned"]), by_role: object({ "implementer?": line(200), "planner?": line(200), "reviewer?": line(200) }) }) : object({ mode: oneOf(["routing-default"]) }))(v, path, errors);
 		if (isObject(v) && v.mode === "pinned" && isObject(v.by_role) && !Object.keys(v.by_role).length) errors.push(`${path}/by_role: must pin at least one role`);
 	},
-	allowed_actions: subset(GRANT_TEMPLATE_ACTIONS, 8), ask_on: subset(GRANT_TEMPLATE_ASK_ON, 16, GRANT_TEMPLATE_FORCED_ASK_ON),
 	exclusions: object({ "paths?": lines(200, 32), "subsystems?": lines(80, 32), "job_kinds?": (v, path, errors) => {
 		if (!Array.isArray(v) || v.length > 4) errors.push(`${path}: must be an array of at most 4`);
 		else v.forEach((item, i) => oneOf(SCHEDULE_JOB_KINDS)(item, `${path}/${i}`, errors));
 	} }),
+} satisfies Record<string, import("./schedule-core.ts").Check>;
+const legacyShape = object({
+	...commonShape,
+	approval: object({ operator_quote: text(4000), decided_by: oneOf(["operator-quote", "operator-delegated"]), approved_at: pattern(ISO_SECOND), "delegation_rule?": text(300), "send_id?": sendId }),
+	permitted_start_channels: object({ slot: boolean, dashboard: boolean, cp_schedule: boolean }),
+	effect_channels: object({ "org_review_approve?": (v, path, errors) => { if (!Array.isArray(v) || v.length !== 1 || v[0] !== "dashboard") errors.push(`${path}: must be exactly [dashboard]`); } }),
+	allowed_actions: subset(GRANT_TEMPLATE_ACTIONS, 8), ask_on: subset(GRANT_TEMPLATE_ASK_ON, 16, GRANT_TEMPLATE_FORCED_ASK_ON),
 });
+const nativeShape = object({ ...commonShape, authority: oneOf(["native"]), mode: oneOf(SCHEDULE_MODES), kinds: subset(SCHEDULE_JOB_KINDS, 2) });
+
+/** A native pipeline also declares its terminal ship effect; org approval is explicit on cp-org-pr-review only. */
+function nativeEffectErrors(policy: NativeSchedulePolicy): string[] {
+	const { recipe, effects } = policy;
+	const errors: string[] = [];
+	const base = effects.filter((effect) => effect !== "org_review_approve" && !(recipe.delivery === "pipeline" && (effect === "pull_request" || effect === "branch_push")));
+	const expected = recipeEffects(recipe);
+	if (!expected.length || base.length !== expected.length || expected.some((effect) => !base.includes(effect))) errors.push("/effects: must match the recipe's effects");
+	if (recipe.delivery === "pipeline" && effects.filter((effect) => effect === "pull_request" || effect === "branch_push").length !== 1) errors.push("/effects: a pipeline declares exactly one terminal effect, pull_request or branch_push");
+	if (recipe.delivery === "pipeline" && recipe.kind !== "research") errors.push("/recipe: a native pipeline's anchor is its research stage (kind research)");
+	if (effects.includes("org_review_approve") && recipe.skill !== "cp-org-pr-review") errors.push("/effects: org_review_approve requires cp-org-pr-review");
+	if (policy.mode !== effectsMode(effects)) errors.push(`/mode: must be ${effectsMode(effects)} for these effects`);
+	const needed = recipe.delivery === "pipeline" ? ["research", "ship"] : [recipe.kind];
+	if (needed.some((kind) => !policy.kinds.includes(kind as "ship" | "research"))) errors.push(`/kinds: must include ${needed.join(", ")}`);
+	if (policy.mode === "report-only" && policy.kinds.includes("ship")) errors.push("/kinds: report-only runs admit research jobs only");
+	return errors;
+}
 
 /** Unknown fields and invalid shapes fail closed before semantic validation. */
 export function schedulePolicyErrors(value: unknown): string[] {
 	const errors: string[] = [];
-	policyShape(value, "", errors);
+	const native = isObject(value) && value.authority !== undefined;
+	(native ? nativeShape : legacyShape)(value, "", errors);
 	if (errors.length) return errors;
 	const policy = value as SchedulePolicy;
 	const { recipe } = policy;
-	const expected = recipeEffects(recipe);
-	const base = policy.effects.filter((effect) => effect !== "org_review_approve");
-	if (!expected.length || base.length !== expected.length || expected.some((effect) => !base.some((item) => item === effect))) errors.push("/effects: must match the recipe's effects");
-	const approve = policy.effects.includes("org_review_approve");
-	if (approve && (recipe.skill !== "cp-org-pr-review" || !policy.effect_channels.org_review_approve || !policy.permitted_start_channels.dashboard)) errors.push("/effects: org_review_approve requires cp-org-pr-review and dashboard-only effect clearance");
-	if (!approve && policy.effect_channels.org_review_approve) errors.push("/effect_channels: org_review_approve needs its effect");
+	if (isNativePolicy(policy)) errors.push(...nativeEffectErrors(policy));
+	else {
+		const expected = recipeEffects(recipe);
+		const base = policy.effects.filter((effect) => effect !== "org_review_approve");
+		if (!expected.length || base.length !== expected.length || expected.some((effect) => !base.some((item) => item === effect))) errors.push("/effects: must match the recipe's effects");
+		const approve = policy.effects.includes("org_review_approve");
+		if (approve && (recipe.skill !== "cp-org-pr-review" || !policy.effect_channels.org_review_approve || !policy.permitted_start_channels.dashboard)) errors.push("/effects: org_review_approve requires cp-org-pr-review and dashboard-only effect clearance");
+		if (!approve && policy.effect_channels.org_review_approve) errors.push("/effect_channels: org_review_approve needs its effect");
+	}
 	if (recipe.skill && (recipe.kind !== "research" || recipe.delivery !== "local" || recipe.script_path !== undefined || policy.trigger.type !== "manual")) errors.push("/recipe: skills require a manual research/local anchor without script_path");
 	const floor = skillChildFloor(recipe);
 	if (floor !== undefined && policy.limits.child_jobs < floor) errors.push(`/limits/child_jobs: must be at least the skill floor ${floor}`);
@@ -108,8 +153,25 @@ export function schedulePolicyErrors(value: unknown): string[] {
 	return errors;
 }
 
+/** Strict run-only overrides: they never edit the policy or widen its scope or budget. */
+export function runOverrideErrors(value: unknown): string[] {
+	const errors: string[] = [];
+	object({ "model?": (v, p, e) => { line(200)(v, p, e); if (typeof v === "string" && !/^[^/\s]+\/\S+$/.test(v)) e.push(`${p}: must be provider/model`); }, "thinking?": oneOf(RUN_THINKING_LEVELS), "parallelism?": number(1, 32, true) })(value, "", errors);
+	return errors;
+}
+
+/** A native draft derived from the recipe: the narrowest mode, kinds and effects it needs. */
+export function nativePolicyDraft(input: Pick<PolicyBase, "schedule_id" | "project" | "recipe" | "recipe_config" | "trigger" | "limits"> & Partial<Pick<PolicyBase, "model_policy" | "exclusions">>, stamp: Pick<PolicyBase, "revision" | "saved_at" | "saved_by" | "provenance">): NativeSchedulePolicy {
+	const effects: ScheduleEffect[] = [...recipeEffects(input.recipe), ...(input.recipe.delivery === "pipeline" ? ["pull_request" as const] : [])];
+	return structuredClone({
+		...stamp, schedule_id: input.schedule_id, project: input.project, recipe: input.recipe, recipe_config: input.recipe_config, trigger: input.trigger,
+		effects, limits: input.limits, model_policy: input.model_policy ?? { mode: "routing-default" }, exclusions: input.exclusions ?? {},
+		authority: "native", mode: effectsMode(effects), kinds: input.recipe.delivery === "pipeline" ? ["research", "ship"] : [input.recipe.kind],
+	});
+}
+
 /** Pure legacy snapshot; omitted parallelism retains the existing serial fallback. No adoption or writes. */
-export function policyFromLegacy(schedule: Schedule, template: GrantTemplate, seed?: { id: string; schedule_grant?: boolean; schedule_fire?: unknown; status?: unknown; pause_reason?: unknown; revoked_by?: unknown; risk_preapproval?: { scope?: unknown; operator_quote?: unknown; granted_at?: unknown } }): SchedulePolicy {
+export function policyFromLegacy(schedule: Schedule, template: GrantTemplate, seed?: { id: string; schedule_grant?: boolean; schedule_fire?: unknown; status?: unknown; pause_reason?: unknown; revoked_by?: unknown; risk_preapproval?: { scope?: unknown; operator_quote?: unknown; granted_at?: unknown } }): LegacySchedulePolicy {
 	const pre = seed?.risk_preapproval;
 	const approve = schedule.job.skill === "cp-org-pr-review" && seed?.id === template.seed_mandate_id && seed.schedule_grant === true && seed.schedule_fire === undefined && !operatorStop(seed) && pre?.scope === "mandate_jobs" && typeof pre.operator_quote === "string" && pre.operator_quote.length > 0 && typeof pre.granted_at === "string" && pre.granted_at.length > 0;
 	return structuredClone({

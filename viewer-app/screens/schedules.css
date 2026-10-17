@@ -62,6 +62,9 @@
 .schedule-settings, .schedule-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .schedule-settings button, .schedule-editor-actions button { min-height: 44px; padding: 0 16px; background: none; color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 14px; font-weight: 600; white-space: normal; }
 .schedule-settings button:disabled, .schedule-editor-actions button:disabled { opacity: 0.5; }
+.schedule-run-options summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; font-weight: 600; }
+.schedule-run-options label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+.schedule-run-options input, .schedule-run-options select { min-height: 44px; max-width: 100%; box-sizing: border-box; padding: 0 12px; font: inherit; font-size: 16px; color: var(--text); background: none; border: 1px solid var(--border); border-radius: 10px; }
 .schedule-editor-actions .schedule-primary { background: var(--text); color: var(--background); border-color: var(--text); }
 .schedule-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); }
 .schedule-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; color: var(--muted); }

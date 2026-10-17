@@ -132,7 +132,7 @@ test("fresh grant per fire: the removed refire/approval_quote params are refused
 	const { mandates, said, call } = await bench(t);
 	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 500_000 }, job_cap: 2, schedule_grant: true });
 	const add = { action: "add", name: "triage", project: "demo", mandate_id: seed.id, manual: true, title: "Triage", kind: "research", delivery: "answer" };
-	await assert.rejects(call({ ...add, refire: true }), /cp_schedule add refused: unknown parameter refire; every fire mints a fresh grant/);
+	await assert.rejects(call({ ...add, refire: true }), /cp_schedule add refused: unknown parameter refire; a schedule's bounds are its saved policy/);
 	await assert.rejects(call({ ...add, approval_quote: "Yes, refire triage." }), /cp_schedule add refused: unknown parameter approval_quote/);
 	await assert.rejects(call({ ...add, refire: true, approval_quote: "Yes." }), /unknown parameter refire, approval_quote/);
 	assert.equal(mandates.list().filter((m) => m.status === "active").length, 2, "a refused add touched no grant");

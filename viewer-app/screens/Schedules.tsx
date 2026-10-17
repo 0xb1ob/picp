@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import type { ScheduleHistoryJob, ScheduleItem, SchedulesResponse } from "../../src/viewer/api-types.ts";
 import { observedTime } from "../format.ts";
 import { composerHref, jobHref, navigation } from "../routes.ts";
-import { acceptedRunJob, ADD_SCHEDULE_DRAFT, latestRequest, readinessLine, requestLine, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
+import { acceptedRunJob, ADD_SCHEDULE_DRAFT, latestRequest, readinessLine, requestLine, RUN_OPTION_THINKING, runOverrides, type ScheduleControlView, scheduleControlLine, scheduleControlReady } from "../schedule-control.ts";
 import { useSchedulePolicy } from "../use-schedule-control.ts";
 import { ScheduleEditor } from "./ScheduleEditor.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
@@ -121,6 +121,7 @@ type PolicyState = ReturnType<typeof useSchedulePolicy>;
 export function ScheduleControls({s, control, policy = null}: {s:ScheduleItem; control:ScheduleControlView; policy?: PolicyState}) {
  const [confirmRemove,setConfirmRemove] = useState(false);
  const [editing,setEditing] = useState(false);
+ const [runModel,setRunModel] = useState(""), [runThinking,setRunThinking] = useState(""), [runParallelism,setRunParallelism] = useState("");
  const latest = latestRequest(control.status, s.id);
  const pending = latest?.state === "queued" || latest?.state === "applying" || control.sending !== null;
  const disabled = !scheduleControlReady(control.status) || pending;
@@ -131,10 +132,16 @@ export function ScheduleControls({s, control, policy = null}: {s:ScheduleItem; c
  const acceptedJob = latest && !failed ? acceptedRunJob(latest) : null;
  return <div class="schedule-control">
   <div class="schedule-controls">
-   {s.enabled && (s.active_run ? (anchor ? <a class="schedule-primary schedule-view-run" href={jobHref(anchor)}>View active run</a> : <button type="button" class="schedule-primary" disabled>Run starting…</button>) : <button type="button" class="schedule-primary" disabled={disabled} onClick={() => control.request("run_now", s.id, s.policy ? {revision: s.policy.active_revision} : {})}>Run now</button>)}
+   {s.enabled && (s.active_run ? (anchor ? <a class="schedule-primary schedule-view-run" href={jobHref(anchor)}>View active run</a> : <button type="button" class="schedule-primary" disabled>Run starting…</button>) : <button type="button" class="schedule-primary" disabled={disabled} onClick={() => { const overrides = s.policy?.native ? runOverrides(runModel, runThinking, runParallelism) : undefined; control.request("run_now", s.id, s.policy ? {revision: s.policy.active_revision, ...(overrides ? {overrides} : {})} : {}); }}>Run now</button>)}
    <button type="button" disabled={disabled} onClick={() => control.request(s.enabled ? "disable" : "enable", s.id)}>{s.enabled ? "Disable" : "Enable"}</button>
    <button type="button" class="schedule-remove" disabled={disabled} onClick={remove}>{confirmRemove ? "Tap again to remove" : "Remove…"}</button>
   </div>
+  {s.enabled && !s.active_run && s.policy?.native && <details class="schedule-run-options"><summary>Run options</summary>
+   <label>Model <input type="text" placeholder="provider/model (saved policy if blank)" value={runModel} onInput={(e) => setRunModel(e.currentTarget.value)}/></label>
+   <label>Thinking <select value={runThinking} onChange={(e) => setRunThinking(e.currentTarget.value)}><option value="">saved policy</option>{RUN_OPTION_THINKING.map((level) => <option value={level}>{level}</option>)}</select></label>
+   <label>Parallelism <input type="number" min={1} max={32} placeholder={String(s.policy.limits.parallelism)} value={runParallelism} onInput={(e) => setRunParallelism(e.currentTarget.value)}/></label>
+   <p class="job-meta">Applies to the next Run now only, frozen for that run.</p>
+  </details>}
   {answered && <div class="schedule-settings">
    <button type="button" disabled={disabled} aria-expanded={editing} onClick={() => setEditing(open => !open)}>{editing ? "Close editor" : "Edit settings"}</button>
    {!s.policy && (answered.policy || answered.legacy) && <button type="button" disabled={disabled || answered.blocking.length > 0} onClick={() => control.request("adopt", s.id, {revision: answered.policy?.revision ?? 0})}>Adopt saved settings</button>}

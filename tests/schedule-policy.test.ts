@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
 import { effectivePolicyBounds } from "../src/schedule-policy.ts";
 import { withSkillJobFloor } from "../src/schedule-grant.ts";
-import { policyFromLegacy, recipeEffects, schedulePolicyErrors, skillChildFloor, SCHEDULE_POLICY_SCHEMA_VERSION, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import { policyFromLegacy, recipeEffects, schedulePolicyErrors, skillChildFloor, SCHEDULE_POLICY_SCHEMA_VERSION, type LegacySchedulePolicy, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { scheduleFileErrors, SCHEDULE_SKILLS, type GrantTemplate, type Schedule } from "../src/viewer/schedule-core.ts";
 
 const at = "2026-07-01T00:00:00Z";
@@ -45,7 +45,7 @@ test("live-shaped sch-514530 maps without mutating or losing saved bounds and ap
 });
 
 test("validator rejects unknown fields, invalid budgets, fan-out, pins and exclusions", () => {
-	const invalid: Array<[string, (p: SchedulePolicy) => void]> = [
+	const invalid: Array<[string, (p: LegacySchedulePolicy) => void]> = [
 		["allowed_actions", (p) => (p.allowed_actions as string[]).push("merge")],
 		["ask_on", (p) => { p.ask_on = ["merge"]; }],
 		["ask_on", (p) => { p.ask_on = ["risk:high"]; }],

@@ -10,7 +10,7 @@ import { ScheduleControl } from "../src/schedule-control.ts";
 import { openScheduleRunStore, SCHEDULE_RUNS_ACTIVE } from "../src/schedule-runs.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
 import { readScheduleControl, type ScheduleControlFields, type ScheduleControlOp } from "../src/viewer/control-files.ts";
-import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
+import { policyFromLegacy, type LegacySchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { readSchedulesOrEmpty } from "../src/schedule-expand.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 import { schedulePolicyView } from "../src/viewer/schedule-policy-view.ts";
@@ -67,12 +67,12 @@ test("authenticated adopt is atomic, refuses an open legacy job, retires pointer
 test("save binds revisions and frozen runs; deactivate preserves history and restores the original legacy recipe",async(t)=>{
  const b=await bench(t);await b.request("adopt",{revision:0});
  const started=await b.request("run_now",{revision:1}), event=started.events[0]!;
- const draft=structuredClone(b.runs.activePolicy(b.schedule.id)!);
+ const draft=structuredClone(b.runs.activePolicy(b.schedule.id)!) as LegacySchedulePolicy;
  draft.recipe.title="Next recipe";draft.limits.tokens=2_000_000;
  draft.approval.operator_quote="forged approval";
  const saved=await b.request("save_policy",{revision:1,policy:draft});assert.equal(saved.receipt.state,"done");
  assert.equal(b.runs.activePolicy(b.schedule.id)?.recipe.title,"Next recipe");
- assert.notEqual(b.runs.activePolicy(b.schedule.id)?.approval.operator_quote,"forged approval");
+ assert.notEqual((b.runs.activePolicy(b.schedule.id) as LegacySchedulePolicy | undefined)?.approval.operator_quote,"forged approval");
  assert.equal(b.runs.run(event.run_id!)?.policy.recipe.title,"Nightly report");
  assert.equal(b.scheduler.list()[0]?.job.title,"Nightly report","open run keeps frozen expansion recipe");
  const stale=await b.request("save_policy",{revision:1,policy:draft});assert.equal(stale.receipt.state,"refused");assert.match(stale.receipt.reason!,/Schedule changed/);
@@ -121,7 +121,7 @@ test("a verified dashboard Run now and a cp_schedule run now record their run's 
  const stamp=()=>new Date().toISOString().replace(/\.\d{3}Z$/,"Z");
  const started=await b.request("run_now",{revision:1}), event=started.events[0]!;
  const run=b.runs.run(event.run_id!)!;
- assert.equal(run.risk_preapproval?.operator_quote,run.policy.approval.operator_quote);
+ assert.equal(run.risk_preapproval?.operator_quote,(run.policy as LegacySchedulePolicy).approval.operator_quote);
  const permission=await b.mandates.assertDispatchAllowed({jobId:event.job_id!,project:"demo",kind:"research",risk:"high"});
  assert.match(permission.run?.started_by ?? "",new RegExp(`^Started by the operator via dashboard Run now \\(request ${started.receipt.id}, `));
  const escalations=new EscalationStore({home:b.home.path});
@@ -173,7 +173,7 @@ test("deactivation drains authority even when bounds forbid new runs, preserving
  assert.equal(record.active_revision,null);assert.equal(record.revisions.length,3);
  assert.equal(record.revisions.at(-1)?.provenance.request_id,off.receipt.id);
  assert.deepEqual(record.revisions.at(-1)?.exclusions,policy.exclusions);
- assert.deepEqual(record.revisions.at(-1)?.approval,policy.approval);
+ assert.deepEqual((record.revisions.at(-1) as LegacySchedulePolicy | undefined)?.approval,(policy as LegacySchedulePolicy).approval);
  assert.equal(JSON.stringify(b.mandates.list()),before);assert.equal(b.runs.run(event.run_id!)?.phase,"closed");
 });
 

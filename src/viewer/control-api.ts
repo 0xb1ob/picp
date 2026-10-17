@@ -615,7 +615,7 @@ export function handleOperatorStart(req: IncomingMessage, options: ControlRouteO
 function requestView(request: ScheduleControlRequest, now: Date): ScheduleControlStatusResponse["requests"][number] {
 	const stale = request.state === "queued" && !(now.getTime() - Date.parse(request.at) <= SCHEDULE_CONTROL_MAX_AGE_MS);
 	return {
-		id: request.id, at: request.at, op: request.op, schedule_id: request.schedule_id, ...(request.revision !== undefined ? {revision:request.revision} : {}), ...(request.client_id ? {client_id:request.client_id} : {}),
+		id: request.id, at: request.at, op: request.op, schedule_id: request.schedule_id, ...(request.revision !== undefined ? {revision:request.revision} : {}), ...(request.client_id ? {client_id:request.client_id} : {}), ...(request.overrides ? {overrides:request.overrides} : {}),
 		state: stale ? "expired" : request.state,
 		reason: stale ? `not taken by the parent within ${SCHEDULE_CONTROL_MAX_AGE_MS / 1000} s; it will not be applied` : request.reason,
 		job_id: request.job_id,
@@ -647,7 +647,7 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 		const op = (SCHEDULE_CONTROL_OPS as readonly unknown[]).includes(value?.op) ? (value?.op as ScheduleControlOp) : undefined;
 		const scheduleId = typeof value?.schedule_id === "string" && SCHEDULE_ID.test(value.schedule_id) ? value.schedule_id : undefined;
 		parsed({ kind: "schedule", text: null, ask_id: null, ...(op ? { op } : {}), ...(scheduleId ? { schedule_id: scheduleId } : {}) });
-		if (!value || !op || !scheduleId || Object.keys(value).some(k=>!["op","schedule_id","revision","policy","client_id"].includes(k))) return refuse(400, 'body must be {op, schedule_id, revision?, policy?, client_id?}');
+		if (!value || !op || !scheduleId || Object.keys(value).some(k=>!["op","schedule_id","revision","policy","client_id","overrides"].includes(k))) return refuse(400, 'body must be {op, schedule_id, revision?, policy?, client_id?, overrides?}');
 		const invalid = scheduleControlFieldError(value);
 		if (invalid) return refuse(400, invalid);
 		const parent = parentHolder(options.stateDir);
@@ -667,7 +667,7 @@ export function handleScheduleControl(req: IncomingMessage, options: ControlRout
 		const pending = journal.requests.filter((request) => requestView(request, now).state === "queued").length;
 		if (pending >= SCHEDULE_CONTROL_MAX_PENDING) return refuse(409, `${SCHEDULE_CONTROL_MAX_PENDING} schedule requests already wait for the parent`);
 		const id = scheduleRequestId(now);
-		const fields: ScheduleControlFields = { ...(value.revision !== undefined ? {revision:value.revision as number} : {}), ...(value.policy !== undefined ? {policy:value.policy as NonNullable<ScheduleControlFields["policy"]>} : {}), ...(value.client_id ? {client_id:value.client_id as string} : {}) };
+		const fields: ScheduleControlFields = { ...(value.revision !== undefined ? {revision:value.revision as number} : {}), ...(value.policy !== undefined ? {policy:value.policy as NonNullable<ScheduleControlFields["policy"]>} : {}), ...(value.client_id ? {client_id:value.client_id as string} : {}), ...(value.overrides !== undefined ? {overrides:value.overrides as NonNullable<ScheduleControlFields["overrides"]>} : {}) };
 		const written = appendScheduleControlLine(options.stateDir, { type: "request", by: "viewer", id, at: now.toISOString(), peer, op, schedule_id: scheduleId, ...fields });
 		if (!written.ok) return refuse(500, `schedule control journal unwritable (${scheduleControlFile(options.stateDir)}): ${written.error}`);
 		return { status: 202, body: { id, state: "queued" } satisfies ScheduleControlSendResponse };

@@ -271,7 +271,8 @@ export type ScheduleItem = Omit<Schedule, "last_output_sha"> & {
 	last_run: { job_id: string; at: string; via: ScheduleRunView["via"]; missed: boolean } | null;
 	run_count: number; job_count: number;
 	lands: "board" | "report" | "branch" | "pull_request" | "plan" | "answer";
-	policy?: { active_revision: number; activated_at: string; limits: SchedulePolicy["limits"]; model: SchedulePolicy["model_policy"] } | null;
+	/** `native`: the saved revision is the authorization (no grant, quote or risk ask per run); Run now takes overrides. */
+	policy?: { active_revision: number; activated_at: string; limits: SchedulePolicy["limits"]; model: SchedulePolicy["model_policy"]; native: boolean } | null;
 	active_run?: ScheduleRun | null;
 };
 /** `/api/schedules`: `error` names an unreadable or invalid `state/schedules.json`; it is never silently empty. */
