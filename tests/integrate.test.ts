@@ -1868,7 +1868,12 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 	// picp-wzq: the red fact and the hand-back both name the failing run.
 	assert.match(b.sent[0]!.message, /\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)/);
 	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
-	assert.match(b.sent[0]!.message, /--force-with-lease/);
+	// cp-c1ur N6: a red head was never advanced server-side — no such claim, no reset, no force push.
+	assert.doesNotMatch(b.sent[0]!.message, /advanced on the server|force-with-lease|git reset/);
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`git fetch origin && git merge origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count origin/${BR}\\.\\.HEAD`));
+	assert.match(b.sent[0]!.message, /plain\s+`git push`/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	assert.equal(
 		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
@@ -2081,13 +2086,18 @@ test("4B1-T4: promoting(job) is true while the repair send is in flight, and Hel
 	assert.equal(integrator.promoting(BR), false);
 });
 
-test("a conflict is handed back once, with the resync the server-side rebase requires", async (t) => {
+test("a conflict is handed back once, as a merge and a plain push — never a rebase, reset or force push", async (t) => {
 	const b = await benchOf(t);
 	const first = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
 	assert.equal(first.step, "conflict");
 	assert.equal(first.next, "resolve");
 	assert.equal(b.sent.length, 1);
-	assert.match(b.sent[0]!.message, new RegExp(`git reset --hard origin/${BR}`));
+	// cp-c1ur N6: the conflict hand-back used to prescribe reset --hard, rebase and --force-with-lease.
+	assert.doesNotMatch(b.sent[0]!.message, /git reset|git rebase|force-with-lease/);
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`git merge origin/${BR}`));
+	assert.match(b.sent[0]!.message, /git fetch origin && git merge origin\/main/);
+	assert.match(b.sent[0]!.message, /plain `git push`/);
 	assert.match(b.sent[0]!.message, /both sides survive/);
 
 	// A second failure is the operator's, never a third automated attempt.
@@ -3128,7 +3138,7 @@ test("one job's three authorizations are three files, three ids, and never each 
 
 test("the generated conflict message is the promote text, not a model's prose", () => {
 	const message = conflictMessage({ jobId: BR, branch: BR, prUrl: PR_URL, base: "main" });
-	assert.match(message, new RegExp(`git fetch origin && git reset --hard origin/${BR}`));
+	assert.match(message, /git fetch origin && git merge origin\/main/);
 	assert.match(message, /second PR, never a new branch/);
 });
 

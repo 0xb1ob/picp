@@ -372,7 +372,7 @@ the worker's own worktree (required for ship; checked with `git rev-parse HEAD`,
 failing closed if git cannot answer). Failing those is repairable, so the model can
 fix the tree, copy the observed sha, or report `blocked` instead.
 
-### Ship worker final step: rebase, run focused checks, push, report the head sha
+### Ship worker final step: merge the base, run focused checks, push, report the head sha
 
 Every `ship` job **must** follow this final sequence before calling `report_result`.
 It replaces stale-base green runs (a worker reported green, the base moved, the
@@ -380,25 +380,42 @@ PR merged red). Evidence from live runs: PRs #15–22 landed green locally and
 went stale or conflicted by merge time; three needed re-dispatch, one took five
 rebases across a day.
 
-**Rebase onto `origin/<base>` — the base branch the brief names, resolved per
+**Merge `origin/<base>` — the base branch the brief names, resolved per
 repository from `origin/HEAD` and `main` only when that is what it resolves to —
 re-run typecheck and the touched tests locally, push, report the pushed head sha — and stop.** In
 detail:
 
 1. `git fetch origin` — ensure you have the latest base.
-2. `git rebase origin/<base>` — rebase your commits onto the current base.
+2. `git merge origin/<base>` — bring the current base into your branch. Never a
+   rebase: the branch only moves forward (cp-c1ur N6), so step 4 is a plain push.
    - **If there are conflicts:** resolve them so **both sides survive**. Never
      weaken a test or delete code to make a conflict go away. If you cannot
-     resolve both sides (the right resolution is unclear), report `blocked` with
-     the exact conflict and the resolution you tried — the operator will take it
-     from there.
+     resolve both sides (the right resolution is unclear), `git merge --abort` and
+     report `blocked` with the exact conflict and the resolution you tried — the
+     operator will take it from there.
 3. Run `npm run typecheck` and only the touched test files
-   (`npm run test:one -- tests/<x>.test.ts`) on the rebased tree — never the full
+   (`npm run test:one -- tests/<x>.test.ts`) on the merged tree — never the full
    `npm test` locally; CI (`.github/workflows/ci.yml`) runs the full suite once on
-   the pushed head. That focused run on the rebased base is the evidence the worker owes.
-4. `git push --force-with-lease` to update the branch with the rebased commits.
+   the pushed head. That focused run on the merged base is the evidence the worker owes.
+4. A plain `git push` — never a force push.
 5. `git rev-parse HEAD` → `head_sha`, `git rev-parse origin/<base>` → `base_sha`.
    Call `report_result` with both. **The job ends here.**
+
+#### The worker never rewrites its branch's history
+
+`src/worker-history-guard.ts`, wired into the worker's `bash` hook, refuses
+`git rebase` (only `--abort` passes, to leave a rebase already in progress), every
+forced push (`-f`, `--force`, `--force-with-lease`, a `+ref` refspec) and
+`git reset --hard` onto a remote-tracking ref (`origin/…`, `refs/remotes/…`,
+`@{u}`, `FETCH_HEAD`). The refusal names the merge alternative: `git fetch origin`,
+`git merge origin/<branch>` if origin moved, `git merge origin/<base>`, a plain push.
+The reset rule is a parse, not a read of "is origin ahead": the usual shape is
+`git fetch origin && git reset --hard origin/<branch>`, where the guard runs before
+the fetch and the tracking ref it could read is still stale. Adopting origin's
+history over local commits is refused whatever the counts; `git reset --hard` with
+no ref or a local one (`HEAD~1`) is untouched. The merge from a `gh pr update-branch
+--rebase` origin carries the same changes on both sides, so it normally merges
+cleanly. `cp_integrate` squash-merges, so merge commits never reach the base.
 
 `head_sha` and `base_sha` make the run self-describing: the parent knows exactly
 which commit, on exactly which base, CI is read for before merging.
@@ -2555,7 +2572,7 @@ Every real verdict records git's stable `patch-id` for the complete branch diff.
 
 **The diff reviewer's own run directory.** Each attempt gets `state/runs/<job-id>/review-<n>/` as its `CP_RUN_DIR` (events, status, verdict, brief) and `state/runs/<job-id>/review-<n>/review/` as its **cwd**, containing the materialized diff, the frozen original task when the job has one (do8.4, below) and the repository context files `context.md`/`context-manifest.json` (R2, below), and nothing else. Fresh context is mechanical — no repository checkout, no worktree history. The reviewer runs the same role as a gate reviewer (`gate-reviewer`), against the same `report_verdict` terminating tool, with a different brief (`DIFF_REVIEW_BRIEF_TEMPLATE`, `"diff-review-rubric"`).
 
-**Repository context (R2, [`src/review-context.ts`](../src/review-context.ts)).** Every attempt that reaches a reviewer (never an incomplete-subject stop) writes two more files into the cwd: `context.md` and `context-manifest.json`. They are read-only git snapshots from the canonical clone at two exact SHAs — the **fork point** (`git merge-base refs/remotes/origin/<base> <head>`) and the pushed **head** — never the leased worktree, a home file, an absolute or `~` path, or a symlink target, and no subject code runs. The packet has its own budget, `REVIEW_CONTEXT_MAX_BYTES` = 300,000 bytes, separate from the diff's; a file that does not fit is skipped whole (`omitted-budget`), never cut. Candidates, deduplicated by (path, side), in order: task-named paths (head, then fork) — relative path tokens in the scratch `original-task.md`/`task-addenda.md`, an exact path or a unique basename, at most 50 `ambiguous`/`unresolved` entries; changed paths of the whole branch (head, then fork, even on a delta review); the invariants `REVIEW_CONTEXT_INVARIANTS` (head); and consumers of each changed non-test path (`git grep -l -F` of its basename at head, at most 5, sorted). Each manifest entry has a state: `included` (a whole section with bytes and sha256), `absent`, `omitted-budget`, `binary`, `unreadable`, `ambiguous` or `unresolved`. **`absent` is written only after a successful git tree read** — git confirmed the path does not exist at that sha; every other non-`included` state is unknown, never absence. When the fork point or a tree cannot be read, the manifest says `status: "unavailable"` with the reason, no `context.md` is written, and the review proceeds. The brief carries one pointer sentence (both SHAs, how to read the states, or the unavailable reason) — never a body; no context body enters the brief, a tool result, `events.jsonl` or a parent wake.
+**Repository context (R2, [`src/review-context.ts`](../src/review-context.ts)).** Every attempt that reaches a reviewer (never an incomplete-subject stop) writes two more files into the cwd: `context.md` and `context-manifest.json`. They are read-only git snapshots from the canonical clone at two exact SHAs — the **fork point** (`git merge-base refs/remotes/origin/<base> <head>`) and the pushed **head** — never the leased worktree, a home file, an absolute or `~` path, or a symlink target, and no subject code runs. The packet has its own budget, `REVIEW_CONTEXT_MAX_BYTES` = 300,000 bytes, separate from the diff's; a file that does not fit is skipped whole (`omitted-budget`), never cut. Candidates, deduplicated by (path, side), in order: changed paths of the whole branch (head, then fork, even on a delta review); task-named paths (head only: an unchanged path's fork side is identical) — relative path tokens in the scratch `original-task.md`/`task-addenda.md`, an exact path or a unique basename, at most 50 `ambiguous`/`unresolved` entries; the invariants `REVIEW_CONTEXT_INVARIANTS` present in the head tree; and consumers of each changed non-test path (`git grep -l -F` of its basename at head, at most 5, sorted). A data file or fixture over 32,000 bytes fills the budget only after every other candidate. Each manifest entry has a state: `included` (a whole section with bytes and sha256), `absent`, `omitted-budget`, `binary`, `unreadable`, `ambiguous` or `unresolved`. **`absent` is written only after a successful git tree read** — git confirmed the path does not exist at that sha; every other non-`included` state is unknown, never absence. When the fork point or a tree cannot be read, the manifest says `status: "unavailable"` with the reason, no `context.md` is written, and the review proceeds. The brief carries one pointer sentence (both SHAs, how to read the states, or the unavailable reason) — never a body; no context body enters the brief, a tool result, `events.jsonl` or a parent wake.
 
 **Attempt state is on disk.** `readPriorAttempts` reads `state/runs/<id>/review-<n>.json` in order, so the review cap and the operational ladder survive a parent restart. The same attempt bookkeeping as the gate, and the same reader — the budget it applies is passed in (`capExhausted`), which is the one place the two ladders differ.
 
@@ -2870,6 +2887,11 @@ Measured against real treehouse, because the whole gate depends on it:
 2. `treehouse return --force` does **not** delete the directory: it returns the
    slot to the pool, and the **next lease reuses that same path**, reset onto the
    base. Uncommitted work is gone, and the files there belong to the next job.
+   Gitignored files are **not** reset: the next lease inherits them. A passing
+   teardown lists the full ignored paths it leaves behind (`ignored`; any path
+   through a dependency install such as `node_modules` is skipped, at any depth)
+   and never removes them
+   — they may be the only copy (cp-c1ur N18).
 3. `refs/heads/<job-id>` **survives** in `projects/<name>`, and its commits are
    readable there afterwards.
 4. Nothing merges into the clone's own base branch, ever. `projects/<name>`
@@ -3800,9 +3822,15 @@ The branch has exactly one writer at any moment, and the boundaries are code:
 3. a conflict, or CI red after a rebase, is handed **back** to the job's own
    implementer with `cp_send` and a message generated in code — one promote,
    then a human (`INTEGRATE_MAX_RESOLVE`, the shape of `GATE_MAX_REVISE`). Repeating that surface for the same head waits until the branch moves and does not surface again. A
-   replacement is never dispatched in its place. The message's first
-   instruction is `git fetch origin && git reset --hard origin/<branch>`,
-   because a server-side rebase leaves the worker's own clone behind origin;
+   replacement is never dispatched in its place. Neither message prescribes a
+   rebase, a reset or a force push (cp-c1ur N6), and the worker's history guard
+   refuses all three. Both start with `git fetch origin` and, only when
+   `git rev-list --count HEAD..origin/<branch>` is not 0 (a server-side
+   `gh pr update-branch --rebase`, or someone else's push), `git merge origin/<branch>`,
+   which keeps the worker's unpushed commits (`git rev-list --count origin/<branch>..HEAD`).
+   The conflict message then says `git fetch origin && git merge origin/<base>`,
+   resolve so both sides survive, commit; the CI-red message claims no server-side
+   advance and says fix with one more commit. Both end in a plain `git push`;
 4. `cp_merged` writes the receipt → the `pr` receipt becomes `merged` →
    `decideReopen` refuses any further `cp_send`. **Recording the merge is the
    code-enforced end of the implementer's write window**, which is why `record`

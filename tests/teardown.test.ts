@@ -35,7 +35,7 @@ import { initialStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { formatTeardown, type GitRunner, Teardown, type TeardownLedger } from "../src/teardown.ts";
-import { unreportedLiveWorker } from "../src/teardown-head.ts";
+import { ignoredEntries, unreportedLiveWorker } from "../src/teardown-head.ts";
 import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
 import { registerIntegrateTools } from "../extensions/command-post/tools-integrate.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
@@ -1123,6 +1123,38 @@ test("a normal (gated) teardown is marked closed_reason:gated, never left ambigu
 	const result = await b.teardown.teardown("cp-gated");
 	assert.equal(result.torn_down, true);
 	assert.equal(b.fleet.require("cp-gated").closed_reason, "gated");
+});
+
+test("cp-c1ur N18: teardown names gitignored data the recycled worktree keeps; dependency installs are not named", { timeout: 60_000 }, async (t) => {
+	const b = benchOf(t);
+	const worktree = b.worktree("cp-ign");
+	await b.addJob("cp-ign", worktree);
+	writeFileSync(join(worktree, ".gitignore"), "backtest/\nnode_modules/\n*.log\n");
+	mkdirSync(join(worktree, "pkg", "sub"), { recursive: true });
+	writeFileSync(join(worktree, "pkg", "sub", "a.ts"), "export {};\n");
+	git(worktree, "add", ".gitignore", "pkg");
+	git(worktree, "commit", "--quiet", "-m", "ignore");
+	git(worktree, "push", "--quiet", "-u", "origin", "cp-ign");
+	for (const dir of ["backtest", "node_modules", "pkg/node_modules"]) {
+		mkdirSync(join(worktree, dir));
+		writeFileSync(join(worktree, dir, "x"), "x\n");
+	}
+	writeFileSync(join(worktree, "pkg", "sub", "out.log"), "log\n");
+
+	const result = await b.teardown.teardown("cp-ign");
+	assert.equal(result.torn_down, true, formatTeardown(result));
+	// Review 2: a nested install is skipped like a top-level one, and a nested data path is named in full.
+	assert.deepEqual(result.ignored, ["backtest/", "pkg/sub/out.log"]);
+	assert.match(formatTeardown(result), /for its next lease: backtest\/, pkg\/sub\/out\.log \(not removed\)/);
+	assert.ok(existsSync(join(worktree, "backtest", "x")), "reported, never removed");
+});
+
+test("cp-c1ur N18: an unreadable ignored listing is named, never read as nothing", async () => {
+	const failing: GitRunner = async () => ({ status: 128, stdout: "", stderr: "fatal: not a git repository\nmore" });
+	assert.deepEqual(await ignoredEntries(failing, "/nowhere"), { error: "git status --ignored failed: fatal: not a git repository" });
+	const line = formatTeardown({ job_id: "cp-x", torn_down: true, reason: "pushed", worktree: "/w", branch: "cp-x", lease_returned: true,
+		artifacts_removed: false, ignored_error: "git status --ignored failed: boom" });
+	assert.match(line, /ignored entries unknown \(git status --ignored failed: boom\)/);
 });
 
 test("picp-pvo: closing a job withdraws its open human-review row and nothing else", { timeout: 60_000 }, async (t) => {

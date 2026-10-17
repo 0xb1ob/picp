@@ -1144,7 +1144,7 @@ test("the packet is the diff and the frozen original task, both as files, neithe
 	assert.ok(!events.includes(TASK_MARKER), "an original task must never reach a log line");
 });
 
-test("R2: context.md holds the base version of a task-named unchanged file, and the brief only points at it", { timeout: 120_000 }, async (t) => {
+test("R2: context.md holds a task-named unchanged file once, from head, and the brief only points at it", { timeout: 120_000 }, async (t) => {
 	const b = await reviewBenchOf(t);
 	const jobId = "cp-review-context";
 	b.pushJobBranch(jobId);
@@ -1159,9 +1159,11 @@ test("R2: context.md holds the base version of a task-named unchanged file, and 
 	const manifest = JSON.parse(readFileSync(join(scratch, REVIEW_CONTEXT_MANIFEST), "utf8")) as ReviewContextResult;
 	const fork = manifest.fork_point as string;
 	assert.equal(fork, b.repo.head(b.repo.branch), "the fork point is the base the branch was cut from");
-	assert.ok(manifest.entries.some((entry) => entry.path === "README.md" && entry.side === "fork" && entry.reason === "task-named" && entry.state === "included"));
+	// cp-c1ur N11: an unchanged file's fork blob equals its head blob, so it is sent once (head), never twice.
+	assert.ok(manifest.entries.some((entry) => entry.path === "README.md" && entry.side === "head" && entry.reason === "task-named" && entry.state === "included"));
+	assert.ok(!manifest.entries.some((entry) => entry.path === "README.md" && entry.side === "fork"), "no duplicate fork side");
 	const context = readFileSync(join(scratch, "context.md"), "utf8");
-	assert.ok(context.includes(`### fork ${fork.slice(0, 12)} README.md (`), "the base version is a whole section");
+	assert.ok(context.includes(`### head ${manifest.head_sha.slice(0, 12)} README.md (`), "the unchanged file is a whole section");
 	assert.ok(context.includes(BODY_MARKER), "the changed file's body is in the context");
 	const brief = readFileSync(join(b.home, paths.reviewRunDir(jobId, 1), "brief.md"), "utf8");
 	assert.ok(brief.includes(reviewContextPointer(manifest)), "the brief carries the pointer");

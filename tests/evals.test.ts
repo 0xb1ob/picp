@@ -235,7 +235,7 @@ test("the ship brief is rendered with the resolved base, and keeps no origin/mai
 	// do8.6, asserted through the eval's own renderer: the same text a worker is
 	// given, with a non-main base.
 	const brief = renderSurface(ARM, "ship-brief");
-	assert.match(brief, /git rebase origin\/trunk/);
+	assert.match(brief, /git merge origin\/trunk/);
 	assert.doesNotMatch(brief, /origin\/main/);
 });
 

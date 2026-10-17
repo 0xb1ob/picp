@@ -188,7 +188,7 @@ test("planner and QA briefs name real tools, forbid patch writers, and require a
 	}
 });
 
-test("brief-ship names the npm ci recovery for a post-rebase TS2307/TS7016", () => {
+test("brief-ship names the npm ci recovery for a post-merge TS2307/TS7016", () => {
 	const ship = read("prompts/briefs/brief-ship.md");
 	assert.match(ship, /TS2307/);
 	assert.match(ship, /TS7016/);
