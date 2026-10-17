@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { type AwaitingMergeWatchFile, type FleetRecord, isoTimestamp, LAYOUT, type ParkedPrWatch, validateAwaitingMergeWatchFile } from "./contracts.ts";
 import { applyExit, type ExitOutcome, type ExitPorts, type HumanEvent, type PrSnapshot } from "./awaiting-merge-exits.ts";
 import { atomicWriteJson } from "./json-store.ts";
+import { withdrawDoneHumanReviews } from "./teardown-head.ts";
 import type { StackFollowups } from "./stack-followups.ts";
 
 export const WATCH_BATCH_SIZE = 25;
@@ -92,9 +93,11 @@ export class AwaitingMergeWatch {
 
 	async #sweep(result: SweepResult): Promise<SweepResult> {
 		const now = this.#now();
+		const jobs = this.#options.fleet.read().jobs;
+		// N20: a done job's human-review row stops asking even when no teardown withdrew it; no GitHub read needed.
+		await withdrawDoneHumanReviews(this.#options.home, jobs).catch((error: Error) => result.errors.push(`human-review rows not withdrawn: ${error.message.split("\n")[0]}`));
 		const file = readWatchFile(this.#options.home);
 		if (file.backoff_until && Date.parse(file.backoff_until) > now.getTime()) return { ...result, skipped: `backing off until ${file.backoff_until}`, backoff_until: file.backoff_until };
-		const jobs = this.#options.fleet.read().jobs;
 		const parked = jobs.filter((job) => job.phase === "awaiting_merge" && job.awaiting_merge);
 		const live = jobs.filter((job) => job.phase !== "awaiting_merge" && job.phase !== "done");
 		// A re-park starts a new cycle: its cursors start over, and jobs no longer parked drop out.

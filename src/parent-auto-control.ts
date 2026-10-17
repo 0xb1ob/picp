@@ -23,9 +23,9 @@ export async function runAutoControl(
 	const outcome = await autoParentContext(home, missionEnd, lastAssistant, control)
 		.catch((error: Error): Awaited<ReturnType<typeof autoParentContext>> => ({ event: "failed", error: error.message }));
 	const log = (line: string) => parentContextLog(home, SOURCE, line);
-	if (outcome.rotated) log(`rotated mission=${outcome.rotated}`);
+	if (outcome.rotated) log(`rotated mission=${outcome.rotated} trigger=${JSON.stringify(outcome.trigger)}`);
 	if (outcome.rotateFailed !== undefined) {
-		log(`rotate_failed mission=${missionEnd} error=${JSON.stringify(outcome.rotateFailed)}`);
+		log(`rotate_failed mission=${outcome.mission} trigger=${JSON.stringify(outcome.trigger)} error=${JSON.stringify(outcome.rotateFailed)}`);
 		relayError(`parent mission-end rotation failed: ${outcome.rotateFailed}`);
 	}
 	if (!outcome.event) return;

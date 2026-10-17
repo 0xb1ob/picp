@@ -15,7 +15,8 @@ import { CpBridge } from "../src/cp-bridge.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, parentCompactInstructions, parentContextLog, parentSettings, standingOrdersFile } from "../src/parent-context.ts";
+import { autoParentContext, digestsInContext, effectiveContextTokens, lastValidAssistant, missionRotation, parentCompactInstructions, parentContextLog, parentSettings, standingOrdersFile } from "../src/parent-context.ts";
+import type { Mandate } from "../src/contracts.ts";
 import { cacheRebuildLine, PROMPT_CACHE_TTL_SECONDS, runAutoControl, trackAssistant } from "../src/parent-auto-control.ts";
 import { PARENT_CONTROL_BUSY } from "../src/parent-diagnostics.ts";
 import type { ParentStatus } from "../src/cp-bridge.ts";
@@ -96,6 +97,33 @@ test("runAutoControl: a timed_out compact relay names the retry and the worker c
 	assert.equal(relayed[1], "parent automatic context control failed: compact rejected: x");
 	const log = readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8");
 	assert.match(log, /timed_out .*error="timeout after 240000ms/, "the log keeps the error evidence");
+});
+
+test("N17: rotation follows the grant that actually ended — a parent revoke counts, a stale cp_next mission id does not", () => {
+	const grant = (id: string, status: Mandate["status"], extra: Partial<Mandate> = {}) => ({ id, status, expiry: "2026-12-01T00:00:00Z", ...extra }) as Mandate;
+	const closed = grant("md-old", "revoked", { revoked_at: "2026-10-16T12:36:11Z", revoked_by: { by: "system" } });
+	const revoked = grant("md-new", "revoked", { revoked_at: "2026-10-16T14:12:25Z", revoked_by: { by: "parent" } });
+	assert.deepEqual(missionRotation([closed, revoked], "md-old", {}), { id: "md-new", trigger: "revoked by parent" }, "the newest end, not the stale id");
+	assert.equal(missionRotation([closed, revoked, grant("md-live", "active")], "md-old", {}), undefined, "a grant still active");
+	const done = { lastMissionEnd: "md-new", lastRotateAt: "2026-10-16T14:12:38Z" };
+	assert.equal(missionRotation([closed, revoked], "md-old", done), undefined, "no new end since the last rotation");
+	const later = grant("md-later", "revoked", { revoked_at: "2026-10-16T17:30:51Z", revoked_by: { by: "parent" } });
+	assert.deepEqual(missionRotation([closed, revoked, later], "md-old", done), { id: "md-later", trigger: "revoked by parent" });
+	assert.deepEqual(missionRotation([grant("md-x", "active")], "md-x", {}), { id: "md-x", trigger: "cp_next mission_end" });
+	assert.equal(missionRotation([grant("md-x", "active")], "md-x", { lastMissionEnd: "md-x" }), undefined);
+});
+
+test("N17: runAutoControl rotates after a parent revoke with no cp_next mission end, and logs the true trigger", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const grant = store.issue({ projects: ["demo"], objective: "ship", expiry: isoTimestamp(new Date(Date.now() + 86400000)), spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1 });
+	store.revoke(grant.id, { by: "parent" });
+	const rotated: string[] = [];
+	const control = { unsettled: () => undefined, status: async () => ({ contextTokens: 1000 }) as ParentStatus, rotate: async (mission: string) => void rotated.push(mission), compact: async () => ({}) };
+	await runAutoControl(home.path, undefined, undefined, control, () => assert.fail("no error relay"));
+	assert.deepEqual(rotated, [grant.id]);
+	assert.match(readFileSync(join(home.path, LAYOUT.state, "daemon.log"), "utf8"), new RegExp(`rotated mission=${grant.id} trigger="revoked by parent"`));
 });
 
 // N1(c) (cp-c1ur): warm rebuilds were invisible; only a turn that kept its prompt size inside the cache TTL but read

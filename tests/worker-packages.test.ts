@@ -613,6 +613,7 @@ test("per-role activation: implementer gets its packages; readers get pi-lens; n
 	]);
 	assert.deepEqual(flagValues(implementer, "--skill"), [], "no ponytail, process or ~/.pi/agent/skills skill file");
 	assert.ok(implementer.includes("--no-read-guard"), "pi-lens is only loaded with its read guard off");
+	assert.ok(implementer.includes("--no-lens-context"), "pi-lens never injects one-request findings (N19)");
 	assert.ok(managerWith(detected).plan(spawnRequest()).env.PI_LENS_HOME, "pi-lens logs are pinned out of the worktree");
 	assert.ok(managerWith(detected).plan(spawnRequest(loadProfile(PROFILES_DIR, "planner"))).env.PI_LENS_HOME);
 	assertArgvSpawns(implementer);
@@ -626,6 +627,7 @@ test("per-role activation: implementer gets its packages; readers get pi-lens; n
 		assert.deepEqual(flagValues(args, "--skill"), [], `${name}: no process skills`);
 		assert.equal(args.includes("--no-read-guard"), true, `${name}: pi-lens flag`);
 		assert.equal(args.includes("--no-lazy-tools"), true, `${name}: headless tools stay active`);
+		assert.equal(args.includes("--no-lens-context"), true, `${name}: no one-request lens injection drops signed thinking (N19)`);
 	}
 });
 
