@@ -3780,9 +3780,11 @@ The branch has exactly one writer at any moment, and the boundaries are code:
    replacement is never dispatched in its place. The conflict message's first
    instruction is `git fetch origin && git reset --hard origin/<branch>`,
    because a server-side rebase leaves the worker's own clone behind origin;
-   the CI-red message claims no server-side advance: it resets only when
-   `git rev-list --count HEAD..origin/<branch>` is not 0, and ends in a plain
-   `git push`, never a force push;
+   the CI-red message claims no server-side advance and never prescribes a
+   reset: only when `git rev-list --count HEAD..origin/<branch>` is not 0 does
+   it say `git fetch origin && git merge origin/<branch>`, which keeps the
+   worker's unpushed commits (`git rev-list --count origin/<branch>..HEAD`),
+   and it ends in a plain `git push`, never a force push;
 4. `cp_merged` writes the receipt → the `pr` receipt becomes `merged` →
    `decideReopen` refuses any further `cp_send`. **Recording the merge is the
    code-enforced end of the implementer's write window**, which is why `record`

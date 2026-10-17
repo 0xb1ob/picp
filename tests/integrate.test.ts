@@ -1868,9 +1868,11 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 	// picp-wzq: the red fact and the hand-back both name the failing run.
 	assert.match(b.sent[0]!.message, /\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)/);
 	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
-	// cp-c1ur N6: a red head was never advanced server-side — no such claim, no forced reset, no force push.
-	assert.doesNotMatch(b.sent[0]!.message, /advanced on the server|force-with-lease/);
+	// cp-c1ur N6: a red head was never advanced server-side — no such claim, no reset, no force push.
+	assert.doesNotMatch(b.sent[0]!.message, /advanced on the server|force-with-lease|git reset/);
 	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`git fetch origin && git merge origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count origin/${BR}\\.\\.HEAD`));
 	assert.match(b.sent[0]!.message, /plain\s+`git push`/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	assert.equal(
