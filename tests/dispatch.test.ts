@@ -963,7 +963,7 @@ test("riskkw-f10: a job-recorded or header-declared low turns a keyword-only hig
 	// A recorded high gates even on harmless words, and names where it was recorded.
 	const high = await create("kw-high", { risk: "high" });
 	await assert.rejects(() => dispatcher.dispatch({ jobId: high.id, task: "Fix the typo in the README.", model: b.model, fetch: false }), /risk:high under ask_on/);
-	assert.match(escalations().find((e) => e.job_ids.includes(high.id))?.question ?? "", /risk high recorded on the job's risk: label/);
+	assert.match(escalations().find((e) => e.job_ids.includes(high.id))?.question ?? "", /risk high recorded on the job's risk: label; risk source: explicit\)$/);
 	assert.equal(b.fleet.get(high.id), undefined, "refused before any record");
 	// ...and beats an explicit low on the dispatch.
 	const highVsLow = await create("kw-high-low", { risk: "high" });
