@@ -8240,7 +8240,8 @@ an active schedule grant (`schedule_grant: true`, *Schedule grants* above;
 `cp_schedule add` with any other grant is refused naming `schedule_grant`), cover
 the project and job kind, name no `job_ids` (every fire is a new id), and be
 named by no other schedule (one grant per schedule). Every add saves the seed's
-`grant_template`, and **every fire mints its own grant from it** (*Fresh grant per fire* below); the schedule's
+`grant_template`, and **every fire mints its own grant from it** (*Fresh grant per fire* below; historical since PR4,
+which made add native-only and retired every grant mint: *Native schedule migration*); the schedule's
 `mandate_id` then points at its latest fire grant. A saved schedule's `mandate_id` changes only by its own fire or
 `cp_schedule move`. The scheduler evaluates grants at second precision; `MandateStore`
 normalizes any instant it is handed. A fire only records an ordinary ledger job — title plus the slot,
@@ -8384,17 +8385,18 @@ kind:research delivery:local description:"org: <org>\nteam: <slug>\nmax_reviewer
 `cp-org-pr-review` as invalid (fail closed): `cp_schedule remove` it first; a fire grant carrying `risk_preapproval`
 validates on older binaries (the field is already in `MandateSchema`). No data migration.
 
-**Scheduled runs: activation (P3a).** The production lock is `SCHEDULE_RUNS_ACTIVE=true`, landed together with the first authenticated policy writer. Only an authenticated adopt/save activates a schedule; unadopted schedules and pipelines keep per-fire grants. Activated fires start one durable run and mint no grant. P2b landed the consumers inert with the lock false; the approved P3a addendum corrects A1's attribution of that false lock to the plan.
+**Scheduled runs: activation (P3a).** The production lock is `SCHEDULE_RUNS_ACTIVE=true`, landed together with the first authenticated policy writer. Only an authenticated adopt/save activates a schedule; unadopted schedules and pipelines kept per-fire grants until PR4 retired them (*Native schedule migration*). Activated fires start one durable run and mint no grant. P2b landed the consumers inert with the lock false; the approved P3a addendum corrects A1's attribution of that false lock to the plan.
 
 Run authority intercepts dispatch, promotion, implementation, reviewer start, repair, merge and checkpoint auto-decision before grant selection. The saved policy snapshot binds actions, exclusions, risk, USD/token caps, child admission and parallelism. A post-activation scheduled job without membership fails closed (`not_member`); legacy jobs created before activation continue under mandates. Missing/corrupt policies fail closed. Other named refusals are `run_closed`, `run_usd_cap`, `run_token_cap`, `child_cap`, `parallelism_full`, `deadline_passed`, `action_not_allowed`, `kind_excluded`, `path_excluded`, `subsystem_excluded`, `risk_high` and `hard_stop`. Only same-kind continuation is permitted after the deadline, and caps still bind it.
 
 A run checkpoint cites the closed basis `{run, clause}`, with clause `schedule-run <run-id> (policy rev N)` and attribution `schedule-run:<run-id>`. No synthetic mandate is created. Permits/refusals journal only to the run's `authority_log`; risk pre-approval covers run members only, never scripts, and hard stops still ask. Advice reads write nothing. Worker and reviewer non-cached usage count together; 80%/cap notices say no new admission, in-flight work continues, and the run closes partial, with no raise advice.
 
-A verified operator start — a dashboard Run now whose `verifiedRunNowClick` passes at fire time, or `cp_schedule run_now` on a verified operator quote — records `risk_preapproval` on that run (the policy approval quote for a click, the run-now quote for cp_schedule). It opens the `ask_on: risk:high` gate for that run's members for every use (dispatch, promotion, reviewer start, repair, implementation): the operator who triggers a run also runs it. Each dispatch or promotion pass appends one `risk_preapproved` row (`decided_by: operator`, first evidence `fire run_now <request or call id>`); other uses journal to `authority_log` only. Hard stops, scripts, exclusions, caps, allowed actions, final_fix/gate flags, `ask_on: merge`/`plan_approval` and slot/watch runs are unchanged. A cp-org-pr-review run uses it only for a dashboard click with the `org_review_approve` effect. Run briefs carry `Started by …`. A run risk escalation names the run as `mandate_id`, `<run> (schedule <id>, policy rev N): …` as the clause, and the starter in the question.
+A verified operator start of a legacy-policy run (PR4 starts none; open ones keep this rule) — a dashboard Run now whose `verifiedRunNowClick` passes at fire time, or `cp_schedule run_now` on a verified operator quote — records `risk_preapproval` on that run (the policy approval quote for a click, the run-now quote for cp_schedule). It opens the `ask_on: risk:high` gate for that run's members for every use (dispatch, promotion, reviewer start, repair, implementation): the operator who triggers a run also runs it. Each dispatch or promotion pass appends one `risk_preapproved` row (`decided_by: operator`, first evidence `fire run_now <request or call id>`); other uses journal to `authority_log` only. Hard stops, scripts, exclusions, caps, allowed actions, final_fix/gate flags, `ask_on: merge`/`plan_approval` and slot/watch runs are unchanged. A cp-org-pr-review run uses it only for a dashboard click with the `org_review_approve` effect. Run briefs carry `Started by …`. A run risk escalation names the run as `mandate_id`, `<run> (schedule <id>, policy rev N): …` as the clause, and the starter in the question.
 
-**Downgrade:** disable adopted schedules, drain every open run and its jobs, then deactivate each schedule before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize open members. Preserve both policy and run stores as audit history; deactivation restores legacy mint without a bulk migration.
+**Downgrade:** disable adopted schedules, drain every open run and its jobs, then deactivate each schedule before downgrading below P2b. Old binaries ignore policies/runs and cannot authorize open members. Preserve both policy and run stores as audit history; before PR4, deactivation restored the legacy mint without a bulk migration (since PR4 a deactivated schedule does not fire until a native revision is adopted).
 
-**Fresh grant per fire.** Every fire of a schedule without an activated policy — a cron slot, a watch fire, the page's Run now and
+**Fresh grant per fire** (historical: retired by PR4, *Native schedule migration* below; kept for the legacy records it
+explains). Every fire of a schedule without an activated policy — a cron slot, a watch fire, the page's Run now and
 `cp_schedule run_now` — files its job under a grant minted for that fire alone, from the schedule's saved
 `grant_template`. This is hard-coded: there is no flag, parameter, config, environment variable, mandate default or
 standing order that turns it off, and the S3 opt-in is gone — `cp_schedule add` with `refire` or `approval_quote` is
@@ -8438,10 +8440,9 @@ paused on a cap records no cap entry in its own `escalations` either. The job's
 notes say `under fire grant <id> (minted from the template approved by <decided_by>)`; the event names the minted
 grant, its expiry, every note and every revoked grant. `cp_schedule enable` re-evaluates the template the same way;
 `remove` revokes the schedule's current grant unless another schedule names it (in-flight workers are not killed).
-The Schedules page shows the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the fire path
-would refuse: "move the schedule to a new grant" for a revoke, "resume it, or move the schedule to a new grant" for a
-pause; a pointer revoked `by: "parent"` or `by: "system"` shows `active · next fire mints a fresh grant` — and the
-template with its verbatim approval, or that the schedule has no template with the migration's reason.
+Before PR4 the Schedules page showed the fire grant — stopped (`grant_stopped`, from `operatorStop`) only when the
+fire path would refuse — and the template with its verbatim approval; since PR4 it shows the legacy pointer as
+*Native schedule migration* describes, and the template stays visible as read-only history.
 
 ### Schedule policy (authoritative for adopted schedules)
 
@@ -8517,16 +8518,17 @@ recipe's `script_path`, and any hard stop (`hard_stop`: credential handling, dat
 external publishing) outright. Caps, deadline, exclusions, flagged/final-fix checkpoints, review and the
 repository's merge rules apply unchanged; risk is routing and audit information only.
 
-A native run records `start_key` (`dashboard:<request>`, `cp_schedule:<call>`, `slot:<iso>` or
-`watch:<iso>`; unique in `state/schedule-runs.json`) and `execution` `{requested, effective}`:
+A native run records `start_key` (`dashboard:<request>`, `cp_schedule:<call>`, `slot:<schedule id>@<iso>` or
+`watch:<schedule id>@<iso>`, so two schedules firing in the same second never collide; unique in
+`state/schedule-runs.json`) and `execution` `{requested, effective}`:
 `run_now` overrides `{model?, thinking?, parallelism?}` (provider/model ≤200 chars, a routing thinking level,
 parallelism 1–32; model and thinking refused for a script recipe) are validated before the run exists and
 frozen for it, never written to the policy. A repeated start key returns the original run (`replayed`);
 another start while a run is open is refused (`already_running`). Every member dispatch and review uses the
 run's model (override, else the policy's pinned role, even over an explicit model; else routing) and thinking; dispatch parallelism is
 `execution.effective.parallelism`, and a full run keeps a queued dispatch at its head. A native run_now needs
-no revision (a stale explicit one refuses) and ignores a supplied operator quote; a legacy run_now still needs
-its quote and takes no overrides. The dashboard journals `overrides` on `run_now` requests only.
+no revision (a stale explicit one refuses) and ignores a supplied operator quote; since PR4 a schedule with no active
+native revision refuses run_now (`run now not recorded: <why>`). The dashboard journals `overrides` on `run_now` requests only.
 
 A native pipeline is started by the schedule host in code on the run's fired research anchor: the ship job is
 titled `ship: <title> (<run id>)`, labelled `schedule:<id>` and admitted to the run before its dependency is
@@ -8542,18 +8544,66 @@ one idempotent step, serialized per run: it creates and admits six report-only r
 and the synthesis S1 (research/board) with their member `role`, titled `<role title> [<anchor id>]` so a crash
 replay finds a created job again; it adds S1 ← L1–L6 and an `expanded:` comment on the anchor; dispatches
 readers in order within `execution.effective.parallelism` (wall clock 3 h each), then S1 once all six closed
-undropped; and closes the anchor `researched: synthesis <S1>`. A passed deadline or a `usd`/`tokens` cap notice
-at 100% drops every unstarted member; a dropped reader drops S1, and the anchor is then dropped, so the run
+delivered (closed `researched:` or `gated:`, a teardown's delivery close); and closes the anchor `researched: synthesis
+<S1>`. A passed deadline or a `usd`/`tokens` cap notice at 100% drops every unstarted member; a reader closed any
+other way (dropped, or closed as failed) is a lost report and drops S1, and the anchor is then dropped, so the run
 closes `partial` without a false-success synthesis. A done member envelope is torn down with no parent wake; a
 blocked or failed one, a refused teardown or an escalation wakes the parent as before. The run is never a
 pending expansion (no expansion wake), `cp_next` never offers its members, and a `schedule:<id>` label on a
 non-member job is refused while it is open. A legacy parent-expanded run (an `expanded:` marker and no role
 members) stays the parent's under `skills/cp-self-review`.
 
-**`cp_schedule move id mandate_id`** retargets a schedule to a fresh seed grant: the same schedule id and
-`schedule:<id>` label, a new `grant_template` from the new seed (the add checks, the `cp_schedule move` approval and the
-skill floor apply), `mandate_id` set to the seed, `last_skip` cleared; the old pointer is revoked unless another
-schedule names it. It is the way back from an operator revoke or pause, and from a schedule the migration skipped.
+#### Native schedule migration (PR4 of the schedules refactor)
+
+**No fire mints a grant.** `Scheduler.add` is native-only (`cp_schedule add` takes no `mandate_id`), `cp_schedule move`
+is removed, and every fire — slot, watch, dashboard Run now, `cp_schedule run_now` — starts a run only under an active
+native revision. Anything else is refused and named, with no grant issued: an open legacy run or job (`legacy run <id>
+is still open: it continues under its original authority, and the schedule migrates to a native policy once it
+drains`), the migration's recorded reason, or `schedule <id> has no active native policy (needs setup: save or adopt a
+native revision); no fire mints a grant`. A tick records a standing refusal on `last_skip` once (no slot in the reason);
+a run now's refusal is reported, never recorded. `enable` refuses a schedule with no active native revision; disable
+never does. Only a native revision is adopted; a legacy grant-shaped revision is read-only history, and a save of one
+(the editor opens a migration-skipped schedule on its legacy snapshot) stores its recipe, trigger, limits, exclusions
+and model policy as a native revision with the narrowest mode, kinds and effects (`nativePolicyDraft`); deactivate
+needs no template. The *Fresh grant per fire* text above and its `cp_schedule move` references are historical: legacy
+`grant_template`/`mandate_id` rows, `schedule_fire` grants and legacy policy revisions stay readable for audit and for
+runs that froze them. Native fires do not consult `deny_projects` (`projectDenial`) at start; the dispatch preflight
+still refuses a denied project's members (the legacy mint refused it before the fire).
+
+**The migration.** `sweepNativeScheduleMigration` (`src/schedule-native-migration.ts`) runs at `session_start` after
+the P4 import and again on every scheduler tick until done. Every schedule whose active policy is not native — an
+active legacy revision (as `sch-514530`: schema 2, no pointer, legacy revision 2) or a `grant_template` read with
+`policyFromLegacy` — gains native revision N+1 with `saved_by: migration`, provenance `{channel: migration,
+legacy_seed?, delegation_rule: "native migration of revision <n>"}`, and the same project, trigger, recipe,
+recipe config, limits (USD, tokens, child jobs, parallelism, run hours), exclusions and model policy (pins become run
+defaults a run now may override); mode, kinds and effects are the narrowest the recipe implies (`nativePolicyDraft`).
+It converts only what the legacy revision authorized and otherwise records `native migration: needs scope edit: <why>;
+save a native policy in the editor`: a dashboard-only org-review approval (never widened to every start), a recipe
+action the grant never allowed, or a ship/pipeline whose grant asked `plan_approval`. A missing or unreadable seed, or
+no saved policy and no template, records `native migration: needs setup: …`; no authority is inferred. A disabled
+schedule stays disabled. An operator stop on the pointer (`operatorStop`) saves the revision without activating it and
+keeps the pointer: `operator stop on <grant> preserved: native revision <n> is saved, adopt it to resume`. Otherwise
+the revision is activated, the pointer revoked `by: "system"` unless another schedule names it, and the schedule's
+`mandate_id`, `grant_template` and `last_skip` are dropped. Risk:high asks are not carried (a native revision has none).
+
+**Drain first, verified backups, crash resume.** A schedule with an open run or a non-closed `schedule:<id>` job is
+deferred (its open work continues under its frozen authority) and retried on the next tick; a missing ledger throws
+before any write. Before the first write the sweep snapshots `state/schedules.json`, `state/schedule-policies.json`,
+`state/schedule-runs.json` and every pointer and seed grant into `state/.migrations/backups/2027-01-schedule-native/`
+with the 0600 manifest `state/.migrations/2027-01-schedule-native.backup.json` (the P4 snapshot rules: fsynced,
+SHA-256 verified, absent stores recorded, and a retry verifies the original snapshot instead of replacing it). Writes
+go revision save → activation → pointer retirement → `schedules.json`; a crash after any stage resumes on the next
+sweep with no duplicate revision (the same migration revision is reused) and heals the retirement. The marker
+`state/.migrations/2027-01-schedule-native.done` is written only with nothing deferred; then every sweep is a no-op.
+Skipped schedules never hold the marker. The parent prints one line per migrated, skipped or deferred schedule.
+
+**Rollback (PR4→PR3):** disable schedules, drain every open run and its jobs, stop the parent, copy the current
+stores aside as audit, restore each manifest snapshot over its source (removing sources recorded absent), remove the
+marker, then downgrade. Restoring `schedule-runs.json` drops runs started after the snapshot from the live store.
+
+The Schedules page shows a legacy pointer as `Legacy grant <id> · <status> · no fire mints a grant: <last_skip, or
+"the operator pause/revoke is kept when it migrates to a native policy", or "it migrates to a native policy once no
+legacy run is open">`; a schedule with neither template nor policy says `open the editor to set up this schedule`.
 
 **`cp_schedule update id [skill] [description] [title] [kind] [delivery]`** changes a schedule's job — at least one
 field — under the add rules (a known skill on a manual schedule with the anchor's kind and delivery and no script, its

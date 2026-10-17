@@ -169,7 +169,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					const action = params.action as "pause" | "resume" | "revoke" | "raise_tokens";
 					if (action === "raise_tokens" && (tokens === undefined || !reason)) throw new MandateError("cp_mandate raise_tokens needs spend_tokens (the new cap) and reason");
 					// The USD cap is passed through only so raiseTokenCap refuses it in code: the parent never raises money.
-					// Every revoke records who asked (revoked_by): the operator's verified quote, else the parent's own revoke (pointerRefusal mints past it).
+					// Every revoke records who asked (revoked_by): the operator's verified quote, else the parent's own revoke.
 					const revokedBy = action === "revoke" && params.operator_quote ? requireOperatorQuote(params.operator_quote, { operatorTexts: operatorTexts() }) : undefined;
 					const mandate = action === "raise_tokens"
 						? raiseTokenCap(post.mandates, params.mandate_id, { tokens: tokens as number, reason: reason as string, ...(usd !== undefined ? { usd } : {}) }, jobs)

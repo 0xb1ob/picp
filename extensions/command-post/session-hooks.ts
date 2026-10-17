@@ -252,7 +252,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 			if (ctx.hasUI) ctx.ui.notify(message, "error");
 			else process.stderr.write(`${message}\n`);
 		}
-		// Fresh grant per fire: give every schedule saved before it a grant template, once, before the scheduler ticks.
+		// Legacy grant templates for schedules saved before them, once; the native migration below retires them.
 		try {
 			const text = formatScheduleMigration(sweepScheduleGrantTemplates({ home, mandates: commandPost().mandates }));
 			if (text.length > 0) {

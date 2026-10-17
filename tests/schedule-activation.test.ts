@@ -9,7 +9,7 @@ import { ScheduleControl } from "../src/schedule-control.ts";
 import { openScheduleRunStore, SCHEDULE_RUNS_ACTIVE } from "../src/schedule-runs.ts";
 import { appendScheduleControlLine } from "../src/viewer/control-audit.ts";
 import { readScheduleControl, type ScheduleControlFields, type ScheduleControlOp } from "../src/viewer/control-files.ts";
-import { policyFromLegacy, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import { isNativePolicy, policyFromLegacy, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 import { schedulePolicyView } from "../src/viewer/schedule-policy-view.ts";
 import { effectivePolicyBounds } from "../src/schedule-policy.ts";
@@ -60,7 +60,7 @@ test("authenticated adopt is atomic, refuses an open job, and routes spending to
  const off=await b.request("deactivate");assert.equal(off.receipt.state,"refused");assert.match(off.receipt.reason!,/open run/);
 });
 
-test("save binds revisions and frozen runs; a legacy draft is refused; deactivate preserves history and starts nothing",async(t)=>{
+test("save binds revisions and frozen runs; a legacy draft saves natively; deactivate preserves history and starts nothing",async(t)=>{
  const b=await bench(t);
  const started=await b.request("run_now",{revision:1}), event=started.events[0]!;
  const draft=structuredClone(b.runs.activePolicy(b.schedule.id)!) as NativeSchedulePolicy;
@@ -70,9 +70,8 @@ test("save binds revisions and frozen runs; a legacy draft is refused; deactivat
  assert.equal(b.runs.run(event.run_id!)?.policy.recipe.title,"Nightly report");
  assert.equal(b.scheduler.list()[0]?.job.title,"Nightly report","open run keeps frozen expansion recipe");
  const stale=await b.request("save_policy",{revision:1,policy:draft});assert.equal(stale.receipt.state,"refused");assert.match(stale.receipt.reason!,/Schedule changed/);
- // PR4: a legacy grant-shaped revision is read-only; nothing saves or adopts one again.
+ // PR4: a legacy grant-shaped revision is read-only; nothing adopts one, and a save re-expresses it natively.
  const legacy=policyFromLegacy({...b.schedule,mandate_id:"md-123456"},{seed_mandate_id:"md-123456",channel:"operator_chat",objective:"Nightly report",expiry_hours:1,spend_usd:10,spend_tokens:1000,job_cap:3,allowed_actions:["plan"],ask_on:["merge","risk:high"],approval:{operator_quote:"Run the nightly report",decided_by:"operator-quote",approved_at:stamp()}});
- await assert.rejects(b.scheduler.savePolicy(b.schedule.id,legacy,{saved_by:"operator-quote",provenance:{channel:"cp_schedule",tool_call_id:"tool",quote_sha:"123456abcdef"}},2),/only a native policy revision is saved or adopted/);
  await b.ledger.close(event.job_id!,"completed");await b.runs.closeRun(event.run_id!,"completed",stamp());
  assert.equal(b.scheduler.list()[0]?.job.title,"Next recipe");
  const staleRun=await b.request("run_now",{revision:1});assert.equal(staleRun.receipt.state,"refused");assert.match(staleRun.receipt.reason!,/Schedule changed/);
@@ -81,6 +80,10 @@ test("save binds revisions and frozen runs; a legacy draft is refused; deactivat
  const after=await b.request("run_now",{revision:0});assert.equal(after.receipt.state,"refused");assert.match(after.receipt.reason!,/no active native policy/);
  assert.deepEqual(b.mandates.list(),[],"no fallback grant is minted");
  assert.deepEqual(await b.ledger.list(),[]);
+ // The editor opens a migration-skipped schedule on its legacy snapshot; the operator's save must land a native revision.
+ const resaved=await b.scheduler.savePolicy(b.schedule.id,legacy,{saved_by:"operator-quote",provenance:{channel:"cp_schedule",tool_call_id:"tool",quote_sha:"123456abcdef"}},3);
+ assert.equal(resaved.active_revision,4);assert.ok(isNativePolicy(b.runs.activePolicy(b.schedule.id)!));
+ assert.equal(b.runs.activePolicy(b.schedule.id)?.limits.usd,legacy.limits.usd);
 });
 
 test("save refuses invalid authority and live bounds without changing policy bytes",async(t)=>{

@@ -23,7 +23,7 @@ const MAX_EXCLUDED_PATHS = 32;
  * 1-168 h. Its status is not read (a migration derives from an expired, revoked or cap-paused seed alike). A seed that
  * is no schedule grant, is itself a fire grant, or names job_ids, is refused; so is one carrying a risk:high
  * pre-approval, unless `job` is a cp-org-pr-review schedule's and the pre-approval covers the grant's jobs
- * (`mandate_jobs`). Even then the template never holds it: only `carriedPreapproval` reads it, per fire.
+ * (`mandate_jobs`). Even then the template never holds it (PR4 retired the per-fire carry; templates are legacy records).
  */
 export function templateFromSeed(seed: Mandate, approval: Omit<GrantTemplate["approval"], "approved_at">, at: string, job?: Schedule["job"]): { template: GrantTemplate; notes: string[] } | Refusal {
 	if (!seed.schedule_grant) return { refusal: `${seed.id} is not a schedule grant` };

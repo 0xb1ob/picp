@@ -4,7 +4,7 @@ import { effectivePolicyBounds } from "./schedule-policy.ts";
 import { refused, type MintContext } from "./schedule-grant.ts";
 import type { Ledger } from "./ledger.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
-import { isNativePolicy, schedulePolicyErrors, type SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { isNativePolicy, nativePolicyDraft, schedulePolicyErrors, type SchedulePolicy } from "./viewer/schedule-policy.ts";
 import type { Schedule } from "./viewer/schedule-core.ts";
 
 export interface PolicyAction {
@@ -28,9 +28,11 @@ export async function changePolicy(input: {op:"save"|"adopt"|"deactivate"; sched
  if ((input.op === "adopt" || (input.op === "save" && record?.active_revision == null)) && (runs.openRun(schedule.id) || (await input.ledger.list({labels:[`schedule:${schedule.id}`]})).length)) throw new Error(`schedule ${schedule.id} has an open legacy/run job; adopt once every job closes`);
  const used = action.provenance.quote_sha;
  if (used && record?.revisions.some(p=>p.provenance.quote_sha === used)) throw new Error("the operator message behind this quote was already used for this schedule");
- const draft = input.draft ?? latest;
+ const given = input.draft ?? latest;
+ // The editor opens a legacy schedule on its read-only snapshot: the operator's save re-expresses it, narrowest, natively.
+ const draft = input.op === "save" && given && !isNativePolicy(given) ? nativePolicyDraft({schedule_id:given.schedule_id,project:given.project,recipe:given.recipe,recipe_config:given.recipe_config,trigger:given.trigger,limits:given.limits,model_policy:given.model_policy,exclusions:given.exclusions}, {revision:given.revision,saved_at:given.saved_at,saved_by:given.saved_by,provenance:given.provenance}) : given;
  if (!draft) throw new Error(`schedule ${schedule.id} has no saved policy; save a native one`);
- // Legacy grant-shaped revisions stay readable for audit and open runs, but none is saved or activated again.
+ // Legacy grant-shaped revisions stay readable for audit and open runs, but none is adopted again.
  if (input.op !== "deactivate" && !isNativePolicy(draft)) throw new Error("only a native policy revision is saved or adopted; a legacy grant-shaped revision is read-only");
  const errors = schedulePolicyErrors(draft);
  if (errors.length) throw new Error(`invalid schedule policy: ${errors.join("; ")}`);
