@@ -27,7 +27,7 @@ import { contextOver, type HoldContext, ParentCompactHold } from "../../src/pare
 import { parentContextLog } from "../../src/parent-context.ts";
 import { cpNext, formatNext } from "../../src/next.ts";
 import { holdsParentLock } from "../../src/parent-lock.ts";
-import { durableIdsFromMessage, isLandedContinuation } from "../../src/wakeup-outbox.ts";
+import { durableIdsFromMessage, isLandedContinuation, isQuietWakeup } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
 import { formatWedgedNotice } from "../../src/wedged.ts";
 import { currentRuntime, runtimeOrRefusal, sourceFailureRecorder, wakeupHeadSources } from "./helpers.ts";
@@ -384,7 +384,7 @@ export function createWakeupSurfaces(
 					},
 					entry.content,
 					{ durable_id: entry.id },
-					!isLandedContinuation(entry.id),
+					!isQuietWakeup(entry.id),
 				);
 				return sent ? true : suppressionReason;
 			});
@@ -738,10 +738,10 @@ export function createWakeupSurfaces(
 	 * (only the context handed to this request is rewritten), and a facts read
 	 * that fails leaves the messages exactly as they were.
 	 */
-	// Observed delivery tokens and withheld identities persist, never enqueued notices or bodies.
-	// The existing bounded memory must survive extension reload and parent/host restart.
+	// Observed delivery tokens and withheld identities persist (bounded, survive reload), never notices or bodies.
 	// ponytail: retains 512 identities; use a journal if longer replay retention is needed.
 	let replayMemory: WakeupReplayMemory = new Map();
+	const carriedWakeups = new Set<string>(); // N2: unchanged wakes an earlier request carried; never projected out.
 	let replayFile: string | undefined;
 	let savedReplay = "";
 	const replayFailureUnseen = boundedSeen();
@@ -764,7 +764,7 @@ export function createWakeupSurfaces(
 					savedReplay = JSON.stringify([...replayMemory]);
 				} catch (error) { replayFailure("read", error); }
 			}
-			const review = reviewWakeups(messages, wakeupFactsNow(), new Date(), replayMemory);
+			const review = reviewWakeups(messages, wakeupFactsNow(), new Date(), replayMemory, carriedWakeups);
 			const snapshot = JSON.stringify([...replayMemory]);
 			if (snapshot !== savedReplay) {
 				try {
@@ -773,7 +773,7 @@ export function createWakeupSurfaces(
 				} catch (error) { replayFailure("write", error); } // A failed write must not restore a withheld body.
 			}
 			if (!review.changed) return undefined;
-			for (const stale of review.superseded) recordStaleWakeup(stale.stamp, stale.verdict, "delivery");
+			for (const stale of review.superseded) if (!stale.repeat) recordStaleWakeup(stale.stamp, stale.verdict, "delivery");
 			return review.messages;
 		} catch {
 			return undefined;

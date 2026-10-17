@@ -254,9 +254,11 @@ export function resolveProjectArg(_runtime: Runtime, given: string | undefined, 
 // ---------------------------------------------------------------------------
 
 export interface ContractInjectionEvent {
-	systemPrompt: string;
 	contextFiles?: ReadonlyArray<{ path: string }>;
 }
+
+/** The system-prompt section the contract is persisted under (N1: wake and user turns share its bytes). */
+export const CONTRACT_SECTION = "operating_contract";
 
 export interface ContractInjectionOptions {
 	packageRoot: string;
@@ -268,8 +270,8 @@ export interface ContractInjectionOptions {
 /**
  * pi loads context files from the working directory and its parents only, so
  * a parent launched anywhere but this checkout has no AGENTS.md. When the
- * package's own AGENTS.md is not among the loaded context files, append it to
- * the chained system prompt; when it is, return nothing and change nothing.
+ * package's own AGENTS.md is not among the loaded context files, return its
+ * text for the `CONTRACT_SECTION` prompt section; when it is, return nothing.
  */
 /**
  * The same, for a runtime that may not exist. A refused mode (`CP_MODE` or
@@ -282,7 +284,7 @@ export interface ContractInjectionOptions {
 export function contractInjectionOrNone(
 	event: ContractInjectionEvent,
 	options: Omit<ContractInjectionOptions, "runtime"> & { runtime: () => Runtime },
-): { systemPrompt: string } | undefined {
+): { contract: string } | undefined {
 	let runtime: Runtime;
 	try {
 		runtime = options.runtime();
@@ -312,7 +314,7 @@ export function packageContractLoaded(
 export function contractInjection(
 	event: ContractInjectionEvent,
 	options: ContractInjectionOptions,
-): { systemPrompt: string } | undefined {
+): { contract: string } | undefined {
 	const contractPath = realpathOrSelf(join(options.packageRoot, "AGENTS.md"));
 	if (packageContractLoaded(event.contextFiles, options.packageRoot)) return undefined;
 	const read =
@@ -325,6 +327,5 @@ export function contractInjection(
 			}
 		});
 	const contract = read();
-	if (contract === undefined) return undefined;
-	return { systemPrompt: `${event.systemPrompt}\n\n${contract}` };
+	return contract === undefined ? undefined : { contract };
 }

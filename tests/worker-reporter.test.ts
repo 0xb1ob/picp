@@ -248,7 +248,7 @@ function stubbedToolResultHandler() {
 	};
 }
 
-test("credential guards are blocked at tool_call (N1, N2)", () => {
+test("credential guards are blocked at tool_call (N1, N2, N5)", () => {
 	const handlers = stubbedHandlers();
 	const call = (command: string) =>
 		handlers.tool_call?.({ toolName: "bash", input: { command } }) as { block: true; reason: string } | undefined;
@@ -258,8 +258,12 @@ test("credential guards are blocked at tool_call (N1, N2)", () => {
 	const auth = call("gh auth status 2>&1");
 	assert.equal(auth?.block, true);
 	assert.match(auth?.reason ?? "", /gh api user --jq \.login/);
+	const search = call("grep -rlE 'EXAMPLE_API_KEY=' ~/.pi-command-post ~/.config ~/.pi");
+	assert.equal(search?.block, true);
+	assert.match(search?.reason ?? "", /printenv NAME/);
 	assert.equal(call("cp ~/.pi/agent/models.json /tmp/a/models.json"), undefined);
 	assert.equal(call("cp -a ~/.pi-command-post/state/runs/cp-xlax /tmp/a/"), undefined);
+	assert.equal(call("rg -n API_KEY src/"), undefined);
 });
 
 test("tool_result handler: bash token shapes are redacted, success or error", () => {

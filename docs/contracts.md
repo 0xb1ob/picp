@@ -441,7 +441,8 @@ a long-running command with no CI query (`npm test`, a build, a big rebase); a
 bare `sleep 5`; a single non-blocking `gh run list`; and any of these words
 inside a quoted string (`grep "sleep 270; gh run list" …`), because the `sleep`
 must be in command position (start of command, or after `;`, `&&`, `||`, `|`,
-`(`, a newline, `do`, `then`).
+`(`, a newline, `do`, `then`); a wrapper prefix (`timeout 1500`, `env`, `time`, `nice`, `nohup`, `command`,
+`stdbuf`) keeps the wrapped command in command position.
 The refusal text itself sends the worker to `npm run typecheck` and `npm run test:one -- tests/<x>.test.ts`
 (never `npm test`), and `detectCiWait` still does not classify `npm test` as a wait.
 A worker `bash` call that copies the host `auth.json` (`cp ~/.pi/agent/auth.json …`, or a
@@ -451,6 +452,11 @@ The same module refuses a bulk `cp`/`rsync` of a command-post home — its root,
 `data/`, `state/sessions` or all of `state/runs` (an `--exclude` or a glob does not make it
 smaller); one named `state/runs/<id>/` and single files stay allowed — and `gh auth status`/
 `gh auth token`, which print the stored token (`gh api user --jq .login` is the login check).
+`detectCredentialSearch` (N5) refuses a command-position `grep`/`rg`/`find`/… with a home root or a credential dotdir
+(`~/.pi`, `~/.config`, `~/.pi-command-post`, `~/.ssh`, …) as an operand and a key-shaped word (an upper-case
+`*_KEY`/`*TOKEN`/`*SECRET` name, `.env`, `auth.json`, `api_key`, or a raw key prefix `sk-`/`ghp_`/`github_pat_` at a word
+start); a worktree search passes. A credential comes only from
+the env var or file the task names (brief-ship *Agent isolation*); unset or unnamed, the worker reports `blocked`.
 Bash tool results pass through `redactGithubTokens` in the worker-reporter `tool_result` hook,
 so a GitHub token shape reaches the model and the pi session transcript only as `[REDACTED]`;
 the run log's streamed `tool_execution_update` is not covered (docs/storage.md Known gaps).
@@ -781,6 +787,18 @@ property of the notification path — not a prompt for more parent diligence.
   one neutral `custom` stand-in (`cp-withheld-tail`, `src/context-tail.ts`): no
   wake-up stamp, no stale body, only "nothing needs doing; end the turn".
   Session history is never mutated.
+- **A wake an earlier request carried is never withheld (N2).** The hook runs on
+  every provider request; a wake-up that an earlier request in this process
+  carried unchanged keeps travelling unchanged, even after its job moved on, so
+  the parent never loses a message it already read and the prompt prefix stays
+  cacheable (bounded in-memory set, not persisted: a restart re-reviews).
+- **A superseded verdict keeps its findings (N2).** A withheld `cp-verdict` whose
+  `details.verdict.reasons` is non-empty is replaced, not dropped, by a fixed
+  stand-in (`src/withheld-findings.ts`) listing only those reasons, marked
+  "verdict and next step withheld; relay only". It is built from the message
+  alone, so every request sees the same bytes.
+- **One marker per withheld key.** A key the persisted withheld memory already
+  held (an earlier context, or before a restart) is not journaled again.
 - **Silence is recorded.** Every withheld or rewritten wake-up appends a
   `cp:wakeup_suppressed` marker (kind, generation, `issued_at`, delay, reason,
   the stamp's `keys` (at most 8), and which stage caught it) to the job's run
@@ -1117,8 +1135,13 @@ An operator send through the bridge is a `prompt` with `streamingBehavior:
 wake-ups are sent with `{ triggerTurn: false }`: they ride into the next
 request instead of queueing one follow-up turn each. Actionable `cp-answered`
 messages always trigger. Answer acknowledgements whose in-process `cpNext`
-action is `wait`, `no_mandate` or `draining`, and landed-PR continuations, use
+action is `wait`, `no_mandate` or `draining`, landed-PR continuations and
+review-window `HELD PR WAITING` notices (`isQuietWakeup`, N9), use
 `triggerTurn: false` even when idle and never increment the unseen-notice count.
+On the operator side a relay message whose every relay is `informational` (a
+bridge-relayed `HELD PR LANDED`, an idle-beads notice) is appended with
+`triggerTurn: false` and acked on hand-off, since a quiet append fires no
+message hook; any other relay in the same message makes it triggering.
 `agent_settled` clears busy before anything else runs.
 A non-triggering notice that no later request carried (the run's last turn was
 text-only) would be stranded, so `agent_settled` sends one triggering
@@ -3277,7 +3300,7 @@ sequence above by itself on four triggers:
 |---|---|
 | an accepted `hold` envelope | `EnvelopeIntake`'s `onReported` |
 | a `ci_green` / `ci_failed` / `pr_merged` / `pr_closed` fact for the held head | `CiWatch`'s `onObserved` — at derivation, never at notice delivery |
-| a diff review whose `next` is `proceed` | `ReviewRuns`' `beforeWakeup`, after the verdict is on disk and before `cp-verdict` is sent |
+| a diff review whose `next` is `proceed` | `ReviewRuns`' `afterWakeup`, right after `cp-verdict` is sent (N2: the parent hears the verdict before any merge step it allows) |
 | startup | `session_start`, after `reconcile`: every held `delivery:pr` ship job, once |
 
 Each trigger loops `Integrator.advance` while `next: advance` and stops on
@@ -3307,9 +3330,9 @@ There is no duration setting or zero-window bypass. Flagged/final-fix exceptions
 without a complete pass timestamp, observed external merges, and human handoff
 retain their existing rules.
 
-A passing verdict yields promptly: its local window check runs before the
-existing deferred-row recheck and verdict transport, publishes one `HELD PR
-WAITING` notice naming the head, deadline and hold command, and releases the
+A passing verdict yields promptly: after the deferred-row recheck and verdict
+transport, its local window check publishes one `HELD PR
+WAITING` notice (delivered with `triggerTurn: false`) naming the head, deadline and hold command, and releases the
 project lane and reviewer handback. A synchronous equivalence pass does the
 same. Envelope/startup/CI integration waits expose transient `review_resume_at`
 and arm the same cancellable one-shot timer. This is a deadline event, not a CI
@@ -3872,9 +3895,14 @@ move is the right one.
 | `ledger_inlines_artifact` | `br show`/`comments`/`export` naming an **artifact-bearing** id | `br list`/`br ready` for status, `cp_artifact get` for the body |
 | `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`, and `.beads/` in multi mode) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
-| `leased_git_mutation` | parent bash `git checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
+| `leased_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
+| `canonical_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push in a canonical clone under `projects/` (N12); a plain `git -C <clone> switch <branch>`, the preflight fix, stays allowed | `cp_check`/`cp_dispatch` fetch the clone themselves, `cp_integrate` syncs after a merge |
 | `ci_checks_read` | parent bash `gh [flags] pr checks`, or a `gh` `--json`/`gh api` argument naming `statusCheckRollup` (the checks API is refused in this home; prose mentioning it is allowed) | `cp_integrate <job-id>`; CI is read from the Actions runs API by `cp_integrate` and the `cp-ci` wake-up |
 | `schedule_control_write` | parent `write`/`edit` of a `schedule-control.jsonl` path, or a bash statement naming it with a stage that is not a plain reader (`cat`, `head`, `tail`, `less`, `more`, `grep`, `rg`, `jq`, `wc`, `ls`, `stat`), an output redirect or a substitution | the operator clicks Run now, or `cp_schedule run_now` with their verbatim sentence (*Run now clearance*) |
+
+The operator session's bash (`operatorToolRefusal`, extensions/cp-bridge) refuses the same ref moves — `git
+fetch/pull/checkout/switch/reset/clean` or a force push — in a canonical clone under `projects/` (N12), and a CI wait
+behind a wrapper prefix (`timeout`/`env`/`time`/`nice`/`nohup`/`command`/`stdbuf`, N3, shared with the worker hook).
 
 The bash rule is an allowlist, because that is the only shape that fails
 closed: a command that mentions an artifact path is refused unless it is a
@@ -8025,9 +8053,15 @@ one runtime root (cp-u3i2): `data`, `state`, `projects` and
 [storage.md](storage.md).
 
 **The contract**: pi loads `AGENTS.md` only from the working directory and
-its parents, so in `before_agent_start` the extension appends this package's
-`AGENTS.md` to the system prompt whenever it is not already among the loaded
-context files. When pi loaded it (a session in this checkout), nothing changes.
+its parents, so in `before_agent_start` the extension sets this package's
+`AGENTS.md` as the persisted `operating_contract` system-prompt section
+whenever it is not already among the loaded context files. A section, never a
+returned `systemPrompt` (N1): pi replays persisted sections on wake turns that
+skip the hook, so wake and user turns share one cacheable system prefix. When
+pi loaded it (a session in this checkout), nothing changes. The bridge logs one
+daemon.log `parent context cache_rebuild cr=… prev=… gap_s=…` line when an
+assistant turn inside the 300 s cache TTL reads under half the previous prompt
+while the prompt itself did not shrink (a compaction is not a rebuild).
 
 **Doctor**: `mode`, `home.gitignore`, `scaffold.projects`, `storage.home`,
 `storage.state` and `storage.handoffs_dir`.

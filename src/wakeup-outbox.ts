@@ -48,6 +48,11 @@ export function isLandedContinuation(id: string): boolean {
 	return id.startsWith("continuation:done:") || (id.startsWith("continuation:") && id.endsWith(":done"));
 }
 
+/** N9: a landing or a merge-window WAITING notice rides along with the next turn; neither starts one. */
+export function isQuietWakeup(id: string): boolean {
+	return isLandedContinuation(id) || id.startsWith("continuation:window:");
+}
+
 /** issue #2: the durable id prefix of a killed_unreported notice; cp-bridge relays it straight to the operator. */
 export const KILLED_UNREPORTED_WAKEUP_PREFIX = "killed-unreported:";
 

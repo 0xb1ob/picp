@@ -52,6 +52,12 @@ export interface CiWaitFinding {
 	what: string;
 }
 
+/** A wrapper that runs its argument as the command (`timeout 1500 gh run watch` is still the watch: N3). */
+const WRAPPER =
+	"(?:timeout(?:[ \\t]+--?[A-Za-z][\\w-]*(?:[= \\t]\\S+)?)*?[ \\t]+[0-9.]+[smhd]?" +
+	"|env(?:[ \\t]+(?:-\\S+|[A-Za-z_]\\w*=\\S*))*|time(?:[ \\t]+-p)?|nice(?:[ \\t]+-n[ \\t]*-?\\d+|[ \\t]+-\\d+)?" +
+	"|nohup|command(?:[ \\t]+-p)?|stdbuf(?:[ \\t]+-[ioe][ \\t]*\\S+)*)[ \\t]+";
+
 /**
  * Command position: the start of the command, or right after a separator. Every
  * pattern below is anchored on it, which is what keeps a *quoted mention* of a
@@ -60,7 +66,7 @@ export interface CiWaitFinding {
  * separators too: `until gh run list …; do sleep 20; done` runs the query as a
  * command exactly as `; gh run list` does.
  */
-const CMD_POS = "(?:^|[;&|(\\n]|\\bdo\\b|\\bthen\\b|\\bwhile\\b|\\buntil\\b)[ \\t]*";
+const CMD_POS = `(?:^|[;&|(\\n]|\\bdo\\b|\\bthen\\b|\\bwhile\\b|\\buntil\\b)[ \\t]*(?:${WRAPPER})*`;
 
 function atCommandPosition(pattern: string): RegExp {
 	return new RegExp(`${CMD_POS}${pattern}`, "i");

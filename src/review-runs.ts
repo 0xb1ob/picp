@@ -151,6 +151,8 @@ export interface ReviewRunsOptions {
 	 * released regardless. This is an ordering guarantee, not a veto.
 	 */
 	beforeWakeup?: (wakeup: ReviewWakeup) => Promise<void> | void;
+	/** Ran (and awaited, same bound) right after the wake-up is sent: work the verdict starts follows the news. */
+	afterWakeup?: (wakeup: ReviewWakeup) => Promise<void> | void;
 	/** Reported when the hook threw or ran out of time. Never fatal. */
 	onBeforeWakeupFailure?: (reason: string, wakeup: ReviewWakeup) => void;
 	/**
@@ -420,37 +422,35 @@ export class ReviewRuns {
 		// cp-runtime-deferred-recheck: everything that must be true *before* the
 		// parent is woken happens here, awaited, with the decision already on disk —
 		// and bounded, so "before" can never become "instead of".
-		await this.#runBeforeWakeup(wakeup);
+		await this.#runHook("beforeWakeup", wakeup);
 		this.#send(wakeup);
 		this.#slots.delete(key);
+		// N2: work the verdict starts (a held PR's merge step) runs after its wake-up is handed over, never before.
+		await this.#runHook("afterWakeup", wakeup);
 	}
 
 	/**
-	 * The hook, or the bound, whichever comes first. Three failure modes, one
-	 * outcome: a synchronous throw, a rejection and a promise that never settles
-	 * all resolve here, are reported once, and leave `#send` and the slot cleanup
-	 * below to run exactly as they would have. Nothing the hook did or did not do
-	 * is recorded as having succeeded — it writes through its own store, so a
-	 * spent bound simply means it did not finish.
+	 * The hook, or the bound, whichever comes first. A synchronous throw, a rejection and a promise that never
+	 * settles are each reported once and never stop the send or slot cleanup; nothing is recorded as succeeded.
 	 */
-	async #runBeforeWakeup(wakeup: ReviewWakeup): Promise<void> {
-		const hook = this.#options.beforeWakeup;
+	async #runHook(stage: "beforeWakeup" | "afterWakeup", wakeup: ReviewWakeup): Promise<void> {
+		const hook = this.#options[stage];
 		if (!hook) return;
 		const ms = this.#options.beforeWakeupTimeoutMs ?? BEFORE_WAKEUP_MAX_WAIT_MS;
 		let started: Promise<void>;
 		try {
 			started = Promise.resolve(hook(wakeup));
 		} catch (error) {
-			this.#reportBeforeWakeup(`beforeWakeup threw: ${(error as Error).message}`, wakeup);
+			this.#reportBeforeWakeup(`${stage} threw: ${(error as Error).message}`, wakeup);
 			return;
 		}
 		const failure = await withDeadline(
 			started.then(
 				() => undefined,
-				(error: unknown) => `beforeWakeup failed: ${(error as Error).message}`,
+				(error: unknown) => `${stage} failed: ${(error as Error).message}`,
 			),
 			ms,
-			() => `beforeWakeup did not finish within ${ms}ms; the verdict was delivered anyway`,
+			() => `${stage} did not finish within ${ms}ms; the verdict was delivered anyway`,
 		);
 		if (failure) this.#reportBeforeWakeup(failure, wakeup);
 	}

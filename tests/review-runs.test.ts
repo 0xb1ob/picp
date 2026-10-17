@@ -623,7 +623,7 @@ test("passing verdict settles and wakes the parent before deadline integration",
 	const registry = new ReviewRuns({
 		home: home.path,
 		wakeup: () => (order.push("wakeup"), true),
-		beforeWakeup: (wakeup) => continuation.onVerdict(wakeup),
+		afterWakeup: (wakeup) => continuation.onVerdict(wakeup),
 	});
 	let release: (outcome: string) => void = () => {};
 	const wait = registry.start<string>({
@@ -638,13 +638,13 @@ test("passing verdict settles and wakes the parent before deadline integration",
 	registry.handBack(wait.key);
 	release("pass");
 	await registry.settled(wait.key);
-	assert.deepEqual(order, ["notice", "wakeup"], "durable pass and notice reach the operator without a GitHub read or merge");
+	assert.deepEqual(order, ["wakeup", "notice"], "the verdict reaches the parent first; the window notice follows, no merge");
 	assert.equal(registry.pending("cp-v2", "review"), undefined, "the reviewer slot is released during the interval");
 	clock.tick(Date.parse("2026-10-07T10:00:30Z") - 1);
-	assert.deepEqual(order, ["notice", "wakeup"]);
+	assert.deepEqual(order, ["wakeup", "notice"]);
 	clock.tick(clock.now().getTime() + 1);
 	await continuation.serialize("cp-v2", async () => {});
-	assert.deepEqual(order, ["notice", "wakeup", "advance:decided", "notice"]);
+	assert.deepEqual(order, ["wakeup", "notice", "advance:decided", "notice"]);
 	assert.equal(clock.tasks.size, 0);
 	continuation.stop();
 });

@@ -42,6 +42,26 @@ export async function runAutoControl(
 	}
 }
 
+/** Anthropic's default prompt-cache TTL: a rebuild after a longer gap is expected, not a defect. */
+export const PROMPT_CACHE_TTL_SECONDS = 300;
+
+/** N1(c): a `cache_rebuild` line when a prompt kept its size inside the cache TTL but read under half the last one. */
+export function cacheRebuildLine(prev: AssistantLike | undefined, next: AssistantLike): string | undefined {
+	const prompt = (message: AssistantLike) => (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0) + (message.usage?.cacheWrite ?? 0);
+	if (typeof prev?.timestamp !== "number" || typeof next.timestamp !== "number") return undefined;
+	const gap = (next.timestamp - prev.timestamp) / 1000, before = prompt(prev), cacheRead = next.usage?.cacheRead ?? 0;
+	// A compaction shrinks the prompt itself; only a prompt that kept its size but lost its cache is a rebuild.
+	if (gap < 0 || gap > PROMPT_CACHE_TTL_SECONDS || cacheRead >= before / 2 || prompt(next) < before / 2) return undefined;
+	return `cache_rebuild cr=${cacheRead} prev=${before} gap_s=${Math.round(gap)}`;
+}
+
+/** The bridge's per-assistant hook: logs a `cacheRebuildLine` to daemon.log, returns the assistant to keep. */
+export function trackAssistant(home: string | undefined, prev: AssistantLike | undefined, next: AssistantLike | undefined): AssistantLike | undefined {
+	const line = next && cacheRebuildLine(prev, next);
+	if (home && line) parentContextLog(home, SOURCE, line);
+	return next ?? prev;
+}
+
 /**
  * H1 review (finding 2): the bridge keeps no per-turn run log the way a job
  * does. This is the smallest durable record it does keep now — one

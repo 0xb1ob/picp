@@ -50,6 +50,7 @@ import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
 import { detectCiWait, detectSleepLoop } from "../../src/ci-wait.ts";
+import { canonicalCloneRefusal } from "../../src/guards.ts";
 
 export const BRIDGE_TOOL = "cp_parent";
 
@@ -194,7 +195,10 @@ export function operatorToolRefusal(toolName: string, input: unknown, cwd: strin
 		if (typeof command !== "string") return undefined;
 		const wait = detectCiWait(command);
 		const loop = wait ? undefined : detectSleepLoop(command);
-		if (!wait && !loop) return undefined;
+		if (!wait && !loop) {
+			try { return canonicalCloneRefusal(command, cwd, () => { const t = target(); return resolve(t.home, layoutForHome(t.mode, t.home).projects); }); }
+			catch (error) { return `Refused: no command-post home resolves for the canonical-clone git check (${(error as Error).message}).`; }
+		}
 		return `Refused: ${wait ? `${wait.what} (${wait.shape}: ${wait.matched})` : `this sleep loop holds the operator turn (${loop})`}. ` +
 			"Dashboard answers queue behind a running turn. Do not poll CI or state/update.json: end the turn and wait for the cp-bridge wake (CI, merge and update outcomes arrive as messages). " +
 			"A single non-blocking `gh run list` is still allowed.";
@@ -295,7 +299,9 @@ export default function (pi: ExtensionAPI): void {
 			deferredRelays += 1;
 			compaction.whenIdle(() => {
 				deferredRelays -= 1;
-				pi.sendMessage({ customType: "cp-bridge", content: message.content, display: true, details: message.details }, { deliverAs: "followUp", triggerTurn: true });
+				const appMessage = { customType: "cp-bridge", content: message.content, display: true, details: message.details };
+				pi.sendMessage(appMessage, message.quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true });
+				if (message.quiet) consumer.ack(appMessage); // N9: a quiet append may fire no message hook; it is in context
 			});
 		},
 		status: (line) => setStatusLine(sessionCtx, "cp-relays", line),

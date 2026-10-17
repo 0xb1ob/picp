@@ -249,7 +249,7 @@ export class HeldContinuation {
 		});
 	}
 
-	/** At verdict due time (`beforeWakeup`): only a passing diff review has anything left to continue. */
+	/** Right after the verdict's wake-up is sent (`afterWakeup`): only a passing diff review has anything to continue. */
 	async onVerdict(wakeup: ReviewWakeup): Promise<void> {
 		if (wakeup.surface !== "review" || (wakeup.details as { next?: unknown }).next !== "proceed") return;
 		await this.trigger({ jobId: wakeup.jobId, event: "verdict", attempt: wakeup.attempt, ...(wakeup.headSha ? { head: wakeup.headSha } : {}) });

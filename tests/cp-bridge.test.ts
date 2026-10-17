@@ -871,6 +871,7 @@ test("a landed continuation reaches the operator once without a parent reply", a
 		await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
 		assert.equal(wakes.length, 1);
 		assert.equal(wakes[0]!.text, content);
+		assert.equal(wakes[0]!.informational, true, "N9: the operator gets the landing without a turn");
 	});
 });
 

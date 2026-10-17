@@ -335,6 +335,34 @@ test("a hook that throws costs the row, never the wake-up", async (t) => {
 	}
 });
 
+// N2 (cp-c1ur): the held continuation's merge step used to run in `beforeWakeup`, so a PR could merge
+// before the parent read the verdict that allowed it. `afterWakeup` runs after the send; a throw costs nothing.
+test("afterWakeup runs after the wake-up is sent, and a throwing one is reported, not fatal", async (t) => {
+	const home = createScratchHome();
+	try {
+		const order: string[] = [];
+		const failures: string[] = [];
+		const registry = new ReviewRuns({
+			home: home.path,
+			beforeWakeup: () => void order.push("before"),
+			afterWakeup: () => {
+				order.push("after");
+				throw new Error("merge failed");
+			},
+			onBeforeWakeupFailure: (reason) => void failures.push(reason),
+			wakeup: () => (order.push("send"), true),
+		});
+		const pass = await reviewWakeup(t, home.path, { verdict: "pass" });
+		const started = registry.start(attemptOf(pass));
+		registry.handBack(started.key);
+		await registry.settled(started.key);
+		assert.deepEqual(order, ["before", "send", "after"]);
+		assert.deepEqual(failures, ["afterWakeup threw: merge failed"]);
+	} finally {
+		home.cleanup();
+	}
+});
+
 test("CommandPost plumbs beforeWakeup into the reviewer delivery path", async (t) => {
 	const home = createScratchHome();
 	try {
