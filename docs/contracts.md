@@ -404,11 +404,14 @@ detail:
 #### The worker never rewrites its branch's history
 
 `src/worker-history-guard.ts`, wired into the worker's `bash` hook, refuses
-`git rebase` (only `--abort` passes, to leave a rebase already in progress), every
-forced push (`-f`, `--force`, `--force-with-lease`, a `+ref` refspec) and
+`git rebase` (only `--abort` passes, to leave a rebase already in progress),
+`git pull` with a rebase (`--rebase[=…]`, `-r`, a bundled `-vr`, or a `-c pull.rebase=true`
+/ `-c branch.<b>.rebase=…` config; `--no-rebase` and `--rebase=false` pass), every
+forced push (`-f`, a bundled short flag carrying `f` such as `-uf`/`-fu`, `--force`,
+`--force-with-lease`, a `+ref` refspec) and
 `git reset --hard` onto a remote-tracking ref (`origin/…`, `refs/remotes/…`,
-`@{u}`, `FETCH_HEAD`). The refusal names the merge alternative: `git fetch origin`,
-`git merge origin/<branch>` if origin moved, `git merge origin/<base>`, a plain push.
+`@{u}`, `FETCH_HEAD`). The refusal names the merge alternative:
+`git fetch origin && git merge origin/<branch>` if origin moved, `git merge origin/<base>`, a plain `git push`.
 The reset rule is a parse, not a read of "is origin ahead": the usual shape is
 `git fetch origin && git reset --hard origin/<branch>`, where the guard runs before
 the fetch and the tracking ref it could read is still stale. Adopting origin's
