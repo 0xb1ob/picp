@@ -92,9 +92,9 @@ test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-
 	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
 	assert.deepEqual(
 		inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", recorded: "high", recordedFrom: "job_label", text: "Fix the typo" }),
-		{ risk: "high", evidence: "risk high recorded on the job's risk: label" },
+		{ risk: "high", evidence: "risk high recorded on the job's risk: label; risk source: explicit" },
 	);
-	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "explicit", recorded: "high", recordedFrom: "dispatch", text: "x" }), { risk: "high" });
+	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "explicit", recorded: "high", recordedFrom: "dispatch", text: "x" }), { risk: "high", evidence: "risk source: explicit" });
 	const warned = inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", recorded: "low", recordedFrom: "job_label", text: "Delete the stale fixture" });
 	assert.equal(warned.risk, "low");
 	assert.match(warned.warning ?? "", /keywords only \(delete\); risk low was recorded on the job's risk: label, so ask_on risk:high warned instead of gating/);
@@ -104,9 +104,12 @@ test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-
 		planned.warning ?? "",
 		/keywords only \(delete\); risk low was assessed by the planner, so ask_on risk:high warned instead of gating/,
 	);
-	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "explicit", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).risk, "high");
-	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "assessed", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).risk, "high");
-	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", text: "Delete it" }).risk, "high");
+	// cp-c1ur N14: every gated high names its risk source, so a risk escalation is never scope-only evidence.
+	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "explicit", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).evidence, "risk source: explicit");
+	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "assessed", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).evidence, "risk source: planner");
+	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", text: "Delete it" }), { risk: "high", evidence: "risk source: classify" });
+	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", recorded: "high", recordedFrom: "planner", text: "x" }).evidence, "risk high assessed by the planner; risk source: planner");
+	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", text: "x" }), { risk: "low" });
 	assert.equal(
 		inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", recorded: "low", text: "Delete it" }).warning,
 		"cp-x: warning: risk:high inferred from keywords only (delete); risk low was recorded, so ask_on risk:high warned instead of gating",

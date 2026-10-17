@@ -1551,7 +1551,9 @@ expiry or actions \u2014 they resolve through `src/mandate-defaults.ts`'s ladder
 and echo the effective grant, fields and sources, in one line once issued),
 one mandate per topic (a topic spanning repos is one mandate naming each
 project; never a bucket for unrelated work, so cost, expiry,
-revoke and mission-end summary stay per topic), the ask/decide split, and the plan-review
+revoke and mission-end summary stay per topic), the ask/decide split (a step only the human can take — restart,
+login, a click on a host — is a `cp_parent ask`; `cp_review` owns the diff, so the main session reads one only when a
+wake escalates it, never holding an integration to re-review), and the plan-review
 procedure. The ask/decide split is one tier up from AGENTS.md §Escalation's
 own list: `operatorAction(kind, inScope)` in `src/operator-note.ts` says
 `plan_approval` is a decide only when the mandate already covers it, every
@@ -1561,6 +1563,12 @@ claim about what the main LLM actually does with the note is not made here,
 same convention as the worker and parent-routing evals. The on-demand skill
 (`skills/cp-operator/`) stays unwritten until the note proves insufficient
 somewhere (ticket scope, not a gap).
+
+**Operator idle cache warming** (`src/operator-cache-warming.ts`, cp-c1ur N8). The bridge's `cache_warming_decision`
+handler answers `warm` whenever one avoided cache miss pays for the refresh (`missCost > warmCost`), overriding pi's
+idle estimate, and otherwise leaves pi's decision. pi fires the event between turns only under the global
+`cacheWarming: "idle"` setting (default `"streaming"` stops at settle) and ends idle warming 30 minutes after the last
+request; choosing that setting is the human's, since it is machine-wide.
 
 ### Reconcile
 
@@ -4429,8 +4437,9 @@ starts:
 When an active, covering mandate's `ask_on` names `risk:high` and the gate's
 risk is `high` (see H6 below for the one inferred case that only warns), the call is refused and
 one `risk_high_irreversible` escalation is raised (duplicate-safe: a second
-refused attempt raises nothing new), naming the job and the risk evidence
-words. Options: `approve` (the next `cp_dispatch`/`cp_send` for this job
+refused attempt raises nothing new), naming the job, the risk evidence
+words and who made the high (`risk source: explicit|planner|classify`, `inferredRiskGate` in
+`src/risk-warning.ts`; cp-c1ur N14). Options: `approve` (the next `cp_dispatch`/`cp_send` for this job
 proceeds) or `drop`. The escalation is answered directly by `cp_decide` with an
 operator quote (never a mandate basis — `risk:high` never auto-permits) —
 a structured escalation is never a checkpoint or a declared Awaiting-you row,

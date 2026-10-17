@@ -93,6 +93,15 @@ test("the operator note carries exactly one verbatim dashboard thread instructio
 	assert.equal(OPERATOR_NOTE.split("\n").filter(line => line === sentence).length, 1);
 });
 
+// cp-c1ur N4/N13: a restart asked for only in chat never happened, and the operator re-read diffs cp_review owned.
+// Both rules must sit inside the 60-line cap, in the sections the main LLM reads for asks and for file access.
+test("the note makes a human-only step a cp_parent ask and leaves the diff to cp_review", () => {
+	const capped = OPERATOR_NOTE.split("\n").slice(0, OPERATOR_NOTE_MAX_LINES).join("\n");
+	const asks = capped.split("## Ask vs decide")[1]?.split("## Plan review")[0] ?? "";
+	assert.match(asks, /a step only the human can take \(restart, login, a click on a host\) is a `cp_parent ask`/);
+	assert.match(capped, /`cp_review` owns the diff: rely on its verdict, read a diff only when a wake escalates it/);
+});
+
 // Remote dashboard (Decision es-6a78c3): the note carries the remote device-management prohibition once, inside the cap,
 // and the bridge still injects that exact note. This proves the instruction is delivered, not that a model obeys it.
 test("the operator note forbids device pairing and device-list edits on a remote-originated request", async () => {
