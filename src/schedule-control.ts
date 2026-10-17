@@ -172,7 +172,7 @@ export class ScheduleControl {
 					: request.op === "adopt" ? await scheduler.activatePolicy!(id, action, request.revision!) : await scheduler.deactivatePolicy!(id, action);
 				this.#outcome(request, "done", request.op === "deactivate" ? "Back on per-fire grants" : `Settings saved · revision ${record.active_revision} (applies to the next run)`);
 			} else {
-				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer, ...(request.revision !== undefined ? { revision: request.revision } : {}) });
+				const event = await scheduler.fireNow(id, { via: "dashboard", request_id: request.id, peer: request.peer, ...(request.revision !== undefined ? { revision: request.revision } : {}), ...(request.overrides ? { overrides: request.overrides } : {}) });
 				if (event.outcome !== "fired") {
 					this.#outcome(request, "refused", event.reason);
 					return undefined;

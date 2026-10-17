@@ -154,7 +154,7 @@ export type FireTrigger =
 	// A native run needs no quote; a legacy run_now still refuses without one.
 	| { via: "cp_schedule"; tool_call_id: string; operator_quote?: string; decided_by?: string; source_sha?: string; send_id?: string; delegation_rule?: string; revision?: number; overrides?: RunOverrides };
 type LegacyFireTrigger = Exclude<FireTrigger, { via: "cp_schedule" }> | (Extract<FireTrigger, { via: "cp_schedule" }> & { operator_quote: string; decided_by: string; source_sha: string });
-const legacyTrigger = (manual: FireTrigger | undefined): manual is LegacyFireTrigger | undefined => manual?.via !== "cp_schedule" || (!!manual.operator_quote && !!manual.decided_by && !!manual.source_sha);
+const legacyTrigger = (manual: FireTrigger | undefined): manual is LegacyFireTrigger | undefined => !(manual && "overrides" in manual && manual.overrides) && (manual?.via !== "cp_schedule" || (!!manual.operator_quote && !!manual.decided_by && !!manual.source_sha));
 
 /** Written on a cp_schedule run now's job (notes and quote comment); finding it on any job of the schedule refuses a replay. */
 export const runNowQuoteMarker = (sourceSha: string): string => `run-now quote sha ${sourceSha}`;
@@ -586,7 +586,7 @@ export class Scheduler {
 		if (manual && ((currentPolicy && !native && manual.revision === undefined) || (manual.revision !== undefined && manual.revision !== (currentPolicy?.revision ?? 0)))) throw new SchedulerError("Schedule changed; review updated settings");
 		schedule = policySchedule(latestSchedule, currentPolicy);
 		if (native) return this.#nativeFire(schedule, native, slot, missed, now, missedAt, manual);
-		if (!legacyTrigger(manual)) throw new SchedulerError(`schedule ${schedule.id} is on legacy per-fire grants: run_now needs operator_quote until it saves a native policy`);
+		if (!legacyTrigger(manual)) throw new SchedulerError(`schedule ${schedule.id} is on legacy per-fire grants: run_now needs operator_quote and takes no overrides until it saves a native policy`);
 		const at = now.toISOString();
 		const base = { schedule_id: schedule.id, name: schedule.name, project: schedule.project, mandate_id: schedule.mandate_id };
 		const manualFields = manual === undefined ? {} : { manual: manual.via === "dashboard" ? manual.request_id : manual.tool_call_id, manual_via: manual.via };

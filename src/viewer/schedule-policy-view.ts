@@ -1,7 +1,7 @@
 /** Read-only policy preview. Live narrowing mirrors effectivePolicyBounds; parity is pinned by HTTP tests. */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { policyFromLegacy, schedulePolicyErrors, type SchedulePolicy } from "./schedule-policy.ts";
+import { isNativePolicy, policyFromLegacy, schedulePolicyErrors, type SchedulePolicy } from "./schedule-policy.ts";
 import { readSchedulePolicies } from "./schedule-run-core.ts";
 import { readScheduleFile } from "./schedule-core.ts";
 import type { SchedulePolicyResponse } from "./api-types.ts";
@@ -22,7 +22,7 @@ export function schedulePolicyView(stateDir: string, id: string): SchedulePolicy
  if (!selected) blocking.push("no saved policy or legacy template; needs setup");
  else {
   blocking.push(...schedulePolicyErrors(selected));
-  if (selected.recipe.delivery === "pipeline") blocking.push("pipeline schedules remain on per-fire grants");
+  if (selected.recipe.delivery === "pipeline" && !isNativePolicy(selected)) blocking.push("legacy pipeline schedules remain on per-fire grants; save a native policy");
   try {
    const dataDir = join(dirname(stateDir),"data");
    const defaultsFile = join(dataDir,"mandate-defaults.json"), projectsFile = join(dataDir,"projects.json");

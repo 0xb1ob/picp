@@ -23,7 +23,7 @@ import { pushDataDir, readPushConfig } from "./push-files.ts";
 import { IMAGE_ID_SOURCE, TEXT_ID_SOURCE, isUploadId, sanitizeUploadName } from "./uploads.ts";
 import { isSafeId } from "./sessions.ts";
 
-import { schedulePolicyErrors, type SchedulePolicy } from "./schedule-policy.ts";
+import { runOverrideErrors, schedulePolicyErrors, type RunOverrides, type SchedulePolicy } from "./schedule-policy.ts";
 export const CONTROL_PROTOCOL = 1;
 /** Composer text cap; with its JSON envelope it fits the body cap. */
 export const CONTROL_TEXT_MAX = 16_000;
@@ -58,7 +58,7 @@ export type ScheduleControlLine =
 	| ({ type: "request"; by: "viewer"; id: string; at: string; peer: string | null; op: ScheduleControlOp; schedule_id: string } & ScheduleControlFields)
 	| { type: "claimed"; by: "parent"; id: string; at: string; pid: number }
 	| { type: "outcome"; by: "parent"; id: string; at: string; state: "done" | "refused" | "expired" | "interrupted"; reason: string | null; job_id: string | null };
-export interface ScheduleControlFields { revision?: number; policy?: SchedulePolicy; client_id?: string }
+export interface ScheduleControlFields { revision?: number; policy?: SchedulePolicy; client_id?: string; overrides?: RunOverrides }
 export const SCHEDULE_CLIENT_ID = /^sk-[0-9]{14}-[0-9a-f]{8}$/;
 /** Shared ingress and journal validation; legacy requests may omit revision until a policy is active. */
 export function scheduleControlFieldError(value: Record<string, unknown>): string | undefined {
@@ -70,6 +70,11 @@ export function scheduleControlFieldError(value: Record<string, unknown>): strin
   const errors = schedulePolicyErrors(value.policy);
   if (errors.length) return `invalid schedule policy: ${errors.join("; ")}`;
  } else if (value.policy !== undefined) return "policy is only for save_policy";
+ if (value.overrides !== undefined) {
+  if (op !== "run_now") return "overrides are only for run_now";
+  const errors = runOverrideErrors(value.overrides);
+  if (errors.length) return `invalid run overrides: ${errors.join("; ")}`;
+ }
  return undefined;
 }
 export interface ScheduleControlRequest extends ScheduleControlFields {
@@ -105,7 +110,7 @@ export function readScheduleControl(stateDir: string): { requests: ScheduleContr
 		if (typeof line?.id !== "string" || typeof line.at !== "string") continue;
 		if (line.type === "request") {
 			if (requests.has(line.id) || !(SCHEDULE_CONTROL_OPS as readonly unknown[]).includes(line.op) || typeof line.schedule_id !== "string" || scheduleControlFieldError(line)) continue;
-			requests.set(line.id, { id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, op: line.op as ScheduleControlOp, schedule_id: line.schedule_id, ...(line.revision !== undefined ? {revision:line.revision as number} : {}), ...(line.policy !== undefined ? {policy:line.policy as SchedulePolicy} : {}), ...(line.client_id !== undefined ? {client_id:line.client_id as string} : {}), state: "queued", claimed_pid: null, reason: null, job_id: null });
+			requests.set(line.id, { id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, op: line.op as ScheduleControlOp, schedule_id: line.schedule_id, ...(line.revision !== undefined ? {revision:line.revision as number} : {}), ...(line.policy !== undefined ? {policy:line.policy as SchedulePolicy} : {}), ...(line.client_id !== undefined ? {client_id:line.client_id as string} : {}), ...(line.overrides !== undefined ? {overrides:line.overrides as RunOverrides} : {}), state: "queued", claimed_pid: null, reason: null, job_id: null });
 			continue;
 		}
 		const request = requests.get(line.id);

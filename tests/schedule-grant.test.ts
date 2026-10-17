@@ -231,8 +231,8 @@ test("A4: the fire path has no branch around #mint and never checks schedule.man
 	const beforeMint = fireOnce.slice(0, fireOnce.indexOf("this.#mint("));
 	assert.deepEqual(
 		beforeMint.split("\n").filter((line) => /^\t\t(?:if .*\) )?return\b/.test(line)).map((line) => line.trim()),
-		["if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));", "if (early) return refuse(early);"],
-		"before the mint, only the archive refusal and the open-fire/single-use guard",
+		["if (native) return this.#nativeFire(schedule, native, slot, missed, now, missedAt, manual);", "if (this.#ports.archivedProjects?.().includes(schedule.project)) return refuse(archivedRefusal(schedule.project));", "if (early) return refuse(early);"],
+		"before the mint, only the archive refusal, the open-fire/single-use guard and a native policy's run start (no grant at all)",
 	);
 	const mint = body("async #mint(");
 	assert.doesNotMatch(mint, /manual === undefined\) return/, "no trigger is excluded from minting");

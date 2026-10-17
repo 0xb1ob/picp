@@ -1,5 +1,5 @@
 import type { ScheduleControlRequestView, ScheduleControlSendResponse, ScheduleControlStatusResponse, SchedulePolicyResponse } from "../src/viewer/api-types.ts";
-import type { SchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import type { RunOverrides, SchedulePolicy } from "../src/viewer/schedule-policy.ts";
 
 /** Schedules page controls (cp-hhuf P6): enable, disable, run now and remove, journaled for the parent to apply. */
 export const SCHEDULE_CONTROL_STATUS_URL = "/api/schedules/control";
@@ -15,7 +15,7 @@ export interface ScheduleControlView {
  /** Ids of requests this browser already sent (kept across reloads); never resent. */
  receipts?: string[];
 }
-export interface ScheduleRequestExtra {revision?: number; policy?: SchedulePolicy}
+export interface ScheduleRequestExtra {revision?: number; policy?: SchedulePolicy; overrides?: RunOverrides}
 export type ScheduleRequestBody = {op: ScheduleOp; schedule_id: string; client_id?: string} & ScheduleRequestExtra;
 /** `sk-<14 digits>-<8 hex>`: one id per click, so a repeated POST is answered with the first receipt. */
 export function scheduleClientId(now = new Date(), random: () => number = Math.random): string {
@@ -23,8 +23,20 @@ export function scheduleClientId(now = new Date(), random: () => number = Math.r
 }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-/** Add schedule… prefills the composer with this: a schedule needs its own grant, issued only on the operator's words. */
-export const ADD_SCHEDULE_DRAFT = "Add a schedule (cp_schedule add): name \"…\", project \"…\", cron \"0 9 * * *\" tz \"UTC\" (or a watch script), kind research, delivery answer, title \"…\", description \"…\". Issue its own schedule grant first (cp_mandate issue with schedule_grant:true).";
+/** Add schedule… prefills the composer with this: the schedule's saved policy is its authority, set on the operator's words. */
+export const ADD_SCHEDULE_DRAFT = "Add a schedule (cp_schedule add): name \"…\", project \"…\", cron \"0 9 * * *\" tz \"UTC\" (or a watch script), kind research, delivery answer, title \"…\", description \"…\". Its saved policy authorizes every run; optional limits (usd, tokens, child_jobs, parallelism, run_hours).";
+
+/** Run options' thinking choices; the browser bundle cannot import RUN_THINKING_LEVELS (node-only module), a test pins parity. */
+export const RUN_OPTION_THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+/** Run options → `overrides`: blank fields are omitted, so the saved policy's model, thinking and parallelism apply. */
+export function runOverrides(model: string, thinking: string, parallelism: string): RunOverrides | undefined {
+ const out: RunOverrides = {
+  ...(model.trim() ? {model: model.trim()} : {}),
+  ...(thinking ? {thinking: thinking as NonNullable<RunOverrides["thinking"]>} : {}),
+  ...(parallelism.trim() ? {parallelism: Number(parallelism)} : {}),
+ };
+ return Object.keys(out).length ? out : undefined;
+}
 
 async function failure(response: Response): Promise<string> {
  try { const body = await response.json() as {error?: unknown}; if (typeof body.error === "string") return body.error; } catch { /* no JSON body: the status says enough */ }

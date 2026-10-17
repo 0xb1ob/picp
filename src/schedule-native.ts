@@ -10,6 +10,7 @@ import { isNativePolicy, runOverrideErrors, type NativeSchedulePolicy, type RunO
 import type { RunExecution, ScheduleRun } from "./viewer/schedule-run-core.ts";
 import { RUNNER_DELIVERIES } from "./schedule-runner.ts";
 import type { ScheduleEvent } from "./scheduler.ts";
+import type { StartRequest, StartResult } from "./pipeline.ts";
 
 /** Who asked; audit metadata only, never authority. */
 export type NativeTrigger =
@@ -129,4 +130,22 @@ export function formatNativeEvent(event: Pick<ScheduleEvent, "reason" | "job_id"
 	return fired + (RUNNER_DELIVERIES.includes(event.delivery ?? "")
 		? `${event.job_id} is dispatched by the schedule runner under ${event.run_id}; no cp_next needed.`
 		: `Call cp_next: ${event.job_id} is a member of ${event.run_id}; the saved policy's caps, scope and review apply, nothing to ask.`);
+}
+
+/** Pipeline deps the host wires: the runner's start and whether an anchor already started one. */
+export interface PipelineStarter { start: (request: StartRequest) => Promise<StartResult>; started: (anchorId: string) => boolean }
+
+/** Starts a native pipeline run in code on its fired research anchor; a replay heals a start a crash interrupted. */
+export async function startScheduledPipeline(pipeline: PipelineStarter, runs: ScheduleRunStore, schedule: Schedule, event: Pick<ScheduleEvent, "job_id" | "run_id">): Promise<string> {
+	const run = event.run_id ? runs.run(event.run_id) : undefined;
+	if (!run || !event.job_id || run.anchor_job_id !== event.job_id || !isNativePolicy(run.policy)) {
+		throw new Error(`no native run anchored on ${event.job_id ?? "(no anchor)"}`);
+	}
+	if (pipeline.started(event.job_id)) return `${event.job_id} already started its pipeline under ${run.id}`;
+	const result = await pipeline.start({
+		title: run.policy.recipe.title, project: run.policy.project, task: run.policy.recipe.description ?? run.policy.recipe.title,
+		delivery: run.policy.effects.includes("branch_push") ? "local" : "pr",
+		run: { runs, runId: run.id, anchorId: event.job_id, scheduleId: schedule.id },
+	});
+	return `pipeline started under ${run.id}: ${result.research_id} -> ${result.ship_id}, planner dispatched`;
 }
