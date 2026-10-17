@@ -36,6 +36,8 @@ import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { isActive } from "./mandate-accounting.ts";
 import { type ActionsRun, readActionsCi } from "./actions-ci.ts";
 import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
+import type { CommandRunner as StatusRunner } from "./merges.ts";
+import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
 
 const MainCiEntrySchema = Type.Object(
 	{
@@ -132,7 +134,7 @@ export class MainCiStore {
 /** One red or green transition for one project. */
 export interface MainCiObservation {
 	project: string;
-	event: "main_ci_failed" | "main_ci_green" | "main_ci_released";
+	event: "main_ci_failed" | "main_ci_green" | "main_ci_released" | "main_ci_rerun";
 	sha: string;
 	reason: string;
 	workflow?: string;
@@ -248,10 +250,10 @@ async function failingTestLine(cwd: string, runId: number, exec: CommandRunner, 
 /**
  * One reading for one project, counting only `countedMainRuns` for `login`.
  * Returns an observation only on a transition (absent or foreign → own red,
- * own red → green on the tip, a foreign or login-less row → released); every
- * other reading leaves the latch untouched. Unreadable state, git or gh throws — the caller logs it.
+ * own red → green on the tip, a foreign or login-less row → released, an attempt-1 infra-only red → rerun
+ * unlatched); every other reading leaves the latch untouched. Unreadable state, git or gh throws — the caller logs it.
  */
-export async function checkMainCi(options: { project: string; cwd: string; store: MainCiStore; login: string; exec?: CommandRunner; timeoutMs?: number }): Promise<MainCiObservation | undefined> {
+export async function checkMainCi(options: { project: string; cwd: string; home: string; store: MainCiStore; login: string; exec?: CommandRunner; timeoutMs?: number }): Promise<MainCiObservation | undefined> {
 	const { project, cwd, store, login } = options;
 	const exec = options.exec ?? runCommand;
 	const timeoutMs = options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS;
@@ -266,13 +268,19 @@ export async function checkMainCi(options: { project: string; cwd: string; store
 	} catch (error) {
 		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 200)}`);
 	}
-	const classified = classifyMainTip(tip, countedMainRuns(runs, login));
+	const counted = countedMainRuns(runs, login);
+	const classified = classifyMainTip(tip, counted);
 	if (classified.status === "red" && !own) {
+		// One infra-only rerun per tip (claim `main-<project>`), never latched; attempt 2 or any refusal latches below.
+		const statusRun: StatusRunner = (dir, bin, args, opts) =>
+			exec(bin, args, { cwd: dir, timeoutMs: opts?.timeoutMs ?? timeoutMs }).then((stdout) => ({ status: 0, stdout, stderr: "" }), (error: Error) => ({ status: 1, stdout: "", stderr: error.message }));
+		const rerun = await maybeRerunInfra({ jobId: `main-${project}`, head: tip, runs: counted, cwd, run: statusRun, home: options.home, store: new CiRerunStore(options.home) });
+		if (rerun?.rerun) return { project, event: "main_ci_rerun", sha: tip, reason: rerun.fact };
 		const id = classified.failingRunId;
 		const failing = id === undefined ? undefined : ((await failingTestLine(cwd, id, exec, timeoutMs)) ?? failingJobName(runs.find((run) => run.databaseId === id)));
 		const extra = { ...(classified.workflow ? { workflow: classified.workflow } : {}), ...(failing ? { failing } : {}) };
 		store.setRed(project, tip, { ...extra, login });
-		return { project, event: "main_ci_failed", sha: tip, reason: classified.reason, ...extra };
+		return { project, event: "main_ci_failed", sha: tip, reason: rerun ? `${classified.reason}; ${rerun.fact}` : classified.reason, ...extra };
 	}
 	if (classified.status === "green" && own) {
 		store.clear(project);
@@ -294,6 +302,9 @@ export function formatMainCiNotice(observation: MainCiObservation): string {
 	}
 	if (observation.event === "main_ci_released") {
 		return `MAIN CI LATCH RELEASED — ${observation.project}: red since ${sha} no longer counts (${observation.reason}). Call cp_integrate for held ${observation.project} PRs.`;
+	}
+	if (observation.event === "main_ci_rerun") {
+		return `MAIN CI RERUN — ${observation.project}: infra-only failure on ${sha}, rerun once; no action (${observation.reason}).`;
 	}
 	return (
 		`MAIN IS RED — ${observation.project}: CI failed on ${sha}${observation.workflow ? ` (${observation.workflow})` : ""}` +
@@ -337,7 +348,7 @@ export async function runMainCiTick(options: {
 		try {
 			const cwd = options.pathOf(project);
 			if (!existsSync(cwd)) continue;
-			const observation = await checkMainCi({ project, cwd, store, login, ...(options.exec ? { exec: options.exec } : {}) });
+			const observation = await checkMainCi({ project, cwd, home: options.home, store, login, ...(options.exec ? { exec: options.exec } : {}) });
 			if (!observation) continue;
 			observations.push(observation);
 			const text = formatMainCiNotice(observation);

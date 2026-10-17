@@ -21,6 +21,7 @@ import {
 	runMainCiTick,
 } from "../src/main-ci.ts";
 import type { CommandRunner } from "../src/merge-ask.ts";
+import { CiRerunStore } from "../src/ci-infra-rerun.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { answerActions } from "./harness/actions-api.ts";
 
@@ -90,7 +91,7 @@ function setup(t: { after(fn: () => void): void }) {
 }
 
 async function check(ctx: ReturnType<typeof setup>, world: World, project = "demo"): Promise<MainCiObservation | undefined> {
-	return checkMainCi({ project, cwd: ctx.clone, store: ctx.store, login: "me", exec: execFor(world) });
+	return checkMainCi({ project, cwd: ctx.clone, home: ctx.home, store: ctx.store, login: "me", exec: execFor(world) });
 }
 
 test("row 1: a failure on the fetched tip latches once, naming the sha, workflow and failing test line", async (t) => {
@@ -481,7 +482,7 @@ test("cp-oc0m: resolveMainCiScope — active mandate and readable login enforce;
 test("cp-oc0m: the Actions query carries event and triggering actor, and the counted filter uses them", async (t) => {
 	const ctx = setup(t);
 	const calls: string[] = [];
-	const obs = await checkMainCi({ project: "demo", cwd: ctx.clone, store: ctx.store, login: "me", exec: execFor({ tip: T1, runs: [{ ...failed(T1), attempt: 2 }] }, calls) });
+	const obs = await checkMainCi({ project: "demo", cwd: ctx.clone, home: ctx.home, store: ctx.store, login: "me", exec: execFor({ tip: T1, runs: [{ ...failed(T1), attempt: 2 }] }, calls) });
 	assert.equal(obs?.event, "main_ci_failed");
 	assert.ok(calls.includes(`gh api repos/{owner}/{repo}/actions/runs?head_sha=${T1}&branch=main&per_page=100&page=1`));
 	assert.ok(calls.includes("gh api repos/{owner}/{repo}/actions/runs/2/attempts/2/jobs?per_page=100&page=1"), "the run attempt's jobs are read too");
@@ -498,7 +499,7 @@ test("main CI: an unreadable jobs read or a malformed runs page latches nothing 
 		if (String(args[1]).includes("/attempts/")) throw new Error("gh: Resource not accessible by integration (HTTP 403)");
 		return execFor({ tip: T1, runs: [failed(T1)] })(command, args, { cwd: ctx.clone, timeoutMs: 1000 });
 	};
-	await assert.rejects(checkMainCi({ project: "demo", cwd: ctx.clone, store: ctx.store, login: "me", exec: jobsDenied }), /actions\/runs unreadable: Actions CI read denied/);
+	await assert.rejects(checkMainCi({ project: "demo", cwd: ctx.clone, home: ctx.home, store: ctx.store, login: "me", exec: jobsDenied }), /actions\/runs unreadable: Actions CI read denied/);
 	await assert.rejects(check(ctx, { tip: T1, runs: "not json" }), /actions\/runs unreadable/);
 	assert.equal(ctx.store.entry("demo"), undefined);
 });
@@ -508,4 +509,70 @@ test("formatMainCiNotice: released wording", () => {
 		formatMainCiNotice({ project: "demo", event: "main_ci_released", sha: T1, reason: "latched for other, this machine is me" }),
 		"MAIN CI LATCH RELEASED — demo: red since 111111111111 no longer counts (latched for other, this machine is me). Call cp_integrate for held demo PRs.",
 	);
+});
+
+// --- PR1: one infra-only rerun of an attempt-1 red main tip, claimed under `main-<project>` ---
+
+/** The repo's own ci.yml job with `failedStep` failed: the attempt jobs the runs read returns. */
+function suiteJobs(failedStep: string): World["jobs"] {
+	const names = ["Set up job", "Checkout", "Install dependencies", "Install treehouse", "Run suite (typecheck + tests)"];
+	const at = names.indexOf(failedStep);
+	const steps = names.map((name, index) => ({ name, status: "completed", conclusion: index < at ? "success" : index === at ? "failure" : "skipped" }));
+	return { jobs: [{ name: "suite", conclusion: "failure", steps }] };
+}
+
+function rerunBench(ctx: ReturnType<typeof setup>, rerunError?: string) {
+	const calls: string[] = [];
+	const claimsAtRerun: number[] = [];
+	const go = (world: World) => {
+		const inner = execFor(world, calls);
+		const exec: CommandRunner = async (command, args, options) => {
+			if (args[0] !== "run" || args[1] !== "rerun") return inner(command, args, options);
+			calls.push(`${command} ${args.join(" ")}`);
+			claimsAtRerun.push(new CiRerunStore(ctx.home).read().entries.length);
+			if (rerunError) throw new Error(rerunError);
+			return "";
+		};
+		return checkMainCi({ project: "demo", cwd: ctx.clone, home: ctx.home, store: ctx.store, login: "me", exec });
+	};
+	return { calls, claimsAtRerun, reruns: () => calls.filter((call) => call.startsWith("gh run rerun")), go };
+}
+
+test("PR1: an attempt-1 Install treehouse failure on main is claimed, rerun once and not latched; attempt 2 latches", async (t) => {
+	const ctx = setup(t);
+	const b = rerunBench(ctx);
+	const obs = await b.go({ tip: T1, runs: [failed(T1, 41, { attempt: 1 })], jobs: suiteJobs("Install treehouse") });
+	assert.equal(obs?.event, "main_ci_rerun", obs?.reason);
+	assert.deepEqual(b.reruns(), ["gh run rerun 41 --failed"]);
+	assert.deepEqual(b.claimsAtRerun, [1], "the claim was on disk before gh run rerun ran");
+	assert.deepEqual(new CiRerunStore(ctx.home).read().entries.map((entry) => [entry.job_id, entry.head_sha, entry.run_id, entry.step]), [["main-demo", T1, 41, "Install treehouse"]]);
+	assert.equal(ctx.store.entry("demo"), undefined, "no latch while the rerun runs");
+	assert.match(formatMainCiNotice(obs!), /^MAIN CI RERUN — demo: infra-only failure on 111111111111, rerun once; no action \(ci rerun: .*"Install treehouse"/);
+	// The rerun's attempt 2 fails the same way: today's latch, no second rerun.
+	const again = await b.go({ tip: T1, runs: [failed(T1, 41, { attempt: 2 })], jobs: suiteJobs("Install treehouse") });
+	assert.equal(again?.event, "main_ci_failed");
+	assert.match(again?.reason ?? "", /attempt 2: a second failure is the parent's/);
+	assert.equal(ctx.store.entry("demo")?.red_since_sha, T1);
+	assert.equal(b.reruns().length, 1);
+});
+
+test("PR1: a suite failure on main latches with no rerun and no claim", async (t) => {
+	const ctx = setup(t);
+	const b = rerunBench(ctx);
+	const obs = await b.go({ tip: T1, runs: [failed(T1, 41, { attempt: 1 })], jobs: suiteJobs("Run suite (typecheck + tests)") });
+	assert.equal(obs?.event, "main_ci_failed");
+	assert.equal(ctx.store.entry("demo")?.red_since_sha, T1);
+	assert.deepEqual(b.reruns(), []);
+	assert.deepEqual(new CiRerunStore(ctx.home).read().entries, []);
+});
+
+test("PR1: a refused gh run rerun latches, names the refusal and keeps its claim", async (t) => {
+	const ctx = setup(t);
+	const b = rerunBench(ctx, "HTTP 403: forbidden");
+	const obs = await b.go({ tip: T1, runs: [failed(T1, 41, { attempt: 1 })], jobs: suiteJobs("Install treehouse") });
+	assert.equal(obs?.event, "main_ci_failed");
+	assert.match(obs?.reason ?? "", /gh refused \(41: .*HTTP 403: forbidden\)/);
+	assert.equal(ctx.store.entry("demo")?.red_since_sha, T1);
+	assert.equal(new CiRerunStore(ctx.home).read().entries.length, 1, "a gh fault never earns a second try");
+	assert.equal(b.reruns().length, 1);
 });

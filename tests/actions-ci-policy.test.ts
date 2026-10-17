@@ -117,7 +117,7 @@ test("native adapters (merge-ask/integrate/watch, foreign watch, main CI) send o
 	};
 	const home = createScratchHome();
 	try {
-		const obs = await checkMainCi({ project: "demo", cwd: "/x", store: new MainCiStore({ home: home.path }), login: "me", exec: mainExec });
+		const obs = await checkMainCi({ project: "demo", cwd: "/x", home: home.path, store: new MainCiStore({ home: home.path }), login: "me", exec: mainExec });
 		assert.equal(obs?.event, "main_ci_failed");
 	} finally {
 		home.cleanup();
