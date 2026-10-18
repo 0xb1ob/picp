@@ -498,8 +498,10 @@ export interface ProcessVersion {
 export interface UpstreamVersion {
  state: "current" | "behind" | "ahead" | "diverged" | "unknown"; behind: number | null; ahead: number | null; reason: string | null;
  checked_at: string | null;
- /** `state/update.json` + `data/update.json`; null when the updater never ran. */
- /** `progress`: the run's phase or result as a sentence with its UTC clock and next step; `progress_short` fits the pill. */
+ /**
+  * `state/update.json` + `data/update.json`; null when the updater never ran. `progress`: the run's phase or result
+  * as a sentence with its UTC clock and next step; `progress_short` fits the pill.
+  */
  updater: {enabled: boolean; phase: string | null; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number; progress: string | null; progress_short: string | null} | null;
 }
 /** `GET /api/version`: picked fields only, never a token, csrf or socket. */

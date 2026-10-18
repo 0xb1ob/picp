@@ -7,7 +7,7 @@ import { resolveForgeRepository } from "./forge-url.ts";
 import type { EnsureCloneResult } from "./projects.ts";
 import { type ProjectTracker, projectTracker } from "./trackers/config.ts";
 
-/** Advisory and never throws: a failed probe prints `unknown`, never "no CI" and never gh's output. */
+/** Advisory: a failed probe prints `unknown`, never "no CI" or gh's output; a throwing `run` propagates. */
 export function formatReadiness(home: string, project: EnsureCloneResult["project"], clonePath: () => string, run: CommandRunner): string {
 	const { name } = project;
 	const forge = resolveForgeRepository(project.clone_url, project.forge);

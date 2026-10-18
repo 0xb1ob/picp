@@ -81,6 +81,8 @@ export const DRAIN_TIMEOUT_S = 600;
 /** `skipped_busy` for this many × interval_min: mid-turn workers no longer skip, the drain decides (cp-ccm0). */
 export const BUSY_FORCE_FACTOR = 4;
 export const DRAIN_WAIT_MS = 660_000;
+/** After a drain_timeout (or a held-back rollback) the next run waits this many × interval_min. */
+export const DRAIN_TIMEOUT_RETRY_FACTOR = 4;
 export const VERIFY_MS = 120_000;
 /** Extra wait while the parent is alive but busy: PARENT_UNSETTLED or a doctor queued behind a live parent; never for an absent parent or an observed failure. */
 export const VERIFY_SETTLE_MS = 300_000;
@@ -306,7 +308,7 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		}
 		if (prior.phase === "updating" && git("rev-parse", "HEAD").stdout.trim() === from) return failBeforeMerge("a run was interrupted before the merge", { from, to });
 		// A rollback that live workers held back waits like a drain timeout before it drains again.
-		if (prior.phase === "rolling_back" && prior.last_result === "rollback_failed" && since(prior.last_run_at) < 4 * interval) return undefined;
+		if (prior.phase === "rolling_back" && prior.last_result === "rollback_failed" && since(prior.last_run_at) < DRAIN_TIMEOUT_RETRY_FACTOR * interval) return undefined;
 		return rollback(from, to, lock, `a run left phase ${prior.phase}`);
 	}
 	if (prior.last_result === "rollback_failed") {
@@ -315,7 +317,7 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 	}
 	if (typeof config === "string") return finish("config_invalid", config);
 	if (!config.enabled) return finish("skipped_disabled", "auto-update is off (data/update.json absent or enabled: false)");
-	if (!dry && since(prior.last_run_at) < interval * (prior.last_result === "drain_timeout" ? 4 : 1)) return undefined;
+	if (!dry && since(prior.last_run_at) < interval * (prior.last_result === "drain_timeout" ? DRAIN_TIMEOUT_RETRY_FACTOR : 1)) return undefined;
 
 	let from: string;
 	let to: string;
