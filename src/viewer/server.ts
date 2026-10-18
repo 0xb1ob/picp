@@ -53,7 +53,8 @@ import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, se
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
-import { readVersion } from "./version-view.ts";
+import { readRunning, readVersion } from "./version-view.ts";
+import { SHA } from "./git-read.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
 import { diffJson } from "./json-delta.ts";
 import { viewVersions } from "./view-versions.ts";
@@ -430,7 +431,13 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 					send(res, log === undefined ? 404 : 200, "text/plain; charset=utf-8", log ?? "Run log unavailable (missing or exceeds 16 MiB).\n", { "content-security-policy": "default-src 'none'; frame-ancestors 'none'" });
 					return;
 				}
-				if (job) sendView(req, res, job); else sendJson(res, 404, { error: "no such job" });
+				if (!job) { sendJson(res, 404, { error: "no such job" }); return; }
+				const merge = job.job.merge_sha?.toLowerCase();
+				if (!merge || !SHA.test(merge)) { sendView(req, res, job); return; }
+				// With a merge_sha, finished_at is the merge receipt's merged_at (jobs-view.ts).
+				readRunning(merge, { home: options.home, stateDir: options.stateDir }, job.job.finished_at)
+					.then((running) => sendView(req, res, { ...job, running }))
+					.catch(() => { if (!res.headersSent) sendView(req, res, { ...job, running: { checkout: "unknown", since: null, why: "version read failed", processes: [] } }); });
 				return;
 			}
 			if (url.pathname.startsWith("/assets/viewer/")) {
