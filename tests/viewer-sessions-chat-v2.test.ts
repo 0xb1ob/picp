@@ -267,6 +267,31 @@ test("quick replies send the exact typed answer once; a sent answer holds the ch
 	assert.equal(s.root.querySelector(".session-replies-state")?.textContent, "Dashboard control is off");
 });
 
+test("quick replies: a chip click holds them through a later composer send, a reload and a queued card reply, until the ask closes", async t => {
+	// #342 review (a): the chips read only the latest `delivery`, so a composer send that replaced it re-enabled them and
+	// a second chip could answer the same ask twice. Recorded (status.recent) and pending answers hold them as well.
+	const s = stage(t), sends: ControlBody[] = [], ask = awaiting("ask-aaaa");
+	const control = (over: Partial<ControlView> = {}): ControlView => ({ status: status(), delivery: null, send: body => { sends.push(body); }, ...over });
+	const held = () => [...s.root.querySelectorAll(".session-reply")].every(b => (b as HTMLButtonElement).disabled);
+	await act(() => replies(s.root, ask, control()));
+	await s.click(s.root.querySelector(".session-reply"));
+	await act(() => replies(s.root, ask, control({ delivery: { id: "dc-2", state: "queued", reason: null, ask_id: null } })));
+	assert.ok(held(), "the composer's send replaced `delivery`; the chips stay disabled");
+	assert.match(s.root.querySelector(".session-replies [role=status]")!.textContent!, /^An answer is on its way/);
+	assert.deepEqual(sends, [{ kind: "answer", ask_id: "ask-aaaa", label: "Keep" }]);
+	await act(() => unmount(s.root));
+	await act(() => replies(s.root, ask, control({ status: status({ recent: [{ id: "dc-1", kind: "answer", state: "delivered", at: local(15, 9), reason: null, ask_id: "ask-aaaa" }] }) })));
+	assert.ok(held(), "after a reload, the recorded answer holds them");
+	await act(() => unmount(s.root));
+	const queued = { key: "k", id: "dc-3", at: local(15, 9), state: "queued", reason: null, ask_id: "ask-aaaa", body: { kind: "message", text: "other" } } as NonNullable<ControlView["pending"]>[number];
+	await act(() => replies(s.root, ask, control({ pending: [queued] })));
+	assert.ok(held(), "a queued free-text reply to the same card holds them");
+	await act(() => replies(s.root, ask, control({ pending: [{ ...queued, state: "failed" }] })));
+	assert.ok(!held(), "a failed one does not");
+	const closed = { ...view([card("ask-aaaa", "answered")]), open_asks: [ask] } as SessionsResponse;
+	assert.doesNotMatch(html(closed, undefined, control()), /session-replies/, "the journal closing the ask removes them");
+});
+
 test("header: Operator with the recorded state and model; missing busy is unknown, history and an unreadable status say so", () => {
 	const data = { ...view([]), operator_context: { model: "fixture-model" } } as SessionsResponse;
 	const state = (control?: ControlView, over: Partial<SessionsResponse> = {}) => /<span class="session-heading-state">[\s\S]*?<\/span><span>([^<]*)<\/span>/.exec(html({ ...data, ...over }, undefined, control))?.[1];
