@@ -369,16 +369,21 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   a `[cp-skill <name> <dir>]` line; the Full transcript strips those lines from a dashboard message and shows one
   `@name` chip each (`components/TranscriptSkills.tsx`, `SessionEntry.skills`, reusing `.session-files`). Job detail
   shows a **Skills** fact (`ViewerJob.skills` from the fleet record, "none" when absent) as one wrapping `<code>` line.
-- **Mobile layout** (below 900 px, every Sessions view): the global header and the
-  bottom nav give way to one 48 px top bar — back to Overview, a menu of every
-  session (Operator ↔ you, CP parent, each worker), the view's name, the live dot,
-  the ctx percent, the composer's status chip (`busy`/`idle`/`not running`, then the
-  last send's state) and a ⋯ sheet with Decisions / Full transcript, the tool-call
-  toggle, Search, the session file picker and the file name. Only the transcript
-  scrolls; the shell follows `visualViewport` so the composer sits above the
-  on-screen keyboard. The whole app disables zoom
-  (viewport `maximum-scale=1, user-scalable=no, viewport-fit=cover`,
-  `touch-action: manipulation`, 16 px fields on mobile).
+- **Mobile layout** (below 900 px, every Sessions view; chat v2 PR 5): the global header and the bottom nav give way
+  to one 48 px top bar — a 44 px back to Overview, the 28 px avatar, the name over an 11 px line (the state dot, then
+  the `# thread` filter whose native select covers the whole name column, or the state text where there are no
+  threads), the live dot and a 44 px ⋯ (with the version-alert dot). The ⋯ sheet holds everything the phone moved
+  out of the heading and composer: the state line (dot, state · model, ctx %), the session streams (Operator ↔ you,
+  CP parent, Workers, each worker with its run phase), the thread chips (+ New first, Mark done last; a chip closes the
+  sheet, + New and Mark done keep it for their dialog or refusal), the tool-call toggle, Search, the session file
+  picker and the file name, the Viewer version and Restart session. Escape or a tap outside closes it, Escape returns
+  focus to ⋯. The composer is one row — attach, the 46 px auto-growing 16 px field, ⋯ steer/abort while busy, round
+  send, all 44 px; its own `#` picker and Options are desktop-only. Quick-reply chips are a 38 px face in a 44 px hit
+  area. Only the transcript scrolls; the shell follows `visualViewport` so the composer sits above the on-screen
+  keyboard, and a reader scrolled up keeps their place while a new message raises **Jump to latest**. Measured in
+  headless Chrome (`tests/fixtures/sessions-chat-v2-browser.ts --stage pr5` fails on a page scroll, a target under
+  44 px, a field under 16 px or a composer overlap); a physical iPhone keyboard remains a device check. The whole app
+  disables zoom (viewport `maximum-scale=1, user-scalable=no, viewport-fit=cover`, `touch-action: manipulation`).
 - **Pinned decisions** (cp-6kt6; every width): open asks sit above the composer as one
   "N decisions waiting ▾" bar (`aria-expanded`) that opens into a sheet of the full cards
   (45vh, 60dvh below 900 px, scrolling inside) and closes after an answer. The open/collapsed
@@ -474,9 +479,9 @@ sorts the one chat into threads: views of one session, never separate contexts, 
 is kept in `localStorage` `cp-thread` (absent is **All messages**; a storage that refuses the write warns and the choice holds for
 the view). It drives everything at once: the transcript filter (`visibleEntries`: the entries filed under that thread, plus a `shared` one — a bridge relay, a system entry, the inbox replay — only between that thread's first and last own entry; **All messages** shows everything), the chips, the
 sidebar and the composer picker. A tag with no thread yet shows no entries and `No messages in <tag> yet`; its first send creates it. A thread with no own entries shows none either. The pinned "N decisions waiting" section is never filtered. Below 900 px a `<nav
-class="session-threads" aria-label="Threads">` filter line sits directly under the top bar: **All messages**, then each thread not
+class="session-threads" aria-label="Threads">` of chips wraps inside the top bar's ⋯ sheet (the bar's `#` filter is the same selection): **+ New**, **All messages**, then each thread not
 done, its label the tag plus a waiting badge (`· 2`, open asks plus unacknowledged answers, spelled out in its
-`aria-label`), `aria-pressed` on the selected one, then **Mark done** for it (on the phone it ends the filter line; on desktop it is quiet text on the selected row); 44 px chips, the row scrolls sideways and
+`aria-label`), `aria-pressed` on the selected one, then **Mark done** for it (on the phone it ends the chips; on desktop it is quiet text on the selected row); 44 px chips that wrap, never scroll, and the nav
 is `display: none` at 900 px and up. There the Chats list nests a **Threads** section under the Operator row (only in the Full
 transcript): **# All messages** first, a row per open or waiting thread (its badge `Waiting N`, never `· N`), a selected new tag, done threads in a collapsed `Done (n)` (open when one is selected). **Mark done** (`POST
 /api/threads/done {id}` with the thread token, `x-cp-control-token`) is disabled, with the reason as its title, while the

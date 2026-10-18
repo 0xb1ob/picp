@@ -47,7 +47,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  const listed=screen({...sessions,workers});
  // S8 keeps the short model while making the observed run phase readable in both switcher and sidebar.
  assert.match(listed,/Fleet · 2 live/); assert.match(listed,/session-dot-working/); assert.match(listed,/session-dot-held/); assert.doesNotMatch(listed,/waiting · m|session-dot-waiting/); assert.match(listed,/<small class="session-model">m · working<\/small>/);
- const switcher=parseHTML(`<body>${listed}</body>`).document.querySelector('.session-bar-views nav')!;
+ const switcher=parseHTML(`<body>${listed}</body>`).document.querySelector('nav.session-bar-views')!;
  assert.deepEqual([...switcher.querySelectorAll('.session-bar-worker small')].map(e=>e.textContent),["working","idle","exited"]);
  const unknown=screen({...sessions,workers:[{...workers[0],run_phase:null}]});
  assert.match(unknown,/>no run status</); assert.doesNotMatch(unknown,/>waiting</);

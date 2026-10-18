@@ -11,12 +11,9 @@ import { RestartSession, restartShown } from "./RestartSession.tsx";
 import { VersionBadge } from "./VersionBadge.tsx";
 
 /**
- * The shell's ⋮ menu, always shown. Refresh reloads the page (and names the last updated time); Copy link writes
- * this view's URL; Notifications shows the push phase and links to #more, where the toggle stays; Viewer is the
- * version badge. Restart session is the last row, only while a session runs. Esc and a tap outside close it; a dot
- * shows a restart under way or a version alert. The panel mounts only while open, except that a screen's `extra` rows
- * (always in the DOM, hidden by the closed details) keep it mounted.
- */
+ * The shell's ⋮ menu: Refresh, Copy link, Notifications (links to #more), the Viewer version and, while a session runs,
+ * Restart session. Esc and a tap outside close it; a dot shows a restart or a version alert. The panel mounts only while
+ * open, except that a screen's `extra` rows (always in the DOM, hidden by the closed details) keep it mounted. */
 export function MoreMenu({control, version = {view:null, error:null}, updatedAt = null, extra}: {control: ControlView | undefined; version?: VersionState; updatedAt?: string | null; extra?: ComponentChildren}) {
  const menu = useRef<HTMLDetailsElement>(null);
  const [open,setOpen] = useState(false);

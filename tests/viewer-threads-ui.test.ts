@@ -76,7 +76,10 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 	assert.deepEqual(chips, [["+ New", null], ["All messages", "true"], ["billing-bug · 2", "false"], ["ops", "false"]], "+ New first, All pressed; done threads are not chips; + New opens the dialog");
 	assert.equal(all.querySelector('nav.session-threads button[aria-pressed="false"]')?.getAttribute("aria-label"), "billing-bug: waiting, 1 open ask(s), 1 unacknowledged answer(s)");
 	const nav = all.querySelector("nav.session-threads")!;
-	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
+	// PR 5: no strip under the top bar; the chips wrap in its ⋯ sheet and the bar's # filter picks the same selection.
+	assert.equal(nav.parentElement?.getAttribute("class"), "session-bar-threads", "the chips live in the top bar's ⋯ sheet");
+	assert.equal(nav.closest(".session-bar-sheet")?.firstElementChild?.getAttribute("class"), "session-bar-state", "under the state line");
+	assert.equal(all.querySelector(".session-bar-sub .session-thread-filter select")?.getAttribute("aria-label"), "Show thread", "the # filter under the name");
 	const sidebar = all.querySelector('.session-sidebar section[aria-label="Threads"]');
 	assert.ok(sidebar, "a Threads section in the Chats list");
 	assert.equal(sidebar!.previousElementSibling?.getAttribute("aria-label"), "Operator", "nested right under the Operator chat");
@@ -243,7 +246,7 @@ test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine show
 	assert.match(css.slice(desktop), /\.session-threads \{ display: none; \}/, "no chips at 900 px and up");
 	assert.doesNotMatch(css.slice(0, desktop), /\.session-threads \{[^}]*display: none/);
 	assert.match(css, /\.session-thread-chip \{[^}]*min-height: 44px/);
-	assert.match(css, /\.session-threads \{[^}]*overflow-x: auto/);
+	assert.match(css, /\.session-threads \{[^}]*flex-wrap: wrap/, "the sheet wraps every chip; none scrolls out of reach");
 	const control = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), phone = control.lastIndexOf("@media (max-width: 899px)");
 	assert.match(control.slice(phone), /\.thread-pill > select \{ font-size: 16px; \}/, "16 px fields on the phone");
 	assert.doesNotMatch(control, /operator-composer-thread (input|button)/, "the dead inline-tag rules are gone");

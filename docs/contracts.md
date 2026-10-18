@@ -1605,7 +1605,9 @@ login, a click on a host — is a `cp_parent ask`; `cp_review` owns the diff, so
 wake escalates it, never holding an integration to re-review), and the plan-review
 procedure. The ask/decide split is one tier up from AGENTS.md §Escalation's
 own list: `operatorAction(kind, inScope)` in `src/operator-note.ts` says
-`plan_approval` is a decide only when the mandate already covers it, every
+`plan_approval` is a decide only when the mandate already covers it,
+`mandate_creation` only when the human asked for that work (a named defect or
+feature in a registered project is the grant, #322), and every
 other escalation kind is always an ask. `evals/operator-decide-vs-ask.json`
 pins that mapping over at least four kinds, scored for free — a live-model
 claim about what the main LLM actually does with the note is not made here,

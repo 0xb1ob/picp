@@ -13,7 +13,7 @@
  * applies the same judgement to what the parent relays. Acceptance requires
  * both lists appear in the note exactly as written here. */
 export const OPERATOR_ASK_LIST =
-	"mandate creation, product ambiguity, scope expansion, risk high/irreversible, loop exhausted, budget (USD cap or token ceiling), conflicting acceptance, merge refused, mission end";
+	"mandate creation for work the human did not ask for (a message naming a defect or feature in a registered project is the grant; an ambiguous request or a research-to-build choice still asks), product ambiguity, scope expansion, risk high/irreversible, loop exhausted, budget (USD cap or token ceiling), conflicting acceptance, merge refused, mission end";
 export const OPERATOR_DECIDE_LIST =
 	"in-scope plan approval, how-questions, review findings, test failures, next job, merge when repo permits, bounded recovery, token-cap raise within the ceiling";
 
@@ -87,11 +87,10 @@ An identifier is an address, not a description: give \`cp_parent status\`'s pid 
 `;
 
 /**
- * Deterministic decide-vs-ask split, one escalation kind at a time (eval
- * corpus below). `plan_approval` is the one kind that is a decide when the
- * mandate already covers it — every other kind is always an ask.
+ * Deterministic decide-vs-ask split, one escalation kind at a time (eval corpus below). `plan_approval` (mandate
+ * covers it) and `mandate_creation` (the human asked for that work) are decides when `inScope`; all else asks.
  */
 export function operatorAction(kind: string, inScope = false): "ask" | "decide" {
-	if (kind === "plan_approval") return inScope ? "decide" : "ask";
+	if (kind === "plan_approval" || kind === "mandate_creation") return inScope ? "decide" : "ask";
 	return "ask";
 }
