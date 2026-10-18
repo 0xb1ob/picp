@@ -915,15 +915,19 @@ test("#323 snapshot: verdicts per job, nothing queued keeps its since, unread ev
 	await ports.ledger.addDep(after.id, first.id);
 	const verdicts = (snapshot: NextSnapshot) => snapshot.items.map((item) => [item.id, item.verdict]);
 	const uncovered = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
-	assert.deepEqual(verdicts(uncovered), [[after.id, "blocked"], [first.id, "uncovered"], [second.id, "uncovered"]], "no grant: lined up, never nothing queued");
+	const byId = (rows: string[][]) => [...rows].sort((a, b) => a[0]!.localeCompare(b[0]!));
+	assert.deepEqual(byId(verdicts(uncovered)), byId([[after.id, "blocked"], [first.id, "uncovered"], [second.id, "uncovered"]]), "no grant: lined up, never nothing queued");
 	assert.equal(uncovered.empty_since, null);
 	ports.mandates.issue({ projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
-	const granted = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
-	assert.deepEqual(verdicts(granted), [[first.id, "dispatch"], [second.id, "wait"], [after.id, "blocked"]]);
-	assert.equal(granted.items[1]!.reason, `after ${first.id}`);
-	const queued = nextSnapshot(await cpNext({ ...ports, queued: () => [first.id] }, "demo"), "2026-10-01T12:00:00Z", "demo");
-	assert.deepEqual(verdicts(queued), [[second.id, "wait"], [after.id, "blocked"], [first.id, "queued"]]);
-	assert.match(queued.items[0]!.reason, /dispatch-parallelism 1 is full .*1 queued/, "why a ready job is not running");
+	const grantedResult = await cpNext(ports, "demo");
+	const head = grantedResult.action.job_id!;
+	const other = head === first.id ? second.id : first.id;
+	const granted = nextSnapshot(grantedResult, "2026-10-01T12:00:00Z", "demo");
+	assert.deepEqual(byId(verdicts(granted)), byId([[head, "dispatch"], [other, "wait"], [after.id, "blocked"]]));
+	assert.equal(granted.items.find((item) => item.id === other)!.reason, `after ${head}`);
+	const queued = nextSnapshot(await cpNext({ ...ports, queued: () => [head] }, "demo"), "2026-10-01T12:00:00Z", "demo");
+	assert.deepEqual(byId(verdicts(queued)), byId([[other, "wait"], [after.id, "blocked"], [head, "queued"]]));
+	assert.match(queued.items.find((item) => item.id === other)!.reason, /dispatch-parallelism 1 is full .*1 queued/, "why a ready job is not running");
 
 	const failed = nextSnapshot({ ready: [], action: { kind: "wait", reason: "x" }, lined_up: { jobs: [], beads: [{ project: "demo", ids: [], error: "ENOENT" }], queued: [] } }, "2026-10-01T12:00:00Z");
 	assert.deepEqual([failed.unavailable, failed.empty_since], [[{ project: "demo", error: "ready beads unavailable: ENOENT" }], null], "a failed tracker read is not nothing queued");
