@@ -101,7 +101,7 @@ Decisions page; `transcript=0` still renders the recorded asks, answers, delegat
 and where the transcript is refused with 403 the app falls back to it silently. The Full transcript is
 the operator session's own pi JSONL, entry for entry, as the CLI
 shows it (user and assistant messages, collapsed thinking, tool calls hidden by default behind
-one header toggle — *Tools N*, N the tool calls in view (its label names Show/Hide); the choice is remembered in `localStorage` under one key shared by every view, and a
+one toggle in the ⋮ menu — *Tools N*, N the tool calls in view (its label names Show/Hide); the choice is remembered in `localStorage` under one key shared by every view, and a
 run of consecutive calls collapses to one *≡ N steps · detail ▸* pill that opens that run's card
 alone; a parsed bridge notice right above the run joins its card, keeping its own toggle, and a card naming a job ends
 in *Open job transcript →* (`#job/<id>?tab=transcript`). With tools shown every card is open and has no pill.
@@ -314,7 +314,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 
 - **Composer** (`components/OperatorComposer.tsx`): one row — an auto-growing textarea
   (16,000 characters; one line, up to about five before it scrolls; the placeholder
-  carries the hint, `Message #tag (Enter to send)` with a thread selected; the paperclip sits inside the field and a status line reads `Posting to #tag` / `Posting to no thread`) and a round send button that does what Enter does. While the
+  carries the hint, `Message #tag (Enter to send)` with a thread selected; the paperclip leads the footer and the `#` pill names the thread) and a round send button that does what Enter does. While the
   session is busy a ⋯ menu beside it holds `Steer now` and `Abort turn` (abort
   needs a second, confirming tap). Enter sends — after this turn while the session
   is busy, a plain send while it is idle — and Shift+Enter starts a new line
@@ -340,7 +340,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   Composer POSTs carry an optional shape-checked `client_id` (`dc-<timestamp>-<8 hex>`), chosen before the request. The current bridge/inbox uses it as the dashboard id so even a transcript that beats the HTTP acknowledgement replaces the sending bubble directly. Send again chooses a fresh id. It is correlation, not automatic retry or an authorization field; old clients without it still receive a server id. A running older bridge may ignore it until the session restarts.
   Shared attachment interface: `ControlMessageBody` in `src/viewer/api-types.ts` is the message arm of the server's body and viewer `ControlBody`; `PendingSend.body` retains that entire body for retry. Chips, browser persistence and journal projection preserve both `images` and `files` id lists, including mixed sends from the text attachment flow below. Queued bubbles add no upload or file-delivery capability. The pending styles inherit the existing light/dark tokens and the own-pill widths (84% on a phone, 72% from 900 px); controls stay 44 px and long text and ids wrap at 390 px and 1440 px.
 - **Image attachments** (cp-br81; docs/contracts.md §Image attachments): a 44 px
-  paperclip before the textarea (only when the status says `images: true`, i.e. the
+  paperclip before the textarea (enabled only when the status says `images: true`, i.e. the
   session's bridge takes them) opens a hidden `<input type=file multiple
   accept=image/*>`; pasting image files into the textarea attaches them too (a paste
   that also carries text keeps the text). Each file uploads at once, one at a time,
@@ -584,8 +584,11 @@ Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks, histo
 The conversation header (chat v2) shows the avatar, the name and one state line from recorded facts only: the operator
 transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle, a missing `busy` is "Status unknown",
 an unreadable status says so, an older file is "Historical transcript"), then the session's recorded model and ctx;
-the parent and workers keep their recorded phase. Its `# All messages ▾` filter is the composer's thread picker over
-the same `cp-thread` selection. The composer is one rounded box at 900 px and up: the field over attach, `# No thread ▾`,
+the parent and workers keep their recorded phase. Its compact `# All messages ▾` pill is the composer's thread picker
+over the same `cp-thread` selection (a native select laid transparent over the pill face). The transcript file picker
+and *Tools N* sit at the top of the page's ⋮ menu (`PageHeader`'s `menu` rows), not in the header row. The composer is
+one rounded box at 900 px and up: the field over the paperclip (always shown when the page has an upload port;
+disabled, with the reason in its title, while the session does not take attachments), a `# No thread ▾` pill,
 `Options ▾` (the session file) and the round send; below 900 px one row with a 44 px `#` target. Quick replies
 (`QuickReplies.tsx`) are the verbatim options of exactly one open ask whose card is in the latest operator transcript
 (and in the selected thread, if any); none for zero or several such asks, history, or other tiers. A chip sends the

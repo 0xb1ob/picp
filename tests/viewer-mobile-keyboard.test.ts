@@ -138,5 +138,6 @@ test("the collapsed phone composer is one row (attach, thread, field, ⋯, send)
 	assert.match(phone, /\.operator-composer-more, \.operator-composer-send \{ order: 2; \}/, "send stays at the row's end");
 	assert.match(phone, /\.operator-composer-options \{ display: none; \}/);
 	assert.match(phone, /\.operator-composer-thread \{[^}]*width: 44px; height: 44px;/, "the thread picker is one 44 px # target");
-	assert.match(phone, /\.operator-composer-thread select \{ position: absolute; inset: 0; width: 100%; opacity: 0; \}/, "the native select stays the control");
+	assert.match(css, /\.thread-pill > select \{ position: absolute; inset: -6px 0; width: 100%;[^}]*opacity: 0;/, "the native select stays the control");
+	assert.match(phone, /\.operator-composer-thread > select \{ inset: 0; \}/, "and covers the whole 44 px target");
 });

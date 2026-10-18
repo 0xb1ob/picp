@@ -326,7 +326,12 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  return <div class="sessions">
-  <PageHeader title="Chats"/>
+  {/* The ⋮ menu carries the transcript file and the tool-call toggle; the phone's ⋯ sheet keeps its own. */}
+  <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 ? <div class="session-menu">
+   {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
+   {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
+   {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
+  </div> : undefined}/>
   {threadsOn && threadsReady(threadsOn.status) && <NewThread threads={threadsOn} control={control} class="session-chats-new" label="+"/>}
   <aside class="session-sidebar" aria-label="Session streams">
    <section aria-label="Operator">{row(sessionHref("you"),"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
@@ -339,9 +344,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
     {threadsOn && <ThreadPicker threads={threadsOn} filter/>}
-    {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
-    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
-    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}

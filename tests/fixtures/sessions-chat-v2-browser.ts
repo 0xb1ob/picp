@@ -84,7 +84,7 @@ if (args.stage === "pr4") {
 }
 const body = (text: string) => ({ kind: "message" as const, text });
 const control: ControlStatusResponse = {
-	generated_at: GENERATED, enabled: true, running: true, reason: null, token: "fixture-token", busy: true, pending: true, session_file: "op.jsonl", recent: [],
+	generated_at: GENERATED, enabled: true, running: true, reason: null, token: "fixture-token", busy: true, pending: true, session_file: "op.jsonl", recent: [], images: true, files: true,
 	sends: [
 		{ id: "dc-queued", at: "2026-10-15T08:05:00Z", state: "queued", reason: null, ask_id: null, editable: true, body: body("Queued while the session is busy: open it as a draft.") },
 		{ id: "dc-failed", at: "2026-10-15T08:06:00Z", state: "failed", reason: "Session stopped before delivery", ask_id: null, body: body("This one failed to deliver.") },
@@ -197,11 +197,14 @@ try {
 				summary_x: [...document.querySelectorAll(".session-steps-open .session-steps-rows")].map(card => [...new Set([...card.querySelectorAll(".session-tool > summary > span")].map(s => Math.round(s.getBoundingClientRect().left)))]),
 				replies: [...document.querySelectorAll(".session-replies .session-reply")].map(b => b.textContent + (b.disabled ? " (disabled)" : "")),
 				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
+				thread_pills: [...document.querySelectorAll(".thread-pill")].map(p => Math.round(p.getBoundingClientRect().width)),
+				footer: [...document.querySelectorAll(".operator-composer-footer > :not(input)")].map(e => e.className.split(" ")[0]),
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
 				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
+		if (stage === "pr4" && facts.thread_pills.some((w: number) => w > 240)) throw new Error(`${name}: a # thread pill is ${facts.thread_pills.join("/")} px wide, not compact`);
 		const png = (await cdp("Page.captureScreenshot", { format: "png" })).data as string;
 		const file = join(out, `${name}.png`);
 		writeFileSync(file, Buffer.from(png, "base64"));
@@ -274,6 +277,9 @@ try {
 		// The header filter and the composer picker are one selection (cp-thread).
 		await capture("pr4-header-filter-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`(() => { const s = document.querySelector(".session-thread-filter select"); s.value = "sessions-v2"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`,
 			`document.querySelector(".operator-composer-thread select")?.value === "sessions-v2"`]]);
+		// The ⋮ menu carries the transcript file picker and Tools N above the shell's rows.
+		await capture("pr4-header-menu-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`document.querySelector(".page-header .shell-more > summary").click()`,
+			`!!document.querySelector(".shell-more[open] .session-menu .session-file-picker") && !!document.querySelector(".shell-more[open] .session-menu .session-tools-toggle")`]]);
 		// A chip is one exact answer POST; this read-only fixture refuses it, so the failure line shows and the chips re-enable.
 		await capture("pr4-reply-failed-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [["true", chips], [`document.querySelector(".session-reply").click()`, `!!document.querySelector(".session-replies-failed") && !document.querySelector(".session-reply").disabled`], at(".session-replies")]);
 		if (posts.join() !== "POST /api/operator/message") throw new Error(`pr4: a chip click sent ${posts.join(", ") || "nothing"}, not one answer`);

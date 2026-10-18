@@ -152,7 +152,8 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
      if (e.key !== "Enter" || e.shiftKey) return; e.preventDefault(); send(busy ? "followUp" : undefined); }}/>
    </div>
    <div class="operator-composer-footer">
-   {upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title="Attach files or images (or paste/drop)" disabled={sending} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
+   {/* The paperclip always leads the footer; disabled, its title says why it cannot attach now. */}
+   {control.upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title={upload ? "Attach files or images (or paste/drop)" : status.running ? "This session does not take attachments (⋮ → Restart session)" : "Attachments need a running session"} disabled={sending || !upload} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
    {thread && <ThreadPicker threads={thread}/>}
    {status.running && status.session_file && <details class="operator-composer-options">
@@ -172,7 +173,6 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
   {ready && mentions.known.length > 0 && <ul class="operator-composer-mentions" aria-label="Skills mentioned">{mentions.known.map(name => <li key={name}><code>@{name}</code></li>)}</ul>}
   {ready && unknown.map(name => <p key={name} role="status" class="operator-composer-hint">@{name} is not an installed skill — sent as plain text</p>)}
   {ready && catalog && "error" in catalog && <p role="status" class="operator-composer-hint">skill list unavailable: {catalog.error}</p>}
-  {ready && threadsReady(thread?.status) && <p class="operator-composer-posting">{thread?.selected ? `Posting to #${thread.selected}` : "Posting to no thread"}</p>}
   {/* A failure, or a delivered send with a reason (its thread not recorded), is an alert the phone shows too. */}
   {line && <p role={flagged ? "alert" : "status"} class={flagged ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}
  </section>;

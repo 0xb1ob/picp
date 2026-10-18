@@ -279,3 +279,16 @@ test("header: Operator with the recorded state and model; missing busy is unknow
 	assert.equal(state(undefined), "Checking status · fixture-model");
 	assert.equal(state(live({}), { operator_sessions: [{ id: "new.jsonl", at: local(16, 9) }, { id: "op.jsonl", at: local(15, 9) }], operator_session: "op.jsonl" }), "Historical transcript");
 });
+
+test("header: avatar, name, state, the # All messages pill and ⋮; the file picker and Tools N live in the ⋮ menu", () => {
+	// Amendment 2: the heading row was a wide native select plus the file picker and Tools N; both moved into ⋮.
+	const data = { ...view([entry("t1", "tool", local(16, 9), { name: "read", summary: "Read 1 line" })]), operator_sessions: [{ id: "new.jsonl", at: local(16, 9) }, { id: "op.jsonl", at: local(15, 9) }], operator_session: "new.jsonl" } as SessionsResponse;
+	const threads = { status: { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [], total: 0, warning: null }, selected: null, select() {}, done() {}, sending: null, failed: null } as unknown as ThreadsView;
+	const doc = parseHTML(`<body>${html(data, threads, { status: status({}), delivery: null, send() {} } as ControlView)}</body>`).document;
+	const heading = doc.querySelector(".session-heading")!;
+	assert.equal(heading.querySelector(".session-thread-filter.thread-pill .thread-pill-label")?.textContent, "All messages");
+	assert.equal(heading.querySelector(".session-file-picker, .session-tools-toggle"), null, "the heading carries no file picker or Tools N");
+	const menu = doc.querySelector(".shell-more .session-menu")!;
+	assert.equal(menu.querySelector("select")?.getAttribute("aria-label"), "Operator session file");
+	assert.equal(menu.querySelector(".session-tools-toggle")?.textContent, "Tools 1");
+});

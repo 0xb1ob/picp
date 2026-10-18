@@ -38,7 +38,11 @@
 .session-heading > .session-avatar { color: var(--text); overflow: visible; }
 .session-heading > .session-avatar-bot { color: var(--avatar-bot-text); }
 .session-heading-state { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.session-heading > .session-thread-filter { flex: 0 1 auto; flex-direction: row; align-items: center; gap: 2px; min-width: 0; color: var(--muted); font-size: 12px; }
+.session-heading > .session-thread-filter { flex: 0 1 auto; flex-direction: row; gap: 5px; }
+/* The ⋮ menu's Sessions rows: transcript file and Tools N, above the shell's own rows. */
+.session-menu { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 6px; margin-bottom: 4px; border-bottom: 1px solid var(--divider); }
+.session-menu .session-file-picker { padding: 0 8px 0 14px; }
+.session-menu .session-file-picker select { flex: 1 1 auto; }
 /* Quick replies: one ask's verbatim options as chips after the newest operator-session message; the consequence is the
    title and the chip's screen-reader description. */
 .session-replies { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 4px 0 12px; }
@@ -297,16 +301,11 @@
  .session-thread-row > .session-thread-done:hover:not(:disabled) { color: var(--text); }
  .session-sidebar details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 10px 0 60px; font-size: 12px; color: var(--muted); cursor: pointer; }
  .session-sidebar .session-thread-failed { display: block; padding: 0 18px 0 60px; white-space: normal; overflow-wrap: anywhere; }
- /* One 48px row: name, ctx percent, session picker, Tools N. Not sticky. */
- /* One 48px row: name, muted ctx %, session picker, quiet Tools N; the shell's status dot and ⋮ sit at its right end. No bar, no boxed button. */
+ /* One 48px row: avatar, name over state · model · ctx, the "# All messages" pill; the shell's ⋮ sits at its right end. */
  .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 48px; padding: 0 84px 0 16px; flex-shrink: 0; }
  .session-heading > div { flex: 1 1 140px; gap: 1px; }
  .session-heading strong { font-size: 15px; font-weight: 500; }
  .session-heading .session-ctx { font-size: 12px; color: var(--muted); }
- .session-heading .session-file-picker { flex: 0 1 auto; max-width: 100%; font-size: 0; }
- .session-heading select { max-width: 160px; min-height: 32px; padding: 0 6px; background: none; border: 0; color: var(--muted); font-size: 12px; }
- .session-heading > button { min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--muted); }
- .session-heading > button[aria-pressed=true] { background: none; color: var(--text); }
  .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
  /* Chat v2: one centred 820 px column (32 px sides) on 16/8 transcript padding; cards at most 670 px, own pills 72%. */
  .session-transcript { padding: 16px 0 8px; }

@@ -245,7 +245,7 @@ test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine show
 	assert.match(css, /\.session-thread-chip \{[^}]*min-height: 44px/);
 	assert.match(css, /\.session-threads \{[^}]*overflow-x: auto/);
 	const control = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), phone = control.lastIndexOf("@media (max-width: 899px)");
-	assert.match(control.slice(phone), /\.operator-composer-thread select \{ font-size: 16px; \}/, "16 px fields on the phone");
+	assert.match(control.slice(phone), /\.thread-pill > select \{ font-size: 16px; \}/, "16 px fields on the phone");
 	assert.doesNotMatch(control, /operator-composer-thread (input|button)/, "the dead inline-tag rules are gone");
 	assert.match(control, /\.new-thread \{[^}]*border-radius: 12px 12px 0 0/, "sheet below 900 px");
 	assert.match(control.slice(control.indexOf("@media (min-width: 900px)")), /\.new-thread \{[^}]*border-radius: 12px; \}/, "dialog from 900 px");

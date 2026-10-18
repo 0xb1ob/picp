@@ -55,7 +55,10 @@ test("composer images: attach, upload in order, thumbnails, remove, refusals, se
 	assert.equal($(".operator-composer-attach"), null, "no upload port: no paperclip");
 	await act(() => unmount(root));
 	await act(() => mount(root, control(ready)));
-	assert.equal($(".operator-composer-attach"), null, "the session's bridge does not take images: no paperclip");
+	// Chat v2 keeps the paperclip at the footer's left, disabled with the reason, instead of hiding it.
+	assert.equal(($(".operator-composer-attach") as HTMLButtonElement).disabled, true, "the bridge does not take images: disabled");
+	assert.match($(".operator-composer-attach")!.getAttribute("title")!, /does not take attachments/);
+	assert.equal($("input[type=file]"), null, "and no file input to open");
 	await act(() => unmount(root));
 
 	await act(() => mount(root, control({ ...ready, images: true })));

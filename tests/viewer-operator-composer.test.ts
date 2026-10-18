@@ -163,11 +163,12 @@ test("composer (chat v2): attach, # thread and a closed Options holding the file
  const picker = root.querySelector('select[aria-label="Thread"]');
  assert.ok(picker?.closest(".operator-composer-footer"),"the empty picker sits in the footer, outside Options");
  assert.equal(picker?.closest("details"),null);
- assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to no thread");
+ assert.equal(root.querySelector(".operator-composer-posting"),null,"the pill names the selection; no status line repeats it");
+ assert.equal(picker?.closest(".thread-pill")?.querySelector(".thread-pill-label")?.textContent,"No thread");
  assert.match(picker?.textContent ?? "",/^No thread$/);
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,{...threads,selected:"new-fixture-thread"}));
  assert.match(root.querySelector('select[aria-label="Thread"]')?.textContent ?? "",/new-fixture-thread \(new\)/);
- assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to #new-fixture-thread");
+ assert.equal(root.querySelector(".thread-pill-label")?.textContent,"new-fixture-thread");
  assert.equal(root.querySelector("textarea")?.getAttribute("placeholder"),"Message #new-fixture-thread…");
  await act(() => unmount(root));
  await act(() => mount(root,{status:{...ready,enabled:false,reason:"Dashboard control is off"},delivery:null,send:()=>{}}));

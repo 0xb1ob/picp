@@ -77,8 +77,9 @@ export function ThreadPicker({threads, filter = false}: {threads: ThreadsView; f
  if (!threadsReady(status)) return null;
  const live = status.threads.filter(t => t.state !== "done"), done = status.threads.filter(t => t.state === "done");
  const fresh = threads.selected && !status.threads.some(t => t.tag === threads.selected) ? threads.selected : null;
- return <div class={filter ? "session-thread-filter" : "operator-composer-thread"}>
-  <span aria-hidden="true">#</span>
+ // A compact pill: the face names the selection; the native select, transparent, lies over it and stays the control.
+ return <div class={filter ? "session-thread-filter thread-pill" : "operator-composer-thread thread-pill"}>
+  <span aria-hidden="true">#</span><span class="thread-pill-label" aria-hidden="true">{threads.selected ?? (filter ? "All messages" : "No thread")}</span><span aria-hidden="true">▾</span>
   <select aria-label={filter ? "Show thread" : "Thread"} value={threads.selected ?? ""} onChange={e => threads.select(e.currentTarget.value || null)}>
    <option value="">{filter ? "All messages" : "No thread"}</option>
    {fresh && <option value={fresh}>{fresh} (new)</option>}
