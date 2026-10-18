@@ -147,11 +147,6 @@ export function controlLine(status: ControlStatus | null | undefined): string {
  return status.busy ? "Session busy — send after this turn, steer, or abort" : "Ready";
 }
 
-/** The mobile top bar's tiny status chip: busy, idle or not running, then the last send's delivery state. */
-export function controlChip(status: ControlStatus | null | undefined, delivery: Delivery | null): string {
- const state = !status ? "checking" : "error" in status ? "unavailable" : !status.enabled ? "off" : status.offline ? "offline" : controlReady(status) ? (status.busy ? "busy" : "idle") : "not running";
- return delivery ? `${state} · ${delivery.state}` : state;
-}
 
 /** `POST /api/operator/start` `{"via": …}` (plus `"resume": true`) with the inbox token; the reply's state, or the refusal as an error. */
 export async function startOperator(fetch: Fetch, token: string, via: Launcher, resume = false): Promise<OperatorStartResponse | {error: string}> {

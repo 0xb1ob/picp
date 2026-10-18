@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import type { AwaitingDetail, ControlStatusResponse, SessionEntry } from "../src/viewer/api-types.ts";
 import { sessionsView } from "../src/viewer/sessions-view.ts";
-import { type ControlView, controlChip, controlLine, deliveryLine, readControl, sendControl, startOperator } from "../viewer-app/control.ts";
+import { type ControlView, controlLine, deliveryLine, readControl, sendControl, startOperator } from "../viewer-app/control.ts";
 import { overview } from "../src/viewer/overview-view.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -99,11 +99,13 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.equal(options.querySelector("p")?.textContent, "Delivers to the running session op.jsonl");
 	assert.equal(options.querySelector("code")?.textContent, "op.jsonl", "the filename stays reachable in Message options");
 	assert.match(ready, /class="operator-composer-state operator-composer-state-ready"/, "the ready status line is the one mobile hides");
-	// The mobile top bar: back, the view's name, the compact ctx, the status chip and the ⋯ sheet; no tab rows.
+	// The phone top bar (chat v2): back, avatar, the name over the state, the ⋯ sheet opening on the state line; no tab rows.
 	const bar = /<header class="session-bar">[\s\S]*?<\/header>/.exec(ready)?.[0] ?? "";
 	assert.match(bar, /href="#overview" aria-label="Back to Overview"/);
-	assert.match(bar, /<summary aria-label="Switch session"><strong>Operator ↔ you<\/strong>/);
-	assert.match(bar, /class="session-bar-status" role="status" title="Ready">idle<\/span>/);
+	assert.match(bar, /<div class="session-bar-id"><strong>Operator<\/strong>/);
+	assert.match(bar, /<nav class="session-bar-views" aria-label="Session streams"><a href="#sessions\?view=you" aria-current="page">Operator ↔ you<\/a>/, "switching lives in ⋯");
+	assert.match(bar, /<span class="session-dot session-dot-idle" role="img" aria-label="Idle · model unknown" title="Idle · model unknown"><\/span>/);
+	assert.match(bar, /<p class="session-bar-state" role="status"><span class="session-dot session-dot-idle"><\/span><span>Idle · model unknown<\/span>/);
 	assert.doesNotMatch(bar, />Decisions<\/a>|>Full transcript<\/a>/, "audit P4 #27: no Decisions | Full transcript toggle in the ⋯ sheet");
 	assert.match(bar, />Search<\/button>/);
 	assert.match(bar, /class="session-bar-file">Delivers to <code>op\.jsonl<\/code>/, "the session file name lives in the ⋯ sheet");
@@ -114,7 +116,8 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	const replies = parseHTML(ready).document.querySelector(".session-entries > .session-replies")!;
 	assert.deepEqual([...replies.querySelectorAll("button.session-reply")].map(b => b.textContent), ["Keep", "Raise"]);
 	assert.match(replies.querySelector(".session-replies-to")!.textContent!, /^Options from ask-aaaa: Question ask-aaaa$/);
-	assert.match(ready, /<strong>Operator<\/strong><span class="session-heading-state"><span class="session-dot session-dot-working"><\/span><span>Idle · model unknown<\/span>/);
+	// An Idle running session gets the idle dot; only a busy one is working (#342 review).
+	assert.match(ready, /<strong>Operator<\/strong><span class="session-heading-state"><span class="session-dot session-dot-idle"><\/span><span>Idle · model unknown<\/span>/);
 
 	const busy = screen(full, view(status({ busy: true })));
 	assert.match(busy, /class="operator-composer-send" aria-label="Send after this turn"/, "busy: the send button follows up, like Enter");
@@ -122,7 +125,8 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.match(busy, /<details class="operator-composer-more"><summary aria-label="Steer or abort"/, "busy: steer and abort behind the ⋯ menu");
 	for (const label of ["Steer now", "Abort turn"]) assert.match(busy, new RegExp(`>${label}</button>`));
 	assert.match(busy, /Session busy — send after this turn, steer, or abort/);
-	assert.match(busy, /class="session-bar-status" role="status"[^>]*>busy<\/span>/);
+	assert.match(busy, /<span class="session-dot session-dot-working" role="img" aria-label="Working · model unknown"/, "the top bar's dot");
+	assert.match(busy, /<span class="session-dot session-dot-working"><\/span><span>Working · model unknown<\/span>/);
 
 	const down = screen(full, view(status({ running: false, token: null, reason: "Session not running: no dashboard control record at /x/dashboard.json" })));
 	assert.match(down, /Session not running: no dashboard control record/);
@@ -145,7 +149,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	const parent = screen(sessionsView(state, "parent", null)!, view(status({})));
 	assert.doesNotMatch(parent, /operator-composer/, "nor does any other tier");
 	assert.match(parent, /<header class="session-bar">[\s\S]*?<strong>CP parent<\/strong>/, "the parent transcript gets the compact top bar too");
-	assert.doesNotMatch(parent, /session-bar-status/, "no composer, no status chip");
+	assert.match(parent, /<span class="session-bar-sub"><span class="session-dot session-dot-unknown" role="img" aria-label="No recent recorded activity · [^"]*"/, "no composer: its state, never a thread pill");
 	assert.match(decisions, /<header class="session-bar">/);
 });
 
@@ -168,12 +172,6 @@ test("client: sendControl and controlLine map 202/403/409/503 and an unreachable
 	assert.equal(deliveryLine({ id: "dc-1", state: "queued", reason: null, ask_id: null }), "Queued · dc-1");
 	assert.equal(deliveryLine({ id: "dc-1", state: "delivered", reason: null, ask_id: null }), "Delivered to the session · dc-1");
 	assert.equal(deliveryLine({ id: null, state: "failed", reason: "boom", ask_id: null }), "Failed: boom");
-	assert.equal(controlChip(null, null), "checking");
-	assert.equal(controlChip(status({}), null), "idle");
-	assert.equal(controlChip(status({ busy: true }), { id: "dc-1", state: "queued", reason: null, ask_id: null }), "busy · queued");
-	assert.equal(controlChip(status({ running: false, token: null }), null), "not running");
-	assert.equal(controlChip(status({ enabled: false, running: false, token: null }), null), "off");
-	assert.equal(controlChip({ error: "HTTP 403" }, { id: null, state: "failed", reason: "x", ask_id: null }), "unavailable · failed");
 });
 
 test("offline → starting → running (cp-daemon P3): the composer holds with the inbox token and offers Start session with the tmux hint; starting disables it; running opens it; the Overview line says offline · N held", async (t) => {
@@ -266,7 +264,6 @@ test("client: startOperator posts {via} with the inbox token and maps starting /
 	assert.deepEqual(await startOperator(reply(503, { state: "unavailable", reason: "no unit" }), "tok", "tmux"), { state: "unavailable", reason: "no unit" });
 	assert.deepEqual(await startOperator(reply(429, { error: "one start per 60 s; retry in 40 s" }), "tok", "tmux"), { error: "one start per 60 s; retry in 40 s" });
 	assert.deepEqual(await startOperator(async () => { throw new Error("x"); }, "tok", "herdr"), { error: "Could not reach this home" });
-	assert.equal(controlChip(status({ running: false, token: null, offline: true, inbox_token: "i" }), null), "offline");
 	assert.equal(controlLine(status({ running: false, token: null, offline: true, inbox_token: "i" })), "Operator session offline — a message waits here until a session attaches");
 });
 
