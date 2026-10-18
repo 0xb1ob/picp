@@ -36,7 +36,7 @@ export function PendingBubble({send,position,total,control,viewing,truncated}: {
    {/* picp-96n: links only the send's own recorded session; a plain hash link that posts nothing. */}
    {failed && send.target_session && send.target_session !== viewing && <a class="session-pending-evidence" href={`#sessions?view=you&transcript=1&session=${encodeURIComponent(send.target_session)}`}>Open the session it was handed to</a>}
    {failed && send.target_session && send.target_session === viewing && truncated && <p class="session-pending-detail">Older than this transcript's loaded window; it cannot be checked here.</p>}
-   {failed && !send.target_session && send.reason?.startsWith("Not confirmed") && <p class="session-pending-detail">Its session was not recorded; it cannot be checked here.</p>}
+   {failed && !send.target_session && send.reason?.startsWith("Not confirmed") && <p class="session-pending-detail">Its session is not available here; it cannot be checked here.</p>}
    {note && <p class="session-pending-detail" role="alert">{note}</p>}
    {changeable && draft === null && <div class="session-pending-actions"><button type="button" class="session-pending-edit" disabled={busy} onClick={()=>{setNote(null);setDraft(send.body.text);}}>Edit</button><button type="button" class="session-pending-cancel" disabled={busy} onClick={remove}>Cancel send</button></div>}
    {/* cp-y43c addendum 2: Send again is the only way a failed or lost message is sent again — a new message, on this click only. */}
