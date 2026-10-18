@@ -11,7 +11,8 @@ import { restartInFlight } from "../restart-control.ts";
 export function QuickReplies({ask, control}: {ask: AwaitingDetail; control?: ControlView | undefined}) {
  const ready = controlReady(control?.status);
  const mine = control?.delivery?.ask_id === ask.id ? control.delivery : null;
- const failed = mine?.state === "failed";
+ // A later send can replace `delivery`; the ask's own failed entry in `pending` then still re-enables the chips.
+ const failed = mine ? mine.state === "failed" : control?.pending?.some(p => p.ask_id === ask.id && p.state === "failed") === true;
  // A click holds the chips even after a later send (the composer's, another card's) replaces `delivery`.
  const [clicked,setClicked] = useState(false);
  useEffect(() => { if (failed) setClicked(false); }, [failed]);
