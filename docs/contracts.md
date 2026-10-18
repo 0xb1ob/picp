@@ -10070,7 +10070,7 @@ The policy table (`RECOVERY_POLICY` in `src/contracts.ts`):
 
 | class | action |
 |---|---|
-| `crash`, `timeout`, `provider_limit`, `agent_empty_output`, `settled_without_report` | `revive` — relaunch on the same session file (`cp_revive`), then send a brief that says continue, do not redo |
+| `crash`, `timeout`, `provider_limit`, `agent_empty_output`, `settled_without_report` | `revive` — relaunch on the same session file (`cp_revive`), then send a brief that says continue, do not redo, and names the interrupted call (name and id, never its arguments) whose synthetic "No result provided" error does not show whether it ran |
 | `wall_clock_exceeded`, `tool_call_cap_exceeded` | `redispatch` — the worktree is intact and the process is already stopped; the brief carries the on-disk evidence (`describeUnreportedWork`) and says finish from exactly that state |
 | `tool_loop`, `budget_exceeded`, `envelope_invalid`, `spawn_failed`, `model_call_failed` | `none` — a policy cause, escalated on the very first occurrence, never auto-recovered |
 
