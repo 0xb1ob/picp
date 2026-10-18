@@ -21,7 +21,7 @@ import {
 import { MandateError, MANDATE_JOBS_THIS_TURN, projectWideCapWarning, resolveMandateJobIds, resolveMandateObjectiveRef } from "../../src/mandate.ts";
 import { formatMandateDefaults, loadMandateDefaults, MANDATE_HOME_ONLY_FIELDS, resolveMandateGrant, sameProjectMandateOverride, setMandateDefault } from "../../src/mandate-defaults.ts";
 import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
-import { cpNext, dedupeNext, formatNext } from "../../src/next.ts";
+import { cpNext, dedupeNext, formatNext, writeNextSnapshot } from "../../src/next.ts";
 import { homeMandateProjects } from "../../src/project-report.ts";
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { preapprovalRecord } from "../../src/risk-preapproval.ts";
@@ -313,6 +313,11 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			);
 			// SAFETY: cpNext returns a JSON result for extension tool details.
 			let body = formatNext(result);
+			try {
+				writeNextSnapshot(cmdPost.fleet.home, result, isoTimestamp(new Date()), params.project);
+			} catch (error) {
+				body += `\nsnapshot: the viewer's Lined up strip was not updated (${String((error as Error).message ?? error).slice(0, 200)})`;
+			}
 			// A mission end is when the parent curates; say whether there is anything to curate so it never calls an empty one.
 			if (result.action.kind === "mission_end") body += `\nmemory: ${cmdPost.curationPlan().pending.length} pending candidate(s) \u2014 cp_memory curate only when above 0`;
 			if (params.full) seenNext.delete(params.project ?? "");

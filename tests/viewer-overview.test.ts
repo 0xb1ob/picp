@@ -15,6 +15,10 @@ import { MainCiStore } from "../src/main-ci.ts";
 import { liveUsageJobs } from "../src/mandate-usage.ts";
 import { readStatus, resolveStateDir, runtimeRoot } from "../src/viewer/sessions.ts";
 import type { RunRegistry } from "../src/runs.ts";
+import { build } from "esbuild";
+import type { Job } from "../src/ledger.ts";
+import { writeNextSnapshot } from "../src/next.ts";
+import { REPO_ROOT } from "./harness/index.ts";
 process.env.TZ = "UTC";
 const now = Date.parse("2026-09-26T12:00:00Z");
 function fixture(t: {after(fn: () => void): void}) {
@@ -278,4 +282,32 @@ test("in_flight context is the worker session when one is recorded, otherwise nu
  assert.equal(live?.context?.tokens, 15);
  assert.equal(live?.context?.window, 1000);
  assert.equal(none?.context, null);
+});
+
+test("#323 Lined up: the cp_next snapshot as written, its age, and nothing queued only when every source was read", async t => {
+ const {state, put} = fixture(t);
+ const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const screen=(data)=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
+ const {screen} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
+ assert.deepEqual(overview(state, now).lined_up, {availability:"missing", at:null, project:null, empty_since:null, items:[], unavailable:[]});
+ assert.match(screen(overview(state, now)), /Lined up · -.*No cp_next snapshot yet/s);
+ const job = {id:"cp-q1", title:"Queued <b>title</b>", labels:["project:demo"]} as unknown as Job;
+ const ready = {ready:[job], action:{kind:"wait" as const, reason:"md-a dispatch-parallelism 1 is full"}, lined_up:{jobs:[job], beads:[{project:"demo", ids:["bd-7"]}], queued:[]}};
+ writeNextSnapshot(state.home, ready, "2026-09-26T11:30:00Z", "demo");
+ const data = overview(state, now);
+ assert.deepEqual(data.lined_up.items.map(i => [i.kind, i.id, i.verdict]), [["job","cp-q1","wait"], ["bead","bd-7","no job"]]);
+ const html = screen(data);
+ assert.match(html, /Lined up · 2.*snapshot from 11:30, 30m ago · demo only/s);
+ assert.match(html, /href="#job\/cp-q1".*Queued &lt;b>title.*wait · md-a dispatch-parallelism 1 is full/s);
+ assert.match(html, /href="#sessions\?view=you&amp;transcript=1&amp;draft=Create\+a\+picp\+job\+for\+ready\+bead\+bd-7/);
+ assert.doesNotMatch(html, /Nothing queued/);
+ const empty = {ready:[], action:{kind:"wait" as const, reason:"nothing ready"}, lined_up:{jobs:[], beads:[], queued:[]}};
+ writeNextSnapshot(state.home, empty, "2026-09-26T10:00:00Z");
+ writeNextSnapshot(state.home, empty, "2026-09-26T11:00:00Z");
+ assert.match(screen(overview(state, now)), /Lined up · 0.*snapshot from 11:00, 1h ago.*Nothing queued since 10:00/s);
+ writeNextSnapshot(state.home, {...empty, lined_up:{jobs:[], beads:[{project:"demo", ids:[], error:"ENOENT"}], queued:[]}}, "2026-09-26T11:00:00Z");
+ const unread = screen(overview(state, now));
+ assert.match(unread, /demo: ready beads unavailable: ENOENT/); assert.doesNotMatch(unread, /Nothing queued/, "a failed tracker read is never nothing queued");
+ put(join(LAYOUT.state, "next-snapshot.json"), {schema_version:1, at:"2026-09-26T11:00:00Z", items:[{kind:"job", id:"../x", project:"demo", verdict:"wait", reason:""}], unavailable:[]});
+ assert.equal(overview(state, now).lined_up.availability, "unavailable", "an unsafe job id makes the snapshot unreadable");
+ assert.match(screen(overview(state, now)), /Lined up unavailable/);
 });
