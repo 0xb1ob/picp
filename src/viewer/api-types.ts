@@ -499,7 +499,8 @@ export interface UpstreamVersion {
  state: "current" | "behind" | "ahead" | "diverged" | "unknown"; behind: number | null; ahead: number | null; reason: string | null;
  checked_at: string | null;
  /** `state/update.json` + `data/update.json`; null when the updater never ran. */
- updater: {enabled: boolean; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number} | null;
+ /** `progress`: the run's phase or result as a sentence with its UTC clock and next step; `progress_short` fits the pill. */
+ updater: {enabled: boolean; phase: string | null; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number; progress: string | null; progress_short: string | null} | null;
 }
 /** `GET /api/version`: picked fields only, never a token, csrf or socket. */
 export interface VersionResponse {
@@ -509,5 +510,6 @@ export interface VersionResponse {
  processes: ProcessVersion[];
  /** The app script this server serves; a page whose own script differs is outdated. */
  bundle: {script: string | null};
- overall: {level: VersionLevel; label: string};
+ /** `label` is pill-sized; `headline` is the same with the updater's full `progress` sentence (the popover's head). */
+ overall: {level: VersionLevel; label: string; headline: string};
 }

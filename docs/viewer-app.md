@@ -150,7 +150,9 @@ pass for PR6, which changes no layout).
 text — `✓` latest, `N↓` behind, `↻` a stale process, `!` alert, `?` unknown — as the Viewer row of the ⋮ menu,
 labelled in that row, and in the Sessions top bar on phone (where the shell header is hidden).
 Colour is never the only signal. Tapping it opens the three layers: the deployed commit and upstream (behind/ahead
-origin/main and when the updater last fetched, its result and detail), each running process — viewer, parent host,
+origin/main and when the updater last fetched, its result and detail — a waiting, draining, timed-out, skipped-dirty or
+applied update reads as one sentence with its UTC clock and next step in the popover headline, a short form in the
+pill), each running process — viewer, parent host,
 CP parent, operator session — with its state and the restart that fixes it, and this page: when its app script differs
 from the server's `bundle.script` the badge is at least a warning and the panel offers **Reload page** (the browser's own
 reload; no write route). The shell reads `/api/version` once on mount, every 60 s and when the tab becomes visible,

@@ -3,7 +3,7 @@ import type { VersionLevel, VersionResponse } from "../src/viewer/api-types.ts";
 
 export const VERSION_REFRESH_MS = 60_000;
 export interface VersionState { view: VersionResponse | null; error: string | null }
-export interface BadgeView { level: VersionLevel; short: string; label: string; pageStale: boolean }
+export interface BadgeView { level: VersionLevel; short: string; label: string; headline: string; pageStale: boolean }
 
 /** The app script this tab loaded, as the server names it in `bundle.script`. */
 export function pageScript(doc: Document = document): string | null {
@@ -13,12 +13,12 @@ export function pageScript(doc: Document = document): string | null {
 /** What the badge shows: the server's level and label, plus an outdated page (its script differs from the server's) → at least amber. */
 export function badgeView(state: VersionState, script: string | null): BadgeView {
  const view = state.view;
- if (!view) return {level: "unknown", short: "?", label: state.error ? `version unavailable (${state.error})` : "version: loading", pageStale: false};
+ if (!view) { const label = state.error ? `version unavailable (${state.error})` : "version: loading"; return {level: "unknown", short: "?", label, headline: label, pageStale: false}; }
  const pageStale = view.bundle.script !== null && script !== null && script !== view.bundle.script;
  const level = pageStale && (view.overall.level === "ok" || view.overall.level === "unknown") ? "warn" : view.overall.level;
- const label = pageStale ? `page outdated — reload · ${view.overall.label}` : view.overall.label;
+ const stale = (text: string) => pageStale ? `page outdated — reload · ${text}` : text;
  const short = level === "ok" ? "✓" : level === "alert" ? "!" : level === "unknown" ? "?" : view.upstream.behind ? `${view.upstream.behind}↓` : "↻";
- return {level, short, label, pageStale};
+ return {level, short, label: stale(view.overall.label), headline: stale(view.overall.headline), pageStale};
 }
 
 /**

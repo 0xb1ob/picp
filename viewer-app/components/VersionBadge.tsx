@@ -5,6 +5,8 @@ import { badgeView, pageScript, type VersionState } from "../use-version.ts";
 
 const ROLE: Record<ProcessVersion["role"], string> = {viewer: "Viewer server", host: "Parent host", parent: "CP parent", operator: "Operator session"};
 const ago = (at: string | null): string => at && !Number.isNaN(Date.parse(at)) ? `${elapsed(Math.max(0, (Date.now() - Date.parse(at)) / 1000))} ago` : "unknown";
+/** A settling detail only repeats the sentence's clock as raw ISO timestamps. */
+const settled = (view: VersionResponse) => view.upstream.updater?.result === "skipped_settling" && view.upstream.updater.progress !== null && view.upstream.updater.phase === "idle";
 
 function upstreamText(view: VersionResponse): string {
  const u = view.upstream;
@@ -37,14 +39,14 @@ export function VersionBadge({state, labelled = false}: {state: VersionState; la
  const badge = badgeView(state, typeof document === "undefined" ? null : pageScript());
  const view = state.view;
  return <details class={`shell-version shell-version-${badge.level}${labelled ? " shell-version-labelled" : ""}`} ref={menu} onToggle={e => setOpen(e.currentTarget.open)}>
-  <summary aria-label={`Version: ${badge.label}`} title={badge.label}><span class="shell-version-dot" aria-hidden="true"/><span class="shell-version-short" aria-hidden="true">{badge.short}</span>{labelled && <span class="shell-version-label" aria-hidden="true">{badge.label}</span>}</summary>
+  <summary aria-label={`Version: ${badge.headline}`} title={badge.headline}><span class="shell-version-dot" aria-hidden="true"/><span class="shell-version-short" aria-hidden="true">{badge.short}</span>{labelled && <span class="shell-version-label" aria-hidden="true">{badge.label}</span>}</summary>
   {open && <div class="shell-version-panel">
-   <p class="shell-version-head">{badge.label}</p>
+   <p class="shell-version-head">{badge.headline}</p>
    {view && <>
     <dl class="shell-version-layers">
      <dt>Deployed</dt><dd>{view.deployed ? <><code>{view.deployed.sha.slice(0,7)}</code> · committed {ago(view.deployed.at)}</> : "checkout HEAD unreadable"}</dd>
      <dt>Upstream</dt><dd>{upstreamText(view)}</dd>
-     {view.upstream.updater && <><dt>Updater</dt><dd>{view.upstream.updater.enabled ? "" : "auto-update off · "}{view.upstream.updater.result ?? "no result"}{view.upstream.updater.last_run_at && ` · last run ${ago(view.upstream.updater.last_run_at)}`}{view.upstream.updater.fetch_failures > 0 && ` · ${view.upstream.updater.fetch_failures} failed fetch(es)`}{view.upstream.updater.detail && <small>{view.upstream.updater.detail}</small>}</dd></>}
+     {view.upstream.updater && <><dt>Updater</dt><dd>{view.upstream.updater.enabled ? "" : "auto-update off · "}{view.upstream.updater.progress ?? view.upstream.updater.result ?? "no result"}{view.upstream.updater.last_run_at && ` · last run ${ago(view.upstream.updater.last_run_at)}`}{view.upstream.updater.fetch_failures > 0 && ` · ${view.upstream.updater.fetch_failures} failed fetch(es)`}{view.upstream.updater.detail && !settled(view) && <small>{view.upstream.updater.detail}</small>}</dd></>}
      {!view.upstream.updater && <><dt>Updater</dt><dd>never ran (no state/update.json)</dd></>}
     </dl>
     <ul class="shell-version-procs">{view.processes.map(p => <li key={p.role}>

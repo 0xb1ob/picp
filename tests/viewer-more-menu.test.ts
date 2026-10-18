@@ -29,10 +29,10 @@ test("⋮ menu: always rendered; Restart only with a session; a dot while a rest
 	assert.doesNotMatch(draw(view(status(), restarting("restarted"))), /shell-more-dot/);
 });
 test("⋮ dot shows on a version alert and Restart stays hidden without a control view", () => {
-	const version = { view: { generated_at: "2026-01-01T00:00:00Z", deployed: null, upstream: { state: "unknown" as const, behind: null, ahead: null, reason: null, checked_at: null, updater: null }, processes: [], bundle: { script: null }, overall: { level: "alert" as const, label: "update failed" } }, error: null };
+	const version = { view: { generated_at: "2026-01-01T00:00:00Z", deployed: null, upstream: { state: "unknown" as const, behind: null, ahead: null, reason: null, checked_at: null, updater: null }, processes: [], bundle: { script: null }, overall: { level: "alert" as const, label: "update failed", headline: "update failed" } }, error: null };
 	assert.match(draw(undefined, {version}), /shell-more-dot/);
 	assert.doesNotMatch(draw(undefined, {version}), /Restart session/);
-	assert.doesNotMatch(draw(undefined, {version: {...version, view: {...version.view, overall: {level: "ok" as const, label: "current"}}}}), /shell-more-dot/);
+	assert.doesNotMatch(draw(undefined, {version: {...version, view: {...version.view, overall: {level: "ok" as const, label: "current", headline: "current"}}}}), /shell-more-dot/);
 });
 
 test("⋮ menu: opens with Restart session inside (two-tap confirm kept); Esc and an outside tap close it", async t => {
