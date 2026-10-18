@@ -15,6 +15,7 @@ import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
 import { forwardedCi, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
 import { reportsView } from "./reports-view.ts";
+import { deployView } from "./deploy-view.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -106,7 +107,7 @@ export function boardView(state:ViewerState,now=Date.now()):BoardResponse {
   {key:"done",name:"Landed today",hint:"merged or closed"},{key:"failed",name:"Failed",hint:"stopped; may continue on its lease"}],
   revoked_hidden:hidden.length,hidden_mandates:hidden,stranded_count:base.blocked.stranded_count};
 }
-const eventLabels:Record<string,string>={spawned:"Spawned",envelope_received:"Report filed",review_decided:"Review",failure:"Failed",worker_revived:"Worker revived",question_asked:"Question asked",question_closed:"Question closed",ci_observed:"CI observed",merge_recorded:"Merge recorded"};
+const eventLabels:Record<string,string>={spawned:"Spawned",envelope_received:"Report filed",review_decided:"Review",failure:"Failed",worker_revived:"Worker revived",question_asked:"Question asked",question_closed:"Question closed",ci_observed:"CI observed",merge_recorded:"Merge recorded",after_merge_deploy:"Deploy job created"};
 export function jobEventsFile(state:ViewerState,id:string):string | undefined {
  if(!isSafeId(id)) return undefined;
  try {
@@ -140,7 +141,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   const verdict=str(payload?.verdict); const observation=str(payload?.event);
   if(event.type==="review_decided") label=`Review ${nonnegative(payload?.attempt) ?? "-"} · ${verdict==="revise" ? "changes requested" : verdict ?? "unknown"}`;
   if(event.type==="ci_observed") label=({ci_green:"CI green",ci_failed:"CI red",pr_merged:"PR merged",pr_closed:"PR closed unmerged"} as Record<string,string>)[observation ?? ""] ?? "CI observed";
-  const meta=[str(payload?.model),str(payload?.reason),str(payload?.head_sha)].filter(Boolean).join(" · ");
+  const meta=[str(payload?.model),str(payload?.reason),str(payload?.deploy_job_id),str(payload?.head_sha)].filter(Boolean).join(" · ");
   timeline.push({at:event.ts,label,meta,tone:observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral"});
   if(observation==="ci_green" || observation==="ci_failed") seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};
  }
@@ -156,7 +157,9 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  // The detail page shows the envelope headline uncut (≤600); the list keeps 80.
  const full=str(obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope)?.summary)?.split("\n").find(l=>l.trim())?.trim();
  if(full) job.summary=full.length>600 ? `${full.slice(0,599)}…` : full;
+ const deploy=deployView(state,id,data.jobs);
  return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,
+  ...(deploy ? {deploy} : {}),
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,
   reports:reportsView(state,undefined,now).reports.filter(report=>report.job_ids.includes(id)),

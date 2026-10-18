@@ -190,3 +190,35 @@ test("failure headline sits above the tabs; the Ask action lives in the facts ra
  assert.equal(ask({wide: false, initial: "transcript"}).tab, "transcript", "on phone Transcript the rail is CSS-hidden");
  assert.equal(detail({phase: "done"}).includes("Ask about this failure"), false, "only failed jobs offer it");
 });
+
+test("Deploy row: status phrase and job link first, the long detail on a clamped muted line with a full title", () => {
+ const merge = "b".repeat(40);
+ const row = (deploy: Partial<NonNullable<JobResponse["deploy"]>>) => {
+  const full = {state: "queued", merge_sha: merge, branch: "main", deploy_job_id: "cp-deploy", reason: null, at: null, coverage: null, mandate_id: null, ...deploy} as NonNullable<JobResponse["deploy"]>;
+  const {document} = parseHTML(detail({id: "cp-merged", phase: "done", merge_sha: merge}, {deploy: full}));
+  return document.querySelector(".job-fact-deploy dd")!;
+ };
+ const lines = (deploy: Partial<NonNullable<JobResponse["deploy"]>>) => {
+  const dd = row(deploy), detailLine = dd.querySelector(".job-deploy-detail");
+  assert.equal(detailLine?.getAttribute("title") ?? null, detailLine?.textContent ?? null, "the tooltip carries the full detail");
+  return [dd.querySelector(".job-deploy-status")!.textContent, detailLine?.textContent ?? null];
+ };
+ assert.equal(detail({phase: "done", merge_sha: merge}).includes("job-fact-deploy"), false);
+ const both = parseHTML(detail({phase: "done", merge_sha: merge}, {running: {checkout: "included", since: null, why: "", processes: []}, deploy: {state: "queued", merge_sha: merge, branch: "main", deploy_job_id: "cp-deploy", reason: null, at: null, coverage: null, mandate_id: null}}));
+ assert.ok(both.document.querySelector(".job-fact-running + .job-fact-deploy"), "Deploy sits right after Running here");
+ assert.equal(row({}).querySelector('.job-deploy-status a[href="#job/cp-deploy"] code')?.textContent, "cp-deploy");
+ assert.deepEqual(lines({coverage: "none"}), ["deploy queued · cp-deploy", "no covering grant — dispatch needs a grant"]);
+ assert.deepEqual(lines({coverage: "none", reason: "cannot enroll: job cap 1 reached"}), ["deploy queued · cp-deploy", "no covering grant — dispatch needs a grant (cannot enroll: job cap 1 reached)"]);
+ assert.deepEqual(lines({coverage: "enrolled", mandate_id: "md-a"}), ["deploy queued · cp-deploy", "enrolled in md-a"]);
+ assert.deepEqual(lines({coverage: "project_wide", mandate_id: "md-w"}), ["deploy queued · cp-deploy", "covered by project-wide md-w"]);
+ assert.deepEqual(lines({state: "deploying"}), ["deploying · cp-deploy", "merged bbbbbbb"]);
+ const [deployed, health] = lines({state: "deployed", at: "2026-09-26T12:00:00Z"});
+ assert.equal(deployed, "deployed · in use · cp-deploy");
+ assert.match(health!, /^merged bbbbbbb · health-checked .+/);
+ assert.deepEqual(lines({state: "blocked", reason: "rolled back: health check failed"}), ["deploy blocked: rolled back · cp-deploy", "rolled back: health check failed"]);
+ assert.deepEqual(lines({state: "blocked", reason: "needs the operator to open port 22"}), ["deploy blocked · cp-deploy", "needs the operator to open port 22"]);
+ assert.deepEqual(lines({state: "failed", reason: "worker died"}), ["deploy failed · cp-deploy", "worker died"]);
+ assert.deepEqual(lines({state: "skipped", deploy_job_id: null, reason: "merged into release, not the deploy branch main"}), ["no deploy", "merged into release, not the deploy branch main"]);
+ const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/job-detail.css"), "utf8");
+ assert.match(css, /\.job-deploy-detail \{[^}]*-webkit-line-clamp: 2;/, "long detail is clamped to two lines");
+});

@@ -119,6 +119,12 @@ test("coverage: a named grant listing the merged job enrolls the deploy; at its 
 	const projectWide = wide.issue();
 	assert.match((await afterMergeDeploy(wide.ports, wide.receipt())) ?? "", new RegExp(`covered by project-wide ${projectWide.id}`));
 	assert.equal(wide.record().coverage, "project_wide");
+
+	// Coverage is cp_dispatch's own grant selection: a project-wide grant that excludes research never selects the deploy.
+	const excluded = await bench(t);
+	excluded.mandates.issue({ projects: ["demo"], objective: "ship only", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10, exclusions: { job_kinds: ["research"] } });
+	assert.match((await afterMergeDeploy(excluded.ports, excluded.receipt())) ?? "", /no covering grant — dispatch needs a grant/);
+	assert.equal(excluded.record().coverage, "none");
 });
 
 test("a ledger refusal throws and writes no record, so the merge store names it and a retry can still create", async (t) => {

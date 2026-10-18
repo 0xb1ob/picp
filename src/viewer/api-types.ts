@@ -191,6 +191,14 @@ export interface JobResponse {
  mandate: JobMandateSnippet | null;
  /** Merged jobs only, `GET /api/job/<id>`: is the merge in this home's checkout and running processes. */
  running?: JobRunning;
+ /** Merged jobs with an after-merge record (#326): the deploy that follows the merge. */
+ deploy?: JobDeploy;
+}
+/** After-merge deploy (#326): `deployed` is the deploy job's own `done` report; `at` is set only then. */
+export interface JobDeploy {
+ state: "queued" | "deploying" | "deployed" | "blocked" | "failed" | "skipped";
+ merge_sha: string; branch: string | null; deploy_job_id: string | null; reason: string | null; at: string | null;
+ coverage: "enrolled" | "project_wide" | "none" | null; mandate_id: string | null;
 }
 /** The mandate a job runs under, as the job page shows it. */
 export interface JobMandateSnippet {id: string; status: string; objective: string; spend_usd: number | null; cap_usd: number | null; jobs: number}
