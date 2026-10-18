@@ -37,7 +37,7 @@ test("transcript renders Worker/Parent time labels, counted tool groups, report 
  assert.match(document.querySelector(".jt-head")!.textContent!, /read-only.*Worker session · anthropic\/m · 12:00–12:10.*Jump to Brief.*Report.*Reviews/s);
  assert.deepEqual([...document.querySelectorAll(".jt-label")].map(n => n.textContent), ["Parent · 12:00", "Worker · 12:05"]);
  const group = document.querySelector(".tool-run-solid")!;
- assert.equal(group.querySelector("button")!.textContent, "▸ 3 tool calls · read 2 files · ran 1 command");
+ assert.equal(group.querySelector("button")!.textContent, "▸ 3 tool calls — read 2 files · ran 1 command");
  assert.equal(group.querySelector("button")!.getAttribute("aria-expanded"), "false");
  assert.equal(group.querySelectorAll(".jt-tool").length, 0, "collapsed: rows are not rendered");
  const rows = parseHTML(open(entries.slice(1, 4))).document;
@@ -102,7 +102,7 @@ test("a loaded live job that finishes gets one final fetch, then no finished pol
 
 test("Sessions and Job detail render the one shared tool-run row; solid is the only difference", () => {
  const dashed = row(false, false), solid = row(true, false);
- assert.equal(dashed, '<div class="session-tool-run"><button type="button" class="session-tools" aria-expanded="false"><span aria-hidden="true">▸</span> 2 tool calls<small> · d</small></button></div>');
+ assert.equal(dashed, '<div class="session-tool-run"><button type="button" class="session-tools" aria-expanded="false"><span aria-hidden="true">▸</span> 2 tool calls<small> — d</small></button></div>');
  assert.equal(solid, dashed.replace('"session-tool-run"', '"session-tool-run tool-run-solid"'));
  assert.match(row(false, true), /aria-expanded="true"><span aria-hidden="true">▾<\/span>.*<\/button>kids<\/div>/);
  const src = (f: string) => readFileSync(join(REPO_ROOT, f), "utf8");

@@ -31,8 +31,8 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  ]});
  assert.ok(picked.includes(`title="newest.jsonl"`) && picked.includes(when(stamped,true)) && picked.includes(when(olderAt,false)));
  assert.match(picked,/class="session-project">picp</);
- assert.match(picked,/class="session-bridge-line">bridge woke cp-x · owner observed</);
- assert.match(picked,/class="session-bridge-details"/); assert.doesNotMatch(picked,/session-bridge-details" open/);
+ assert.match(picked,/class="session-bridge-chip">bridge<\/span><span class="session-bridge-what">woke <a href="#job\/cp-x">cp-x<\/a><\/span><small class="session-bridge-receipt">· owner observed<\/small>/);
+ assert.match(picked,/<button type="button" class="session-notice-line" aria-expanded="false" aria-label="Show notice">notice /); assert.doesNotMatch(picked,/Second line/);
  const doc=parseHTML(`<body>${picked}</body>`).document;
  assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Sessions","the desktop title row stays inside the direct-child screen");
  assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator ↔ you");

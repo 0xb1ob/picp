@@ -1,11 +1,11 @@
 import { ToolRunRow } from "../components/ToolRunRow.tsx";
-import { Fragment, type ComponentChild } from "preact";
+import type { ComponentChild } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
 import { time } from "../format.ts";
-import { sessionHref } from "../routes.ts";
+import { jobHref, sessionHref } from "../routes.ts";
 import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { Icon } from "../components/icons.tsx";
 import { OperatorComposer } from "../components/OperatorComposer.tsx";
@@ -92,35 +92,37 @@ function groupStarts(rowList: Row[]): Set<string> {
 }
 /** A hidden run of tool calls: one faint line between messages, and clicking it opens that run alone. */
 function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;onToggle:()=>void}) {
- return <ToolRunRow count={entries.length} detail={entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}>{entries.map(e=><Entry key={e.id} entry={e}/>)}</ToolRunRow>;
+ // Open, the header drops its preview: it repeats the first row (often the thinking line) right below it.
+ return <ToolRunRow count={entries.length} detail={open ? null : entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}><div class="session-tool-card">{entries.map(e=><Entry key={e.id} entry={e}/>)}</div></ToolRunRow>;
 }
-/**
- * A cp-bridge wake or escalation, or any other system entry (compaction, custom messages): one muted line, the rest and a
- * relay's `paths:` links behind one expander (mobile-chat-layout). An opened relay past RELAY_LINES shows its head and "Show more".
- */
-function bridgeWords(b: NonNullable<SessionEntry["bridge"]>): string {
- const verb = b.kind === "wake" ? "woke" : b.kind.replaceAll("_", " ");
- const receipt = b.receipt?.replaceAll("_", " ");
- return ["bridge", verb, b.job].filter(Boolean).join(" ") + (receipt ? ` · ${receipt}` : "");
-}
-/** A parsed cp-bridge notice: one summary line, the body in a collapsed details when more than one line remains. */
+/** A parsed cp-bridge notice: one row — a "bridge" chip, verb, job link, receipt, an inline "notice ▸" — the body below it. */
 function BridgeNotice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
  const [open,setOpen]=useState(false);
+ const b=e.bridge!;
  const lines=e.text.length ? e.text.split("\n") : [];
  const links=e.paths ?? [];
  const at=links.length ? lines.findIndex(line=>line.trim() === "paths:") : -1;
  const prose=(at < 0 ? lines : lines.slice(0,at)).join("\n").replace(/\n+$/,"");
  const multi=e.text.includes("\n");
+ const receipt=b.receipt?.replaceAll("_", " ");
  return <article class="session-message session-notice session-system session-bridge">
   {clock}
   <div class="session-body">
-   <div class="session-who"><span>{e.who}</span>{e.tag && <span>{e.tag}</span>}</div>
-   <p class="session-bridge-line">{bridgeWords(e.bridge!)}</p>
-   {multi ? <details class="session-bridge-details" open={open}><summary class="session-notice-line" aria-expanded={open} onClick={ev=>{ev.preventDefault();setOpen(!open);}}><small>{open ? "Hide notice" : "Show notice"}</small></summary>{open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>{link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>}</details>
+   <div class="session-bridge-line">
+    <span class="session-bridge-chip">bridge</span>
+    <span class="session-bridge-what">{b.kind === "wake" ? "woke" : b.kind.replaceAll("_", " ")}{b.job && <> <a href={jobHref(b.job)}>{b.job}</a></>}</span>
+    {receipt && <small class="session-bridge-receipt">· {receipt}</small>}
+    {multi && <button type="button" class="session-notice-line" aria-expanded={open} aria-label={open ? "Hide notice" : "Show notice"} onClick={()=>setOpen(!open)}>notice <span aria-hidden="true">{open ? "▾" : "▸"}</span></button>}
+   </div>
+   {multi ? open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>{link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>
     : prose ? <p><InlineText text={prose} links={e.links}/></p> : null}
   </div>
  </article>;
 }
+/**
+ * A cp-bridge wake or escalation, or any other system entry (compaction, custom messages): one muted line, the rest and a
+ * relay's `paths:` links behind one expander (mobile-chat-layout). An opened relay past RELAY_LINES shows its head and "Show more".
+ */
 function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
  const [open,setOpen]=useState(false);
  const [full,setFull]=useState(false);
@@ -266,7 +268,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
  const rowList=rows(shown);
  // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
- const renderRows=(list:SessionEntry[])=>{const rl=rows(list), st=groupStarts(rl); return rl.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <Fragment key={row.key}>{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</Fragment> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>);};
+ const renderRows=(list:SessionEntry[])=>{const rl=rows(list), st=groupStarts(rl); return rl.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <div key={row.key} class="session-tool-card">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>);};
  const edge=(side:"before"|"after",list:SessionEntry[],word:string)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
