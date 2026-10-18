@@ -5,7 +5,10 @@
 import { obj, str, type Json } from "./sessions.ts";
 import { timestamp } from "./overview-read.ts";
 import type { SessionEntry, StatsParentWindow } from "./api-types.ts";
-import { STALE_WAKEUP_HEADLINE, WAKEUP_CUSTOM_TYPES } from "../wakeups.ts";
+
+/** Mirrors of `../wakeups.ts` (the viewer may not import it); tests/stats-wakeup-drift.test.ts pins them equal. */
+export const STALE_WAKEUP_HEADLINE = "STALE WAKE-UP — do not act on this";
+export const FACT_WAKE_TYPES = ["cp-envelope", "cp-answered", "cp-wedged", "cp-unreported", "cp-ci", "cp-verdict", "cp-bound", "cp-death", "cp-recovery"];
 
 export const DAY_MS = 86_400_000;
 export const MAX_CUSTOM_SPAN_MS = 31 * DAY_MS;
@@ -75,7 +78,7 @@ export function percentile(values: readonly number[], p: number): number | null 
  return sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)]!;
 }
 
-const FACT_WAKES = new Set(Object.values(WAKEUP_CUSTOM_TYPES));
+const FACT_WAKES = new Set(FACT_WAKE_TYPES);
 export interface ParentTurn { at: number; reply_seconds: number; wasted: boolean; cost: number }
 /**
  * Turns of a parsed parent transcript: one opens on an owner message or a displayed `cp-*` wake (queued wakes merge).
