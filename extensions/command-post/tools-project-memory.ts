@@ -12,10 +12,14 @@ import { type ForgeConfig, resolveForgeRepository } from "../../src/forge-url.ts
 import type { MergePolicy } from "../../src/contracts.ts";
 import { detectMergePolicy, ghMergeFlowProbe, type MergeFlowProbe } from "../../src/merge-policy-detect.ts";
 import { formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
+import { type CommandRunner, execRunner } from "../../src/doctor.ts";
+import { formatReadiness } from "../../src/project-readiness.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
-/** `probe` reads who merges a newly added GitHub project; injectable so tests need no network. */
-export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps, probe: MergeFlowProbe = ghMergeFlowProbe()): void {
+/** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read; injectable so tests need no network. */
+export function registerProjectMemoryTools(
+	pi: ExtensionAPI, deps: ExtensionDeps, probe: MergeFlowProbe = ghMergeFlowProbe(), ciRun: CommandRunner = execRunner,
+): void {
 	const { commandPost, setLive } = deps;
 
 	// Project registration (cp-sdm). Until this existed, `cp_dispatch` refused
@@ -142,8 +146,14 @@ export function registerProjectMemoryTools(pi: ExtensionAPI, deps: ExtensionDeps
 					mergeNote = decision.note;
 				} else mergeNote += "; not a GitHub remote, so no detection";
 			}
+			let readiness: string;
+			try {
+				readiness = formatReadiness(registry.home, result.project, () => registry.pathOf(result.project.name), ciRun);
+			} catch (error) {
+				readiness = `  readiness: unknown (${(error as Error).message}); add itself succeeded`;
+			}
 			return {
-				content: [{ type: "text", text: formatEnsured(result, mergeNote) }],
+				content: [{ type: "text", text: `${formatEnsured(result, mergeNote)}\n${readiness}` }],
 				details: result as unknown as Record<string, unknown>,
 			};
 		},
