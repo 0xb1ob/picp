@@ -10,12 +10,12 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { startVersionLine } from "../extensions/cp-bridge/version-line.ts";
 import { LAYOUT } from "../src/contracts.ts";
-import type { VersionResponse } from "../src/viewer/api-types.ts";
+import type { JobResponse, VersionResponse } from "../src/viewer/api-types.ts";
 import type { GitRunner } from "../src/viewer/loaded-commit.ts";
 import { runGit } from "../src/viewer/git-read.ts";
 import { createViewer } from "../src/viewer/server.ts";
 import { DRAIN_TIMEOUT_RETRY_FACTOR, DRAIN_WAIT_MS, QUIET_MIN_DEFAULT, readUpdateConfig } from "../src/service/update.ts";
-import { formatTerminal, GIT_CACHE_MS, gitFacts, readVersion, UPDATER } from "../src/viewer/version-view.ts";
+import { formatTerminal, GIT_CACHE_MS, gitFacts, readRunning, readVersion, UPDATER } from "../src/viewer/version-view.ts";
 import { badgeView } from "../viewer-app/use-version.ts";
 import { advanceBase, createScratchHome, createScratchRepo } from "./harness/index.ts";
 
@@ -236,6 +236,38 @@ test("badge: an outdated page lifts ok/unknown to amber with a reload; alert sta
 	assert.deepEqual(badgeView({ view: null, error: "HTTP 500" }, null), { level: "unknown", short: "?", label: "version unavailable (HTTP 500)", headline: "version unavailable (HTTP 500)", pageStale: false });
 });
 
+test("#324: merged vs running here — checkout ancestry and each process's started-on commit stay separate", async (t) => {
+	const f = fixture(t);
+	const base = f.repo.head();
+	f.repo.write("fix.txt", "fix");
+	const merged = f.repo.commitAll("the merged fix");
+	const opts = { home: f.home.path, stateDir: f.stateDir, repo: f.repo.path, now: () => NOW, alive: (pid: number) => ALIVE.has(pid), self: { pid: 100, started_at: iso(5), commit: merged } };
+	f.write("parent-host.1.json", { pid: 101, started_at: iso(30), commit: base });
+	f.write("parent.lock", { pid: 102, started_at: iso(30), commit: OLD });
+	f.write("operator/dashboard.json", { pid: 999, started_at: iso(20), commit: merged });
+	f.write("update.json", { last_result: "updated", updated_at: iso(10), from: base, to: merged });
+	const running = await readRunning(merged, opts);
+	assert.deepEqual([running.checkout, running.since], ["included", iso(10)], "the recorded update brought it in");
+	assert.deepEqual(running.processes.map((p) => [p.role, p.state, p.since]), [
+		["viewer", "loaded", iso(5)], ["host", "not_loaded", null], ["parent", "unknown", null], ["operator", "down", null],
+	]);
+	// Ancestry alone never dates adoption: an update whose `from` already had the merge leaves the time unknown.
+	f.write("update.json", { last_result: "updated", updated_at: iso(10), from: merged, to: merged });
+	assert.deepEqual([(await readRunning(merged, opts)).since, (await readRunning(base, opts)).since], [null, null]);
+	// Amendment 1: a recorded time before the merge itself is impossible and never shown, for checkout or process.
+	f.write("update.json", { last_result: "updated", updated_at: iso(10), from: base, to: merged });
+	const early = await readRunning(merged, opts, iso(7));
+	assert.deepEqual([early.since, early.processes[0]?.since], [null, iso(5)]);
+	assert.deepEqual((await readRunning(merged, opts, iso(4))).processes.map((p) => p.since), [null, null, null, null]);
+	assert.equal((await readRunning(merged, opts, iso(10))).since, iso(10), "equal to the merge time is possible");
+	const upstream = advanceBase(f.repo, "later.txt", "later");
+	f.repo.git("fetch", "--quiet", "origin");
+	assert.equal((await readRunning(upstream, opts)).checkout, "not_included");
+	const other = await readRunning("e".repeat(40), opts);
+	assert.deepEqual([other.checkout, other.since, other.processes.map((p) => p.state)], ["unknown", null, ["unknown", "unknown", "unknown", "down"]]);
+	assert.match(other.why, /not in this home's checkout/);
+});
+
 function get(port: number, path: string): Promise<{ status: number; body: string }> {
 	return new Promise((resolve, reject) => {
 		const req = request({ host: "127.0.0.1", port, path, headers: { host: `127.0.0.1:${port}` } }, (res) => {
@@ -263,4 +295,40 @@ test("GET /api/version: a VersionResponse with no token, csrf or socket from the
 	assert.deepEqual(Object.keys(view).sort(), ["bundle", "deployed", "generated_at", "overall", "processes", "upstream"]);
 	assert.deepEqual(view.processes.map((p) => p.role), ["viewer", "host", "parent", "operator"]);
 	for (const leak of [SECRET, "/tmp/host.sock", "/tmp/dash.sock", "token", "csrf", "socket"]) assert.ok(!reply.body.includes(leak), leak);
+});
+
+test("#324 GET /api/job/<id>: a merged job carries `running`; a merge this checkout lacks is unknown, never not-running", async (t) => {
+	const f = fixture(t);
+	current(f);
+	const put = (file: string, value: unknown) => { mkdirSync(dirname(join(f.home.path, file)), { recursive: true }); writeFileSync(join(f.home.path, file), JSON.stringify(value)); };
+	put(LAYOUT.fleetFile, { jobs: [{ job_id: "cp-merged", project: "demo", kind: "ship", phase: "done", dispatched_at: iso(60), closed_at: iso(5) }] });
+	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", merged_at: iso(5), pr_url: "https://github.com/acme/demo/pull/7", merge_commit_sha: "e".repeat(40) });
+	const options = { home: f.home.path, stateDir: f.stateDir, host: "127.0.0.1", port: 0 };
+	const server = createViewer(options);
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	options.port = (server.address() as AddressInfo).port;
+	t.after(() => server.close());
+	const reply = await get(options.port, "/api/job/cp-merged");
+	assert.equal(reply.status, 200);
+	const running = (JSON.parse(reply.body) as JobResponse).running;
+	assert.equal(running?.checkout, "unknown");
+	assert.match(running?.why ?? "", /eeeeeee is not in this home's checkout/);
+	// Amendment 1: an update recorded before the receipt's merged_at cannot have brought the merge in; never shown.
+	const base = f.repo.head();
+	f.repo.write("fix.txt", "fix");
+	const merged = f.repo.commitAll("the merged fix");
+	const prior = process.env.CP_VERSION_REPO;
+	process.env.CP_VERSION_REPO = f.repo.path;
+	t.after(() => { if (prior === undefined) delete process.env.CP_VERSION_REPO; else process.env.CP_VERSION_REPO = prior; });
+	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", merged_at: iso(5), pr_url: "https://github.com/acme/demo/pull/7", merge_commit_sha: merged });
+	const since = async (updatedAt: string) => {
+		f.write("update.json", { last_result: "updated", updated_at: updatedAt, from: base, to: merged });
+		const view = JSON.parse((await get(options.port, "/api/job/cp-merged")).body) as JobResponse;
+		assert.equal(view.running?.checkout, "included");
+		const shown = view.running?.since ?? null;
+		assert.ok(shown === null || Date.parse(shown) >= Date.parse(view.job.finished_at!), `${shown} precedes the merge`);
+		return shown;
+	};
+	assert.equal(await since(iso(10)), null);
+	assert.equal(await since(iso(3)), iso(3));
 });

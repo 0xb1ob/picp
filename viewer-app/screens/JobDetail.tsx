@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { JobResponse, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { JobResponse, JobRunning, ViewerJob } from "../../src/viewer/api-types.ts";
+import { ROLE } from "../components/VersionBadge.tsx";
 import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, observedTime, prNumber, shortSha, time } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
@@ -46,6 +47,15 @@ function prFact(job: ViewerJob) {
  const number = prNumber(job.pr_url);
  if (!number || !job.pr_url) return "none yet";
  return <><a href={job.pr_url}>{number} ↗</a>{job.pr_status ? ` ${job.pr_status}` : null}{job.pr_status === "merged" && job.merge_sha ? <> as <ShaCopy sha={job.merge_sha}/></> : null}</>;
+}
+
+const LOADED: Record<JobRunning["processes"][number]["state"], string> = {loaded: "loaded", not_loaded: "not loaded — needs a restart", unknown: "unknown", down: "down"};
+
+/** Incorporation (checkout) and process-loaded evidence stay separate; a missing time reads "unknown", never a guess. */
+function RunningFact({running}: {running: JobRunning}) {
+ const checkout = running.checkout === "included" ? `in this checkout since ${running.since ? observedTime(running.since) : "unknown"}`
+  : running.checkout === "not_included" ? "merged · not in this checkout yet — update pending" : `unknown · ${running.why}`;
+ return <><p>{checkout}</p>{running.checkout !== "unknown" && <ul class="job-running">{running.processes.map(p => <li key={p.role}>{ROLE[p.role]}: {LOADED[p.state]}{p.since ? ` since ${observedTime(p.since)}` : ""}</li>)}</ul>}</>;
 }
 
 function RoutingFact({job}: {job: ViewerJob}) {
@@ -131,6 +141,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
      <div class="job-fact-wide job-fact-skills"><dt>Skills</dt><dd>{job.skills?.length ? <code>{job.skills.map(name => `@${name}`).join(" ")}</code> : "none"}</dd></div>
      <div class="job-fact-mandate"><dt>Mandate</dt><dd>{job.mandate_id ? <a href="#map"><code>{job.mandate_id}</code> →</a> : "none"}</dd></div>
      <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
+     {data.running && <div class="job-fact-wide job-fact-running"><dt>Running here</dt><dd><RunningFact running={data.running}/></dd></div>}
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
      <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
     </dl>

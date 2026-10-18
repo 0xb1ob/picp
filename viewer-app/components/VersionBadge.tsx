@@ -3,7 +3,7 @@ import type { ProcessVersion, VersionResponse } from "../../src/viewer/api-types
 import { elapsed } from "../format.ts";
 import { badgeView, pageScript, type VersionState } from "../use-version.ts";
 
-const ROLE: Record<ProcessVersion["role"], string> = {viewer: "Viewer server", host: "Parent host", parent: "CP parent", operator: "Operator session"};
+export const ROLE: Record<ProcessVersion["role"], string> = {viewer: "Viewer server", host: "Parent host", parent: "CP parent", operator: "Operator session"};
 const ago = (at: string | null): string => at && !Number.isNaN(Date.parse(at)) ? `${elapsed(Math.max(0, (Date.now() - Date.parse(at)) / 1000))} ago` : "unknown";
 /** A settling detail only repeats the sentence's clock as raw ISO timestamps. */
 const settled = (view: VersionResponse) => view.upstream.updater?.result === "skipped_settling" && view.upstream.updater.progress !== null && (view.upstream.updater.phase ?? "idle") === "idle";

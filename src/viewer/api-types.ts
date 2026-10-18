@@ -189,6 +189,8 @@ export interface JobResponse {
  description: string | null;
  /** The mandate this job runs under; null when none is recorded or readable. */
  mandate: JobMandateSnippet | null;
+ /** Merged jobs only, `GET /api/job/<id>`: is the merge in this home's checkout and running processes. */
+ running?: JobRunning;
 }
 /** The mandate a job runs under, as the job page shows it. */
 export interface JobMandateSnippet {id: string; status: string; objective: string; spend_usd: number | null; cap_usd: number | null; jobs: number}
@@ -527,4 +529,12 @@ export interface VersionResponse {
  bundle: {script: string | null};
  /** `label` is pill-sized; `headline` is the same with the updater's full `progress` sentence (the popover's head). */
  overall: {level: VersionLevel; label: string; headline: string};
+}
+/**
+ * A merged job against this home: `checkout` by ancestry of HEAD; `since` only from the recorded update that brought it
+ * in (null = unknown). Each process is `loaded` when its started-on commit has the merge; its `since` is its start.
+ */
+export interface JobRunning {
+ checkout: "included" | "not_included" | "unknown"; since: string | null; why: string;
+ processes: {role: ProcessRole; state: "loaded" | "not_loaded" | "unknown" | "down"; since: string | null}[];
 }
