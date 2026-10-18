@@ -44,7 +44,7 @@ export function VersionBadge({state, labelled = false}: {state: VersionState; la
     <dl class="shell-version-layers">
      <dt>Deployed</dt><dd>{view.deployed ? <><code>{view.deployed.sha.slice(0,7)}</code> · committed {ago(view.deployed.at)}</> : "checkout HEAD unreadable"}</dd>
      <dt>Upstream</dt><dd>{upstreamText(view)}</dd>
-     {view.upstream.updater && <><dt>Updater</dt><dd>{view.upstream.updater.enabled ? "" : "auto-update off · "}{view.upstream.updater.result ?? "no result"}{view.upstream.updater.last_run_at && ` · last run ${ago(view.upstream.updater.last_run_at)}`}{view.upstream.updater.fetch_failures > 0 && ` · ${view.upstream.updater.fetch_failures} failed fetch(es)`}{view.upstream.updater.detail && <small>{view.upstream.updater.detail}</small>}</dd></>}
+     {view.upstream.updater && <><dt>Updater</dt><dd>{view.upstream.updater.enabled ? "" : "auto-update off · "}{view.upstream.updater.progress ?? view.upstream.updater.result ?? "no result"}{view.upstream.updater.last_run_at && ` · last run ${ago(view.upstream.updater.last_run_at)}`}{view.upstream.updater.fetch_failures > 0 && ` · ${view.upstream.updater.fetch_failures} failed fetch(es)`}{view.upstream.updater.detail && <small>{view.upstream.updater.detail}</small>}</dd></>}
      {!view.upstream.updater && <><dt>Updater</dt><dd>never ran (no state/update.json)</dd></>}
     </dl>
     <ul class="shell-version-procs">{view.processes.map(p => <li key={p.role}>

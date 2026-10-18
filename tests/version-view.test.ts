@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { startVersionLine } from "../extensions/cp-bridge/version-line.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -73,6 +73,33 @@ test("amber: origin/main moved on and the updater skipped while busy → warn, N
 	const view = await f.read();
 	assert.deepEqual([view.upstream.state, view.upstream.behind, view.upstream.ahead], ["behind", 2, 0]);
 	assert.deepEqual([view.overall.level, view.overall.label], ["warn", "2 behind (skipped_busy)"]);
+});
+
+test("#325: the updater's phase and result read as a clocked sentence from state/update.json", async (t) => {
+	const f = fixture(t);
+	current(f);
+	advanceBase(f.repo, "a.txt", "a");
+	f.repo.git("fetch", "--quiet", "origin");
+	const to = "a".repeat(40);
+	const data = join(dirname(f.stateDir), "data");
+	mkdirSync(data, { recursive: true });
+	writeFileSync(join(data, "update.json"), JSON.stringify({ enabled: true, interval_min: 5, quiet_min: 20 }));
+	f.write("update.json", { phase: "idle", last_result: "skipped_settling", last_run_at: iso(1), to, first_seen_sha: to, first_seen_at: "2026-10-01T11:51:00Z" });
+	const settling = await f.read();
+	assert.equal(settling.overall.label, "1 behind (update to aaaaaaa waits for quiet origin/main until 12:11Z)", "first_seen_at + quiet_min");
+	f.write("update.json", { phase: "draining", last_result: "skipped_settling", last_run_at: iso(6), to });
+	assert.equal((await f.read()).overall.label, "1 behind (draining for update to aaaaaaa; gives up after 11 min)", "phase beats the prior result");
+	f.write("update.json", { phase: "idle", last_result: "drain_timeout", last_run_at: "2026-10-01T11:58:00Z", to });
+	assert.equal((await f.read()).overall.label, "1 behind · drain timed out — retries 12:18Z; cp_parent drain_cancel reopens dispatch", "4× interval_min");
+	f.write("update.json", { phase: "idle", last_result: "skipped_dirty", last_run_at: iso(1) });
+	assert.match((await f.read()).overall.label, /^1 behind \(skipped: local changes in the checkout \(git status\) — commit, stash or remove them\)$/);
+	f.write("update.json", { phase: "idle", last_result: "updated", last_run_at: iso(1), to, updated_at: "2026-10-01T11:56:00Z" });
+	const applied = await f.read();
+	assert.equal(applied.upstream.updater?.progress, "applied aaaaaaa 11:56Z · parent restarted");
+	assert.equal(applied.overall.label, "1 behind", "an applied update adds nothing to the badge label");
+	// No first_seen_at recorded: no invented clock, the bare result stays.
+	f.write("update.json", { phase: "idle", last_result: "skipped_settling", last_run_at: iso(1) });
+	assert.equal((await f.read()).overall.label, "1 behind (skipped_settling)");
 });
 
 test("ahead and diverged are neutral; a stale host is amber with its restart", async (t) => {

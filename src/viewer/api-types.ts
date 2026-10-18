@@ -499,7 +499,8 @@ export interface UpstreamVersion {
  state: "current" | "behind" | "ahead" | "diverged" | "unknown"; behind: number | null; ahead: number | null; reason: string | null;
  checked_at: string | null;
  /** `state/update.json` + `data/update.json`; null when the updater never ran. */
- updater: {enabled: boolean; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number} | null;
+ /** `progress`: the run's phase or result as a sentence with its clock (UTC) and next step; null when it has none. */
+ updater: {enabled: boolean; phase: string | null; result: string | null; since: string | null; last_run_at: string | null; detail: string | null; fetch_failures: number; progress: string | null} | null;
 }
 /** `GET /api/version`: picked fields only, never a token, csrf or socket. */
 export interface VersionResponse {
