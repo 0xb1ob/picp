@@ -271,6 +271,13 @@ test("daemonFindings: nothing installed is silent; legacy files warn; not runnin
 	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "start-limit-hit" }, viewer: { state: "running" } } }));
 	assert.match(daemonFindings(run, home, unitDir, probe)[0]?.what ?? "", /parent supervisor is failed \(start-limit-hit\) — a crash loop/);
 
+	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "exit-code" }, viewer: { state: "running" } } }));
+	const noModel = daemonFindings(run, home, unitDir, probe)[0];
+	assert.match(noModel?.what ?? "", /no parent model \(exit 78\)/);
+	for (const re of [/Settings/, /cp-daemon reload/, /cp-install --parent-model <provider\/model> --force/, /cp_parent start/]) {
+		assert.match(noModel?.fix ?? "", re);
+	}
+
 	// Remote dashboard (T6): a failed pairing-alert sender warns; an old record without it, or a running one, does not.
 	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "running" }, viewer: { state: "running" }, "device-notify": { state: "failed", result: "start-limit-hit" } } }));
 	const sender = daemonFindings(run, home, unitDir, probe)[0];

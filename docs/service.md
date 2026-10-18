@@ -480,7 +480,8 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 A host that runs no parent is started with `CP_PARENT_MODEL` (`parent_model` in `data/daemon.json`:
 `--parent-model` or step 3c's choice), else the saved `state/sessions/cp-parent-control.json`
 model. With neither, the supervisor exits 78 and cp-daemon does not restart it (the parent role is
-`failed`, `/doctor` `service.daemon` says no parent model): set `--parent-model` and reinstall with
+`failed`, `/doctor` `service.daemon` says no parent model): set the parent model in dashboard Settings
+(`data/parent.json`, beats `CP_PARENT_MODEL`) and run `cp-daemon reload`, or set `--parent-model` and reinstall with
 `--force`, or start the parent once with `cp_parent start`.
 
 The operator session started through the wrapper runs `pi --model
