@@ -121,7 +121,7 @@ function LinedUp({data}: {data:OverviewResponse}) {
  const body = l.availability === "unavailable" ? <p class="overview-error">Lined up unavailable: the cp_next snapshot is unreadable</p>
   : !l.at ? <p class="overview-meta">No cp_next snapshot yet</p>
   : !l.items.length && !l.unavailable.length ? <p class="overview-meta">Nothing queued since {time(l.empty_since ?? l.at)}</p>
-  : <>{l.unavailable.map(u => <p key={u.project} class="overview-error">{u.project}: {u.error}</p>)}
+  : <>{l.unavailable.map(u => <p key={u.project} class="overview-meta" title={u.error}>{u.project}: {u.error.startsWith("not read") ? "not read" : "beads unreadable"}</p>)}
    {l.items.map(i => <a key={`${i.kind}:${i.id}`} href={i.kind === "job" ? jobHref(i.id) : composerHref(`Create a picp job for ready bead ${i.id} in ${i.project}.`)} class="overview-line">
     <code>{i.id}</code><span class="overview-line-text" title={i.title ?? undefined}>{i.title ?? "ready bead, no job"}</span><span class="overview-meta" title={i.reason}>{many && `${i.project} · `}{i.verdict} · {i.reason}</span></a>)}</>;
  return <Block id="lined-up" title={<>Lined up &middot; {l.at && l.availability !== "unavailable" ? l.items.length : "-"}{age}</>}>{body}</Block>;

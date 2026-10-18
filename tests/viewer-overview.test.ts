@@ -306,7 +306,8 @@ test("#323 Lined up: the cp_next snapshot as written, its age, and nothing queue
  assert.match(screen(overview(state, now)), /Lined up · 0.*snapshot from 11:00, 1h ago.*Nothing queued since 10:00/s);
  writeNextSnapshot(state.home, {...empty, lined_up:{jobs:[], beads:[{project:"demo", ids:[], error:"ENOENT"}], queued:[]}}, "2026-09-26T11:00:00Z");
  const unread = screen(overview(state, now));
- assert.match(unread, /demo: ready beads unavailable: ENOENT/); assert.doesNotMatch(unread, /Nothing queued/, "a failed tracker read is never nothing queued");
+ assert.match(unread, /<p class="overview-meta" title="ready beads unavailable: ENOENT">demo: beads unreadable<\/p>/, "a short muted note; the error is the tooltip");
+ assert.doesNotMatch(unread, /Nothing queued/, "a failed tracker read is never nothing queued");
  put(join(LAYOUT.state, "next-snapshot.json"), {schema_version:1, at:"2026-09-26T11:00:00Z", items:[{kind:"job", id:"../x", project:"demo", verdict:"wait", reason:""}], unavailable:[]});
  assert.equal(overview(state, now).lined_up.availability, "unavailable", "an unsafe job id makes the snapshot unreadable");
  assert.match(screen(overview(state, now)), /Lined up unavailable/);
