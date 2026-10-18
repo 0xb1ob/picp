@@ -198,7 +198,6 @@ try {
 				replies: [...document.querySelectorAll(".session-replies .session-reply")].map(b => b.textContent + (b.disabled ? " (disabled)" : "")),
 				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
 				thread_pills: [...document.querySelectorAll(".thread-pill")].map(p => Math.round(p.getBoundingClientRect().width)),
-				footer: [...document.querySelectorAll(".operator-composer-footer > :not(input)")].map(e => e.className.split(" ")[0]),
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
 				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
