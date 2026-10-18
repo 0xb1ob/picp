@@ -516,7 +516,7 @@ export class Dispatcher {
 				...(request.taskFile === undefined ? {} : { path: request.taskFile }),
 			},
 			...(blockers.length > 0 ? { blockers } : {}),
-			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], readOnly: profile.frontmatter.readOnly === true, ops: request.profile === OPS_PROFILE_NAME }, riskGate(undefined, request, issue, task, { jobId: issue.id, project: labels.project, kind }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
+			...(options.mandates?.wouldAskRiskHigh({ jobId: issue.id, project: labels.project, kind, pathHints: [task.forInference], readOnly: profile.frontmatter.readOnly === true, ops: request.profile === OPS_PROFILE_NAME }, riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, ops: request.profile === OPS_PROFILE_NAME }, inputs, options.fleet.read().jobs).risk, options.fleet.read().jobs) ? { mandate_gate: "would ask: risk:high" } : {}),
 			...(skills.length ? { skills } : {}),
 		};
 	}

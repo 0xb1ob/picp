@@ -88,7 +88,7 @@ test("riskField routes a recorded high only, never a low, and never overrides th
 });
 
 test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-only, explicit/assessed highs gate", () => {
-	const asks = { wouldAskRiskHigh: () => true } as unknown as MandateStore;
+	const asks = { wouldAskRiskHigh: () => true, selection: () => undefined } as unknown as MandateStore;
 	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
 	assert.deepEqual(
 		inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", recorded: "high", recordedFrom: "job_label", text: "Fix the typo" }),
@@ -107,7 +107,7 @@ test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-
 	// cp-c1ur N14: every gated high names its risk source, so a risk escalation is never scope-only evidence.
 	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "explicit", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).evidence, "risk source: explicit");
 	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "assessed", recorded: "low", recordedFrom: "job_label", text: "Delete it" }).evidence, "risk source: planner");
-	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", text: "Delete it" }), { risk: "high", evidence: "risk source: classify" });
+	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", text: "Delete it" }), { risk: "high", evidence: "risk source: classify (word: delete)" });
 	assert.equal(inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", recorded: "high", recordedFrom: "planner", text: "x" }).evidence, "risk high assessed by the planner; risk source: planner");
 	assert.deepEqual(inferredRiskGate({ mandates: asks, job, routed: "low", routedFrom: "defaulted", text: "x" }), { risk: "low" });
 	assert.equal(
@@ -119,8 +119,38 @@ test("inferredRiskGate: a recorded high gates, a recorded low warns on inferred-
 	assert.deepEqual(none, { risk: "low" });
 });
 
+test("#321: a classify-sourced high on an operator-chat grant warns with its word; bridge, schedule, ops, hard stops and recorded highs gate", () => {
+	const store = (grant: Record<string, unknown> | undefined) =>
+		({ wouldAskRiskHigh: () => true, selection: () => (grant ? { grant } : undefined) }) as unknown as MandateStore;
+	const chat = store({ id: "md-chat01", issued_by: { channel: "operator_chat" } });
+	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
+	const gate = (text: string, extra: Partial<Parameters<typeof inferredRiskGate>[0]> = {}) =>
+		inferredRiskGate({ mandates: chat, job, routed: "high", routedFrom: "inferred", text, ...extra });
+	const warned = gate("Delete the old migration helper");
+	assert.equal(warned.risk, "low");
+	assert.equal(warned.evidence, "risk source: classify (word: delete, migration)");
+	assert.equal(
+		warned.warning,
+		"cp-x: warning: risk:high inferred from keywords only; risk source: classify (word: delete, migration); grant md-chat01 was issued from operator chat, so ask_on risk:high warned instead of gating",
+	);
+	assert.equal(gate("Delete it", { routedFrom: "defaulted" }).risk, "low", "a defaulted high is classify-sourced too");
+	for (const [why, extra] of [
+		["bridge grant", { mandates: store({ id: "md-b", issued_by: { channel: "bridge" } }) }],
+		["schedule fire grant", { mandates: store({ id: "md-s", issued_by: { channel: "operator_chat" }, schedule_fire: {} }) }],
+		["no selected grant (schedule run)", { mandates: store(undefined) }],
+		["explicit high", { routedFrom: "explicit" }],
+		["planner high", { routedFrom: "assessed" }],
+		["recorded high", { recorded: "high", recordedFrom: "job_label" }],
+		["ops job", { job: { ...job, ops: true } }],
+	] as const) assert.equal(gate("Delete it", extra as Partial<Parameters<typeof inferredRiskGate>[0]>).risk, "high", why);
+	for (const text of ["rm -rf build", "Copy auth.json into the worker", "force push the branch"]) {
+		assert.deepEqual(gate(text).risk, "high", `hard stop gates: ${text}`);
+	}
+	assert.equal(inferredRiskGate({ mandates: { wouldAskRiskHigh: () => false } as unknown as MandateStore, job, routed: "high", routedFrom: "inferred", text: "Delete it" }).risk, "high", "no asking grant: unchanged");
+});
+
 test("riskkw-qno: audit tags and an unapproved named item do not warn; the gate and inference are unchanged", () => {
-	const asks = { wouldAskRiskHigh: () => true } as unknown as MandateStore;
+	const asks = { wouldAskRiskHigh: () => true, selection: () => undefined } as unknown as MandateStore;
 	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
 	// cp-sr-s1-lkgo N4: bare `auth` is no risk signal, so the `gh auth status` probe is not even inferred any more.
 	assert.deepEqual(riskKeywords("After it's installed, check `gh auth status`."), []);
@@ -138,7 +168,7 @@ test("riskkw-qno: audit tags and an unapproved named item do not warn; the gate 
 });
 
 test("deleting a named source/doc file or dead code does not warn; a bare or data deletion still does", () => {
-	const asks = { wouldAskRiskHigh: () => true } as unknown as MandateStore;
+	const asks = { wouldAskRiskHigh: () => true, selection: () => undefined } as unknown as MandateStore;
 	const job = { jobId: "cp-x", project: "demo", kind: "ship" as const };
 	const gate = (text: string) => inferredRiskGate({ mandates: asks, job, routed: "high", routedFrom: "inferred", recorded: "low", recordedFrom: "task_header", text });
 	for (const text of ["Delete src/viewer/awaiting-view.ts.", "Delete the docs/HANDOFF.md file.", "Then delete dead code in the viewer."]) {
