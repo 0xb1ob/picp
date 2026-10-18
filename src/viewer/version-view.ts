@@ -62,31 +62,32 @@ export function classifyProcess(role: ProcessRole, record: ProcessRecord | undef
 const clock = (at: number) => `${new Date(at).toISOString().slice(11, 16)}Z`;
 const minutes = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback);
 
-/** The updater's phase or last result as a clocked sentence, from fields `runUpdate` records; null when there is none. */
-export function progressSentence(update: Json, config: Json | undefined): string | null {
+/** The updater's phase or last result as a clocked sentence, and a pill-sized form, from fields `runUpdate` records. */
+export function progressSentence(update: Json, config: Json | undefined): { text: string; short: string } | null {
 	const to = str(update.to)?.slice(0, 7) ?? "origin/main";
 	const at = (field: unknown) => { const t = Date.parse(str(field) ?? ""); return Number.isNaN(t) ? null : t; };
 	const phase = str(update.phase);
 	// drain start is not recorded: the 11 min is DRAIN_WAIT_MS (src/service/update.ts), never a clock.
-	if (phase === "draining") return `draining for update to ${to}; gives up after 11 min`;
-	if (phase === "updating" || phase === "verifying") return `applying update to ${to}`;
-	if (phase === "rolling_back") return `rolling back ${to}`;
+	if (phase === "draining") return { text: `draining for update to ${to}; gives up after 11 min`, short: "draining ≤ 11 min" };
+	if (phase === "updating" || phase === "verifying") return { text: `applying update to ${to}`, short: "applying" };
+	if (phase === "rolling_back") return { text: `rolling back ${to}`, short: "rolling back" };
 	const result = str(update.last_result);
 	if (result === "skipped_settling") {
 		const seen = at(update.first_seen_at);
-		return seen === null ? null : `update to ${to} waits for quiet origin/main until ${clock(seen + minutes(config?.quiet_min, 10) * 60_000)}`;
+		const until = seen === null ? null : clock(seen + minutes(config?.quiet_min, 10) * 60_000);
+		return until === null ? null : { text: `update to ${to} waits for quiet origin/main until ${until}`, short: `waits until ${until}` };
 	}
 	if (result === "updated") {
 		const applied = at(update.updated_at) ?? at(update.last_run_at);
-		return applied === null ? null : `applied ${to} ${clock(applied)} · parent restarted`;
+		return applied === null ? null : { text: `applied ${to} ${clock(applied)} · parent restarted`, short: `applied ${clock(applied)}` };
 	}
 	if (result === "drain_timeout") {
 		const ran = at(update.last_run_at);
 		// The updater waits 4× interval_min after a drain_timeout.
-		const retry = ran === null ? "" : ` — retries ${clock(ran + 4 * (minutes(config?.interval_min, 15) || 15) * 60_000)}`;
-		return `drain timed out${retry}; cp_parent drain_cancel reopens dispatch`;
+		const retry = ran === null ? null : clock(ran + 4 * (minutes(config?.interval_min, 15) || 15) * 60_000);
+		return { text: `drain timed out${retry ? ` — retries ${retry}` : ""}; cp_parent drain_cancel reopens dispatch`, short: `drain timeout${retry ? ` · retry ${retry}` : ""}` };
 	}
-	if (result === "skipped_dirty") return "skipped: local changes in the checkout (git status) — commit, stash or remove them";
+	if (result === "skipped_dirty") return { text: "skipped: local changes in the checkout (git status) — commit, stash or remove them", short: "local changes" };
 	return null;
 }
 
@@ -97,22 +98,28 @@ export function classifyUpstream(git: GitFacts, update: Json | undefined, config
 	const fresh = result !== null && FETCHED.has(result) && lastRun !== null && now - Date.parse(lastRun) <= UPSTREAM_FRESH_MS;
 	const detail = str(update?.detail);
 	const failures = update?.fetch_failures;
+	const progress = update ? progressSentence(update, config) : null;
 	const updater = update ? {
 		enabled: config?.enabled === true, phase: str(update.phase) ?? null, result, since: str(update.since) ?? null, last_run_at: lastRun,
 		detail: detail ? (detail.length > DETAIL_MAX ? `${detail.slice(0, DETAIL_MAX - 1)}…` : detail) : null,
 		fetch_failures: Number.isInteger(failures) && (failures as number) > 0 ? (failures as number) : 0,
-		progress: progressSentence(update, config),
+		progress: progress?.text ?? null, progress_short: progress?.short ?? null,
 	} : null;
 	const { behind, ahead } = git;
 	const state = behind === null || ahead === null ? "unknown" : behind && ahead ? "diverged" : behind ? "behind" : ahead ? "ahead" : "current";
 	return { state, behind, ahead, reason: git.reason, checked_at: fresh && state !== "unknown" ? lastRun : null, updater };
 }
 
-/** One level and a short label: alert > warn > unknown > ok. `sessionStale` names the operator session's own staleness. */
-export function overall(deployed: Commit | null, upstream: UpstreamVersion, processes: ProcessVersion[], sessionStale = "session stale — restart"): { level: VersionLevel; label: string } {
+/** One level, a short label (the badge pill and footer) and the same with the updater's full sentence (`headline`). */
+export function overall(deployed: Commit | null, upstream: UpstreamVersion, processes: ProcessVersion[], sessionStale = "session stale — restart"): VersionResponse["overall"] {
+	const { level, label } = compose(deployed, upstream, processes, sessionStale, upstream.updater?.progress_short ?? null);
+	return { level, label, headline: compose(deployed, upstream, processes, sessionStale, upstream.updater?.progress ?? null).label };
+}
+
+/** alert > warn > unknown > ok; `progress` stands in for the updater's bare result. */
+function compose(deployed: Commit | null, upstream: UpstreamVersion, processes: ProcessVersion[], sessionStale: string, progress: string | null): { level: VersionLevel; label: string } {
 	if (!deployed) return { level: "unknown", label: "version unknown (checkout HEAD unreadable)" };
 	const result = upstream.updater?.result ?? null;
-	const progress = upstream.updater?.progress ?? null;
 	const alert = [
 		...(processes.some((p) => p.role === "operator" && p.state === "stale") ? [sessionStale] : []),
 		...(result && ALERT_RESULTS.has(result) ? [result === "drain_timeout" && progress ? progress : `update ${result}`] : []),
