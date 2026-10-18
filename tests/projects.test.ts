@@ -85,6 +85,24 @@ test("cp_project reviewer_model dispatches set/clear and displays the saved pref
 	assert.equal(registry.get("demo")?.reviewer_model, undefined);
 });
 
+test("cp_project after_merge_deploy sets, shows and clears the opt-in; a call without deploy is refused", async (t) => {
+	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git", base_branch: "main" });
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never);
+	const run = (params: Record<string, unknown>) => tools.get("cp_project")!.execute("c", params, undefined, undefined, {}) as Promise<{ content: Array<{ text: string }> }>;
+	const set = await run({ action: "after_merge_deploy", name: "demo", deploy: { task: "copy dist to host-a", resources: ["host-a"] } });
+	assert.match(set.content[0]!.text, /^demo after-merge deploy: main · resource:host-a/);
+	assert.deepEqual([registry.get("demo")?.after_merge_deploy?.branch, registry.get("demo")?.after_merge_deploy?.resources], ["main", ["host-a"]]);
+	assert.match((await run({ action: "show", name: "demo" })).content[0]!.text, /after-merge deploy: main/);
+	await assert.rejects(run({ action: "after_merge_deploy", name: "demo" }), /needs deploy/);
+	assert.ok(registry.get("demo")?.after_merge_deploy, "a refused call leaves the setting in place");
+	assert.equal((await run({ action: "after_merge_deploy", name: "demo", deploy: null })).content[0]!.text, "demo after-merge deploy: off");
+	assert.equal(registry.get("demo")?.after_merge_deploy, undefined);
+});
+
 test("forge: legacy registries read unchanged; set/show/clear stores only non-secret settings; refusals write nothing", async (t) => {
 	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
 	await registry.register({ name: "demo", clone_url: "git@code.example.com:team/sub/app.git" });

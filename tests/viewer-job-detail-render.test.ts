@@ -190,3 +190,28 @@ test("failure headline sits above the tabs; the Ask action lives in the facts ra
  assert.equal(ask({wide: false, initial: "transcript"}).tab, "transcript", "on phone Transcript the rail is CSS-hidden");
  assert.equal(detail({phase: "done"}).includes("Ask about this failure"), false, "only failed jobs offer it");
 });
+
+test("Deploy row: one wording per state, beside Running here, absent without a deploy", () => {
+ const merge = "b".repeat(40);
+ const row = (deploy: Partial<NonNullable<JobResponse["deploy"]>>) => {
+  const full = {state: "queued", merge_sha: merge, branch: "main", deploy_job_id: "cp-deploy", reason: null, at: null, coverage: null, mandate_id: null, ...deploy} as NonNullable<JobResponse["deploy"]>;
+  const {document} = parseHTML(detail({id: "cp-merged", phase: "done", merge_sha: merge}, {deploy: full}));
+  return document.querySelector(".job-fact-deploy dd")!;
+ };
+ const text = (deploy: Partial<NonNullable<JobResponse["deploy"]>>) => row(deploy).textContent!.replace(/\s+/g, " ").trim();
+ assert.equal(detail({phase: "done", merge_sha: merge}).includes("job-fact-deploy"), false);
+ const both = parseHTML(detail({phase: "done", merge_sha: merge}, {running: {checkout: "included", since: null, why: "", processes: []}, deploy: {state: "queued", merge_sha: merge, branch: "main", deploy_job_id: "cp-deploy", reason: null, at: null, coverage: null, mandate_id: null}}));
+ assert.ok(both.document.querySelector(".job-fact-running + .job-fact-deploy"), "Deploy sits right after Running here");
+ assert.equal(row({}).querySelector('a[href="#job/cp-deploy"] code')?.textContent, "cp-deploy");
+ assert.equal(text({coverage: "none"}), "merged bbbbbbb → deploy cp-deploy queued · no covering grant — dispatch needs a grant");
+ assert.equal(text({coverage: "none", reason: "cannot enroll: job cap 1 reached"}), "merged bbbbbbb → deploy cp-deploy queued · no covering grant — dispatch needs a grant (cannot enroll: job cap 1 reached)");
+ assert.equal(text({coverage: "enrolled", mandate_id: "md-a"}), "merged bbbbbbb → deploy cp-deploy queued · enrolled in md-a");
+ assert.equal(text({coverage: "project_wide", mandate_id: "md-w"}), "merged bbbbbbb → deploy cp-deploy queued · covered by project-wide md-w");
+ assert.equal(text({state: "deploying"}), "merged bbbbbbb → deploying (cp-deploy)");
+ assert.match(text({state: "deployed", at: "2026-09-26T12:00:00Z"}), /^merged bbbbbbb → deployed and health-checked by cp-deploy at .+ · in use$/);
+ assert.equal(text({state: "blocked", reason: "rolled back: health check failed"}), "merged bbbbbbb → deploy blocked: rolled back: health check failed (cp-deploy)");
+ assert.equal(text({state: "failed", reason: "worker died"}), "merged bbbbbbb → deploy failed: worker died (cp-deploy)");
+ assert.equal(text({state: "skipped", deploy_job_id: null, reason: "merged into release, not the deploy branch main"}), "merged bbbbbbb · no deploy: merged into release, not the deploy branch main");
+ const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/job-detail.css"), "utf8");
+ assert.match(css, /\.job-fact-deploy dd \{ display: block;/, "long reasons wrap as one sentence, not as flex fragments");
+});

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { JobResponse, JobRunning, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { JobDeploy, JobResponse, JobRunning, ViewerJob } from "../../src/viewer/api-types.ts";
 import { ROLE } from "../components/VersionBadge.tsx";
 import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, observedTime, prNumber, shortSha, time } from "../format.ts";
@@ -7,7 +7,7 @@ import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { PhaseDot, CiSignal, ModelName, parkedPendingText } from "../components/JobSignals.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
-import { composerHref } from "../routes.ts";
+import { composerHref, jobHref } from "../routes.ts";
 import "./job-detail.css";
 
 function ModelFact({job}: {job: ViewerJob}) {
@@ -56,6 +56,23 @@ function RunningFact({running}: {running: JobRunning}) {
  const checkout = running.checkout === "included" ? `in this checkout since ${running.since ? observedTime(running.since) : "unknown"}`
   : running.checkout === "not_included" ? "merged · not in this checkout yet — update pending" : `unknown · ${running.why}`;
  return <><p>{checkout}</p>{running.checkout !== "unknown" && <ul class="job-running">{running.processes.map(p => <li key={p.role}>{ROLE[p.role]}: {LOADED[p.state]}{p.since ? ` since ${observedTime(p.since)}` : ""}</li>)}</ul>}</>;
+}
+
+const coverageText = (d: JobDeploy) => d.coverage === "enrolled" ? `enrolled in ${d.mandate_id ?? "a grant"}` : d.coverage === "project_wide" ? `covered by project-wide ${d.mandate_id ?? "grant"}`
+ : `no covering grant — dispatch needs a grant${d.reason ? ` (${d.reason})` : ""}`;
+
+/** merged → deployed → in use (#326); wording mirrors the after-merge outcome line (src/after-merge.ts). */
+function DeployFact({deploy}: {deploy: JobDeploy}) {
+ const job = deploy.deploy_job_id ? <a href={jobHref(deploy.deploy_job_id)}><code>{deploy.deploy_job_id}</code></a> : null;
+ const merged = <>merged <code title={deploy.merge_sha}>{shortSha(deploy.merge_sha)}</code></>;
+ switch (deploy.state) {
+  case "deployed": return <>{merged} → deployed and health-checked by {job}{deploy.at ? ` at ${observedTime(deploy.at)}` : ""} · in use</>;
+  case "deploying": return <>{merged} → deploying ({job})</>;
+  case "queued": return <>{merged} → deploy {job} queued · {coverageText(deploy)}</>;
+  case "blocked": return <>{merged} → deploy blocked: {deploy.reason} ({job})</>;
+  case "failed": return <>{merged} → deploy failed: {deploy.reason} ({job})</>;
+  default: return <>{merged} · no deploy: {deploy.reason}</>;
+ }
 }
 
 function RoutingFact({job}: {job: ViewerJob}) {
@@ -142,6 +159,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
      <div class="job-fact-mandate"><dt>Mandate</dt><dd>{job.mandate_id ? <a href="#map"><code>{job.mandate_id}</code> →</a> : "none"}</dd></div>
      <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
      {data.running && <div class="job-fact-wide job-fact-running"><dt>Running here</dt><dd><RunningFact running={data.running}/></dd></div>}
+     {data.deploy && <div class="job-fact-wide job-fact-deploy"><dt>Deploy</dt><dd><DeployFact deploy={data.deploy}/></dd></div>}
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
      <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
     </dl>

@@ -4,7 +4,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type AfterMergeDeploy, type AfterMergeRecord, AfterMergeRecordSchema, isoTimestamp, type Mandate, type MergeReceipt, paths, SCHEMA_VERSION, validate } from "./contracts.ts";
+import { type AfterMergeDeploy, type AfterMergeRecord, AfterMergeRecordSchema, isoTimestamp, type MergeReceipt, paths, SCHEMA_VERSION, validate } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
 import { compareActiveGrants } from "./grant-order.ts";
 import { atomicWriteJson, atomicWriteText, queued } from "./json-store.ts";
@@ -114,7 +114,9 @@ function cover(ports: AfterMergePorts, project: string, merged: string, deployId
 			return { coverage: "none", reason: String((error as Error).message).slice(0, 400) };
 		}
 	}
-	const wide = active.find((grant: Mandate) => !grant.job_ids?.length && !grant.schedule_grant && !grant.exclusions?.job_kinds?.includes("research"));
+	// The grant selection cp_dispatch runs, read-only; risk:high and the grant's caps still apply at dispatch.
+	const selected = ports.mandates.selection("dispatch", { jobId: deployId, project, kind: "research" }, ports.fleet.read().jobs);
+	const wide = selected?.at.standing === "permit" && selected.at.cause === "active" ? selected.grant : undefined;
 	return wide ? { coverage: "project_wide", mandate_id: wide.id } : { coverage: "none" };
 }
 
