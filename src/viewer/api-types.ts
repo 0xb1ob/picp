@@ -49,6 +49,8 @@ export interface SessionEntry {
  shared?: true;
  /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */
  answer_id?: string;
+ /** The assistant message's recorded `usage.cost.total`, on its first entry (Stats Parent panel). */
+ cost_usd?: number;
 }
 /** An operator ask as its card renders inline in the Full transcript; state comes from the ask journal only. */
 export interface TranscriptAsk {
@@ -221,6 +223,13 @@ export interface StatsResponse {
  spend_by_model: { model: string; usd: number }[];
  decisions: { for_you: number | null; by_you: number | null; worth: number | null };
  mandates: StatsMandateRow[];
+ /** Parent turns in the 7 and 30 days ending at `generated_at`, unfiltered; null when no parent session file reads. */
+ parent: StatsParentWindow[] | null;
+}
+/** One window of parent turns: definitions and denominators in docs/viewer-app.md (Stats API, Parent). */
+export interface StatsParentWindow {
+ days: number; turns: number; wasted_turns: number; reply_p50_seconds: number | null; reply_p90_seconds: number | null;
+ spend_usd: number; wasted_usd: number;
 }
 /** A published web board as the Reports page lists it (`href` is the served path, not an absolute URL). */
 export interface ReportItem {

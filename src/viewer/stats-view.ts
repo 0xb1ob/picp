@@ -1,7 +1,7 @@
 /**
  * `GET /api/stats` (S8a): a read-only projection of the ledger, fleet, run status, run events, mandates and
- * decisions. Definitions are in docs/viewer-app.md (Stats). Nothing is written and no rollup exists: the
- * only scan is each finished job's events.jsonl, each file bounded at 16 MiB and the whole request at 128 MiB.
+ * decisions. Definitions are in docs/viewer-app.md (Stats). Nothing is written and no rollup exists: the scans
+ * are each finished job's events.jsonl (16 MiB per file, 128 MiB per request) and the parent session files.
  */
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -10,8 +10,10 @@ import { jobEventsFile, jobsView } from "./jobs-view.ts";
 import { readMandates } from "./fleet-view.ts";
 import { decisions } from "./overview-decisions.ts";
 import { objectList, timestamp } from "./overview-read.ts";
-import { fleetJobs, isSafeId, num, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
-import { bucketEdges, bucketStep, classifyFinished, deltaPct, median, parseStatsQuery, walkEvents, type EventFacts } from "./stats-series.ts";
+import { fleetJobs, isSafeId, num, obj, parentFile, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
+import { bucketEdges, bucketStep, classifyFinished, DAY_MS, deltaPct, median, parentTurns, parentWindow, parseStatsQuery, walkEvents, type EventFacts, type ParentTurn } from "./stats-series.ts";
+import { parentTranscript } from "./sessions-view.ts";
+import { fileCache } from "./file-cache.ts";
 
 const REVIEWER_RUN_DIR = /^(?:gate|review|quality)-[a-z0-9_-]+$/;
 /** Per-file and per-request read bounds for events.jsonl; the parameter exists so tests can use small ones. */
@@ -73,6 +75,23 @@ function eventScanner(limits: ScanLimits) {
   } catch { return undefined; }
  };
  return { read, counts };
+}
+
+const PARENT_FILE_BYTES = 64 * 1024 * 1024;
+const ARCHIVE = /^cp-parent(?:-\d+-[a-f0-9]{8})?\.jsonl$/;
+const parentCaches = new Map<string, (file: string) => { turns: ParentTurn[]; truncated: boolean }>();
+/** Parent turns from the live session file and archives touched in the last 30 days; cached per file identity. */
+function parentStats(state: ViewerState, now: number, warnings: StatsResponse["warnings"]): StatsResponse["parent"] {
+ let read = parentCaches.get(state.stateDir);
+ if (!read) parentCaches.set(state.stateDir, read = fileCache(file => { const t = parentTranscript(state, file, PARENT_FILE_BYTES); return { turns: parentTurns(t.entries), truncated: t.truncated }; }, v => v.turns.length * 64));
+ const dir = join(state.stateDir, "sessions");
+ let names: string[] = []; try { names = readdirSync(dir).filter(n => ARCHIVE.test(n)); } catch { /* no sessions dir: only the live file */ }
+ const files = [...new Set([parentFile(state), ...names.map(n => join(dir, n))])].filter(f => { try { return statSync(f).mtimeMs >= now - 30 * DAY_MS; } catch { return false; } });
+ const turns: ParentTurn[] = []; let truncated = 0, failed = 0;
+ for (const f of files) { try { const r = read(f); turns.push(...r.turns); if (r.truncated) truncated++; } catch { failed++; } }
+ if (failed) warnings.push({ section: "parent", message: `${failed} parent session file(s) are unreadable and left out of the Parent figures.` });
+ if (truncated) warnings.push({ section: "parent", message: `${truncated} parent session file(s) exceed 64 MiB; only their last 64 MiB count.` });
+ return files.length > failed ? [parentWindow(turns, now, 7), parentWindow(turns, now, 30)] : null;
 }
 
 export function statsView(state: ViewerState, params: URLSearchParams, now: number, limits: ScanLimits = DEFAULT_LIMITS): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {
@@ -175,6 +194,7 @@ export function statsView(state: ViewerState, params: URLSearchParams, now: numb
   spend_by_model: [...spendByModel].map(([model, usd]) => ({ model, usd })).sort((a, b) => b.usd - a.usd),
   decisions: { for_you: forYou?.length ?? null, by_you: byYou?.length ?? null, worth: forYou ? forYou.filter(i => i.worth.length > 0).length : null },
   mandates: mandateRows,
+  parent: parentStats(state, now, warnings),
  };
  return { status: 200, body };
 }
