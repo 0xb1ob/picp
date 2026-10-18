@@ -108,6 +108,7 @@
 .session-pending-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .session-pending-actions > button { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .session-pending-actions > button:disabled { opacity: 0.5; cursor: default; }
+.session-pending-evidence { display: inline-flex; align-items: center; min-height: 44px; color: var(--blue); font-size: 13px; overflow-wrap: anywhere; }
 .session-pending-editing > .session-body { box-sizing: border-box; width: 100%; }
 .session-pending-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .session-pending-editor > textarea { box-sizing: border-box; width: 100%; min-height: 88px; max-height: 40vh; field-sizing: content; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: inherit; font-size: 14px; resize: vertical; overflow-wrap: anywhere; }

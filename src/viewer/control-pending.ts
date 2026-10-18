@@ -1,7 +1,9 @@
 import { readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { ControlPendingSend } from "./api-types.ts";
 import { controlInboxFile, controlJournalFile, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, readThreads } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
+import { readOperatorSessions } from "./operator-sessions.ts";
 import { stripSkillLines } from "./skill-mentions.ts";
 
 /**
@@ -58,6 +60,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
  }
  // Thread bindings also recover tags from requests written by older bridges that did not journal the tag.
  const threads = readThreads(stateDir);
+ const listed = readOperatorSessions(join(stateDir, "sessions"));
  for (const send of sends.values()) {
   if (send.state === "queued" && accepted.has(send.id)) {
    const target = targets.get(send.id);
@@ -75,6 +78,10 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
    // cp-y43c addendum 2: no silent loss. The text stays in a failed bubble; only the operator's Send again sends it, as a new message.
    send.state = "failed";
    send.reason = `${injected.has(send.id) ? "Not confirmed" : "Not sent"}: ${send.reason}. ${injected.has(send.id) ? "It was handed to the session but never seen in its transcript; check the transcript before sending it again." : "It was never given to the session."}`;
+   // picp-96n: only the send's own recorded file, and only when the viewer serves exactly that file under its basename.
+   const file = injected.has(send.id) ? targets.get(send.id)?.file : undefined;
+   const same = file ? listed.filter(row=>row.id === basename(file)) : [];
+   if (same.length === 1 && same[0]!.file === file) send.target_session = same[0]!.id;
   }
   const id = threads.refs.get(`dashboard:${send.id}`);
   const tag = threads.threads.find(thread=>thread.id === id)?.tag;

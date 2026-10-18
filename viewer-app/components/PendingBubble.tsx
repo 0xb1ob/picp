@@ -5,7 +5,7 @@ import { restartInFlight } from "../restart-control.ts";
 import { time } from "../format.ts";
 import { Markdown } from "./Markdown.tsx";
 
-export function PendingBubble({send,position,total,control}: {send:PendingSend;position:number;total:number;control:ControlView}) {
+export function PendingBubble({send,position,total,control,viewing,truncated}: {send:PendingSend;position:number;total:number;control:ControlView;viewing:string | null;truncated:boolean}) {
  const [draft,setDraft] = useState<string | null>(null);
  const [busy,setBusy] = useState(false);
  const [note,setNote] = useState<string | null>(null);
@@ -33,6 +33,10 @@ export function PendingBubble({send,position,total,control}: {send:PendingSend;p
    {attachments.length ? <ul class="session-pending-attachments" aria-label="Attachments">{attachments.map(({id,label})=><li key={id}>{label} · {id}</li>)}</ul> : null}
    {detail && <p class="session-pending-detail">{detail}</p>}
    {send.reason && <p class="session-pending-detail">{failed ? "Failed: " : ""}{send.reason}</p>}
+   {/* picp-96n: links only the send's own recorded session; a plain hash link that posts nothing. */}
+   {failed && send.target_session && send.target_session !== viewing && <a class="session-pending-evidence" href={`#sessions?view=you&transcript=1&session=${encodeURIComponent(send.target_session)}`}>Open the session it was handed to</a>}
+   {failed && send.target_session && send.target_session === viewing && truncated && <p class="session-pending-detail">Older than this transcript's loaded window; it cannot be checked here.</p>}
+   {failed && !send.target_session && send.reason?.startsWith("Not confirmed") && <p class="session-pending-detail">Its session was not recorded; it cannot be checked here.</p>}
    {note && <p class="session-pending-detail" role="alert">{note}</p>}
    {changeable && draft === null && <div class="session-pending-actions"><button type="button" class="session-pending-edit" disabled={busy} onClick={()=>{setNote(null);setDraft(send.body.text);}}>Edit</button><button type="button" class="session-pending-cancel" disabled={busy} onClick={remove}>Cancel send</button></div>}
    {/* cp-y43c addendum 2: Send again is the only way a failed or lost message is sent again — a new message, on this click only. */}

@@ -14,7 +14,7 @@ const {html,act,mount,unmount} = await import(`data:text/javascript;base64,${Buf
 const at="2026-10-04T14:00:00Z";
 const status: ControlStatusResponse = {generated_at:at,enabled:true,running:true,reason:null,token:"fixture-only",busy:true,pending:true,session_file:"fixture.jsonl",recent:[],offline:false,held:0,inbox_token:null,start_unavailable:null,launchers:{tmux:false,herdr:false},resume:{tmux:false,herdr:false}};
 const entry=(id:string,extra:Partial<SessionEntry>={}):SessionEntry=>({id,at,kind:"say",who:"Assistant",text:id,name:null,send_id:null,tag:null,failed:false,trace:[],...extra});
-const view=(entries:SessionEntry[],generated_at=at,truncated=false)=>({generated_at,selected:"you",session_id:null,parent:{id:"cp-parent",live:false},workers:[],entries,title:"Operator ↔ you",subtitle:"Full transcript",warnings:[],truncated,transcript:true} as unknown as SessionsResponse);
+const view=(entries:SessionEntry[],generated_at=at,truncated=false,extra:object={})=>({generated_at,selected:"you",session_id:null,parent:{id:"cp-parent",live:false},workers:[],entries,title:"Operator ↔ you",subtitle:"Full transcript",warnings:[],truncated,transcript:true,...extra} as unknown as SessionsResponse);
 const pending=(key:string,extra:object={})=>({key,id:`dc-${key}`,at,state:"queued",reason:null,ask_id:null,body:{kind:"message",text:`queued ${key}`,thread:"layout"},...extra});
 
 test("queued bubbles: FIFO after newest transcript, state and time, attachment chips, failures and thread filtering",()=>{
@@ -61,7 +61,7 @@ async function stage(t:TestContext, store=new Map<string,string>()) {
   return new Response(JSON.stringify(current));
  };
  const flush=()=>act(async()=>{for(let i=0;i<5;i++) await new Promise(resolve=>setImmediate(resolve));});
- const show=async (entries:SessionEntry[]=[],version=Math.random().toString(),truncated=false)=>{await act(()=>mount(root,view(entries,version,truncated),fetcher,(value:ControlView)=>{control=value;}));await flush();};
+ const show=async (entries:SessionEntry[]=[],version=Math.random().toString(),truncated=false,extra:object={})=>{await act(()=>mount(root,view(entries,version,truncated,extra),fetcher,(value:ControlView)=>{control=value;}));await flush();};
  t.after(async()=>{await act(()=>unmount(root));for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
  const bubbleTexts=()=>[...root.querySelectorAll(".session-pending .md")].map(el=>el.textContent);
  return {root,store,posted,show,flush,bubbleTexts,get control(){return control!;},status:(value:ControlStatusResponse)=>{current=value;},
@@ -347,6 +347,23 @@ test("cp-y43c review 1: Edit, Cancel send, Save, Cancel and Send again are 44 px
  assert.match(phone,/\.session-pending-actions > button \{[^}]*min-height: 44px;/,"base (phone) rule: every width below 900 px, so 390 and 430");
  assert.doesNotMatch(css.slice(css.indexOf("@media")),/session-pending/,"no media block resizes them");
  for (const sheet of ["styles/shell.css","components/control.css","styles/tokens.css"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT,"viewer-app",sheet),"utf8"),/session-pending/,sheet);
+});
+
+test("picp-96n: a Not confirmed failure links to its own recorded session, else says it cannot be checked here; nothing is posted",async t=>{
+ const s=await stage(t);
+ const failed=(n:string,reason:string,extra:object={})=>({id:`dc-20261004140000-0000000${n}`,at,state:"failed" as const,reason,ask_id:null,body:{kind:"message" as const,text:`lost ${n}`},...extra});
+ const unconfirmed="Not confirmed: target operator session ended. It was handed to the session but never seen in its transcript; check the transcript before sending it again.";
+ s.status({...status,session_file:"B.jsonl",sends:[failed("a",unconfirmed,{target_session:"A.jsonl"}),failed("b",unconfirmed),failed("c","Not sent: session shut down. It was never given to the session.")]});
+ const evidence=()=>[...s.root.querySelectorAll(".session-pending")].map(b=>[b.querySelector(".md")?.textContent,b.querySelector(".session-pending-evidence")?.getAttribute("href") ?? null,/cannot be checked here/.test(b.textContent!)]);
+ await s.show([],"v1",false,{operator_session:"B.jsonl"});
+ assert.deepEqual(evidence(),[["lost a","#sessions?view=you&transcript=1&session=A.jsonl",false],["lost b",null,true],["lost c",null,false]],
+  "the recorded target while viewing the current session; no target is never the current one; Not sent gets neither");
+ await s.show([],"v2",true,{operator_session:"A.jsonl"});
+ assert.deepEqual(evidence()[0],["lost a",null,true],"viewing its own session, older than the loaded window: no self-link, says so");
+ assert.equal(s.posted.length,0,"no link or render ever posts a request");
+ const local=[pending("x",{state:"failed",reason:unconfirmed})] as PendingSend[];
+ const carried=reconcilePending({items:local,dismissed:[]},{...status,sends:[{...failed("0",unconfirmed,{target_session:"A.jsonl"}),id:"dc-x"}]},[]);
+ assert.equal(carried.items[0]?.target_session,"A.jsonl","a browser-kept bubble takes the target from the status");
 });
 
 test("picp-cc0: a delivered send clears once a truncated transcript window or the status grace passes it; queued, held and failed stay",()=>{
