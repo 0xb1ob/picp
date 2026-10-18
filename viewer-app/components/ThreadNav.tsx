@@ -68,15 +68,19 @@ export function ThreadSidebar({threads}: {threads: ThreadsView}) {
  </section>;
 }
 
-/** The composer's thread: No thread, each open or waiting tag, and the Done group. New threads are made in the dialog (`+ New`). */
-export function ThreadPicker({threads}: {threads: ThreadsView}) {
+/**
+ * The composer's thread (No thread), or with `filter` the header's view of the same selection (All messages): each
+ * open or waiting tag, a selected new one, and the Done group. New threads are made in the dialog (`+ New`).
+ */
+export function ThreadPicker({threads, filter = false}: {threads: ThreadsView; filter?: boolean}) {
  const status = threads.status;
  if (!threadsReady(status)) return null;
  const live = status.threads.filter(t => t.state !== "done"), done = status.threads.filter(t => t.state === "done");
  const fresh = threads.selected && !status.threads.some(t => t.tag === threads.selected) ? threads.selected : null;
- return <div class="operator-composer-thread">
-  <select aria-label="Thread" value={threads.selected ?? ""} onChange={e => threads.select(e.currentTarget.value || null)}>
-   <option value="">No thread</option>
+ return <div class={filter ? "session-thread-filter" : "operator-composer-thread"}>
+  <span aria-hidden="true">#</span>
+  <select aria-label={filter ? "Show thread" : "Thread"} value={threads.selected ?? ""} onChange={e => threads.select(e.currentTarget.value || null)}>
+   <option value="">{filter ? "All messages" : "No thread"}</option>
    {fresh && <option value={fresh}>{fresh} (new)</option>}
    {live.map(t => <option key={t.id} value={t.tag}>{t.tag}{threadBadge(t)}</option>)}
    {done.length > 0 && <optgroup label="Done">{done.map(t => <option key={t.id} value={t.tag}>{t.tag}</option>)}</optgroup>}

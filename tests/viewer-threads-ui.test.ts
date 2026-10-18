@@ -133,7 +133,7 @@ test("composer picker: a selected tag rides the send; the picker only selects (n
 	assert.deepEqual([...select.querySelectorAll(":scope > option")].map(o => o.textContent), ["No thread", "billing-bug · 2", "ops"], "no inline New thread… option: the dialog creates threads");
 	assert.equal(root.querySelector('input[aria-label="New thread tag"]'), null);
 	assert.deepEqual([...select.querySelectorAll("optgroup[label=Done] option")].map(o => o.textContent), ["old"]);
-	assert.ok(root.innerHTML.indexOf("operator-composer-thread") < root.innerHTML.indexOf("operator-composer-row"), "the picker sits above the text row");
+	assert.ok(select.closest(".operator-composer-box > .operator-composer-footer"), "the picker sits in the composer box's footer");
 	await typeInto(root.querySelector("textarea")!, "hello");
 	await fire(sendButton(), "click");
 	assert.deepEqual(sends, [{ kind: "message", text: "hello", thread: "ops" }]);

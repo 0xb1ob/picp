@@ -88,7 +88,8 @@ export function waitingLabel(view: ThreadView): string | null {
 /** The reasons, spelled out. */
 export function threadAria(view: ThreadView): string {
  if (view.state === "waiting" && view.waiting) return `${view.tag}: waiting, ${view.waiting.asks} open ask(s), ${view.waiting.answers} unacknowledged answer(s)`;
- return view.waiting ? `${view.tag}: ${view.state}` : `${view.tag}: ${view.state}, waiting unknown`;
+ // A done thread hides its badge (waitingLabel), so an unreadable count is not announced either.
+ return view.waiting || view.state === "done" ? `${view.tag}: ${view.state}` : `${view.tag}: ${view.state}, waiting unknown`;
 }
 /** Why Mark done cannot run on this thread now, or null. */
 export function doneRefusal(status: ThreadsResponse, view: ThreadView): string | null {

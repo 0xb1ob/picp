@@ -90,7 +90,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.match(ready, /<span class="session-who-name">You<\/span><span>dashboard<\/span>/, "the operator's own dashboard message reads You");
 	assert.match(ready, /dashboard dc-20260927082600-0123abcd · ask-aaaa/);
 	assert.match(ready, /<textarea aria-label="Message to the operator session" maxLength="16000"|<textarea aria-label="Message to the operator session" maxlength="16000"/);
-	assert.match(ready, /placeholder="Message \(Enter to send\)"/, "one short placeholder that fits the 390px one-row box; no separate hint line");
+	assert.match(ready, /placeholder="Message Operator…"/, "one short placeholder that fits the 390px one-row box; no separate hint line");
 	assert.doesNotMatch(ready, /operator-composer-hint/);
 	assert.match(ready, /<button type="button" class="operator-composer-send" aria-label="Send" title="Send" disabled(?:="")?>/, "one round send button, idle: a plain send");
 	assert.doesNotMatch(ready, /operator-composer-more/, "no steer/abort menu while idle");
@@ -109,10 +109,16 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.match(bar, /class="session-bar-file">Delivers to <code>op\.jsonl<\/code>/, "the session file name lives in the ⋯ sheet");
 	assert.doesNotMatch(ready, /session-tabs|session-mobile-controls/, "the old tab rows are gone");
 	assert.doesNotMatch(ready, /<form/);
+	// Chat v2 quick replies: ask-aaaa is the one open ask carded here (ask-dddd is older than the window), so its literal
+	// labels follow the newest operator-session card; the header reads the recorded state.
+	const replies = parseHTML(ready).document.querySelector(".session-entries > .session-replies")!;
+	assert.deepEqual([...replies.querySelectorAll("button.session-reply")].map(b => b.textContent), ["Keep", "Raise"]);
+	assert.match(replies.querySelector(".session-replies-to")!.textContent!, /^Options from ask-aaaa: Question ask-aaaa$/);
+	assert.match(ready, /<strong>Operator<\/strong><span class="session-heading-state"><span class="session-dot session-dot-working"><\/span><span>Idle · model unknown<\/span>/);
 
 	const busy = screen(full, view(status({ busy: true })));
 	assert.match(busy, /class="operator-composer-send" aria-label="Send after this turn"/, "busy: the send button follows up, like Enter");
-	assert.match(busy, /placeholder="Message \(Enter to send\)"/, "the placeholder never grows: the send button's tooltip says what Enter does while busy");
+	assert.match(busy, /placeholder="Message Operator…"/, "the placeholder never grows: the send button's tooltip says what Enter does while busy");
 	assert.match(busy, /<details class="operator-composer-more"><summary aria-label="Steer or abort"/, "busy: steer and abort behind the ⋯ menu");
 	for (const label of ["Steer now", "Abort turn"]) assert.match(busy, new RegExp(`>${label}</button>`));
 	assert.match(busy, /Session busy — send after this turn, steer, or abort/);

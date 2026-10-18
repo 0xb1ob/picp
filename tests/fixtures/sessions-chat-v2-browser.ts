@@ -1,6 +1,6 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
- * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3 [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3|pr4 [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,7 +15,7 @@ import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -68,6 +68,20 @@ const sessions: SessionsResponse = {
 	generated_at: GENERATED, selected: "you", session_id: "op-session", entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings: [], truncated: false,
 	parent: { id: "cp-parent", kind: "parent", live: true, last_activity: "2026-10-15T08:04:20Z" }, workers, transcript: true, operator_sessions: [{ id: "op.jsonl", at: GENERATED }], operator_session: "op.jsonl",
 };
+/** PR 4: one open ask carded in the transcript, so its literal options become quick replies; a second one hides them. */
+const asked = (id: string, question: string) => ({ id, project: "picp", question, created_at: "2026-10-15T08:04:40Z", recommendation: "Merge after CI",
+	options: [{ label: "Merge after CI", consequence: "Lands once the pushed head is green", reply: "" }, { label: "Hold for review", consequence: "Waits for a second review pass", reply: "" },
+		{ label: "Close the PR without merging and file the remaining work as a new job", consequence: "Nothing lands; a long label wraps inside its chip", reply: "" }],
+	source_escalation: null, job_ids: [], context: null, evidence_paths: [], reason: null, source_created_at: null, mandate_id: null, mandate_status: null, spend: null, spend_cap: null,
+	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
+const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
+	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
+if (args.stage === "pr4") {
+	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
+	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
+	sessions.open_asks = [ask];
+	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
+}
 const body = (text: string) => ({ kind: "message" as const, text });
 const control: ControlStatusResponse = {
 	generated_at: GENERATED, enabled: true, running: true, reason: null, token: "fixture-token", busy: true, pending: true, session_file: "op.jsonl", recent: [],
@@ -180,10 +194,14 @@ try {
 				open_cards: document.querySelectorAll(".session-steps-open").length, job_tab: document.querySelector(".job-detail")?.dataset.tab ?? null,
 				step_names: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].map(c => c.textContent + " " + c.clientWidth + "/" + c.scrollWidth + "px"),
 				clipped: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].filter(c => c.scrollWidth > c.clientWidth).map(c => c.textContent),
+				summary_x: [...document.querySelectorAll(".session-steps-open .session-steps-rows")].map(card => [...new Set([...card.querySelectorAll(".session-tool > summary > span")].map(s => Math.round(s.getBoundingClientRect().left)))]),
+				replies: [...document.querySelectorAll(".session-replies .session-reply")].map(b => b.textContent + (b.disabled ? " (disabled)" : "")),
+				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
 				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
+		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
 		const png = (await cdp("Page.captureScreenshot", { format: "png" })).data as string;
 		const file = join(out, `${name}.png`);
 		writeFileSync(file, Buffer.from(png, "base64"));
@@ -243,6 +261,33 @@ try {
 		await chats("fleet-empty", "light", []);
 		sessions.workers = workers;
 		if (posts.length) throw new Error(`pr3 sent ${posts.join(", ")}: New thread and Cancel must request nothing`);
+	}
+	if (stage === "pr4") {
+		const chips = `document.querySelectorAll(".session-replies .session-reply").length === 3`, at = (selector: string): [string, string] =>
+			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector("${selector}").getBoundingClientRect().top - t.getBoundingClientRect().top - 260; })()`, "true"];
+		for (const theme of ["dark", "light"] as const) {
+			await capture(`pr4-replies-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", [["true", chips], at(".session-replies")]);
+			await capture(`pr4-replies-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [["true", chips], at(".session-replies")]);
+		}
+		// Step names at phone width: cp_integrate and fetch_content fit, every summary at one x (the run fails otherwise).
+		await capture("pr4-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`], at(".session-steps-open")]);
+		// The header filter and the composer picker are one selection (cp-thread).
+		await capture("pr4-header-filter-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`(() => { const s = document.querySelector(".session-thread-filter select"); s.value = "sessions-v2"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`,
+			`document.querySelector(".operator-composer-thread select")?.value === "sessions-v2"`]]);
+		// A chip is one exact answer POST; this read-only fixture refuses it, so the failure line shows and the chips re-enable.
+		await capture("pr4-reply-failed-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [["true", chips], [`document.querySelector(".session-reply").click()`, `!!document.querySelector(".session-replies-failed") && !document.querySelector(".session-reply").disabled`], at(".session-replies")]);
+		if (posts.join() !== "POST /api/operator/message") throw new Error(`pr4: a chip click sent ${posts.join(", ") || "nothing"}, not one answer`);
+		const [entriesBefore, asksBefore] = [sessions.entries, sessions.open_asks!];
+		const second = asked("ask-pr4b", "Also rotate the fixture token?");
+		sessions.entries = [...entriesBefore, askCard(second, "2026-10-15T08:04:50Z")]; sessions.open_asks = [...asksBefore, second];
+		await capture("pr4-two-asks-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [["true", `!document.querySelector(".session-replies")`]]);
+		sessions.entries = entriesBefore; sessions.open_asks = asksBefore;
+		sessions.operator_sessions = [{ id: "op-newer.jsonl", at: GENERATED }, { id: "op.jsonl", at: "2026-10-15T08:00:00Z" }];
+		await capture("pr4-history-desktop-light-1440x1000", transcript, 1440, 1000, "light", loaded, "bottom", [["true", `!document.querySelector(".session-replies") && /Historical transcript/.test(document.querySelector(".session-heading").innerText)`]]);
+		sessions.operator_sessions = [{ id: "op.jsonl", at: GENERATED }];
+		routes["/api/operator/control"] = { ...control, running: false, offline: true, busy: false, pending: false, token: null, inbox_token: "i".repeat(64) };
+		await capture("pr4-offline-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom");
+		routes["/api/operator/control"] = control;
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
