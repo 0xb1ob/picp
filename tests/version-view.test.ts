@@ -14,7 +14,8 @@ import type { VersionResponse } from "../src/viewer/api-types.ts";
 import type { GitRunner } from "../src/viewer/loaded-commit.ts";
 import { runGit } from "../src/viewer/git-read.ts";
 import { createViewer } from "../src/viewer/server.ts";
-import { formatTerminal, GIT_CACHE_MS, gitFacts, readVersion } from "../src/viewer/version-view.ts";
+import { DRAIN_TIMEOUT_RETRY_FACTOR, DRAIN_WAIT_MS, QUIET_MIN_DEFAULT, readUpdateConfig } from "../src/service/update.ts";
+import { formatTerminal, GIT_CACHE_MS, gitFacts, readVersion, UPDATER } from "../src/viewer/version-view.ts";
 import { badgeView } from "../viewer-app/use-version.ts";
 import { advanceBase, createScratchHome, createScratchRepo } from "./harness/index.ts";
 
@@ -101,6 +102,15 @@ test("#325: the updater's phase and result read as a clocked sentence from state
 	// No first_seen_at recorded: no invented clock, the bare result stays.
 	f.write("update.json", { phase: "idle", last_result: "skipped_settling", last_run_at: iso(1) });
 	assert.deepEqual(await pair(), ["1 behind (skipped_settling)", "1 behind (skipped_settling)"]);
+});
+
+test("#325: the sentence's drain wait, retry factor and defaults match the updater's own constants", (t) => {
+	// Mirrored, not imported (the updater imports the viewer server); this fails when either side drifts.
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const config = readUpdateConfig(join(home.path, "no-data"));
+	assert.ok(typeof config !== "string");
+	assert.deepEqual(UPDATER, { drainWaitMin: DRAIN_WAIT_MS / 60_000, retryFactor: DRAIN_TIMEOUT_RETRY_FACTOR, intervalMin: config.interval_min, quietMin: QUIET_MIN_DEFAULT });
 });
 
 test("ahead and diverged are neutral; a stale host is amber with its restart", async (t) => {

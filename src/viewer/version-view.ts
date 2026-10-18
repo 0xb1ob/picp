@@ -23,6 +23,8 @@ import { type Json, readObject, resolveStateDir, str } from "./sessions.ts";
 export const GIT_CACHE_MS = 10_000;
 /** 6 × the updater's 5-min tick: an older fetch no longer says what upstream is. */
 export const UPSTREAM_FRESH_MS = 30 * 60_000;
+/** src/service/update.ts values, not imported (update.ts → health.ts → viewer server → here); a test pins them. */
+export const UPDATER = { drainWaitMin: 11, retryFactor: 4, intervalMin: 15, quietMin: 10 };
 const DETAIL_MAX = 160;
 const COUNT_MAX_BYTES = 64 * 1024;
 /** Results a run records only after its `git fetch origin main` succeeded (src/service/update.ts). */
@@ -67,14 +69,14 @@ export function progressSentence(update: Json, config: Json | undefined): { text
 	const to = str(update.to)?.slice(0, 7) ?? "origin/main";
 	const at = (field: unknown) => { const t = Date.parse(str(field) ?? ""); return Number.isNaN(t) ? null : t; };
 	const phase = str(update.phase);
-	// drain start is not recorded: the 11 min is DRAIN_WAIT_MS (src/service/update.ts), never a clock.
-	if (phase === "draining") return { text: `draining for update to ${to}; gives up after 11 min`, short: "draining ≤ 11 min" };
+	// drain start is not recorded: the limit is DRAIN_WAIT_MS, never a clock.
+	if (phase === "draining") return { text: `draining for update to ${to}; gives up after ${UPDATER.drainWaitMin} min`, short: `draining ≤ ${UPDATER.drainWaitMin} min` };
 	if (phase === "updating" || phase === "verifying") return { text: `applying update to ${to}`, short: "applying" };
 	if (phase === "rolling_back") return { text: `rolling back ${to}`, short: "rolling back" };
 	const result = str(update.last_result);
 	if (result === "skipped_settling") {
 		const seen = at(update.first_seen_at);
-		const until = seen === null ? null : clock(seen + minutes(config?.quiet_min, 10) * 60_000);
+		const until = seen === null ? null : clock(seen + minutes(config?.quiet_min, UPDATER.quietMin) * 60_000);
 		return until === null ? null : { text: `update to ${to} waits for quiet origin/main until ${until}`, short: `waits until ${until}` };
 	}
 	if (result === "updated") {
@@ -83,8 +85,8 @@ export function progressSentence(update: Json, config: Json | undefined): { text
 	}
 	if (result === "drain_timeout") {
 		const ran = at(update.last_run_at);
-		// The updater waits 4× interval_min after a drain_timeout.
-		const retry = ran === null ? null : clock(ran + 4 * (minutes(config?.interval_min, 15) || 15) * 60_000);
+		const interval = minutes(config?.interval_min, UPDATER.intervalMin) || UPDATER.intervalMin;
+		const retry = ran === null ? null : clock(ran + UPDATER.retryFactor * interval * 60_000);
 		return { text: `drain timed out${retry ? ` — retries ${retry}` : ""}; cp_parent drain_cancel reopens dispatch`, short: `drain timeout${retry ? ` · retry ${retry}` : ""}` };
 	}
 	if (result === "skipped_dirty") return { text: "skipped: local changes in the checkout (git status) — commit, stash or remove them", short: "local changes" };
