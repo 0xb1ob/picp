@@ -173,7 +173,9 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 	}
 	if (listed === undefined || listed.length === 0) {
 		const why = listed === undefined ? "pi --no-extensions --list-models gave no model table" : `no model pi can use as the service sees it (${join(ctx.agentDir, "auth.json")} and ambient credentials; a key exported only in this shell does not reach the units)`;
-		step("skip", "model", `${why}: run \`pi\`, then /login, then rerun cp-install; nothing pinned`);
+		// An ordinary rerun keeps an unpinned choice (it may be intentional), so the continuation needs --force.
+		const rerun = `${join(ctx.app, "bin/cp-install")} --home ${ctx.home} --app ${ctx.app} --force`;
+		step("skip", "model", `${why}: nothing pinned; run \`pi\`, then /login, then ${rerun} (without --force a rerun keeps this unpinned; --force also reruns npm ci and replaces data/daemon.json, a unit or the wrapper that differs from what this install renders). The rerun lists models again as the service sees them, so a login can still leave nothing to pin`);
 		return models;
 	}
 	const routing = ports.read(join(ctx.home, layoutForHome("multi", ctx.home).data, "routing.json")) ?? ports.read(join(ctx.app, "defaults/routing.default.json"));
