@@ -2,9 +2,10 @@
 
 A **snapshot**, written when `.beads/` stopped being tracked (`cp-rnr`). The rebuild plan that used to live in `PLAN.md` is this table; `PLAN.md` is now a pointer.
 
-br is the in-flight ledger of a *running* command post, so it is machine-local:
-`.beads/` is in `.gitignore` like `data/`, `state/` and `projects/`, and the T19
-guard refuses to stage any of them. During this build the ledger was tracked on
+br is the in-flight ledger of a *running* command post, so the home's ledger is machine-local:
+the home ignores its `.beads/` like `data/`, `state/` and `projects/`, and the T19
+guard refuses to stage the home's copy (a project's own `.beads/` — picp's since
+[#298](https://github.com/0xb1ob/picp/pull/298) — is tracked). During this build the ledger was tracked on
 purpose — it *was* the plan's task list — which contradicted that guard and would
 have shipped an installed home whose ledger is committable but unstageable.
 
