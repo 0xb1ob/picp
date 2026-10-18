@@ -34,7 +34,7 @@ export function PageHeader({title, detail, back, context, stack = false, fallbac
   {context && <span class="page-header-context">{context}</span>}
   {detail && <code class="page-header-detail" title={detail}>{detail}</code>}
   <div class="page-header-end">
-   <span class={`shell-live shell-live-${status}`}><span/>{updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={`Updated ${stamp(updatedAt, true)}`}>updated {time(updatedAt)}</time> : status}</span>
+   <span class={`shell-live shell-live-${status}`} title={status}><span/>{updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={`Updated ${stamp(updatedAt, true)}`}>updated {time(updatedAt)}</time> : status}</span>
    <MoreMenu control={control} version={version} updatedAt={updatedAt}/>
   </div>
  </div>;

@@ -22,6 +22,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  assert.ok(desktop>0); assert.equal(css.includes("136px"),false,"the corner clock is gone, so the heading no longer dodges it");
  assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
  assert.match(css.slice(desktop),/\.session-heading \{[^}]*min-height: 48px;[^}]*padding: 0 84px 0 16px;/);
+ assert.match(css.slice(desktop),/\.sessions \.page-header-end > \.shell-live \{ font-size: 0; \}/,"only the status dot sits in the 84px, never a word over Tools N");
  assert.doesNotMatch(css,/\.session-tools-toggle[^{]*\{[^}]*display:\s*none/,"the tool-call toggle is never display:none, including at 1440");
  const stamped="2026-09-27T08:24:05Z", olderAt="2026-09-26T18:00:00Z";
  const when=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
