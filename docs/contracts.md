@@ -105,6 +105,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     ci-reruns.json        one infra-only CI rerun claimed per job + head (unload-parent PR2)
     armed-dispatches.json  cp_dispatch requests waiting for their blockers to land (unload-parent PR2)
     main-ci.json          per-project red-main latch; pauses cp_integrate (k52)
+    next-snapshot.json    the last cp_next answer, read by the viewer's "Lined up" strip (#323)
     answer-cards.json     answer cards the operator is owed, and the ones shown (cp-6lg7)
     status-block-shipped.json  Shipped rows already reported, per session (cp-b5eg)
     runs/<job-id>/

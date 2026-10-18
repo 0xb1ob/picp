@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { EMPTY_USAGE, isoTimestamp, LAYOUT, WORKER_FORBIDDEN_TOOLS, type FleetRecord } from "../src/contracts.ts";
@@ -12,7 +12,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { cpNext, dedupeNext, formatNext, type NextPorts } from "../src/next.ts";
+import { cpNext, dedupeNext, formatNext, type NextPorts, type NextSnapshot, nextSnapshot, nextSnapshotFile, writeNextSnapshot } from "../src/next.ts";
 import { mandateDisplay } from "../src/viewer/mandates-map-view.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { registerSendStatusTools } from "../extensions/command-post/tools-send-status.ts";
@@ -879,6 +879,7 @@ test("the cp_next tool: an identical second call is one line, full/compaction/ro
 
 	const first = await call();
 	assert.match(first, /no active mandate/);
+	assert.equal(JSON.parse(readFileSync(nextSnapshotFile(home.path), "utf8")).action.kind, "no_mandate", "#323: every call persists the snapshot");
 	const second = await call();
 	assert.match(second, /^cp_next unchanged since \S+: nothing new/);
 	assert.equal(second.split("\n").length, 1, "the repeat is one line");
@@ -894,4 +895,44 @@ test("the cp_next tool: an identical second call is one line, full/compaction/ro
 	ports.mandates.issue({ projects: ["demo"], objective: "ship the one job", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10, job_ids: [only.id] });
 	await ports.ledger.drop(only.id, "not needed");
 	assert.match(await call(), /action: mission_end[\s\S]*\nmemory: 0 pending candidate\(s\) \u2014 cp_memory curate only when above 0$/);
+});
+
+test("#323 snapshot: verdicts per job, nothing queued keeps its since, unread evidence is never empty", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const ports = bench(home);
+	const file = nextSnapshotFile(home.path);
+	const read = () => JSON.parse(readFileSync(file, "utf8")) as NextSnapshot;
+	writeNextSnapshot(home.path, await cpNext(ports, "demo"), "2026-10-01T09:00:00Z", "demo");
+	writeNextSnapshot(home.path, await cpNext(ports, "demo"), "2026-10-01T10:00:00Z", "demo");
+	assert.deepEqual([read().items, read().unavailable, read().at, read().empty_since], [[], [], "2026-10-01T10:00:00Z", "2026-10-01T09:00:00Z"]);
+	writeNextSnapshot(home.path, await cpNext(ports), "2026-10-01T11:00:00Z");
+	assert.equal(read().empty_since, "2026-10-01T11:00:00Z", "another scope starts its own since");
+
+	const first = await ports.ledger.create({ title: "first", project: "demo", delivery: "pr", kind: "ship" });
+	const second = await ports.ledger.create({ title: "second", project: "demo", delivery: "pr", kind: "ship" });
+	const after = await ports.ledger.create({ title: "after", project: "demo", delivery: "pr", kind: "ship" });
+	await ports.ledger.addDep(after.id, first.id);
+	const verdicts = (snapshot: NextSnapshot) => snapshot.items.map((item) => [item.id, item.verdict]);
+	const uncovered = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
+	const byId = (rows: string[][]) => [...rows].sort((a, b) => a[0]!.localeCompare(b[0]!));
+	assert.deepEqual(byId(verdicts(uncovered)), byId([[after.id, "blocked"], [first.id, "uncovered"], [second.id, "uncovered"]]), "no grant: lined up, never nothing queued");
+	assert.equal(uncovered.empty_since, null);
+	ports.mandates.issue({ projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+	const grantedResult = await cpNext(ports, "demo");
+	const head = grantedResult.action.job_id!;
+	const other = head === first.id ? second.id : first.id;
+	const granted = nextSnapshot(grantedResult, "2026-10-01T12:00:00Z", "demo");
+	assert.deepEqual(byId(verdicts(granted)), byId([[head, "dispatch"], [other, "wait"], [after.id, "blocked"]]));
+	assert.equal(granted.items.find((item) => item.id === other)!.reason, `after ${head}`);
+	const queued = nextSnapshot(await cpNext({ ...ports, queued: () => [head] }, "demo"), "2026-10-01T12:00:00Z", "demo");
+	assert.deepEqual(byId(verdicts(queued)), byId([[other, "wait"], [after.id, "blocked"], [head, "queued"]]));
+	assert.match(queued.items.find((item) => item.id === other)!.reason, /dispatch-parallelism 1 is full .*1 queued/, "why a ready job is not running");
+
+	const failed = nextSnapshot({ ready: [], action: { kind: "wait", reason: "x" }, lined_up: { jobs: [], beads: [{ project: "demo", ids: [], error: "ENOENT" }], queued: [] } }, "2026-10-01T12:00:00Z");
+	assert.deepEqual([failed.unavailable, failed.empty_since], [[{ project: "demo", error: "ready beads unavailable: ENOENT" }], null], "a failed tracker read is not nothing queued");
+	writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ state: "draining", started_at: "2026-08-27T12:00:00Z", deadline: "2026-08-27T12:10:00Z", timeout_s: 600, jobs: [] }));
+	const drained = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
+	assert.match(drained.unavailable[0]!.error, /^not read: draining since/);
+	assert.equal(drained.empty_since, null);
 });

@@ -40,7 +40,7 @@ export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: n
   blocked:blocked(ledger.value,grants.value,fleet.value,now,ledger.availability !== "unavailable" && grants.availability !== "unavailable"),
   failed:failedJobs(state,fleet.value,ledger.value), main_ci:mainCi(state), ci_unreadable:ciUnreadable(state,fleet.value),
   mandates:{active_count:count(m => m.status === "active" && Date.parse(String(m.expiry)) > now), paused_count:count(m => m.status === "paused"), paused_projects:[...new Set(grants.value.filter(m => m.status === "paused").flatMap(m => strings(m.projects)))], revoked_hidden_count:count(m => m.status === "revoked"), items},
-  fleet:{...health(state,fleet.value,now,fleet.availability !== "unavailable",isAlive), operator:operatorHealth(state,isAlive)}, services:services(state), delivery:delivery(state,now), quota:quota(state,fleet.value),
+  fleet:{...health(state,fleet.value,now,fleet.availability !== "unavailable",isAlive), operator:operatorHealth(state,isAlive)}, services:services(state), delivery:delivery(state,now), quota:quota(state,fleet.value), lined_up:linedUp(state),
   navigation:{project_count:accessible.filter(r => r.kind === "project").length, worktree_count:accessible.filter(r => r.kind === "worktree").length},
   warnings:Object.entries(availability).filter(([,v]) => v === "unavailable").map(([section]) => ({section,message:"Recorded data is unavailable or malformed."})),
  };
@@ -58,6 +58,20 @@ function services(state: ViewerState): OverviewResponse["services"] {
  if (!record || !timestamp(record.last_run_at) || !checks) return {health:null};
  const failing = Object.entries(checks).flatMap(([check,value]) => { const row = obj(value); return row?.status === "fail" ? [{check, detail:str(row.detail) ?? "", since:timestamp(row.since) ? row.since : String(record.last_run_at)}] : []; });
  return {health:{last_run_at:String(record.last_run_at), failing}};
+}
+/** #323: `state/next-snapshot.json` (src/next.ts `writeNextSnapshot`); an off-schema row makes it unavailable, never empty. */
+function linedUp(state: ViewerState): OverviewResponse["lined_up"] {
+ const read = source<Omit<OverviewResponse["lined_up"],"availability">>(() => {
+  const s = parseObject(readBounded(join(state.stateDir,"next-snapshot.json")));
+  const items = Array.isArray(s?.items) ? s.items.map(obj) : [undefined];
+  const unavailable = Array.isArray(s?.unavailable) ? s.unavailable.map(obj) : [undefined];
+  if (!s || !timestamp(s.at) || items.some(i => !i || !(i.kind === "bead" ? text(i.id) : i.kind === "job" && typeof i.id === "string" && isSafeId(i.id)) || typeof i.project !== "string" || !text(i.verdict) || typeof i.reason !== "string")
+   || unavailable.some(u => !u || typeof u.project !== "string" || typeof u.error !== "string")) throw new Error("invalid snapshot");
+  return {at:String(s.at), project:str(s.project) ?? null, empty_since:timestamp(s.empty_since) ? s.empty_since : null,
+   items:items.map(i => ({kind:i!.kind as "job" | "bead", id:String(i!.id), project:String(i!.project), title:str(i!.title) ?? null, verdict:String(i!.verdict), reason:String(i!.reason)})),
+   unavailable:unavailable.map(u => ({project:String(u!.project), error:String(u!.error)}))};
+ }, {at:null, project:null, empty_since:null, items:[], unavailable:[]});
+ return {availability:read.availability, ...read.value};
 }
 /**
  * Audit P3 #19: `state/main-ci.json` (src/main-ci.ts `MainCiStore`), re-derived here because viewer modules import
