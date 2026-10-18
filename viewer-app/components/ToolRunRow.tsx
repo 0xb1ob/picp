@@ -1,9 +1,8 @@
 import type { ComponentChild, ComponentChildren } from "preact";
 
 /**
- * One collapsible row for a run of consecutive tool calls, shared by Sessions and the Job detail transcript: a ▸/▾ marker,
- * the count label, an optional dimmed detail, and the run's rows only while open. Controlled, so each screen owns its own state.
- * `solid` is the Job detail look (bordered row); the default, a borderless line; `steps`, Sessions' pill (StepsRow).
+ * One controlled, collapsible row for a run of tool calls (Sessions and Job detail): marker, count, optional detail.
+ * `solid` is the Job detail's bordered look; the default a borderless line; `steps` the Sessions pill (StepsRow).
  */
 export function ToolRunRow({count, detail, open, onToggle, solid = false, steps = false, notice, children}: {count: number; detail?: string | null; open: boolean; onToggle?: () => void; solid?: boolean; steps?: boolean; notice?: ComponentChild; children?: ComponentChildren}) {
  if (steps) return <StepsRow count={count} detail={detail} open={open} onToggle={onToggle} notice={notice}>{children}</StepsRow>;

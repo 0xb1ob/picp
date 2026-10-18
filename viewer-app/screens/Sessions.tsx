@@ -4,7 +4,7 @@ import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
-import { time } from "../format.ts";
+import { stamp, time } from "../format.ts";
 import { jobHref, jobTranscriptHref, sessionHref } from "../routes.ts";
 import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { Icon } from "../components/icons.tsx";
@@ -22,8 +22,8 @@ import { VersionBadge } from "../components/VersionBadge.tsx";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
-import { ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
-import { threadBands, threadFilter, type ThreadsView } from "../threads.ts";
+import { NewThread, ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
+import { threadBands, threadFilter, type ThreadsView, threadsReady } from "../threads.ts";
 import { dayKey, dayStarts, lastDay, type Row, rows } from "../session-rows.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
@@ -290,15 +290,25 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "steps" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
- const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class="session-choice-head"><strong>{label}</strong><span class={`session-dot session-dot-${phase}`}/><CtxPct usage={context}/></span><small class="session-model">{meta}</small></a>;
+ /** A Chats row: avatar (none on a worker nested under CP parent), name, dot, ctx, recorded time, one meta line. */
+ const row=(href:string,label:string,meta:string,selected:boolean,{avatar,phase,at,context,preview=false}:{avatar?:string;phase?:string;at?:string | undefined;context?:ContextUsage | null | undefined;preview?:boolean})=><a href={href} aria-current={selected ? "page" : undefined} class={avatar ? "session-choice" : "session-choice session-choice-nested"}>
+  {avatar && <span class={`session-avatar${avatar === "OP" ? " session-avatar-bot" : ""}`} aria-hidden="true">{avatar}</span>}
+  <span class="session-choice-head"><strong title={label}>{label}</strong>{phase && <span class={`session-dot session-dot-${phase}`}/>}<CtxPct usage={context}/>{dayKey(at) && <time class="session-time" dateTime={at} title={stamp(at!,true)}>{time(at!)}</time>}</span>
+  <small class={preview ? "session-model session-preview" : "session-model"}>{meta}</small></a>;
  const files=data.operator_sessions ?? [], open=data.open_asks ?? [];
  const context=data.selected === "you" ? data.operator_context : data.selected === "parent" ? data.parent.context : data.workers.find(w=>w.id===data.session_id)?.context;
+ // The Operator preview comes only from the latest file's loaded transcript; history and other tiers keep theirs.
+ const history=data.transcript === true && !!data.operator_session && !!files[0] && data.operator_session !== files[0].id;
+ const last=data.selected === "you" && data.transcript === true && !history ? data.entries.findLast(e=>isBubble(e) && e.text.trim() !== "") : undefined;
+ const preview=last && `${isOwn(last) ? "You: " : ""}${last.text.replace(/[`*#>|]/g,"").replace(/\s+/g," ").trim().slice(0,200)}`;
+ const threadsOn=data.selected === "you" && data.transcript === true && threads;
  return <div class="sessions">
-  <PageHeader title="Sessions"/>
+  <PageHeader title="Chats"/>
+  {threadsOn && threadsReady(threadsOn.status) && <NewThread threads={threadsOn} control={control} class="session-chats-new" label="+"/>}
   <aside class="session-sidebar" aria-label="Session streams">
-   <section><h2>Operator ↔ you</h2>{row(sessionHref("you"),"Operator ↔ you",modelText(data.operator_context ?? {}),data.selected === "you","unknown",data.operator_context)}</section>
-   {data.selected === "you" && data.transcript === true && threads && <ThreadSidebar threads={threads} control={control}/>}
-   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "active" : "idle"}`,data.selected === "parent",data.parent.live ? "working" : "unknown",data.parent.context)}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",w.context)}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   <section aria-label="Operator">{row(sessionHref("you"),"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
+   {threadsOn && <ThreadSidebar threads={threadsOn}/>}
+   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>

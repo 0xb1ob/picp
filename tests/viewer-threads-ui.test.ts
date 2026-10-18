@@ -78,13 +78,14 @@ test("Sessions: chips with aria-pressed and All by default, the sidebar section,
 	const nav = all.querySelector("nav.session-threads")!;
 	assert.deepEqual([nav.previousElementSibling?.getAttribute("class"), nav.nextElementSibling?.getAttribute("class")], ["session-bar", "session-heading"], "the filter line sits directly under the top bar");
 	const sidebar = all.querySelector('.session-sidebar section[aria-label="Threads"]');
-	assert.ok(sidebar, "a Threads section in the sidebar");
-	assert.equal(sidebar!.previousElementSibling?.querySelector("h2")?.textContent, "Operator ↔ you");
-	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["+", "All messages", "billing-bug · 2waiting", "Mark done", "opsopen", "Mark done"], "+ New is a sibling of the heading, not inside the h2; Mark done on every open row");
-	assert.equal(sidebar!.querySelector("h2")?.textContent, "Threads", "the dialog trigger and dialog stay out of the heading");
+	assert.ok(sidebar, "a Threads section in the Chats list");
+	assert.equal(sidebar!.previousElementSibling?.getAttribute("aria-label"), "Operator", "nested right under the Operator chat");
+	assert.deepEqual([...sidebar!.querySelectorAll(":scope > button, :scope > .session-thread-row > button")].map(b => b.textContent), ["All messages", "billing-bugWaiting 2waiting", "Mark done", "opsopen", "Mark done"], "Waiting N, never ` · N`; Mark done on every open row");
+	assert.equal(sidebar!.querySelector("h2"), null, "no heading: the rows nest under the Operator chat");
+	assert.equal(all.querySelector(".sessions > button.session-chats-new")?.getAttribute("aria-label"), "New thread", "+ sits in the Chats title row, not in the list");
 	assert.match(sidebar!.querySelector("details > summary")?.textContent ?? "", /^Done \(1\)$/);
 	assert.match(html, /about billing/); assert.match(html, /about ops/);
-	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|<h2>Threads/, "Decisions view: no threads");
+	assert.doesNotMatch(screen({ ...full, transcript: false }, control, threads()), /session-threads|aria-label="Threads"|session-chats-new/, "Decisions view: no threads, no New thread");
 
 	const filtered = screen(full, control, threads({ selected: "ops" }));
 	assert.match(filtered, /about ops/); assert.match(filtered, /ops tail/); assert.match(filtered, /relay line/, "a shared entry between this thread's own entries is shown");
@@ -213,12 +214,12 @@ test("New thread dialog: no request until Create; Create selects and sends the f
 	assert.match(css, /\.session-thread-row:hover > \.session-thread-done, \.session-thread-row:focus-within > \.session-thread-done \{ display: block/, "Mark done only on hover or focus");
 	assert.doesNotMatch(css, /aria-pressed=true\]\) > \.session-thread-done/, "selected alone never shows Mark done");
 	assert.match(css, /\.session-thread-row:hover:has\(> \.session-thread-done\) \.session-thread-working[^{]*\{ visibility: hidden/, "the badge is hidden only on a row that has the action");
-	assert.match(html, /<button type="button" class="session-thread-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
+	assert.match(html, /<button type="button" class="session-chats-new" aria-haspopup="dialog" aria-label="New thread">\+<\/button>/);
 
 	const full = { ...base, entries: [entry("a-before"), entry("b-before"), entry("own", { thread: B }), entry("a-after")] };
 	const sep = screen(full, control, threads({ selected: "billing-bug" }));
 	assert.match(sep, /2 earlier messages in other threads · show/); assert.match(sep, /1 later message in other threads · show/);
-	assert.doesNotMatch(sep, /text a-before|text a-after/, "collapsed until asked");
+	assert.doesNotMatch(sep.slice(sep.indexOf('class="session-entries"')), /text a-before|text a-after/, "collapsed until asked; the Chats preview may show it");
 	assert.match(sep, /text own/);
 	assert.doesNotMatch(screen(full, control, threads()), /in other threads · show/, "All has no separators");
 });

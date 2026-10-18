@@ -1,14 +1,16 @@
 /**
- * Sessions chat v2, PR 1: browser-local day separators that never sort, invent or duplicate a day, and the light theme
- * scoped to the Sessions shell (`shell-sessions`) so every other screen keeps the dark palette.
+ * Sessions chat v2: browser-local day separators that never sort, invent or duplicate a day; the light theme scoped
+ * to the Sessions shell (`shell-sessions`); steps rows and the Job transcript link (PR 2); Chats and threads (PR 3).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { build } from "esbuild";
 import { test, type TestContext } from "node:test";
 import { parseHTML } from "linkedom";
 import { REPO_ROOT } from "./harness/index.ts";
-import type { JobResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
-import type { ThreadsView } from "../viewer-app/threads.ts";
+import type { JobResponse, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../src/viewer/api-types.ts";
+import { threadAria, type ThreadsView, waitingCount, waitingLabel } from "../viewer-app/threads.ts";
 import type { ControlView } from "../viewer-app/control.ts";
 import { dayKey, dayLabel, dayStarts, lastDay, rows } from "../viewer-app/session-rows.ts";
 
@@ -153,4 +155,59 @@ test("App: the explicit Job transcript link opens a done job's Transcript on a p
 	await go("#job/cp-done?tab=transcript");
 	assert.equal(tab(), "transcript", "Forward to the explicit link lands on Transcript again");
 	assert.deepEqual([...new Set(requests.filter(url => url.startsWith("/api/job/cp-done") && !url.includes("/transcript")))], ["/api/job/cp-done"], "the job read never carries the tab");
+});
+
+const chats = (rendered: string) => parseHTML(`<div>${rendered}</div>`).document.querySelector(".session-sidebar")!;
+const operatorLine = (data: SessionsResponse) => {
+	const row = chats(html(data)).querySelector('section[aria-label="Operator"] .session-choice')!;
+	return [row.querySelector("small")!.textContent, row.querySelector("time")?.getAttribute("datetime") ?? null];
+};
+
+test("Chats: the Operator preview is the newest loaded message of the latest file; history and other tiers never borrow it", () => {
+	// PR 3: the preview reads the unfiltered transcript, so it must not show another tier's text, an older file's last
+	// line as if it were current, or a tool call. Decisions and the parent tier keep the model line.
+	const at = local(15, 9), later = local(15, 10);
+	const entries = [entry("a", "say", at, { text: "**Reply** with `code`\n\nand more" }), entry("t", "tool", later, { name: "bash", text: "ls" })];
+	const files = { operator_sessions: [{ id: "new.jsonl", at }, { id: "old.jsonl", at }], operator_session: "new.jsonl", operator_context: { model: "m-op" } } as Partial<SessionsResponse>;
+	assert.deepEqual(operatorLine({ ...view(entries), ...files }), ["Reply with code and more", at], "markdown marks dropped, tools skipped");
+	assert.deepEqual(operatorLine({ ...view([...entries, entry("y", "via", later, { who: "Operator", text: "ship it" })]), ...files }), ["You: ship it", later]);
+	assert.deepEqual(operatorLine({ ...view(entries), ...files, operator_session: "old.jsonl" }), ["Historical transcript", null]);
+	assert.deepEqual(operatorLine({ ...view(entries), ...files, transcript: false }), ["m-op", null], "Decisions view");
+	assert.deepEqual(operatorLine({ ...view(entries), ...files, selected: "parent" }), ["m-op", null], "another tier");
+	assert.deepEqual(operatorLine({ ...view([]), ...files }), ["m-op", null], "nothing loaded yet");
+});
+
+test("Chats: `Waiting N` is open asks plus unacknowledged answers; unknown is `Waiting ?`, never 0; Fleet live is not threads' working", () => {
+	const thread = (tag: string, state: ThreadView["state"], waiting: ThreadView["waiting"], working: number | null = 0): ThreadView => ({ id: `th-${tag}`, tag, state, waiting, counts: { messages: 3, asks: 0, answers: 0, jobs_working: working }, opened_at: local(15, 9), last_at: local(15, 9), done_at: null });
+	const waiting = thread("billing", "waiting", { asks: 1, answers: 2 }), quiet = thread("ops", "open", { asks: 0, answers: 0 }), blind = thread("blind", "open", null), shut = thread("old", "done", null);
+	assert.deepEqual([waiting, quiet, blind, shut].map(t => [waitingCount(t), waitingLabel(t)]), [[3, "Waiting 3"], [0, null], [null, "Waiting ?"], [null, null]], "counts.messages (3) is never shown");
+	assert.equal(threadAria(blind), "blind: open, waiting unknown");
+	const status = { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [waiting, quiet, blind, shut], total: 4, warning: null } as ThreadsResponse;
+	const threads = { status, selected: null, select() {}, done() {}, sending: null, failed: null } as unknown as ThreadsView;
+	const heldIdle = { id: "cp-idle", kind: "worker", job_id: "cp-idle", phase: "held", run_phase: "idle", model: "m", live: false };
+	const side = chats(html({ ...view([]), workers: [heldIdle] } as unknown as SessionsResponse, threads));
+	assert.deepEqual([...side.querySelectorAll(".session-thread-waiting")].map(b => [b.textContent, b.className]), [["Waiting 3", "session-thread-waiting"], ["Waiting ?", "session-thread-waiting session-thread-waiting-unknown"]]);
+	assert.equal(side.querySelector(".session-thread-working"), null, "no thread job is working");
+	assert.match(side.querySelector("section:last-child h2")?.textContent ?? "", /^Fleet · 1 live$/, "a held-idle worker still counts as live");
+	assert.equal(side.querySelector(".session-choice-nested strong")?.getAttribute("title"), "cp-idle", "workers nest under CP parent, full id in the title");
+});
+
+test("Chats: + in the title row opens New thread and closing it selects nothing; a selected new tag shows as a pressed row", async t => {
+	const picked: (string | null)[] = [];
+	const status = { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [], total: 0, warning: null } as unknown as ThreadsResponse;
+	const threads = (selected: string | null) => ({ status, selected, select: (tag: string | null) => { picked.push(tag); }, done() {}, sending: null, failed: null }) as unknown as ThreadsView;
+	const s = stage(t);
+	await act(() => mount(s.root, view([]), threads(null)));
+	await s.click(s.root.querySelector(".sessions > .session-chats-new"));
+	assert.ok(s.root.querySelector('[role="dialog"]'), "the dialog opens from the Chats title");
+	await s.click(s.root.querySelector(".new-thread-close"));
+	assert.deepEqual([s.root.querySelector('[role="dialog"]'), picked], [null, []]);
+	await act(() => mount(s.root, view([]), threads("fresh")));
+	assert.equal(s.root.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"]')?.getAttribute("aria-label"), "fresh: new, no messages yet");
+});
+
+test("steps rows: the name column fits real tool names instead of a fixed 44 px that clipped cp_integrate", () => {
+	// #319 review: `16px 44px …` clipped every name past ~6 characters; the browser capture checks rendered widths.
+	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
+	assert.match(css, /\.session-steps-rows \.session-tool summary \{[^}]*grid-template-columns: 16px fit-content\(120px\) minmax\(0,1fr\) auto;/);
 });
