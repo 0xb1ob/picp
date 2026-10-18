@@ -1408,7 +1408,9 @@ send still not terminal `SEND_NOTICE_SECONDS` (600) after `queued_at` exactly on
 parent busy | landed, awaiting reply`), persisted as `pending_notice_at` so a
 restart never repeats it. Each outcome then reaches `owner_observed` (sync tool
 result, or its relay acked in the operator relay outbox below) or an
-`undeliverable`/`failed` relay. A fresh bridge (an
+`undeliverable`/`failed` relay. An `undeliverable` relay says *not delivered* only for a
+never-injected send (`attempts` 0); one with `landed_at` reads landed with no reply, any other
+has no confirmed landing — each keeps its cause (picp-4by). A fresh bridge (an
 operator restart) drains the same file and re-emits settled outcomes a dead
 operator session never observed. Session shutdown keeps pending sends; a
 corrupt outbox refuses `cp_parent start`, naming the file. Downgrade: an older

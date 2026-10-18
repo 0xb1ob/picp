@@ -300,11 +300,20 @@ export function receiptOf(entry: ParentSendEntry): ParentSendReceipt {
 	}
 }
 
-/** The main session's text for a send that ended without its sync waiter. */
+/**
+ * The main session's text for a send that ended without its sync waiter. An undeliverable send claims non-delivery
+ * only when it was never injected (`attempts` 0); a `landed_at` says it landed, anything else is unconfirmed.
+ */
 export function sendRelayText(entry: ParentSendEntry, file: string): string {
 	if (entry.state === "settled") return entry.reply ?? "";
 	if (entry.state === "failed") return `send ${entry.id} turn failed: ${entry.error ?? "unknown error"}`;
-	return `send ${entry.id} was not delivered (${entry.error ?? "undeliverable"}); its text is kept in ${file}. Resend only if it is still wanted.`;
+	const cause = entry.error ?? "undeliverable";
+	const kept = `its text is kept in ${file}.`;
+	if (entry.landed_at) {
+		return `send ${entry.id} reached the parent at ${entry.landed_at} but got no reply (${cause}); ${kept} Check the parent's transcript before resending: it may already have acted on it.`;
+	}
+	if (entry.attempts === 0) return `send ${entry.id} was not delivered (${cause}); ${kept} Resend only if it is still wanted.`;
+	return `send ${entry.id} has no confirmed landing (${cause}), which does not prove it never reached the parent; ${kept} Check the parent's transcript before resending.`;
 }
 
 /** The `send`-kind relay (a `BridgeRelay`) for one outcome. */

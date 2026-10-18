@@ -612,6 +612,9 @@ test("a landed send with no reply 24 h after landing ends undeliverable; stop re
 	ctx.delivery.sweep(ctx.now());
 	assert.equal(ctx.box.get(late.id)?.state, "undeliverable");
 	assert.match(ctx.box.get(late.id)?.error ?? "", /no reply within 24 h of landing/);
+	const lateText = ctx.relays.find((relay) => relay.sendId === late.id)?.text ?? "";
+	assert.match(lateText, /reached the parent at .* but got no reply \(no reply within 24 h of landing\)/);
+	assert.doesNotMatch(lateText, /not delivered/, "picp-4by: a known landing is never relayed as non-delivery");
 	const stopped = ctx.box.enqueue("stopped");
 	ctx.box.markInjected([stopped.id]);
 	ctx.box.markLanded([stopped.id]);
@@ -619,6 +622,7 @@ test("a landed send with no reply 24 h after landing ends undeliverable; stop re
 	assert.equal(ctx.box.get(stopped.id)?.state, "undeliverable");
 	assert.equal(ctx.box.get(stopped.id)?.error, "parent stopped before replying");
 	assert.ok(ctx.relays.some((relay) => relay.sendId === stopped.id));
+	assert.match(ctx.relays.find((relay) => relay.sendId === stopped.id)?.text ?? "", /reached the parent at .* but got no reply \(parent stopped before replying\)/);
 });
 
 test("a wake turn that ends on a transient error is nudged on the send ladder, then relays once when exhausted", async () => {
