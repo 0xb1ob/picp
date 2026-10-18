@@ -53,7 +53,7 @@ the stages, and each stage is still reviewed.
 
 **Regenerate before pushing** (picp only): run `npm run eval:contract` and `CP_UPDATE_GOLDEN=1 npm run test:one -- tests/contracts-exports.test.ts`, then commit both files.
 
-**Design reference.** When the task supplies a design source (artboards, mockups, screenshots), capture screenshots of the changed screens at the artboard sizes into `state/artifacts/${job_id}/screenshots` and list their paths in the envelope's artifact notes.
+**Design reference.** When the task supplies a design source (mockups, artboards), screenshot the changed screens at the artboard sizes into `$HOME/.pi-command-post/state/artifacts/${job_id}/screenshots` (outside the worktree); add a `screenshots: <dir>` line to the report_result summary.
 
 **Comments and docstrings.** Comments earn their place by saying why, not what. Keep them short enough to read at a glance:
 
@@ -123,6 +123,7 @@ report_result(
   pr_url: "https://github.com/<owner>/<repo>/pull/<n>",   # delivery: pr only
   # summary: at most 3 lines and at most 600 characters
   summary: "focused checks passed on the merged tree; never a diff, a transcript or findings",
+  # design jobs: add a `screenshots: <dir>` line
   # when blocked, required and non-empty:
   blockers: ["<exact path or command that failed, one per item>"],
 )

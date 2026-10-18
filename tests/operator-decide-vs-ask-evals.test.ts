@@ -47,7 +47,7 @@ test("a risk:high escalation is always ask, in scope or not", () => {
 	assert.equal(operatorAction("risk_high_irreversible", false), "ask");
 });
 
-test("an in-scope plan approval is the one decide case", () => {
+test("plan approval is decide in scope and ask out of scope", () => {
 	assert.equal(operatorAction("plan_approval", true), "decide");
 	assert.equal(operatorAction("plan_approval", false), "ask");
 });

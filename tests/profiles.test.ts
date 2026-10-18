@@ -535,6 +535,8 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 	assert.doesNotMatch(ship, /Run the full suite on the rebased tree|Run CI's `npm test`|full suite after rebase/i, "brief-ship must leave the full suite to CI");
 	assert.match(ship, /never run full `npm test` locally/i);
 	assert.match(ship, /Nomad CI runs the full suite on the pushed head/i);
+	assert.match(ship, /Design reference\.[^\n]*artifacts\/\$\{job_id\}\/screenshots[^\n]*outside the worktree/);
+	assert.match(ship, /screenshots: <dir>/);
 	assert.match(ship, /prior synthesis/);
 	assert.match(ship, /compact threshold/);
 	assert.match(ship, /Inspect the diff, then commit/i, "the diff is read before the commit");
@@ -581,7 +583,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
-	assert.ok(ship.length < 10250, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // cp-c1ur N10: per-project test cadence; N5: credential sentence; #338: design reference
+	assert.ok(ship.length < 10350, `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`); // cp-c1ur N10: per-project test cadence; N5: credential sentence; #338: design reference; #322: screenshots path
 	assert.match(ship, /credential comes only from the env var or file your task names[^]*never search files or the home/);
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");
