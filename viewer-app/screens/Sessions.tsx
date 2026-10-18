@@ -24,6 +24,7 @@ import { type ControlView, controlChip, controlLine, controlReady, deliveryLine 
 import { useViewportFit } from "../viewport-fit.ts";
 import { ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
 import { threadBands, threadFilter, type ThreadsView } from "../threads.ts";
+import { dayKey, dayStarts, lastDay } from "../session-rows.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -56,13 +57,13 @@ function readSeen(): string[] | null {
  try { const ids: unknown = JSON.parse(raw); return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null; }
  catch (error) { console.warn(`seen decisions unreadable, starting over: ${(error as Error).message}`); return null; }
 }
-/** Consecutive tool entries collapse into one run; every other entry stands alone. */
+/** Consecutive tool entries collapse into one run, split where a local day starts; every other entry stands alone. */
 type Row = {kind:"entry";entry:SessionEntry} | {kind:"run";key:string;entries:SessionEntry[]};
-function rows(entries: SessionEntry[]): Row[] {
+function rows(entries: SessionEntry[], days: Map<string,string>): Row[] {
  const out: Row[] = [];
  for (const entry of entries) {
   const tail = out.at(-1);
-  if (entry.kind === "tool" && tail?.kind === "run") { tail.entries.push(entry); continue; }
+  if (entry.kind === "tool" && tail?.kind === "run" && !days.has(entry.id)) { tail.entries.push(entry); continue; }
   out.push(entry.kind === "tool" ? {kind:"run",key:entry.id,entries:[entry]} : {kind:"entry",entry});
  }
  return out;
@@ -76,8 +77,11 @@ const isOwn = (e: SessionEntry) => e.kind === "via" || OWN.has(e.who);
 const GROUP_GAP_MS = 5 * 60_000;
 /** An opened relay longer than this many lines shows its head, the rest behind "Show more". */
 const RELAY_LINES = 6;
-/** Which bubbles open a group: the first, a change of author, a notice or card between, or a long gap. Tool calls never split a group. */
-function groupStarts(rowList: Row[]): Set<string> {
+/**
+ * Bubbles that open a group: the first, a new author or day, after a notice or card, or a long gap.
+ * Tool calls never split a group.
+ */
+function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  const starts = new Set<string>();
  let prev: SessionEntry | undefined;
  for (const row of rowList) {
@@ -85,7 +89,7 @@ function groupStarts(rowList: Row[]): Set<string> {
   const e = row.entry;
   if (!isBubble(e)) { prev = undefined; continue; }
   const gap = prev && e.at && prev.at ? Date.parse(e.at)-Date.parse(prev.at) : 0;
-  if (!prev || prev.who !== e.who || !(gap <= GROUP_GAP_MS)) starts.add(e.id);
+  if (!prev || days.has(e.id) || prev.who !== e.who || !(gap <= GROUP_GAP_MS)) starts.add(e.id);
   prev = e;
  }
  return starts;
@@ -147,19 +151,21 @@ function Notice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
   </div>
  </article>;
 }
-/** A message bubble: the prompting side on the right in the accent colour, the session on the left; a group's first bubble carries who and when. */
+/** A message bubble: your side a right-hand pill, time below; the session a card under avatar, name and time. */
 const initials = (who: string) => who.replace(/[^A-Za-z]/g,"").slice(0,2).toUpperCase();
 function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boolean}) {
  // In the operator transcript the person is "You" and the session they talk to is "Operator" (frame 06); other views keep the recorded name.
  const own = isOwn(e), who = you ? (own ? "You" : e.who === "Assistant" ? "Operator" : e.who) : e.who;
- return <article class={`session-message session-say session-bubble ${isOwn(e) ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
-  {first && <div class="session-who">{!own && <span class="session-avatar" aria-hidden="true">{initials(who)}</span>}<span>{who}</span>{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{e.at && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>}
+ const meta = <div class="session-who">{own ? <span class={you ? "session-who-name" : undefined}>{who}</span> : <><span class={`session-avatar${who === "Operator" ? " session-avatar-bot" : ""}`} aria-hidden="true">{initials(who)}</span><span>{who}</span></>}{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{dayKey(e.at) && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>;
+ return <article class={`session-message session-say session-bubble ${own ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
+  {!own && first && meta}
   <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.skills?.length ? <TranscriptSkills names={e.skills}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
+  {own && meta}
  </article>;
 }
 function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolean;you?:boolean}) {
  const trace=e.trace.filter(step=>step.at);
- const clock=<code class="session-time">{e.at ? time(e.at) : "-"}</code>;
+ const clock=<code class="session-time">{dayKey(e.at) ? time(e.at) : "-"}</code>;
  const head=e.kind === "tool" && e.text.length > TOOL_TEXT_MAX ? e.text.slice(0,TOOL_TEXT_MAX) : e.text;
  return <div class={e.failed ? "session-entry session-failed" : "session-entry"}>
   {e.kind === "tool" ? <details class="session-tool"><summary>{clock}<code>{e.name}</code><span>{e.summary}</span></summary><pre><Linked text={head} links={e.links}/></pre>{head !== e.text && <details class="session-tool-all"><summary>show all</summary><pre><Linked text={e.text.slice(TOOL_TEXT_MAX)} links={e.links}/></pre></details>}</details> :
@@ -266,10 +272,16 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  // `Show N earlier / later`: what the thread filter hides around its span, collapsed until asked for; a new selection collapses them again.
  const [edges,setEdges]=useState({tag:threads?.selected ?? null,before:false,after:false});
  const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
- const rowList=rows(shown);
+ // A local-day separator opens each new day; a band continues from the day shown right above it.
+ const beforeDay=edgeOpen.before ? lastDay(bands.before) : null, insideDay=lastDay(shown) ?? beforeDay;
+ const rowList=rows(shown,dayStarts(shown,beforeDay));
  // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
- const renderRows=(list:SessionEntry[])=>{const rl=rows(list), st=groupStarts(rl); return rl.map(row=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <div key={row.key} class="session-tool-card">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>);};
- const edge=(side:"before"|"after",list:SessionEntry[],word:string)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
+ const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), rl=rows(list,days), st=groupStarts(rl,days); return rl.flatMap(row=>{
+  const head=row.kind === "entry" ? row.entry : row.entries[0]!, label=days.get(head.id);
+  const node=row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <div key={row.key} class="session-tool-card">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>;
+  return label ? [<p key={`day-${head.id}`} class="session-day"><time dateTime={dayKey(head.at)!}>{label}</time></p>,node] : [node];
+ });};
+ const edge=(side:"before"|"after",list:SessionEntry[],word:string,prev:string | null)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list,prev)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
@@ -295,7 +307,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier")}{renderRows(shown)}{edge("after",bands.after,"later")}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>)}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier",null)}{renderRows(shown,beforeDay)}{edge("after",bands.after,"later",insideDay)}{pending.map(send=><PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>)}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">

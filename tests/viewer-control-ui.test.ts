@@ -87,7 +87,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.doesNotMatch(card(ready, "answered"), /<button/);
 	assert.equal(card(ready, "withdrawn"), '<p class="session-ask-settled">Withdrawn: No longer needed</p>');
 	assert.doesNotMatch(screen({ ...full, open_asks: [] }, view(status({}))), /session-pinned/, "no open ask, no pinned block");
-	assert.match(ready, /<span>You<\/span><span>dashboard<\/span>/, "the operator's own dashboard message reads You");
+	assert.match(ready, /<span class="session-who-name">You<\/span><span>dashboard<\/span>/, "the operator's own dashboard message reads You");
 	assert.match(ready, /dashboard dc-20260927082600-0123abcd · ask-aaaa/);
 	assert.match(ready, /<textarea aria-label="Message to the operator session" maxLength="16000"|<textarea aria-label="Message to the operator session" maxlength="16000"/);
 	assert.match(ready, /placeholder="Message \(Enter to send\)"/, "one short placeholder that fits the 390px one-row box; no separate hint line");

@@ -38,8 +38,8 @@
 .session-tools-toggle[aria-pressed=true] { background: var(--toggle); color: var(--text); }
 /* A collapsed run of tool calls: one faint borderless line "▸ N tool calls — first summary" (tool-run.css). */
 .session-heading > p { display: none; }
-.session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 8px 16px 16px; scroll-padding-top: 16px; }
-.session-entries { max-width: min(760px, 100%); }
+.session-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 8px 0; scroll-padding-top: 16px; }
+.session-entries { padding: 0 12px; }
 .session-time { font-size: 11px; color: var(--dim); flex-shrink: 0; }
 .session-tool { min-width: 0; }
 .session-tool summary { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
@@ -84,30 +84,34 @@
 .session-trace summary > span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .session-trace p { white-space: pre-wrap; padding: 10px 12px; background: var(--surface); border-radius: 8px; }
 /*
- * Transcript chat (cp-wfw3). Bubbles: the prompting side on the right in the accent (the design's held blue), the session
- * on the left on the surface, full width up to the column on a phone (min(760px,100%) from 900px); a group's later bubbles sit closer and carry no header.
+ * Transcript chat (cp-wfw3, Sessions chat v2). The prompting side is a right-hand pill with its time below; the session
+ * is a raised card under an avatar, name, project and time, whose group's later cards carry no header.
  * Tool calls and system/bridge entries stay compact muted one-liners, never bubbles; ask cards keep their card.
  */
-.session-entries { --bubble-own: color-mix(in srgb, var(--blue) 20%, var(--surface)); }
 .session-message.session-bubble { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding: 0; border: 0; }
-.session-message.session-grouped { margin-top: 3px; }
+.session-message.session-grouped { margin-top: 4px; }
 .session-own { align-items: flex-end; }
+.session-message.session-own { gap: 3px; }
 .session-other { align-items: flex-start; }
-.session-bubble > .session-who { justify-content: flex-start; align-items: baseline; gap: 6px; max-width: 100%; padding: 0 6px; font-size: 12px; color: var(--muted); }
-.session-bubble > .session-body { max-width: 100%; gap: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 18px; overflow-wrap: anywhere; }
-/* The session's turns sit on the theme surface with a hairline; the prompting side takes a soft accent tint. */
-.session-other > .session-body { background: var(--surface); border-top-left-radius: 6px; }
-.session-other > .session-who { padding: 0; }
-.session-own > .session-body { background: var(--bubble-own); border-color: var(--bubble-own); border-top-right-radius: 6px; }
+.session-bubble > .session-who { justify-content: flex-start; align-items: baseline; gap: 6px; max-width: 100%; padding: 0; font-size: 11px; color: var(--dim); }
+.session-bubble > .session-body { max-width: 100%; gap: 0; overflow-wrap: anywhere; }
+.session-bubble .session-body p, .session-bubble .md ul, .session-bubble .md ol { line-height: 22px; }
+.session-other > .session-body { padding: 10px 14px; background: var(--raised); border: 1px solid var(--divider); border-radius: 4px 18px 18px 18px; }
+.session-grouped.session-other > .session-body { border-radius: 18px; }
+.session-own > .session-body { max-width: 84%; padding: 9px 14px; background: var(--session-you); color: var(--session-you-text); border: 0; border-radius: 18px 18px 4px 18px; }
 .session-own > .session-who { justify-content: flex-end; }
-.session-who > time.session-time::before { content: "· "; }
-.session-message.session-other { position: relative; padding-left: 32px; }
-.session-other > .session-who > .session-avatar { position: absolute; left: 0; top: -2px; }
-.session-avatar { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; font-size: 9px; color: var(--muted); }
-.session-grouped.session-own > .session-body { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
-.session-grouped.session-other > .session-body { border-bottom-left-radius: 6px; }
+.session-own .md a { color: inherit; text-decoration: underline; }
+.session-who > .session-project { padding: 0 5px; border-radius: 4px; font-size: 10.5px; }
+.session-message.session-other { position: relative; padding-left: 34px; }
+.session-other > .session-who { min-height: 16px; align-items: center; }
+.session-other > .session-who > .session-avatar { position: absolute; left: 0; top: 0; }
+.session-avatar { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--avatar-cp); font-size: 10px; font-weight: 600; color: var(--text); }
+.session-avatar-bot { background: linear-gradient(135deg, var(--avatar-bot-from), var(--avatar-bot-to)); color: var(--avatar-bot-text); }
 .session-failed .session-bubble > .session-body { border-color: var(--border); }
 .session-bubble .session-send { margin-top: 4px; }
+/* A browser-local day opens with one centred pill; undated entries never invent one. */
+.session-day { display: flex; justify-content: center; margin: 18px 0 4px; }
+.session-day > time { padding: 2px 10px; border-radius: 999px; background: var(--surface); font-size: 12px; line-height: 20px; color: var(--dim); }
 /* Pending sends stay after the newest transcript entry, sharing the own bubble's responsive widths. */
 .session-pending > .session-body { background: var(--surface); border: 1px dashed var(--muted); color: var(--subtle); gap: 6px; }
 .session-pending-badge { align-self: flex-start; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
@@ -120,10 +124,10 @@
 .session-pending-actions > button { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .session-pending-actions > button:disabled { opacity: 0.5; cursor: default; }
 .session-pending-evidence { display: inline-flex; align-items: center; min-height: 44px; color: var(--blue); font-size: 13px; overflow-wrap: anywhere; }
-.session-pending-editing > .session-body { box-sizing: border-box; width: 100%; }
+.session-own.session-pending-editing > .session-body { box-sizing: border-box; width: 100%; max-width: 100%; }
 .session-pending-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .session-pending-editor > textarea { box-sizing: border-box; width: 100%; min-height: 88px; max-height: 40vh; field-sizing: content; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: inherit; font-size: 14px; resize: vertical; overflow-wrap: anywhere; }
-.session-pending-live { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.session-pending-live, .session-who-name { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Sent images (cp-br81 D9): 96 px tiles in the bubble, wrapping at 390 px; a tap opens one at the bubble's width; a file gone from the upload store reads "image expired". */
 .session-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; min-width: 0; }
 .session-images > li { display: flex; min-width: 0; max-width: 100%; }
@@ -153,6 +157,13 @@
 .md-table th { background: var(--background); color: var(--muted); font-weight: 600; white-space: nowrap; }
 .md blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--border); }
 .md blockquote p { color: var(--subtle); }
+/* Sessions only (Job detail shares .md): inline code as a faint ink chip, tables as horizontal rules. */
+.sessions .md :not(pre) > code { background: color-mix(in srgb, var(--session-code-ink) var(--session-code-mix), transparent); }
+.sessions .session-own .md :not(pre) > code { background: color-mix(in srgb, var(--session-own-code-ink) var(--session-own-code-mix), transparent); }
+.sessions .md-table table { width: 100%; font-size: 13px; line-height: 19px; }
+.sessions .md-table th, .sessions .md-table td { padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--border); }
+.sessions .md-table th { padding: 2px 14px 6px 0; background: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+.sessions .md-table tbody tr:last-child td { border-bottom: 0; }
 /* System and bridge entries: one compact row — time, who, the line — that opens in place; never a full-width card. */
 .session-message.session-system { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 4px 0; padding: 0; background: none; border: 0; border-radius: 0; }
 .session-message.session-system > .session-time { padding-top: 0; line-height: 44px; }
@@ -249,11 +260,14 @@
  .session-heading > button { min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--muted); }
  .session-heading > button[aria-pressed=true] { background: none; color: var(--text); }
  .session-heading > p { display: block; flex-basis: 100%; font-size: 12px; color: var(--dim); }
- .session-transcript { padding: 12px 24px 16px; }
- .session-entries { max-width: none; }
- .session-message.session-other { padding-left: 36px; }
- /* Chat in the 760px column: bubbles at most min(760px,100%) wide; system rows share the tool calls' 56px time column. */
- .session-bubble > .session-who, .session-bubble > .session-body { max-width: min(760px, 100%); }
+ /* Chat v2: one centred 820 px column (32 px sides) on 16/8 transcript padding; cards at most 670 px, own pills 72%. */
+ .session-transcript { padding: 16px 0 8px; }
+ .session-entries { max-width: 820px; margin: 0 auto; padding: 0 32px; }
+ .session-message.session-other { padding-left: 42px; }
+ .session-avatar { width: 32px; height: 32px; font-size: 11px; }
+ .session-other > .session-body { max-width: 670px; }
+ .session-own > .session-body { max-width: 72%; }
+ .session-own > .session-body p, .session-own .md ul, .session-own .md ol { line-height: 21px; }
  .session-message.session-system { gap: 12px; }
  .session-message.session-system > .session-time { width: 56px; }
  .session-tool summary { display: grid; grid-template-columns: 56px 112px minmax(0,1fr); gap: 12px; font-size: 13px; }
@@ -267,33 +281,4 @@
  .session-notice > .session-time { padding-top: 18px; }
  .session-trace { margin-left: 68px; }
  .session-new-wrap { bottom: 24px; }
-}
-/*
- * Light Sessions (cp-wfw3): a light-scheme browser gets the Sessions screen — sidebar, top bar, transcript, cards and
- * composer — in light, the rest of the app keeps its dark shell. No new colours: the palette's own values are
- * captured on the parent (`--lt-*`, read from the dark tokens) and the tokens are remapped on `.sessions`, so every
- * component inside (control.css, context.css, the ask cards) follows without a rule of its own. Accents darken for
- * text on a light ground; the own bubble takes the light blue.
- */
-@media (prefers-color-scheme: light) {
- .shell-main:has(> .sessions) {
-  --lt-ink: var(--background); --lt-ink-2: var(--surface); --lt-ink-3: var(--nav-selected);
-  --lt-muted: var(--faint); --lt-dim: var(--disabled-text); --lt-faint: var(--dim); --lt-decor: var(--muted);
-  --lt-line: var(--subtle); --lt-line-2: var(--secondary); --lt-paper-2: var(--objective); --lt-paper: var(--text); --lt-white: var(--hover);
-  --lt-green: var(--check-border); --lt-amber: var(--map-stranded-border); --lt-blue: var(--held-border); --lt-coral: var(--error-border);
-  --lt-soft-green: var(--green); --lt-soft-amber: var(--amber); --lt-soft-blue: var(--blue); --lt-soft-coral: var(--coral);
- }
- .sessions {
-  color-scheme: light;
-  --page: var(--lt-line); --background: var(--lt-paper); --nav: var(--lt-paper-2); --surface: var(--lt-white);
-  --divider: var(--lt-paper-2); --nav-selected: var(--lt-line-2); --border: var(--lt-line-2); --toggle: var(--lt-line-2);
-  --button: var(--lt-white); --tab-selected: var(--lt-line-2); --questions-background: var(--lt-white); --transcript-divider: var(--lt-paper-2);
-  --tag-border: var(--lt-line); --worth-border: var(--lt-line); --paused-border: var(--lt-line); --ledger-border: var(--lt-line); --trail-line: var(--lt-line);
-  --empty-background: var(--lt-white); --empty-border: var(--lt-line-2); --check-background: var(--lt-white); --check-border: var(--lt-soft-green);
-  --ask-background: var(--lt-white); --ask-border: var(--lt-soft-amber); --error-border: var(--lt-soft-coral); --held-border: var(--lt-soft-blue);
-  --text: var(--lt-ink); --secondary: var(--lt-ink-2); --subtle: var(--lt-ink-3); --objective: var(--lt-ink-2); --hover: var(--lt-ink);
-  --muted: var(--lt-muted); --empty-text: var(--lt-muted); --dim: var(--lt-dim); --faint: var(--lt-decor); --disabled-text: var(--lt-faint);
-  --green: var(--lt-green); --amber: var(--lt-amber); --blue: var(--lt-blue); --coral: var(--lt-coral);
-  background: var(--background); color: var(--text);
- }
 }

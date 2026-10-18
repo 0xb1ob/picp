@@ -249,7 +249,7 @@ test("sendThreadDone maps 202 and 409; readThreads maps a 403; deliveryLine show
 	assert.match(control, /\.new-thread \{[^}]*border-radius: 12px 12px 0 0/, "sheet below 900 px");
 	assert.match(control.slice(control.indexOf("@media (min-width: 900px)")), /\.new-thread \{[^}]*border-radius: 12px; \}/, "dialog from 900 px");
 	assert.match(control, /\.new-thread-create \{[^}]*min-height: 44px/);
-	assert.match(css, /\.session-message\.session-other \{[^}]*padding-left: 32px/, "S6a low: the phone avatar gutter is 32px");
+	assert.match(css, /\.session-message\.session-other \{[^}]*padding-left: 34px/, "chat v2: the phone avatar gutter is 26 px plus an 8 px gap");
 	assert.match(css, /\.session-other > \.session-who > \.session-avatar \{[^}]*position: absolute/);
 	assert.match(css, /\.session-avatar \{ display: flex;/, "the phone avatar is visible, not hidden below 900 px");
 	assert.doesNotMatch(css.slice(0, desktop), /\.session-avatar \{[^}]*display: none/);
