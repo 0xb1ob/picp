@@ -17,7 +17,10 @@
  * order); every other grant's result rides along in `others`.
  */
 
-import { type Escalation, type FleetRecord, isoTimestamp, type Mandate } from "./contracts.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type Escalation, type FleetRecord, isoTimestamp, LAYOUT, type Mandate } from "./contracts.ts";
+import { atomicWriteJson } from "./json-store.ts";
 import { raiseMissionEnd } from "./escalation.ts";
 import type { EscalationStore } from "./escalation.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
@@ -98,6 +101,8 @@ export interface NextResult {
 	escalation_id?: string;
 	/** The other covering mandates' own results, each with its own action and mission-end escalation. */
 	others?: NextResult[];
+	/** Readiness behind the answer (every ledger-ready job, unfiltered beads, the spawn queue), for the snapshot only. */
+	lined_up?: { jobs: Job[]; beads: ReadyBeads[]; queued: string[] };
 }
 
 function jobProject(job: Job): string | undefined {
@@ -201,7 +206,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
 	}
 	if (candidates.length === 0 && runResults.length === 0) {
-		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, ready_beads: visibleBeads, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
+		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, ready_beads: visibleBeads, lined_up: { jobs: readyJobs, beads, queued: ports.queued?.() ?? [] }, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
@@ -235,7 +240,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
 	primary.ready_beads = visibleBeads;
 	const others = results.filter((result) => result !== primary);
-	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}) };
+	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, beads, queued: [...queued] } };
 }
 
 async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], selected: ReadonlyMap<string, ReturnType<typeof selectGrant>>, queued: ReadonlySet<string>, expanded: ReadonlySet<string>): Promise<NextResult> {
@@ -399,4 +404,53 @@ export function dedupeNext(seen: Map<string, { text: string; at: string }>, scop
 	if (prev?.text === text) return `cp_next unchanged since ${prev.at}: nothing new — end the turn unless a wake-up brought news (cp_next full: true returns the whole answer).`;
 	seen.set(scope, { text, at });
 	return text;
+}
+
+export interface NextSnapshotItem { kind: "job" | "bead"; id: string; project: string; title: string | null; verdict: string; reason: string }
+/** `state/next-snapshot.json` (#323): the last cp_next answer as the viewer's "Lined up" strip reads it. */
+export interface NextSnapshot {
+	schema_version: 1; at: string; project: string | null; action: NextAction; items: NextSnapshotItem[];
+	/** Evidence that could not be read; any row here means the snapshot never claims "nothing queued". */
+	unavailable: { project: string; error: string }[];
+	empty_since: string | null;
+}
+
+export const nextSnapshotFile = (home: string): string => join(home, LAYOUT.state, "next-snapshot.json");
+
+/** Each ready job with its grant's verdict, blocked and spawn-queued jobs, ready beads with no job. */
+export function nextSnapshot(result: NextResult, at: string, project?: string, previous?: Partial<NextSnapshot>): NextSnapshot {
+	const items: NextSnapshotItem[] = [];
+	const unavailable: NextSnapshot["unavailable"] = [];
+	const add = (job: Job, verdict: string, reason: string) => {
+		if (!items.some((item) => item.id === job.id)) items.push({ kind: "job", id: job.id, project: jobProject(job) ?? "", title: job.title, verdict, reason });
+	};
+	const results = [result, ...(result.others ?? [])];
+	for (const { ready, action } of results) for (const job of ready) {
+		const after = action.job_id && action.job_id !== job.id;
+		add(job, after ? "wait" : action.kind, after ? `after ${action.job_id}` : action.reason);
+	}
+	for (const { blocked } of results) for (const row of blocked ?? []) add(row.job, "blocked", `waiting on ${row.waiting_on}`);
+	const lined = result.lined_up;
+	for (const job of lined?.jobs ?? []) {
+		if (lined!.queued.includes(job.id)) add(job, "queued", "cp_dispatch queued it; it starts when a spawn slot frees");
+		else add(job, "uncovered", "ready, but not a dispatch candidate under any active grant");
+	}
+	for (const row of lined?.beads ?? []) {
+		if (row.error) unavailable.push({ project: row.project, error: `ready beads unavailable: ${row.error}` });
+		for (const id of row.ids) items.push({ kind: "bead", id, project: row.project, title: null, verdict: "no job", reason: "ready bead with no job" });
+	}
+	if (!lined) unavailable.push({ project: project ?? "all projects", error: `not read: ${result.action.reason}` });
+	const empty = !items.length && !unavailable.length;
+	const scope = project ?? null;
+	const since = previous?.project === scope && typeof previous?.empty_since === "string" ? previous.empty_since : at;
+	return { schema_version: 1, at, project: scope, action: result.action, items, unavailable, empty_since: empty ? since : null };
+}
+
+/** Overwrites the snapshot; an empty answer keeps the previous one's `empty_since` for the same scope. */
+export function writeNextSnapshot(home: string, result: NextResult, at: string, project?: string): void {
+	const file = nextSnapshotFile(home);
+	let previous: Partial<NextSnapshot> | undefined;
+	// No previous or an unreadable one only restarts `empty_since`; the new snapshot is still written.
+	try { previous = JSON.parse(readFileSync(file, "utf8")) as Partial<NextSnapshot>; } catch { previous = undefined; }
+	atomicWriteJson(file, nextSnapshot(result, at, project, previous));
 }

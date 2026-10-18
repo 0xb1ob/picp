@@ -6,7 +6,7 @@ import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
-import { jobHref } from "../routes.ts";
+import { composerHref, jobHref } from "../routes.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { GlossaryLink } from "../components/GlossaryLink.tsx";
 function Chip({href,tone,label,value,title,wide}: {href?:string;tone:string;label:string;value:string;title?:string | undefined;wide?:boolean}) {
@@ -112,6 +112,20 @@ function Alarm({data}: {data:OverviewResponse}) {
  for (const p of data.ci_unreadable) lines.push(`${CI_UNREADABLE_LABEL} for ${p.project}: ${p.job_ids.length} held job${p.job_ids.length === 1 ? "" : "s"} cannot show CI or hand off (${CI_READ_NEEDED})`);
  return lines.length ? <section class="overview-alarm" role="alert">{lines.map(line => <p key={line}>{line}</p>)}</section> : null;
 }
+/** The parent's last cp_next answer (issue 323), always with its age; unread evidence is never "nothing queued". */
+function LinedUp({data}: {data:OverviewResponse}) {
+ const l = data.lined_up;
+ const scope = l.project ? ` · ${l.project} only` : "";
+ const age = l.at ? <span class="overview-held-hint">snapshot from {time(l.at)}, {ago(l.at, data.generated_at)}{scope}</span> : null;
+ const many = new Set(l.items.map(i => i.project)).size > 1;
+ const body = l.availability === "unavailable" ? <p class="overview-error">Lined up unavailable: the cp_next snapshot is unreadable</p>
+  : !l.at ? <p class="overview-meta">No cp_next snapshot yet</p>
+  : !l.items.length && !l.unavailable.length ? <p class="overview-meta">Nothing queued since {time(l.empty_since ?? l.at)}</p>
+  : <>{l.unavailable.map(u => <p key={u.project} class="overview-meta" title={u.error}>{u.project}: {u.error.startsWith("not read") ? "not read" : "beads unreadable"}</p>)}
+   {l.items.map(i => <a key={`${i.kind}:${i.id}`} href={i.kind === "job" ? jobHref(i.id) : composerHref(`Create a picp job for ready bead ${i.id} in ${i.project}.`)} class="overview-line">
+    <code>{i.id}</code><span class="overview-line-text" title={i.title ?? undefined}>{i.title ?? "ready bead, no job"}</span><span class="overview-meta" title={i.reason}>{many && `${i.project} · `}{i.verdict} · {i.reason}</span></a>)}</>;
+ return <Block id="lined-up" title={<>Lined up &middot; {l.at && l.availability !== "unavailable" ? l.items.length : "-"}{age}</>}>{body}</Block>;
+}
 const LANDED_ROWS = 5;
 function Block({id,title,children}: {id?:string;title:ComponentChildren;children:ComponentChildren}) {
  return <section id={id} tabIndex={id ? -1 : undefined} class="overview-block"><h2>{title}</h2>{children}</section>;
@@ -143,6 +157,7 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
    <div class="overview-team-columns" aria-hidden="true">{["Job","Title","PR","Head","Age","Approvals","CI","Last human"].map(label => <span key={label}>{label}</span>)}</div>
    {data.with_team.map(j => <TeamRow key={j.id} j={j} manyProjects={teamProjects} now={data.generated_at}/>)}
   </Block>}
+  <LinedUp data={data}/>
   <Block title={<>Landed today &middot; {fleet ? "-" : data.shipped_today.length} merged{data.closed_today ? <> &middot; {data.closed_today} closed without PR</> : null}{costs.length > 0 && <> &middot; <span title="merged jobs only, worker plus reviewer">{money(costs.reduce((sum,c) => sum + c,0))}</span></>}</>}>
    {data.shipped_today.length > 0 && <div class="overview-landed-columns" aria-hidden="true">{["Job","Title","PR","Commit","Cost"].map(label => <span key={label}>{label}</span>)}</div>}
    {data.shipped_today.slice(0,LANDED_ROWS).map(j => <article key={j.id} class="overview-line overview-landed" aria-label={j.id}><a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-done"/><code>{j.id}</code></a><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><a href={j.pr_url} class="overview-landed-pr">{prNumber(j.pr_url)} ↗</a><span class="overview-meta overview-merge" title={j.merge_sha}><span class="overview-merge-word">merged </span><code>{shortSha(j.merge_sha)}</code></span><span class="overview-cost">{money(j.cost_usd)}</span></article>)}

@@ -432,6 +432,8 @@ export interface QuotaObservation {
  observed_at: string; source_job_id: string; historical: true;
  providers: {provider: string; five_hour: number | null; seven_day: number | null; tight: boolean; free_slots: number | null}[];
 }
+/** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict, or a ready bead with no job. */
+export interface LinedUpItem {kind: "job" | "bead"; id: string; project: string; title: string | null; verdict: string; reason: string}
 export interface OverviewResponse {
  generated_at: string;
  availability: Record<"asks" | "escalations" | "fleet" | "ledger" | "mandates", SourceAvailability>;
@@ -459,6 +461,8 @@ export interface OverviewResponse {
  /** cp-6fyl PR2: did the operator session see what the parent sent (`state/operator/relay-{outbox.json,acks.jsonl}`)? Null counts: unreadable, never zero. */
  delivery: {availability: SourceAvailability; unseen: number | null; oldest_id: string | null; oldest_kind: string | null; oldest_age_seconds: number | null; consumer_seen_at: string | null; alarm: boolean};
  quota: QuotaObservation | null;
+ /** #323: the parent's last `cp_next` answer (`state/next-snapshot.json`); `at` null when none was ever written. */
+ lined_up: {availability: SourceAvailability; at: string | null; project: string | null; empty_since: string | null; items: LinedUpItem[]; unavailable: {project: string; error: string}[]};
  navigation: {project_count: number; worktree_count: number};
  warnings: {section: string; message: string}[];
 }
