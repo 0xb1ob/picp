@@ -8,6 +8,7 @@ import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
+import { GlossaryLink } from "../components/GlossaryLink.tsx";
 function Chip({href,tone,label,value,title,wide}: {href?:string;tone:string;label:string;value:string;title?:string | undefined;wide?:boolean}) {
  const body = <><span class="overview-meta"><span class={`overview-dot overview-dot-${tone}`}/>{label}</span><strong title={title ? `${value}\n${title}` : value}>{value}</strong></>;
  const cls = wide ? "overview-chip overview-chip-wide" : "overview-chip";
@@ -135,10 +136,10 @@ export function Overview({data,control}: {data:OverviewResponse;control?:Control
    {data.failed.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta"><span class="overview-failed">failed</span>{j.failure && <> &middot; <span title={j.failure}>{j.failure}</span></>}</span></a>)}
    {data.blocked.items.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta">blocked by {j.blockers.map((b,i) => { const phase = blockerPhase(b.id, b.phase); return <span key={b.id}>{i > 0 && ", "}<code>{b.id}</code>{phase && ` (${phase})`}{b.stranded && <span class="overview-amber"> · {b.grant_status ?? "no active grant"}</span>}</span>; })}</span></a>)}
   </Block>}
-  <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}{data.in_flight.length > 0 && <span class="overview-held-hint">held = waiting on CI or review, normal for hours</span>}</>}>
+  <Block title={<>In flight &middot; {fleet ? "-" : data.in_flight.length}{data.in_flight.length > 0 && <span class="overview-held-hint">held = waiting on CI or review, normal for hours &middot; <GlossaryLink/></span>}</>}>
    {fleet ? <p class="overview-error">Jobs unavailable</p> : data.in_flight.length ? <><div class="overview-flight-columns" aria-hidden="true">{["Job","Title","Wall clock","Context","Review","CI","Model","Cost"].map(label => <span key={label}>{label}</span>)}</div>{data.in_flight.map(j => <FlightRow key={j.id} j={j} manyProjects={manyProjects}/>)}</> : <p class="overview-meta">Nothing in flight</p>}
   </Block>
-  {!fleet && data.with_team.length > 0 && <Block title={<>With the team &middot; {data.with_team.length}<span class="overview-held-hint">handed off; waiting on a human merge, no worker or slot</span></>}>
+  {!fleet && data.with_team.length > 0 && <Block title={<>With the team &middot; {data.with_team.length}<span class="overview-held-hint">handed off; waiting on a human merge, no worker or slot &middot; <GlossaryLink/></span></>}>
    <div class="overview-team-columns" aria-hidden="true">{["Job","Title","PR","Head","Age","Approvals","CI","Last human"].map(label => <span key={label}>{label}</span>)}</div>
    {data.with_team.map(j => <TeamRow key={j.id} j={j} manyProjects={teamProjects} now={data.generated_at}/>)}
   </Block>}

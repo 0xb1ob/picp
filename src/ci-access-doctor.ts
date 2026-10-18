@@ -54,37 +54,35 @@ export function ciAccessFindings(home: string, run: Run): DoctorFinding[] {
 	}
 	const findings: DoctorFinding[] = [];
 	for (const project of projects) {
-		const repo = githubRepoFromCloneUrl(project.clone_url);
-		if (!repo) continue; // not GitHub: this probe has nothing to ask
-		const endpoint = `repos/${repo}/actions/workflows`;
-		const result = run("gh", ["api", endpoint], home);
-		if (result.status === null && /\bENOENT\b/.test(result.stderr)) return []; // host.gh already says gh is missing
-		const check = `ci.${project.name}`;
-		const denied = { check, severity: "warn" as const, what: `${CI_UNREADABLE_LABEL} for ${repo}`,
-			detail: "the token in use cannot read this repository's CI, so its PRs show no CI evidence and cannot hand off",
-			fix: `give the token gh uses CI read access (${CI_READ_NEEDED}), then re-run /doctor` };
-		const unknown = (cause: string) => ({ check, severity: "warn" as const, what: `CI state unknown for ${repo}: the Actions read failed (${cause})`,
-			fix: "check `gh auth status` and the network, then re-run /doctor" });
-		if (result.status !== 0 && ciReadDenied(`${endpoint} ${result.stderr} ${result.stdout}`)) {
-			findings.push(denied);
-			continue;
-		}
-		const verdict = readCiConfigured(result);
-		if (verdict.state === "none") {
-			findings.push({ check, severity: "ok", what: `no Actions CI configured for ${repo} (0 Actions workflows)` });
-			continue;
-		}
-		if (verdict.state !== "present") {
-			findings.push(unknown(verdict.cause));
-			continue;
-		}
-		const probe = probeLatestRun(run, home, repo);
-		const workflows = `${verdict.workflow_count} workflow(s)`;
-		if ("jobs" in probe) findings.push({ check, severity: "ok", what: `CI readable for ${repo} (${workflows}; latest run and its ${probe.jobs} job(s) read)` });
-		else if ("runs" in probe) findings.push({ check, severity: "ok", what: `Actions workflows readable for ${repo} (${workflows}; no runs yet, so run and job access is untested)` });
-		else if (probe.failed === "denied") findings.push(denied);
-		else if (probe.failed === "missing") return [];
-		else findings.push(unknown(probe.cause));
+		const finding = ciAccessFinding(home, run, project.name, project.clone_url);
+		if (finding === "gh_missing") return []; // host.gh already says gh is missing
+		if (finding) findings.push(finding);
 	}
 	return findings;
+}
+
+/** One project's `ci.<name>` finding; undefined when the remote is not GitHub, `gh_missing` when gh is absent. */
+export function ciAccessFinding(home: string, run: Run, name: string, cloneUrl: string): DoctorFinding | "gh_missing" | undefined {
+	const repo = githubRepoFromCloneUrl(cloneUrl);
+	if (!repo) return undefined;
+	const endpoint = `repos/${repo}/actions/workflows`;
+	const result = run("gh", ["api", endpoint], home);
+	if (result.status === null && /\bENOENT\b/.test(result.stderr)) return "gh_missing";
+	const check = `ci.${name}`;
+	const denied = { check, severity: "warn" as const, what: `${CI_UNREADABLE_LABEL} for ${repo}`,
+		detail: "the token in use cannot read this repository's CI, so its PRs show no CI evidence and cannot hand off",
+		fix: `give the token gh uses CI read access (${CI_READ_NEEDED}), then re-run /doctor` };
+	const unknown = (cause: string) => ({ check, severity: "warn" as const, what: `CI state unknown for ${repo}: the Actions read failed (${cause})`,
+		fix: "check `gh auth status` and the network, then re-run /doctor" });
+	if (result.status !== 0 && ciReadDenied(`${endpoint} ${result.stderr} ${result.stdout}`)) return denied;
+	const verdict = readCiConfigured(result);
+	if (verdict.state === "none") return { check, severity: "ok", what: `no Actions CI configured for ${repo} (0 Actions workflows)` };
+	if (verdict.state !== "present") return unknown(verdict.cause);
+	const probe = probeLatestRun(run, home, repo);
+	const workflows = `${verdict.workflow_count} workflow(s)`;
+	if ("jobs" in probe) return { check, severity: "ok", what: `CI readable for ${repo} (${workflows}; latest run and its ${probe.jobs} job(s) read)` };
+	if ("runs" in probe) return { check, severity: "ok", what: `Actions workflows readable for ${repo} (${workflows}; no runs yet, so run and job access is untested)` };
+	if (probe.failed === "denied") return denied;
+	if (probe.failed === "missing") return "gh_missing";
+	return unknown(probe.cause);
 }

@@ -515,9 +515,11 @@ test("cp_project add: new projects default to human_handoff, detection may set r
 		if (facts instanceof Error) throw facts;
 		return facts;
 	};
+	let ci = { status: 0 as number | null, stdout: JSON.stringify({ total_count: 0, workflows: [] }), stderr: "" };
+	const ciRun = () => ci;
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
 	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
-		{ commandPost: () => ({ registry }), setLive: () => {} } as never, probe);
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never, probe, ciRun);
 	const run = async (params: Record<string, unknown>) =>
 		((await tools.get("cp_project")!.execute("c", { action: "add", ...params }, undefined, undefined, {})) as { content: Array<{ text: string }> }).content[0]!.text;
 	// A GitHub remote without network: the canonical clone is already in place with that origin.
@@ -548,6 +550,24 @@ test("cp_project add: new projects default to human_handoff, detection may set r
 	assert.ok(!("merge_policy" in registry.require("explicit")));
 	assert.match(await run({ name: "solo", clone_url: "https://github.com/o/solo.git" }), /merge: repo \(existing project, unchanged\)/);
 	assert.equal(probed.length, 3, "an explicit policy or a re-add never probes");
+
+	// Readiness (#329): advisory lines plus a paste-ready paragraph; a refused or failed CI read never fails add
+	// and never reads as "no CI"; gh's output (which may carry a token) is never echoed.
+	assert.match(local, /forge: {3}unknown: .*\n {4}CI: {6}not probed.*\n {4}tracker: none — connect one with cp_tracker connect project=local/);
+	assert.match(local, /tell the user: picp is set up for local\. picp opens a pull request.*it never merges itself\. picp does not probe/);
+	assert.match(solo, /forge: {3}github \(o\/solo\)\n {4}CI: {6}no Actions CI configured for o\/solo/);
+	assert.match(solo, /picp merges a pull request once it is reviewed.*no GitHub Actions workflows/);
+	ci = { status: 1, stdout: "", stderr: "HTTP 403: Resource not accessible by personal access token sentinel-secret" };
+	const denied = await addGithub("denied");
+	assert.match(denied, /CI: {6}CI unreadable — token lacks Actions read for o\/denied — fix: give the token/);
+	assert.match(denied, /cannot read this repository's CI yet.*Actions read/);
+	ci = { status: 1, stdout: "", stderr: "dial tcp: i/o timeout sentinel-secret" };
+	const flaky = await addGithub("flaky");
+	assert.match(flaky, /CI: {6}CI state unknown for o\/flaky/);
+	assert.match(flaky, /unknown, not "no CI"/);
+	ci = { status: null, stdout: "", stderr: "spawnSync gh ENOENT" };
+	assert.match(await run({ name: "solo", clone_url: "https://github.com/o/solo.git" }), /CI: {6}unknown: gh is not installed/);
+	assert.doesNotMatch(denied + flaky, /sentinel-secret/);
 });
 
 test("the ledger refuses a job in an archived project with a clear message", async (t) => {
