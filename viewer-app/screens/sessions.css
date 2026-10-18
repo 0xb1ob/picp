@@ -62,7 +62,7 @@
 .session-bridge-chip { flex-shrink: 0; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; line-height: 16px; color: var(--dim); }
 .session-bridge-what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .session-bridge-what a { color: var(--blue); }
-.session-bridge-receipt { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--dim); }
+.session-bridge-receipt { flex: 0 10000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--dim); }
 .session-system .session-bridge-line > .session-notice-line { flex: 0 0 auto; gap: 4px; font-size: 12px; color: var(--dim); }
 .session-body p a { overflow-wrap: anywhere; }
 .session-notice { margin: 8px 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; gap: 4px; }
