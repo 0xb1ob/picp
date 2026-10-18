@@ -68,6 +68,7 @@ test(
 				project: "live",
 				kind: "ship",
 				delivery: "local",
+				artifact_path: join(home.path, paths.artifactDir(jobId), "report.md"),
 				task: "Change the single number in src/version.txt from 1 to 2, commit it with message 'bump version', and report. Do not touch anything else. There is no test suite and no remote: do not push, do not open a PR.",
 			},
 		});
