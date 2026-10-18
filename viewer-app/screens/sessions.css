@@ -46,12 +46,28 @@
 .session-tool summary > code:nth-child(2) { font-size: 12px; color: var(--muted); flex: 0 0 96px; min-width: 0; max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tool summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tool pre, .file-text { margin: 0 0 12px; padding: 10px 12px; background: var(--surface); border-radius: 8px; font-size: 11px; line-height: 1.55; color: var(--subtle); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* An opened tool run (or every run with Tools on): one dense bordered card, ~30px per call. */
-.session-tool-card { display: flex; flex-direction: column; margin: 2px 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.session-tool-card > .session-entry + .session-entry { border-top: 1px solid var(--divider); }
-.session-tool-card .session-tool summary { min-height: 30px; padding: 0 10px; }
-.session-tool-card .session-tool pre { margin: 0 0 8px; background: var(--background); }
-.session-tool-card .session-tool > pre, .session-tool-card .session-tool-all { margin: 0 10px 8px; }
+/*
+ * Chat v2 steps (tool-run.css draws the pill): aligned with the session's cards. Open, one panel card at most 640 px:
+ * the wake notice over a hairline, compact one-line rows (marker, name, summary, time), then the job transcript link.
+ */
+.session-steps { padding-left: 34px; }
+.session-steps-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.session-steps-open > .session-steps-card { max-width: 640px; margin-bottom: 8px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--divider); border-radius: 14px; }
+.session-steps-card > .session-message.session-system { margin: 0; }
+.session-steps-open > .session-steps-card > .session-message.session-system { padding-bottom: 2px; border-bottom: 1px solid var(--divider); }
+.session-steps-card .session-notice-rest { padding: 6px 0; }
+.session-steps-card .session-notice-rest p { font-size: 13px; line-height: 20px; }
+.session-notice-paths.session-notice-chips { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.session-notice-chips a, .session-notice-chips code { padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; text-decoration: none; overflow-wrap: anywhere; }
+.session-steps-rows { display: flex; flex-direction: column; padding-top: 4px; }
+.session-steps-rows .session-tool summary { display: grid; grid-template-columns: 16px 44px minmax(0,1fr) auto; align-items: center; gap: 8px; min-height: 30px; padding: 3px 0; font-size: 12.5px; line-height: 18px; }
+.session-steps-rows .session-tool summary::before { content: "›"; text-align: center; color: var(--dim); }
+.session-steps-rows .session-tool[open] > summary::before { content: "⌄"; }
+.session-steps-rows .session-tool summary > .session-time { order: 1; }
+.session-steps-rows .session-tool summary > code:nth-child(2) { max-width: none; font-size: 11px; color: var(--dim); }
+.session-steps-rows .session-tool summary > span { color: var(--muted); }
+.session-steps-rows .session-tool pre { margin: 0 0 8px; background: var(--background); }
+.session-steps-link { display: flex; align-items: center; align-self: flex-start; min-height: 44px; font-size: 12px; color: var(--blue); text-decoration: none; }
 .session-message { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--transcript-divider); }
 .session-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .session-who { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--muted); }
@@ -280,5 +296,7 @@
  .session-notice .session-awaiting { border-color: var(--ask-border); }
  .session-notice > .session-time { padding-top: 18px; }
  .session-trace { margin-left: 68px; }
+ .session-steps { padding-left: 42px; }
+ .session-steps-link { min-height: 32px; }
  .session-new-wrap { bottom: 24px; }
 }

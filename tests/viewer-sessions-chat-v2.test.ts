@@ -7,9 +7,9 @@ import { build } from "esbuild";
 import { test, type TestContext } from "node:test";
 import { parseHTML } from "linkedom";
 import { REPO_ROOT } from "./harness/index.ts";
-import type { SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
+import type { JobResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
 import type { ThreadsView } from "../viewer-app/threads.ts";
-import { dayKey, dayLabel, dayStarts, lastDay } from "../viewer-app/session-rows.ts";
+import { dayKey, dayLabel, dayStarts, lastDay, rows } from "../viewer-app/session-rows.ts";
 
 const bundle = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import renderToString from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const html=(data,threads)=>renderToString(h(Sessions,{data,threads})); export const shell=screen=>renderToString(h(Shell,{current:{screen,section:null},awaiting:0,status:"live",updatedAt:null},"Content")); export const mount=(root,data,threads)=>render(h(Sessions,{data,threads}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
 const { act, html, shell, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`) as {
@@ -87,4 +87,49 @@ test("thread bands: a collapsed earlier band leaves the thread its own day pill;
 test("theme scope: only the Sessions route's shell carries shell-sessions, so the light palette never reaches another screen", () => {
 	assert.match(shell("sessions"), /^<div class="shell shell-sessions">/);
 	for (const screen of ["overview", "decisions", "jobs", "job", "files"]) assert.match(shell(screen), /^<div class="shell">/, screen);
+});
+
+test("rows: a run of steps is contiguous tool calls plus at most the one parsed wake notice right above them", () => {
+	const at = local(15, 9);
+	const wake = (id: string, over: Partial<SessionEntry> = {}) => entry(id, "system", at, { bridge: { kind: "wake", job: "cp-a", id: null, receipt: null }, ...over });
+	const tool = (id: string, over: Partial<SessionEntry> = {}) => entry(id, "tool", at, { name: "bash", ...over });
+	const shape = (list: SessionEntry[], days = new Map<string, string>(), order?: Map<string, number>) =>
+		rows(list, days, order).map(row => row.kind === "entry" ? row.entry.id : `${row.key}[${row.notice ? `${row.notice.id}+` : ""}${row.entries.map(e => e.id).join(",")}]`);
+	assert.deepEqual(shape([wake("w1"), wake("w2"), tool("t1"), tool("t2"), entry("s", "say", at), tool("t3")]), ["w1", "w2[w2+t1,t2]", "s", "t3[t3]"], "only the nearest notice joins; a message ends the run");
+	assert.deepEqual(shape([entry("x", "system", at), tool("t1"), wake("w1"), entry("ask", "ask", at), tool("t2"), tool("t3")]), ["x", "t1[t1]", "w1", "ask", "t2[t2,t3]"], "an unparsed system entry or an ask card never joins");
+	assert.deepEqual(shape([tool("t1"), wake("w1"), tool("t2")]), ["t1[t1]", "w1[w1+t2]"], "a notice ends a run and opens the next");
+	assert.deepEqual(shape([wake("w1"), tool("t1"), tool("t2")], new Map([["t2", "Fri"]])), ["w1[w1+t1]", "t2[t2]"], "a new local day splits the run");
+	assert.deepEqual(shape([wake("w1"), tool("t1", { thread: "th-1" }), tool("t2", { thread: "th-1" }), tool("t3")]), ["w1", "t1[t1,t2]", "t3[t3]"], "so does another thread");
+	const list = [wake("w1"), tool("t1"), tool("t3")];
+	assert.deepEqual(shape(list, new Map(), new Map([["w1", 0], ["t1", 1], ["t3", 3]])), ["w1[w1+t1]", "t3[t3]"], "and a gap the thread filter opened in source order");
+	assert.deepEqual(shape(list, new Map(), new Map([["w1", 4], ["t1", 5], ["t3", 6]])), ["w1[w1+t1,t3]"]);
+});
+
+test("App: the explicit Job transcript link opens a done job's Transcript on a phone; a plain Job link keeps Details", async t => {
+	// Back/Forward between the two hashes of one job remounts the route (its key includes the query), so each lands on its
+	// own tab; the API read is the job id alone. Phone width comes from matchMedia, which JobDetail reads at mount.
+	const built = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {App} from "./viewer-app/app.tsx"; export {act}; export const mount=root=>render(h(App,{}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact", loader: { ".css": "empty" } });
+	const app = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as { act: typeof act; mount: (root: Element) => void; unmount: (root: Element) => void };
+	const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
+	const location = { hash: "#job/cp-done?tab=transcript" };
+	const job = { id: "cp-done", project: "demo", title: "Done job", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: null, finished_today: false, merge_sha: null, failure: null, summary: null, blockers: [], context: null };
+	const data = { generated_at: "2026-10-15T16:00:00Z", awaiting_count: 0, job, description: null, mandate: null, timeline: [], timeline_truncated: false, files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [] } as unknown as JobResponse;
+	const requests: string[] = [];
+	const globals = { window, document, location, EventSource: class extends EventTarget { close() {} }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+		fetch: async (url: string) => { requests.push(url); return new Response(JSON.stringify(url === "/api/job/cp-done" ? data : { error: "not in fixture" }), { status: url === "/api/job/cp-done" ? 200 : 503 }); } };
+	const originals = Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+	const root = document.getElementById("root")!;
+	t.after(async () => { await app.act(() => app.unmount(root)); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } });
+	const settle = () => app.act(async () => { for (let i = 0; i < 5; i++) await new Promise(done => setImmediate(done)); });
+	const go = async (hash: string) => { location.hash = hash; await app.act(() => { window.dispatchEvent(new window.Event("hashchange")); }); await settle(); };
+	const tab = () => root.querySelector(".job-detail")?.getAttribute("data-tab");
+	await app.act(() => app.mount(root));
+	await settle();
+	assert.equal(tab(), "transcript", "the explicit link opens Transcript, not the phone's default Details");
+	await go("#job/cp-done");
+	assert.equal(tab(), "details", "an ordinary Job link keeps the phone default");
+	await go("#job/cp-done?tab=transcript");
+	assert.equal(tab(), "transcript", "Forward to the explicit link lands on Transcript again");
+	assert.deepEqual([...new Set(requests.filter(url => url.startsWith("/api/job/cp-done") && !url.includes("/transcript")))], ["/api/job/cp-done"], "the job read never carries the tab");
 });

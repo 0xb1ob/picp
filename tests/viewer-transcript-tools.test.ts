@@ -73,7 +73,7 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 
 	// Hidden by default: no tool entry renders, each run is one faint line with its count.
 	assert.deepEqual(tools(), [], "no tool call renders before the toggle");
-	assert.deepEqual(lines(), ["▸ 3 tool calls — Read 42 lines", "▸ 1 tool call — Read 2 lines"], "consecutive calls collapse into one line carrying the hidden count");
+	assert.deepEqual(lines(), ["≡ 3 steps · Read 42 lines ▸", "≡ 1 step · Read 2 lines ▸"], "consecutive calls collapse into one pill carrying the hidden count");
 	assert.equal(toggle().textContent, "Tools 4", "the toggle counts everything the transcript hides");
 	assert.equal(toggle().getAttribute("aria-pressed"), "false");
 
@@ -84,8 +84,8 @@ test("tool calls hide by default, the toggle remembers next time, and a run open
 	// One run opens alone; the toggle keeps counting what is still hidden.
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools().map(text => /TOOL-\w+/.exec(text)?.[0]), ["TOOL-ONE", "TOOL-TWO", "TOOL-THREE"], "only the clicked run expands");
-	assert.deepEqual(lines(), ["▾ 3 tool calls", "▸ 1 tool call — Read 2 lines"], "open, the handle drops the preview its first row repeats; the other run is untouched");
-	assert.equal(root.querySelectorAll(".session-tool-run .session-tool-card .session-tool").length, 3, "the opened run's rows sit in one card");
+	assert.deepEqual(lines(), ["≡ 3 steps ▾", "≡ 1 step · Read 2 lines ▸"], "open, the pill drops the preview its first row repeats; the other run is untouched");
+	assert.equal(root.querySelectorAll(".session-steps-open .session-steps-rows .session-tool").length, 3, "the opened run's rows sit in one card");
 	assert.equal(toggle().textContent, "Tools 4", "the count is every tool call, open or not");
 	await click(root.querySelectorAll(".session-tools")[0]!);
 	assert.deepEqual(tools(), [], "clicking the line again collapses that run");
@@ -252,4 +252,49 @@ test("the operator's own messages and the assistant's replies are never collapse
 	assert.equal(root.querySelectorAll(".session-notice-line").length, 1, "only the bridge notice carries an expander");
 	assert.match(root.textContent!, /operator words\nsecond operator line/, "the operator's own words are all on screen");
 	assert.match(root.textContent!, /assistant words\nsecond assistant line/, "so is every assistant reply");
+});
+
+test("a wake notice and the tool calls right after it are one run of steps; the notice and the tools open independently", async (t) => {
+	// Chat v2 PR 2: the pill counts the notice as a step, the notice keeps its own #306 toggle inside or outside the card,
+	// a streamed call joins the open run without closing it, and the card links the recorded job's transcript.
+	const thinking = entry("t1", "tool", { name: "thinking", text: "THINK-ONE", summary: "Checking the head" });
+	const entries = [entry("m1", "say", { text: "MESSAGE-ONE" }), bridgeEntry(), thinking, entry("t2", "tool", { name: "bash", text: "TOOL-TWO", summary: "Ran git log" }), entry("m2", "say", { text: "MESSAGE-TWO" })];
+	const data = fullTranscript(t, entries);
+	const { root, click, lines, tools } = stage(t);
+	await act(() => mount(root, data));
+	const notice = () => root.querySelector(".session-steps .session-notice-line")!;
+	assert.deepEqual(lines(), ["≡ 3 steps · cp-xrhq ▸"], "one pill: the wake notice plus two calls, named by the recorded job");
+	assert.equal(root.querySelectorAll(".session-bridge").length, 1, "the notice is not repeated outside its run");
+
+	await click(notice());
+	assert.equal(notice().getAttribute("aria-expanded"), "true", "the notice opens while the tools stay hidden");
+	assert.deepEqual(tools(), []);
+	assert.match(root.innerHTML, /Mobile chat layout/);
+
+	await click(root.querySelector(".session-steps > .session-tools"));
+	assert.deepEqual(tools().map(text => /THINK-ONE|TOOL-TWO/.exec(text)?.[0] ?? text), ["THINK-ONE", "TOOL-TWO"]);
+	assert.equal(notice().getAttribute("aria-expanded"), "true", "opening the tools leaves the notice as it was");
+	const card = root.querySelector(".session-steps-card")!;
+	assert.deepEqual([...card.children].map(child => child.getAttribute("class")), ["session-message session-notice session-system session-bridge", "session-steps-rows", "session-steps-link"]);
+	assert.equal(card.querySelector(".session-steps-link")!.getAttribute("href"), "#job/cp-xrhq?tab=transcript");
+	assert.deepEqual([...card.querySelectorAll(".session-notice-chips a, .session-notice-chips code")].map(chip => [chip.textContent, chip.getAttribute("title")]), [["artifact.md", "/h/state/runs/cp-xrhq/artifact.md"], ["cp-xrhq", "/h/state/runs/cp-xrhq"], ["report.md", "/h/state/artifacts/cp-xrhq/report.md"]], "chips name the file; the full path stays in the title, unresolved as text");
+
+	await act(() => mount(root, { ...data, entries: [...entries.slice(0, 4), entry("t3", "tool", { name: "read", text: "TOOL-THREE" }), entries[4]!] }));
+	assert.deepEqual(lines(), ["≡ 4 steps · cp-xrhq ▾"], "a streamed call joins the run, which stays open (its key is the notice id)");
+	assert.equal(tools().length, 3);
+	assert.equal(notice().getAttribute("aria-expanded"), "true");
+});
+
+test("Tools on opens every run of steps without pills; a lone tool run and a notice with no calls keep their own shapes", async (t) => {
+	const data = fullTranscript(t, [entry("t0", "tool", { name: "read", text: "ORPHAN" }), entry("m1", "say", { text: "MESSAGE-ONE" }), bridgeEntry()]);
+	const { root, click, toggle, lines, tools } = stage(t);
+	await act(() => mount(root, data));
+	assert.deepEqual(lines(), ["≡ 1 step ▸"], "a tool run with no wake notice is a run of its own, with no job named");
+	assert.equal(root.querySelectorAll(".session-steps .session-bridge").length, 0, "a notice no calls follow stays a standalone row");
+	assert.equal(root.querySelectorAll(".session-bridge").length, 1);
+	await click(toggle());
+	assert.deepEqual(lines(), [], "no pills while every call is shown");
+	assert.equal(tools().length, 1);
+	assert.equal(root.querySelectorAll(".session-steps-open .session-steps-card").length, 1);
+	assert.equal(root.querySelector(".session-steps-link"), null, "no job transcript link without a recorded bridge job");
 });

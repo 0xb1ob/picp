@@ -10,12 +10,12 @@ import { REPO_ROOT } from "./harness/index.ts";
 process.env.TZ = "UTC";
 const built = await build({
  stdin: {
-  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {TranscriptDocument} from "./viewer-app/screens/JobTranscript.tsx"; import {ToolRunRow} from "./viewer-app/components/ToolRunRow.tsx"; export {ToolRunRow}; import {ToolRun} from "./viewer-app/screens/JobTranscript.tsx"; export const row=(solid,o)=>render(h(ToolRunRow,{count:2,detail:"d",open:o,onToggle(){},solid},"kids")); export const open=(run)=>render(h(ToolRun,{run,open:true})); import {shouldFetch,POLL_MS} from "./viewer-app/screens/JobTranscript.tsx"; export {shouldFetch,POLL_MS}; import {overflows} from "./viewer-app/screens/JobDetail.tsx"; export {overflows}; export const screen=(data,reports=[])=>render(h(TranscriptDocument,{data,model:"anthropic/m",reports}));',
+  contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {TranscriptDocument} from "./viewer-app/screens/JobTranscript.tsx"; import {ToolRunRow} from "./viewer-app/components/ToolRunRow.tsx"; export {ToolRunRow}; import {ToolRun} from "./viewer-app/screens/JobTranscript.tsx"; export const row=(solid,o)=>render(h(ToolRunRow,{count:2,detail:"d",open:o,onToggle(){},solid},"kids")); export const steps=(o,notice,toggle=true)=>render(h(ToolRunRow,{count:2,detail:"d",open:o,onToggle:toggle?()=>{}:undefined,steps:true,notice},"kids")); export const open=(run)=>render(h(ToolRun,{run,open:true})); import {shouldFetch,POLL_MS} from "./viewer-app/screens/JobTranscript.tsx"; export {shouldFetch,POLL_MS}; import {overflows} from "./viewer-app/screens/JobDetail.tsx"; export {overflows}; export const screen=(data,reports=[])=>render(h(TranscriptDocument,{data,model:"anthropic/m",reports}));',
   loader: "tsx", resolveDir: REPO_ROOT,
  },
  bundle: true, write: false, platform: "node", format: "esm", jsx: "automatic", jsxImportSource: "preact", loader: {".css": "empty"},
 });
-const {screen, open, row, overflows, shouldFetch, POLL_MS} = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
+const {screen, open, row, steps, overflows, shouldFetch, POLL_MS} = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`);
 
 const e = (id: string, at: string, kind: SessionEntry["kind"], who: string, text: string, over: Partial<SessionEntry> = {}): SessionEntry =>
  ({id, at, kind, who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over});
@@ -109,4 +109,14 @@ test("Sessions and Job detail render the one shared tool-run row; solid is the o
  assert.match(src("viewer-app/screens/Sessions.tsx"), /<ToolRunRow /);
  assert.match(src("viewer-app/screens/JobTranscript.tsx"), /<ToolRunRow solid /);
  assert.doesNotMatch(src("viewer-app/screens/Sessions.tsx") + src("viewer-app/screens/JobTranscript.tsx"), /class="session-tools"|class="jt-tools"/, "no private look-alike row");
+});
+
+test("the steps variant is Sessions' opt-in pill and card; the default and solid rows above are unchanged by it", () => {
+ // Chat v2 PR 2: `steps` adds a pill face and one card that holds the notice slot even while closed; without onToggle
+ // (Tools on) the pill goes and the card stays open. JobTranscript never passes `steps`.
+ assert.equal(steps(false), '<div class="session-tool-run session-steps"><button type="button" class="session-tools" aria-expanded="false"><span class="session-steps-face"><span aria-hidden="true">≡</span> 2 steps<small> · d</small><span aria-hidden="true"> ▸</span></span></button></div>');
+ assert.match(steps(false, "NOTICE"), /<\/button><div class="session-steps-card">NOTICE<\/div><\/div>$/, "closed, the notice slot still renders; the rows do not");
+ assert.match(steps(true, "NOTICE"), /^<div class="session-tool-run session-steps session-steps-open">.*<div class="session-steps-card">NOTICEkids<\/div><\/div>$/);
+ assert.equal(steps(true, undefined, false), '<div class="session-tool-run session-steps session-steps-open"><div class="session-steps-card">kids</div></div>');
+ assert.doesNotMatch(readFileSync(join(REPO_ROOT, "viewer-app/screens/JobTranscript.tsx"), "utf8"), /\bsteps\b/);
 });

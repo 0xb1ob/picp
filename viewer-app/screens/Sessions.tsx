@@ -5,7 +5,7 @@ import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/vie
 import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
 import { time } from "../format.ts";
-import { jobHref, sessionHref } from "../routes.ts";
+import { jobHref, jobTranscriptHref, sessionHref } from "../routes.ts";
 import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { Icon } from "../components/icons.tsx";
 import { OperatorComposer } from "../components/OperatorComposer.tsx";
@@ -24,7 +24,7 @@ import { type ControlView, controlChip, controlLine, controlReady, deliveryLine 
 import { useViewportFit } from "../viewport-fit.ts";
 import { ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
 import { threadBands, threadFilter, type ThreadsView } from "../threads.ts";
-import { dayKey, dayStarts, lastDay } from "../session-rows.ts";
+import { dayKey, dayStarts, lastDay, type Row, rows } from "../session-rows.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -57,17 +57,6 @@ function readSeen(): string[] | null {
  try { const ids: unknown = JSON.parse(raw); return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null; }
  catch (error) { console.warn(`seen decisions unreadable, starting over: ${(error as Error).message}`); return null; }
 }
-/** Consecutive tool entries collapse into one run, split where a local day starts; every other entry stands alone. */
-type Row = {kind:"entry";entry:SessionEntry} | {kind:"run";key:string;entries:SessionEntry[]};
-function rows(entries: SessionEntry[], days: Map<string,string>): Row[] {
- const out: Row[] = [];
- for (const entry of entries) {
-  const tail = out.at(-1);
-  if (entry.kind === "tool" && tail?.kind === "run" && !days.has(entry.id)) { tail.entries.push(entry); continue; }
-  out.push(entry.kind === "tool" ? {kind:"run",key:entry.id,entries:[entry]} : {kind:"entry",entry});
- }
- return out;
-}
 
 /** The prompting side of a transcript (sessions-view.ts SIDES: the user turns) sits on the right; everything the session says on the left. */
 const OWN = new Set(["Operator","Operator → parent","Parent"]);
@@ -79,13 +68,13 @@ const GROUP_GAP_MS = 5 * 60_000;
 const RELAY_LINES = 6;
 /**
  * Bubbles that open a group: the first, a new author or day, after a notice or card, or a long gap.
- * Tool calls never split a group.
+ * Tool calls never split a group; a run of steps holding a wake notice does.
  */
 function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  const starts = new Set<string>();
  let prev: SessionEntry | undefined;
  for (const row of rowList) {
-  if (row.kind === "run") continue;
+  if (row.kind === "steps") { if (row.notice) prev = undefined; continue; }
   const e = row.entry;
   if (!isBubble(e)) { prev = undefined; continue; }
   const gap = prev && e.at && prev.at ? Date.parse(e.at)-Date.parse(prev.at) : 0;
@@ -94,13 +83,22 @@ function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  }
  return starts;
 }
-/** A hidden run of tool calls: one faint line between messages, and clicking it opens that run alone. */
-function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;onToggle:()=>void}) {
- // Open, the header drops its preview: it repeats the first row (often the thinking line) right below it.
- return <ToolRunRow count={entries.length} detail={open ? null : entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}><div class="session-tool-card">{entries.map(e=><Entry key={e.id} entry={e}/>)}</div></ToolRunRow>;
+/**
+ * A run of steps (chat v2): one pill opening one card — the wake notice with its own toggle, compact tool rows and,
+ * for a recorded job, its transcript link. Tools on (no `onToggle`) shows every card open, without pills.
+ */
+function Steps({row,open,onToggle}: {row:Extract<Row,{kind:"steps"}>;open:boolean;onToggle?:()=>void}) {
+ const job=row.notice?.bridge?.job ?? null;
+ // Open, a summary preview would repeat the first row right below it; the job id never does.
+ return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ?? (open ? null : row.entries.find(e=>e.summary)?.summary)} open={open} onToggle={onToggle} notice={row.notice && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
+  <div class="session-steps-rows">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div>
+  {job && <a class="session-steps-link" href={jobTranscriptHref(job)}>Open job transcript →</a>}
+ </ToolRunRow>;
 }
-/** A parsed cp-bridge notice: one row (bridge chip, verb, job link, receipt, inline "notice ▸"), body below. */
-function BridgeNotice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
+const clockOf=(e:SessionEntry)=><code class="session-time">{dayKey(e.at) ? time(e.at) : "-"}</code>;
+const baseName=(path:string)=>path.replace(/\/+$/,"").split("/").at(-1) || path;
+/** A parsed cp-bridge notice: one row (chip, verb, job, receipt, notice toggle), the body below; `chips`: basenames. */
+function BridgeNotice({entry:e,clock,chips=false}: {entry:SessionEntry;clock:ComponentChild;chips?:boolean}) {
  const [open,setOpen]=useState(false);
  const b=e.bridge!;
  const lines=e.text.length ? e.text.split("\n") : [];
@@ -118,7 +116,7 @@ function BridgeNotice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}
     {receipt && <small class="session-bridge-receipt">· {receipt}</small>}
     {multi && <button type="button" class="session-notice-line" aria-expanded={open} aria-label={open ? "Hide notice" : "Show notice"} onClick={()=>setOpen(!open)}>notice <span aria-hidden="true">{open ? "▾" : "▸"}</span></button>}
    </div>
-   {multi ? open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class="session-notice-paths">{links.map(link=><li key={link.path}>{link.href ? <a href={link.href}>{link.path}</a> : <code>{link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>
+   {multi ? open && <div class="session-notice-rest">{prose && <p><InlineText text={prose} links={e.links}/></p>}{links.length > 0 && <ul class={chips ? "session-notice-paths session-notice-chips" : "session-notice-paths"}>{links.map(link=><li key={link.path}>{link.href ? <a href={link.href} title={link.path}>{chips ? baseName(link.path) : link.path}</a> : <code title={link.path}>{chips ? baseName(link.path) : link.path}</code>}{link.read && <a href={link.read}>read</a>}</li>)}</ul>}</div>
     : prose ? <p><InlineText text={prose} links={e.links}/></p> : null}
   </div>
  </article>;
@@ -165,7 +163,7 @@ function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boole
 }
 function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolean;you?:boolean}) {
  const trace=e.trace.filter(step=>step.at);
- const clock=<code class="session-time">{dayKey(e.at) ? time(e.at) : "-"}</code>;
+ const clock=clockOf(e);
  const head=e.kind === "tool" && e.text.length > TOOL_TEXT_MAX ? e.text.slice(0,TOOL_TEXT_MAX) : e.text;
  return <div class={e.failed ? "session-entry session-failed" : "session-entry"}>
   {e.kind === "tool" ? <details class="session-tool"><summary>{clock}<code>{e.name}</code><span>{e.summary}</span></summary><pre><Linked text={head} links={e.links}/></pre>{head !== e.text && <details class="session-tool-all"><summary>show all</summary><pre><Linked text={e.text.slice(TOOL_TEXT_MAX)} links={e.links}/></pre></details>}</details> :
@@ -274,16 +272,18 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
  // A local-day separator opens each new day; a band continues from the day shown right above it.
  const beforeDay=edgeOpen.before ? lastDay(bands.before) : null, insideDay=lastDay(shown) ?? beforeDay;
- const rowList=rows(shown,dayStarts(shown,beforeDay));
+ // Source order by id: a run of steps never spans entries the thread filter left out.
+ const order=new Map(data.entries.map((e,i)=>[e.id,i]));
+ const rowList=rows(shown,dayStarts(shown,beforeDay),order);
  // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
- const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), rl=rows(list,days), st=groupStarts(rl,days); return rl.flatMap(row=>{
-  const head=row.kind === "entry" ? row.entry : row.entries[0]!, label=days.get(head.id);
-  const node=row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : showTools ? <div key={row.key} class="session-tool-card">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div> : <ToolRun key={row.key} entries={row.entries} open={openRuns.includes(row.key)} onToggle={()=>toggleRun(row.key)}/>;
+ const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), rl=rows(list,days,order), st=groupStarts(rl,days); return rl.flatMap(row=>{
+  const head=row.kind === "entry" ? row.entry : row.notice ?? row.entries[0]!, label=days.get(head.id);
+  const node=row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/>;
   return label ? [<p key={`day-${head.id}`} class="session-day"><time dateTime={dayKey(head.at)!}>{label}</time></p>,node] : [node];
  });};
  const edge=(side:"before"|"after",list:SessionEntry[],word:string,prev:string | null)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list,prev)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
- const hiddenTools=rowList.reduce((n,row)=>row.kind === "run" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
+ const hiddenTools=rowList.reduce((n,row)=>row.kind === "steps" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
  const toggleRun=(key:string)=>setOpenRuns(open=>open.includes(key) ? open.filter(k=>k!==key) : [...open,key]);
  const row=(href:string,label:string,meta:string,selected:boolean,phase:string,context?:ContextUsage | null)=><a href={href} aria-current={selected ? "page" : undefined} class="session-choice"><span class="session-choice-head"><strong>{label}</strong><span class={`session-dot session-dot-${phase}`}/><CtxPct usage={context}/></span><small class="session-model">{meta}</small></a>;
