@@ -128,9 +128,11 @@ The usual sequence on a new machine:
    model login exists yet.
 2. Run `pi`, type `/login`, pick your provider, then quit pi.
 3. Run the installer again with `--force` so it can offer the models your login gives:
-   `~/.pi-command-post/app/bin/cp-install --force`. Without `--force` a rerun keeps
+   `~/.pi-command-post/app/bin/cp-install --force`, plus the same `--home`/`--app` if you
+   passed them (the installer prints the exact command). Without `--force` a rerun keeps
    the unpinned choice and offers nothing; `--force` also reruns `npm ci` and replaces a
-   generated file that differs from what this install renders.
+   generated file that differs from what this install renders. The rerun lists models as
+   the service sees them, so a login that does not reach the service still pins nothing.
 
 Pass flags after `sh -s --` (bootstrap) or straight to `bin/cp-install`:
 
