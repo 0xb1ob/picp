@@ -8,8 +8,8 @@
  *     parent's context is how a fleet controller turns into an implementer.
  *  2. **The ledger never holds an artifact body.** `state/artifacts/<job-id>/
  *     report.md` is the only home of findings, so no ledger read can leak one.
- *  3. **`data/ state/ projects/ .beads/ .pi-command-post/` are never
- *     committed or pushed.** They are runtime truth, not source.
+ *  3. **`data/ state/ projects/ .pi-command-post/` and the home's `.beads/`
+ *     are never committed or pushed.** They are runtime truth, not source.
  *
  * Here they are `tool_call` guards: a decision function over the tool name and
  * its arguments, returning a block reason the model can act on. Policy is code,
@@ -454,9 +454,10 @@ export class ContextGuard {
 		}
 		if (!GIT_PUBLISHING_SUBCOMMANDS.has(subcommand)) return undefined;
 
+		const where = gitTarget(argv, segment, cwd, uncertainCwd);
 		for (const token of args) {
 			if (token.startsWith("-")) continue;
-			const matched = this.#neverCommitPath(token, cwd);
+			const matched = this.#neverCommitPath(token, where);
 			if (!matched) continue;
 			return {
 				code: "never_commit_path",
@@ -544,22 +545,17 @@ export class ContextGuard {
 	}
 
 	/**
-	 * Which never-commit root a token falls under, if any. Two rules, both
-	 * fail-closed: a leading path segment that names one of them (whatever the
-	 * cwd — `cd home && git add .beads` is the case that motivates it), and a
-	 * path that resolves inside this home's copy of one.
+	 * Which never-commit root a token falls under, if any. The runtime dir is refused by its leading segment from any
+	 * cwd; `.beads/` only inside this home's copy (a project tracks its own), or by segment when the git target is hidden.
 	 */
-	#neverCommitPath(token: string, cwd: string): string | undefined {
+	#neverCommitPath(token: string, where: Omit<GitTarget, "subcommand">): string | undefined {
 		const raw = (token.startsWith("@") ? token.slice(1) : token).replace(/^\.\//, "");
 		if (raw.length === 0) return undefined;
 		const head = raw.split("/")[0] ?? "";
+		const resolved = resolve(where.target, raw);
 		for (const never of NEVER_COMMIT_PATHS) {
 			const name = never.replace(/\/$/, "");
-			if (head === name) return never;
-		}
-		const resolved = resolve(cwd, raw);
-		for (const never of NEVER_COMMIT_PATHS) {
-			const name = never.replace(/\/$/, "");
+			if (head === name && (name !== ".beads" || where.unresolved)) return never;
 			if (isInside(resolved, resolve(this.#home, name)) || isInside(resolved, resolve(this.#canonicalHome, name))) {
 				return never;
 			}
