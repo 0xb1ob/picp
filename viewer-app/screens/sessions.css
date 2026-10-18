@@ -2,27 +2,38 @@
 .sessions > .page-header { display: none; }
 .session-sidebar, .session-chats-new { display: none; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
-/* The mobile top bar (mobile-chat-layout): one row, at most 48 px; desktop keeps the sidebar and heading. */
-.session-bar { position: relative; z-index: 3; display: flex; align-items: center; gap: 6px; height: 47px; padding: 0 6px 0 2px; padding-top: env(safe-area-inset-top); box-sizing: content-box; border-bottom: 1px solid var(--divider); background: var(--background); flex-shrink: 0; min-width: 0; }
-.session-bar-icon, .session-bar-more > summary { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 10px; text-decoration: none; color: var(--text); }
+/* The phone top bar (chat v2): 48 px plus its hairline; back and ⋯ are 44 px, the avatar 28 px; the name (15 px) over a
+   11 px line, the # filter whose select covers the whole name column. Desktop keeps the sidebar and heading. */
+.session-bar { position: relative; z-index: 3; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 4px 0 0; padding-top: env(safe-area-inset-top); box-sizing: content-box; border-bottom: 1px solid var(--divider); background: var(--background); flex-shrink: 0; min-width: 0; }
+.session-bar-icon, .session-bar-more > summary { position: relative; width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 10px; text-decoration: none; color: var(--text); }
+.session-bar-icon { margin-right: -6px; }
 .session-bar-menu > summary { list-style: none; cursor: pointer; }
 .session-bar-menu > summary::-webkit-details-marker { display: none; }
-.session-bar-views { flex: 1; min-width: 0; }
-.session-bar-views > summary { display: flex; align-items: center; gap: 6px; min-height: 40px; min-width: 0; }
-.session-bar-views > summary strong { font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-bar-views > summary > span { font-size: 12px; color: var(--muted); }
-.session-bar-ctx, .session-bar-status { flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.session-bar-ctx.ctx-warn { color: var(--secondary); }
-.session-bar-ctx.ctx-high { color: var(--text); }
-.session-bar-status { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
+.session-bar > .session-avatar { width: 28px; height: 28px; font-size: 10px; }
+.session-bar-id { position: relative; flex: 1; align-self: stretch; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.session-bar-id > strong { font-size: 15px; font-weight: 600; line-height: 20px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-bar-sub { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; line-height: 14px; color: var(--muted); }
+.session-bar-sub > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-bar-sub > .session-dot { width: 6px; height: 6px; }
+.session-bar-sub > .thread-pill { position: static; height: 14px; padding: 0; background: none; border: 0; font-size: 11px; }
+.session-bar-sub > .thread-pill:focus-within { outline: 0; }
+.session-bar-id:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
+.session-bar-sub > .thread-pill > select { inset: 0; }
+.session-bar-state { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--divider); }
+.session-bar-state > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.session-bar-state > .session-ctx { margin-left: auto; flex-shrink: 0; font-size: 12px; }
+.session-bar-views, .session-bar-threads { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; border-bottom: 1px solid var(--divider); }
 .session-bar-sheet { position: absolute; top: 100%; left: 8px; right: 8px; max-height: 70dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
-.session-bar-sheet > a, .session-bar-sheet > button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; background: none; border: 0; border-radius: 9px; text-align: left; text-decoration: none; font-size: 15px; color: var(--text); min-width: 0; }
-.session-bar-sheet > a > span:not(.session-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-bar-sheet > a small { margin-left: auto; font-size: 12px; color: var(--muted); }
+.session-bar-views > a, .session-bar-sheet > button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; background: none; border: 0; border-radius: 9px; text-align: left; text-decoration: none; font-size: 15px; color: var(--text); min-width: 0; }
+.session-bar-views > a > span:not(.session-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-bar-views > a small { margin-left: auto; font-size: 12px; color: var(--muted); }
+.session-bar-sub > .thread-pill > .thread-pill-label { color: inherit; }
 .session-bar-sheet [aria-current=page], .session-bar-sheet [aria-pressed=true] { background: var(--toggle); }
 .session-bar-worker { padding-left: 24px !important; }
 .session-bar-sheet select { width: 100%; min-width: 0; min-height: 44px; margin: 4px 0; padding: 0 8px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; text-overflow: ellipsis; }
 .session-bar-file { padding: 8px 12px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.session-bar-sheet > .session-file-picker { padding: 0 0 0 12px; white-space: nowrap; }
+.session-bar-sheet > .session-file-picker select { flex: 1; }
 .session-bar-restart { padding: 4px 12px; }
 .session-bar-restart .operator-restart { flex-direction: column; align-items: stretch; }
 .session-file-picker { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted); }
@@ -34,7 +45,7 @@
 .session-heading > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .session-heading strong { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-heading span { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Chat v2 header: avatar, name over the state line (dot · state · model · ctx), the # thread filter, then the tools. */
+/* Chat v2 header: avatar, name over the state line (dot · state · model · ctx), then the # thread filter. */
 .session-heading > .session-avatar { color: var(--text); overflow: visible; }
 .session-heading > .session-avatar-bot { color: var(--avatar-bot-text); }
 .session-heading-state { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -48,9 +59,11 @@
 .session-replies { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 4px 0 12px; }
 .session-replies-to, .session-replies-state { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .session-replies-failed { color: var(--secondary); }
-.session-replies-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.session-replies-chips { display: flex; flex-wrap: wrap; gap: 10px 8px; min-width: 0; }
 .session-reply-wrap { position: relative; min-width: 0; max-width: 100%; }
-.session-reply { min-height: 44px; max-width: 100%; padding: 6px 16px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 22px; font: inherit; font-size: 14px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.session-reply { position: relative; min-height: 38px; max-width: 100%; padding: 6px 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 19px; font: inherit; font-size: 13px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+/* A 38 px face (34 px at 900 px and up) in a 44 px hit area; rows sit 10 px apart so no two areas overlap. */
+.session-reply::after { content: ""; position: absolute; inset: -3px 0; }
 .session-reply-recommended { border-color: var(--text); }
 .session-reply:disabled { opacity: 0.5; cursor: default; }
 .session-replies-why { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -227,13 +240,13 @@
 /* An error banner can sit above .sessions in .shell-main: it takes what is left, never `height: 100%` on top of it, or the composer is pushed below the viewport. */
 .shell-main:has(> .sessions) { display: flex; flex-direction: column; }
 .shell-main > .sessions { flex: 1 1 0; }
-/* Operator threads (cp-xmw2): below 900 px one chip row right above the composer, scrolling sideways; at 900 px and up the sidebar lists them. */
-/* The filter line sits directly under the top bar (Mark done is its last chip). */
-.session-threads { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-width: 0; padding: 6px 12px; overflow-x: auto; border-bottom: 1px solid var(--divider); }
+/* Operator threads (cp-xmw2): below 900 px the top bar's ⋯ sheet wraps them as 44 px chips (+ New first, Mark done last);
+   at 900 px and up the sidebar lists them. */
+.session-threads { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; }
 .session-thread-chip { flex-shrink: 0; min-height: 44px; max-width: 70vw; padding: 0 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .session-thread-chip[aria-pressed=true] { background: var(--toggle); }
 .session-thread-done:disabled { opacity: 0.5; cursor: default; }
-.session-thread-failed { flex-shrink: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; }
+.session-thread-failed { flex: 1 1 100%; min-width: 0; font-size: 12px; color: var(--secondary); overflow-wrap: anywhere; }
 .session-thread-new { color: var(--muted); }
 .session-thread-working { color: var(--muted); font-weight: 400; white-space: nowrap; }
 .session-thread-chip .session-thread-working::before { content: " · "; white-space: pre; }
@@ -330,4 +343,6 @@
  .session-steps { padding-left: 42px; }
  .session-steps-link { min-height: 32px; }
  .session-new-wrap { bottom: 24px; }
+ .session-reply { min-height: 34px; border-radius: 17px; }
+ .session-reply::after { inset: -5px 0; }
 }

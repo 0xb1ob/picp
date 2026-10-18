@@ -1,6 +1,6 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
- * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3|pr4 [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3|pr4|pr5 [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,7 +15,7 @@ import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -76,7 +76,7 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4") {
+if (args.stage === "pr4" || args.stage === "pr5") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
@@ -121,10 +121,18 @@ try {
 	const app = await buildViewer({ stateDir: join(scratch, LAYOUT.state) });
 	const empty = overview({ home: scratch, stateDir: join(scratch, LAYOUT.state) }, Date.parse(GENERATED));
 	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, "/api/threads": threads, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
+	if (args.stage === "pr5") routes["/api/skills"] = { generated_at: GENERATED, skipped: [], omitted: 0, skills: [
+		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
 		if (req.method !== "GET") { posts.push(`${req.method} ${path}`); return send(405, "application/json", '{"error":"fixture is read-only"}'); }
+		// PR 5: a message arrives while the reader is scrolled up — appended here, announced on the stream like the viewer's.
+		if (path === "/fixture/new-message") {
+			sessions.entries = [...sessions.entries, say("n1", "2026-10-15T08:07:00Z", "Assistant", "New while you were reading: PR #321 merged.")];
+			for (const stream of streams) stream.write("event: refresh\ndata: sessions\n\n");
+			return send(200, "application/json", "{}");
+		}
 		if (path === "/") return send(200, "text/html; charset=utf-8", appPage(app));
 		const asset = app.assets[path];
 		if (asset) return send(200, asset.mime, asset.bytes);
@@ -177,7 +185,8 @@ try {
 	const shots: object[] = [];
 	mkdirSync(out, { recursive: true });
 	/** `steps`: [script, ready expression] pairs run in order after load — real clicks on real handlers, each awaited. */
-	const capture = async (name: string, hash: string, width: number, height: number, theme: "light" | "dark", ready: string, scroll?: "top" | "bottom", steps: [string, string][] = []) => {
+	type Step = [string | { cdp: string; params: object }, string];
+	const capture = async (name: string, hash: string, width: number, height: number, theme: "light" | "dark", ready: string, scroll?: "top" | "bottom", steps: Step[] = []) => {
 		await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 900 });
 		await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
 		await cdp("Page.navigate", { url: "about:blank" });
@@ -185,7 +194,11 @@ try {
 		await until(name, `document.readyState === "complete" && !!document.querySelector(${JSON.stringify(ready)}) && document.fonts.status === "loaded"`);
 		// Pending bubbles land after the first scroll-to-latest, so the fixture settles the scroller itself.
 		if (scroll) await evaluate(`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop = ${scroll === "top" ? 0 : "t.scrollHeight"}; })()`);
-		for (const [run, done] of steps) { await new Promise(r => setTimeout(r, 150)); await evaluate(run); await until(`${name}: ${done}`, done); }
+		for (const [run, done] of steps) {
+			await new Promise(r => setTimeout(r, 150));
+			await (typeof run === "string" ? evaluate(run) : cdp(run.cdp, run.params));
+			await until(`${name}: ${done}`, done);
+		}
 		await new Promise(r => setTimeout(r, 300));
 		const facts = await evaluate(`(() => { const shell = document.querySelector(".shell"); const css = shell && getComputedStyle(shell);
 			return { overflow: document.documentElement.scrollWidth - innerWidth, shell: shell?.className ?? null, background: css?.getPropertyValue("--background").trim() ?? null,
@@ -199,15 +212,24 @@ try {
 				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
 				thread_pills: [...document.querySelectorAll(".thread-pill")].map(p => Math.round(p.getBoundingClientRect().width)),
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
-				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent) }; })()`);
+				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent),
+				page_scroll: document.documentElement.scrollHeight - innerHeight, scroll_top: Math.round(document.querySelector(".session-transcript")?.scrollTop ?? -1),
+				jump: !!document.querySelector(".session-new"), overlap: Math.round((document.querySelector(".session-transcript")?.getBoundingClientRect().bottom ?? 0) - (document.querySelector(".operator-composer")?.getBoundingClientRect().top ?? Infinity)),
+				small_targets: [...document.querySelectorAll(".session-bar-icon, .session-bar-more > summary, .session-bar-sheet button, .session-bar-views > a, .operator-composer-box button, .operator-composer-more > summary, .session-pending-actions button")]
+					.filter(e => e.getClientRects().length && e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent),
+				small_fields: [...document.querySelectorAll("textarea, select, input")].filter(e => e.getClientRects().length && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.getAttribute("aria-label")) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
 		if (stage === "pr4" && facts.thread_pills.some((w: number) => w > 240)) throw new Error(`${name}: a # thread pill is ${facts.thread_pills.join("/")} px wide, not compact`);
+		if (stage === "pr5" && facts.page_scroll > 0) throw new Error(`${name}: the page scrolls by ${facts.page_scroll}px`);
+		if (stage === "pr5" && facts.overlap > 0) throw new Error(`${name}: the transcript runs ${facts.overlap}px under the composer`);
+		if (stage === "pr5" && width < 900 && facts.small_targets.length) throw new Error(`${name}: targets under 44 px: ${facts.small_targets.join(", ")}`);
+		if (stage === "pr5" && width < 900 && facts.small_fields.length) throw new Error(`${name}: fields under 16 px: ${facts.small_fields.join(", ")}`);
 		const png = (await cdp("Page.captureScreenshot", { format: "png" })).data as string;
 		const file = join(out, `${name}.png`);
 		writeFileSync(file, Buffer.from(png, "base64"));
-		shots.push({ file, hash, width, height, theme, scroll: scroll ?? null, steps: steps.map(([run]) => run), ...facts });
+		shots.push({ file, hash, width, height, theme, scroll: scroll ?? null, steps: steps.map(([run]) => typeof run === "string" ? run : `${run.cdp} ${JSON.stringify(run.params)}`), ...facts });
 		await evaluate("localStorage.clear()");
 	};
 	const transcript = "#sessions?view=you&transcript=1";
@@ -293,6 +315,38 @@ try {
 		routes["/api/operator/control"] = { ...control, running: false, offline: true, busy: false, pending: false, token: null, inbox_token: "i".repeat(64) };
 		await capture("pr4-offline-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom");
 		routes["/api/operator/control"] = control;
+	}
+	if (stage === "pr5") {
+		const phone = (name: string, steps: Step[], scroll: "top" | "bottom" = "bottom", height = 844) => capture(`pr5-${name}-phone-dark-390x${height}`, transcript, 390, height, "dark", loaded, scroll, steps);
+		const more = `document.querySelector(".session-bar-more > summary").click()`, opened = `!!document.querySelector(".session-bar-more[open] .session-bar-threads .session-thread-chip")`;
+		// Every action the phone moved out of the composer and heading: one ⋯ sheet, the state line first.
+		await phone("menu", [[more, opened]]);
+		await capture("pr5-menu-phone-light-390x844", transcript, 390, 844, "light", loaded, "bottom", [[more, opened]]);
+		// A thread chip picks the thread and closes the sheet; the # filter under the name and the composer follow it.
+		await phone("filter", [[more, opened], [`[...document.querySelectorAll(".session-bar-threads .session-thread-chip")].find(b => b.textContent.startsWith("picp-improv")).click()`,
+			`!document.querySelector(".session-bar-more[open]") && document.querySelector(".session-bar-sub select")?.value === "picp-improv" && /#picp-improv/.test(document.querySelector(".operator-composer textarea").placeholder)`]]);
+		// Escape closes the sheet and hands focus back to ⋯ (the Sessions screen's document handler, not a reload).
+		await phone("menu-escape", [[`(() => { const s = document.querySelector(".session-bar-more > summary"); s.focus(); s.click(); })()`, opened],
+			[`document.querySelector(".session-bar-more").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+				`!document.querySelector(".session-bar-more[open]") && document.activeElement === document.querySelector(".session-bar-more > summary")`]]);
+		await phone("pending-edit", [[`document.querySelector(".session-pending-edit").click()`, `!!document.querySelector(".session-pending-editor textarea")`],
+			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop = t.scrollHeight; })()`, "true"]]);
+		await phone("skills", [[`(() => { const i = document.querySelector(".operator-composer textarea"); i.focus(); i.value = "Run @cp"; i.setSelectionRange(7, 7); i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelectorAll(".operator-composer-skills [role=option]").length === 2`]]);
+		// The keyboard shortens the layout viewport; the composer stays on screen, then the full height comes back unscrolled.
+		const keyboard = { cdp: "Emulation.setDeviceMetricsOverride", params: { width: 390, height: 480, deviceScaleFactor: 1, mobile: true } };
+		const focus: Step = [`document.querySelector(".operator-composer textarea").focus()`, `document.activeElement?.matches(".operator-composer textarea")`];
+		await phone("keyboard", [focus, [keyboard, `innerHeight === 480 && document.querySelector(".operator-composer").getBoundingClientRect().bottom <= 480`]]);
+		await phone("keyboard-restored", [focus, [keyboard, "innerHeight === 480"], [{ ...keyboard, params: { ...keyboard.params, height: 844 } },
+			`innerHeight === 844 && document.querySelector(".operator-composer").getBoundingClientRect().bottom <= 844 && scrollY === 0`]]);
+		// Scrolled up, a new message lands: the reader keeps their place and Jump to latest appears (no auto-scroll).
+		const reader = `document.querySelector(".session-transcript").scrollTop`;
+		await phone("new-message", [[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop = 400; window.cpReader = t.scrollTop; })()`, "!!document.querySelector('.session-new')"],
+			[`fetch("/fixture/new-message")`, `/New while you were reading/.test(document.querySelector(".session-entries").textContent) && Math.abs(${reader} - window.cpReader) < 2 && !!document.querySelector(".session-new")`]], "top");
+		sessions.entries = sessions.entries.filter(e => e.id !== "n1");
+		await phone("jump-latest", [[`document.querySelector(".session-transcript").scrollTop = 400`, "!!document.querySelector('.session-new')"],
+			[`document.querySelector(".session-new").click()`, `!document.querySelector(".session-new")`]], "top");
+		if (posts.length) throw new Error(`pr5 sent ${posts.join(", ")}: menus, filters, edits and the keyboard must request nothing`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

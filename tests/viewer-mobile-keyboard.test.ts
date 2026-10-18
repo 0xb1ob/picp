@@ -128,16 +128,22 @@ test("the attach icon never overlaps composer text: it is a footer sibling of th
 	assert.match(css, /\.operator-composer textarea \{[^}]*padding: 10px 12px;/, "the field keeps its own padding only");
 });
 
-test("the collapsed phone composer is one row (attach, thread, field, ⋯, send); Options is desktop-only", () => {
-	// Chat v2 (PR4): the footer flattens into the box's row below 900 px; the file name lives in the top bar's ⋯ sheet.
+test("the collapsed phone composer is one row (attach, field, ⋯, send) of 44 px targets; Options is desktop-only", () => {
+	// Chat v2 (PR5): the footer flattens into the box's row below 900 px; the file name and the thread chips live in the
+	// top bar's ⋯ sheet, its # filter is the same selection, so the composer's own # picker hides on the phone.
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8");
 	const phone = css.slice(css.lastIndexOf("@media (max-width: 899px) {"));
-	assert.match(css, /\.operator-composer-box \{ display: flex; align-items: flex-end;/, "one flex row of 42-44 px targets");
+	assert.match(css, /\.operator-composer-box \{ display: flex; align-items: flex-end;/, "one flex row of 44 px targets");
 	assert.match(css, /\.operator-composer-footer \{ display: contents; \}/, "the footer's controls share the field's row");
 	assert.match(phone, /\.operator-composer-field \{ order: 1; \}/);
 	assert.match(phone, /\.operator-composer-more, \.operator-composer-send \{ order: 2; \}/, "send stays at the row's end");
 	assert.match(phone, /\.operator-composer-options \{ display: none; \}/);
-	assert.match(phone, /\.operator-composer-thread \{[^}]*width: 44px; height: 44px;/, "the thread picker is one 44 px # target");
+	assert.match(phone, /\.operator-composer-thread \{ display: none; \}/, "the top bar carries the thread");
+	assert.match(phone, /\.operator-composer-attach, \.operator-composer-send, \.operator-composer-more > summary \{ width: 44px; height: 44px; \}/);
+	assert.match(phone, /\.operator-composer textarea \{ min-height: 46px; padding: 12px 16px; border-radius: 22px; font-size: 16px; \}/, "a 16 px field");
+	const sessions = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	assert.match(css, /\.thread-pill > select \{ position: absolute; inset: -6px 0; width: 100%;[^}]*opacity: 0;/, "the native select stays the control");
-	assert.match(phone, /\.operator-composer-thread > select \{ inset: 0; \}/, "and covers the whole 44 px target");
+	assert.match(sessions, /\.session-bar-id \{ position: relative; flex: 1; align-self: stretch;/, "the bar's name column is the # target");
+	assert.match(sessions, /\.session-bar-sub > \.thread-pill \{ position: static;/, "so its select covers the whole column");
+	assert.match(sessions, /\.session-bar-icon, \.session-bar-more > summary \{ position: relative; width: 44px; height: 44px;/, "back and ⋯ are 44 px");
 });

@@ -3,7 +3,7 @@ import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, cont
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
-import { threadsReady, type ThreadsView } from "../threads.ts";
+import type { ThreadsView } from "../threads.ts";
 import { ThreadPicker } from "./ThreadNav.tsx";
 import { composerMentions, matchSkills, mentionAt, type SkillCatalog } from "../skills.ts";
 

@@ -19,8 +19,9 @@ import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
+import { badgeView } from "../use-version.ts";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
-import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
+import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 import { NewThread, ThreadChips, ThreadPicker, ThreadSidebar } from "../components/ThreadNav.tsx";
 import { QuickReplies } from "../components/QuickReplies.tsx";
@@ -52,8 +53,7 @@ function headerState(data: SessionsResponse, status: ControlView["status"] | und
  if (history) return {text: "Historical transcript", dot: "unknown"};
  const state = !status ? "Checking status" : "error" in status ? "Status unavailable" : !status.enabled ? "Dashboard control off" : status.offline ? "Offline"
   : !status.running ? "Not running" : status.busy === true ? "Working" : status.busy === false ? "Idle" : "Status unknown";
- const running = !!status && !("error" in status) && status.enabled && status.running;
- return {text: `${state} · ${modelText(data.operator_context ?? {})}`, dot: running ? "working" : "unknown"};
+ return {text: `${state} · ${modelText(data.operator_context ?? {})}`, dot: state === "Working" ? "working" : state === "Idle" ? "idle" : "unknown"};
 }
 function readStored(key: string): string | null {
  if (typeof window === "undefined") return null;
@@ -198,9 +198,9 @@ function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolea
 /** Close the menu a tap came from. */
 const closeMenu = (e: {currentTarget: EventTarget | null}) => { const menu = (e.currentTarget as Element | null)?.closest?.("details"); if (menu) (menu as HTMLDetailsElement).open = false; };
 /**
- * The mobile top bar (mobile-chat-layout): back to the app, a menu with every session, the view's name, the live dot,
- * a compact ctx chip, the composer's status chip, and one ⋯ menu for tool calls, the session file and search.
- * It replaces the shell header, the tab rows and the heading below 900 px; desktop keeps its sidebar and heading.
+ * The phone top bar (chat v2): back, avatar, the name (a menu with every session) over the # thread filter or the state
+ * line, and one ⋯ sheet: the state with ctx, the thread chips (New, Mark done), tools, search, file, version, restart.
+ * It replaces the shell header and the heading below 900 px; desktop keeps its sidebar and heading.
  */
 const sessionWhen = new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 function sessionOptionLabel(at: string, current: boolean): string {
@@ -208,31 +208,37 @@ function sessionOptionLabel(at: string, current: boolean): string {
  return current ? `${when} · current` : when;
 }
 const fileOptions = (files: {id:string;at:string}[]) => files.map((s,i)=><option key={s.id} value={s.id} title={s.id}>{sessionOptionLabel(s.at,i === 0)}</option>);
-function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void}) {
+function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,threads,state}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;threads:ThreadsView | false | undefined;state:{text:string;dot:string}}) {
  const shell = useContext(ShellContext);
  const composer = data.transcript === true && control;
  const files = data.operator_sessions ?? [];
  const views = [["you","Operator ↔ you"],["parent","CP parent"],["workers","Workers"]] as const;
+ const filter = threads && threadsReady(threads.status);
+ const alert = !!shell.version && badgeView(shell.version, null).level === "alert";
+ // The name is text: the # filter's select covers the whole name column (a 48 px target); switching lives in ⋯.
  return <header class="session-bar">
   <a class="session-bar-icon" href="#overview" aria-label="Back to Overview"><Icon name="back"/></a>
-  <details class="session-bar-menu session-bar-views">
-   <summary aria-label="Switch session"><strong>{data.title}</strong><span aria-hidden="true">▾</span></summary>
-   <nav class="session-bar-sheet" aria-label="Session streams">
-    {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
-    {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
-   </nav>
-  </details>
+  {data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
+  <div class="session-bar-id">
+   <strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong>
+   <span class="session-bar-sub"><span class={`session-dot session-dot-${state.dot}`} role="img" aria-label={state.text} title={state.text}/>{filter ? <ThreadPicker threads={threads} filter/> : <span aria-hidden="true">{state.text}</span>}</span>
+  </div>
   <span class={`shell-live shell-live-${shell.status}`} role="status" aria-label={`Data ${shell.status}`} title={shell.status}><span/></span>
-  {context && <span class={`session-bar-ctx ctx-${context.level ?? "unknown"}`} title={contextText(context)}>{context.percent === null ? "ctx n/a" : `${Math.round(context.percent)}%`}</span>}
-  {composer && <span class="session-bar-status" role="status" title={[controlLine(control.status),deliveryLine(control.delivery)].filter(Boolean).join(" · ")}>{controlChip(control.status,control.delivery)}</span>}
-  {shell.version && <VersionBadge state={shell.version}/>}
   <details class="session-bar-menu session-bar-more">
-   <summary aria-label="More" title="More"><Icon name="more"/></summary>
+   <summary aria-label="More" title="More"><Icon name="more"/>{alert && <span class="shell-more-dot" role="status" aria-label="Version alert"/>}</summary>
    <div class="session-bar-sheet">
+    <p class="session-bar-state" role="status"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></p>
+    <nav class="session-bar-views" aria-label="Session streams">
+     {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
+     {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
+    </nav>
+    {/* Picking a thread closes the sheet; + New and Mark done keep it open for their dialog or refusal. */}
+    {filter && <div class="session-bar-threads" onClick={e => { if ((e.target as Element).closest?.(".session-thread-chip:not(.session-thread-new):not(.session-thread-done)")) closeMenu(e); }}><ThreadChips threads={threads} control={control}/></div>}
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
+    {shell.version && <div class="shell-more-version"><span>Viewer</span><VersionBadge state={shell.version} labelled/></div>}
     {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
    </div>
   </details>
@@ -277,10 +283,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   observer.observe(el); observer.observe(entries);
   return ()=>observer.disconnect();
  },[]);
- // A tap outside an open top-bar or composer menu closes it.
+ // A tap outside an open top-bar or composer menu closes it; Escape closes the top bar's ⋯ or Options, focus back on it.
  useEffect(()=>{
   const outside=(e:Event)=>{for(const menu of document.querySelectorAll<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-more[open], .operator-composer-options[open]")) if(!menu.contains(e.target as Node)) menu.open=false;};
-  const escape=(e:KeyboardEvent)=>{if(e.key !== "Escape") return; const menu=document.querySelector<HTMLDetailsElement>(".operator-composer-options[open]"); if(menu){menu.open=false; menu.querySelector<HTMLElement>("summary")?.focus();}};
+  const escape=(e:KeyboardEvent)=>{if(e.key !== "Escape") return; const menu=document.querySelector<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-options[open]"); if(menu){menu.open=false; menu.querySelector<HTMLElement>("summary")?.focus();}};
   document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
@@ -322,7 +328,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const threadsOn=data.selected === "you" && data.transcript === true && threads;
  // Quick replies follow the newest shown operator-session message or card (else the rows), before the pending tail.
  const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open,filter) : null;
- const replies=replyTo && <QuickReplies key="replies" ask={replyTo} control={control}/>;
+ const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control}/>;
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  return <div class="sessions">
@@ -339,8 +345,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
-   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
-   {data.transcript === true && threads && <ThreadChips threads={threads} control={control}/>}
+   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} threads={threadsOn} state={state}/>
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
     {threadsOn && <ThreadPicker threads={threadsOn} filter/>}

@@ -208,6 +208,25 @@ test("Chats: + in the title row opens New thread and closing it selects nothing;
 	assert.equal(s.root.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"]')?.getAttribute("aria-label"), "fresh: new, no messages yet");
 });
 
+test("phone ⋯ sheet: streams, thread chips with + New, and Search are all reachable; the # filter sits under the name", async t => {
+	// PR 5 moved the thread strip, streams and Search into the top bar's sheet. Closing on a chip and on Escape runs in
+	// Chrome (sessions-chat-v2-browser.ts --stage pr5): linkedom's details has no reflected `open`.
+	const picked: (string | null)[] = [];
+	const thread = { id: "th-1", tag: "alpha", state: "open", waiting: { asks: 0, answers: 0 }, counts: { messages: 1, asks: 0, answers: 0, jobs_working: 0 }, opened_at: local(15, 9), last_at: local(15, 11), done_at: null };
+	const status = { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [thread], total: 1, warning: null } as unknown as ThreadsResponse;
+	const threads = { status, selected: null, select: (tag: string | null) => { picked.push(tag); }, done() {}, sending: null, failed: null } as unknown as ThreadsView;
+	const s = stage(t);
+	await act(() => mount(s.root, view([entry("m1", "say", local(15, 10))]), threads));
+	const sheet = s.root.querySelector(".session-bar-more")! as HTMLDetailsElement;
+	assert.deepEqual([...sheet.querySelectorAll(".session-bar-views > a")].map(a => a.textContent), ["Operator ↔ you", "CP parent", "Workers"]);
+	assert.deepEqual([...sheet.querySelectorAll(".session-bar-threads button")].map(b => b.textContent), ["+ New", "All messages", "alpha"]);
+	assert.ok([...sheet.querySelectorAll("button")].some(b => b.textContent === "Search"), "Search stays one tap into the sheet");
+	assert.equal(s.root.querySelector(".session-bar-sub select")?.getAttribute("aria-label"), "Show thread", "the # filter under the name");
+	await s.click(sheet.querySelector(".session-bar-threads .session-thread-new"));
+	await s.click(s.root.querySelector(".new-thread-close"));
+	assert.deepEqual([s.root.querySelector('[role="dialog"]'), picked], [null, []], "+ New from the sheet, then Cancel, selects nothing");
+});
+
 test("steps rows: one name column per card, the widest name up to 14ch, so every summary starts at one x", () => {
 	// #320 amendment: a per-row fit-content column started each summary at its own x; the card is now one grid that
 	// every row (entry, details, summary) subgrids. The browser capture fails on a clipped name or a misaligned summary.
@@ -265,6 +284,31 @@ test("quick replies send the exact typed answer once; a sent answer holds the ch
 	await act(() => replies(s.root, ask, { status: status({ enabled: false, reason: "Dashboard control is off" }), delivery: null, send: () => assert.fail("disabled") }));
 	assert.ok([...s.root.querySelectorAll("button")].every(b => (b as HTMLButtonElement).disabled));
 	assert.equal(s.root.querySelector(".session-replies-state")?.textContent, "Dashboard control is off");
+});
+
+test("quick replies: a chip click holds them through a later composer send, a reload and a queued card reply, until the ask closes", async t => {
+	// #342 review (a): the chips read only the latest `delivery`, so a composer send that replaced it re-enabled them and
+	// a second chip could answer the same ask twice. Recorded (status.recent) and pending answers hold them as well.
+	const s = stage(t), sends: ControlBody[] = [], ask = awaiting("ask-aaaa");
+	const control = (over: Partial<ControlView> = {}): ControlView => ({ status: status(), delivery: null, send: body => { sends.push(body); }, ...over });
+	const held = () => [...s.root.querySelectorAll(".session-reply")].every(b => (b as HTMLButtonElement).disabled);
+	await act(() => replies(s.root, ask, control()));
+	await s.click(s.root.querySelector(".session-reply"));
+	await act(() => replies(s.root, ask, control({ delivery: { id: "dc-2", state: "queued", reason: null, ask_id: null } })));
+	assert.ok(held(), "the composer's send replaced `delivery`; the chips stay disabled");
+	assert.match(s.root.querySelector(".session-replies [role=status]")!.textContent!, /^An answer is on its way/);
+	assert.deepEqual(sends, [{ kind: "answer", ask_id: "ask-aaaa", label: "Keep" }]);
+	await act(() => unmount(s.root));
+	await act(() => replies(s.root, ask, control({ status: status({ recent: [{ id: "dc-1", kind: "answer", state: "delivered", at: local(15, 9), reason: null, ask_id: "ask-aaaa" }] }) })));
+	assert.ok(held(), "after a reload, the recorded answer holds them");
+	await act(() => unmount(s.root));
+	const queued = { key: "k", id: "dc-3", at: local(15, 9), state: "queued", reason: null, ask_id: "ask-aaaa", body: { kind: "message", text: "other" } } as NonNullable<ControlView["pending"]>[number];
+	await act(() => replies(s.root, ask, control({ pending: [queued] })));
+	assert.ok(held(), "a queued free-text reply to the same card holds them");
+	await act(() => replies(s.root, ask, control({ pending: [{ ...queued, state: "failed" }] })));
+	assert.ok(!held(), "a failed one does not");
+	const closed = { ...view([card("ask-aaaa", "answered")]), open_asks: [ask] } as SessionsResponse;
+	assert.doesNotMatch(html(closed, undefined, control()), /session-replies/, "the journal closing the ask removes them");
 });
 
 test("header: Operator with the recorded state and model; missing busy is unknown, history and an unreadable status say so", () => {
