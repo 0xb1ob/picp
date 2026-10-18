@@ -78,8 +78,10 @@ details[open] > summary > .jt-caret { transform: rotate(90deg); }
 .job-routing-pill { padding: 2px 8px; border: 1px solid var(--tag-border); border-radius: 999px; font-size: 11px; color: var(--subtle); }
 .job-fact-routing p { font-size: 13px; line-height: 1.5; color: var(--muted); }
 .job-fact-running dd { flex-direction: column; align-items: stretch; gap: 4px; }
-.job-fact-deploy dd { display: block; line-height: 1.5; }
+.job-fact-deploy dd { flex-direction: column; align-items: stretch; gap: 2px; }
+.job-deploy-status, .job-deploy-detail { margin: 0; line-height: 1.5; }
 .job-fact-deploy a { display: inline; min-height: 0; padding: 12px 0; }
+.job-deploy-detail { color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .job-running { margin: 0; padding: 0; list-style: none; color: var(--muted); line-height: 1.5; }
 .job-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; order: 3; }
 .job-links > * { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; font-size: 13px; color: var(--secondary); text-align: center; }

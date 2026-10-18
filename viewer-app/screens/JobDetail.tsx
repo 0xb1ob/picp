@@ -61,18 +61,23 @@ function RunningFact({running}: {running: JobRunning}) {
 const coverageText = (d: JobDeploy) => d.coverage === "enrolled" ? `enrolled in ${d.mandate_id ?? "a grant"}` : d.coverage === "project_wide" ? `covered by project-wide ${d.mandate_id ?? "grant"}`
  : `no covering grant — dispatch needs a grant${d.reason ? ` (${d.reason})` : ""}`;
 
-/** merged → deployed → in use (#326); wording mirrors the after-merge outcome line (src/after-merge.ts). */
-function DeployFact({deploy}: {deploy: JobDeploy}) {
- const job = deploy.deploy_job_id ? <a href={jobHref(deploy.deploy_job_id)}><code>{deploy.deploy_job_id}</code></a> : null;
- const merged = <>merged <code title={deploy.merge_sha}>{shortSha(deploy.merge_sha)}</code></>;
- switch (deploy.state) {
-  case "deployed": return <>{merged} → deployed and health-checked by {job}{deploy.at ? ` at ${observedTime(deploy.at)}` : ""} · in use</>;
-  case "deploying": return <>{merged} → deploying ({job})</>;
-  case "queued": return <>{merged} → deploy {job} queued · {coverageText(deploy)}</>;
-  case "blocked": return <>{merged} → deploy blocked: {deploy.reason} ({job})</>;
-  case "failed": return <>{merged} → deploy failed: {deploy.reason} ({job})</>;
-  default: return <>{merged} · no deploy: {deploy.reason}</>;
+/** Status phrase and job link first; the long detail (coverage wording as in src/after-merge.ts) on a muted, clamped line. */
+function deployLines(d: JobDeploy): [string, string | null] {
+ const merged = `merged ${shortSha(d.merge_sha)}`;
+ switch (d.state) {
+  case "deployed": return ["deployed · in use", `${merged} · health-checked${d.at ? ` ${observedTime(d.at)}` : ""}`];
+  case "deploying": return ["deploying", merged];
+  case "queued": return ["deploy queued", coverageText(d)];
+  case "blocked": return [/^rolled back\b/i.test(d.reason ?? "") ? "deploy blocked: rolled back" : "deploy blocked", d.reason];
+  case "failed": return ["deploy failed", d.reason];
+  default: return ["no deploy", d.reason];
  }
+}
+
+function DeployFact({deploy}: {deploy: JobDeploy}) {
+ const [status, detail] = deployLines(deploy);
+ return <><p class="job-deploy-status">{status}{deploy.deploy_job_id && <> · <a href={jobHref(deploy.deploy_job_id)}><code>{deploy.deploy_job_id}</code></a></>}</p>
+  {detail && <p class="job-deploy-detail" title={detail}>{detail}</p>}</>;
 }
 
 function RoutingFact({job}: {job: ViewerJob}) {
