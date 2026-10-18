@@ -77,7 +77,7 @@ import { RunRegistry } from "../src/runs.ts";
 import type { TeardownResult } from "../src/teardown.ts";
 import { createScratchHome, fakeWorkerManager, readRunEvents } from "./harness/index.ts";
 import { HeldRelease } from "../src/held-release.ts";
-import { HeldContinuation } from "../src/held-continuation.ts";
+import { formatContinuationNotice, HeldContinuation } from "../src/held-continuation.ts";
 
 import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
 import { answerActions, type FakeRun } from "./harness/actions-api.ts";
@@ -2955,6 +2955,33 @@ test("a job close that fails leaves a merged, torn-down job in a retryable state
 	assert.equal(finished.next, "done");
 	assert.equal(finished.end_state?.br_closed, true);
 	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+});
+
+test("OPP-007: a retry notice keeps the reason's effects and never claims nothing was mutated", async (t) => {
+	// Composed through formatContinuationNotice, as HeldContinuation sends it: before any effect (a 403 read),
+	// an unknown merge outcome (gh exit 1), and a landed merge whose cleanup failed. The old hint said
+	// "nothing was mutated" under a reason saying "merged and torn down".
+	const notice = (result: { next: string; reason: string; pr_url?: string }) =>
+		formatContinuationNotice(BR, result.next, result.reason, result.pr_url);
+	const pre = await (await benchOf(t)).integrator({ pr: { fail: "HTTP 403: Resource not accessible" } }).advance({ jobId: BR });
+	const unknown = await benchOf(t);
+	unknown.approve(HEAD_A);
+	const unsure = await unknown.integrator({ mergeFails: "connection reset by peer" }).advance({ jobId: BR });
+	const landed = await benchOf(t);
+	landed.approve(HEAD_A);
+	await landed.integrator().advance({ jobId: BR });
+	const partial = await landed.integrator({ pr: mergedPr(), deleteFails: "protected branch" }).advance({ jobId: BR });
+	for (const [result, reason] of [[pre, /403/], [unsure, /connection reset by peer/], [partial, /merged and torn down/]] as const) {
+		const text = notice(result);
+		assert.equal(result.next, "retry");
+		assert.match(text, new RegExp(`HELD PR STOPPED — ${BR} \\(continuation, next: retry\\)`));
+		assert.match(text, reason, "the integration reason stays visible");
+		assert.match(text, /resumes, never starting over/);
+	}
+	// Only the pre-effect reason may say so itself; the hint never does.
+	assert.doesNotMatch(notice(unsure), /nothing was mutated/i);
+	assert.doesNotMatch(notice(partial), /nothing was mutated/i);
+	assert.ok(notice(partial).includes(PR_URL), "the merged PR stays named");
 });
 
 test("cp_integrate and cp_merged are parent-only tools", () => {
