@@ -101,7 +101,7 @@ test("audit P3: Blocked & failed, the operator and main CI chips, project tags, 
  assert.equal((html.match(/class="overview-project"/g) ?? []).length,3,"two projects in flight: every row tagged");
  assert.match(html,/CI running</); assert.match(html,/review 1\/5 pass</); assert.match(html,/overview-dot-working/); assert.match(html,/0m \/ -</);
  assert.match(html,/Landed today · 7 merged · <span title="[^"]+">\$6\.00/,"total over every merged row with a known cost");
- assert.equal((html.match(/↗/g) ?? []).length,5,"five landed rows");
+ assert.equal((html.match(/class="overview-landed-pr"/g) ?? []).length,5,"five landed rows");
  assert.match(html,/href="#jobs" class="overview-more">2 more merged in Jobs →</);
  data.main_ci = {availability:"ok",red:[...data.main_ci.red,{project:"beta",red_since_sha:"d".repeat(7),red_since_at:"2026-09-26T05:41:07Z",workflow:null,failing:null}]};
  assert.match(screen(data),/<strong title="demo red since ccccccc [^,]+, beta red since ddddddd /,"per project once more than one is red");
@@ -219,6 +219,7 @@ test("S7 Overview has a calm empty strip, complete flight cells and five project
  assert.equal(document.querySelector(".overview-paused-pill")?.textContent,"fixture-paused · paused"); assert.ok(document.querySelector(".page-header-context .overview-paused-pill"),"paused pills live in the title row"); assert.equal(document.querySelector(".overview-subtitle"),null);
  assert.equal(document.querySelector(".overview-health")?.parentElement,document.querySelector(".overview-services")?.parentElement,"health and service line share compact spacing");
  assert.deepEqual([...document.querySelectorAll(".overview-flight-columns > span")].map(e=>e.textContent),["Job","Title","Wall clock","Context","Review","CI","Model","Cost"]); assert.match(document.querySelector(".overview-held-hint")!.textContent!,/held = waiting on CI or review, normal for hours/);
+ assert.equal(document.querySelector(".overview-held-hint .glossary-link")?.getAttribute("href"),"https://github.com/0xb1ob/picp#words-you-will-see","#330: Overview rows link the README glossary");
  assert.deepEqual([...document.querySelectorAll(".overview-landed-columns > span")].map(e=>e.textContent),["Job","Title","PR","Commit","Cost"]);
  const rows = [...document.querySelectorAll(".overview-flight")]; assert.equal(rows.length,3);
  for (const row of rows) for (const cell of [".overview-job-id",".overview-flight-title",".overview-clock",".overview-context",".overview-review",".overview-ci",".overview-model",".overview-cost"]) assert.ok(row.querySelector(cell),cell);

@@ -4,6 +4,7 @@ import type { AwaitingDetail } from "../../src/viewer/api-types.ts";
 import { CONTROL_TEXT_MAX, type ControlView, controlLine, controlReady } from "../control.ts";
 import { money } from "../format.ts";
 import { jobHref } from "../routes.ts";
+import { GlossaryLink } from "./GlossaryLink.tsx";
 
 const BULLET = /^\s*[-*\u2022]\s+/;
 /** An ask's plain-text context: blank lines split paragraphs, `- ` lines are bullets. Text only, never markup. */
@@ -38,7 +39,7 @@ export function DecisionCard({ask,control,level = 2,factsOpen = false,contextOpe
    <span class="decision-card-option-heading"><strong>{option.label}</strong>{ask.recommendation === option.label && <span class="overview-rec-badge">recommended</span>}</span><span class="decision-card-consequence">{option.consequence}</span>
   </button>)}</div>
   {!ready && <p class="decision-card-disabled" role="status">{controlLine(control?.status)}</p>}
-  <p class="decision-card-recommendation">operator session recommends <strong>{ask.recommendation}</strong></p>
+  <p class="decision-card-recommendation">operator session recommends <strong>{ask.recommendation}</strong> &middot; <GlossaryLink/></p>
   {ask.escalation?.differs && ask.escalation.recommended && <p class="decision-card-differs" role="note">automatic default: {ask.escalation.recommended}</p>}
   <div class="decision-card-other"><input type="text" aria-label={`Other answer to ${ask.id}`} placeholder="Other answer…" maxLength={CONTROL_TEXT_MAX - ask.id.length - 2} value={other} disabled={disabled}
    onInput={e => setOther(e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sendOther(); } }}/><button type="button" disabled={disabled || !other.trim()} onClick={sendOther}>Send</button></div>

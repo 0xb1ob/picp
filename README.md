@@ -221,11 +221,17 @@ ask in words. The parent's own commands (`/status`, `/watch <job-id>`,
 | Word | Meaning |
 |---|---|
 | **mandate** | the authority you give up front: one topic's projects, objective, expiry, allowed actions, and spend/job caps. The parent acts only within it. |
+| **grant** | one issued mandate record, shown by its id (`md-…`). A topic can hold more than one grant; each has its own caps and expiry. |
+| **supplement** | a later grant that names specific jobs (`job_ids`). When an earlier named grant has reached its job cap, a supplement covering the job carries it instead. |
 | **job** | one unit of work in the ledger, with a project and a delivery (`pr`, `local`, `pipeline`, `answer`). Its id is also its git branch. |
 | **planner** | a worker that reads code and writes a plan, without changing anything. |
 | **ship** | a job that changes code; its worker (the implementer) pushes a branch and, for `delivery: pr`, opens a draft pull request. |
 | **gate** | a fresh reviewer that checks a planner's plan before anyone implements it; at most one revise round. |
+| **checkpoint** | the plan-approval step after a gate passes: a mandate that allows it decides it, otherwise it waits for you as a plan-approval question. |
 | **review** | a fresh reviewer that checks a pull request's diff for its current head. A PR merges only with a passing review and green CI, and only when GitHub allows the merge. |
+| **final_fix** | after a PR's fifth and last review still has findings: one last fix you approve by quoting it; only the next fix head may merge. |
+| **human_handoff** | a project setting (`merge_policy`) under which picp never merges: a reviewed, green PR is handed to the team to merge. |
+| **parked** / **awaiting_merge** | a `human_handoff` PR waiting on a human merge. Its worker is closed and it holds no slot; Overview lists it under "With the team". |
 | **escalation** | the one question the parent raises when a decision is outside the mandate: risk, scope, budget, a refused merge, the end of a mission. |
 | **ask** | a question the operator session puts to you and records until you answer. Separately, a *small question* about a project can be answered by a read-only worker as an answer card (`cp_ask`), with no code change. |
 

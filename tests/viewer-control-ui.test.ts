@@ -82,6 +82,7 @@ test("cards and composer: open asks pinned above the composer with a button per 
 	assert.match(open, /<button type="button" class="decision-card-option decision-card-recommended"><span class="decision-card-option-heading"><strong>Keep<\/strong><span class="overview-rec-badge">recommended<\/span><\/span><span class="decision-card-consequence">Paused until Monday<\/span>/);
 	assert.doesNotMatch(ready, /Copy reply/);
 	assert.match(open, /operator session recommends <strong>Keep<\/strong>/);
+	assert.match(open, /<a class="glossary-link" href="https:\/\/github.com\/0xb1ob\/picp#words-you-will-see" target="_blank"/, "#330: each card links the README glossary");
 	assert.equal(card(ready, "open"), '<p class="session-ask-pointer">open, answer below</p>', "the inline card is history, a one-line pointer");
 	assert.match(card(ready, "answered"), /Answered: Raise · /);
 	assert.doesNotMatch(card(ready, "answered"), /<button/);

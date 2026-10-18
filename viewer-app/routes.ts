@@ -16,6 +16,8 @@ export const navigation = [
  {id:"files", label:"Files", href:"#files"},
  {id:"settings", label:"Settings", href:"#settings"},
 ] as const;
+/** The README's "Words you will see" table: the one glossary that decision cards and Overview rows link to. */
+export const GLOSSARY_HREF = "https://github.com/0xb1ob/picp#words-you-will-see";
 export type NavId = typeof navigation[number]["id"];
 /** The sidebar (desktop) and the tab bar (phone); Reports sits under More on phone only. */
 export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","stats","reports","settings","more"] : ["overview","decisions","jobs","sessions","more"];
