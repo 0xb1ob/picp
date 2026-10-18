@@ -1134,10 +1134,30 @@ test("install: no usable model says run pi then /login and pins nothing; the log
 	const f = modelFake(scratch(t), { [LIST_CALL]: { stdout: "No models available. Use /login or set an API key environment variable.\n" } });
 	assert.equal(await install(flags(f.ports.env.HOME!), f.ports), 0, f.lines.join("\n"));
 	const line = f.lines.find((l) => l.startsWith("skip: model: no model pi can use as the service sees it (")) ?? "";
-	assert.match(line, /auth\.json.*run `pi`, then \/login, then rerun cp-install/, f.lines.join("\n"));
+	assert.match(line, /auth\.json.*run `pi`, then \/login, then /, f.lines.join("\n"));
 	assert.deepEqual(modelQuestions(f), []);
 	assert.doesNotMatch(configText(f) + wrapperOf(f), /parent_model|CP_PARENT_MODEL|CP_OPERATOR_MODEL/);
 	assert.ok(f.lines.some((l) => l.startsWith("skip: login: no provider")));
+});
+
+test("install: the post-login continuation keeps --home/--app, needs --force, names its effects and promises no model", async (t) => {
+	const user = scratch(t);
+	const home = join(user, "custom-home");
+	const app = join(user, ".pi-command-post/app");
+	const f = modelFake(user, { [LIST_CALL]: { stdout: "No models available. Use /login or set an API key environment variable.\n" } });
+	assert.equal(await install(flags(user, { home }), f.ports), 0, f.lines.join("\n"));
+	const line = f.lines.find((l) => l.startsWith("skip: model: no model pi can use")) ?? "";
+	assert.ok(line.includes(`then ${app}/bin/cp-install --home ${home} --app ${app} --force (without --force a rerun keeps this unpinned;`), line);
+	assert.match(line, /--force also reruns npm ci and replaces data\/daemon\.json, a unit or the wrapper that differs/);
+	assert.match(line, /a login can still leave nothing to pin$/);
+
+	// After the login: an ordinary rerun keeps the unpinned choice; the printed --force rerun offers the models.
+	const after = modelFake(user);
+	for (const [path, text] of f.files) after.files.set(path, text);
+	assert.equal(await install(flags(user, { home }), after.ports), 0, after.lines.join("\n"));
+	assert.ok(after.lines.includes("skip: model: parent: none pinned; --force asks, --parent-model <provider/model> --force pins one"), after.lines.join("\n"));
+	assert.equal(await install(flags(user, { home, force: true, yes: true }), after.ports), 0, after.lines.join("\n"));
+	assert.equal((JSON.parse(after.files.get(daemonPaths(home).config) ?? "{}") as { parent_model?: string }).parent_model, "anthropic/claude-opus-5-5");
 });
 
 test("install: a rerun keeps every pin unasked and byte-identical; --force re-opens only an unpinned choice", async (t) => {
