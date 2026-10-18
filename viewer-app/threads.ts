@@ -76,13 +76,19 @@ export function threadBands(entries: SessionEntry[], filter: string | null): {be
  return {before: entries.slice(0, first), inside, after: entries.slice(last + 1)};
 }
 
-const waitingCount = (view: ThreadView): number => view.waiting ? view.waiting.asks + view.waiting.answers : 0;
+/** Open asks plus unacknowledged answers; null while either is unreadable (unknown, never zero). */
+export const waitingCount = (view: ThreadView): number | null => view.waiting ? view.waiting.asks + view.waiting.answers : null;
 /** The chip's waiting badge, e.g. ` · 2`. */
 export const threadBadge = (view: ThreadView): string => view.state === "waiting" && waitingCount(view) ? ` · ${waitingCount(view)}` : "";
+/** The sidebar badge: `Waiting N`, `Waiting ?` while unknown on a thread not done, else null. Never unread. */
+export function waitingLabel(view: ThreadView): string | null {
+ const count = waitingCount(view);
+ return count ? `Waiting ${count}` : count === null && view.state !== "done" ? "Waiting ?" : null;
+}
 /** The reasons, spelled out. */
 export function threadAria(view: ThreadView): string {
  if (view.state === "waiting" && view.waiting) return `${view.tag}: waiting, ${view.waiting.asks} open ask(s), ${view.waiting.answers} unacknowledged answer(s)`;
- return `${view.tag}: ${view.state}`;
+ return view.waiting ? `${view.tag}: ${view.state}` : `${view.tag}: ${view.state}, waiting unknown`;
 }
 /** Why Mark done cannot run on this thread now, or null. */
 export function doneRefusal(status: ThreadsResponse, view: ThreadView): string | null {

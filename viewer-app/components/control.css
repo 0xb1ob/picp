@@ -106,7 +106,7 @@
 .new-thread { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; width: 100%; max-height: 92%; padding: 16px; overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
 .new-thread > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .new-thread > header > h2 { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--text); }
-.new-thread > p, .session-sidebar .new-thread > p { margin: 0; padding: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
+.new-thread > p { margin: 0; padding: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
 .new-thread > footer > small { flex: 1; align-self: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .new-thread-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: none; color: var(--muted); border: 0; border-radius: 50%; cursor: pointer; }
 .new-thread label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }

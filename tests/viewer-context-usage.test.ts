@@ -149,7 +149,7 @@ test("model and thinking: latest model_change and thinking_level_change; last as
 	assert.deepEqual([view.parent.context!.model, view.parent.context!.thinking], ["openai/gpt-x", null]);
 	let html = screens.sessions(view);
 	assert.match(html, /<small class="session-model">claude-x · high<\/small>/);
-	assert.match(html, /<small class="session-model">gpt-x · (?:idle|active)<\/small>/, "no thinking, no separator");
+	assert.match(html, /<small class="session-model">gpt-x · (?:no )?recent activity<\/small>/, "no thinking, no separator");
 
 	// Parent with thinking, operator with nothing recorded: the model is explicitly unknown.
 	const parentFile = join(sessions, "cp-parent.jsonl");
@@ -159,7 +159,7 @@ test("model and thinking: latest model_change and thinking_level_change; last as
 	assert.deepEqual([next.parent.context!.model, next.parent.context!.thinking], ["anthropic/claude-x", "high"]);
 	assert.deepEqual([next.operator_context!.model, next.operator_context!.thinking], [null, null]);
 	html = screens.sessions(next);
-	assert.match(html, /<small class="session-model">claude-x · high · (?:idle|active)<\/small>/);
+	assert.match(html, /<small class="session-model">claude-x · high · (?:no )?recent activity<\/small>/);
 	assert.match(html, /<small class="session-model">model unknown<\/small>/);
 });
 

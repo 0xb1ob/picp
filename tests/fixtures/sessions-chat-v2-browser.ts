@@ -1,6 +1,6 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
- * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2 [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3 [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,12 +10,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LAYOUT } from "../../src/contracts.ts";
-import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse, ThreadsResponse } from "../../src/viewer/api-types.ts";
+import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../../src/viewer/api-types.ts";
 import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2"];
+const STAGES = ["pr1", "pr2", "pr3"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -40,24 +40,33 @@ const TABLE = "| Job | Project | State | Head | Note |\n|---|---|---|---|---|\n"
 	+ "| cp-sessions-v2-pr1 | picp | held | 3f2a9c1 | Themes, cards and dates for the Sessions transcript |\n"
 	+ "| cp-very-long-job-identifier-that-keeps-going-to-force-a-scroll | demo-app | working | 9b77e02 | long cells scroll inside the table |\n"
 	+ "| cp-ab12 | picp | done | 1c0ffee | merged |";
+const TH = { v2: "th-0123456789ab", improv: "th-aaaaaaaaaaaa", long: "th-bbbbbbbbbbbb", done: "th-dddddddddddd" };
 const entries: SessionEntry[] = [
-	say("e1", "2026-10-14T09:12:00Z", "Operator", "Morning. Where is the Sessions redesign?"),
-	say("e2", "2026-10-14T09:12:40Z", "Assistant", "PR 1 of 5 is in flight: tokens, cards and date separators. Status by job:\n\n" + TABLE),
+	say("e1", "2026-10-14T09:12:00Z", "Operator", "Morning. Where is the Sessions redesign?", { thread: TH.done }),
+	say("e2", "2026-10-14T09:12:40Z", "Assistant", "PR 1 of 5 is in flight: tokens, cards and date separators. Status by job:\n\n" + TABLE, { thread: TH.done }),
 	tool("t1", "2026-10-14T09:13:00Z", "bash", "git log --oneline -3"),
 	tool("t2", "2026-10-14T09:13:05Z", "read", "viewer-app/screens/sessions.css"),
 	say("e3", "2026-10-14T09:14:00Z", "Assistant", "The theme lives on `.shell-sessions` only, so Overview keeps its palette:\n\n```css\n.shell-sessions { color-scheme: light; background: var(--background); }\n```"),
-	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp" }),
-	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one."),
+	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", thread: TH.v2 }),
+	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", { thread: TH.v2 }),
 	wake,
 	tool("k1", "2026-10-15T08:03:31Z", "thinking", "Let me verify the precedence claim before answering.", "Let me verify the precedence claim: docs say parent.json overrides CP_PARENT_MODEL"),
 	tool("k2", "2026-10-15T08:03:35Z", "bash", "Arguments\n{\"command\":\"rg -n Models docs\"}\n\nResult\n## Models", "## Models"),
 	tool("k3", "2026-10-15T08:03:38Z", "read", "Arguments\n{\"path\":\"src/service/supervise.ts\"}\n\nResult\n…", "src/service/supervise.ts"),
-	say("e6", "2026-10-15T08:04:00Z", "Assistant", "Anything else before I open the draft?"),
+	tool("k4", "2026-10-15T08:03:40Z", "cp_integrate", `Arguments\n{"job_id":"${JOB}"}\n\nResult\nnext: wait`, `${JOB} · next: wait`),
+	tool("k5", "2026-10-15T08:03:44Z", "fetch_content", "Arguments\n{\"url\":\"https://example.com/notes\"}\n\nResult\n…", "https://example.com/notes"),
+	say("e6", "2026-10-15T08:04:00Z", "Assistant", "Anything else before I open the draft?", { thread: TH.improv }),
 	tool("o1", "2026-10-15T08:04:10Z", "bash", "Arguments\n{\"command\":\"git status\"}\n\nResult\nclean", "git status"),
+	tool("o2", "2026-10-15T08:04:12Z", "cp_parent", "Arguments\n{\"action\":\"status\"}\n\nResult\nrunning", "status · running"),
+];
+type Worker = SessionsResponse["workers"][number];
+const workers: Worker[] = [
+	{ id: "cp-sessions-v2-pr3", kind: "worker", job_id: "cp-sessions-v2-pr3", phase: "waiting", run_phase: "working", model: "fixture-model", live: true, last_activity: "2026-10-15T08:04:30Z" },
+	{ id: "cp-held-review-with-a-long-job-id", kind: "worker", job_id: "cp-held-review-with-a-long-job-id", phase: "held", run_phase: "idle", model: "fixture-model", live: false, last_activity: "2026-10-15T07:40:00Z" },
 ];
 const sessions: SessionsResponse = {
 	generated_at: GENERATED, selected: "you", session_id: "op-session", entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings: [], truncated: false,
-	parent: { id: "cp-parent", live: true } as SessionsResponse["parent"], workers: [], transcript: true, operator_sessions: [{ id: "op.jsonl", at: GENERATED }], operator_session: "op.jsonl",
+	parent: { id: "cp-parent", kind: "parent", live: true, last_activity: "2026-10-15T08:04:20Z" }, workers, transcript: true, operator_sessions: [{ id: "op.jsonl", at: GENERATED }], operator_session: "op.jsonl",
 };
 const body = (text: string) => ({ kind: "message" as const, text });
 const control: ControlStatusResponse = {
@@ -68,7 +77,15 @@ const control: ControlStatusResponse = {
 	],
 	offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: false, herdr: false }, resume: { tmux: false, herdr: false },
 };
-const threads: ThreadsResponse = { generated_at: GENERATED, availability: "ok", enabled: false, reason: "threads are off in this fixture", token: null, threads: [], total: 0, warning: null };
+const thread = (id: string, tag: string, state: ThreadView["state"], waiting: ThreadView["waiting"], working = 0): ThreadView => ({ id, tag, state, waiting,
+	counts: { messages: 1, asks: 0, answers: 0, jobs_working: working }, opened_at: "2026-10-14T09:00:00Z", last_at: "2026-10-15T08:04:00Z", done_at: state === "done" ? "2026-10-15T08:00:00Z" : null });
+const threads: ThreadsResponse = { generated_at: GENERATED, availability: "ok", enabled: true, reason: null, token: "fixture-token", threads: [
+	thread(TH.v2, "sessions-v2", "waiting", { asks: 1, answers: 1 }), thread(TH.improv, "picp-improv", "open", { asks: 0, answers: 0 }, 1),
+	thread(TH.long, "a-thread-tag-of-the-full-32-char", "open", { asks: 0, answers: 0 }), thread(TH.done, "old-release", "done", { asks: 0, answers: 0 }),
+], total: 4, warning: null };
+/** The same list with asks unreadable, as threadsView serves it: every `waiting` null, nothing in the waiting state. */
+const blind: ThreadsResponse = { ...threads, warning: "asks unavailable: state/operator/asks.jsonl unreadable; waiting is unknown",
+	threads: threads.threads.map(t => ({ ...t, waiting: null, state: t.state === "waiting" ? "open" : t.state })) };
 /** A done job for the card's "Open job transcript →"; shaped as in tests/viewer-job-detail-render.test.ts. */
 const job = { generated_at: GENERATED, awaiting_count: 0, description: null, mandate: null, timeline: [], timeline_truncated: false, files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [],
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
@@ -160,8 +177,13 @@ try {
 			return { overflow: document.documentElement.scrollWidth - innerWidth, shell: shell?.className ?? null, background: css?.getPropertyValue("--background").trim() ?? null,
 				color_scheme: css?.colorScheme ?? null, days: [...document.querySelectorAll(".session-day")].map(d => d.textContent),
 				pending: document.querySelectorAll(".session-pending").length, pills: [...document.querySelectorAll(".session-steps > .session-tools")].map(b => b.textContent),
-				open_cards: document.querySelectorAll(".session-steps-open").length, job_tab: document.querySelector(".job-detail")?.dataset.tab ?? null }; })()`);
+				open_cards: document.querySelectorAll(".session-steps-open").length, job_tab: document.querySelector(".job-detail")?.dataset.tab ?? null,
+				step_names: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].map(c => c.textContent + " " + c.clientWidth + "/" + c.scrollWidth + "px"),
+				clipped: [...document.querySelectorAll(".session-steps-open .session-steps-rows .session-tool summary > code")].filter(c => c.scrollWidth > c.clientWidth).map(c => c.textContent),
+				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
+				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
+		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		const png = (await cdp("Page.captureScreenshot", { format: "png" })).data as string;
 		const file = join(out, `${name}.png`);
 		writeFileSync(file, Buffer.from(png, "base64"));
@@ -187,13 +209,40 @@ try {
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.
 		const centre = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector("${wakeRun}").getBoundingClientRect().top - t.getBoundingClientRect().top - 140; })()`, "true"] as [string, string];
 		for (const theme of ["dark", "light"] as const) {
-			await capture(`pr2-steps-${theme}-1440x1100`, transcript, 1440, 1100, theme, loaded, "bottom", [[`${notice}; ${pill}`, `!!document.querySelector(".session-steps-open .session-notice-rest")`], centre]);
-			await capture(`pr2-job-transcript-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [[pill, `!!document.querySelector(".session-steps-link")`],
+			await capture(`${stage}-steps-${theme}-1440x1100`, transcript, 1440, 1100, theme, loaded, "bottom", [[`${notice}; ${pill}`, `!!document.querySelector(".session-steps-open .session-notice-rest")`], centre]);
+			if (stage === "pr2") await capture(`pr2-job-transcript-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [[pill, `!!document.querySelector(".session-steps-link")`],
 				[`document.querySelector(".session-steps-link").click()`, `document.querySelector(".job-detail")?.dataset.tab === "transcript" && !!document.querySelector(".jt-say")`]]);
 		}
-		await capture("pr2-notice-only-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[notice, `!!document.querySelector(".session-steps .session-notice-rest") && !document.querySelector(".session-steps-open")`], centre]);
-		await capture("pr2-tools-on-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`document.querySelector(".session-tools-toggle").click()`, `!document.querySelector(".session-steps > .session-tools") && document.querySelectorAll(".session-steps-open").length === 3`]]);
-		await capture("pr2-job-default-phone-dark-390x844", `#job/${JOB}`, 390, 844, "dark", ".job-detail[data-tab=details]");
+		if (stage === "pr2") {
+			await capture("pr2-notice-only-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[notice, `!!document.querySelector(".session-steps .session-notice-rest") && !document.querySelector(".session-steps-open")`], centre]);
+			await capture("pr2-tools-on-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`document.querySelector(".session-tools-toggle").click()`, `!document.querySelector(".session-steps > .session-tools") && document.querySelectorAll(".session-steps-open").length === 3`]]);
+			await capture("pr2-job-default-phone-dark-390x844", `#job/${JOB}`, 390, 844, "dark", ".job-detail[data-tab=details]");
+		}
+	}
+	if (stage === "pr3") {
+		const base = shots.find(s => (s as { file: string }).file.endsWith("pr3-desktop-dark-1440x1000.png")) as { columns: number[] };
+		if (base.columns.join() !== "208,281,951") throw new Error(`pr3: rail, Chats and conversation are ${base.columns.join(" + ")} px, not 208 + 281 + 951`);
+		// Step names at phone width too: cp_integrate and fetch_content fit their column (the run fails on a clipped one).
+		await capture("pr3-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`],
+			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-steps-open").getBoundingClientRect().top - t.getBoundingClientRect().top - 60; })()`, "true"]]);
+		const rows: [string, string] = ["true", `!!document.querySelector(".session-thread-row")`];
+		const pick = (label: string): [string, string] => [`[...document.querySelectorAll(".session-sidebar .session-thread-choice")].find(b => (b.getAttribute("aria-label") ?? "").startsWith(${JSON.stringify(label)})).click()`,
+			`!!document.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"][aria-label^=${JSON.stringify(label)}]')`];
+		const chats = (name: string, theme: "dark" | "light", steps: [string, string][]) => capture(`pr3-${name}-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", [rows, ...steps]);
+		for (const theme of ["dark", "light"] as const) await chats("thread-selected", theme, [pick("sessions-v2:")]);
+		await chats("thread-done", "dark", [[`document.querySelector(".session-sidebar details > summary").click()`, `document.querySelector(".session-sidebar details").open`], pick("old-release:")]);
+		const plus = `document.querySelector(".session-chats-new").click()`, dialog = `!!document.querySelector(".new-thread input")`;
+		const typed: [string, string] = [`(() => { const i = document.querySelector(".new-thread input"); i.value = "fresh-idea"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`, `!document.querySelector(".new-thread-create").disabled`];
+		await chats("new-thread-dialog", "dark", [[plus, dialog], typed]);
+		await chats("thread-new", "dark", [[plus, dialog], [`document.querySelector(".new-thread-close").click()`, `!document.querySelector(".new-thread")`], [plus, dialog], typed,
+			[`document.querySelector(".new-thread-create").click()`, `!document.querySelector(".new-thread") && !!document.querySelector('.session-thread-choice[aria-pressed="true"][aria-label^="fresh-idea:"]')`]]);
+		routes["/api/threads"] = blind;
+		await chats("waiting-unknown", "dark", []);
+		routes["/api/threads"] = threads;
+		sessions.workers = [];
+		await chats("fleet-empty", "light", []);
+		sessions.workers = workers;
+		if (posts.length) throw new Error(`pr3 sent ${posts.join(", ")}: New thread and Cancel must request nothing`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

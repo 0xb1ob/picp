@@ -35,8 +35,8 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  assert.match(picked,/class="session-bridge-chip">bridge<\/span><span class="session-bridge-what">woke <a href="#job\/cp-x">cp-x<\/a><\/span><small class="session-bridge-receipt">· owner observed<\/small>/);
  assert.match(picked,/<button type="button" class="session-notice-line" aria-expanded="false" aria-label="Show notice">notice /); assert.doesNotMatch(picked,/Second line/);
  const doc=parseHTML(`<body>${picked}</body>`).document;
- assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Sessions","the desktop title row stays inside the direct-child screen");
- assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator ↔ you");
+ assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Chats","the desktop title row stays inside the direct-child screen");
+ assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator");
  assert.equal(doc.querySelector('.session-heading label')?.firstChild?.textContent,"Transcript");
  assert.equal(doc.querySelector('.session-heading label select')?.getAttribute("aria-label"),"Operator session file");
  assert.doesNotMatch(doc.querySelector('.session-heading')?.textContent ?? "",/entry for entry|Full transcript/);
