@@ -110,15 +110,17 @@ const PARENT_DEF = "Turn: from an owner message or a displayed cp-* wake to the 
  "Wasted: the turn made no tool call and wrote no reply, or every wake in it was a stale wake-up or a repeat of an identical earlier one. " +
  "Wasted turns = wasted / all answered turns; wasted $ = recorded cost of wasted turns / recorded cost of all turns. " +
  "Source: the parent session and its archives; all projects and mandates, whatever the filters.";
+/** Seconds under a minute, `1m 32s` under 10 minutes, then the shared minute format. */
+export const latency = (s: number | null): string => { const r = s === null ? null : Math.round(s); return r === null || r >= 600 ? elapsed(r) : r < 60 ? `${r}s` : `${Math.floor(r/60)}m ${r%60}s`; };
 /** Parent responsiveness and waste over 7 and 30 days; definitions and denominators are the tooltip. */
 function ParentPanel({rows}: {rows:StatsResponse["parent"]}) {
  const share = (n: number, of: number, f: (v: number) => string) => of ? `${pct(n/of)} · ${f(n)} of ${f(of)}` : "-";
- const secs = (s: number | null) => s !== null && s < 60 ? `${Math.round(s)}s` : elapsed(s);
+ const cells = (r: NonNullable<StatsResponse["parent"]>[number]) => [["Turns",count(r.turns)],["Reply p50",latency(r.reply_p50_seconds)],["Reply p90",latency(r.reply_p90_seconds)],
+  ["Wasted turns",share(r.wasted_turns,r.turns,count)],["Wasted $",share(r.wasted_usd,r.spend_usd,money)]];
  return <section class="stats-panel stats-parent" aria-label="Parent">
   <header><h2 title={PARENT_DEF}>Parent<span>responsiveness and waste · all projects</span></h2></header>
-  {rows ? <div class="stats-scroll"><table class="stats-table"><thead><tr><th scope="col"></th>{["Turns","Reply p50","Reply p90","Wasted turns","Wasted $"].map(h => <th scope="col" key={h} title={PARENT_DEF}>{h}</th>)}</tr></thead>
-   <tbody>{rows.map(r => <tr key={r.days}><th scope="row">{r.days} days</th><td>{count(r.turns)}</td><td>{secs(r.reply_p50_seconds)}</td><td>{secs(r.reply_p90_seconds)}</td>
-    <td>{share(r.wasted_turns,r.turns,count)}</td><td>{share(r.wasted_usd,r.spend_usd,money)}</td></tr>)}</tbody></table></div>
+  {rows ? rows.map(r => <div class="stats-prow" key={r.days}><h3>{r.days} days</h3>
+   <dl>{cells(r).map(([name,value]) => <div key={name}><dt title={PARENT_DEF}>{name}</dt><dd>{value}</dd></div>)}</dl></div>)
    : <p class="stats-none">-</p>}
   <p class="stats-note">Wasted: no tool call and no reply, or only stale or repeated wakes. Shares are of all answered turns and of their recorded cost.</p>
  </section>;

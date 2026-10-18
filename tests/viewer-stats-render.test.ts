@@ -7,8 +7,8 @@ import { REPO_ROOT } from "./harness/index.ts";
 import type { StatsResponse } from "../src/viewer/api-types.ts";
 
 async function load() {
- const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv, statsApiUrl} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv, statsApiUrl};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
- return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string; statsApiUrl:(q:string,tz:string|undefined)=>string};
+ const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv, latency, statsApiUrl} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv, latency, statsApiUrl};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string; latency:(s:number|null)=>string; statsApiUrl:(q:string,tz:string|undefined)=>string};
 }
 const at = "2026-01-02T00:00:00.000Z";
 const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
@@ -65,13 +65,16 @@ test("Jobs finished is a dash when either side is unknown, never missing-as-zero
 });
 
 test("Parent panel shows 7/30-day reply percentiles and wasted shares with their denominators; unknown is a dash", async () => {
- const {draw} = await load();
+ const {draw, latency} = await load();
  const html = draw(data(),"range=24h");
  const panel = /<section class="stats-panel stats-parent"[\s\S]*?<\/section>/.exec(html)![0];
- assert.match(panel,/7 days<\/th><td>4<\/td><td>42s<\/td><td>2m<\/td><td>25% · 1 of 4<\/td><td>25% · \$0\.50 of \$2\.00<\/td>/);
- assert.match(panel,/30 days<\/th><td>0<\/td><td>-<\/td><td>-<\/td><td>-<\/td><td>-<\/td>/,"no turns is a dash, never 0%");
+ const cells = (days: number) => [...new RegExp(`<h3>${days} days</h3><dl>([\\s\\S]*?)</dl>`).exec(panel)![1]!.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map(m => `${m[1]}=${m[2]}`);
+ // All five figures render for each window as stacked label/value pairs (amendment 1: none may drop off at 390 px).
+ assert.deepEqual(cells(7),["Turns=4","Reply p50=42s","Reply p90=2m 30s","Wasted turns=25% · 1 of 4","Wasted $=25% · $0.50 of $2.00"]);
+ assert.deepEqual(cells(30),["Turns=0","Reply p50=-","Reply p90=-","Wasted turns=-","Wasted $=-"],"no turns is a dash, never 0%");
  assert.match(panel,/title="[^"]*Wasted turns = wasted \/ all answered turns; wasted \$ = recorded cost of wasted turns \/ recorded cost of all turns/);
  assert.match(draw(data({parent:null}),"range=24h"),/aria-label="Parent">[\s\S]*?<p class="stats-none">-<\/p>/);
+ assert.deepEqual([null,42.4,59.6,92,599,600,4000].map(latency),["-","42s","1m 0s","1m 32s","9m 59s","10m","1h 6m"],"under 10 minutes keeps seconds");
 });
 
 test("CSV export escapes quotes and formula starts and leaves missing values empty", async () => {
