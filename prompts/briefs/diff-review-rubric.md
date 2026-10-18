@@ -55,6 +55,7 @@ that `offset` until a result is not cut. Never score from the first page alone.
 6. **Comments** — new or changed comments and docstrings in the diff are judged against the comment budget
    (why, not what; docstrings and test comments ≤ 4 lines, code comments ≤ 2, every line ≤ 120 characters). A violation
    is a low finding, never a revise on its own — the one style finding allowed. Comments the diff did not touch are out of scope.
+7. **Coverage limit** — visual fidelity is unchecked from a text diff: state in `reasons` that it was not verified (confidence low, never a revise on its own).
 
 **Before you score:**
 
