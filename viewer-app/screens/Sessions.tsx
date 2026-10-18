@@ -95,7 +95,7 @@ function ToolRun({entries,open,onToggle}: {entries:SessionEntry[];open:boolean;o
  // Open, the header drops its preview: it repeats the first row (often the thinking line) right below it.
  return <ToolRunRow count={entries.length} detail={open ? null : entries.find(e=>e.summary)?.summary} open={open} onToggle={onToggle}><div class="session-tool-card">{entries.map(e=><Entry key={e.id} entry={e}/>)}</div></ToolRunRow>;
 }
-/** A parsed cp-bridge notice: one row — a "bridge" chip, verb, job link, receipt, an inline "notice ▸" — the body below it. */
+/** A parsed cp-bridge notice: one row (bridge chip, verb, job link, receipt, inline "notice ▸"), body below. */
 function BridgeNotice({entry:e,clock}: {entry:SessionEntry;clock:ComponentChild}) {
  const [open,setOpen]=useState(false);
  const b=e.bridge!;
