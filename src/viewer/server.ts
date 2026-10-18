@@ -431,7 +431,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				if (!job) { sendJson(res, 404, { error: "no such job" }); return; }
 				const merge = job.job.merge_sha?.toLowerCase();
 				if (!merge || !SHA.test(merge)) { sendView(req, res, job); return; }
-				readRunning(merge, { home: options.home, stateDir: options.stateDir })
+				// With a merge_sha, finished_at is the merge receipt's merged_at (jobs-view.ts).
+				readRunning(merge, { home: options.home, stateDir: options.stateDir }, job.job.finished_at)
 					.then((running) => sendView(req, res, { ...job, running }))
 					.catch(() => { if (!res.headersSent) sendView(req, res, { ...job, running: { checkout: "unknown", since: null, why: "version read failed", processes: [] } }); });
 				return;

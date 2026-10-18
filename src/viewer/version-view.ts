@@ -227,10 +227,11 @@ async function contains(repo: string, sha: string, commit: string, git: GitRunne
 }
 
 /**
- * Is merge `sha` in the checkout and in each running process? Incorporation is ancestry of HEAD; `since` is only the
- * last recorded update that brought it in (its `from` lacks it), else null. A process's `since` is its own start.
+ * Merge `sha` in the checkout (ancestry of HEAD) and each process. Checkout `since` only from the last update that
+ * brought it in, a process's from its start; null when unrecorded or (impossibly) earlier than `mergedAt`.
  */
-export async function readRunning(sha: string, options: VersionOptions): Promise<JobRunning> {
+export async function readRunning(sha: string, options: VersionOptions, mergedAt?: string | null): Promise<JobRunning> {
+	const after = (at: string | null | undefined) => (at && !(Date.parse(at) < Date.parse(mergedAt ?? "")) ? at : null);
 	const view = await readVersion(options);
 	const repo = options.repo ?? (options.env ?? process.env).CP_VERSION_REPO ?? PACKAGE_ROOT;
 	const git = options.git ?? runGit;
@@ -238,11 +239,11 @@ export async function readRunning(sha: string, options: VersionOptions): Promise
 	const checkout = await has(view.deployed?.sha);
 	const update = readObject(join(options.stateDir ?? resolveStateDir(options.home), "update.json"));
 	const updated = checkout && str(update?.last_result) === "updated" && str(update?.updated_at);
-	const since = updated && (await has(str(update?.to))) === true && (await has(str(update?.from))) === false ? updated : null;
+	const since = updated && (await has(str(update?.to))) === true && (await has(str(update?.from))) === false ? after(updated) : null;
 	const processes = await Promise.all(view.processes.map(async (p) => {
 		const loaded = p.state === "down" ? null : await has(p.commit);
 		const state = p.state === "down" ? "down" as const : loaded === null ? "unknown" as const : loaded ? "loaded" as const : "not_loaded" as const;
-		return { role: p.role, state, since: loaded ? p.started_at : null };
+		return { role: p.role, state, since: loaded ? after(p.started_at) : null };
 	}));
 	return {
 		checkout: checkout === null ? "unknown" : checkout ? "included" : "not_included",

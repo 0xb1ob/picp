@@ -254,6 +254,12 @@ test("#324: merged vs running here — checkout ancestry and each process's star
 	// Ancestry alone never dates adoption: an update whose `from` already had the merge leaves the time unknown.
 	f.write("update.json", { last_result: "updated", updated_at: iso(10), from: merged, to: merged });
 	assert.deepEqual([(await readRunning(merged, opts)).since, (await readRunning(base, opts)).since], [null, null]);
+	// Amendment 1: a recorded time before the merge itself is impossible and never shown, for checkout or process.
+	f.write("update.json", { last_result: "updated", updated_at: iso(10), from: base, to: merged });
+	const early = await readRunning(merged, opts, iso(7));
+	assert.deepEqual([early.since, early.processes[0]?.since], [null, iso(5)]);
+	assert.deepEqual((await readRunning(merged, opts, iso(4))).processes.map((p) => p.since), [null, null, null, null]);
+	assert.equal((await readRunning(merged, opts, iso(10))).since, iso(10), "equal to the merge time is possible");
 	const upstream = advanceBase(f.repo, "later.txt", "later");
 	f.repo.git("fetch", "--quiet", "origin");
 	assert.equal((await readRunning(upstream, opts)).checkout, "not_included");
@@ -307,4 +313,22 @@ test("#324 GET /api/job/<id>: a merged job carries `running`; a merge this check
 	const running = (JSON.parse(reply.body) as JobResponse).running;
 	assert.equal(running?.checkout, "unknown");
 	assert.match(running?.why ?? "", /eeeeeee is not in this home's checkout/);
+	// Amendment 1: an update recorded before the receipt's merged_at cannot have brought the merge in; never shown.
+	const base = f.repo.head();
+	f.repo.write("fix.txt", "fix");
+	const merged = f.repo.commitAll("the merged fix");
+	const prior = process.env.CP_VERSION_REPO;
+	process.env.CP_VERSION_REPO = f.repo.path;
+	t.after(() => { if (prior === undefined) delete process.env.CP_VERSION_REPO; else process.env.CP_VERSION_REPO = prior; });
+	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", merged_at: iso(5), pr_url: "https://github.com/acme/demo/pull/7", merge_commit_sha: merged });
+	const since = async (updatedAt: string) => {
+		f.write("update.json", { last_result: "updated", updated_at: updatedAt, from: base, to: merged });
+		const view = JSON.parse((await get(options.port, "/api/job/cp-merged")).body) as JobResponse;
+		assert.equal(view.running?.checkout, "included");
+		const shown = view.running?.since ?? null;
+		assert.ok(shown === null || Date.parse(shown) >= Date.parse(view.job.finished_at!), `${shown} precedes the merge`);
+		return shown;
+	};
+	assert.equal(await since(iso(10)), null);
+	assert.equal(await since(iso(3)), iso(3));
 });
