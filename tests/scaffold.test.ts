@@ -63,20 +63,12 @@ test("gitignore keeps runtime state out of the repo", () => {
 	const ignored = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8")
 		.split("\n")
 		.map((line) => line.trim());
-	// cp-u3i2: the one runtime root is ignored at the root. `.beads/` is tracked on purpose (the picp issue
-	// tracker); its own .gitignore keeps the db, WAL/shm and lock/daemon files out.
+	// cp-u3i2: exactly the one runtime root plus br's `.beads/`; the shipped
+	// default rubric template now lives in tracked `defaults/`, so `data/` needs
+	// no negation and no top-level entry at all.
 	assert.deepEqual(NEVER_COMMIT_PATHS, [".pi-command-post/", ".beads/"]);
-	for (const entry of [".pi-command-post/", "node_modules/"]) {
+	for (const entry of [...NEVER_COMMIT_PATHS, "node_modules/"]) {
 		assert.ok(ignored.includes(entry), `missing .gitignore entry ${entry}`);
-	}
-	const beadsIgnored = readFileSync(join(REPO_ROOT, ".beads/.gitignore"), "utf8")
-		.split("\n")
-		.map((line) => line.trim());
-	for (const entry of ["*.db", "*.db-shm", "*.db-wal*", "*.lock", "daemon.lock", "daemon.pid"]) {
-		assert.ok(beadsIgnored.includes(entry), `missing .beads/.gitignore entry ${entry}`);
-	}
-	for (const tracked of ["issues.jsonl", "config.yaml", "metadata.json"]) {
-		assert.ok(!beadsIgnored.includes(tracked), `.beads/${tracked} must stay tracked`);
 	}
 	for (const gone of ["/data/*", "!/data/routing.default.json", "state/", "projects/"]) {
 		assert.ok(!ignored.includes(gone), `.gitignore still lists the old root ${gone}`);
