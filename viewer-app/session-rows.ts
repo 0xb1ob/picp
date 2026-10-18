@@ -12,7 +12,7 @@ export function dayLabel(at: string, now = new Date()): string {
  return new Intl.DateTimeFormat("en-US",{weekday:"short",month:"short",day:"numeric",...(date.getFullYear() === now.getFullYear() ? {} : {year:"numeric"})}).format(date);
 }
 /** Entry id → day label for each entry opening a new local day after `prev` (the day shown above), in source order. */
-export function dayStarts(entries: SessionEntry[], prev: string | null = null): Map<string,string> {
+export function dayStarts(entries: Pick<SessionEntry,"id"|"at">[], prev: string | null = null): Map<string,string> {
  const out = new Map<string,string>();
  let day = prev;
  for (const e of entries) {

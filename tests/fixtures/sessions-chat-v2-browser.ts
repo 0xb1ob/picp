@@ -1,7 +1,6 @@
 /**
- * Sessions chat v2 real-browser capture: builds the production app in memory, serves it with synthetic APIs on loopback
- * under the production CSP, drives an isolated headless Chrome over native CDP and saves PNGs plus manifest.json.
- * `node tests/fixtures/sessions-chat-v2-browser.ts --stage pr1|pr2 [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
+ * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2 [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

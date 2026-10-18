@@ -100,9 +100,8 @@
 .session-trace summary > span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .session-trace p { white-space: pre-wrap; padding: 10px 12px; background: var(--surface); border-radius: 8px; }
 /*
- * Transcript chat (cp-wfw3, Sessions chat v2). The prompting side is a right-hand pill with its time below; the session
- * is a raised card under an avatar, name, project and time, whose group's later cards carry no header.
- * Tool calls and system/bridge entries stay compact muted one-liners, never bubbles; ask cards keep their card.
+ * Transcript chat (cp-wfw3, Sessions chat v2): your side a right-hand pill, time below; the session a raised card under
+ * avatar, name, project and time (a group's later cards have no header). Tool and system rows stay compact, not bubbles.
  */
 .session-message.session-bubble { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding: 0; border: 0; }
 .session-message.session-grouped { margin-top: 4px; }

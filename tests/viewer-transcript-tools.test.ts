@@ -273,6 +273,7 @@ test("a wake notice and the tool calls right after it are one run of steps; the 
 
 	await click(root.querySelector(".session-steps > .session-tools"));
 	assert.deepEqual(tools().map(text => /THINK-ONE|TOOL-TWO/.exec(text)?.[0] ?? text), ["THINK-ONE", "TOOL-TWO"]);
+	assert.deepEqual([...root.querySelectorAll(".session-steps-rows .session-tool > summary > code:nth-child(2)")].map(name => name.textContent), ["think", "bash"], "thinking fits the name column as \"think\"");
 	assert.equal(notice().getAttribute("aria-expanded"), "true", "opening the tools leaves the notice as it was");
 	const card = root.querySelector(".session-steps-card")!;
 	assert.deepEqual([...card.children].map(child => child.getAttribute("class")), ["session-message session-notice session-system session-bridge", "session-steps-rows", "session-steps-link"]);

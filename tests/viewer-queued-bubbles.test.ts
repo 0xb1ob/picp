@@ -154,7 +154,9 @@ test("send FIFO: quick sends remain visible, POSTs serialize, delivered status n
  await s.show([entry("response"),entry("next streamed response")]);
  assert.deepEqual(s.bubbleTexts(),["first","second"],"status delivered stays visible until actual arrival");
  assert.match(s.root.querySelector(".session-pending")!.textContent!,/waiting for transcript/);
- assert.equal(s.root.querySelector(".session-pending")?.previousElementSibling?.textContent?.includes("next streamed response"),true,"pending sends move after the latest response");
+ // The send is stamped "now", a later day than the fixture, so its own day pill may sit between (amendment 1b).
+ const before=s.root.querySelector(".session-pending")?.previousElementSibling;
+ assert.equal((before?.classList.contains("session-day") ? before.previousElementSibling : before)?.textContent?.includes("next streamed response"),true,"pending sends move after the latest response");
  await s.show([entry("response"),entry("real-first",{kind:"via",text:"first",dashboard_id:"dc-first"})]);
  assert.deepEqual(s.bubbleTexts(),["second"]);
  assert.equal([...s.root.querySelectorAll(".md")].filter(el=>el.textContent === "first").length,1,"one real bubble, no duplicate render");

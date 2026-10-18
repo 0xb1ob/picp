@@ -9,12 +9,13 @@ import { parseHTML } from "linkedom";
 import { REPO_ROOT } from "./harness/index.ts";
 import type { JobResponse, SessionEntry, SessionsResponse } from "../src/viewer/api-types.ts";
 import type { ThreadsView } from "../viewer-app/threads.ts";
+import type { ControlView } from "../viewer-app/control.ts";
 import { dayKey, dayLabel, dayStarts, lastDay, rows } from "../viewer-app/session-rows.ts";
 
-const bundle = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import renderToString from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const html=(data,threads)=>renderToString(h(Sessions,{data,threads})); export const shell=screen=>renderToString(h(Shell,{current:{screen,section:null},awaiting:0,status:"live",updatedAt:null},"Content")); export const mount=(root,data,threads)=>render(h(Sessions,{data,threads}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const bundle = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import renderToString from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const html=(data,threads,control)=>renderToString(h(Sessions,{data,threads,control})); export const shell=screen=>renderToString(h(Shell,{current:{screen,section:null},awaiting:0,status:"live",updatedAt:null},"Content")); export const mount=(root,data,threads)=>render(h(Sessions,{data,threads}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
 const { act, html, shell, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`) as {
 	act: (run: () => void | Promise<void>) => Promise<void>;
-	html: (data: SessionsResponse, threads?: ThreadsView) => string;
+	html: (data: SessionsResponse, threads?: ThreadsView, control?: ControlView) => string;
 	shell: (screen: string) => string;
 	mount: (root: Element, data: SessionsResponse, threads?: ThreadsView) => void;
 	unmount: (root: Element) => void;
@@ -55,6 +56,26 @@ test("rendered separators: in source order, across local midnight, splitting a t
 	assert.equal(bubbles[1]!.querySelector(".session-who")?.textContent?.includes("Operator"), true, "a new day opens a new group even within five minutes");
 	assert.equal(bubbles[2]!.querySelector("time"), null, "no time is invented for an unparseable stamp");
 	assert.deepEqual([...document.querySelectorAll(".session-day time")].map(t => t.getAttribute("datetime")), ["2026-10-15", "2026-10-16", "2026-10-15"]);
+});
+
+test("pending sends: one queued past local midnight opens its own day pill; a same-day send and a dated tail add none", () => {
+	// #318 review low: the pending tail rendered no separators, so a send queued at 00:05 sat under the previous day.
+	const send = (key: string, at: string) => ({ key, id: `dc-${key}`, at, state: "queued", reason: null, ask_id: null, body: { kind: "message", text: `queued ${key}` } });
+	const control = (...pending: ReturnType<typeof send>[]) => ({ status: null, delivery: null, pending, send() {}, retry() {}, discard() {} }) as unknown as ControlView;
+	const data = view([entry("a1", "say", local(15, 23, 50), { text: "before midnight" })]);
+	const days = (c: ControlView) => [...parseHTML(`<div>${html(data, undefined, c)}</div>`).document.querySelectorAll(".session-entries .session-day, .session-entries .session-pending")]
+		.map(el => el.classList.contains("session-day") ? `day:${el.textContent}` : "pending");
+	assert.deepEqual(days(control(send("s1", local(15, 23, 55)), send("s2", local(16, 0, 5)), send("s3", local(16, 0, 6)))), ["day:Thu, Oct 15", "pending", "day:Fri, Oct 16", "pending", "pending"]);
+	assert.deepEqual(days(control(send("s4", local(15, 23, 59)))), ["day:Thu, Oct 15", "pending"]);
+});
+
+test("grouped own bubbles in a worker view name the author once; the session side already did", () => {
+	// #318 review low: consecutive parent briefs in a worker transcript repeated "Parent" above each bubble of the group.
+	const briefs = [entry("p1", "say", local(15, 9), { who: "Parent", text: "brief one" }), entry("p2", "say", local(15, 9, 1), { who: "Parent", text: "brief two" }), entry("w1", "say", local(15, 9, 2), { who: "Worker", text: "on it" }), entry("w2", "say", local(15, 9, 3), { who: "Worker", text: "done" })];
+	const { document } = parseHTML(`<div>${html({ ...view(briefs), selected: "workers" })}</div>`);
+	const names = [...document.querySelectorAll(".session-bubble")].map(b => [...b.querySelectorAll(".session-who > span:not(.session-avatar)")].map(s => s.textContent).join(","));
+	assert.deepEqual(names, ["Parent", "", "Worker", ""]);
+	assert.equal(document.querySelectorAll(".session-own .session-who time").length, 2, "each own bubble keeps its time");
 });
 
 /** A DOM to click the thread's `Show earlier` band in; the screen's scroll hooks need only stubs here. */
