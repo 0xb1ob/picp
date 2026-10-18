@@ -325,7 +325,7 @@ try {
 		// A thread chip picks the thread and closes the sheet; the # filter under the name and the composer follow it.
 		await phone("filter", [[more, opened], [`[...document.querySelectorAll(".session-bar-threads .session-thread-chip")].find(b => b.textContent.startsWith("picp-improv")).click()`,
 			`!document.querySelector(".session-bar-more[open]") && document.querySelector(".session-bar-sub select")?.value === "picp-improv" && /#picp-improv/.test(document.querySelector(".operator-composer textarea").placeholder)`]]);
-		// Escape closes the sheet and hands focus back to ⋯ (MoreMenu's handler, not a reload).
+		// Escape closes the sheet and hands focus back to ⋯ (the Sessions screen's document handler, not a reload).
 		await phone("menu-escape", [[`(() => { const s = document.querySelector(".session-bar-more > summary"); s.focus(); s.click(); })()`, opened],
 			[`document.querySelector(".session-bar-more").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
 				`!document.querySelector(".session-bar-more[open]") && document.activeElement === document.querySelector(".session-bar-more > summary")`]]);

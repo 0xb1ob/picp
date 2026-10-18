@@ -283,10 +283,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   observer.observe(el); observer.observe(entries);
   return ()=>observer.disconnect();
  },[]);
- // A tap outside an open top-bar or composer menu closes it.
+ // A tap outside an open top-bar or composer menu closes it; Escape closes the top bar's ⋯ or Options, focus back on it.
  useEffect(()=>{
   const outside=(e:Event)=>{for(const menu of document.querySelectorAll<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-more[open], .operator-composer-options[open]")) if(!menu.contains(e.target as Node)) menu.open=false;};
-  const escape=(e:KeyboardEvent)=>{if(e.key !== "Escape") return; const menu=document.querySelector<HTMLDetailsElement>(".operator-composer-options[open]"); if(menu){menu.open=false; menu.querySelector<HTMLElement>("summary")?.focus();}};
+  const escape=(e:KeyboardEvent)=>{if(e.key !== "Escape") return; const menu=document.querySelector<HTMLDetailsElement>(".session-bar-menu[open], .operator-composer-options[open]"); if(menu){menu.open=false; menu.querySelector<HTMLElement>("summary")?.focus();}};
   document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);

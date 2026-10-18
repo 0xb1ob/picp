@@ -208,6 +208,25 @@ test("Chats: + in the title row opens New thread and closing it selects nothing;
 	assert.equal(s.root.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"]')?.getAttribute("aria-label"), "fresh: new, no messages yet");
 });
 
+test("phone ⋯ sheet: streams, thread chips with + New, and Search are all reachable; the # filter sits under the name", async t => {
+	// PR 5 moved the thread strip, streams and Search into the top bar's sheet. Closing on a chip and on Escape runs in
+	// Chrome (sessions-chat-v2-browser.ts --stage pr5): linkedom's details has no reflected `open`.
+	const picked: (string | null)[] = [];
+	const thread = { id: "th-1", tag: "alpha", state: "open", waiting: { asks: 0, answers: 0 }, counts: { messages: 1, asks: 0, answers: 0, jobs_working: 0 }, opened_at: local(15, 9), last_at: local(15, 11), done_at: null };
+	const status = { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [thread], total: 1, warning: null } as unknown as ThreadsResponse;
+	const threads = { status, selected: null, select: (tag: string | null) => { picked.push(tag); }, done() {}, sending: null, failed: null } as unknown as ThreadsView;
+	const s = stage(t);
+	await act(() => mount(s.root, view([entry("m1", "say", local(15, 10))]), threads));
+	const sheet = s.root.querySelector(".session-bar-more")! as HTMLDetailsElement;
+	assert.deepEqual([...sheet.querySelectorAll(".session-bar-views > a")].map(a => a.textContent), ["Operator ↔ you", "CP parent", "Workers"]);
+	assert.deepEqual([...sheet.querySelectorAll(".session-bar-threads button")].map(b => b.textContent), ["+ New", "All messages", "alpha"]);
+	assert.ok([...sheet.querySelectorAll("button")].some(b => b.textContent === "Search"), "Search stays one tap into the sheet");
+	assert.equal(s.root.querySelector(".session-bar-sub select")?.getAttribute("aria-label"), "Show thread", "the # filter under the name");
+	await s.click(sheet.querySelector(".session-bar-threads .session-thread-new"));
+	await s.click(s.root.querySelector(".new-thread-close"));
+	assert.deepEqual([s.root.querySelector('[role="dialog"]'), picked], [null, []], "+ New from the sheet, then Cancel, selects nothing");
+});
+
 test("steps rows: one name column per card, the widest name up to 14ch, so every summary starts at one x", () => {
 	// #320 amendment: a per-row fit-content column started each summary at its own x; the card is now one grid that
 	// every row (entry, details, summary) subgrids. The browser capture fails on a clipped name or a misaligned summary.
