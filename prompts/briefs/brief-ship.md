@@ -53,7 +53,7 @@ the stages, and each stage is still reviewed.
 
 **Regenerate before pushing** (picp only): run `npm run eval:contract` and `CP_UPDATE_GOLDEN=1 npm run test:one -- tests/contracts-exports.test.ts`, then commit both files.
 
-**Design reference.** When the task supplies a design source (mockups, artboards), screenshot the changed screens at the artboard sizes into `$HOME/.pi-command-post/state/artifacts/${job_id}/screenshots` (outside the worktree); add a `screenshots: <dir>` line to the report_result summary.
+**Design reference.** When the task supplies a design source (artboards, mockups, screenshots), capture screenshots of the changed screens at the artboard sizes into a `screenshots/` directory beside `${artifact_path}` (outside the worktree) and add a `screenshots: <dir>` line to the report_result summary.
 
 **Comments and docstrings.** Comments earn their place by saying why, not what. Keep them short enough to read at a glance:
 
