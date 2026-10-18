@@ -55,6 +55,13 @@
 .stats-decisions dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .stats-decisions dd { font-size: 20px; color: var(--text); }
 .stats-decisions dt { font-size: 12px; color: var(--dim); }
+.stats-prow { padding: 10px 0; border-top: 1px solid var(--border); }
+.stats-prow h3 { font-size: 13px; font-weight: 400; color: var(--text); padding-bottom: 6px; }
+.stats-prow dl { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 8px 12px; }
+.stats-prow dl > div { grid-column: span 2; }
+.stats-prow dl > div:nth-child(n+4) { grid-column: span 3; }
+.stats-prow dt { font-size: 12px; color: var(--dim); }
+.stats-prow dd { margin: 0; font-size: 13px; color: var(--text); }
 .stats-scroll { max-width: 100%; overflow-x: auto; }
 .stats-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .stats-table th, .stats-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); font-weight: 400; color: var(--muted); white-space: nowrap; overflow-wrap: normal; }
@@ -82,6 +89,9 @@
  .stats-kpis { grid-template-columns: repeat(6,minmax(0,1fr)); }
  .stats-charts { grid-template-columns: minmax(0,2fr) minmax(0,1fr); }
  .stats-phase { order: 0; }
+ .stats-prow { display: grid; grid-template-columns: 90px minmax(0,1fr); align-items: baseline; }
+ .stats-prow dl { grid-template-columns: repeat(5,minmax(0,1fr)); }
+ .stats-prow dl > div, .stats-prow dl > div:nth-child(n+4) { grid-column: auto; }
  .stats-mhead, .stats-mrow { grid-template-columns: minmax(0,1.6fr) 48px minmax(0,1.2fr) minmax(0,1.2fr) 80px 90px; gap: 0 16px; }
  .stats-mhead { display: grid; padding: 10px 0; font-size: 11px; color: var(--dim); }
  .stats-mid, .stats-mbar, .stats-mstatus { grid-column: auto; }
