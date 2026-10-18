@@ -14,8 +14,8 @@
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PACKAGE_ROOT } from "../home.ts";
-import type { ProcessRole, ProcessVersion, UpstreamVersion, VersionLevel, VersionResponse } from "./api-types.ts";
-import { runGit } from "./git-read.ts";
+import type { JobRunning, ProcessRole, ProcessVersion, UpstreamVersion, VersionLevel, VersionResponse } from "./api-types.ts";
+import { runGit, SHA } from "./git-read.ts";
 import { type Commit, commitField, type GitRunner, headCommit, LOADED_AT, LOADED_COMMIT } from "./loaded-commit.ts";
 import { pidAlive } from "./overview-health.ts";
 import { type Json, readObject, resolveStateDir, str } from "./sessions.ts";
@@ -210,6 +210,45 @@ export async function readVersion(options: VersionOptions): Promise<VersionRespo
 		processes,
 		bundle: { script: options.script ?? null },
 		overall: overall(facts.deployed, upstream, processes),
+	};
+}
+
+const containsCache = new Map<string, boolean>();
+/** Whether `commit` has `sha` in its history; null when git cannot say (either commit missing here). Pairs never change. */
+async function contains(repo: string, sha: string, commit: string, git: GitRunner): Promise<boolean | null> {
+	const key = `${repo}\0${sha}\0${commit}`;
+	const hit = containsCache.get(key);
+	if (hit !== undefined) return hit;
+	const out = await git(repo, ["log", "-1", "--format=%H", sha, `^${commit}`, "--"], { maxBytes: 4096 });
+	if (!out.ok) return null;
+	if (containsCache.size >= 1000) containsCache.clear();
+	containsCache.set(key, out.stdout.trim() === "");
+	return out.stdout.trim() === "";
+}
+
+/**
+ * Is merge `sha` in the checkout and in each running process? Incorporation is ancestry of HEAD; `since` is only the
+ * last recorded update that brought it in (its `from` lacks it), else null. A process's `since` is its own start.
+ */
+export async function readRunning(sha: string, options: VersionOptions): Promise<JobRunning> {
+	const view = await readVersion(options);
+	const repo = options.repo ?? (options.env ?? process.env).CP_VERSION_REPO ?? PACKAGE_ROOT;
+	const git = options.git ?? runGit;
+	const has = (commit: string | null | undefined) => (commit && SHA.test(commit) ? contains(repo, sha, commit, git) : Promise.resolve(null));
+	const checkout = await has(view.deployed?.sha);
+	const update = readObject(join(options.stateDir ?? resolveStateDir(options.home), "update.json"));
+	const updated = checkout && str(update?.last_result) === "updated" && str(update?.updated_at);
+	const since = updated && (await has(str(update?.to))) === true && (await has(str(update?.from))) === false ? updated : null;
+	const processes = await Promise.all(view.processes.map(async (p) => {
+		const loaded = p.state === "down" ? null : await has(p.commit);
+		const state = p.state === "down" ? "down" as const : loaded === null ? "unknown" as const : loaded ? "loaded" as const : "not_loaded" as const;
+		return { role: p.role, state, since: loaded ? p.started_at : null };
+	}));
+	return {
+		checkout: checkout === null ? "unknown" : checkout ? "included" : "not_included",
+		since,
+		why: !view.deployed ? "checkout HEAD unreadable" : checkout === null ? `${short(sha)} is not in this home's checkout (another project, or not fetched)` : `checkout at ${short(view.deployed.sha)}`,
+		processes,
 	};
 }
 
