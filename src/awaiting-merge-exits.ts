@@ -122,7 +122,7 @@ async function apply(ports: ExitPorts, jobId: string, cycle: number, snap: PrSna
 /** Receipt → ledger close → stack follow-ups → fleet done → dependents → one wake; every step is idempotent. */
 async function landed(ports: ExitPorts, jobId: string, cycle: number, snap: PrSnapshot, now: Date): Promise<ExitOutcome> {
 	const record = ports.fleet.get(jobId)!;
-	const { receipt } = await ports.merges.recordObserved(jobId, {
+	const { receipt, after_merge } = await ports.merges.recordObserved(jobId, {
 		provider: "github", url: snap.url, number: snap.number, state: "merged", source_branch: snap.head_branch ?? record.branch,
 		target_branch: snap.base, head_sha: snap.head_sha,
 		...(snap.merge_sha ? { merge_commit_sha: snap.merge_sha } : {}), ...(snap.merged_at ? { merged_at: snap.merged_at } : {}),
@@ -143,7 +143,7 @@ async function landed(ports: ExitPorts, jobId: string, cycle: number, snap: PrSn
 		id: boundedWakeupId(`awaiting-merge:merged:${jobId}:${cycle}`),
 		kind: "recovery",
 		job_id: jobId,
-		content: `[cp-awaiting-merge] ${jobId}: the team merged ${receipt.pr_url} (${receipt.merge_commit_sha.slice(0, 12)}); job closed.${stacked}`,
+		content: `[cp-awaiting-merge] ${jobId}: the team merged ${receipt.pr_url} (${receipt.merge_commit_sha.slice(0, 12)}); job closed.${stacked}${after_merge ? ` ${after_merge}` : ""}`,
 	});
 	return { job_id: jobId, applied: "merged", stack_actions: actions.length };
 }

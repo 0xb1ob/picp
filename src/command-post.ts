@@ -124,6 +124,7 @@ import { HeldRelease } from "./held-release.ts";
 import { DispatchQueue, wireSlotFree } from "./dispatch-queue.ts";
 import { ArmedDispatches } from "./dependency-dispatch.ts";
 import { makeHandoff } from "./human-handoff.ts";
+import { afterMergeHook } from "./after-merge.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
 import { ProjectRegistry, projectDirResolver } from "./projects.ts";
@@ -452,7 +453,7 @@ export class CommandPost {
 		});
 		// cp-vk1: `cp_merged` writes here and the ship gate reads it, which is how
 		// "confirm the PR merged" stopped being advice with no mechanism behind it.
-		this.merges = new MergeStore({ home: options.home, fleet: this.fleet, runs: this.runs });
+		this.merges = new MergeStore({ home: options.home, fleet: this.fleet, runs: this.runs, afterRecorded: afterMergeHook(this) });
 		this.failures = new FailureMonitor({
 			home: options.home,
 			fleet: this.fleet,

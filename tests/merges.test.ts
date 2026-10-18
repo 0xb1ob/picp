@@ -343,3 +343,24 @@ test("forge PR 2: a mismatched observation records nothing, and a legacy receipt
 	writeFileSync(join(b.home, paths.mergeFile("cp-m1")), JSON.stringify(withoutForge));
 	assert.equal(readMergeReceipt(b.home, "cp-m1")?.head_sha, "a".repeat(40), "a pre-forge receipt is still valid");
 });
+
+test("#326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-m1", [PR_RECEIPT]);
+	const pr: GhPr = { number: 54, url: PR_RECEIPT.url, state: "MERGED", mergeCommit: { oid: "b".repeat(40) }, headRefName: "cp-m1", headRefOid: "a".repeat(40), baseRefName: "main" };
+	const seen: string[] = [];
+	const store = (afterRecorded: (receipt: import("../src/contracts.ts").MergeReceipt) => Promise<string | undefined>) =>
+		new MergeStore({ home: b.home, fleet: b.fleet, runs: b.runs, run: runner(pr), afterRecorded });
+	const failing = await store(async () => { throw new Error("ledger refused\nsecond line"); }).record({ jobId: "cp-m1" });
+	assert.equal(failing.recorded, true);
+	assert.ok(readMergeReceipt(b.home, "cp-m1"), "the receipt is written whatever the port does");
+	assert.equal(failing.after_merge, "after-merge deploy NOT created: ledger refused — cp_merged cp-m1 retries");
+	assert.match(formatMerge(failing), /can now pass without force\. after-merge deploy NOT created/);
+	const again = await store(async (receipt) => (seen.push(receipt.base_branch ?? ""), "after-merge deploy cp-d1 created")).record({ jobId: "cp-m1" });
+	assert.equal(again.recorded, false);
+	assert.equal(again.after_merge, "after-merge deploy cp-d1 created");
+	assert.deepEqual(seen, ["main"]);
+	const quiet = await store(async () => undefined).record({ jobId: "cp-m1" });
+	assert.equal("after_merge" in quiet, false);
+	assert.equal("after_merge" in (await b.store(pr).record({ jobId: "cp-m1" })), false, "no port: today's result");
+});

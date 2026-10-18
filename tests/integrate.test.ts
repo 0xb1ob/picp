@@ -70,7 +70,7 @@ import {
 	type TeardownLike,
 } from "../src/integrate.ts";
 import { CiRerunStore, maybeRerunInfra } from "../src/ci-infra-rerun.ts";
-import type { CommandRunner } from "../src/merges.ts";
+import type { CommandRunner, MergeStoreOptions } from "../src/merges.ts";
 import { trackersFile } from "../src/trackers/config.ts";
 import { MergeStore } from "../src/merges.ts";
 import { RunRegistry } from "../src/runs.ts";
@@ -514,6 +514,8 @@ interface BenchOptions {
 	mainCiScope?: IntegratorOptions["mainCiScope"];
 	/** Forge PR 3: the GitLab observer, wired into both the MergeStore and the Integrator. */
 	observer?: IntegratorOptions["observer"];
+	/** #326: the MergeStore's after-merge port, as CommandPost wires it. */
+	afterRecorded?: MergeStoreOptions["afterRecorded"];
 }
 
 async function benchOf(
@@ -602,7 +604,7 @@ async function benchOf(
 		integrator(worldPatch = {}, options = {}) {
 			const world = defaultWorld(worldPatch);
 			const run = options.run ?? runnerFor(world, calls, worktree);
-			const merges = new MergeStore({ home: home.path, fleet, runs, run, ...(options.observer ? { observer: options.observer } : {}) });
+			const merges = new MergeStore({ home: home.path, fleet, runs, run, ...(options.observer ? { observer: options.observer } : {}), ...(options.afterRecorded ? { afterRecorded: options.afterRecorded } : {}) });
 			return new Integrator({
 				home: home.path,
 				fleet,
@@ -1242,6 +1244,20 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 
 	assert.match(formatIntegration(done), /integrate: done -> done/);
 	assert.match(formatIntegration(merged), /authority: repo_derived/);
+});
+
+test("#326: the after-merge port's line lands once in the integrate facts; no port leaves the tail unchanged", async (t) => {
+	const b = await benchOf(t);
+	await b.integrator().advance({ jobId: BR });
+	const seen: string[] = [];
+	const done = await b.integrator({ pr: mergedPr() }, { afterRecorded: async (receipt) => (seen.push(receipt.job_id), "after-merge deploy cp-dep1 created") }).advance({ jobId: BR });
+	assert.equal(done.next, "done");
+	assert.deepEqual(seen, [BR]);
+	assert.equal(done.record.facts.filter((fact) => fact === "after-merge deploy cp-dep1 created").length, 1, done.record.facts.join("\n"));
+	const plain = await benchOf(t);
+	await plain.integrator().advance({ jobId: BR });
+	const untouched = await plain.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	assert.ok(!untouched.record.facts.some((fact) => fact.startsWith("after-merge")));
 });
 
 test("--admin, --auto and --delete-branch are never issued, across every path in this file", async (t) => {

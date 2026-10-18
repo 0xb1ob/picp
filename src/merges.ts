@@ -81,6 +81,8 @@ export interface MergeStoreOptions {
 	/** The forge observer for a PR/MR ref; defaults to the job project's forge (src/forge-runtime.ts), gh when unresolvable. */
 	observer?: (ref: string, cwd: string) => ForgeObserver;
 	now?: () => Date;
+	/** #326: runs after every recorded or existing receipt; returns the operator line, or undefined for nothing to say. */
+	afterRecorded?: (receipt: MergeReceipt) => Promise<string | undefined>;
 }
 
 export interface RecordMergeRequest {
@@ -106,6 +108,8 @@ export interface RecordMergeResult {
 	recorded: boolean;
 	/** True when the job's `pr` receipt moved from `open` to `merged`. */
 	receipt_status_updated: boolean;
+	/** #326: the after-merge deploy outcome line, when the port had one. */
+	after_merge?: string;
 }
 
 /**
@@ -153,6 +157,23 @@ export class MergeStore {
 	 * merged PR with no merge commit all refuse and write nothing.
 	 */
 	async record(request: RecordMergeRequest): Promise<RecordMergeResult> {
+		return this.#after(await this.#record(request));
+	}
+
+	/** Every receipt result, new or existing, runs the after-merge port; its failure never fails the record. */
+	async #after(result: RecordMergeResult): Promise<RecordMergeResult> {
+		const port = this.#options.afterRecorded;
+		if (!port) return result;
+		try {
+			const line = await port(result.receipt);
+			return line ? { ...result, after_merge: line } : result;
+		} catch (error) {
+			const first = String((error as Error)?.message ?? error).split("\n")[0];
+			return { ...result, after_merge: `after-merge deploy NOT created: ${first} — cp_merged ${result.receipt.job_id} retries` };
+		}
+	}
+
+	async #record(request: RecordMergeRequest): Promise<RecordMergeResult> {
 		const { fleet } = this.#options;
 		const jobId = request.jobId;
 		const record = fleet.get(jobId);
@@ -195,6 +216,10 @@ export class MergeStore {
 	 * the same validation as `record`. No git runs: a parked job's recorded worktree may be another job's by now.
 	 */
 	async recordObserved(jobId: string, view: ChangeRequestObservation, by: string): Promise<RecordMergeResult> {
+		return this.#after(await this.#recordObserved(jobId, view, by));
+	}
+
+	async #recordObserved(jobId: string, view: ChangeRequestObservation, by: string): Promise<RecordMergeResult> {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) throw new MergeError(`no fleet record for ${jobId} — a merge receipt is a fact about a job this home dispatched`);
 		const existing = this.get(jobId);
@@ -363,6 +388,7 @@ export function formatMerge(result: RecordMergeResult): string {
 	const deleted = receipt.head_branch_deleted === true ? ", head branch deleted" : "";
 	return (
 		`${receipt.job_id} ${verb}: ${receipt.pr_url} merged as ${receipt.merge_commit_sha.slice(0, 12)} ` +
-		`(head ${receipt.head_sha.slice(0, 12)}${deleted}). cp_teardown ${receipt.job_id} can now pass without force.`
+		`(head ${receipt.head_sha.slice(0, 12)}${deleted}). cp_teardown ${receipt.job_id} can now pass without force.` +
+		(result.after_merge ? ` ${result.after_merge}` : "")
 	);
 }

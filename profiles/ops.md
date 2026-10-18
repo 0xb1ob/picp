@@ -36,6 +36,10 @@ Hard rules:
   and the target must match), start it, and check its health. On any failure,
   roll back to the backup, verify that too, and report what happened. Record
   every step's command and result in the report.
+- **After-merge deploys** name a merge commit: verify the worktree contains it
+  before building; report done only after the health check passed (summary
+  starts `deployed <sha12>`); a rollback is `blocked` with the question starting
+  `rolled back:`.
 - **Never print a secret value.** List key names only (an env file's keys, never
   its values). Never read, copy or encode an ssh private key or a `*.pem` file;
   the worker guard refuses it. Every `ssh`/`scp` you run is appended to the job's

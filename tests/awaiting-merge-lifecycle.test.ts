@@ -121,6 +121,16 @@ test("lifecycle: a team change request marks the parked job pending, a merge clo
 	assert.equal(b.touched.length, afterPark, "no gate, git or lease call after the release");
 });
 
+test("#326: the merged wake-up carries the after-merge line when the MergeStore port returns one", async (t) => {
+	const b = await parkedBench(t);
+	const merges = new MergeStore({ home: b.home, fleet: b.fleet, run: async () => assert.fail("no git"), afterRecorded: async (receipt) => `after-merge deploy cp-dep1 created for ${receipt.base_branch}` });
+	const merged = watchOf(b, { state: "MERGED", mergedAt: "2026-10-15T11:59:00Z", mergeCommit: { oid: MERGE } }, { merges });
+	assert.deepEqual((await merged.watch.sweep()).outcomes.map((outcome) => outcome.applied), ["merged"]);
+	assert.equal(b.fleet.require("cp-park").phase, "done");
+	assert.equal(merged.wakes.length, 1);
+	assert.match(merged.wakes[0]?.content ?? "", /job closed\. after-merge deploy cp-dep1 created for main$/);
+});
+
 test("lifecycle: after a park, a moved head's Actions pending then red reach the dashboard; CI alone resumes nothing", async (t) => {
 	const b = await parkedBench(t);
 	const moved = "b".repeat(40);

@@ -1107,6 +1107,7 @@ export class Integrator {
 			facts.push(`receipt written: ${paths.mergeFile(jobId)}`);
 			this.#event(jobId, "integration_advanced", { step: "record", pr_url: merge.receipt.pr_url });
 		}
+		if (merge.after_merge) facts.push(merge.after_merge);
 
 		const record = fleet.get(jobId);
 		const done = record?.phase === "done";

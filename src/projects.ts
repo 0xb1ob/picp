@@ -20,6 +20,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
+	type AfterMergeDeploy,
 	type Delivery,
 	DELIVERIES,
 	isoTimestamp,
@@ -262,6 +263,17 @@ export class ProjectRegistry {
 			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
 			const { reviewer_model: _drop, ...rest } = projects[index] as Project;
 			projects[index] = model === null ? rest : { ...rest, reviewer_model: typeof model === "string" ? model.trim() : model };
+		});
+		return this.require(name);
+	}
+
+	/** #326 opt-in: store the after-merge deploy (branch defaults to base_branch, enabled_at = now); null clears it. */
+	async setAfterMergeDeploy(name: string, deploy: { branch?: string; task: string; resources: string[] } | null): Promise<Project> {
+		await this.mutate((projects) => {
+			const index = projects.findIndex((entry) => entry.name === name);
+			if (index === -1) throw new ProjectError(`unknown project "${name}"`);
+			const { after_merge_deploy: _drop, ...rest } = projects[index] as Project;
+			projects[index] = deploy === null ? rest : { ...rest, after_merge_deploy: checkedDeploy(name, rest.base_branch, deploy, this.#now()) };
 		});
 		return this.require(name);
 	}
@@ -539,6 +551,7 @@ export function formatProjects(
 			`    ${project.clone_url}${project.base_branch ? `  base=${project.base_branch}` : ""}`,
 			...(project.reviewer_model ? [`    reviewer model: ${project.reviewer_model}`] : []),
 			...(project.forge ? [`    forge: ${formatForge(project.forge)}`] : []),
+			...(project.after_merge_deploy ? [`    after-merge deploy: ${formatAfterMergeDeploy(project.after_merge_deploy)}`] : []),
 		);
 	}
 	return lines.join("\n");
@@ -568,4 +581,24 @@ export function formatEnsured(result: EnsureCloneResult, mergeNote?: string): st
 
 function checkMergePolicy(policy: unknown): void {
 	if (policy !== "repo" && policy !== "human_handoff") throw new ProjectError(`unknown merge policy "${String(policy)}" — repo or human_handoff`);
+}
+
+/** `<branch> · resource:<r>,… · since <enabled_at>` for cp_project show and the setter's reply. */
+export function formatAfterMergeDeploy(deploy: AfterMergeDeploy): string {
+	return `${deploy.branch} · ${deploy.resources.map((r) => `resource:${r}`).join(",")} · since ${deploy.enabled_at}`;
+}
+
+const RESOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+function checkedDeploy(name: string, baseBranch: string | undefined, deploy: { branch?: string; task: string; resources: string[] }, now: Date): AfterMergeDeploy {
+	const branch = (typeof deploy.branch === "string" ? deploy.branch.trim() : "") || baseBranch;
+	if (!branch) throw new ProjectError(`project ${name}: name branch — the project records no base_branch to default to`);
+	if (branch.length > 200) throw new ProjectError(`project ${name}: deploy branch is over 200 characters`);
+	const task = typeof deploy.task === "string" ? deploy.task.trim() : "";
+	if (!task || task.length > 4000) throw new ProjectError(`project ${name}: deploy task must be 1–4000 characters (the standing deploy instruction)`);
+	const resources = Array.isArray(deploy.resources) ? deploy.resources.map((r) => (typeof r === "string" ? r.trim() : "")) : [];
+	if (resources.length < 1 || resources.length > 8) throw new ProjectError(`project ${name}: deploy needs 1–8 resources — they serialize deploys via resource:<name> labels`);
+	const bad = resources.filter((r, i) => !RESOURCE_NAME.test(r) || resources.indexOf(r) !== i);
+	if (bad.length > 0) throw new ProjectError(`project ${name}: invalid or duplicate resource name(s): ${bad.join(", ") || "(empty)"} — ${RESOURCE_NAME.source}`);
+	return { branch, task, resources, enabled_at: isoTimestamp(now) };
 }

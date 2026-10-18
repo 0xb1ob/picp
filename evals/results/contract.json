@@ -9,7 +9,7 @@
     "prompts": {
       "profiles/gate-reviewer.md": "sha256:56fea35c51e770a6880061b49da7f4e1ddf8916d4da00488dcea49858ea60194",
       "profiles/implementer.md": "sha256:15c7a8a9794b2869d31c2c8124b3b6cdfd859d15d48201d8631acd9a6a963a23",
-      "profiles/ops.md": "sha256:ebb6be1c10ee32c05c45efd50a13b7c4e479c4c8599dcc29fb52b0bb84d9ccdf",
+      "profiles/ops.md": "sha256:f25824650d5fda0324104ab255690c6c7b9eb04aeed5d910576f23434f954af1",
       "profiles/planner.md": "sha256:76198d695a70a7dbaa3ae7c7767e0dbbe726673d8dcbd4023831f324f9dd5cfe",
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-ops.md": "sha256:bcdf5f310a27eef18e7fa0069ea6f2b500e8892fdd4755510cc03e7411732f5e",

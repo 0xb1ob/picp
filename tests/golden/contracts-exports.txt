@@ -27,6 +27,9 @@ AWAITING_STATES	value	e3568d67dff14b13	ce3510844e3ccc1d
 AWAITING_SUBJECT_MAX_CHARS	value	3ae1776dd2bc070a	27badc983df1780b
 AWAITING_TYPES	value	406dfaaac88ddcc7	20c803da5229bd1c
 AWAITING_TYPE_OPTION	value	a67767b38295f12a	fa879879d684573c
+AfterMergeDeploy	type	e3b044f1d85dfd15	-
+AfterMergeRecord	type	3ed97f774c2b8ce7	-
+AfterMergeRecordSchema	value	590e253edcfe7d74	a47bc3c70003c7d1
 AnswerCardChannel	type	afaa456830579d52	-
 AnswerCardChannelSchema	value	537bcba157c28c98	4344efaa6ae90b88
 AnswerCardDelivery	type	32bd99df28eee814	-
@@ -87,7 +90,7 @@ CI_WATCH_IDLE_MULTIPLIER	value	cbe2649ca1afe1cc	ef2d127de37b942b
 CI_WATCH_INTERVAL_MS	value	7167448c735abb91	d55d01d0341ed0ba
 CI_WATCH_KEEP_ANNOUNCED	value	565599989d7b8406	1a6562590ef19d10
 CI_WATCH_MAX_BACKOFF_MS	value	6ecd5f312ec3ee6a	d1d282f04815e254
-CP_EVENT_KINDS	value	1339b7a95dfb58ba	eaa449dab2d2a85f
+CP_EVENT_KINDS	value	df94f451202b0da4	1f008892720716a0
 Checkpoint	type	d1c462e0c6aa9937	-
 CheckpointDecision	type	1a7bb07fade60614	-
 CheckpointDecisionSchema	value	e4ce39719c2509de	fc45a9911b41c900
@@ -114,7 +117,7 @@ CiWatchJobSchema	value	bdb72f0e135d76ef	898debb712735da7
 Confidence	type	b626807470740910	-
 ContractError	class	e6cbe92ed1ab171c	e200d9d8db2fc02b
 CpEventKind	type	d73f96cfd2161fd9	-
-CpEventKindSchema	value	28b4ba70f9a2809b	e55ab26f6a981ed3
+CpEventKindSchema	value	28b4ba70f9a2809b	058472dac6863c94
 CurrentToolSchema	value	8ac5ec202fe7c032	cbcc4590e0baed94
 DEATH_MESSAGE_TYPE	value	0bd493782cc0def1	210bdf086fd1826b
 DECISION_CONTEXT_LINE_MAX_CHARS	value	5a616797cd2968ab	a512db2741cd2069
@@ -411,8 +414,8 @@ ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
 Project	type	7e05ebef591d0321	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
-ProjectRegistrySchema	value	1cc8877e8fc45666	afc4ca351cd62eb2
-ProjectSchema	value	60cb7d7b03857f2c	ebc6a323a86b8b12
+ProjectRegistrySchema	value	1cc8877e8fc45666	e25734dc7f2b1c6f
+ProjectSchema	value	ac47184280c64242	96e2fed803870cf3
 QUALITY_LENSES	value	9d9728612bd80e96	da1ad1cd9d71c6cc
 QUALITY_PANEL_SLOT	value	9dac97ccd7bc9dfb	e80fdef4566bcfb0
 QUESTION_ANSWER_MAX_CHARS	value	72be5ce6a6f549aa	40510175845988f1
@@ -682,7 +685,7 @@ neverCommitFor	value	6e9ea76ef482d253	1080a2a38c3665e6
 normalizeLegacyRoles	value	1ab16b55d306df9c	ca1e9f09ba9ac2b1
 parseCheckpointAwaitingId	value	7cb36ab1c05fe202	49477f7f3c577cb7
 parseCheckpointFileName	value	80a0472e39bfbed2	6b6eb72177de157a
-paths	value	f98c40aa9c1a7ff6	95cc93df2a3f66cb
+paths	value	d772c172fe483d36	65f0bad281e79d59
 planSummaryErrors	value	813cff175b953b5d	82dd7d8bde478008
 plannerBlockedRoundAction	value	f1df9ec96df23256	fe4583526a990d23
 runtimeDirFor	value	9c6283c46ec843ec	65500d2fc48056d8
