@@ -181,7 +181,7 @@ run `cp_review` on that head, never re-review an unchanged one; it's evidence, n
 
 Branch on `next`: `advance` (call again), `wait` (CI unfinished, call later,
 never poll), `review` (run `cp_review`), `resolve` (implementer promoted,
-wait), `retry` (operational fault, nothing mutated), `surface` (human
+wait), `retry` (operational fault; landed steps stand, the next call resumes), `surface` (human
 decision or repo refuses — relay, don't retry), `done` (merged, closed).
 `cp_review` runs only when the head has no passing review yet.
 **Merge authority is the repository's, per PR and per head sha.**

@@ -123,7 +123,9 @@ const NEXT_HINT: Readonly<Record<string, string>> = Object.freeze({
 	done: "merged, torn down and closed without a parent turn.",
 	resolve: "the job's own implementer was promoted to fix it; its next envelope resumes this. Wait — never re-dispatch.",
 	surface: "stopped on a human or repository decision: relay it. Nothing retries this automatically.",
-	retry: "an operational fault; nothing was mutated and nothing retries automatically. Call cp_integrate once the cause clears.",
+	retry:
+		"an operational fault; nothing retries automatically. Any step the reason above names as done stands — once the cause " +
+		"clears, call cp_integrate: it re-reads the facts and resumes, never starting over.",
 });
 
 /** Which source owns a trigger's head: the watcher for a GitHub fact, the fleet's reported head otherwise. */

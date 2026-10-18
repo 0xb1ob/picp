@@ -220,8 +220,8 @@ export const IntegrationStepSchema = StringEnum([...INTEGRATION_STEPS]);
  *  | `wait` | CI, an integration hold, or the review merge deadline is pending |
  *  | `review` | no passing `cp_review` on this head; run it, never re-review an unchanged one |
  *  | `resolve` | the job's own implementer was promoted; wait for its report |
- *  | `retry` | an operational fault (gh 403, rate limit); nothing was mutated |
- *  | `surface` | a human decision is required; nothing was mutated |
+ *  | `retry` | an operational fault (gh 403, rate limit); a step that already landed stands, the next call resumes |
+ *  | `surface` | a human decision is required; a step that already landed stands |
  *  | `done` | the delivery landed, was recorded, torn down and closed |
  */
 export const INTEGRATION_NEXT = ["advance", "wait", "review", "resolve", "retry", "surface", "done"] as const;
