@@ -45,6 +45,7 @@ import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
 import { assertNotDraining } from "./drain.ts";
 import { inferredRiskGate, recordedProvenance, recordedRisk } from "./risk-warning.ts";
+import { OPS_PROFILE_NAME } from "./ops-jobs.ts";
 import { rebuildStatus } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
 import { decideReopen, reopenEnvelopeSlot, type Supersession, type TaskUpdate, updateFrozenTask } from "./supersede.ts";
@@ -358,7 +359,7 @@ export class Sender {
 			const gate = inferredRiskGate({
 				mandates: this.#options.mandates,
 				jobs: fleet.read().jobs,
-				job: { jobId: request.jobId, project: record.project, kind: record.kind, pathHints: [resolvedTask.forInference] },
+				job: { jobId: request.jobId, project: record.project, kind: record.kind, pathHints: [resolvedTask.forInference], ops: record.worker.profile === OPS_PROFILE_NAME },
 				routed: routing?.risk === "high" ? "high" : (assessed.risk ?? "low"),
 				routedFrom,
 				...(recorded ? { recorded: recorded.risk, recordedFrom: recorded.from } : {}),

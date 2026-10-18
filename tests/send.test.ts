@@ -668,6 +668,7 @@ test("risk:high under ask_on refuses a cp_send promotion into a ship brief; an o
 		spend_cap: { usd: 10, tokens: 100_000 },
 		job_cap: 10,
 		ask_on: ["risk:high"],
+		channel: "bridge", // #321: an operator-chat grant warns on a classify-only high; a bridge grant still gates
 	});
 	const sender = new Sender({ fleet: b.fleet, manager: b.manager, runs: b.runs, home: b.home, mandates });
 
@@ -782,6 +783,20 @@ test("H6: a cp_send promotion whose risk:high is inferred-only against a recorde
 	await setRouting({ risk: "high", inferred: false, provenance: { scope: "defaulted", risk: "explicit" } });
 	await assert.rejects(() => sender.send({ jobId: b.jobId, message: "re-brief", task: "Delete the stale fixture." }), /risk:high under ask_on/);
 	assert.equal(new EscalationStore({ home: b.home }).open()[0]?.kind, "risk_high_irreversible");
+});
+
+// #321: a promotion shares the dispatch's decision: a classify-only high on an operator-chat grant warns with its words.
+test("#321: a cp_send promotion with a classify-only high under an operator-chat grant warns; a hard stop still escalates", { timeout: 120_000 }, async (t) => {
+	const b = await bench(t, [{ kind: "text", text: "ok" }, { kind: "text", text: "ok" }]);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["send"], objective: "ship the cleanup", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const sender = new Sender({ fleet: b.fleet, manager: b.manager, runs: b.runs, home: b.home, mandates });
+	const result = await sender.send({ jobId: b.jobId, message: "re-brief", task: "Delete the stale fixture." });
+	assert.equal(result.receipt, "delivered");
+	assert.match(result.risk_warning ?? "", /risk source: classify \(word: delete\); grant md-\w+ was issued from operator chat/);
+	assert.equal(new EscalationStore({ home: b.home }).open().length, 0, "nothing was escalated");
+	await b.worker.waitForSettled(60_000);
+	await assert.rejects(() => sender.send({ jobId: b.jobId, message: "re-brief", task: "Delete the fixture, then force push the branch." }), /risk:high under ask_on/);
 });
 
 // riskkw-f10: the promoted task's own header can declare its risk.
