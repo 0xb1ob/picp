@@ -22,6 +22,7 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  assert.ok(desktop>0); assert.equal(css.includes("136px"),false,"the corner clock is gone, so the heading no longer dodges it");
  assert.match(css.slice(0,desktop),/\.session-heading \{ display: none; padding: 0 16px 12px;/);
  assert.match(css.slice(desktop),/\.session-heading \{[^}]*min-height: 48px;[^}]*padding: 0 84px 0 16px;/);
+ assert.match(css.slice(desktop),/\.sessions \.page-header-end > \.shell-live \{ font-size: 0; \}/,"only the status dot sits in the 84px, never a word over Tools N");
  assert.doesNotMatch(css,/\.session-tools-toggle[^{]*\{[^}]*display:\s*none/,"the tool-call toggle is never display:none, including at 1440");
  const stamped="2026-09-27T08:24:05Z", olderAt="2026-09-26T18:00:00Z";
  const when=(at:string,current:boolean)=>{ const label=new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(at)); return current?`${label} · current`:label; };
@@ -31,8 +32,8 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  ]});
  assert.ok(picked.includes(`title="newest.jsonl"`) && picked.includes(when(stamped,true)) && picked.includes(when(olderAt,false)));
  assert.match(picked,/class="session-project">picp</);
- assert.match(picked,/class="session-bridge-line">bridge woke cp-x · owner observed</);
- assert.match(picked,/class="session-bridge-details"/); assert.doesNotMatch(picked,/session-bridge-details" open/);
+ assert.match(picked,/class="session-bridge-chip">bridge<\/span><span class="session-bridge-what">woke <a href="#job\/cp-x">cp-x<\/a><\/span><small class="session-bridge-receipt">· owner observed<\/small>/);
+ assert.match(picked,/<button type="button" class="session-notice-line" aria-expanded="false" aria-label="Show notice">notice /); assert.doesNotMatch(picked,/Second line/);
  const doc=parseHTML(`<body>${picked}</body>`).document;
  assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Sessions","the desktop title row stays inside the direct-child screen");
  assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator ↔ you");

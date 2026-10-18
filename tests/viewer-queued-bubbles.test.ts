@@ -358,6 +358,7 @@ test("picp-96n: a Not confirmed failure links to its own recorded session, else 
  await s.show([],"v1",false,{operator_session:"B.jsonl"});
  assert.deepEqual(evidence(),[["lost a","#sessions?view=you&transcript=1&session=A.jsonl",false],["lost b",null,true],["lost c",null,false]],
   "the recorded target while viewing the current session; no target is never the current one; Not sent gets neither");
+ assert.match(s.root.querySelectorAll(".session-pending")[1]!.textContent!,/Its session is not available here;/,"an unlisted or unrecorded session file is unavailable, not unrecorded");
  await s.show([],"v2",true,{operator_session:"A.jsonl"});
  assert.deepEqual(evidence()[0],["lost a",null,true],"viewing its own session, older than the loaded window: no self-link, says so");
  assert.equal(s.posted.length,0,"no link or render ever posts a request");
