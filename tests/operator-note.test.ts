@@ -26,7 +26,7 @@ test("the operator note carries both ask/decide lists verbatim", () => {
 	assert.ok(OPERATOR_NOTE.includes(OPERATOR_DECIDE_LIST));
 	// Every escalation kind the ticket names must appear as a distinct item.
 	for (const item of [
-		"mandate creation",
+		"mandate creation for work the human did not ask for",
 		"product ambiguity",
 		"scope expansion",
 		"risk high/irreversible",
@@ -50,6 +50,15 @@ test("the operator note carries both ask/decide lists verbatim", () => {
 	]) {
 		assert.ok(OPERATOR_DECIDE_LIST.includes(item), `decide list missing "${item}"`);
 	}
+});
+
+// #322: an owner-reported defect or asked-for feature was carded "Fix now?" because the list asked on every mandate
+// creation. The grant clause and the kept card (ambiguity, research-to-build) must both reach the main LLM.
+test("a named defect or feature is the grant; ambiguous and research-to-build asks keep the card", () => {
+	const asks = OPERATOR_NOTE.split("## Ask vs decide")[1]?.split("## Plan review")[0] ?? "";
+	assert.ok(asks.includes("a message naming a defect or feature in a registered project is the grant"));
+	assert.ok(asks.includes("an ambiguous request or a research-to-build choice still asks"));
+	assert.equal(OPERATOR_ASK_LIST.startsWith("mandate creation, "), false, "bare mandate creation is an ask again");
 });
 
 test("the note never mentions fleet tools or state/ as things to call or touch", () => {

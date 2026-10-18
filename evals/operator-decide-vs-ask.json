@@ -50,6 +50,20 @@
       "kind": "scope_expansion",
       "expect": "ask",
       "why": "Work outside what the mandate named is exactly what scope expansion means."
+    },
+    {
+      "id": "operator-mandate-creation-owner-reported-defect",
+      "kind": "mandate_creation",
+      "in_scope": true,
+      "expect": "decide",
+      "why": "\"The stuck 'Delivered · waiting for transcript' bubble in picp\" names a defect in a registered project: the message is the grant; issue it and echo it, no \"Fix now?\" card (#322)."
+    },
+    {
+      "id": "operator-mandate-creation-unasked-proposal",
+      "kind": "mandate_creation",
+      "in_scope": false,
+      "expect": "ask",
+      "why": "Work the human did not ask for (a proposal such as the host-ops delegation changes, or a research outcome's build slices) keeps the card."
     }
   ]
 }
