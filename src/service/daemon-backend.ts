@@ -403,7 +403,7 @@ function daemonFinding(run: FindRun, home: string, paths: DaemonPaths, config: D
 	const parent = runtime?.units.parent;
 	if (parent?.state === "failed") {
 		return parent.result === "exit-code"
-			? { check, severity: "warn", what: "cp-daemon: the parent supervisor stopped: no parent model (exit 78)", fix: "pin a model: cp-install --parent-model <provider/model> --force" }
+			? { check, severity: "warn", what: "cp-daemon: the parent supervisor stopped: no parent model (exit 78)", fix: "pin a parent model: dashboard Settings → Parent model, then cp-daemon reload; or cp-install --parent-model <provider/model> --force; or cp_parent start from the operator session" }
 			: { check, severity: "warn", what: `cp-daemon: the parent supervisor is failed (${parent.result ?? "failed"})${parent.result === "start-limit-hit" ? " — a crash loop" : ""}`, fix: "cp-daemon log, then cp-daemon reload" };
 	}
 	const viewer = runtime?.units.viewer;
