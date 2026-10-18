@@ -4,6 +4,11 @@
  */
 import { obj, str, type Json } from "./sessions.ts";
 import { timestamp } from "./overview-read.ts";
+import type { SessionEntry, StatsParentWindow } from "./api-types.ts";
+
+/** Mirrors of `../wakeups.ts` (the viewer may not import it); tests/stats-wakeup-drift.test.ts pins them equal. */
+export const STALE_WAKEUP_HEADLINE = "STALE WAKE-UP — do not act on this";
+export const FACT_WAKE_TYPES = ["cp-envelope", "cp-answered", "cp-wedged", "cp-unreported", "cp-ci", "cp-verdict", "cp-bound", "cp-death", "cp-recovery"];
 
 export const DAY_MS = 86_400_000;
 export const MAX_CUSTOM_SPAN_MS = 31 * DAY_MS;
@@ -65,6 +70,49 @@ export function median(values: readonly number[]): number | null {
  if (!values.length) return null;
  const sorted = [...values].sort((a, b) => a - b); const mid = sorted.length >> 1;
  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+/** Nearest-rank percentile (p in (0, 1]); null for no values. */
+export function percentile(values: readonly number[], p: number): number | null {
+ if (!values.length) return null;
+ const sorted = [...values].sort((a, b) => a - b);
+ return sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)]!;
+}
+
+const FACT_WAKES = new Set(FACT_WAKE_TYPES);
+export interface ParentTurn { at: number; reply_seconds: number; wasted: boolean; cost: number }
+/**
+ * Turns of a parsed parent transcript: one opens on an owner message or a displayed `cp-*` wake (queued wakes merge).
+ * Wasted = only stale or repeated wakes, or no tool call and no reply text; unanswered and pre-wake entries drop out.
+ */
+export function parentTurns(entries: readonly SessionEntry[]): ParentTurn[] {
+ const turns: ParentTurn[] = []; const seen = new Set<string>();
+ let open: { at: number; reply?: number; acted: boolean; repeat: boolean; cost: number } | undefined;
+ const close = () => { if (open?.reply !== undefined) turns.push({ at: open.at, reply_seconds: Math.max(0, open.reply - open.at) / 1000, wasted: open.repeat || !open.acted, cost: open.cost }); };
+ for (const e of entries) {
+  const at = Date.parse(e.at); if (Number.isNaN(at)) continue;
+  const wake = e.kind === "system" && e.who.startsWith("cp-"), owner = (e.kind === "say" || e.kind === "via") && e.who === "Operator → parent";
+  if (wake || owner) {
+   if (!open || open.reply !== undefined) { close(); open = { at, acted: false, repeat: wake, cost: 0 }; }
+   const key = `${e.who}\n${e.text}`, fact = wake && FACT_WAKES.has(e.who);
+   // A turn is a repeat only when every wake in it is stale or an already-seen fact; an owner message always counts.
+   open.repeat = open.repeat && wake && (e.text.includes(STALE_WAKEUP_HEADLINE) || (fact && seen.has(key)));
+   if (fact) seen.add(key);
+   continue;
+  }
+  if (!open) continue;
+  const assistant = e.who === "Parent → operator" || (e.kind === "tool" && e.who === "assistant");
+  if (assistant) { open.reply ??= at; if (e.name !== "thinking") open.acted = true; }
+  open.cost += e.cost_usd ?? 0;
+ }
+ close();
+ return turns;
+}
+
+/** Turns started in [to - days, to): counts, nearest-rank p50/p90 reply, and spend of all and of wasted turns. */
+export function parentWindow(turns: readonly ParentTurn[], to: number, days: number): StatsParentWindow {
+ const inside = turns.filter(t => t.at >= to - days * DAY_MS && t.at < to); const wasted = inside.filter(t => t.wasted);
+ const replies = inside.map(t => t.reply_seconds); const usd = (set: ParentTurn[]) => set.reduce((a, t) => a + t.cost, 0);
+ return { days, turns: inside.length, wasted_turns: wasted.length, reply_p50_seconds: percentile(replies, 0.5), reply_p90_seconds: percentile(replies, 0.9), spend_usd: usd(inside), wasted_usd: usd(wasted) };
 }
 
 /** Merged = merge receipt; closed without PR = done and not merged; failed (and anything unfinished) is neither. */

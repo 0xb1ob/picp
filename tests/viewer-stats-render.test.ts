@@ -7,8 +7,8 @@ import { REPO_ROOT } from "./harness/index.ts";
 import type { StatsResponse } from "../src/viewer/api-types.ts";
 
 async function load() {
- const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv, statsApiUrl} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv, statsApiUrl};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
- return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string; statsApiUrl:(q:string,tz:string|undefined)=>string};
+ const built = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Stats, exportCsv, latency, statsApiUrl} from "./viewer-app/screens/Stats.tsx"; export const draw=(data,query)=>render(h(Stats,{data,query})); export {exportCsv, latency, statsApiUrl};',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
+ return await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles![0]!.contents).toString("base64")}`) as {draw:(d:StatsResponse,q:string)=>string; exportCsv:(r:StatsResponse["mandates"])=>string; latency:(s:number|null)=>string; statsApiUrl:(q:string,tz:string|undefined)=>string};
 }
 const at = "2026-01-02T00:00:00.000Z";
 const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
@@ -20,6 +20,7 @@ const data = (over: Partial<StatsResponse> = {}): StatsResponse => ({
  tokens_by_model: {models:["a"],buckets:[{start:"2026-01-01T00:00:00.000Z",end:"2026-01-01T01:00:00.000Z",tokens:{a:5}}]},
  spend_by_model: [{model:"a",usd:1.5}], decisions: {for_you:1,by_you:2,worth:0},
  mandates: [{id:"unassigned",objective:null,status:null,jobs:1,spend_usd:null,spend_cap_usd:null,tokens:null,token_cap:null,time_left_seconds:null},{id:"m1",objective:'=Ship, "it"',status:"active",jobs:2,spend_usd:null,spend_cap_usd:5,tokens:null,token_cap:null,time_left_seconds:null}],
+ parent: [{days:7,turns:4,wasted_turns:1,reply_p50_seconds:42,reply_p90_seconds:150,spend_usd:2,wasted_usd:0.5},{days:30,turns:0,wasted_turns:0,reply_p50_seconds:null,reply_p90_seconds:null,spend_usd:0,wasted_usd:0}],
  ...over,
 });
 
@@ -61,6 +62,19 @@ test("Jobs finished is a dash when either side is unknown, never missing-as-zero
  const {draw} = await load();
  const value = (merged: number | null, closed: number | null) => /<h2>Jobs finished<\/h2><strong>([^<]*)<\/strong>/.exec(draw(data({jobs_finished:{merged,closed,buckets:[]}}),"range=24h"))![1];
  assert.equal(value(null,5),"-"); assert.equal(value(4,null),"-"); assert.equal(value(null,null),"-"); assert.equal(value(4,5),"9");
+});
+
+test("Parent panel shows 7/30-day reply percentiles and wasted shares with their denominators; unknown is a dash", async () => {
+ const {draw, latency} = await load();
+ const html = draw(data(),"range=24h");
+ const panel = /<section class="stats-panel stats-parent"[\s\S]*?<\/section>/.exec(html)![0];
+ const cells = (days: number) => [...new RegExp(`<h3>${days} days</h3><dl>([\\s\\S]*?)</dl>`).exec(panel)![1]!.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map(m => `${m[1]}=${m[2]}`);
+ // All five figures render for each window as stacked label/value pairs (amendment 1: none may drop off at 390 px).
+ assert.deepEqual(cells(7),["Turns=4","Reply p50=42s","Reply p90=2m 30s","Wasted turns=25% · 1 of 4","Wasted $=25% · $0.50 of $2.00"]);
+ assert.deepEqual(cells(30),["Turns=0","Reply p50=-","Reply p90=-","Wasted turns=-","Wasted $=-"],"no turns is a dash, never 0%");
+ assert.match(panel,/title="[^"]*Wasted turns = wasted \/ all answered turns; wasted \$ = recorded cost of wasted turns \/ recorded cost of all turns/);
+ assert.match(draw(data({parent:null}),"range=24h"),/aria-label="Parent">[\s\S]*?<p class="stats-none">-<\/p>/);
+ assert.deepEqual([null,42.4,59.6,92,599,600,4000].map(latency),["-","42s","1m 0s","1m 32s","9m 59s","10m","1h 6m"],"under 10 minutes keeps seconds");
 });
 
 test("CSV export escapes quotes and formula starts and leaves missing values empty", async () => {

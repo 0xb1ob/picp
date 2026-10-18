@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
@@ -218,4 +218,33 @@ test("jobs finished long before the window do not change any figure", t => {
  put(join(LAYOUT.runs, "cp-ancient/status.json"), { model: "x/y", usage: { cost_usd: 999, input: 9, output: 9, total_tokens: 18 } });
  assert.equal(JSON.stringify({ ...get(), generated_at: 0 }), before);
  void state;
+});
+
+test("Parent panel: turns from the live parent file and its archives; reply p50/p90 and wasted shares by turns and by $", t => {
+ const { home, put, get } = fixture(); t.after(() => home.cleanup());
+ const msg = (ts: string, role: string, content: unknown, cost?: number) => ({ type: "message", timestamp: ts, message: { role, content, ...(cost === undefined ? {} : { usage: { cost: { total: cost } } }) } });
+ const wake = (ts: string, customType: string, content: string) => ({ type: "custom_message", timestamp: ts, customType, content, display: true });
+ const tool = [{ type: "toolCall", id: "c1", name: "cp_next", arguments: {} }], think = [{ type: "thinking", thinking: "nothing to do" }];
+ const at = (hms: string, day = "2026-10-08") => `${day}T${hms}Z`;
+ const jsonl = (records: unknown[]) => records.map(r => JSON.stringify(r)).join("\n") + "\n";
+ // Five answered turns today: acted, text-only (acted), repeated identical cp-ci (wasted), stale wake that still
+ // called a tool (wasted), a nudge answered with thinking only (wasted); the last wake has no reply yet and is left out.
+ put(join(LAYOUT.sessions, "cp-parent.jsonl"), jsonl([
+  msg(at("10:00:00"), "user", "status?"), msg(at("10:00:30"), "assistant", tool, 1), msg(at("10:00:31"), "toolResult", "ok"),
+  wake(at("10:10:00"), "cp-ci", "CI green for cp-x"), msg(at("10:11:00"), "assistant", [{ type: "text", text: "noted" }], 0.5),
+  wake(at("10:20:00"), "cp-ci", "CI green for cp-x"), msg(at("10:20:10"), "assistant", tool, 0.25),
+  wake(at("10:30:00"), "cp-verdict", `STALE WAKE-UP — do not act on this\nold verdict`), msg(at("10:30:05"), "assistant", tool, 0.25),
+  wake(at("10:40:00"), "cp-wakeup-nudge", "1 fleet notice(s) arrived"), msg(at("10:40:20"), "assistant", think, 0.5),
+  wake(at("11:00:00"), "cp-ci", "CI red for cp-y"),
+ ]));
+ put(join(LAYOUT.sessions, "cp-parent-1760000000000-abcdef12.jsonl"), jsonl([msg(at("09:00:00", "2026-09-18"), "user", "old"), msg(at("09:01:40", "2026-09-18"), "assistant", tool, 1)]));
+ put(join(LAYOUT.sessions, "2026-10-08T00-00-00_worker.jsonl"), jsonl([msg(at("10:00:00"), "user", "brief"), msg(at("10:00:01"), "assistant", think, 50)]));
+ utimesSync(join(home.path, LAYOUT.sessions, "cp-parent-1760000000000-abcdef12.jsonl"), new Date(at("09:02:00", "2026-09-18")), new Date(at("09:02:00", "2026-09-18")));
+ utimesSync(join(home.path, LAYOUT.sessions, "cp-parent.jsonl"), new Date(at("11:00:00")), new Date(at("11:00:00")));
+ assert.deepEqual(get().parent, [
+  { days: 7, turns: 5, wasted_turns: 3, reply_p50_seconds: 20, reply_p90_seconds: 60, spend_usd: 2.5, wasted_usd: 1 },
+  { days: 30, turns: 6, wasted_turns: 3, reply_p50_seconds: 20, reply_p90_seconds: 100, spend_usd: 3.5, wasted_usd: 1 },
+ ]);
+ const bare = fixture(); t.after(() => bare.home.cleanup());
+ assert.equal(bare.get().parent, null, "no parent session file is unknown, not zero");
 });

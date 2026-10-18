@@ -73,9 +73,9 @@ function stampProjects(entries: SessionEntry[], names: Set<string>): void {
   e.project = m[1]!; e.text = e.text.slice(m[0].length);
  }
 }
-function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}): {entries:SessionEntry[];truncated:boolean} {
- const start = startOffset(file,undefined,BACKLOG_BYTES);
- const lines = readLines(file,start.offset,BACKLOG_BYTES);
+function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean} {
+ const start = startOffset(file,undefined,backlog);
+ const lines = readLines(file,start.offset,backlog);
  const entries: SessionEntry[] = [];
  const calls = new Map<string,SessionEntry>();
  const askCalls = new Set<string>(); // cp_parent ask calls: their result names the ask id
@@ -106,6 +106,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
   if (!message || record.type !== "message") continue;
   const role = str(message.role) ?? "message";
   if (role === "assistant") {
+   const first = entries.length, cost = num(obj(obj(message.usage)?.cost)?.total);
    for (const [i,block] of (Array.isArray(message.content) ? message.content : []).entries()) {
     const b = obj(block); if (!b) continue;
     if (b.type === "text" && str(b.text)) entries.push(entry(`${base}-${i}`,at,"say",sides.assistant,String(b.text)));
@@ -118,6 +119,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
     }
    }
    if (str(message.errorMessage)) { const e=entry(`${base}-error`,at,"say","Error",String(message.errorMessage)); e.failed=true; entries.push(e); }
+   if (cost !== undefined && entries[first]) entries[first]!.cost_usd = cost;
   } else if (role === "toolResult") {
    const text=textOf(message.content), callId=str(message.toolCallId), call=callId ? calls.get(callId) : undefined;
    const e=call ?? entry(base,at,"tool",role,"");
@@ -155,6 +157,10 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  for (const e of entries) if (e.files) e.file_metadata=Object.fromEntries(e.files.flatMap(id=>uploadMetadata.has(id) ? [[id,uploadMetadata.get(id)!]] : []));
  if (sides === SIDES.you) stampProjects(entries, projectNames(state));
  return {entries,truncated:start.offset>0};
+}
+/** The parent session file as the Sessions tier parses it, with a caller-sized tail (Stats reads whole archives). */
+export function parentTranscript(state: ViewerState, file: string, backlog: number): {entries:SessionEntry[];truncated:boolean} {
+ return parseTranscript(state,file,SIDES.parent,backlog);
 }
 
 /** A cp-bridge relay's trailing `paths:` block (formatBridgeRelay in src/cp-bridge.ts). */
