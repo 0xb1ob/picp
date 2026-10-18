@@ -119,10 +119,24 @@ test("the attempt counter is per (job, class) and survives a fresh read", (t) =>
 // Briefs name what is already true, never redo
 // ---------------------------------------------------------------------------
 
-test("the revive brief tells the worker to continue, not redo", () => {
+const BLIND_RETRY = /retry it|treat it as failed|idempotent|safe to retry/i;
+
+test("the revive brief with no detected call still says a 'No result provided' error is synthetic", () => {
 	const text = recoveryReviveBriefText(JOB_ID, { class: "crash", message: "exit 1", at: isoTimestamp() });
 	assert.match(text, /revived on this same session/);
 	assert.match(text, /do not redo work/);
+	assert.match(text, /No result provided/);
+	assert.doesNotMatch(text, BLIND_RETRY);
+});
+
+test("the revive brief names the interrupted call and asks for its effect to be checked, not a blind retry", () => {
+	const cause: Failure = { class: "crash", message: "exit 1", at: isoTimestamp() };
+	const text = recoveryReviveBriefText(JOB_ID, cause, { name: "bash", toolCallId: "call_9" });
+	assert.match(text, /bash/);
+	assert.match(text, /call_9/);
+	assert.match(text, /does not say whether it ran/);
+	assert.match(text, /unresolved in report_result/);
+	assert.doesNotMatch(text, BLIND_RETRY);
 });
 
 test("the redispatch brief carries the on-disk evidence", () => {
@@ -261,6 +275,23 @@ test("cp-a9fq: a teardown in flight wins; recovery stands down without spending 
 	assert.equal(claims.get(JOB_ID), "recovery", "claimed synchronously, before the first await");
 	assert.equal((await running).action, "revived");
 	assert.equal(claims.has(JOB_ID), false, "released once settled");
+});
+
+// picp-dwp: revival already knows the dangling call; the first brief names it by name and id,
+// and never carries its arguments (a synthetic secret here must not leak into the sent text).
+test("a revive after a cut-off tool call names that call in the brief, never its arguments", async (t) => {
+	const b = await bench(t);
+	b.reviver.revive = async (jobId) => ({
+		job_id: jobId,
+		pid: 4242,
+		session_file: "s.jsonl",
+		model: "mock/model",
+		worktreeDirty: false,
+		interruptedTool: { name: "bash", arguments: { command: "curl -H 'Authorization: Bearer sk-SYNTHETIC' x" }, toolCallId: "call_9" },
+	});
+	assert.equal((await b.recovery.onDeath(JOB_ID, CRASH())).action, "revived");
+	assert.match(b.sender.sent[0] ?? "", /bash \(call id call_9\)/);
+	assert.doesNotMatch(b.sender.sent[0] ?? "", /sk-SYNTHETIC|Authorization/);
 });
 
 // ---------------------------------------------------------------------------
