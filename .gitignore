@@ -1,5 +1,7 @@
 # Everything home-local (data, state, projects, operator) lives here (docs/storage.md).
 .pi-command-post/
+# br's frozen archive; read-only to command-post.
+.beads/
 node_modules/
 dist/
 .DS_Store
