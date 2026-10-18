@@ -311,6 +311,21 @@ test("quick replies: a chip click holds them through a later composer send, a re
 	assert.doesNotMatch(html(closed, undefined, control()), /session-replies/, "the journal closing the ask removes them");
 });
 
+test("quick replies: a chip answer that fails after a composer send replaced `delivery` re-enables the chips", async t => {
+	// Regression: `mine` was null after the composer send, so `clicked` never reset and the chips stayed disabled.
+	const s = stage(t), ask = awaiting("ask-aaaa");
+	const control = (over: Partial<ControlView> = {}): ControlView => ({ status: status(), delivery: null, send() {}, ...over });
+	const held = () => [...s.root.querySelectorAll(".session-reply")].every(b => (b as HTMLButtonElement).disabled);
+	await act(() => replies(s.root, ask, control()));
+	await s.click(s.root.querySelector(".session-reply"));
+	const sent = { id: "dc-2", state: "queued", reason: null, ask_id: null } as const;
+	await act(() => replies(s.root, ask, control({ delivery: sent })));
+	assert.ok(held());
+	const failed = { key: "k", id: null, at: local(15, 9), state: "failed", reason: "x", ask_id: "ask-aaaa", body: { kind: "message", text: "other" } } as NonNullable<ControlView["pending"]>[number];
+	await act(() => replies(s.root, ask, control({ delivery: { ...sent, state: "delivered" }, pending: [failed] })));
+	assert.ok(!held(), "the failed answer re-enables them");
+});
+
 test("header: Operator with the recorded state and model; missing busy is unknown, history and an unreadable status say so", () => {
 	const data = { ...view([]), operator_context: { model: "fixture-model" } } as SessionsResponse;
 	const state = (control?: ControlView, over: Partial<SessionsResponse> = {}) => /<span class="session-heading-state">[\s\S]*?<\/span><span>([^<]*)<\/span>/.exec(html({ ...data, ...over }, undefined, control))?.[1];
