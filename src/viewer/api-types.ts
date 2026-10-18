@@ -480,7 +480,12 @@ export interface PushStatusResponse {
  generated_at: string; configured: boolean; origin: string | null; public_key: string | null;
  devices: number | null; last_sent_at: string | null; undelivered_24h: number | null; last_error: string | null;
 }
-/** Decision es-6a78c3, verbatim: wherever devices are managed (Settings → Devices, `GET /api/devices`, the docs). */
+/** `POST /api/push/test`: the push service's answer to one test send; `accepted` is its HTTP 2xx, never a display. */
+export interface PushTestResponse {
+ at: string; result: "accepted" | "gone" | "retry" | "rejected"; reason?: string;
+ /** The last decision push this device's push service accepted, from the ledger. */
+ last_accepted_at: string | null;
+}
 export const DEVICE_TRUST = "A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested through the operator agent. Use View only for a less-trusted device.";
 /** Remote dashboard PR 3, `GET /api/devices`: the list (no digest), committed pairings and the caller's management rights. `token` only for a caller that may revoke. */
 export interface DevicesResponse {

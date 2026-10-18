@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PushStatusResponse } from "../src/viewer/api-types.ts";
-import { browserPushDeps, disablePush, enablePush, type PushDeps, pushPhase, type PushView, readSubscribed } from "./push.ts";
+import { browserPushDeps, disablePush, enablePush, type PushDeps, pushPhase, type PushView, readSubscribed, sendTestPush } from "./push.ts";
 
 let browserDeps: PushDeps | undefined;
 
@@ -34,5 +34,12 @@ export function usePush(active: boolean, deps: PushDeps = browserDeps ??= browse
   void run.catch((failure: unknown) => { setError(failure instanceof Error ? failure.message : "Notifications could not be changed"); })
    .finally(() => { setBusy(false); setGeneration(value => value + 1); });
  };
- return {phase, status, error, notice, toggle};
+ const test = () => {
+  if (busy || phase !== "on") return;
+  setBusy(true); setError(null); setNotice(null);
+  void sendTestPush(deps).then(setNotice)
+   .catch((failure: unknown) => { setError(failure instanceof Error ? failure.message : "The test could not be sent"); })
+   .finally(() => setBusy(false));
+ };
+ return {phase, status, error, notice, toggle, test};
 }

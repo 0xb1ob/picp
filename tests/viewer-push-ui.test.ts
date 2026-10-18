@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { PushStatusResponse } from "../src/viewer/api-types.ts";
 import { overview } from "../src/viewer/overview-view.ts";
-import { base64UrlToBytes, disablePush, enablePush, type PushDeps, type PushEnv, pushMeta, type PushPhase, pushPhase, type PushSubscriptionLike, type PushView } from "../viewer-app/push.ts";
+import { base64UrlToBytes, disablePush, enablePush, type PushDeps, type PushEnv, pushMeta, type PushPhase, pushPhase, type PushSubscriptionLike, type PushView, sendTestPush, testMessage } from "../viewer-app/push.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
@@ -97,10 +97,12 @@ test("More renders the Notifications control for every phase: a button only for 
 	const { screen } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 	const data = overview({ home: home.path, stateDir: join(home.path, LAYOUT.state) });
 	assert.doesNotMatch(screen(data), /Notifications/);
-	const view = (phase: PushPhase, extra: Partial<PushView> = {}): string => screen(data, { phase, status, error: null, notice: null, toggle: () => {}, ...extra });
+	const view = (phase: PushPhase, extra: Partial<PushView> = {}): string => screen(data, { phase, status, error: null, notice: null, toggle: () => {}, test: () => {}, ...extra });
 	assert.match(view("off"), /<h2 id="more-push-title">Notifications<\/h2>/);
 	assert.match(view("off"), /<button type="button">Turn on<\/button>/);
 	assert.match(view("on"), /<button type="button">Turn off<\/button>/);
+	assert.match(view("on"), /<button type="button">Send test<\/button>/);
+	assert.doesNotMatch(view("off"), /Send test/, "a test needs this device subscribed");
 	assert.match(view("busy"), /<button type="button" disabled>Working<\/button>/);
 	for (const phase of ["checking", "insecure", "install", "unsupported", "unconfigured", "denied", "error"] as const) assert.doesNotMatch(view(phase), /<button/, phase);
 	assert.match(view("insecure"), /href="https:\/\/cp\.example\.com\/#more">Open the HTTPS dashboard/);
@@ -109,4 +111,21 @@ test("More renders the Notifications control for every phase: a button only for 
 	assert.match(view("off", { error: "Not turned on: HTTP 409" }), /<p role="alert" class="overview-error">Not turned on: HTTP 409<\/p>/);
 	assert.match(view("off", { notice: "Removed here" }), /<p role="status" class="more-meta">Removed here<\/p>/);
 	assert.doesNotMatch(view("off"), /style=/);
+});
+
+test("send test (#328): posts only this browser's endpoint and words the answer as the push service's, never a display", async () => {
+	const posted: unknown[] = [];
+	const subscription = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", toJSON: () => ({ endpoint: "x" }), unsubscribe: async () => true };
+	const deps = (reply: Response): PushDeps => ({
+		env: () => ({ secure: true, supported: true, ios: false, standalone: false, permission: "granted" }),
+		requestPermission: async () => "granted",
+		register: async () => { throw new Error("unused"); },
+		getRegistration: async () => ({ pushManager: { getSubscription: async () => subscription, subscribe: async () => subscription } }),
+		fetch: async (url, init) => { posted.push([url, init?.body]); return reply; },
+	});
+	const ok = await sendTestPush(deps(Response.json({ at: "2026-10-18T09:13:00Z", result: "accepted", last_accepted_at: null })));
+	assert.deepEqual(posted, [["/api/push/test", JSON.stringify({ endpoint: subscription.endpoint })]]);
+	assert.match(ok, /^Test accepted by the push service at .+; this does not confirm the device showed it$/);
+	assert.match(testMessage({ at: "2026-10-18T09:13:00Z", result: "gone", reason: "HTTP 410", last_accepted_at: "2026-10-18T08:00:00Z" }), /^Test not accepted by the push service \(gone: HTTP 410\) · last decision push accepted /);
+	await assert.rejects(sendTestPush(deps(Response.json({ error: "one test a minute per device; try again in 30 s" }, { status: 429 }))), /Test not sent: one test a minute/);
 });

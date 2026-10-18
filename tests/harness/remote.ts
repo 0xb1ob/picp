@@ -38,7 +38,7 @@ export function call(port: number, path: string, init: Init = {}): Promise<Reply
 }
 
 /** `localDevices`: also give the local listener the device routes (the opt-in Add device / list / revoke). */
-export async function remoteRig(t: { after(fn: () => void): void }, { localDevices = false }: { localDevices?: boolean } = {}) {
+export async function remoteRig(t: { after(fn: () => void): void }, { localDevices = false, pushFetch }: { localDevices?: boolean; pushFetch?: ViewerOptions["pushFetch"] } = {}) {
 	const home = createScratchHome();
 	const uploads = mkdtempSync(join(tmpdir(), "cp-remote-uploads-"));
 	t.after(() => { home.cleanup(); rmSync(uploads, { recursive: true, force: true }); });
@@ -49,7 +49,7 @@ export async function remoteRig(t: { after(fn: () => void): void }, { localDevic
 	const bound: { current: DeviceBinding | null } = { current: { origin: REMOTE_ORIGIN, generation: 1 } };
 	const devices = { store, binding: () => bound.current };
 	const logs: string[] = [];
-	const options: ViewerOptions = { home: home.path, stateDir, host: "127.0.0.1", port: 0, uploadRoot: uploads, log: (line) => logs.push(line), ...(localDevices ? { devices } : {}) };
+	const options: ViewerOptions = { home: home.path, stateDir, host: "127.0.0.1", port: 0, uploadRoot: uploads, log: (line) => logs.push(line), ...(localDevices ? { devices } : {}), ...(pushFetch ? { pushFetch } : {}) };
 	const localServer = createViewer(options);
 	await new Promise<void>((done) => localServer.listen(0, "127.0.0.1", done));
 	options.port = (localServer.address() as AddressInfo).port;
