@@ -112,6 +112,13 @@ test("QA rendering: recorded grant, shared mandate filters, escalation note and 
  assert.equal(document.querySelectorAll(".job-pr").length,0);
  const detailData=jobView(state,"cp-recorded",now)!;detailData.job.pr_url="https://github.com/acme/repo/pull/99";
  const detail=screen("JobDetail",detailData);assert.match(detail,/job-ci-red/);assert.match(detail,/md-original/);assert.match(detail,/https:\/\/github.com\/acme\/repo\/pull\/99/);
+ // #324: checkout incorporation and per-process loading render apart; a missing adoption time reads "unknown".
+ assert.doesNotMatch(detail,/Running here/,"no merge, no running fact");
+ const procs=[{role:"viewer",state:"loaded",since:at},{role:"parent",state:"not_loaded",since:null}];
+ const running=(r:object)=>parseHTML(screen("JobDetail",{...detailData,running:r})).document.querySelector(".job-fact-running dd")!.textContent;
+ assert.match(running({checkout:"included",since:null,why:"",processes:procs})!,/in this checkout since unknown.*Viewer server: loaded since .*CP parent: not loaded — needs a restart/);
+ assert.match(running({checkout:"not_included",since:null,why:"",processes:procs})!,/merged · not in this checkout yet — update pending/);
+ assert.equal(running({checkout:"unknown",since:null,why:"abc not in this home's checkout",processes:procs}),"unknown · abc not in this home's checkout");
  const board=boardView(state,now);board.lanes[0]!.objective="Land the remaining dashboard vertical slices with exact typography, readable provenance, durable test evidence, and one reviewed pull request per bead.";
  const rendered=screen("Board",board);const dom=parseHTML(rendered).document;
  assert.equal(dom.querySelector(".board-note")?.getAttribute("title"),board.jobs.find(j=>j.id==="cp-recorded")!.note);
