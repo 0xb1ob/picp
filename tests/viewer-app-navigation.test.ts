@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { route, navigation, navOwner, primaryNav, jobHref } from "../viewer-app/routes.ts";
+import { route, navigation, navOwner, primaryNav, jobHref, jobTranscriptHref } from "../viewer-app/routes.ts";
 test("hash routes normalize unknown input and migrate legacy deep links into the app", () => {
  for (const hash of ["", "#%E0", "#unknown", "#overview/missing"]) assert.deepEqual(route(hash), {screen:"overview", section:null});
  assert.equal(route("#more").screen,"more");
@@ -33,6 +33,12 @@ test("hash routes normalize unknown input and migrate legacy deep links into the
  assert.equal(route("#job/..%2Fbad").screen,"overview");
  assert.equal(jobHref("../bad"),"#jobs");
  assert.equal(jobHref("cp-a"),"#job/cp-a");
+ assert.deepEqual(route("#job/cp-a"),{screen:"job",jobId:"cp-a",section:null},"a plain Job link carries no query");
+ // Chat v2 PR 2: the one Job query is `tab=transcript`; any other query, or an unsafe id, is not a job route.
+ assert.equal(jobTranscriptHref("cp-a"),"#job/cp-a?tab=transcript");
+ for (const bad of ["../bad","","-a","a/b","cp-a?tab=transcript"]) assert.equal(jobTranscriptHref(bad),"#jobs",bad);
+ assert.deepEqual(route(jobTranscriptHref("cp-a")),{screen:"job",jobId:"cp-a",section:null,query:"tab=transcript"});
+ for (const hash of ["#job/cp-a?tab=timeline","#job/cp-a?tab=transcript&x=1","#job/..%2Fbad?tab=transcript","#job/cp-a/..?tab=transcript","#job/?tab=transcript"]) assert.deepEqual(route(hash),{screen:"overview",section:null},hash);
  assert.equal(navigation.find(n => n.id === "board")?.href,"#board");
  assert.equal(route("#reports").screen,"reports");
  assert.equal(navigation.find(n => n.id === "reports")?.href,"#reports");

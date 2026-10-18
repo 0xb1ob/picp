@@ -4,3 +4,10 @@
 .session-tools:hover { color: var(--text); }
 .tool-run-solid > .session-tools { min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
 @media (max-width: 899px) { .tool-run-solid > .session-tools { min-height: 44px; } }
+/* Sessions' steps pill: a 28 px face (34 px on phone) in the 44 px hit row; default and solid rows untouched. */
+.session-steps > .session-tools { width: auto; max-width: 100%; align-self: flex-start; }
+.session-steps-face { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 28px; padding: 0 10px 0 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; }
+.session-steps-face > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: inherit; color: var(--dim); }
+.session-steps-face > span:first-child { margin-right: 6px; }
+.session-steps-face > span:last-child { margin-left: 6px; }
+@media (max-width: 899px) { .session-steps-face { height: 34px; font-size: 12.5px; } }

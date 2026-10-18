@@ -55,7 +55,7 @@ export function App() {
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
  if (current.screen === "settings") return <SettingsPage current={current}/>;
  if (current.screen === "stats") return <StatsPage current={current}/>;
- return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
+ return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}?${current.query ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
 function useSection(current: Route, loaded: boolean) {
@@ -101,7 +101,7 @@ function JobsRoute({current}:{current:Route}) {
   {missing ? <NotFound {...missing}/> : <>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{data && " · showing last recorded data"}</p>}
   {summary?.warnings.map(w=><p role="alert" class="overview-error" key={w.section}>{w.section}: {w.message}</p>)}
-  {data ? current.screen === "job" ? <JobDetail data={data as JobResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  {data ? current.screen === "job" ? <JobDetail data={data as JobResponse} initial={current.query === "tab=transcript" ? "transcript" : undefined}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
   </>}
  </Shell>;
 }

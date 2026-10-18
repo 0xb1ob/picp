@@ -40,7 +40,9 @@ export function route(hash: string): Route {
   return {...fallback,screen:screen as "sessions" | "files" | "stats",query:screen === "sessions" ? params.toString() : query.join("?"),...(defaulted ? {defaulted} : {})};
  }
  if (value === "jobs" || value === "board" || value === "reports" || value === "schedules") return {...fallback,screen:value};
- if (/^job\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) return {...fallback,screen:"job",jobId:value.slice(4)};
+ // `?tab=transcript` is the one Job query (jobTranscriptHref); any other query is not a job route.
+ const job=/^job\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(\?tab=transcript)?$/.exec(value);
+ if (job) return {...fallback,screen:"job",jobId:job[1]!,...(job[2] ? {query:"tab=transcript"} : {})};
  if (value.startsWith("job/")) return fallback;
  if (value === "more" || value === "decisions" || value === "map" || value === "settings") return {...fallback,screen:value};
  // Awaiting and Decided are one Decisions page (audit P4 #24): their old hashes scroll to its sections.
@@ -76,4 +78,7 @@ export const decisionsFallback = (current: Route): Route => {
  return {...current,query:query.toString(),defaulted:false};
 };
 export const filesHref = (root:string,path=""): string => `#files?${new URLSearchParams({root,path})}`;
-export const jobHref = (id: string): string => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id) ? `#job/${encodeURIComponent(id)}` : "#jobs";
+const JOB_ID=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+export const jobHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeURIComponent(id)}` : "#jobs";
+/** Job detail opened on its Transcript tab, phone included (ordinary jobHref keeps the per-width default). */
+export const jobTranscriptHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeURIComponent(id)}?tab=transcript` : "#jobs";

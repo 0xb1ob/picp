@@ -102,8 +102,10 @@ and where the transcript is refused with 403 the app falls back to it silently. 
 the operator session's own pi JSONL, entry for entry, as the CLI
 shows it (user and assistant messages, collapsed thinking, tool calls hidden by default behind
 one header toggle — *Tools N*, N the tool calls in view (its label names Show/Hide); the choice is remembered in `localStorage` under one key shared by every view, and a
-run of consecutive calls collapses to one faint *· N tool calls ·* line that opens that run
-alone. Messages, notices, system entries and ask cards are never hidden. A
+run of consecutive calls collapses to one *≡ N steps · detail ▸* pill that opens that run's card
+alone; a parsed bridge notice right above the run joins its card, keeping its own toggle, and a card naming a job ends
+in *Open job transcript →* (`#job/<id>?tab=transcript`). With tools shown every card is open and has no pill.
+Messages, notices, system entries and ask cards are never hidden. A
 result truncated behind one *show all*, `cp-bridge` messages marked `bridge`,
 compaction markers, timestamps). A bridge notice is one line, `bridge <verb> <job> · <receipt>` (`wake` reads `woke`; underscores in a receipt become spaces), and a body of more than one line stays in a collapsed disclosure. A say line in this transcript that starts `[<project>] ` drops that prefix when `<project>` is a directory under `projects/`; the name shows as a chip, and any other bracket stays in the text. The session file picker labels each file with its date and time, marks the newest `current`, and puts the file id on the option title. From 900px the Sessions screen is two flush columns (frames 06/16): a full-height 248px list with a hairline, titled *Sessions*, whose rows are two lines (name, status dot and ctx percent; muted `model · state`, no bars) with *Fleet* holding CP parent and the workers, and a transcript that fills the rest edge to edge. The transcript heading is one 48px row (name, muted ctx percent, session picker, quiet *Tools N*, then the shell's status dot and ⋮), not sticky. Sessions chat v2 (PR 1, `screens/sessions.css`, `session-rows.ts`): the session's messages are raised cards under an initials avatar and `Name · HH:MM` once per group (the operator transcript calls you *You*, visually hidden, and the session *Operator* with the identity gradient avatar); your own messages, and a parent brief in a worker view, are right-hand `--session-you` pills (84% on a phone, 72% from 900 px) with their time below; the transcript is an 820 px centred column with 670 px cards on desktop; markdown tables are full width with hairline rows; a browser-local day pill (`Wed, Oct 15`, year only outside the current one) opens each new calendar day in source order, splitting a tool run and a bubble group, and an unparseable time opens none; a collapsed run of tool calls is a dashed `▸ N tool calls · …` row. the first message keeps scroll padding so its header is never clipped. The cp-bridge appends each `PI_SESSION_FILE` it
 runs under to `state/sessions/operator-sessions.jsonl` on `cp_parent start`,
@@ -570,10 +572,11 @@ progress values replace inline percentage styles under the strict CSP.
 
 Sessions chat v2 tokens (`--session-you*`, `--avatar-*`, `--session-*code-*`) sit beside the dark palette in
 `tokens.css`. Its one `prefers-color-scheme: light` block applies to `.shell-sessions` only, the class `Shell` adds
-on the Sessions route, so every other screen stays dark. `tests/fixtures/sessions-chat-v2-browser.ts --stage pr1
+on the Sessions route, so every other screen stays dark. `tests/fixtures/sessions-chat-v2-browser.ts --stage pr1|pr2
 --out <dir>` builds the app in memory and serves it with synthetic APIs on loopback. It drives
 `/usr/bin/google-chrome` over native CDP with a `mktemp` profile, which it deletes on exit. It writes the 390/1440 px
-light and dark captures, an Overview leak control and `manifest.json`.
+light and dark captures and `manifest.json`; `pr1` adds an Overview leak control, `pr2` the open steps card, a
+notice opened alone, tools shown, and a done job's Transcript tab reached through the card's link.
 
 Type uses the system font stacks from doc 00 (`--font-sans`, `--font-mono` in `tokens.css`); no font files ship.
 
