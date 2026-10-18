@@ -59,6 +59,7 @@ test("m1: full worker lifecycle on the mock provider", { timeout: 120_000 }, asy
 			kind: "ship",
 			delivery: "local",
 			task: "Bump x to 2 in src/app.ts and commit it.",
+			artifact_path: join(home.path, paths.artifactDir(jobId), "report.md"),
 		},
 	});
 	assert.ok(brief.includes(jobId) && !brief.includes("${"));
