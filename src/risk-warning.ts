@@ -24,6 +24,7 @@ import type { Job, JobKind, Risk, RoutingProvenance } from "./contracts.ts";
 import { parseJobLabels } from "./ledger.ts";
 import type { MandateStore, MandateUsageJob } from "./mandate.ts";
 import { acceptedRiskMatches } from "./pipeline.ts";
+import { hardStops } from "./risk-preapproval.ts";
 
 /** Where a recorded risk came from; the warning, escalation evidence and `routing_resolved` name it (riskkw-f10). */
 export type RecordedRiskSource = "dispatch" | "planner" | "pipeline" | "fleet_record" | "job_label" | "description_header" | "task_header";
@@ -153,7 +154,13 @@ export function inferredRiskGate(input: {
 		return { risk: "high", evidence: input.recordedFrom && input.recordedFrom !== "dispatch" ? `risk high ${RECORDED_AS[input.recordedFrom]}; ${source}` : source };
 	}
 	if (recorded !== "low" || (routed === "high" && recordedProvenance(routedFrom))) {
-		return { risk: routed, ...(routed === "high" ? { evidence: `risk source: ${RISK_SOURCE[routedFrom]}` } : {}) };
+		if (routed !== "high") return { risk: routed };
+		if (RISK_SOURCE[routedFrom] !== "classify") return { risk: "high", evidence: `risk source: ${RISK_SOURCE[routedFrom]}` };
+		const evidence = `risk source: classify (word: ${riskKeywords(input.text).join(", ") || "none matched"})`;
+		const grant = operatorChatGrant(input);
+		return grant
+			? { risk: "low", evidence, warning: `${job.jobId}: warning: risk:high inferred from keywords only; ${evidence}; grant ${grant} was issued from operator chat, so ask_on risk:high warned instead of gating` }
+			: { risk: "high", evidence };
 	}
 	const keywords = riskKeywords(input.text, warningOnlyBenign);
 	// Every hit was a warning-only benign sense: the risk is low either way, so no wake line.
@@ -164,4 +171,13 @@ export function inferredRiskGate(input: {
 		risk: "low",
 		warning: `${job.jobId}: warning: risk:high inferred from keywords only (${words}); risk low was ${input.recordedFrom ? RECORDED_AS[input.recordedFrom] : "recorded"}, so ask_on risk:high warned instead of gating`,
 	};
+}
+
+/** #321: the operator-chat grant that would ask, when a classify-sourced high may warn; never an ops job or a hard stop. */
+function operatorChatGrant(input: Parameters<typeof inferredRiskGate>[0]): string | undefined {
+	const { job, mandates } = input, jobs = input.jobs ?? [];
+	if (job.ops || hardStops([input.text, ...(job.pathHints ?? [])].join("\n")).length > 0) return undefined;
+	if (!mandates?.wouldAskRiskHigh(job, "high", jobs)) return undefined;
+	const grant = mandates.selection("dispatch", job, jobs)?.grant;
+	return grant?.issued_by.channel === "operator_chat" && !grant.schedule_fire ? grant.id : undefined;
 }

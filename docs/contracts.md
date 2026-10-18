@@ -4515,7 +4515,7 @@ starts:
   work unasked.
 
 When an active, covering mandate's `ask_on` names `risk:high` and the gate's
-risk is `high` (see H6 below for the one inferred case that only warns), the call is refused and
+risk is `high` (see H6 below, and the operator-chat rule after this paragraph, for the inferred cases that only warn), the call is refused and
 one `risk_high_irreversible` escalation is raised (duplicate-safe: a second
 refused attempt raises nothing new), naming the job, the risk evidence
 words and who made the high (`risk source: explicit|planner|classify`, `inferredRiskGate` in
@@ -4530,6 +4530,17 @@ ids it names only; a new job id needs a new decision, and an escalation answered
 leaves the job refused. `cp_dispatch dry_run` reports `mandate_gate: "would ask:
 risk:high"` from the same predicate (`MandateStore.wouldAskRiskHigh`), with
 nothing escalated.
+
+**A classify-sourced high on an operator-chat grant warns** (#321). When the gate's high was neither recorded nor
+explicit/planner-assessed (provenance `inferred` or `defaulted`: keyword classify), and the covering grant that would
+ask was issued from operator chat (`issued_by.channel: operator_chat`, not a schedule's fire grant), `inferredRiskGate`
+returns risk `low` with a `risk_warning` instead of escalating; routing still takes the risky tier. The one decision
+serves `cp_dispatch` (and its `dry_run`), the pipeline implementer dispatch and the `cp_send` promotion alike. A
+`bridge` grant, a schedule run, an ops job, an explicit/planner/recorded high and any hard stop in the task text
+(`hardStops`, `src/risk-preapproval.ts`: credentials, `rm -rf`, `auth.json`, force push, publishing) still gate.
+Every classify source names its matched words, on the warning and on a gated escalation alike:
+`risk source: classify (word: delete, migrate)`. There is no home-level opt-out: a grant that must ask on a
+classify high is issued with `channel: bridge`.
 
 Read-only planning (research with a readOnly profile) is never gated: planners cannot edit code; the ship
 job that implements a plan is. A fresh `cp_dispatch` of a `kind:research` job whose resolved profile

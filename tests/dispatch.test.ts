@@ -34,6 +34,7 @@ import { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { batchRiskHigh } from "../src/risk-batch.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
+import { composeImplementationRouting } from "../src/pipeline.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import { policyFromLegacy } from "../src/viewer/schedule-policy.ts";
@@ -706,6 +707,7 @@ test("risk:high under ask_on refuses a direct dispatch before any lease, with on
 		spend_cap: { usd: 10, tokens: 100_000 },
 		job_cap: 10,
 		ask_on: ["risk:high"],
+		channel: "bridge", // #321: an operator-chat grant warns on a classify-only high; a bridge grant still gates
 	});
 	const dispatcher = b.makeDispatcher({ mandates });
 	const job = await b.ledger.create({
@@ -800,7 +802,7 @@ test("ops jobs: ops profile by label, deploy gates even when asked low, pull dis
 test("cp-7re9: a denied project refuses a model dispatch with project_denied, before the risk:high gate and before any lease", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const mandates = new MandateStore(b.home);
-	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"], channel: "bridge" });
 	const file = join(b.home, LAYOUT.mandateDefaultsFile);
 	writeFileSync(file, JSON.stringify({ deny_projects: ["demo"] }));
 	const dispatcher = b.makeDispatcher({ mandates });
@@ -878,7 +880,7 @@ test("4B2-T1c: a real Dispatcher's parallelism_full refusal reaches the queue co
 test("risk:high batch: a refused dispatch of a batched job names the batch and raises nothing; one approve dispatches every listed job", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const mandates = new MandateStore(b.home);
-	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	mandates.issue({ projects: ["demo"], objective: "ship the bump", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"], channel: "bridge" });
 	const dispatcher = b.makeDispatcher({ mandates });
 	const task = "Rotate the production database credentials.";
 	const jobs = [await b.ledger.create({ title: "rotate prod-a", project: "demo", delivery: "local", kind: "ship", slug: "prod-a" })];
@@ -943,7 +945,7 @@ test("H6: an inferred-only risk:high with a recorded low dispatches under ask_on
 
 // riskkw-f10: the job itself can record (label) or declare (header) its risk.
 test("riskkw-f10: a job-recorded or header-declared low turns a keyword-only high into the named warning; every recorded, explicit and assessed high still gates", { skip: SKIP, timeout: 180_000 }, async (t) => {
-	const b = await bench(t, { maxTrees: 3 });
+	const b = await bench(t, { maxTrees: 4 });
 	const mandates = new MandateStore(b.home);
 	mandates.issue({
 		projects: ["demo"],
@@ -1007,10 +1009,35 @@ test("riskkw-f10: a job-recorded or header-declared low turns a keyword-only hig
 		() => dispatcher.dispatch({ jobId: assessedHigh.id, task, risk: "high", inputsFrom: { risk: "assessed" }, model: b.model, fetch: false }),
 		/risk:high under ask_on/,
 	);
+	// #321: a keyword high with nothing recorded, under this operator-chat grant, warns with its words and dispatches.
 	const bare = await create("kw-bare");
-	await assert.rejects(() => dispatcher.dispatch({ jobId: bare.id, task, model: b.model, fetch: false }), /risk:high under ask_on/);
-	const refused = [high, highVsLow, headerHigh, explicitHigh, assessedHigh, bare].map((job) => job.id);
+	const warned = await dispatcher.dispatch({ jobId: bare.id, task, model: b.model, fetch: false });
+	assert.equal(warned.state, "dispatched");
+	assert.match(warned.risk_warning ?? "", /risk source: classify \(word: delete, migrate\); grant md-\w+ was issued from operator chat, so ask_on risk:high warned/);
+	assert.equal(b.fleet.get(bare.id)?.routing?.risk, "high", "it still routes to the risky tier");
+	const hardStop = await create("kw-hard-stop");
+	await assert.rejects(() => dispatcher.dispatch({ jobId: hardStop.id, task: `${task} Then rm -rf the build dir.`, model: b.model, fetch: false }), /risk:high under ask_on/);
+	const refused = [high, highVsLow, headerHigh, explicitHigh, assessedHigh, hardStop].map((job) => job.id);
 	assert.deepEqual(escalations().filter((e) => e.kind === "risk_high_irreversible").flatMap((e) => e.job_ids).sort(), [...refused].sort(), "exactly one escalation per refused job");
+});
+
+// #321: the pipeline's implementer dispatch (src/pipeline.ts) reads the same decision as cp_dispatch and cp_send.
+test("#321: a pipeline-composed implementer dispatch warns on a classify-only high under an operator-chat grant; a planner-assessed high gates", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const b = await bench(t);
+	const mandates = new MandateStore(b.home);
+	mandates.issue({ projects: ["demo"], objective: "ship the plan", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
+	const dispatcher = b.makeDispatcher({ mandates });
+	const task = "Delete the stale fixture and migrate the test helper.";
+	const asPipeline = (routing: ReturnType<typeof composeImplementationRouting>) => ({
+		...(routing.risk ? { risk: routing.risk } : {}), ...(routing.recordedRisk ? { recordedRisk: routing.recordedRisk } : {}), inputsFrom: routing.inputsFrom,
+	});
+	const unassessed = await b.ledger.create({ title: "plan ship", project: "demo", delivery: "local", kind: "ship", slug: "p321-warn" });
+	const warned = await dispatcher.dispatch({ jobId: unassessed.id, task, ...asPipeline(composeImplementationRouting({})), model: b.model, fetch: false });
+	assert.equal(warned.state, "dispatched");
+	assert.match(warned.risk_warning ?? "", /risk source: classify \(word: delete, migrate\); grant md-\w+ was issued from operator chat/);
+	const destructive = composeImplementationRouting({ assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: true } });
+	const assessed = await b.ledger.create({ title: "plan ship 2", project: "demo", delivery: "local", kind: "ship", slug: "p321-gate" });
+	await assert.rejects(() => dispatcher.dispatch({ jobId: assessed.id, task, ...asPipeline(destructive), model: b.model, fetch: false }), /risk:high under ask_on/);
 });
 
 test("an unavailable model fails before the lease: no orphan branch, no orphan lease", { skip: SKIP, timeout: 180_000 }, async (t) => {
@@ -1830,10 +1857,13 @@ test("preview: dry_run reports would ask: risk:high without escalating anything"
 
 	const preview = await b.dispatcher(PREVIEW_RUBRIC, undefined, mandates).preview({
 		jobId: job.id,
-		task: "Rotate the production database credentials.",
+		task: "Rotate the production database credentials, then rm -rf the old dump.",
 	});
 	assert.equal(preview.mandate_gate, "would ask: risk:high");
 	assert.equal(new EscalationStore({ home: b.home }).list().length, 0, "a dry run raises nothing");
+	// #321: the dry run reads the dispatch's own gate, so a classify-only high on this operator-chat grant would warn.
+	const chat = await b.dispatcher(PREVIEW_RUBRIC, undefined, mandates).preview({ jobId: job.id, task: "Rotate the production database credentials." });
+	assert.equal(chat.mandate_gate, undefined);
 
 	const low = await b.ledger.create({ title: "typo", project: "demo", delivery: "pr", kind: "ship", slug: "typo" });
 	const lowPreview = await b.dispatcher(PREVIEW_RUBRIC, undefined, mandates).preview({
