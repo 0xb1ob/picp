@@ -48,15 +48,19 @@ cache_write) pauses it too but asks no one: the parent raises it itself with
 Ask vs. decide (`src/operator-note.ts`, `OPERATOR_ASK_LIST` /
 `OPERATOR_DECIDE_LIST`):
 
-- **Ask the human**: mandate creation, product ambiguity, scope expansion,
+- **Ask the human**: mandate creation for work the human did not ask for
+  (a message naming a defect or feature in a registered project is the
+  grant; an ambiguous request or a research-to-build choice still asks),
+  product ambiguity, scope expansion,
   risk high/irreversible, loop exhausted, budget (USD cap or token
   ceiling), conflicting acceptance, merge refused, mission end.
 - **Decide yourself, never ask**: in-scope plan approval, how-questions,
   review findings, test failures, next job, merge when the repo permits,
   bounded recovery, a token-cap raise within the ceiling.
 
-`plan_approval` is the one escalation kind that flips from ask to decide —
-only when the mandate already covers it (`operatorAction()`).
+`plan_approval` flips from ask to decide only when the mandate already
+covers it, and `mandate_creation` only when the human asked for that work
+(`operatorAction()`).
 
 ## The drill list
 

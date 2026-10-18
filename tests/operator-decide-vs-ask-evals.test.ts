@@ -30,7 +30,10 @@ test("operator decide-vs-ask corpus covers at least four escalation kinds", () =
 	const cases = loadCorpus();
 	const kinds = new Set(cases.map((c) => c.kind));
 	assert.ok(kinds.size >= 4, `only ${kinds.size} distinct kinds`);
-	for (const kind of kinds) assert.ok(ESCALATION_KINDS.includes(kind as never), `unknown escalation kind ${kind}`);
+	// mandate_creation is the operator's own ask trigger (#322), not a parent escalation kind.
+	for (const kind of kinds) {
+		assert.ok(kind === "mandate_creation" || ESCALATION_KINDS.includes(kind as never), `unknown escalation kind ${kind}`);
+	}
 });
 
 test("every case's expectation matches operatorAction (docs/contracts.md's own split)", () => {
