@@ -486,6 +486,7 @@ export interface PushTestResponse {
  /** The last decision push this device's push service accepted, from the ledger. */
  last_accepted_at: string | null;
 }
+/** Decision es-6a78c3, verbatim: wherever devices are managed (Settings → Devices, `GET /api/devices`, the docs). */
 export const DEVICE_TRUST = "A Full-control remote device is trusted like your terminal. The dashboard's pairing and device APIs prevent remote devices from creating additional devices; this does not prevent shell actions requested through the operator agent. Use View only for a less-trusted device.";
 /** Remote dashboard PR 3, `GET /api/devices`: the list (no digest), committed pairings and the caller's management rights. `token` only for a caller that may revoke. */
 export interface DevicesResponse {
