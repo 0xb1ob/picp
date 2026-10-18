@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { startVersionLine } from "../extensions/cp-bridge/version-line.ts";
 import { LAYOUT } from "../src/contracts.ts";
@@ -73,6 +73,34 @@ test("amber: origin/main moved on and the updater skipped while busy → warn, N
 	const view = await f.read();
 	assert.deepEqual([view.upstream.state, view.upstream.behind, view.upstream.ahead], ["behind", 2, 0]);
 	assert.deepEqual([view.overall.level, view.overall.label], ["warn", "2 behind (skipped_busy)"]);
+});
+
+test("#325: the updater's phase and result read as a clocked sentence from state/update.json", async (t) => {
+	const f = fixture(t);
+	current(f);
+	advanceBase(f.repo, "a.txt", "a");
+	f.repo.git("fetch", "--quiet", "origin");
+	const to = "a".repeat(40);
+	const data = join(dirname(f.stateDir), "data");
+	mkdirSync(data, { recursive: true });
+	writeFileSync(join(data, "update.json"), JSON.stringify({ enabled: true, interval_min: 5, quiet_min: 20 }));
+	f.write("update.json", { phase: "idle", last_result: "skipped_settling", last_run_at: iso(1), to, first_seen_sha: to, first_seen_at: "2026-10-01T11:51:00Z" });
+	// `label` is the pill (and footer): short, never the whole sentence; `headline` carries the sentence for the popover.
+	const pair = async () => { const { label, headline } = (await f.read()).overall; return [label, headline]; };
+	assert.deepEqual(await pair(), ["1 behind (waits until 12:11Z)", "1 behind (update to aaaaaaa waits for quiet origin/main until 12:11Z)"], "first_seen_at + quiet_min");
+	f.write("update.json", { phase: "draining", last_result: "skipped_settling", last_run_at: iso(6), to });
+	assert.deepEqual(await pair(), ["1 behind (draining ≤ 11 min)", "1 behind (draining for update to aaaaaaa; gives up after 11 min)"], "phase beats the prior result");
+	f.write("update.json", { phase: "idle", last_result: "drain_timeout", last_run_at: "2026-10-01T11:58:00Z", to });
+	assert.deepEqual(await pair(), ["1 behind · drain timeout · retry 12:18Z", "1 behind · drain timed out — retries 12:18Z; cp_parent drain_cancel reopens dispatch"], "4× interval_min");
+	f.write("update.json", { phase: "idle", last_result: "skipped_dirty", last_run_at: iso(1) });
+	assert.deepEqual(await pair(), ["1 behind (local changes)", "1 behind (skipped: local changes in the checkout (git status) — commit, stash or remove them)"]);
+	f.write("update.json", { phase: "idle", last_result: "updated", last_run_at: iso(1), to, updated_at: "2026-10-01T11:56:00Z" });
+	const applied = await f.read();
+	assert.equal(applied.upstream.updater?.progress, "applied aaaaaaa 11:56Z · parent restarted");
+	assert.deepEqual([applied.overall.label, applied.overall.headline], ["1 behind", "1 behind"], "an applied update adds nothing to the badge label");
+	// No first_seen_at recorded: no invented clock, the bare result stays.
+	f.write("update.json", { phase: "idle", last_result: "skipped_settling", last_run_at: iso(1) });
+	assert.deepEqual(await pair(), ["1 behind (skipped_settling)", "1 behind (skipped_settling)"]);
 });
 
 test("ahead and diverged are neutral; a stale host is amber with its restart", async (t) => {
@@ -167,7 +195,7 @@ test("formatTerminal: this session's own loaded commit decides the operator laye
 
 test("version line: refresh = readVersion then formatTerminal into setStatus; nothing without a UI; cleared on stop", async () => {
 	const statuses: Array<[string, string | undefined]> = [];
-	const view = { deployed: { sha: OLD, at: iso(1) }, upstream: { state: "current", behind: 0, ahead: 0, reason: null, checked_at: iso(1), updater: null }, processes: [], bundle: { script: null }, overall: { level: "ok", label: "x" }, generated_at: iso(0) } as VersionResponse;
+	const view = { deployed: { sha: OLD, at: iso(1) }, upstream: { state: "current", behind: 0, ahead: 0, reason: null, checked_at: iso(1), updater: null }, processes: [], bundle: { script: null }, overall: { level: "ok", label: "x", headline: "x" }, generated_at: iso(0) } as VersionResponse;
 	let reads = 0;
 	let hasUI = true;
 	// No `theme`, like the bridge tests' doubles: the line is written plain, never a throw.
@@ -190,12 +218,12 @@ test("badge: an outdated page lifts ok/unknown to amber with a reload; alert sta
 	const f = fixture(t);
 	current(f);
 	const view = await f.read();
-	assert.deepEqual(badgeView({ view, error: null }, "/assets/viewer/app-abc.js"), { level: "ok", short: "✓", label: view.overall.label, pageStale: false });
+	assert.deepEqual(badgeView({ view, error: null }, "/assets/viewer/app-abc.js"), { level: "ok", short: "✓", label: view.overall.label, headline: view.overall.headline, pageStale: false });
 	const old = badgeView({ view, error: null }, "/assets/viewer/app-old.js");
 	assert.deepEqual([old.level, old.pageStale, old.label.startsWith("page outdated — reload")], ["warn", true, true]);
-	const red = { ...view, overall: { level: "alert" as const, label: "update failed" } };
+	const red = { ...view, overall: { level: "alert" as const, label: "update failed", headline: "update failed" } };
 	assert.equal(badgeView({ view: red, error: null }, "/assets/viewer/app-old.js").level, "alert");
-	assert.deepEqual(badgeView({ view: null, error: "HTTP 500" }, null), { level: "unknown", short: "?", label: "version unavailable (HTTP 500)", pageStale: false });
+	assert.deepEqual(badgeView({ view: null, error: "HTTP 500" }, null), { level: "unknown", short: "?", label: "version unavailable (HTTP 500)", headline: "version unavailable (HTTP 500)", pageStale: false });
 });
 
 function get(port: number, path: string): Promise<{ status: number; body: string }> {
