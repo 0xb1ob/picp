@@ -23,7 +23,7 @@ import { sessionCookie } from "./device-store.ts";
 import { DEVICES_REVOKE_PATH, type DeviceRoutes, PAIR_CREATE_PATH, storeRefusal } from "./devices-api.ts";
 import { AttemptLimiter, clientAddress, handlePairClaim, PAIR_CLAIM_PATH } from "./pair-api.ts";
 import { PAIR_CSP, PAIR_HTML, PAIR_PAGE_PATH } from "./pair-page.ts";
-import { PUSH_SUBSCRIPTION_PATH } from "./push-api.ts";
+import { PUSH_SUBSCRIPTION_PATH, PUSH_TEST_PATH } from "./push-api.ts";
 import { dispatch, hostAllowed, hostHeaderFor, send, sendJson, type ViewerOptions } from "./server.ts";
 
 export const REMOTE_HOST = "127.0.0.1";
@@ -110,7 +110,7 @@ export function remoteHandle(req: IncomingMessage, res: ServerResponse, options:
 	res.setHeader("set-cookie", sessionCookie(cookie));
 	const path = (req.url ?? "/").split("?")[0];
 	// Device revoke refuses View-only itself; the push subscription is this browser's own preference (push-api.ts owns it per device).
-	if (req.method !== "GET" && req.method !== "HEAD" && path !== DEVICES_REVOKE_PATH && path !== PAIR_CREATE_PATH && path !== PUSH_SUBSCRIPTION_PATH && access.level === "view") {
+	if (req.method !== "GET" && req.method !== "HEAD" && path !== DEVICES_REVOKE_PATH && path !== PAIR_CREATE_PATH && path !== PUSH_SUBSCRIPTION_PATH && path !== PUSH_TEST_PATH && access.level === "view") {
 		sendJson(res, 403, { error: "View-only device: dashboard writes are refused" });
 		return;
 	}

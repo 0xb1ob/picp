@@ -1,4 +1,5 @@
-import type { PushStatusResponse } from "../src/viewer/api-types.ts";
+import type { PushStatusResponse, PushTestResponse } from "../src/viewer/api-types.ts";
+import { stamp } from "./format.ts";
 
 /** Web Push in this browser (Pier 1.1): what the More screen's Notifications control can say and do. */
 export type PushPhase = "checking" | "insecure" | "install" | "unsupported" | "unconfigured" | "denied" | "off" | "on" | "busy" | "error";
@@ -32,9 +33,12 @@ export interface PushView {
  error: string | null;
  notice: string | null;
  toggle(): void;
+ /** Send one test notification to this device; the result lands in `notice` (or `error`). */
+ test(): void;
 }
 
 export const SUBSCRIPTION_URL = "/api/push/subscription";
+export const TEST_URL = "/api/push/test";
 
 export function browserPushDeps(): PushDeps {
  return {
@@ -157,4 +161,26 @@ export async function disablePush(deps: PushDeps): Promise<{warning?: string}> {
  }
  await subscription.unsubscribe();
  return warning ? {warning} : {};
+}
+
+/** What one test send proved: the push service's answer only, never that the device displayed it. */
+export function testMessage(reply: PushTestResponse): string {
+ const last = reply.last_accepted_at ? ` · last decision push accepted ${stamp(reply.last_accepted_at)}` : "";
+ return reply.result === "accepted"
+  ? `Test accepted by the push service at ${stamp(reply.at)}; this does not confirm the device showed it${last}`
+  : `Test not accepted by the push service (${reply.result}${reply.reason ? `: ${reply.reason}` : ""})${last}`;
+}
+
+/** Ask the home to push this device once and say what its push service answered. */
+export async function sendTestPush(deps: PushDeps): Promise<string> {
+ const subscription = await (await deps.getRegistration())?.pushManager.getSubscription();
+ if (!subscription) throw new Error("This browser has no subscription; turn notifications on first");
+ let response: Response;
+ try {
+  response = await deps.fetch(TEST_URL, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({endpoint: subscription.endpoint})});
+ } catch {
+  throw new Error("Could not reach this home to send the test");
+ }
+ if (!response.ok) throw new Error(`Test not sent: ${await failure(response)}`);
+ return testMessage(await response.json() as PushTestResponse);
 }

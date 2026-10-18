@@ -7,6 +7,7 @@ import { join, relative } from "node:path";
 import { test } from "node:test";
 import { inflateSync } from "node:zlib";
 import { initPush } from "../src/push/keys.ts";
+import { PushDeliveryStore, PushTestJournal } from "../src/push/deliveries.ts";
 import { APP_COLORS } from "../src/viewer/app-manifest.ts";
 import { APP_CSP } from "../src/viewer/app-page.ts";
 import { listSubscriptions, pushDataDir, subscriptionFile, subscriptionId, subscriptionsDir } from "../src/viewer/push-files.ts";
@@ -229,4 +230,38 @@ test("service worker, manifest and icons: same-origin, standalone, opening Await
 		if (body.icons.some((i: { src: string }) => i.src === path)) assert.ok(body.icons.find((i: { src: string }) => i.src === path).sizes === `${size}x${size}`);
 	}
 	assert.equal((await call("/icon-1.png")).status, 404);
+});
+
+test("test notification (#328): only the caller's own subscription, one a minute, journaled; reports the push service's answer, never a display", async (t) => {
+	const sends: string[] = [];
+	let answer = 201;
+	const env = await remoteRig(t, {
+		localDevices: true,
+		pushFetch: async (url) => {
+			sends.push(url);
+			return { status: answer, text: async () => "slow down" };
+		},
+	});
+	initPush({ dataDir: env.dataDir, origin: ORIGIN });
+	const full = env.pair("Laptop"), view = env.pair("Phone", "view");
+	const headers = (cookie: string) => ({ cookie, origin: REMOTE_ORIGIN, "content-type": "application/json" });
+	const phone = device(), laptop = device();
+	for (const [cookie, sub] of [[view.cookie, phone], [full.cookie, laptop]] as const) assert.equal((await env.r("/api/push/subscription", { method: "POST", headers: headers(cookie), body: JSON.stringify(sub) })).status, 201);
+	const accepted = { subscription: subscriptionId(laptop.endpoint), at: "2026-10-18T09:13:00Z" };
+	const record = { id: "a1", source: "ask" as const, kind: "operator_ask", status: "sent" as const, attempts: 1, delivered: 1, accepted: [accepted], created_at: accepted.at, settled_at: accepted.at };
+	new PushDeliveryStore(env.stateDir).write({ schema_version: 1, baseline_at: accepted.at, items: [record] }, new Set());
+	const testPush = (cookie: string, endpoint: string) => env.r("/api/push/test", { method: "POST", headers: headers(cookie), body: JSON.stringify({ endpoint }) });
+
+	assert.deepEqual([(await testPush(full.cookie, phone.endpoint)).body.error], ["this subscription belongs to another device"]);
+	assert.equal((await testPush(view.cookie, device().endpoint)).status, 404, "not subscribed");
+	const own = await testPush(view.cookie, phone.endpoint);
+	assert.deepEqual([own.status, { ...own.body, at: "" }], [200, { at: "", result: "accepted", last_accepted_at: null }], "View-only may test its own");
+	assert.equal((await env.l("/api/push/test", { method: "POST", headers: { origin: bindOrigin(env.options), "content-type": "application/json" }, body: JSON.stringify({ endpoint: phone.endpoint }) })).status, 403, "the local listener never tests a device's");
+	const again = await testPush(view.cookie, phone.endpoint);
+	assert.deepEqual([again.status, Number(again.headers["retry-after"]) > 0], [429, true], "rate-limited per device");
+	answer = 429;
+	const busy = await testPush(full.cookie, laptop.endpoint);
+	assert.deepEqual({ ...busy.body, at: "" }, { at: "", result: "retry", reason: "HTTP 429 slow down", last_accepted_at: accepted.at });
+	assert.deepEqual(sends, [phone.endpoint, laptop.endpoint], "one push per allowed test, none for a refused one");
+	assert.deepEqual(new PushTestJournal(env.stateDir).read().map((item) => [item.subscription, item.result]), [[subscriptionId(phone.endpoint), "accepted"], [subscriptionId(laptop.endpoint), "retry"]]);
 });

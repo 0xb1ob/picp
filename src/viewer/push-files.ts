@@ -7,6 +7,7 @@
  *   data/push/vapid.key                 0600: the private JWK — never read here
  *   data/push/subscriptions/<id>.json   0600: one browser subscription per file
  *   state/push-deliveries.json          the parent's delivery ledger
+ *   state/push-tests.json               the viewer's test sends
  *
  * Nothing in this file writes, and nothing it returns carries key material.
  */
@@ -30,6 +31,7 @@ export const vapidKeyFile = (dataDir: string): string => join(dataDir, "push", "
 export const subscriptionsDir = (dataDir: string): string => join(dataDir, "push", "subscriptions");
 export const subscriptionFile = (dataDir: string, id: string): string => join(subscriptionsDir(dataDir), `${id}.json`);
 export const pushDeliveriesFile = (stateDir: string): string => join(stateDir, "push-deliveries.json");
+export const pushTestsFile = (stateDir: string): string => join(stateDir, "push-tests.json");
 export const subscriptionId = (endpoint: string): string => createHash("sha256").update(endpoint).digest("hex").slice(0, 32);
 
 export interface PushConfig {
@@ -178,4 +180,18 @@ export function readDeliverySummary(stateDir: string, now: Date): PushDeliverySu
 		if (text && (!lastError || at >= lastError.at)) lastError = { at, text };
 	}
 	return { last_sent_at: lastSent, undelivered_24h: undelivered, last_error: lastError?.text ?? null };
+}
+
+/** When a push service last accepted (HTTP 2xx) a decision push for subscription `id`; null when never or unreadable. */
+export function lastAcceptedAt(stateDir: string, id: string): string | null {
+	const items = readObject(pushDeliveriesFile(stateDir))?.items;
+	let last: string | null = null;
+	for (const item of Array.isArray(items) ? items : []) {
+		const accepted = obj(item)?.accepted;
+		for (const entry of Array.isArray(accepted) ? accepted.map(obj) : []) {
+			const at = str(entry?.at);
+			if (entry?.subscription === id && at && (!last || at > last)) last = at;
+		}
+	}
+	return last;
 }

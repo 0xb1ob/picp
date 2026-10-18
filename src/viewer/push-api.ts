@@ -1,6 +1,7 @@
 /**
- * The dashboard's Web Push surface (Pier 1.1): `/api/push` (public setup and delivery health) and the one
- * write route, `POST|DELETE /api/push/subscription`, which stores or removes this browser's subscription.
+ * The dashboard's Web Push surface (Pier 1.1): `/api/push` (public setup and delivery health), the subscription write
+ * route, `POST|DELETE /api/push/subscription`, which stores or removes this browser's subscription, and
+ * `POST /api/push/test`, which sends one test push to it and reports the push service's answer — never a display.
  *
  * The write route is a CSRF target (any page a tailnet browser visits could try to register an endpoint and
  * then read project/kind/headline), so it demands, in order: push set up on this home, an `Origin` equal to
@@ -15,12 +16,18 @@
 
 import type { IncomingMessage } from "node:http";
 import { accessOf } from "./access.ts";
-import type { PushStatusResponse } from "./api-types.ts";
-import { listSubscriptions, parseSubscription, pushDataDir, pushServiceAllowed, readDeliverySummary, readPushConfig } from "./push-files.ts";
+import { isoTimestamp } from "../contracts.ts";
+import { PUSH_TEST_INTERVAL_MS, PushTestJournal } from "../push/deliveries.ts";
+import { readVapidKeys } from "../push/keys.ts";
+import { sendOne } from "../push/sweep.ts";
+import { type PushFetch, vapidAuthorization } from "../push/webpush.ts";
+import type { PushStatusResponse, PushTestResponse } from "./api-types.ts";
+import { lastAcceptedAt, listSubscriptions, ownsSubscription, parseSubscription, pushDataDir, pushServiceAllowed, readDeliverySummary, readPushConfig, type SubscriptionOwner, subscriptionId } from "./push-files.ts";
 import { deleteSubscription, saveSubscription } from "./push-subscriptions.ts";
 
 export const PUSH_STATUS_PATH = "/api/push";
 export const PUSH_SUBSCRIPTION_PATH = "/api/push/subscription";
+export const PUSH_TEST_PATH = "/api/push/test";
 export const PUSH_BODY_MAX_BYTES = 4096;
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -29,6 +36,8 @@ export interface PushRouteOptions {
 	host: string;
 	port: number;
 	log?: (line: string) => void;
+	/** Test seam for the test-notification send. */
+	pushFetch?: PushFetch;
 }
 
 export interface PushRouteResult {
@@ -96,27 +105,36 @@ export function readBody(req: IncomingMessage, max: number): Promise<Buffer | "t
 
 const refuse = (status: number, error: string, headers?: Record<string, string>): PushRouteResult => ({ status, body: { error }, ...(headers ? { headers } : {}) });
 
-export async function handlePushSubscription(req: IncomingMessage, options: PushRouteOptions, now = new Date()): Promise<PushRouteResult> {
-	const method = req.method ?? "";
-	if (method !== "POST" && method !== "DELETE") return refuse(405, "POST or DELETE only", { allow: "POST, DELETE" });
+type Guarded = { ok: false; refused: PushRouteResult } | { ok: true; dataDir: string; owner: SubscriptionOwner; json: unknown };
+
+/** The CSRF guards every push write shares (see the header), up to the parsed JSON body. */
+async function guardedJson(req: IncomingMessage, options: PushRouteOptions): Promise<Guarded> {
+	const fail = (refused: PushRouteResult): Guarded => ({ ok: false, refused });
 	const dataDir = pushDataDir(options.stateDir);
 	const config = readPushConfig(dataDir);
-	if (!config) return refuse(409, "push is not set up on this home: npm run push:init -- --origin https://<dashboard host>");
+	if (!config) return fail(refuse(409, "push is not set up on this home: npm run push:init -- --origin https://<dashboard host>"));
 	// Remote dashboard: a paired device writes from exactly its tunnel origin and owns what it stores (server-derived, never the body's).
 	const access = accessOf(req);
 	const owner = access.kind === "remote" ? { device_id: access.device_id, origin: access.origin } : undefined;
-	if (owner ? req.headers.origin !== owner.origin : !allowedOrigins(options, config.origin).includes(req.headers.origin ?? "")) return refuse(403, `Origin must be ${owner?.origin ?? config.origin}`);
+	if (owner ? req.headers.origin !== owner.origin : !allowedOrigins(options, config.origin).includes(req.headers.origin ?? "")) return fail(refuse(403, `Origin must be ${owner?.origin ?? config.origin}`));
 	const site = req.headers["sec-fetch-site"];
-	if (site !== undefined && site !== "same-origin") return refuse(403, "cross-site request refused");
-	if (!/^application\/json\s*(?:;|$)/i.test(req.headers["content-type"] ?? "")) return refuse(415, "Content-Type must be application/json");
+	if (site !== undefined && site !== "same-origin") return fail(refuse(403, "cross-site request refused"));
+	if (!/^application\/json\s*(?:;|$)/i.test(req.headers["content-type"] ?? "")) return fail(refuse(415, "Content-Type must be application/json"));
 	const body = await readBody(req, PUSH_BODY_MAX_BYTES);
-	if (body === "too_large") return refuse(413, `body is larger than ${PUSH_BODY_MAX_BYTES} bytes`, { connection: "close" });
-	let json: unknown;
+	if (body === "too_large") return fail(refuse(413, `body is larger than ${PUSH_BODY_MAX_BYTES} bytes`, { connection: "close" }));
 	try {
-		json = JSON.parse(body.toString("utf8"));
+		return { ok: true, dataDir, owner, json: JSON.parse(body.toString("utf8")) };
 	} catch {
-		return refuse(400, "body is not JSON");
+		return fail(refuse(400, "body is not JSON"));
 	}
+}
+
+export async function handlePushSubscription(req: IncomingMessage, options: PushRouteOptions, now = new Date()): Promise<PushRouteResult> {
+	const method = req.method ?? "";
+	if (method !== "POST" && method !== "DELETE") return refuse(405, "POST or DELETE only", { allow: "POST, DELETE" });
+	const guarded = await guardedJson(req, options);
+	if (!guarded.ok) return guarded.refused;
+	const { dataDir, owner, json } = guarded;
 	const parsed = parseSubscription(json, method === "POST" ? "subscribe" : "unsubscribe");
 	if (!parsed.ok) return refuse(400, parsed.reason);
 	if (!pushServiceAllowed(parsed.value.endpoint)) return refuse(400, "endpoint is not on a known push service");
@@ -133,5 +151,38 @@ export async function handlePushSubscription(req: IncomingMessage, options: Push
 	} catch (error) {
 		(options.log ?? ((line) => process.stderr.write(line)))(`viewer: push subscription ${method === "POST" ? "save" : "removal"} failed: ${(error as NodeJS.ErrnoException).code ?? "error"}\n`);
 		return refuse(500, "could not store the subscription on this home");
+	}
+}
+
+const TEST_PAYLOAD = JSON.stringify({ project: "command post", kind: "test notification", headline: "Sent from Settings; nothing to do" });
+
+/** `POST /api/push/test {endpoint}`: one labelled push to the caller's own subscription, rate-limited and journaled. */
+export async function handlePushTest(req: IncomingMessage, options: PushRouteOptions, now = new Date()): Promise<PushRouteResult> {
+	if (req.method !== "POST") return refuse(405, "POST only", { allow: "POST" });
+	const guarded = await guardedJson(req, options);
+	if (!guarded.ok) return guarded.refused;
+	const parsed = parseSubscription(guarded.json, "unsubscribe");
+	if (!parsed.ok) return refuse(400, parsed.reason);
+	const id = subscriptionId(parsed.value.endpoint);
+	const target = listSubscriptions(guarded.dataDir).items.find((item) => item.id === id && item.endpoint === parsed.value.endpoint);
+	if (!target) return refuse(404, "this browser is not subscribed on this home; turn notifications on first");
+	if (!ownsSubscription(target, guarded.owner)) return refuse(403, "this subscription belongs to another device");
+	const journal = new PushTestJournal(options.stateDir);
+	try {
+		return await journal.locked(async () => {
+			const previous = journal.read().filter((test) => test.subscription === id).at(-1);
+			const wait = Math.ceil(((previous ? Date.parse(previous.at) : 0) + PUSH_TEST_INTERVAL_MS - now.getTime()) / 1000);
+			if (wait > 0) return refuse(429, `one test a minute per device; try again in ${wait} s`, { "retry-after": String(wait) });
+			const keys = readVapidKeys(guarded.dataDir);
+			if (!keys) return refuse(409, "the push signing key is missing on this home; see /doctor");
+			const outcome = await sendOne(target, TEST_PAYLOAD, (endpoint) => vapidAuthorization({ endpoint, keys, now }), options.pushFetch);
+			const reason = outcome.kind === "delivered" ? undefined : outcome.kind === "gone" ? `HTTP ${outcome.status}: the push service no longer knows this subscription` : outcome.reason;
+			const result: PushTestResponse = { at: isoTimestamp(now), result: outcome.kind === "delivered" ? "accepted" : outcome.kind, ...(reason ? { reason } : {}), last_accepted_at: lastAcceptedAt(options.stateDir, id) };
+			journal.append({ subscription: id, at: result.at, result: result.result, ...(reason ? { reason } : {}) });
+			return { status: 200, body: result };
+		});
+	} catch (error) {
+		(options.log ?? ((line) => process.stderr.write(line)))(`viewer: push test failed: ${(error as Error).message.slice(0, 300)}\n`);
+		return refuse(500, "could not run the test on this home");
 	}
 }

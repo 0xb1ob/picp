@@ -122,6 +122,7 @@ test("first sweep baselines what is open; a new open ask is pushed once per devi
 	}
 	assert.deepEqual(b.ledger()?.items.find((item) => item.id === raised.id), {
 		id: raised.id, source: "ask", kind: "operator_ask", status: "sent", attempts: 1, delivered: 2, created_at: "2026-09-27T00:00:00Z", settled_at: "2026-09-27T00:00:00Z",
+		accepted: [FCM, MOZ].map(subscriptionId).sort().map((subscription) => ({ subscription, at: "2026-09-27T00:00:00Z" })),
 	});
 	assert.doesNotMatch(readFileSync(pushDeliveriesFile(b.stateDir), "utf8"), /Approve|alpha|fcm\.googleapis/);
 

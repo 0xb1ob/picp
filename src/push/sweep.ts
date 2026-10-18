@@ -206,6 +206,7 @@ export async function runPushSweep(ports: PushSweepPorts): Promise<PushSweepRepo
 				const target = targets[index] as StoredSubscription;
 				if (outcome.kind === "delivered") {
 					record.delivered += 1;
+					(record.accepted ??= []).push({ subscription: target.id, at });
 					return;
 				}
 				const reason = outcome.kind === "gone" ? `HTTP ${outcome.status}, subscription removed` : outcome.reason;
