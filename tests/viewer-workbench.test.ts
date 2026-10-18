@@ -213,8 +213,10 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
+			// #328: the test-notification send (VAPID, journal) lives in src/push; only the test route reaches it.
+			if (match[2] === "../push/test-push.ts") assert.equal(name, "push-api.ts", "only the push test route sends a push");
 			if (match[2] === "../forge-url.ts") assert.doesNotMatch(readFileSync(join(VIEWER, "..", "forge-url.ts"), "utf8"), /^\s*import\b|\bimport\s*\(|\brequire\s*\(/m, "forge-url.ts may cross the viewer boundary only while it imports nothing");
 			// PR 2d: the remote runtime reads the tunnel's node-only config/runtime schema, shared with the daemon; nothing else does.
 			if (match[2] === "../service/daemon-tunnel-files.ts") assert.equal(name, "remote-runtime.ts", "only the remote runtime reads the tunnel schema");
