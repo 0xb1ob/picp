@@ -45,9 +45,14 @@ export function formatReadiness(home: string, project: EnsureCloneResult["projec
 			: tracker.adapter === "beads" ? `beads (${tracker.db}, from the ${tracker.source})` : `github (${tracker.connection_id})`;
 	const tellTracker = tracker ? `Work items come from its ${tracker.adapter} tracker.` : "Work arrives as requests to the operator; no tracker is connected.";
 
-	const tellMerge = project.merge_policy === "human_handoff"
-		? "picp opens a pull request, gets it reviewed and green, then hands it to you on GitHub to merge; it never merges itself."
-		: "picp merges a pull request once it is reviewed, CI is green and the repository's own rules allow it (nothing forced).";
+	const kind = forge.ok ? forge.repository.kind : undefined;
+	const request = kind === "gitlab" ? "merge request" : "pull request";
+	const where = kind === "github" ? " on GitHub" : kind === "gitlab" ? " on GitLab" : "";
+	const tellMerge = project.delivery === "local"
+		? "picp pushes each job's branch to the remote; it opens no pull or merge request and merges nothing."
+		: project.merge_policy === "human_handoff"
+			? `picp opens a ${request}, gets it reviewed and green, then hands it to you${where} to merge; it never merges itself.`
+			: `picp merges a ${request} once it is reviewed, CI is green and the repository's own rules allow it (nothing forced).`;
 	return [
 		"  readiness (advisory, never blocks add; re-run cp_project add to check again):",
 		`    forge:   ${forgeLine}`,
