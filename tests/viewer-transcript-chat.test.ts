@@ -61,7 +61,11 @@ test("bubbles: own on the right, the session on the left, grouped under one head
 		"session-message session-say session-bubble session-own",
 	], "a hidden tool run never splits a group; a 27-minute gap and a change of author do");
 	const hm = (at: string) => time(`2026-10-04T${at}:00Z`);
-	assert.deepEqual(bubbles.map(b => b.querySelector(".session-who")?.textContent ?? null), [`You${hm("14:00")}`, null, `OPOperator${hm("14:02")}`, null, `OPOperator${hm("14:30")}`, `Youdashboard${hm("14:00")}`], "one header per group, its time once; the person is You, the session Operator with its initials");
+	assert.deepEqual(bubbles.map(b => b.querySelector(".session-who")?.textContent ?? null), [`You${hm("14:00")}`, `You${hm("14:01")}`, `OPOperator${hm("14:02")}`, null, `OPOperator${hm("14:30")}`, `Youdashboard${hm("14:00")}`], "each own pill keeps its time; the session's header shows once per group with its initials");
+	assert.deepEqual(bubbles.map(b => b.querySelector(".session-who") === null ? null : b.firstElementChild!.classList.contains("session-who") ? "above" : "below"), ["below", "below", "above", null, "above", "below"], "own time below the pill, the session's header above its card");
+	assert.equal(bubbles[0]!.querySelector(".session-who-name")?.textContent, "You", "the own name stays for screen readers, visually hidden");
+	assert.ok(bubbles[2]!.querySelector(".session-avatar.session-avatar-bot"), "the Operator wears the identity gradient avatar");
+	assert.equal(document.querySelectorAll(".session-day").length, 1, "one day separator above the first message of 4 Oct");
 	const md = bubbles[2]!;
 	assert.equal(md.querySelectorAll("ul > li").length, 2);
 	assert.equal(md.querySelector("li strong")?.textContent, "one");
@@ -185,27 +189,28 @@ test("text files: sent filename/size chips link to plain-text views; arbitrary f
  assert.match(css, /\.session-files \{[^}]*flex-wrap: wrap;/); assert.match(css, /\.session-file-link \{[^}]*min-height: 44px;[^}]*overflow-wrap: anywhere;/);
 });
 
-test("layout: bubbles are full width on a phone and min(760px, 100%) on desktop; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
+test("layout: phone pills reach 84% and cards the column; desktop is one centred 820 px column with 670 px cards and 72% pills; code and tables scroll inside; only the transcript scrolls above a fixed composer", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
 	const [phone, desktop = ""] = css.split("@media (min-width: 900px) {");
 	assert.match(phone!, /\.session-bubble > \.session-body \{[^}]*max-width: 100%;[^}]*overflow-wrap: anywhere;/);
+	assert.match(phone!, /\.session-own > \.session-body \{ max-width: 84%; padding: 9px 14px; background: var\(--session-you\); color: var\(--session-you-text\);/);
+	assert.match(phone!, /\.session-other > \.session-body \{ padding: 10px 14px; background: var\(--raised\); border: 1px solid var\(--divider\); border-radius: 4px 18px 18px 18px; \}/);
 	assert.match(phone!, /\.md \.md-code \{[^}]*max-width: 100%;[^}]*overflow-x: auto;[^}]*white-space: pre;/, "a long code line scrolls inside the bubble");
 	assert.match(phone!, /\.md-table \{ max-width: 100%; overflow-x: auto;/, "a wide table scrolls inside the bubble");
+	assert.match(phone!, /\.sessions \.md-table tbody tr:last-child td \{ border-bottom: 0; \}/, "Sessions tables keep horizontal rules only, none under the last row");
 	assert.match(phone!, /\.session-message\.session-system \{ display: flex;[^}]*background: none; border: 0;/, "system rows are never cards");
-	assert.match(desktop, /\.session-bubble > \.session-who, \.session-bubble > \.session-body \{ max-width: min\(760px, 100%\); \}/);
+	assert.match(desktop, /\.session-entries \{ max-width: 820px; margin: 0 auto; padding: 0 32px; \}/);
+	assert.match(desktop, /\.session-other > \.session-body \{ max-width: 670px; \}/);
+	assert.match(desktop, /\.session-own > \.session-body \{ max-width: 72%; \}/);
 	assert.match(phone!, /\.session-transcript \{ flex: 1; min-height: 0; overflow-y: auto;/, "the transcript is the one scroller");
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*flex-shrink: 0; \}/, "the composer keeps its height at the bottom of the panel");
 });
 
-test("light scheme: Sessions remaps the palette tokens to a light ground, captured on the parent so nothing is a cycle", () => {
-	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
-	const light = css.split("@media (prefers-color-scheme: light) {")[1] ?? "";
-	const rule = (selector: string) => new RegExp(`${selector.replace(/[.()>:]/g, "\\$&")} \\{([^}]*)\\}`).exec(light)?.[1] ?? "";
-	const capture = rule(".shell-main:has(> .sessions)"), sessions = rule(".sessions");
-	assert.match(capture, /--lt-ink: var\(--background\);[\s\S]*--lt-paper: var\(--text\);/, "the light values are the palette's own, read from the dark tokens on the parent");
-	assert.match(sessions, /color-scheme: light;/, "native controls and scrollbars follow");
-	for (const pair of ["--background: var(--lt-paper);", "--text: var(--lt-ink);", "--held-border: var(--lt-soft-blue);"]) assert.ok(sessions.includes(pair), `light ground, dark ink, light-blue own bubble: ${pair}`);
-	assert.match(sessions, /background: var\(--background\); color: var\(--text\);/);
-	for (const [, name] of sessions.matchAll(/(--[a-z-]+): var\(--lt-/g)) assert.doesNotMatch(capture, new RegExp(`${name}:`), `${name} is remapped where it is not captured`);
-	assert.doesNotMatch(light, /#[\da-f]{3,8}\b/i, "no colour of its own: the palette guard holds");
+test("light scheme: the measured light palette is set on .shell-sessions in tokens.css, rail included; no other screen or stylesheet remaps it", () => {
+	const tokens = readFileSync(join(REPO_ROOT, "viewer-app/styles/tokens.css"), "utf8");
+	const light = /@media \(prefers-color-scheme: light\) \{\s*\.shell-sessions \{([^}]*)\}\s*\}/.exec(tokens)?.[1] ?? "";
+	assert.match(light, /color-scheme: light; color: var\(--text\);/, "native controls, scrollbars and inherited text follow");
+	for (const pair of ["--background: #f4f2ed;", "--nav: #ebe8e1;", "--raised: #ffffff;", "--text: #1d1c1a;", "--dim: #6b675f;", "--session-you: #2d5aa8;", "--session-code-mix: 5%;"]) assert.ok(light.includes(pair), `measured light token: ${pair}`);
+	assert.equal(tokens.match(/prefers-color-scheme/g)?.length, 1, "one light block");
+	for (const sheet of ["screens/sessions.css", "styles/shell.css", "components/control.css"]) assert.doesNotMatch(readFileSync(join(REPO_ROOT, "viewer-app", sheet), "utf8"), /prefers-color-scheme/, `${sheet} has no second light remap`);
 });

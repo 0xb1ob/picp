@@ -58,6 +58,37 @@
  --raised: #1c1c1a;
  --focus: #7f9fd8;
  --done: #5d5c56;
+ /* Sessions chat v2 (new-sessions-chat.html, measured in Chrome): own bubble, avatars and inline-code ink. */
+ --session-you: #2c3a55;
+ --session-you-text: #eef2fb;
+ --avatar-bot-from: #d98b5f;
+ --avatar-bot-to: #b9654a;
+ --avatar-bot-text: #ffffff;
+ --avatar-cp: #24241f;
+ --session-code-ink: #ffffff;
+ --session-code-mix: 7%;
+ --session-own-code-ink: #ffffff;
+ --session-own-code-mix: 7%;
  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+/*
+ * Light Sessions: the design's light artboard, for the whole Sessions shell (rail included) on a light-scheme browser.
+ * Every other screen keeps the dark :root palette. Links and accents darken for text on a light ground.
+ */
+@media (prefers-color-scheme: light) {
+ .shell-sessions {
+  color-scheme: light; color: var(--text);
+  --page: #d6d2c8; --background: #f4f2ed; --nav: #ebe8e1; --surface: #ebe8e1; --raised: #ffffff;
+  --divider: #e2ded5; --transcript-divider: #e2ded5; --nav-selected: #e0dcd2; --toggle: #e0dcd2; --tab-selected: #e0dcd2;
+  --border: #d6d2c8; --button: #ffffff; --questions-background: #ffffff;
+  --tag-border: #d6d2c8; --worth-border: #d6d2c8; --paused-border: #d6d2c8; --ledger-border: #d6d2c8; --trail-line: #d6d2c8;
+  --empty-background: #ffffff; --empty-border: #d6d2c8; --check-background: #ffffff; --check-border: #7fd49b;
+  --ask-background: #ffffff; --ask-border: #f0b35a; --error-border: #f2917f; --held-border: #93b4f5;
+  --text: #1d1c1a; --hover: #1d1c1a; --secondary: #4f4c45; --subtle: #4f4c45; --objective: #4f4c45;
+  --muted: #4f4c45; --empty-text: #4f4c45; --dim: #6b675f; --faint: #b5b3aa; --disabled-text: #8f8d84;
+  --green: #2f6f4a; --amber: #9a5b00; --blue: #2d5aa8; --coral: #5a2f28; --focus: #2d5aa8;
+  --session-you: #2d5aa8; --session-you-text: #ffffff; --avatar-cp: #d9d4c8;
+  --session-code-ink: #000000; --session-code-mix: 5%; --session-own-code-ink: #ffffff; --session-own-code-mix: 18%;
+ }
 }

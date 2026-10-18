@@ -108,6 +108,8 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-sidebar-nav .shell-nav-icon { padding: 0; }
  .shell-sidebar-nav .shell-count { left: 106px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
+ /* Sessions chat v2 measured the rail at 14×10 padding and a 12 px gap; other screens keep theirs. */
+ .shell-sessions > .shell-sidebar { padding: 14px 10px; gap: 12px; }
  .shell-main { min-width: 0; padding: 0 32px 48px; }
  /* One compact row on the page surface: title left, status and ⋮ right, a hairline under it. */
  .page-header { display: flex; align-items: center; gap: 10px; height: 48px; min-width: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
