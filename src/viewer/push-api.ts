@@ -16,13 +16,10 @@
 
 import type { IncomingMessage } from "node:http";
 import { accessOf } from "./access.ts";
-import { isoTimestamp } from "../contracts.ts";
-import { PUSH_TEST_INTERVAL_MS, PushTestJournal } from "../push/deliveries.ts";
-import { readVapidKeys } from "../push/keys.ts";
-import { sendOne } from "../push/sweep.ts";
-import { type PushFetch, vapidAuthorization } from "../push/webpush.ts";
-import type { PushStatusResponse, PushTestResponse } from "./api-types.ts";
-import { lastAcceptedAt, listSubscriptions, ownsSubscription, parseSubscription, pushDataDir, pushServiceAllowed, readDeliverySummary, readPushConfig, type SubscriptionOwner, subscriptionId } from "./push-files.ts";
+import { runPushTest } from "../push/test-push.ts";
+import type { PushFetch } from "../push/webpush.ts";
+import type { PushStatusResponse } from "./api-types.ts";
+import { listSubscriptions, ownsSubscription, parseSubscription, pushDataDir, pushServiceAllowed, readDeliverySummary, readPushConfig, type SubscriptionOwner, subscriptionId } from "./push-files.ts";
 import { deleteSubscription, saveSubscription } from "./push-subscriptions.ts";
 
 export const PUSH_STATUS_PATH = "/api/push";
@@ -154,8 +151,6 @@ export async function handlePushSubscription(req: IncomingMessage, options: Push
 	}
 }
 
-const TEST_PAYLOAD = JSON.stringify({ project: "command post", kind: "test notification", headline: "Sent from Settings; nothing to do" });
-
 /** `POST /api/push/test {endpoint}`: one labelled push to the caller's own subscription, rate-limited and journaled. */
 export async function handlePushTest(req: IncomingMessage, options: PushRouteOptions, now = new Date()): Promise<PushRouteResult> {
 	if (req.method !== "POST") return refuse(405, "POST only", { allow: "POST" });
@@ -167,20 +162,10 @@ export async function handlePushTest(req: IncomingMessage, options: PushRouteOpt
 	const target = listSubscriptions(guarded.dataDir).items.find((item) => item.id === id && item.endpoint === parsed.value.endpoint);
 	if (!target) return refuse(404, "this browser is not subscribed on this home; turn notifications on first");
 	if (!ownsSubscription(target, guarded.owner)) return refuse(403, "this subscription belongs to another device");
-	const journal = new PushTestJournal(options.stateDir);
 	try {
-		return await journal.locked(async () => {
-			const previous = journal.read().filter((test) => test.subscription === id).at(-1);
-			const wait = Math.ceil(((previous ? Date.parse(previous.at) : 0) + PUSH_TEST_INTERVAL_MS - now.getTime()) / 1000);
-			if (wait > 0) return refuse(429, `one test a minute per device; try again in ${wait} s`, { "retry-after": String(wait) });
-			const keys = readVapidKeys(guarded.dataDir);
-			if (!keys) return refuse(409, "the push signing key is missing on this home; see /doctor");
-			const outcome = await sendOne(target, TEST_PAYLOAD, (endpoint) => vapidAuthorization({ endpoint, keys, now }), options.pushFetch);
-			const reason = outcome.kind === "delivered" ? undefined : outcome.kind === "gone" ? `HTTP ${outcome.status}: the push service no longer knows this subscription` : outcome.reason;
-			const result: PushTestResponse = { at: isoTimestamp(now), result: outcome.kind === "delivered" ? "accepted" : outcome.kind, ...(reason ? { reason } : {}), last_accepted_at: lastAcceptedAt(options.stateDir, id) };
-			journal.append({ subscription: id, at: result.at, result: result.result, ...(reason ? { reason } : {}) });
-			return { status: 200, body: result };
-		});
+		const run = await runPushTest({ stateDir: options.stateDir, dataDir: guarded.dataDir, target, now, ...(options.pushFetch ? { fetch: options.pushFetch } : {}) });
+		if (run.ok) return { status: 200, body: run.reply };
+		return refuse(run.status, run.error, run.retry_after ? { "retry-after": String(run.retry_after) } : undefined);
 	} catch (error) {
 		(options.log ?? ((line) => process.stderr.write(line)))(`viewer: push test failed: ${(error as Error).message.slice(0, 300)}\n`);
 		return refuse(500, "could not run the test on this home");
