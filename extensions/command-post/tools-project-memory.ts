@@ -11,7 +11,7 @@ import { formatCurationAudit, formatCurationPlan, formatMemoryReport, PROMOTABLE
 import { type ForgeConfig, resolveForgeRepository } from "../../src/forge-url.ts";
 import type { MergePolicy } from "../../src/contracts.ts";
 import { detectMergePolicy, ghMergeFlowProbe, type MergeFlowProbe } from "../../src/merge-policy-detect.ts";
-import { formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
+import { formatAfterMergeDeploy, formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
 import { type CommandRunner, execRunner } from "../../src/doctor.ts";
 import { formatReadiness } from "../../src/project-readiness.ts";
 import type { ExtensionDeps } from "./shared.ts";
@@ -40,9 +40,26 @@ export function registerProjectMemoryTools(
 			"reviewer_model sets the exact model for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
 			"forge declares a self-managed GitLab (kind gitlab, web_base_url, optional api_base_url, token_env = the variable NAME); null clears. Never pass a token value.",
 			"cp_project add without policy detects who merges: a solo GitHub repo gets repo, a team or unreadable one human_handoff. A team-owned repo is merge_policy, never a standing order.",
+			"Set after_merge_deploy only on the operator's explicit instruction; it creates (never dispatches) one ops:deploy job per merge into branch, gated by risk:high at dispatch.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model", "forge"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, set/clear reviewer_model, or set/clear its forge" }),
+			action: StringEnum(["list", "add", "show", "archive", "unarchive", "merge_policy", "reviewer_model", "forge", "after_merge_deploy"], { description: "list registered projects, add one, show one, archive/unarchive one (archived: skipped by pollers, refused for new jobs, mandates and dispatch; clone and history kept), set its merge_policy, set/clear reviewer_model, set/clear its forge, or set/clear after_merge_deploy" }),
+			deploy: Type.Optional(
+				Type.Union(
+					[
+						Type.Object(
+							{
+								branch: Type.Optional(Type.String({ description: "Merges into this branch trigger a deploy job; default: the project's base_branch" })),
+								task: Type.String({ description: "The standing deploy instruction, copied into every deploy job's task file" }),
+								resources: Type.Array(Type.String(), { description: "1–8 resource names; each deploy job carries resource:<name> so deploys serialize" }),
+							},
+							{ additionalProperties: false },
+						),
+						Type.Null(),
+					],
+					{ description: "after_merge_deploy: {branch?, task, resources}, or null to turn it off" },
+				),
+			),
 			name: Type.Optional(Type.String({ description: "Project name; required except for list" })),
 			forge: Type.Optional(
 				Type.Union(
@@ -111,6 +128,11 @@ export function registerProjectMemoryTools(
 				// kind is re-validated by the registry; the schema's StringEnum types it as string.
 				const project = await registry.setForge(params.name, params.forge as ForgeConfig | null);
 				return { content: [{ type: "text", text: `${project.name} forge: ${project.forge ? formatForge(project.forge) : "unset (detected from the remote)"}` }], details: { project } as unknown as Record<string, unknown> };
+			}
+			if (params.action === "after_merge_deploy") {
+				if (params.deploy === undefined) throw new Error("cp_project after_merge_deploy needs deploy ({branch?, task, resources} or null)");
+				const project = await registry.setAfterMergeDeploy(params.name, params.deploy);
+				return { content: [{ type: "text", text: `${project.name} after-merge deploy: ${project.after_merge_deploy ? formatAfterMergeDeploy(project.after_merge_deploy) : "off"}` }], details: { project } as unknown as Record<string, unknown> };
 			}
 			if (params.action === "reviewer_model") {
 				if (params.reviewer_model === undefined) throw new Error("cp_project reviewer_model needs reviewer_model (provider/model or null)");

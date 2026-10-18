@@ -42,6 +42,31 @@ test("reviewer preference persists, displays, replaces and clears; refusals do n
 	assert.doesNotMatch(formatProjects(registry.list()), /reviewer model/);
 });
 
+test("after_merge_deploy stores, defaults its branch, refuses bad input, prints, and clears (#326)", async (t) => {
+	const home = withHome(t);
+	const registry = new ProjectRegistry({ home: home.path, now: () => new Date("2026-09-01T10:00:00Z") });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git" });
+	await registry.register({ name: "based", clone_url: "https://github.com/o/based.git", base_branch: "main" });
+	await assert.rejects(registry.setAfterMergeDeploy("demo", { task: "deploy it", resources: ["host-a"] }), /name branch/);
+	const before = readFileSync(registry.file, "utf8");
+	for (const bad of [[], ["a", "a"], ["-bad"], Array.from({ length: 9 }, (_, i) => `r${i}`)]) {
+		await assert.rejects(registry.setAfterMergeDeploy("based", { task: "deploy it", resources: bad }), ProjectError);
+	}
+	await assert.rejects(registry.setAfterMergeDeploy("based", { task: "  ", resources: ["host-a"] }), /task/);
+	await assert.rejects(registry.setAfterMergeDeploy("absent", null), /unknown project/);
+	assert.equal(readFileSync(registry.file, "utf8"), before, "a refusal writes nothing");
+	await registry.setAfterMergeDeploy("based", { task: " copy and restart ", resources: ["host-a", "db"] });
+	assert.deepEqual(new ProjectRegistry({ home: home.path }).get("based")?.after_merge_deploy, {
+		branch: "main", task: "copy and restart", resources: ["host-a", "db"], enabled_at: "2026-09-01T10:00:00Z",
+	});
+	assert.match(formatProjects(registry.list()), /after-merge deploy: main · resource:host-a,resource:db · since 2026-09-01T10:00:00Z/);
+	await registry.setAfterMergeDeploy("demo", { branch: "release", task: "x", resources: ["h"] });
+	assert.equal(registry.get("demo")?.after_merge_deploy?.branch, "release");
+	await registry.setAfterMergeDeploy("based", null);
+	assert.equal(new ProjectRegistry({ home: home.path }).get("based")?.after_merge_deploy, undefined);
+	assert.doesNotMatch(formatProjects([registry.require("based")]), /after-merge deploy/);
+});
+
 
 test("cp_project reviewer_model dispatches set/clear and displays the saved preference", async (t) => {
 	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");

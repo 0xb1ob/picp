@@ -24,6 +24,18 @@ export const ProjectSchema = Type.Object(
 		/** Who lands a reviewed, green PR: absent or `repo` means cp_integrate merges when the repo permits; `human_handoff` hands it to a human on GitHub and never merges. */
 		merge_policy: Type.Optional(StringEnum(["repo", "human_handoff"])),
 		reviewer_model: Type.Optional(ReviewerModelSchema),
+		/** #326 opt-in: a merge into `branch` creates (never dispatches) one ops:deploy job serialized by `resources`. */
+		after_merge_deploy: Type.Optional(
+			Type.Object(
+				{
+					branch: Type.String({ minLength: 1, maxLength: 200 }),
+					task: Type.String({ minLength: 1, maxLength: 4000 }),
+					resources: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" }), { minItems: 1, maxItems: 8 }),
+					enabled_at: IsoTimestampSchema,
+				},
+				{ additionalProperties: false },
+			),
+		),
 		/**
 		 * Which forge hosts the remote (forge PR 1). Absent: github.com and
 		 * gitlab.com are recognised from the remote, any other host is unsupported.
@@ -74,6 +86,7 @@ export type ProjectMandateOverride = {
 	exclude_paths?: string[];
 };
 export type MergePolicy = "repo" | "human_handoff";
+export type AfterMergeDeploy = NonNullable<Static<typeof ProjectSchema>["after_merge_deploy"]>;
 export type Project = Replace<
 	Narrow<Static<typeof ProjectSchema>, "delivery", Delivery>,
 	{ mandate?: ProjectMandateOverride; merge_policy?: MergePolicy; forge?: ForgeConfig }

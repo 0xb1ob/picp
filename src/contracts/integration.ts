@@ -160,6 +160,28 @@ export const MergeReceiptSchema = Type.Object(
 );
 export type MergeReceipt = Replace<Static<typeof MergeReceiptSchema>, { strategy?: MergeStrategy; authority?: MergeAuthority; forge?: { provider: "github" | "gitlab"; project_url: string } }>;
 
+/** After-merge deploy linkage (#326) — state/runs/<merged-job>/after-merge.json; its presence is the idempotence key. */
+export const AfterMergeRecordSchema = Type.Object(
+	{
+		schema_version: Type.Integer({ minimum: 1 }),
+		job_id: JobIdSchema,
+		merge_commit_sha: CommitShaSchema,
+		base_branch: Type.Optional(Type.String({ maxLength: 200 })),
+		status: StringEnum(["created", "skipped"]),
+		deploy_job_id: Type.Optional(JobIdSchema),
+		coverage: Type.Optional(StringEnum(["enrolled", "project_wide", "none"])),
+		mandate_id: Type.Optional(Type.String({ maxLength: 40 })),
+		reason: Type.Optional(Type.String({ maxLength: 400 })),
+		task_file: Type.Optional(Type.String({ maxLength: 500 })),
+		recorded_at: IsoTimestampSchema,
+	},
+	{ additionalProperties: false },
+);
+export type AfterMergeRecord = Replace<
+	Static<typeof AfterMergeRecordSchema>,
+	{ status: "created" | "skipped"; coverage?: "enrolled" | "project_wide" | "none" }
+>;
+
 // ---------------------------------------------------------------------------
 // Integration (cp-uug) — state/runs/<job-id>/integration.json
 // ---------------------------------------------------------------------------

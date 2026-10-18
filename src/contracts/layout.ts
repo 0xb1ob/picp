@@ -443,6 +443,14 @@ export const paths = Object.freeze({
 	mergeFile(jobId: string): string {
 		return `${LAYOUT.runs}/${requireJobId(jobId)}/merge.json`;
 	},
+	/** After-merge deploy linkage record (#326): the deploy job created for this merged job, or why none. */
+	afterMergeFile(jobId: string): string {
+		return `${LAYOUT.runs}/${requireJobId(jobId)}/after-merge.json`;
+	},
+	/** Frozen task file handed to the after-merge deploy job's dispatch. */
+	afterMergeTaskFile(jobId: string): string {
+		return `${LAYOUT.runs}/${requireJobId(jobId)}/after-merge-task.md`;
+	},
 	/**
 	 * What `cp_integrate` has already done for this job (cp-uug). Continuity and
 	 * bounded counters only: the step that is *due* is recomputed from git and
