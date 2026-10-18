@@ -57,7 +57,7 @@ export interface TranscriptAsk {
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
 export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string; client_id?: string};
-export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean }
+export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean; /** picp-96n: basename of the listed operator session a Not confirmed send was handed to; never the current one. */ target_session?: string }
 /** `POST /api/operator/queue` (cp-y43c): 200 with the queued message's committed text, or `cancelled`. A refusal for a message already handed over carries `state: "sent"` and the `text` the session was given. */
 export type OperatorQueueResponse = { id: string; state: "queued"; text: string; editable: true } | { id: string; state: "cancelled" };
 /** `GET /api/operator/control`: can this page steer the operator session, and the session's CSRF token when it can. */

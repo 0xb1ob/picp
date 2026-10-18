@@ -26,7 +26,7 @@ export type ControlBody = ControlMessageBody | {kind: "answer"; ask_id: string; 
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** cp-y43c — `editable`: the dashboard still holds it; `edited`: a saved text the status has not confirmed yet; `sent`: the bridge said it was handed over, so no status read makes it editable again. */
-export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody; editable?: boolean; edited?: string; sent?: true }
+export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody; editable?: boolean; edited?: string; sent?: true; target_session?: string }
 /** cp-y43c Edit/Cancel outcome: saved, already sent (the text the session got), or refused. */
 export type QueueOutcome = { state: "queued" | "cancelled" } | { state: "sent"; text: string } | { error: string };
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */

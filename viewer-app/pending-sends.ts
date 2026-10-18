@@ -17,7 +17,7 @@ export function readPending(): PendingState {
   let skipped = 0;
   const items = value.items.flatMap(item=>{
    try {
-    if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || (item.reason !== null && typeof item.reason !== "string") || (item.ask_id !== undefined && item.ask_id !== null && typeof item.ask_id !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || (item.body.deliver !== undefined && !["prompt","followUp","steer"].includes(item.body.deliver)) || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
+    if (!item || typeof item.key !== "string" || typeof item.at !== "string" || !Number.isFinite(Date.parse(item.at)) || (item.id !== null && typeof item.id !== "string") || (item.reason !== null && typeof item.reason !== "string") || (item.ask_id !== undefined && item.ask_id !== null && typeof item.ask_id !== "string") || (item.target_session !== undefined && typeof item.target_session !== "string") || item.body?.kind !== "message" || typeof item.body.text !== "string" || (item.body.thread !== undefined && typeof item.body.thread !== "string") || (item.body.deliver !== undefined && !["prompt","followUp","steer"].includes(item.body.deliver)) || !["sending","queued","held","delivered","failed"].includes(item.state)) throw new Error("invalid pending send");
     for (const [field,ids] of Object.entries(item.body)) if ((field === "images" || field === "files") && (!Array.isArray(ids) || !ids.every(id=>typeof id === "string"))) throw new Error("invalid pending attachments");
     return [{...item,ask_id:item.ask_id ?? null,...(item.state === "sending" ? {state:"failed" as const,reason:"Send interrupted by reload; check the transcript before retrying"} : {})}];
    } catch { skipped++; return []; }
@@ -64,7 +64,7 @@ export function reconcilePending(value: PendingState, status: ControlStatus | nu
     // cp-y43c: the journal's text wins once it shows the saved edit; until then a status read before the save cannot revert it.
     const {edited,editable:_was,...local} = items[index]!;
     const confirmed = edited === undefined || edited === send.body.text;
-    items[index] = {...local,state:send.state,reason:send.reason ?? local.reason,...(send.editable === true && !local.sent ? {editable:true} : {}),body:confirmed ? {...local.body,text:send.body.text} : local.body,...(confirmed ? {} : {edited})};
+    items[index] = {...local,state:send.state,reason:send.reason ?? local.reason,...(send.editable === true && !local.sent ? {editable:true} : {}),...(send.target_session ? {target_session:send.target_session} : {}),body:confirmed ? {...local.body,text:send.body.text} : local.body,...(confirmed ? {} : {edited})};
    }
   }
   for (const item of items) {

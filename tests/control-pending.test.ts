@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 import { test } from "node:test";
 import { LOST_SEND_VISIBLE_MS, readPendingSends } from "../src/viewer/control-pending.ts";
+import { operatorSessionsFile } from "../src/viewer/operator-sessions.ts";
 import { INBOX_MAX_AGE_MS, controlJournalFile } from "../src/viewer/control-files.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -104,4 +105,33 @@ test("cp-y43c review 1: a lost send is a visible failure for LOST_SEND_VISIBLE_M
  assert.match(sends.get(recentExpired)!.reason!,/^Not sent: queued longer than 24 h\./);
  assert.match(sends.get(boundaryEnded)!.reason!,/^Not confirmed: target operator session ended\./);
  assert.equal(LOST_SEND_VISIBLE_MS, 7 * day);
+});
+
+test("picp-96n: a Not confirmed send names only its own recorded, listed session, never the current one", t => {
+ const home = createScratchHome(); t.after(() => home.cleanup());
+ const stateDir = join(home.path, LAYOUT.state);
+ mkdirSync(join(stateDir,"operator"),{recursive:true}); mkdirSync(join(stateDir,"sessions"),{recursive:true});
+ const now = new Date("2026-10-08T12:00:00Z");
+ const a = join(home.path,"A.jsonl"), b = join(home.path,"B.jsonl"), dup = join(home.path,"dup","A.jsonl");
+ writeFileSync(a,""); writeFileSync(b,"");
+ writeFileSync(operatorSessionsFile(join(stateDir,"sessions")),[{at:"2026-10-07T10:00:00Z",session_file:a},{at:"2026-10-08T11:30:00Z",session_file:b}].map(row=>JSON.stringify(row)).join("\n")+"\n");
+ const session = {running:true,pid:process.pid,since:"2026-10-08T11:30:00Z",reason:"running"};
+ const rows: object[] = [];
+ const add = (n:number, extra:object, injected = true) => {
+  const id = `dc-20261008110000-${n.toString(16).padStart(8,"0")}`;
+  rows.push({type:"request",by:"bridge",id,at:"2026-10-08T11:00:00Z",kind:"message",text:`send ${n}`,ask_id:null,peer:null,deliver:"followUp",session_started_at:"2026-10-07T10:00:00Z",session_file:a,...extra});
+  rows.push({type:"outcome",by:"bridge",id,at:"2026-10-08T11:00:00Z",state:"queued",reason:null});
+  if (injected) rows.push({type:"outcome",by:"bridge",id,at:"2026-10-08T11:00:00Z",state:"injected",reason:null});
+  rows.push({type:"outcome",by:"bridge",id,at:"2026-10-08T11:30:00Z",state:"dropped",reason:"session shut down"});
+  return id;
+ };
+ const inA = add(1,{}), notSent = add(2,{},false), unlisted = add(3,{session_file:join(home.path,"gone.jsonl")});
+ const legacy = add(4,{session_started_at:undefined,session_file:undefined}), sameName = add(5,{session_file:dup});
+ writeFileSync(controlJournalFile(stateDir),rows.map(row=>JSON.stringify(row)).join("\n")+"\n");
+ const sends = new Map(readPendingSends(stateDir,now,session).sends.map(send=>[send.id,send]));
+ assert.deepEqual([inA,notSent,unlisted,legacy,sameName].map(id=>sends.get(id)?.state),["failed","failed","failed","failed","failed"]);
+ assert.match(sends.get(notSent)!.reason!,/^Not sent: /);
+ assert.deepEqual([inA,notSent,unlisted,legacy,sameName].map(id=>sends.get(id)?.target_session),["A.jsonl",undefined,undefined,undefined,undefined],
+  "exact mapping only: never injected, unlisted, legacy and a same-basename different file get no link");
+ assert.notEqual(sends.get(legacy)?.target_session,"B.jsonl","no fallback to the current session");
 });

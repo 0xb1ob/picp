@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- A `Not confirmed` failed send links to the operator session it was handed to (cp-picp-96n-build, picp-96n / OPP-004). The control status `sends[]` gains an optional `target_session`, the basename of the send's own journaled `session_file`, set only when injected and listed in `operator-sessions.jsonl`; the bubble links to the existing `#sessions?view=you&transcript=1&session=<id>` route, or says the send cannot be checked here. Never the current session; no new route, no replay. Migration: none. Rollback: revert.
+
 - The `.beads/` never-commit guard covers only the home's own `.beads/` (cp-beads-tracked-in-projects-dbtd). A project worktree that tracks its `.beads/` (picp since #298) can stage it; the runtime dir is still refused by its leading segment from any cwd, and `.beads` still is when a `cd`/`-C` target is hidden. `git -C <dir> add` paths now resolve against `<dir>`. Migration: none. Rollback: revert.
 
 - Installer post-login continuation is exact (cp-bead-picp-hah-r1z7, picp-hah / OPP-001). When pi lists no usable model, the `model` step now prints `<app>/bin/cp-install --home <home> --app <app> --force`, says a rerun without `--force` keeps the choice unpinned, discloses that `--force` reruns `npm ci` and replaces a differing `data/daemon.json`, unit or wrapper, and states that the rerun can still find no model the service sees. README step 3 agrees. Install behavior is unchanged. Migration: none. Rollback: revert.

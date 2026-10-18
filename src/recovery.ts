@@ -155,15 +155,28 @@ export function decideBoundedRecovery(input: RecoveryDecisionInput): RecoveryDec
 // Briefs
 // ---------------------------------------------------------------------------
 
-/** What a revived worker is told after a transient death: continue, do not redo. */
-export function recoveryReviveBriefText(jobId: string, cause: Failure, interruptedTool?: { name: string }): string {
+/**
+ * What a revived worker is told after a transient death: pi's "No result provided" for a cut-off call is synthetic,
+ * not a failure, so check the effect before repeating. Only the call's name and id are named, never its arguments.
+ */
+export function recoveryReviveBriefText(
+	jobId: string,
+	cause: Failure,
+	interruptedTool?: { name: string; toolCallId: string },
+): string {
+	const synthetic = `"No result provided" error was added on resume and does not say whether it ran.`;
 	const lines = [
 		`Automatic recovery: ${jobId} died (${cause.class}: ${cause.message}) and has been revived on this same session.`,
-		"Nothing on disk was touched. Continue exactly where you left off:",
-		...(interruptedTool
-			? [`the interrupted call was ${interruptedTool.name}; treat it as failed and retry it, do not assume it ran.`]
-			: []),
-		"do not redo work you had already finished, and call report_result once you are done.",
+		"Recovery itself changed nothing on disk; work you did before the death may already be there.",
+		interruptedTool
+			? `Your call ${interruptedTool.name} (call id ${interruptedTool.toolCallId}) was cut off: its ${synthetic}`
+				+ ` The same holds for any other call answered "No result provided".`
+			: `If a tool call shows "No result provided", that ${synthetic}`,
+		"Before repeating such a call, check its effect where you can observe it (files, git status/log, the remote branch):",
+		"skip it if the effect is there; repeat it only if the effect is absent.",
+		"If you cannot check its effect and repeating it could duplicate something outside this worktree, do not repeat it;",
+		"name it as unresolved in report_result.",
+		"Otherwise continue where you left off: do not redo work you had already finished, and call report_result once you are done.",
 		"This is the one automatic recovery this job gets for this failure; a repeat is escalated to a human.",
 	];
 	return lines.join("\n");
@@ -338,7 +351,10 @@ export class BoundedRecovery {
 
 	/** A worker died (crash, timeout, provider_limit, agent_empty_output, settled_without_report, ...). */
 	onDeath(jobId: string, failure: Failure): Promise<RecoveryOutcome> {
-		return this.#claimed(jobId, failure, () => this.#recover(jobId, failure, () => recoveryReviveBriefText(jobId, failure)));
+		const tool = (revived?: ReviveResult) =>
+			revived?.interruptedTool && { name: revived.interruptedTool.name, toolCallId: revived.interruptedTool.toolCallId };
+		return this.#claimed(jobId, failure, () =>
+			this.#recover(jobId, failure, (revived) => recoveryReviveBriefText(jobId, failure, tool(revived))));
 	}
 
 	/** A worker hit its wall-clock or tool-call cap. The worktree is intact; the process is already gone. */
@@ -364,7 +380,7 @@ export class BoundedRecovery {
 		});
 	}
 
-	async #recover(jobId: string, failure: Failure, brief: () => string): Promise<RecoveryOutcome> {
+	async #recover(jobId: string, failure: Failure, brief: (revived?: ReviveResult) => string): Promise<RecoveryOutcome> {
 		const { home, fleet, runs } = this.#options;
 		const record = fleet.get(jobId);
 		if (record && isScriptFleetRecord(record)) return { action: "revive_refused", reason: `${jobId} is a script job; no automatic replay`, attempted: false, attemptsLeft: 0 };
@@ -397,6 +413,7 @@ export class BoundedRecovery {
 
 		let pid: number;
 		let sessionFile: string;
+		let revived: ReviveResult | undefined;
 		if (decision.action === "redispatch") {
 			// The worktree is intact and the process is already gone (module header,
 			// `onBound`): a fresh worker on the SAME worktree/branch, never `Reviver`,
@@ -424,12 +441,12 @@ export class BoundedRecovery {
 				await this.#escalate(jobId, failure, reason);
 				return { action: "revive_refused", reason, attempted: true, attemptsLeft };
 			}
-			const result = await reviver.revive(jobId, { recovering: true });
-			pid = result.pid;
-			sessionFile = result.session_file;
+			revived = await reviver.revive(jobId, { recovering: true });
+			pid = revived.pid;
+			sessionFile = revived.session_file;
 		}
 
-		const text = brief();
+		const text = brief(revived);
 		const sent = await this.#options.sender.send(jobId, text);
 		runs.open(jobId).cp("recovery_attempted", {
 			class: failure.class,
