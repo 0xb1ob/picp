@@ -1497,7 +1497,8 @@ test("cp_parent stop discards never-landed sends with one relay", async (t) => {
 	await bridge.stop({ discardPending: true });
 	const relays = ctx.sendRelays(pending.send_id);
 	assert.equal(relays.length, 1, JSON.stringify(ctx.relays));
-	assert.match(relays[0]?.text ?? "", /not delivered \(parent stopped by the operator\)/);
+	// picp-4by: the body was written to the parent but never observed landing, so the relay stays unknown.
+	assert.match(relays[0]?.text ?? "", /has no confirmed landing \(parent stopped by the operator\)/);
 	assert.equal(bridge.status().sends.find((row) => row.id === pending.send_id)?.state, "undeliverable");
 	await assert.rejects(bridge.send("after stop"), CpBridgeError);
 });

@@ -18,6 +18,7 @@ import {
 	readParentSendOutboxForRestart,
 	receiptOf,
 	sendIdOfMessage,
+	sendRelayText,
 	sendIdsInText,
 	sendIdsInTranscript,
 	sendMarker,
@@ -199,6 +200,26 @@ test("reconcile: seen lands, absent requeues, unprovable is undeliverable", () =
 	const lost = box.reconcile({ entries: window, dropped: 3 });
 	assert.deepEqual(lost.map((entry) => entry.id), [absent.id]);
 	assert.match(box.get(absent.id)?.error ?? "", /landing unprovable/);
+});
+
+// picp-4by: an undeliverable relay claims non-delivery only for a never-injected send; a landed one says it
+// landed with no reply, and an injected one whose landing the transcript window cannot prove stays unknown.
+test("sendRelayText keeps the furthest established delivery fact and its cause", () => {
+	const box = outbox({ now: () => new Date("2026-09-24T10:00:00Z") });
+	const never = box.enqueue("never");
+	const stopped = box.enqueue("stopped");
+	const unprovable = box.enqueue("unprovable");
+	box.markInjected([stopped.id, unprovable.id]);
+	box.markLanded([stopped.id]);
+	box.markUndeliverable([never.id], "parent stopped by the operator");
+	box.markUndeliverable([stopped.id], "parent stopped before replying");
+	box.reconcile({ entries: [{ type: "message", timestamp: "2026-09-24T11:00:00.000Z", message: { role: "user", content: "x" } }], dropped: 3 });
+	const text = (id: string) => sendRelayText(box.get(id)!, box.file);
+	assert.match(text(never.id), /was not delivered \(parent stopped by the operator\)/);
+	assert.match(text(stopped.id), /reached the parent at 2026-09-24T10:00:00Z but got no reply \(parent stopped before replying\)/);
+	assert.doesNotMatch(text(stopped.id), /not delivered/);
+	assert.match(text(unprovable.id), /has no confirmed landing \(landing unprovable: [^)]+\), which does not prove it never reached/);
+	assert.doesNotMatch(text(unprovable.id), /not delivered/);
 });
 
 test("relaysDue skips this owner's own relays and keeps another owner's unobserved ones", () => {
