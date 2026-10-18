@@ -354,7 +354,7 @@ test("picp-96n: a Not confirmed failure links to its own recorded session, else 
  const failed=(n:string,reason:string,extra:object={})=>({id:`dc-20261004140000-0000000${n}`,at,state:"failed" as const,reason,ask_id:null,body:{kind:"message" as const,text:`lost ${n}`},...extra});
  const unconfirmed="Not confirmed: target operator session ended. It was handed to the session but never seen in its transcript; check the transcript before sending it again.";
  s.status({...status,session_file:"B.jsonl",sends:[failed("a",unconfirmed,{target_session:"A.jsonl"}),failed("b",unconfirmed),failed("c","Not sent: session shut down. It was never given to the session.")]});
- const evidence=()=>[...s.root.querySelectorAll(".session-pending")].map(b=>[b.querySelector(".md")?.textContent,b.querySelector(".session-pending-evidence")?.getAttribute("href") ?? null,/cannot be checked here/.test(b.textContent!)]);
+ const evidence=()=>[...s.root.querySelectorAll(".session-pending")].map(b=>[b.querySelector(".md")?.textContent,b.querySelector(".session-pending-evidence")?.getAttribute("href") ?? null,/cannot be checked/.test(b.textContent!)]);
  await s.show([],"v1",false,{operator_session:"B.jsonl"});
  assert.deepEqual(evidence(),[["lost a","#sessions?view=you&transcript=1&session=A.jsonl",false],["lost b",null,true],["lost c",null,false]],
   "the recorded target while viewing the current session; no target is never the current one; Not sent gets neither");
