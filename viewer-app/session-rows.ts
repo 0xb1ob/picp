@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../src/viewer/api-types.ts";
+import type { AwaitingDetail, SessionEntry } from "../src/viewer/api-types.ts";
 
 /** The browser-local calendar day of an ISO time; null when missing or unparseable, so it never opens a day. */
 export function dayKey(at: string | null | undefined): string | null {
@@ -44,4 +44,14 @@ export function rows(entries: SessionEntry[], days: Map<string,string>, order?: 
   prev = e;
  }
  return out;
+}
+/**
+ * The one open ask quick replies may answer: still open, carded in this transcript (filed under the selected thread
+ * when `filter` names one), and the only such ask. None otherwise: chips are never guessed.
+ */
+export function replyAsk(entries: SessionEntry[], open: AwaitingDetail[], filter: string | null): AwaitingDetail | null {
+ if (filter === "none") return null;
+ const carded = new Set(entries.flatMap(e => e.kind === "ask" && e.ask?.state === "open" && (filter === null || e.thread === filter) ? [e.ask.id] : []));
+ const eligible = open.filter(ask => carded.has(ask.id));
+ return eligible.length === 1 ? eligible[0]! : null;
 }

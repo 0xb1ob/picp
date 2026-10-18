@@ -37,8 +37,10 @@ test("Sessions and Files render empty, awaiting, failed, and confined file state
  const doc=parseHTML(`<body>${picked}</body>`).document;
  assert.equal(doc.querySelector('.sessions > .page-header > h1')?.textContent,"Chats","the desktop title row stays inside the direct-child screen");
  assert.equal(doc.querySelector('.session-choice[aria-current="page"] strong')?.textContent,"Operator");
- assert.equal(doc.querySelector('.session-heading label')?.firstChild?.textContent,"Transcript");
- assert.equal(doc.querySelector('.session-heading label select')?.getAttribute("aria-label"),"Operator session file");
+ // Amendment 2: the transcript file picker moved from the heading row into the ⋮ menu.
+ assert.equal(doc.querySelector('.shell-more .session-menu label')?.firstChild?.textContent,"Transcript");
+ assert.equal(doc.querySelector('.shell-more .session-menu label select')?.getAttribute("aria-label"),"Operator session file");
+ assert.equal(doc.querySelector('.session-heading select[aria-label="Operator session file"]'),null,"the heading keeps only the filter pill");
  assert.doesNotMatch(doc.querySelector('.session-heading')?.textContent ?? "",/entry for entry|Full transcript/);
  // Audit P2 #14: held-idle counts as live the way the Overview's health() does, and a running worker shows its run phase, never "waiting".
  const workers=[{id:"cp-run",kind:"worker",job_id:"cp-run",phase:"waiting",run_phase:"working",model:"m",live:true},{id:"cp-idle",kind:"worker",job_id:"cp-idle",phase:"held",run_phase:"idle",model:"m",live:false},{id:"cp-gone",kind:"worker",job_id:"cp-gone",phase:"done",run_phase:"exited",model:"m",live:false}];

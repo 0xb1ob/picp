@@ -17,8 +17,9 @@ export function routeTitle(route: Route): string {
  * Shell draws a `fallback` row (no <h1>) only while a screen has none of its own: loading,
  * unavailable, a job 404. A screen's own row claims HeaderSlot while it renders.
  * `stack` (job page) puts the back link, id and status on row 1 and the <h1> alone on row 2 (desktop only).
+ * `menu` is the screen's own rows at the top of the ⋮ menu (Sessions: transcript file, tool calls).
  */
-export function PageHeader({title, detail, back, context, stack = false, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; context?: ComponentChildren; stack?: boolean; fallback?: boolean}) {
+export function PageHeader({title, detail, back, context, menu, stack = false, fallback = false}: {title: string; detail?: string | undefined; back?: {href: string; label: string}; context?: ComponentChildren; menu?: ComponentChildren; stack?: boolean; fallback?: boolean}) {
  const slot = useContext(HeaderSlot);
  const claimed = useRef(false);
  if (slot && !fallback && !claimed.current) { claimed.current = true; slot.claim(); }
@@ -35,7 +36,7 @@ export function PageHeader({title, detail, back, context, stack = false, fallbac
   {detail && <code class="page-header-detail" title={detail}>{detail}</code>}
   <div class="page-header-end">
    <span class={`shell-live shell-live-${status}`} title={status}><span/>{updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={`Updated ${stamp(updatedAt, true)}`}>updated {time(updatedAt)}</time> : status}</span>
-   <MoreMenu control={control} version={version} updatedAt={updatedAt}/>
+   <MoreMenu control={control} version={version} updatedAt={updatedAt} extra={menu}/>
   </div>
  </div>;
 }

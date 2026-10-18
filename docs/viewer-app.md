@@ -314,7 +314,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
 
 - **Composer** (`components/OperatorComposer.tsx`): one row — an auto-growing textarea
   (16,000 characters; one line, up to about five before it scrolls; the placeholder
-  carries the hint, `Message #tag (Enter to send)` with a thread selected; the paperclip sits inside the field and a status line reads `Posting to #tag` / `Posting to no thread`) and a round send button that does what Enter does. While the
+  carries the hint, `Message #tag (Enter to send)` with a thread selected; the paperclip leads the footer and the `#` pill names the thread) and a round send button that does what Enter does. While the
   session is busy a ⋯ menu beside it holds `Steer now` and `Abort turn` (abort
   needs a second, confirming tap). Enter sends — after this turn while the session
   is busy, a plain send while it is idle — and Shift+Enter starts a new line
@@ -572,13 +572,27 @@ progress values replace inline percentage styles under the strict CSP.
 
 Sessions chat v2 tokens (`--session-you*`, `--avatar-*`, `--session-*code-*`) sit beside the dark palette in
 `tokens.css`. Its one `prefers-color-scheme: light` block applies to `.shell-sessions` only, the class `Shell` adds
-on the Sessions route, so every other screen stays dark. `tests/fixtures/sessions-chat-v2-browser.ts --stage pr1|pr2|pr3
+on the Sessions route, so every other screen stays dark. `tests/fixtures/sessions-chat-v2-browser.ts --stage pr1|pr2|pr3|pr4
 --out <dir>` builds the app in memory and serves it with synthetic APIs on loopback. It drives
 `/usr/bin/google-chrome` over native CDP with a `mktemp` profile, which it deletes on exit. It writes the 390/1440 px
 light and dark captures and `manifest.json`; `pr1` adds an Overview leak control, `pr2` the open steps card, a
 notice opened alone, tools shown, and a done job's Transcript tab reached through the card's link. From `pr2` on, an
-open card fails the run if a `cp_integrate` or `fetch_content` name is clipped. `pr3` adds Chats with a selected,
-a new, a done and a long thread, `Waiting N` and `Waiting ?`, and an empty Fleet.
+open card fails the run if a `cp_integrate` or `fetch_content` name is clipped, or if its summaries start at more than
+one x. `pr3` adds Chats with a selected, a new, a done and a long thread, `Waiting N` and `Waiting ?`, and an empty
+Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks, history, offline) and the header filter.
+
+The conversation header (chat v2) shows the avatar, the name and one state line from recorded facts only: the operator
+transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle, a missing `busy` is "Status unknown",
+an unreadable status says so, an older file is "Historical transcript"), then the session's recorded model and ctx;
+the parent and workers keep their recorded phase. Its compact `# All messages ▾` pill is the composer's thread picker
+over the same `cp-thread` selection; the file picker and *Tools N* sit in the ⋮ menu. The composer is one rounded box
+at 900 px and up: the field over the paperclip (disabled, its title saying why, while the session takes no
+attachments), a `# No thread ▾` pill, `Options ▾` (the session file) and the round send; below 900 px one row with a
+44 px `#` target. Quick replies
+(`QuickReplies.tsx`) are the verbatim options of exactly one open ask whose card is in the latest operator transcript
+(and in the selected thread, if any); none for zero or several such asks, history, or other tiers. A chip sends the
+same `{kind:"answer", ask_id, label}` as the decision card, holds until the journal closes the ask, and a failure
+re-enables it. The client never generates a suggestion.
 
 Type uses the system font stacks from doc 00 (`--font-sans`, `--font-mono` in `tokens.css`); no font files ship.
 

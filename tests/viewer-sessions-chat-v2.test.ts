@@ -9,17 +9,18 @@ import { build } from "esbuild";
 import { test, type TestContext } from "node:test";
 import { parseHTML } from "linkedom";
 import { REPO_ROOT } from "./harness/index.ts";
-import type { JobResponse, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../src/viewer/api-types.ts";
+import type { AwaitingDetail, ControlStatusResponse, JobResponse, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../src/viewer/api-types.ts";
 import { threadAria, type ThreadsView, waitingCount, waitingLabel } from "../viewer-app/threads.ts";
-import type { ControlView } from "../viewer-app/control.ts";
-import { dayKey, dayLabel, dayStarts, lastDay, rows } from "../viewer-app/session-rows.ts";
+import type { ControlBody, ControlView } from "../viewer-app/control.ts";
+import { dayKey, dayLabel, dayStarts, lastDay, replyAsk, rows } from "../viewer-app/session-rows.ts";
 
-const bundle = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import renderToString from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; export {act}; export const html=(data,threads,control)=>renderToString(h(Sessions,{data,threads,control})); export const shell=screen=>renderToString(h(Shell,{current:{screen,section:null},awaiting:0,status:"live",updatedAt:null},"Content")); export const mount=(root,data,threads)=>render(h(Sessions,{data,threads}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
-const { act, html, shell, mount, unmount } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`) as {
+const bundle = await build({ stdin: { contents: 'import {h,render} from "preact"; import {act} from "preact/test-utils"; import renderToString from "preact-render-to-string"; import {Sessions} from "./viewer-app/screens/Sessions.tsx"; import {Shell} from "./viewer-app/components/Shell.tsx"; import {QuickReplies} from "./viewer-app/components/QuickReplies.tsx"; export {act}; export const html=(data,threads,control)=>renderToString(h(Sessions,{data,threads,control})); export const shell=screen=>renderToString(h(Shell,{current:{screen,section:null},awaiting:0,status:"live",updatedAt:null},"Content")); export const mount=(root,data,threads)=>render(h(Sessions,{data,threads}),root); export const replies=(root,ask,control)=>render(h(QuickReplies,{ask,control}),root); export const unmount=root=>render(null,root);', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+const { act, html, shell, mount, replies, unmount } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles![0]!.contents).toString("base64")}`) as {
 	act: (run: () => void | Promise<void>) => Promise<void>;
 	html: (data: SessionsResponse, threads?: ThreadsView, control?: ControlView) => string;
 	shell: (screen: string) => string;
 	mount: (root: Element, data: SessionsResponse, threads?: ThreadsView) => void;
+	replies: (root: Element, ask: AwaitingDetail, control: ControlView) => void;
 	unmount: (root: Element) => void;
 };
 
@@ -182,6 +183,7 @@ test("Chats: `Waiting N` is open asks plus unacknowledged answers; unknown is `W
 	const waiting = thread("billing", "waiting", { asks: 1, answers: 2 }), quiet = thread("ops", "open", { asks: 0, answers: 0 }), blind = thread("blind", "open", null), shut = thread("old", "done", null);
 	assert.deepEqual([waiting, quiet, blind, shut].map(t => [waitingCount(t), waitingLabel(t)]), [[3, "Waiting 3"], [0, null], [null, "Waiting ?"], [null, null]], "counts.messages (3) is never shown");
 	assert.equal(threadAria(blind), "blind: open, waiting unknown");
+	assert.equal(threadAria(shut), "old: done", "a done thread hides its badge, so its label names no unknown count either");
 	const status = { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [waiting, quiet, blind, shut], total: 4, warning: null } as ThreadsResponse;
 	const threads = { status, selected: null, select() {}, done() {}, sending: null, failed: null } as unknown as ThreadsView;
 	const heldIdle = { id: "cp-idle", kind: "worker", job_id: "cp-idle", phase: "held", run_phase: "idle", model: "m", live: false };
@@ -206,8 +208,87 @@ test("Chats: + in the title row opens New thread and closing it selects nothing;
 	assert.equal(s.root.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"]')?.getAttribute("aria-label"), "fresh: new, no messages yet");
 });
 
-test("steps rows: the name column fits real tool names instead of a fixed 44 px that clipped cp_integrate", () => {
-	// #319 review: `16px 44px …` clipped every name past ~6 characters; the browser capture checks rendered widths.
+test("steps rows: one name column per card, the widest name up to 14ch, so every summary starts at one x", () => {
+	// #320 amendment: a per-row fit-content column started each summary at its own x; the card is now one grid that
+	// every row (entry, details, summary) subgrids. The browser capture fails on a clipped name or a misaligned summary.
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8");
-	assert.match(css, /\.session-steps-rows \.session-tool summary \{[^}]*grid-template-columns: 16px fit-content\(120px\) minmax\(0,1fr\) auto;/);
+	assert.match(css, /\.session-steps-rows \{ display: grid; grid-template-columns: 16px fit-content\(14ch\) minmax\(0,1fr\) auto;/);
+	assert.match(css, /\.session-steps-rows > \.session-entry, \.session-steps-rows > \.session-entry > \.session-tool, \.session-steps-rows \.session-tool > summary \{ display: grid; grid-template-columns: subgrid; \}/);
+	assert.match(css, /\.session-tool summary > code:nth-child\(2\) \{[^}]*overflow: hidden; text-overflow: ellipsis;/, "a longer name ellipsizes");
+});
+
+const option = (label: string, consequence: string) => ({ label, consequence, reply: `${label} reply` });
+const awaiting = (id: string): AwaitingDetail => ({ id, project: "picp", question: `Question ${id}`, created_at: local(15, 8), options: [option("Keep", "Paused until Monday"), option("Raise", "Spends more")], recommendation: "Keep",
+	source_escalation: null, job_ids: [], context: null, evidence_paths: [], reason: null, source_created_at: null, mandate_id: null, mandate_status: null, spend: null, spend_cap: null,
+	mandate_objective: null, jobs: [], escalation: null, evidence: [] } as unknown as AwaitingDetail);
+const card = (id: string, state: "open" | "answered", thread?: string) => entry(`c-${id}`, "ask", local(15, 8), { who: "Operator → you", thread, ask: { id, question: `Question ${id}`, options: [], recommendation: "Keep", state, answer: null, answered_at: null, reason: null } });
+const status = (over: Partial<ControlStatusResponse> = {}) => ({ generated_at: "", enabled: true, running: true, reason: null, token: "t", busy: false, pending: false, session_file: "op.jsonl", recent: [], offline: false, held: 0, inbox_token: null, ...over }) as ControlStatusResponse;
+
+test("quick replies: only one open ask carded in this transcript (and thread) is answerable; zero, two or unbound asks offer none", () => {
+	const [a, b] = [awaiting("ask-aaaa"), awaiting("ask-bbbb")];
+	assert.equal(replyAsk([card("ask-aaaa", "open")], [a], null), a);
+	assert.equal(replyAsk([], [a], null), null, "an open ask with no card here is not attributable");
+	assert.equal(replyAsk([card("ask-aaaa", "open"), card("ask-bbbb", "open")], [a, b], null), null, "two candidates: no guess");
+	assert.equal(replyAsk([card("ask-aaaa", "answered")], [a], null), null, "the card's journal state decides, not the list");
+	assert.equal(replyAsk([card("ask-aaaa", "open"), card("ask-bbbb", "open", "th-1")], [a, b], "th-1"), b, "a thread narrows to its own card");
+	assert.equal(replyAsk([card("ask-aaaa", "open")], [a], "th-1"), null, "an unbound ask never shows inside a thread");
+	assert.equal(replyAsk([card("ask-aaaa", "open")], [a], "none"), null);
+	assert.equal(replyAsk([card("ask-aaaa", "open")], [], null), null, "no open ask: no chips");
+});
+
+test("quick replies render only on the latest operator transcript, never in history or another tier", () => {
+	const data = { ...view([card("ask-aaaa", "open"), entry("r1", "say", local(15, 9), { text: "Which way?" })]), open_asks: [awaiting("ask-aaaa")] } as SessionsResponse;
+	const control: ControlView = { status: status(), delivery: null, send() {} };
+	const { document } = parseHTML(`<div>${html(data, undefined, control)}</div>`);
+	const chips = document.querySelector(".session-entries > .session-replies")!;
+	assert.equal(chips.previousElementSibling?.textContent?.includes("Which way?"), true, "after the newest operator-session message");
+	assert.deepEqual([...chips.querySelectorAll("button")].map(b => [b.textContent, b.getAttribute("title")]), [["Keep", "Paused until Monday"], ["Raise", "Spends more"]], "verbatim labels and consequences");
+	assert.equal(chips.querySelector(".session-reply-recommended")?.textContent, "Keep");
+	const history = { ...data, operator_sessions: [{ id: "new.jsonl", at: local(16, 9) }, { id: "op.jsonl", at: local(15, 9) }], operator_session: "op.jsonl" };
+	assert.doesNotMatch(html(history, undefined, control), /session-replies/, "an older file never answers the live ask");
+	assert.doesNotMatch(html({ ...data, selected: "parent" }, undefined, control), /session-replies/);
+});
+
+test("quick replies send the exact typed answer once; a sent answer holds the chips until the journal closes the ask; a failure re-enables", async t => {
+	const s = stage(t), sends: ControlBody[] = [], ask = awaiting("ask-aaaa");
+	const control = (delivery: ControlView["delivery"] = null): ControlView => ({ status: status(), delivery, send: body => { sends.push(body); } });
+	await act(() => replies(s.root, ask, control()));
+	await s.click(s.root.querySelector(".session-reply"));
+	assert.deepEqual(sends, [{ kind: "answer", ask_id: "ask-aaaa", label: "Keep" }]);
+	await act(() => replies(s.root, ask, control({ id: "dc-1", state: "queued", reason: null, ask_id: "ask-aaaa" })));
+	assert.ok([...s.root.querySelectorAll("button")].every(b => (b as HTMLButtonElement).disabled), "no second answer while the first is on its way");
+	assert.match(s.root.querySelector("[role=status]")!.textContent!, /^Queued · dc-1 — the options close when the session records the answer$/);
+	await act(() => replies(s.root, ask, control({ id: null, state: "failed", reason: "token expired", ask_id: "ask-aaaa" })));
+	assert.equal(s.root.querySelector("[role=alert]")?.textContent, "Failed: token expired");
+	await s.click(s.root.querySelectorAll(".session-reply")[1]!);
+	assert.deepEqual(sends.at(-1), { kind: "answer", ask_id: "ask-aaaa", label: "Raise" }, "retry is one click");
+	await act(() => replies(s.root, ask, { status: status({ enabled: false, reason: "Dashboard control is off" }), delivery: null, send: () => assert.fail("disabled") }));
+	assert.ok([...s.root.querySelectorAll("button")].every(b => (b as HTMLButtonElement).disabled));
+	assert.equal(s.root.querySelector(".session-replies-state")?.textContent, "Dashboard control is off");
+});
+
+test("header: Operator with the recorded state and model; missing busy is unknown, history and an unreadable status say so", () => {
+	const data = { ...view([]), operator_context: { model: "fixture-model" } } as SessionsResponse;
+	const state = (control?: ControlView, over: Partial<SessionsResponse> = {}) => /<span class="session-heading-state">[\s\S]*?<\/span><span>([^<]*)<\/span>/.exec(html({ ...data, ...over }, undefined, control))?.[1];
+	const live = (over: Partial<ControlStatusResponse>) => ({ status: status(over), delivery: null, send() {} }) as ControlView;
+	assert.match(html(data, undefined, live({})), /<strong>Operator<\/strong>/);
+	assert.equal(state(live({})), "Idle · fixture-model");
+	assert.equal(state(live({ busy: true })), "Working · fixture-model");
+	assert.equal(state(live({ busy: undefined })), "Status unknown · fixture-model", "no busy field is never Idle");
+	assert.equal(state({ status: { error: "HTTP 500" }, delivery: null, send() {} } as unknown as ControlView), "Status unavailable · fixture-model");
+	assert.equal(state(undefined), "Checking status · fixture-model");
+	assert.equal(state(live({}), { operator_sessions: [{ id: "new.jsonl", at: local(16, 9) }, { id: "op.jsonl", at: local(15, 9) }], operator_session: "op.jsonl" }), "Historical transcript");
+});
+
+test("header: avatar, name, state, the # All messages pill and ⋮; the file picker and Tools N live in the ⋮ menu", () => {
+	// Amendment 2: the heading row was a wide native select plus the file picker and Tools N; both moved into ⋮.
+	const data = { ...view([entry("t1", "tool", local(16, 9), { name: "read", summary: "Read 1 line" })]), operator_sessions: [{ id: "new.jsonl", at: local(16, 9) }, { id: "op.jsonl", at: local(15, 9) }], operator_session: "new.jsonl" } as SessionsResponse;
+	const threads = { status: { generated_at: "", availability: "ok", enabled: true, reason: null, token: "t", threads: [], total: 0, warning: null }, selected: null, select() {}, done() {}, sending: null, failed: null } as unknown as ThreadsView;
+	const doc = parseHTML(`<body>${html(data, threads, { status: status({}), delivery: null, send() {} } as ControlView)}</body>`).document;
+	const heading = doc.querySelector(".session-heading")!;
+	assert.equal(heading.querySelector(".session-thread-filter.thread-pill .thread-pill-label")?.textContent, "All messages");
+	assert.equal(heading.querySelector(".session-file-picker, .session-tools-toggle"), null, "the heading carries no file picker or Tools N");
+	const menu = doc.querySelector(".shell-more .session-menu")!;
+	assert.equal(menu.querySelector("select")?.getAttribute("aria-label"), "Operator session file");
+	assert.equal(menu.querySelector(".session-tools-toggle")?.textContent, "Tools 1");
 });

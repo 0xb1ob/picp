@@ -44,21 +44,19 @@
 .decision-card-jobs small, .decision-card-escalation small { color: var(--muted); }
 .decision-card-escalation { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
 .decision-card a { overflow-wrap: anywhere; }
-/* One row (mobile-chat-layout): auto-growing field, ⋯ steer/abort while busy, round send. ≤ 64 px collapsed, above the safe area. */
+/* One row below 900 px (mobile-chat-layout): Options, attach, auto-growing field, ⋯ steer/abort while busy, round send. ≤ 64 px collapsed, above the safe area. */
 .operator-composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--background); min-width: 0; flex-shrink: 0; }
-.operator-composer-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
-.operator-composer-options { margin-left: auto; min-width: 0; max-width: 100%; }
+.operator-composer-options { min-width: 0; max-width: 100%; }
 .operator-composer-options > summary { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 8px; font-size: 12px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
-.operator-composer-options > summary > svg { display: none; }
 .operator-composer-options-panel { position: absolute; bottom: calc(100% + 8px); right: 12px; z-index: 3; width: 320px; max-width: calc(100% - 24px); max-height: 45dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
 .operator-composer-options-panel > p { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.operator-composer-state, .operator-composer-delivery, .operator-composer-posting { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.operator-composer-posting { flex-basis: 100%; order: 3; }
+.operator-composer-state, .operator-composer-delivery { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* The header and the top bar carry the session's state; this line speaks only while the session is not ready. */
+.operator-composer-state-ready { display: none; }
 .operator-composer-field { position: relative; flex: 1; min-width: 0; display: flex; }
-.operator-composer .operator-composer-field > textarea { padding-left: 42px; } /* beats `.operator-composer textarea` below (same specificity, later wins) that reset it to 12px and put the icon over the text */
-.operator-composer-field > .operator-composer-attach { position: absolute; left: 0; bottom: 0; }
 .operator-composer-failed { color: var(--secondary); }
-.operator-composer-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.operator-composer-box { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.operator-composer-footer { display: contents; }
 .operator-composer textarea { flex: 1; min-width: 0; display: block; min-height: 42px; max-height: 122px; resize: none; overflow-y: auto; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 21px; font: inherit; font-size: 15px; line-height: 20px; overflow-wrap: anywhere; }
 .operator-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .operator-composer-send, .operator-composer-more > summary { width: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
@@ -97,9 +95,12 @@
 .operator-composer-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .operator-composer-mentions > li { min-width: 0; max-width: 100%; padding: 2px 10px; background: var(--nav-selected); color: var(--text); border-radius: 999px; font-size: 12px; overflow-wrap: anywhere; }
 .operator-composer-hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-/* The composer's thread picker (cp-xmw2): one wrapping row above the text box; 44 px select, 16 px on the phone (no iOS zoom). New threads come from the dialog below. */
-.operator-composer-thread { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
-.operator-composer-thread select { min-width: 0; max-width: 100%; min-height: 44px; padding: 0 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; text-overflow: ellipsis; }
+/* Thread pills (chat v2): "# All messages ▾" in the header, "# No thread ▾" in the composer (cp-xmw2). The native
+   select lies transparent over the face, 6 px past it vertically for a 44 px target; 16 px on the phone (no iOS zoom). */
+.thread-pill { position: relative; display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 240px; height: 32px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.thread-pill:focus-within { border-color: var(--focus); outline: 2px solid var(--focus); }
+.thread-pill > .thread-pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.thread-pill > select { position: absolute; inset: -6px 0; width: 100%; max-width: none; min-height: 0; margin: 0; padding: 0; opacity: 0; font: inherit; cursor: pointer; }
 /* New thread (cp-6rsr): a centred 12px-radius dialog at 900 px and up, a bottom sheet below; 44px targets, 16px fields. The scrim is the page colour at reduced opacity. */
 .new-thread-scrim { position: fixed; inset: 0 0 auto 0; height: var(--cp-viewport-height, 100dvh); transform: translateY(var(--cp-viewport-offset, 0px)); z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
 .new-thread-hit { position: absolute; inset: 0; padding: 0; background: var(--page); opacity: 0.7; border: 0; cursor: default; }
@@ -142,23 +143,30 @@
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {
- .operator-composer { display: grid; grid-template-columns: 44px minmax(0,1fr); }
- .operator-composer-meta { display: contents; }
- .operator-composer-state, .operator-composer-attachments, .start-session, .operator-composer-posting { grid-column: 1 / -1; }
- .operator-composer-options { order: 1; grid-column: 1; align-self: end; margin-left: 0; }
- .operator-composer-options > summary { justify-content: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--surface); }
- .operator-composer-options > summary > span { display: none; }
- .operator-composer-options > summary > svg { display: block; }
- .operator-composer-row { order: 1; grid-column: 2; }
- .operator-composer:not(:has(.operator-composer-options)) .operator-composer-row { grid-column: 1 / -1; }
- .operator-composer-delivery, .operator-composer-mentions, .operator-composer-hint { order: 2; grid-column: 1 / -1; }
+ /* One row: attach, thread, field, ⋯, send. The file name lives in the top bar's ⋯ sheet, so Options is desktop-only. */
+ .operator-composer-field { order: 1; }
+ .operator-composer-more, .operator-composer-send { order: 2; }
+ .operator-composer-options { display: none; }
+ /* The pill folds to a 44 px "#"; the top bar's thread chips and the "Message #tag…" placeholder name the selection. */
+ .operator-composer-thread { flex-shrink: 0; justify-content: center; width: 44px; height: 44px; padding: 0; background: none; border: 0; border-radius: 50%; font-size: 18px; }
+ .operator-composer-thread > span:not(:first-child) { display: none; }
+ .operator-composer-thread > select { inset: 0; }
  /* The status and file name live in the top bar (chip and ⋯ sheet); only a failure or an unready session speaks here. */
- .operator-composer-state-ready, .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
- .operator-composer-thread select { font-size: 16px; }
+ .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
+ .thread-pill > select { font-size: 16px; }
 }
 @media (min-width: 900px) {
  .operator-composer { padding: 12px 16px 16px; }
  .operator-composer > * { max-width: none; }
+ /* Chat v2: one rounded box, the field over a footer of attach, # thread, Options and (right) ⋯ and the round send. */
+ .operator-composer-box { flex-direction: column; align-items: stretch; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+ .operator-composer-box:focus-within { border-color: var(--focus); }
+ .operator-composer-box textarea { background: none; border: 0; border-radius: 10px; }
+ .operator-composer-footer { display: flex; align-items: center; gap: 4px; min-width: 0; }
+ .operator-composer-footer > .operator-composer-more { margin-left: auto; }
+ .operator-composer-footer > .operator-composer-send { margin-left: auto; }
+ .operator-composer-more + .operator-composer-send { margin-left: 0; }
+ .operator-composer-options > summary { border: 0; background: none; color: var(--muted); }
  .session-pinned { padding: 0 40px; }
  .session-pinned-open { padding-bottom: 12px; }
  .session-pinned > * { max-width: none; }

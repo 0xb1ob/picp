@@ -22,9 +22,10 @@ import { VersionBadge } from "../components/VersionBadge.tsx";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlChip, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
-import { NewThread, ThreadChips, ThreadSidebar } from "../components/ThreadNav.tsx";
+import { NewThread, ThreadChips, ThreadPicker, ThreadSidebar } from "../components/ThreadNav.tsx";
+import { QuickReplies } from "../components/QuickReplies.tsx";
 import { threadBands, threadFilter, type ThreadsView, threadsReady } from "../threads.ts";
-import { dayKey, dayStarts, lastDay, type Row, rows } from "../session-rows.ts";
+import { dayKey, dayStarts, lastDay, replyAsk, type Row, rows } from "../session-rows.ts";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -38,6 +39,22 @@ function CtxPct({usage,label=false}: {usage:ContextUsage | null | undefined;labe
  return <span class={`session-ctx ctx-${usage.level ?? "unknown"}`} title={contextText(usage)}>{text}</span>;
 }
 const workerPhase = (w: Worker): string => w.run_phase ?? "no run status";
+const workerDot = (w: Worker): string => w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown";
+/**
+ * The conversation header's state line and dot, from recorded facts only: missing busy is unknown (never Idle), an older
+ * file names no model, and a parent's recorded activity is not liveness.
+ */
+function headerState(data: SessionsResponse, status: ControlView["status"] | undefined, history: boolean): {text: string; dot: string} {
+ if (data.selected === "parent") return {text: `${data.parent.live ? "Recorded activity" : "No recent recorded activity"} · ${modelText(data.parent.context ?? {})}`, dot: data.parent.live ? "working" : "unknown"};
+ const w = data.selected === "workers" ? data.workers.find(w => w.id === data.session_id) : undefined;
+ if (w) return {text: `${workerPhase(w)} · ${modelText({model: w.context?.model ?? w.model, thinking: w.thinking})}`, dot: workerDot(w)};
+ if (data.selected !== "you" || data.transcript !== true) return {text: data.subtitle, dot: "unknown"};
+ if (history) return {text: "Historical transcript", dot: "unknown"};
+ const state = !status ? "Checking status" : "error" in status ? "Status unavailable" : !status.enabled ? "Dashboard control off" : status.offline ? "Offline"
+  : !status.running ? "Not running" : status.busy === true ? "Working" : status.busy === false ? "Idle" : "Status unknown";
+ const running = !!status && !("error" in status) && status.enabled && status.running;
+ return {text: `${state} · ${modelText(data.operator_context ?? {})}`, dot: running ? "working" : "unknown"};
+}
 function readStored(key: string): string | null {
  if (typeof window === "undefined") return null;
  try { return window.localStorage?.getItem(key) ?? null; } catch { return null; }
@@ -202,7 +219,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
    <summary aria-label="Switch session"><strong>{data.title}</strong><span aria-hidden="true">▾</span></summary>
    <nav class="session-bar-sheet" aria-label="Session streams">
     {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
-    {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown"}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
+    {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
    </nav>
   </details>
   <span class={`shell-live shell-live-${shell.status}`} role="status" aria-label={`Data ${shell.status}`} title={shell.status}><span/></span>
@@ -283,7 +300,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), rl=rows(list,days,order), st=groupStarts(rl,days); return rl.flatMap(row=>{
   const head=row.kind === "entry" ? row.entry : row.notice ?? row.entries[0]!, label=days.get(head.id);
   const node=row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/>;
-  return label ? [dayPill(head.id,head.at,label),node] : [node];
+  const out=label ? [dayPill(head.id,head.at,label),node] : [node];
+  return replies && row.kind === "entry" && row.entry.id === replyAt ? [...out,replies] : out;
  });};
  const edge=(side:"before"|"after",list:SessionEntry[],word:string,prev:string | null)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list,prev)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
@@ -302,26 +320,35 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const last=data.selected === "you" && data.transcript === true && !history ? data.entries.findLast(e=>isBubble(e) && e.text.trim() !== "") : undefined;
  const preview=last && `${isOwn(last) ? "You: " : ""}${last.text.replace(/[`*#>|]/g,"").replace(/\s+/g," ").trim().slice(0,200)}`;
  const threadsOn=data.selected === "you" && data.transcript === true && threads;
+ // Quick replies follow the newest shown operator-session message or card (else the rows), before the pending tail.
+ const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open,filter) : null;
+ const replies=replyTo && <QuickReplies key="replies" ask={replyTo} control={control}/>;
+ const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
+ const state=headerState(data,control?.status,history);
  return <div class="sessions">
-  <PageHeader title="Chats"/>
+  {/* The ⋮ menu carries the transcript file and the tool-call toggle; the phone's ⋯ sheet keeps its own. */}
+  <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 ? <div class="session-menu">
+   {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
+   {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
+   {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
+  </div> : undefined}/>
   {threadsOn && threadsReady(threadsOn.status) && <NewThread threads={threadsOn} control={control} class="session-chats-new" label="+"/>}
   <aside class="session-sidebar" aria-label="Session streams">
    <section aria-label="Operator">{row(sessionHref("you"),"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
    {threadsOn && <ThreadSidebar threads={threadsOn}/>}
-   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:w.phase === "held" || w.phase === "failed" ? w.phase : w.run_phase ?? "unknown",at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools}/>
    {data.transcript === true && threads && <ThreadChips threads={threads} control={control}/>}
-   <header class="session-heading"><div><strong>{data.title}</strong>{data.transcript !== true && <span>{data.subtitle}</span>}<CtxPct usage={context} label/></div>
-    {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
-    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
-    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
+   <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
+    <div><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
+    {threadsOn && <ThreadPicker threads={threadsOn} filter/>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier",null)}{renderRows(shown,beforeDay)}{edge("after",bands.after,"later",insideDay)}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</div>
+    <div class="session-entries">{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier",null)}{renderRows(shown,beforeDay)}{edge("after",bands.after,"later",insideDay)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">

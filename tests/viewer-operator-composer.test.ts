@@ -132,7 +132,7 @@ test("failure question draft stays editable and unsent in the selected thread, o
   await act(()=>mount(root,control,new URLSearchParams(current.query).get("draft")!,threads));
   const textarea=root.querySelector("textarea")!;
   assert.equal(textarea.value,draft);assert.equal(textarea.disabled,false);
-  assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · recovery/);
+  assert.match(root.querySelector(".operator-composer-footer select[aria-label=Thread]")?.textContent ?? "",/recovery \(new\)/);
   assert.deepEqual(sends,[],"opening the link never sends");
   textarea.value=`${draft} Include the recorded cause.`;
   await act(()=>textarea.dispatchEvent(new window.Event("input",{bubbles:true})));
@@ -143,30 +143,33 @@ test("failure question draft stays editable and unsent in the selected thread, o
  }
 });
 
-test("composer: the filename and thread picker live in compact, closed message options", async t => {
+test("composer (chat v2): attach, # thread and a closed Options holding the filename share the box's footer", async t => {
  const {document} = parseHTML("<html><body><div id='root'></div></body></html>");
  const original = Object.getOwnPropertyDescriptor(globalThis,"document");
  Object.defineProperty(globalThis,"document",{configurable:true,value:document});
  t.after(() => { if (original) Object.defineProperty(globalThis,"document",original); else Reflect.deleteProperty(globalThis,"document"); });
  const root = document.getElementById("root")!;
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}}));
- const options = root.querySelector("details.operator-composer-options");
+ const options = root.querySelector(".operator-composer-box > .operator-composer-footer > details.operator-composer-options");
  assert.ok(options); assert.equal(options.hasAttribute("open"),false);
- assert.equal(options.querySelector("summary")?.getAttribute("aria-label"),"Message options","the icon-only mobile trigger keeps its name");
+ assert.equal(options.querySelector("summary")?.getAttribute("aria-label"),"Message options");
+ assert.match(options.querySelector("summary")?.textContent ?? "",/^Options ▾/);
  assert.match(options.textContent ?? "",/op\.jsonl/);
  assert.equal(root.querySelector(".operator-composer-state")?.textContent,"Ready");
  assert.equal(root.querySelector(".operator-composer-state code"),null);
+ assert.equal(root.querySelector("textarea")?.getAttribute("placeholder"),"Message Operator…");
  const threads: ThreadsView = {status:{generated_at:ready.generated_at,availability:"missing",enabled:true,reason:null,token:"fixture-only",threads:[],total:0,warning:null},selected:null,select:()=>{},done:()=>{},sending:null,failed:null};
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,threads));
  const picker = root.querySelector('select[aria-label="Thread"]');
- assert.ok(picker?.closest("details.operator-composer-options"),"the empty picker stays reachable inside message options");
- assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to no thread");
+ assert.ok(picker?.closest(".operator-composer-footer"),"the empty picker sits in the footer, outside Options");
+ assert.equal(picker?.closest("details"),null);
+ assert.equal(root.querySelector(".operator-composer-posting"),null,"the pill names the selection; no status line repeats it");
+ assert.equal(picker?.closest(".thread-pill")?.querySelector(".thread-pill-label")?.textContent,"No thread");
  assert.match(picker?.textContent ?? "",/^No thread$/);
  await act(() => mount(root,{status:ready,delivery:null,send:()=>{}},undefined,{...threads,selected:"new-fixture-thread"}));
- assert.match(root.querySelector(".operator-composer-options > summary")?.textContent ?? "",/Thread · new-fixture-thread/);
- assert.equal(root.querySelector(".operator-composer-options > summary")?.getAttribute("aria-label"),"Thread · new-fixture-thread","the selected thread stays accessible on mobile");
- assert.equal(root.querySelector(".operator-composer-posting")?.textContent,"Posting to #new-fixture-thread");
- assert.equal(root.querySelector("textarea")?.getAttribute("placeholder"),"Message #new-fixture-thread (Enter to send)");
+ assert.match(root.querySelector('select[aria-label="Thread"]')?.textContent ?? "",/new-fixture-thread \(new\)/);
+ assert.equal(root.querySelector(".thread-pill-label")?.textContent,"new-fixture-thread");
+ assert.equal(root.querySelector("textarea")?.getAttribute("placeholder"),"Message #new-fixture-thread…");
  await act(() => unmount(root));
  await act(() => mount(root,{status:{...ready,enabled:false,reason:"Dashboard control is off"},delivery:null,send:()=>{}}));
  assert.equal(root.querySelector(".operator-composer-options"),null);

@@ -122,22 +122,22 @@ test("the Sessions screen shares .shell-main with the page bar and banners: it f
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*padding-bottom: calc\(8px \+ env\(safe-area-inset-bottom\)\);[^}]*flex-shrink: 0;/, "the composer never shrinks and clears the home indicator");
 });
 
-test("the attach icon never overlaps composer text: the textarea keeps 42px left padding past the generic textarea rule", () => {
+test("the attach icon never overlaps composer text: it is a footer sibling of the field, never positioned over it", () => {
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8");
-	const generic = css.indexOf(".operator-composer textarea {");
-	const pad = css.indexOf(".operator-composer .operator-composer-field > textarea { padding-left: 42px; }");
-	assert.ok(generic > 0 && pad > 0, "both rules exist");
-	assert.match(css.slice(generic, css.indexOf("}", generic)), /padding: 10px 12px/, "the generic rule sets padding");
-	assert.ok(pad < generic, "the field rule is earlier, so it must out-rank by specificity (2 classes + element vs 1 class + element)");
-	assert.doesNotMatch(css, /\n\.operator-composer-field > textarea \{ padding-left/, "a bare one-class field selector loses to the generic rule");
+	assert.doesNotMatch(css, /operator-composer-field > \.operator-composer-attach/, "no absolute icon inside the field");
+	assert.match(css, /\.operator-composer textarea \{[^}]*padding: 10px 12px;/, "the field keeps its own padding only");
 });
 
-test("the collapsed phone composer shares one row with a 44px Message options target", () => {
+test("the collapsed phone composer is one row (attach, thread, field, ⋯, send); Options is desktop-only", () => {
+	// Chat v2 (PR4): the footer flattens into the box's row below 900 px; the file name lives in the top bar's ⋯ sheet.
 	const css = readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8");
 	const phone = css.slice(css.lastIndexOf("@media (max-width: 899px) {"));
-	assert.match(phone, /\.operator-composer \{ display: grid; grid-template-columns: 44px minmax\(0,1fr\); \}/, "options share the input row instead of consuming another 44px row");
-	assert.match(phone, /\.operator-composer-meta \{ display: contents; \}/, "the hidden ready status leaves no empty row or gap");
-	assert.match(phone, /\.operator-composer-row \{[^}]*order: 1;[^}]*grid-column: 2;/);
-	assert.match(phone, /\.operator-composer-options \{[^}]*order: 1;[^}]*grid-column: 1;/);
-	assert.match(phone, /\.operator-composer-options > summary \{[^}]*width: 44px;[^}]*height: 44px;/, "the disclosure keeps its touch target");
+	assert.match(css, /\.operator-composer-box \{ display: flex; align-items: flex-end;/, "one flex row of 42-44 px targets");
+	assert.match(css, /\.operator-composer-footer \{ display: contents; \}/, "the footer's controls share the field's row");
+	assert.match(phone, /\.operator-composer-field \{ order: 1; \}/);
+	assert.match(phone, /\.operator-composer-more, \.operator-composer-send \{ order: 2; \}/, "send stays at the row's end");
+	assert.match(phone, /\.operator-composer-options \{ display: none; \}/);
+	assert.match(phone, /\.operator-composer-thread \{[^}]*width: 44px; height: 44px;/, "the thread picker is one 44 px # target");
+	assert.match(css, /\.thread-pill > select \{ position: absolute; inset: -6px 0; width: 100%;[^}]*opacity: 0;/, "the native select stays the control");
+	assert.match(phone, /\.operator-composer-thread > select \{ inset: 0; \}/, "and covers the whole 44 px target");
 });
