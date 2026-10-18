@@ -568,6 +568,42 @@ test("cp_project add: new projects default to human_handoff, detection may set r
 	ci = { status: null, stdout: "", stderr: "spawnSync gh ENOENT" };
 	assert.match(await run({ name: "solo", clone_url: "https://github.com/o/solo.git" }), /CI: {6}unknown: gh is not installed/);
 	assert.doesNotMatch(denied + flaky, /sentinel-secret/);
+	assert.doesNotMatch(local, /on GitHub/, "a non-GitHub remote is never told to merge on GitHub");
+	assert.match(await addGithub("team2"), /hands it to you on GitHub to merge/);
+});
+
+test("cp_project add readiness: delivery:local wording, a connected tracker, and a throwing probe never fails add", async (t) => {
+	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const { TrackerStore } = await import("../src/trackers/config.ts");
+	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
+	const ciRun = () => { throw new Error("gh exploded"); };
+	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+	registerProjectMemoryTools({ registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => tools.set(tool.name, tool) } as never,
+		{ commandPost: () => ({ registry }), setLive: () => {} } as never, async () => SOLO, ciRun);
+	const run = async (params: Record<string, unknown>) =>
+		((await tools.get("cp_project")!.execute("c", { action: "add", ...params }, undefined, undefined, {})) as { content: Array<{ text: string }> }).content[0]!.text;
+
+	const remote = withRepo(t, "local").remote;
+	const tell = (text: string) => /tell the user: .*/.exec(text)?.[0] ?? "";
+	const local = await run({ name: "local", clone_url: remote, delivery: "local" });
+	assert.match(tell(local), /pushes each job's branch to the remote; it opens no pull or merge request and merges nothing\./);
+	assert.doesNotMatch(tell(local), /opens a pull request|on GitHub/);
+
+	const db = join(home.path, "elsewhere", "beads.db");
+	const store = new TrackerStore({ home: home.path, registry, adapters: () => ({ probe: async (endpoint: string) => endpoint }) as never });
+	await store.connect({ project: "local", adapter: "beads", endpoint: db });
+	const tracked = await run({ name: "local", clone_url: remote, delivery: "local" });
+	assert.ok(tracked.includes(`tracker: beads (${db}, from the connection)`), tracked);
+	assert.match(tell(tracked), /Work items come from its beads tracker\./);
+
+	// A GitHub remote whose CI probe throws (#329): add still succeeds and says readiness is unknown, never "no CI".
+	const url = "https://github.com/o/boom.git";
+	execFileSync("git", ["clone", "-q", withRepo(t, "boom").remote as string, registry.pathOf("boom")]);
+	git(registry.pathOf("boom"), "remote", "set-url", "origin", url);
+	const boom = await run({ name: "boom", clone_url: url });
+	assert.match(boom, /boom ready \(delivery:pr\)/);
+	assert.match(boom, /readiness: unknown \(gh exploded\); add itself succeeded/);
+	assert.doesNotMatch(boom, /no Actions CI/);
 });
 
 test("the ledger refuses a job in an archived project with a clear message", async (t) => {

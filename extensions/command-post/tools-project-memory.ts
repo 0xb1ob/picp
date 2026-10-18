@@ -16,7 +16,8 @@ import { type CommandRunner, execRunner } from "../../src/doctor.ts";
 import { formatReadiness } from "../../src/project-readiness.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
-/** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read; injectable so tests need no network. */
+/** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read;
+ * both injectable so tests need no network. */
 export function registerProjectMemoryTools(
 	pi: ExtensionAPI, deps: ExtensionDeps, probe: MergeFlowProbe = ghMergeFlowProbe(), ciRun: CommandRunner = execRunner,
 ): void {
