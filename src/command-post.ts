@@ -15,7 +15,7 @@ import { openScheduleResults, ScheduleResults } from "./schedule-results.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { AwaitingStore, mergeAwaiting, type ResolvedAwaitingItem } from "./awaiting.ts";
 import { ghCiConfigured } from "./ci-configured.ts";
-import { CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
+import { type CiObservation, CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
 import { recordCiObserved } from "./ci-evidence.ts";
 import { ForeignCiWatch, type ForeignCiTick, ghForeignRuns } from "./foreign-ci-watch.ts";
 import { gitlabCiUnsupported, isGitlabJob, watchChangeRequest } from "./forge-runtime.ts";
@@ -660,14 +660,7 @@ export class CommandPost {
 					job.branch,
 					job.job_id,
 				),
-			onObserved: (jobId, observation) => {
-				try {
-					recordCiObserved(this.runs, jobId, observation);
-				} catch {
-					// A run log that cannot be written must never swallow a wake-up.
-				}
-				this.continuation.onCi(jobId, observation);
-			},
+			onObserved: (jobId, observation) => this.observeCi(jobId, observation),
 		});
 		// cp-wlhu S5: read-only GETs against registered project repos; evidence, never authorization.
 		this.foreignCi = new ForeignCiWatch({
@@ -745,6 +738,16 @@ export class CommandPost {
 	 */
 	async ciTick(): Promise<CiWatchTick> {
 		return this.ciWatch.tick();
+	}
+
+	/** The CI watch's `onObserved`: run-log the fact, then hand it to the continuation (which records `ciOutcome(key)`). */
+	observeCi(jobId: string, observation: CiObservation): void {
+		try {
+			recordCiObserved(this.runs, jobId, observation);
+		} catch {
+			// A run log that cannot be written must never swallow a wake-up.
+		}
+		this.continuation.onCi(jobId, observation);
 	}
 
 	/** cp-wlhu S5: one pass of the foreign-PR CI watch. Its facts are notified, never sent as a wake-up. */
