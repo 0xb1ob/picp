@@ -23,7 +23,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createWakeupSurfaces } from "../extensions/command-post/wakeup-surfaces.ts";
 import { acquireParentLock } from "../src/parent-lock.ts";
-import type { NextActionKind } from "../src/next.ts";
+import type { cpNext, NextActionKind } from "../src/next.ts";
 import { createSessionState } from "../extensions/command-post/shared.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
@@ -1990,6 +1990,72 @@ test("a durable landed notice retries failed sends without repeating the UI noti
 	assert.equal(sent.at(-1)?.options.triggerTurn, false);
 	assert.equal(notices.length, 2);
 	assert.equal(isQuietWakeup("continuation:cp-land:1:stop:x"), false, "a stop still wakes the parent");
+});
+
+// System-one PR1: a resolve stop (implementer already promoted) is relayed, not a turn, only while a fresh in-process
+// cp_next is quiet; another job's work, a failed cp_next or the kill switch off wakes the parent exactly as before.
+async function resolveSweep(t: Parameters<typeof benchOf>[0], next: () => Promise<{ ready: []; action: { kind: NextActionKind; reason: string; job_id?: string } }>, switchOff = false) {
+	const b = benchOf(t);
+	const lock = acquireParentLock({ home: b.home.path });
+	assert.ok(lock.ok);
+	t.after(() => { lock.lock.release(); });
+	if (switchOff) {
+		mkdirSync(join(b.home.path, LAYOUT.data), { recursive: true });
+		writeFileSync(join(b.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}');
+	}
+	const post = new CommandPost({ home: b.home.path, packageRoot: PACKAGE_ROOT });
+	t.after(() => post.shutdown());
+	const sent: Array<{ message: WakeupCarrier; options: { triggerTurn?: boolean; deliverAs?: string } }> = [];
+	const notices: string[] = [];
+	const state = createSessionState();
+	state.live = { hasUI: true, ui: { notify: (text: string) => notices.push(text) }, sessionManager: { getBranch: () => [] } } as unknown as ExtensionContext;
+	const pi = { sendMessage: (message: WakeupCarrier, options: { triggerTurn?: boolean }) => void sent.push({ message, options }) } as unknown as ExtensionAPI;
+	let calls = 0;
+	const stub = (async () => (calls++, next())) as unknown as typeof cpNext;
+	const surface = createWakeupSurfaces(pi, state, { commandPost: () => post, repaintWidget: () => {}, next: stub });
+	post.durableWakeups.enqueue({ id: "continuation:cp-fix:1:abc123def456:ci:resolve", kind: "recovery", job_id: "cp-fix", content: "HELD PR STOPPED — cp-fix (continuation, next: resolve)\n  cp-fix: promoted" });
+	surface.surfaceDurableWakeups();
+	for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+	const journal = (): Array<Record<string, unknown>> => { try { return readRunEvents(b.home.path, "cp-fix").filter((event) => event.type === "continuation").map((event) => event.payload as Record<string, unknown>); } catch { return []; } };
+	return { surface, sent, notices, calls: () => calls, journal };
+}
+
+test("a resolve stop with a quiet cp_next is relayed once with no parent turn", async (t) => {
+	const r = await resolveSweep(t, () => Promise.resolve({ ready: [], action: { kind: "wait", reason: "x" } }));
+	assert.equal(r.sent.length, 1);
+	assert.equal(r.sent.at(-1)!.options.triggerTurn, false);
+	assert.equal((r.sent.at(-1)!.message.details as { relay_only?: boolean }).relay_only, true);
+	assert.equal(r.notices.length, 1);
+	r.surface.surfaceDurableWakeups();
+	assert.equal(r.notices.length, 1, "a second sweep adds no notice");
+	assert.deepEqual(r.journal().map((payload) => [payload.decision, payload.reason]), [["relayed", "cp_next wait"]]);
+});
+
+test("a resolve stop while another job's work is pending wakes the parent unchanged", async (t) => {
+	const r = await resolveSweep(t, () => Promise.resolve({ ready: [], action: { kind: "dispatch", job_id: "cp-next", reason: "dispatch cp-next" } }));
+	assert.equal(r.sent.length, 1);
+	assert.deepEqual(r.sent[0]!.options, { deliverAs: "followUp", triggerTurn: true });
+	assert.equal((r.sent[0]!.message.details as { relay_only?: boolean }).relay_only, undefined);
+	assert.equal(r.notices.length, 0);
+	assert.deepEqual(r.journal().map((payload) => [payload.decision, payload.reason]), [["woke", "cp_next dispatch"]]);
+});
+
+test("a resolve stop whose cp_next throws defers once, then wakes the parent", async (t) => {
+	const r = await resolveSweep(t, () => Promise.reject(new Error("ledger down\nstack")));
+	assert.equal(r.calls(), 1, "one bounded refresh");
+	assert.equal(r.sent.length, 1);
+	assert.equal(r.sent[0]!.options.triggerTurn, true);
+	assert.equal((r.sent[0]!.message.details as { relay_only?: boolean }).relay_only, undefined);
+	assert.deepEqual(r.journal().map((payload) => payload.reason), ["cp_next unavailable: ledger down"]);
+});
+
+test("the wake-rules kill switch off wakes the parent for a resolve stop with no cp_next call", async (t) => {
+	const r = await resolveSweep(t, () => Promise.resolve({ ready: [], action: { kind: "wait", reason: "x" } }), true);
+	assert.equal(r.calls(), 0);
+	assert.equal(r.sent.length, 1);
+	assert.equal(r.sent[0]!.options.triggerTurn, true);
+	assert.equal(r.notices.length, 0);
+	assert.deepEqual(r.journal(), []);
 });
 
 // k52: the origin/main half of the CI-watch tick, through the real `surfaceCi` wiring.

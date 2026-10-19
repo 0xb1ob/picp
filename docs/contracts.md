@@ -1156,11 +1156,12 @@ An operator send through the bridge is a `prompt` with `streamingBehavior:
 wake-ups are sent with `{ triggerTurn: false }`: they ride into the next
 request instead of queueing one follow-up turn each. Actionable `cp-answered`
 messages always trigger. Answer acknowledgements whose in-process `cpNext`
-action is `wait`, `no_mandate` or `draining`, landed-PR continuations and
-review-window `HELD PR WAITING` notices (`isQuietWakeup`, N9), use
+action is `wait`, `no_mandate` or `draining`, landed-PR continuations,
+review-window `HELD PR WAITING` notices (`isQuietWakeup`, N9) and relay-only
+`HELD PR STOPPED (next: resolve)` stops (§Rule-handled wakes) use
 `triggerTurn: false` even when idle and never increment the unseen-notice count.
 On the operator side a relay message whose every relay is `informational` (a
-bridge-relayed `HELD PR LANDED`, an idle-beads notice) is appended with
+bridge-relayed `HELD PR LANDED` or relay-only resolve stop, an idle-beads notice) is appended with
 `triggerTurn: false` and acked on hand-off, since a quiet append fires no
 message hook; any other relay in the same message makes it triggering.
 `agent_settled` clears busy before anything else runs.
@@ -3363,6 +3364,28 @@ stops), so repeated outcomes deliver once and a new generation is new news.
 The bridge relays the process's landed notification during RPC startup too,
 when quiet custom-message events have no subscriber, and coalesces the two
 notification paths into one operator notice.
+
+**Rule-handled wakes (system-one).** `src/wake-rules.ts` lets code, not a parent turn, take a wake the continuation
+already acted on. A `HELD PR STOPPED … (next: resolve)` stop (durable id `continuation:…:resolve`; the implementer is
+already promoted) is **relay-only** when the kill switch is on and the process's cached `cpNext` result is at most
+60 s old with `action.kind` `wait`, `no_mandate` or `draining`. A relay-only stop is sent with `triggerTurn: false`
+and `details.relay_only: true`, shown once to the operator, and relayed once by the bridge as an `informational`
+wake; only messages carrying `relay_only` are relayed, so a resolve that woke the parent is never relayed twice.
+A relay-only message is not a parent turn: it rides along with the parent's next turn and starts none.
+The cache fills wherever `cpNext` already runs in process (answered drains). When a resolve stop is pending and the
+cache is missing or stale, the durable sweep defers once while one bounded refresh runs (10 s, at most one per 60 s),
+then re-sweeps. Any other kind (another job's work pending), a failed or timed-out refresh, or a stale cache
+**fails open**: the stop wakes the parent exactly as before. `surface`, `retry` and review stops always wake.
+The kill switch is `data/wake-rules.json`, read on every evaluation: absent or `{"enabled": true}` = on,
+`{"enabled": false}` = off with no restart; an unreadable or invalid file, or a non-boolean `enabled`, = off (the
+parent is woken). Each decision is journaled once per id as a `continuation` run event in
+`state/runs/<job>/events.jsonl`: `payload: { wake_rule: "held_stop_resolve", decision: "relayed" | "woke", reason,
+next_kind? }` (`reason` is `cp_next <kind>`, `cp_next stale` or `cp_next unavailable: <first line>`). Measure it with:
+
+```
+node -e 'const fs=require("fs"),p=require("path");const r=p.join(process.env.HOME,".pi-command-post/state/runs");const n={};for(const j of fs.readdirSync(r)){const f=p.join(r,j,"events.jsonl");if(!fs.existsSync(f))continue;for(const l of fs.readFileSync(f,"utf8").split("\n")){if(!l.includes("wake_rule"))continue;let e;try{e=JSON.parse(l)}catch{continue}if(e.type!=="continuation"||!e.payload||!e.payload.wake_rule)continue;const k=e.payload.wake_rule+" "+e.payload.decision+" "+(e.payload.decision==="woke"?String(e.payload.reason).split(" ").slice(0,3).join(" "):"");n[k]=(n[k]||0)+1}}console.log(n)'
+```
+
 An operational fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.
 A blocked live report (N3) surfaces at the first step, so no `cp_review`

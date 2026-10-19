@@ -25,6 +25,7 @@ import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, type DrainCause, drainArgs } from "./drain.ts";
 import { durableIdsFromMessage, isLandedContinuation, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
+import { isRelayOnlyNotice, relayOnlyMessage } from "./wake-rules.ts";
 import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
 import { cleanSegmentEnd, wakeSpans } from "./bridge-segments.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
@@ -631,7 +632,7 @@ export class CpBridge {
 	}
 	#onEvent(event: WorkerEvent): void {
 		// RPC notifications survive startup, when quiet custom-message events have no subscriber yet.
-		if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && /^(?:\[[^\]\n]+\] )?HELD PR LANDED — /.test(event.message)) this.#relayLanding(event.message);
+		if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && isRelayOnlyNotice(event.message)) this.#relayLanding(event.message);
 		if (event.type === "agent_start") {
 			if (!this.#runOpen) this.#turn = freshTurn();
 			this.#runOpen = true;
@@ -643,7 +644,7 @@ export class CpBridge {
 			// Idle-bead notices, the one drain outcome wake (durable id `drain:<started>:<outcome>`, kept as `drainId` for the delivery recheck) and a `killed-unreported:` notice (issue #2) reach the operator directly.
 			const durableIds = durableIdsFromMessage(message), drainId = durableIds.find((id) => id.startsWith("drain:"));
 			const directWake = drainId !== undefined || durableIds.some((id) => id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
-			if (message?.role === "custom" && durableIds.some(isLandedContinuation)) this.#relayLanding(textOf(message));
+			if (message?.role === "custom" && (durableIds.some(isLandedContinuation) || relayOnlyMessage(message))) this.#relayLanding(textOf(message));
 			if (message?.role === "custom" && (message.customType === "cp-idle-beads" || directWake)) this.#emit({ kind: "wake", stale: false, text: textOf(message), receipt: climb(emptyReceipt(), "owner_observed"), paths: [], ...(drainId ? { drainId } : {}), ...(directWake ? {} : { informational: true }) });
 			const stamped = jobIdOfMessage(message) ?? scheduleJobIdOf(message);
 			if (stamped) { this.#turn.jobId = stamped; for (const ids of [this.#turn.jobIds, this.#turn.segJobIds]) if (!ids.includes(stamped)) ids.push(stamped); }

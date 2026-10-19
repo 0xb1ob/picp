@@ -854,11 +854,19 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 });
 
 test("a landed continuation reaches the operator once without a parent reply", async (t) => {
-	for (const startup of [true, false]) await t.test(`startup=${startup}`, async (t) => {
+	const landed = { id: "continuation:done:cp-land:1", content: "[demo] HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7" };
+	const resolve = { id: "continuation:cp-fix:1:abc123def456:ci:resolve", content: "[demo] HELD PR STOPPED — cp-fix (continuation, next: resolve)\n  cp-fix: promoted" };
+	// System-one PR1: a relay-only resolve stop relays like a landing; one that woke the parent (no relay_only, no
+	// notify) must not also be relayed, or the operator would hear it twice.
+	const cases = [
+		...[true, false].map((startup) => ({ name: `startup=${startup}`, wake: { ...landed, startup }, relays: 1 })),
+		...[true, false].map((startup) => ({ name: `resolve relay_only startup=${startup}`, wake: { ...resolve, relay_only: true, startup }, relays: 1 })),
+		{ name: "resolve that woke the parent", wake: { ...resolve, notify: false, startup: false }, relays: 0 },
+	];
+	for (const c of cases) await t.test(c.name, async (t) => {
 		const home = createScratchHome();
 		initJobsDocument(home.path, "cp");
-		const content = "[demo] HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7";
-		Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_DURABLE: JSON.stringify({ id: "continuation:done:cp-land:1", content, quiet: true, startup }) });
+		Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_DURABLE: JSON.stringify({ ...c.wake, quiet: true }) });
 		const bridge = new CpBridge();
 		const wakes: BridgeRelay[] = [];
 		bridge.onRelay((relay) => { if (relay.kind === "wake") wakes.push(relay); });
@@ -869,9 +877,10 @@ test("a landed continuation reaches the operator once without a parent reply", a
 			home.cleanup();
 		});
 		await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
-		assert.equal(wakes.length, 1);
-		assert.equal(wakes[0]!.text, content);
-		assert.equal(wakes[0]!.informational, true, "N9: the operator gets the landing without a turn");
+		assert.equal(wakes.length, c.relays, JSON.stringify(wakes));
+		if (c.relays === 0) return;
+		assert.equal(wakes[0]!.text, c.wake.content);
+		assert.equal(wakes[0]!.informational, true, "N9: the operator gets the notice without a turn");
 	});
 });
 

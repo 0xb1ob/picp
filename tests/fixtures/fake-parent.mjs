@@ -89,8 +89,9 @@ rl.on("line", (line) => {
 		const quietLanding = process.env.FAKE_PARENT_WAKE_DURABLE && JSON.parse(process.env.FAKE_PARENT_WAKE_DURABLE);
 		if (!woke && quietLanding?.quiet) {
 			woke = true;
-			lines.push({ type: "extension_ui_request", method: "notify", message: quietLanding.content });
-			if (!quietLanding.startup) lines.push({ type: "message_end", message: { role: "custom", customType: "cp-recovery", content: quietLanding.content, details: { durable_id: quietLanding.id } } });
+			if (quietLanding.notify !== false) lines.push({ type: "extension_ui_request", method: "notify", message: quietLanding.content });
+			const details = { durable_id: quietLanding.id, ...(quietLanding.relay_only ? { relay_only: true } : {}) };
+			if (!quietLanding.startup) lines.push({ type: "message_end", message: { role: "custom", customType: "cp-recovery", content: quietLanding.content, details } });
 			process.stdout.write(lines.map((record) => JSON.stringify(record)).join("\n") + "\n");
 			return;
 		}
