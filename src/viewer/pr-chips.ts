@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PrChip, SessionEntry } from "./api-types.ts";
 import { changeRequestUrl, type ForgeConfig, type ForgeRepository, isSafeChangeRequestUrl, parseChangeRequestUrl, resolveForgeRepository } from "../forge-url.ts";
@@ -30,6 +30,14 @@ const events = fileCache((path: string) => readLines(path, startOffset(path, und
 	.map((l) => parseObject(l.text)).filter((e): e is Json => e?.source === "cp" && (e.type === "integration_advanced" || e.type === "ci_observed")));
 function runEvents(state: ViewerState, id: string): Json[] {
 	try { return events(join(state.stateDir, "runs", id, "events.jsonl")); } catch { return []; }
+}
+
+/** Test hook: counts envelope.json parses (cache misses). */
+export const envelopeReads = { count: 0 };
+const summaries = fileCache((path: string) => { envelopeReads.count++; return str(obj(obj(JSON.parse(readFileSync(path, "utf8")))?.envelope)?.summary) ?? ""; });
+/** The envelope summary, "" when missing or unreadable; cached on mtime+size like events. */
+function envelopeSummary(path: string): string {
+	try { return summaries(path); } catch { return ""; }
 }
 
 /** The PR state rule: merged, closed, unknown (a stale open receipt), draft (never readied by cp_integrate), open. */
@@ -81,7 +89,7 @@ export function attachPrChips(state: ViewerState, entries: SessionEntry[]): Reco
 		const ref = parseChangeRequestUrl(pr);
 		if (ref?.kind !== "github") continue;
 		const base = `https://github.com/${ref.path}/issues/`, own = issueUrl(str(ledger.find((l) => l.id === job.job_id)?.external_ref));
-		const summary = str(obj(readObject(join(state.stateDir, "runs", String(job.job_id), "envelope.json"))?.envelope)?.summary) ?? "";
+		const summary = envelopeSummary(join(state.stateDir, "runs", String(job.job_id), "envelope.json"));
 		for (const issue of [...(own?.startsWith(base) ? [own] : []), ...[...summary.matchAll(CLOSES)].map((m) => base + m[1])]) add(closers, issue, pr);
 	}
 	const prChip = (url: string): PrChip | undefined => {

@@ -10,7 +10,7 @@ import { build } from "esbuild";
 import { parseHTML } from "linkedom";
 import { LAYOUT, PENDING_REVIEW_FILE as CONTRACT_PENDING, paths } from "../src/contracts.ts";
 import type { PrChip, SessionEntry } from "../src/viewer/api-types.ts";
-import { attachPrChips, PENDING_REVIEW_FILE } from "../src/viewer/pr-chips.ts";
+import { attachPrChips, envelopeReads, PENDING_REVIEW_FILE } from "../src/viewer/pr-chips.ts";
 import { runtimeRoot } from "../src/viewer/sessions.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -159,4 +159,16 @@ test("(j) a chip updates in place when the stream's state changes", async (t) =>
 test("(k) pr-chips.ts makes no GitHub call: no process, no fetch, no gh beyond parsing a ledger ref", () => {
 	const source = readFileSync(join(REPO_ROOT, "src/viewer/pr-chips.ts"), "utf8");
 	assert.doesNotMatch(source, /child_process|\bfetch\(|\bgh\b(?! issue view)/);
+});
+
+// A second attach over unchanged files must hit the mtime+size cache: no envelope re-parse, same chips.
+test("envelope summaries are parsed once while the file is unchanged", (t) => {
+	const h = home(t);
+	h.fleet([job("cp-env2", "held", "https://github.com/o/picp/pull/357")]);
+	h.ledger([{ id: "cp-env2", status: "open", labels: ["project:picp"] }]);
+	h.put(h.run("cp-env2", "envelope.json"), { envelope: { summary: "Closes #331." } });
+	const first = attachPrChips(h.state, [say("[picp] #331 #357")]);
+	const before = envelopeReads.count;
+	assert.deepEqual(attachPrChips(h.state, [say("[picp] #331 #357")]), first);
+	assert.equal(envelopeReads.count, before);
 });
