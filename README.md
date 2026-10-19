@@ -305,6 +305,17 @@ CP_LIVE_TESTS=1 npm run e2e:live              # real models, operator-run only
 Tests, CI, the repository layout and running several homes on one machine:
 [docs/development.md](docs/development.md).
 
+## Reporting a problem
+
+Open an issue at https://github.com/0xb1ob/picp/issues/new and attach:
+
+- the `/doctor` output (or `cp_parent doctor` from the operator session);
+- the version from the dashboard badge;
+- the job id(s) involved;
+- what you expected, and what happened instead.
+
+Redact secrets, tokens and any paths you consider private before you post.
+
 ## Not in scope
 
 Slack relays or threads, workers on other agent CLIs than pi, and an HTML
