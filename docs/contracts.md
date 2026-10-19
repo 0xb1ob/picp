@@ -969,7 +969,8 @@ delivery interval expired before the watcher had even looked again.
 
 **The parent is woken when a held PR's CI finishes for its current pushed head,
 or when that PR merges or closes.** [`src/ci-watch.ts`](../src/ci-watch.ts) owns
-it; the extension owns the interval.
+it; the extension owns the interval. A single green fact that the continuation already turned into a review is
+confirmed and relayed to the operator without a parent turn (§Rule-handled wakes).
 
 The gap it closes is structural, and this repo created it: a worker never waits
 for CI (cp-kzc, above), no worker emits a run's completion, and no local file
@@ -3378,13 +3379,25 @@ then re-sweeps. Any other kind (another job's work pending), a failed or timed-o
 **fails open**: the stop wakes the parent exactly as before. `surface`, `retry` and review stops always wake.
 The kill switch is `data/wake-rules.json`, read on every evaluation: absent or `{"enabled": true}` = on,
 `{"enabled": false}` = off with no restart; an unreadable or invalid file, or a non-boolean `enabled`, = off (the
-parent is woken). Each decision is journaled once per id as a `continuation` run event in
+parent is woken). Each decision is journaled once per id, after its send succeeds, as a `continuation` run event in
 `state/runs/<job>/events.jsonl`: `payload: { wake_rule: "held_stop_resolve", decision: "relayed" | "woke", reason,
 next_kind? }` (`reason` is `cp_next <kind>`, `cp_next stale` or `cp_next unavailable: <first line>`). Measure it with:
 
 ```
 node -e 'const fs=require("fs"),p=require("path");const r=p.join(process.env.HOME,".pi-command-post/state/runs");const n={};for(const j of fs.readdirSync(r)){const f=p.join(r,j,"events.jsonl");if(!fs.existsSync(f))continue;for(const l of fs.readFileSync(f,"utf8").split("\n")){if(!l.includes("wake_rule"))continue;let e;try{e=JSON.parse(l)}catch{continue}if(e.type!=="continuation"||!e.payload||!e.payload.wake_rule)continue;const k=e.payload.wake_rule+" "+e.payload.decision+" "+(e.payload.decision==="woke"?String(e.payload.reason).split(" ").slice(0,3).join(" "):"");n[k]=(n[k]||0)+1}}console.log(n)'
 ```
+
+**CI green (system-one PR2).** A `cp-ci` tick with exactly one `ci_green` fact is **suppressed** when the kill switch
+is on, the continuation outcome `onCi` recorded for that watch key settles within 30 s with `action`
+`review_started` or `review_pending`, `next: "review"` and the same job, and a fresh in-process `cpNext` (which also
+refreshes the resolve cache) is `wait`, `no_mandate` or `draining`. A suppressed fact sends no `cp-ci` message, is
+confirmed directly (`confirmCi`, so it is never re-sent), and reaches the operator as one notice
+`[project] CI GREEN — <continuation reason> — handled in code, no parent turn. <pr url>`, which the bridge relays as an
+`informational` wake. The rule never starts a review; it only reads the continuation's outcome. Every other tick wakes
+the parent exactly as before. A single green fact that is not suppressed journals `decision: "woke"` with its reason
+(`kill switch`, `no continuation outcome`, `continuation unsettled after 30000ms`, `outcome <action>/<next>`,
+`cp_next <kind>`, `cp_next failed: <first line>`); a suppressed one journals `{ wake_rule: "ci_green",
+decision: "suppressed", reason, next_kind, action }`.
 
 An operational fault is never retried here, nothing waits on CI and nothing mints an approval:
 every step still re-reads the head, CI and GitHub's permission itself.

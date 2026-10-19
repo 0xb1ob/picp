@@ -2170,6 +2170,50 @@ test("k52: a throwing main tick never blocks the held-PR wake, and is journaled 
 	assert.match(String((failed[0] as Error).message), /main boom/);
 });
 
+// System-one PR2: a single green fact the continuation already turned into a review is confirmed and relayed to the
+// operator with no cp-ci wake; another job's work pending wakes the parent as before. `late.next` is set after
+// construction here, pinning that the override is read per call (PR1 review low).
+async function ciGreenSurface(t: Parameters<typeof mainCiPost>[0], kind: NextActionKind) {
+	const { b, post, sent, pi } = await mainCiPost(t);
+	await b.fleet.add(jobRecord(b.home.path, "cp-held"));
+	const head = "a".repeat(40);
+	const key = ciEventKey("cp-held", head, "ci_green");
+	const observation = { key, event: "ci_green" as const, job_id: "cp-held", branch: "cp-held", head_sha: head, reason: "CI green", pr_url: "https://github.com/o/r/pull/7" };
+	post.ciTick = async (): Promise<CiWatchTick> => ({ observations: [observation], checked: ["cp-held"], skipped: [], errors: [] });
+	const reason = "cp-held: cp_review attempt 1 started on aaaaaaaaaaaa";
+	Object.assign(post.continuation, { ciOutcome: () => Promise.resolve({ job_id: "cp-held", key, action: "review_started", next: "review", steps: 1, reason }) });
+	const confirmed: string[][] = [];
+	post.confirmCi = (keys) => (confirmed.push([...keys]), []);
+	const notices: string[] = [];
+	const state = createSessionState();
+	state.live = { hasUI: true, ui: { notify: (text: string) => notices.push(text) }, sessionManager: { getBranch: () => [] } } as unknown as ExtensionContext;
+	const late: Parameters<typeof createWakeupSurfaces>[2] = { commandPost: () => post, repaintWidget: () => {}, mainCi: { tick: async () => [] } };
+	const surface = createWakeupSurfaces(pi, state, late);
+	let calls = 0;
+	late.next = (async () => (calls++, { ready: [], action: { kind, reason: kind } })) as unknown as typeof cpNext;
+	await surface.surfaceCi();
+	// The bench has no ledger, so the foreign-PR half warns once; only the held-PR notice matters here.
+	return { sent, notices: notices.filter((text) => !text.startsWith("pi-command-post: foreign")), confirmed, calls: () => calls, key };
+}
+
+test("system-one: a single green CI fact already under review is relayed and confirmed, no cp-ci wake", async (t) => {
+	const r = await ciGreenSurface(t, "wait");
+	assert.equal(r.calls(), 1, "late.next set after construction is the cp_next used");
+	assert.equal(r.sent.length, 0);
+	assert.equal(r.notices.length, 1);
+	assert.ok(r.notices[0]!.startsWith("[demo] CI GREEN — cp-held: cp_review attempt 1 started"), r.notices[0]);
+	assert.ok(r.notices[0]!.endsWith("handled in code, no parent turn. https://github.com/o/r/pull/7"), r.notices[0]);
+	assert.deepEqual(r.confirmed, [[r.key]], "confirmed directly: the fact is never re-sent");
+});
+
+test("system-one: a single green CI fact while another job's work is pending wakes the parent as today", async (t) => {
+	const r = await ciGreenSurface(t, "dispatch");
+	assert.equal(r.sent.length, 1);
+	assert.ok(r.sent[0]?.details.ci);
+	assert.match(r.notices[0] ?? "", /^CI\/PR OBSERVED/);
+	assert.deepEqual(r.confirmed, [], "confirmed only when the cp-ci message lands");
+});
+
 test("archived projects are skipped by the main-CI watcher and come back after unarchive", async (t) => {
 	const { post, pi } = await mainCiPost(t);
 	await post.registry.register({ name: "retired", clone_url: "https://example.invalid/retired.git" });
