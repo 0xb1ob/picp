@@ -110,6 +110,8 @@ test("a native self-review run expands, dispatches within parallelism and closes
 	const legacy = readFileSync(join(REPO_ROOT, "skills/cp-self-review/SKILL.md"), "utf8");
 	const contract = synthesis.slice(synthesis.indexOf("Add an \"Experiment proposals\""), synthesis.indexOf("covering authority.") + 19);
 	assert.ok(contract.length > 100 && legacy.includes(contract), "the legacy S1 template mirrors the proposal contract");
+	// The web board (site/index.html) bullet must carry the proposals too, in both templates, not only report.md.
+	for (const text of [synthesis, legacy]) assert.match(text.slice(text.indexOf("`site/index.html`")).split("\n\n")[0]!, /"Experiment proposals" section/);
 	await b.report(ids.S1!);
 	assert.match((await b.ledger.show(fired.job_id!)).close_reason ?? "", new RegExp(`^researched: synthesis ${ids.S1}`));
 	run = b.runs.run(run.id)!;

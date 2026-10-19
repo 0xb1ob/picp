@@ -120,7 +120,7 @@ Deliver as a board (delivery `board`; the brief's board rules apply), in the S1 
   L ids, then the S1 id), `created_at` (ISO-8601 UTC). Its path is S1's `artifact_path`.
 - `report.md` — the full synthesis above (what `cp_gate` reads).
 - `site/index.html` — the static web report: no scripts, inline `<style>` or `/boards/board.css`; the window, the
-  prioritized findings (NEW first) and the "Context & compaction" section; six L links, one per reader, each its job id,
+  prioritized findings (NEW first), the "Context & compaction" section and the "Experiment proposals" section; six L links, one per reader, each its job id,
   title, a link to `/#job/<L-id>` and its artifact path `state/artifacts/<L-id>/report.md`; and the S1 artifact path. The
   served URL is `/boards/<S1-id>/` once intake publishes it. Same redaction as the reports: no secret reaches the page.
 
