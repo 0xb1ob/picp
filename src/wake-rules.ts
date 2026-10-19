@@ -148,6 +148,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
 	const now = deps.now ?? Date.now;
 	const cache = new NextCache();
 	const journaled = new Set<string>();
+	const ciInFlight = new Set<string>();
 	const decided = new Map<string, WakeRulePayload>();
 	const runsOf = (): Pick<RunRegistry, "open"> | undefined => {
 		try {
@@ -241,8 +242,22 @@ export function createWakeRules(deps: WakeRulesDeps) {
 	const ciGreen = async (observations: readonly CiObservation[]): Promise<CiRuling> => {
 		const only = observations.length === 1 ? observations[0] : undefined;
 		if (!only || only.event !== "ci_green") return { suppress: false };
+		// A later tick for a key still waiting on its outcome must not race it; the first pass owns the ruling.
+		if (ciInFlight.has(only.key)) return { suppress: true, relay: "CI GREEN — already being handled in code.", keys: [] };
+		ciInFlight.add(only.key);
+		try {
+			return await ciGreenRule(only);
+		} finally {
+			ciInFlight.delete(only.key);
+		}
+	};
+	const ciGreenRule = async (only: CiObservation): Promise<CiRuling> => {
 		const woke = (reason: string, extra: Record<string, unknown> = {}): CiRuling => {
-			journalWakeRule(runsOf(), only.job_id, { wake_rule: "ci_green", decision: "woke", reason, ...extra });
+			const once = `ci_green:${only.key}`;
+			if (!journaled.has(once)) {
+				journaled.add(once);
+				journalWakeRule(runsOf(), only.job_id, { wake_rule: "ci_green", decision: "woke", reason, ...extra });
+			}
 			return { suppress: false };
 		};
 		try {

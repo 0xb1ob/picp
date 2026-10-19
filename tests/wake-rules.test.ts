@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { CiObservation } from "../src/ci-watch.ts";
+import { CommandPost } from "../src/command-post.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import type { ContinuationAction, ContinuationOutcome } from "../src/held-continuation.ts";
 import type { cpNext, NextActionKind, NextResult } from "../src/next.ts";
@@ -234,4 +235,39 @@ test("ciGreen: two facts or a non-green fact are no candidate and journal nothin
 	assert.deepEqual(await b.rules.ciGreen([{ ...green, event: "ci_failed" }]), { suppress: false });
 	assert.equal(b.journal.length, 0);
 	assert.equal(b.calls(), 0);
+});
+
+test("ciGreen: re-derived ticks for one key journal woke once", async (t) => {
+	const b = rulesBench(t);
+	for (let tick = 0; tick < 3; tick++) assert.deepEqual(await b.rules.ciGreen([green]), { suppress: false });
+	assert.equal(b.journal.length, 1);
+	await b.rules.ciGreen([{ ...green, key: "cp-x|bbbb|ci_green" }]);
+	assert.equal(b.journal.length, 2, "another key is its own measurement");
+});
+
+// Ticks can overlap: the interval timer never awaits surfaceCi, and the outcome wait lasts up to 30 s.
+test("ciGreen: a tick for a key still waiting is suppressed without a ruling of its own", async (t) => {
+	let settle: (value: ContinuationOutcome) => void = () => {};
+	const pending = new Promise<ContinuationOutcome>((resolve) => (settle = resolve));
+	const b = rulesBench(t, { outcome: () => pending, next: () => next("wait"), wait: 5_000 });
+	const first = b.rules.ciGreen([green]);
+	const second = await b.rules.ciGreen([green]);
+	assert.deepEqual(second.suppress && second.keys, [], "nothing confirmed by the overlapping tick");
+	assert.equal(b.journal.length, 0);
+	settle(await outcome("review_started", "review"));
+	assert.ok((await first).suppress);
+	assert.equal(b.journal.length, 1, "only the first pass journaled");
+	assert.ok((await b.rules.ciGreen([green])).suppress, "the guard is released once the first pass settles");
+});
+
+test("CommandPost.observeCi, the CiWatch onObserved wiring, records ciOutcome(key) on the real continuation", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const post = new CommandPost({ home: home.path, packageRoot: process.cwd() });
+	t.after(() => post.shutdown());
+	assert.equal(post.continuation.ciOutcome(KEY), undefined);
+	post.observeCi("cp-x", green);
+	const recorded = await post.continuation.ciOutcome(KEY);
+	assert.equal(recorded?.job_id, "cp-x");
+	assert.equal(recorded?.action, "disabled", "continuation is off here; the outcome is still recorded under the key");
 });
