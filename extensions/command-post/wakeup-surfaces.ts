@@ -25,7 +25,8 @@ import { scheduledJobIds } from "../../src/relay-scope.ts";
 import { SendFirstGate } from "../../src/send-first-gate.ts";
 import { contextOver, type HoldContext, ParentCompactHold } from "../../src/parent-compact-hold.ts";
 import { parentContextLog } from "../../src/parent-context.ts";
-import { cpNext, formatNext } from "../../src/next.ts";
+import { type cpNext, formatNext } from "../../src/next.ts";
+import { createWakeRules, fleetGeneration } from "../../src/wake-rules.ts";
 import { holdsParentLock } from "../../src/parent-lock.ts";
 import { durableIdsFromMessage, isLandedContinuation, isQuietWakeup } from "../../src/wakeup-outbox.ts";
 import { boundedSeen, reviewWakeups, toolCallKey, WAKEUP_SOURCE_FAILURE_MEMORY, type WakeupCarrier, type WakeupReplayMemory, type WakeupFacts, type WakeupMessage, type WakeupStamp, WakeupNotifier, wakeupFacts, verdictKeysFromMessage } from "../../src/wakeups.ts";
@@ -362,15 +363,20 @@ export function createWakeupSurfaces(
 	};
 
 	const landedNotified = new Set<string>();
+	const wakeRules = createWakeRules({
+		home: () => commandPost().home, post: commandPost, override: late.next, resweep: () => surfaceDurableWakeups(),
+	});
 	const surfaceDurableWakeups = (): void => {
 		// Reentrant drains during reconciliation must not race the caller's first prompt.
 		if (s.reconcileInProgress) return;
+		if (wakeRules.deferSweep()) return;
 		try {
 			confirmQuietArrivals();
 			// Stale suppression is terminal; transport failure leaves the entry pending.
 			commandPost().sweepDurableWakeups((entry) => {
 				const projects = durableWakeupProjects(entry, projectOf(), homeMandateProjects(currentRuntime().home));
-				if (isLandedContinuation(entry.id) && !landedNotified.has(entry.id)) {
+				const relayOnly = wakeRules.relayOnly(entry);
+				if ((relayOnly || isLandedContinuation(entry.id)) && !landedNotified.has(entry.id)) {
 					operatorNotify(s.live, entry.content, "info");
 					landedNotified.add(entry.id);
 				}
@@ -383,8 +389,8 @@ export function createWakeupSurfaces(
 						...(projects ? { projects } : {}),
 					},
 					entry.content,
-					{ durable_id: entry.id },
-					!isQuietWakeup(entry.id),
+					{ durable_id: entry.id, ...(relayOnly ? { relay_only: true } : {}) },
+					!isQuietWakeup(entry.id) && !relayOnly,
 				);
 				return sent ? true : suppressionReason;
 			});
@@ -414,11 +420,7 @@ export function createWakeupSurfaces(
 				confirmQuietArrivals();
 				const stats = post.answered.stats();
 				if (stats.pending === stats.in_flight) return;
-				const next = await (late.next ?? cpNext)({
-					packageRoot: post.packageRoot, ledger: post.ledger(), registry: post.registry,
-					fleet: post.fleet, mandates: post.mandates, escalations: post.escalations, pipelines: post.pipelines,
-					queued: () => post.dispatchQueue.ids(),
-				});
+				const next = await wakeRules.next();
 				const triggerTurn = !["wait", "no_mandate", "draining"].includes(next.action.kind);
 				post.drainAnswered((decisions) => {
 					const text = `${formatAnsweredNotice(decisions, projectOf())}\n${formatNext(next)}\nNext action already checked in this process; act on this recommendation without calling cp_next again for this wake-up.`;
@@ -616,14 +618,7 @@ export function createWakeupSurfaces(
 				operatorNotify(s.live, text, "info");
 				const jobs = new Set(observations.map((observation) => observation.job_id));
 				const only = jobs.size === 1 ? observations[0]?.job_id : undefined;
-				const generation = (() => {
-					if (!only) return undefined;
-					try {
-						return (post.fleet.get(only)?.supersessions ?? 0) + 1;
-					} catch {
-						return undefined;
-					}
-				})();
+				const generation = fleetGeneration(post.fleet, only);
 				sendWakeup(
 					{
 						kind: "ci",
