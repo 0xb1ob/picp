@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PrChip, SessionEntry } from "./api-types.ts";
 import { changeRequestUrl, type ForgeConfig, type ForgeRepository, isSafeChangeRequestUrl, parseChangeRequestUrl, resolveForgeRepository } from "../forge-url.ts";
@@ -34,7 +34,7 @@ function runEvents(state: ViewerState, id: string): Json[] {
 
 /** Test hook: counts envelope.json parses (cache misses). */
 export const envelopeReads = { count: 0 };
-const summaries = fileCache((path: string) => { envelopeReads.count++; return str(obj(obj(JSON.parse(readFileSync(path, "utf8")))?.envelope)?.summary) ?? ""; });
+const summaries = fileCache((path: string) => { envelopeReads.count++; return str(obj(readObject(path)?.envelope)?.summary) ?? ""; });
 /** The envelope summary, "" when missing or unreadable; cached on mtime+size like events. */
 function envelopeSummary(path: string): string {
 	try { return summaries(path); } catch { return ""; }
