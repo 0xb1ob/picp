@@ -32,6 +32,14 @@ function runEvents(state: ViewerState, id: string): Json[] {
 	try { return events(join(state.stateDir, "runs", id, "events.jsonl")); } catch { return []; }
 }
 
+/** Test hook: counts envelope.json parses (cache misses). */
+export const envelopeReads = { count: 0 };
+const summaries = fileCache((path: string) => { envelopeReads.count++; return str(obj(readObject(path)?.envelope)?.summary) ?? ""; });
+/** The envelope summary, "" when missing or unreadable; cached on mtime+size like events. */
+function envelopeSummary(path: string): string {
+	try { return summaries(path); } catch { return ""; }
+}
+
 /** The PR state rule: merged, closed, unknown (a stale open receipt), draft (never readied by cp_integrate), open. */
 function prState(state: ViewerState, url: string, job: Json, merged: boolean): Pick<PrChip, "state" | "merge_sha"> {
 	const receipt = mergeReceipt(state, String(job.job_id)), landed = receipt && clean(String(receipt.pr_url)) === url ? receipt : undefined;
@@ -75,15 +83,22 @@ export function attachPrChips(state: ViewerState, entries: SessionEntry[]): Reco
 		}
 	}
 	const add = (map: Map<string, string[]>, key: string, value: string) => map.set(key, [...new Set([...map.get(key) ?? [], value])]);
-	const issueJobs = new Map<string, string[]>(), closers = new Map<string, string[]>();
+	const issueJobs = new Map<string, string[]>();
 	for (const j of ledger) { const url = issueUrl(str(j.external_ref)); if (url) add(issueJobs, url, String(j.id)); }
-	for (const [pr, { job }] of prs) {
-		const ref = parseChangeRequestUrl(pr);
-		if (ref?.kind !== "github") continue;
-		const base = `https://github.com/${ref.path}/issues/`, own = issueUrl(str(ledger.find((l) => l.id === job.job_id)?.external_ref));
-		const summary = str(obj(readObject(join(state.stateDir, "runs", String(job.job_id), "envelope.json"))?.envelope)?.summary) ?? "";
-		for (const issue of [...(own?.startsWith(base) ? [own] : []), ...[...summary.matchAll(CLOSES)].map((m) => base + m[1])]) add(closers, issue, pr);
-	}
+	let closerMap: Map<string, string[]> | undefined;
+	// Lazy: envelope summaries are read only once an issue chip needs closers.
+	const closersOf = () => {
+		if (closerMap) return closerMap;
+		closerMap = new Map();
+		for (const [pr, { job }] of prs) {
+			const ref = parseChangeRequestUrl(pr);
+			if (ref?.kind !== "github") continue;
+			const base = `https://github.com/${ref.path}/issues/`, own = issueUrl(str(ledger.find((l) => l.id === job.job_id)?.external_ref));
+			const summary = envelopeSummary(join(state.stateDir, "runs", String(job.job_id), "envelope.json"));
+			for (const issue of [...(own?.startsWith(base) ? [own] : []), ...[...summary.matchAll(CLOSES)].map((m) => base + m[1])]) add(closerMap, issue, pr);
+		}
+		return closerMap;
+	};
 	const prChip = (url: string): PrChip | undefined => {
 		const hit = prs.get(url), ref = parseChangeRequestUrl(url);
 		if (!hit || !ref) return undefined;
@@ -94,7 +109,7 @@ export function attachPrChips(state: ViewerState, entries: SessionEntry[]): Reco
 	const issueChip = (url: string): PrChip | undefined => {
 		const m = ISSUE.exec(url);
 		if (!m) return undefined;
-		const closing = closers.get(url) ?? [], jobOf = (pr: string) => String(prs.get(pr)?.job.job_id);
+		const closing = closersOf().get(url) ?? [], jobOf = (pr: string) => String(prs.get(pr)?.job.job_id);
 		const landed = closing.find((pr) => clean(str(mergeReceipt(state, jobOf(pr))?.pr_url) ?? "") === pr);
 		const ids = new Set([...issueJobs.get(url) ?? [], ...closing.map(jobOf)]);
 		const newest = ledger.filter((l) => ids.has(String(l.id)) && JOB_STATUS.has(String(l.status))).sort((a, b) => (str(a.created_at) ?? "").localeCompare(str(b.created_at) ?? "")).at(-1);
