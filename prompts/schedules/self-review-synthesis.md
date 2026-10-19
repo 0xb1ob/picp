@@ -20,6 +20,15 @@ Add a "Context & compaction" section: fleet-wide totals, the worst sessions, the
 context, and concrete fixes (e.g. trimming relay bodies, tool-output caps, compaction threshold or rotate policy),
 classified NEW/COVERED as usual.
 
+Add an "Experiment proposals" section: zero to three proposals, each from NEW or PARTIALLY COVERED findings only (never a
+COVERED one). Each names: the observation ids and source locations (path:line) it rests on; its status (NEW/PARTIAL);
+the destination (home memory, project rule, skill, prompt or code); a falsifiable hypothesis; the exact candidate target;
+the baseline identity; the evaluation (dataset or case ids and the command, or "evaluator unavailable"); success and
+regression criteria; a cost bound; the authority it needs; a rollback; and outcome "not run". Say "unknown" where
+evidence is missing; never read missing telemetry as success; include failures and counterexamples. A home-memory
+proposal goes through parent curation, a general rule through a ship job. With nothing supported, write "No supported
+experiment." Proposals are report-only: S1 runs, dispatches and authorizes nothing; any follow-up needs covering authority.
+
 Deliver as a board (delivery `board`; the brief's board rules apply), in `state/artifacts/{{s1}}/`:
 
 - `board.json` — `title` ("Self-review {{start}}–{{end}}"), `description` (window and one-line headline), `job_ids`
