@@ -3,6 +3,8 @@
  * synthesis) with no parent wake. Scratch home and ledger, fake dispatch/teardown ports.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { FleetRecord } from "../src/contracts.ts";
 import { EscalationStore } from "../src/escalation.ts";
@@ -18,7 +20,7 @@ import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { readerTask, SELF_REVIEW_READERS, SELF_REVIEW_WALL_CLOCK_SECONDS, selfReviewWindow, windowText } from "../src/schedule-self-review.ts";
 import { Scheduler } from "../src/scheduler.ts";
 import type { ScheduleRun } from "../src/viewer/schedule-run-core.ts";
-import { createScratchHome, createScratchLedger } from "./harness/index.ts";
+import { createScratchHome, createScratchLedger, REPO_ROOT } from "./harness/index.ts";
 
 const ACTION = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
 const done = (jobId: string, overrides: Partial<IntakeResult> = {}): IntakeResult => ({ job_id: jobId, accepted: true, already: false, phase: "held", next: "teardown", status: "done", summary: "ok", ...overrides });
@@ -97,6 +99,17 @@ test("a native self-review run expands, dispatches within parallelism and closes
 	assert.deepEqual(b.calls.dispatch.map((call) => call.jobId), ["L1", "L2", "L3", "L4", "L5", "L6", "S1"].map((role) => ids[role]));
 	const synthesis = b.calls.dispatch.at(-1)!.task ?? "";
 	assert.match(synthesis, /^Self-review synthesis S1/); assert.match(synthesis, new RegExp(`state/artifacts/${ids.L6}/report.md`));
+	// Pins the report-only proposal contract in the rendered task text; it proves wording, not model behaviour.
+	assert.match(synthesis, /"Experiment proposals" section: zero to three proposals/);
+	for (const field of ["falsifiable hypothesis", "baseline identity", "the authority it needs", "a rollback", "outcome \"not run\""]) {
+		assert.ok(synthesis.includes(field), `S1 proposal field: ${field}`);
+	}
+	assert.match(synthesis, /No supported\s+experiment\./); assert.match(synthesis, /S1 runs, dispatches and authorizes nothing/);
+	assert.match(synthesis, /no builds, tests, installs, git writes, or writes to live state/, "read-only rules stay");
+	assert.match(synthesis, /delivery `board`/);
+	const legacy = readFileSync(join(REPO_ROOT, "skills/cp-self-review/SKILL.md"), "utf8");
+	const contract = synthesis.slice(synthesis.indexOf("Add an \"Experiment proposals\""), synthesis.indexOf("covering authority.") + 19);
+	assert.ok(contract.length > 100 && legacy.includes(contract), "the legacy S1 template mirrors the proposal contract");
 	await b.report(ids.S1!);
 	assert.match((await b.ledger.show(fired.job_id!)).close_reason ?? "", new RegExp(`^researched: synthesis ${ids.S1}`));
 	run = b.runs.run(run.id)!;

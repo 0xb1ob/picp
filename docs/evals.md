@@ -261,6 +261,16 @@ result it did not measure: run the shadow above under `CP_EVAL_LIVE=1`, commit
 the two result files, and the rollout decision becomes a reading of the table
 rather than a judgement call.
 
+## From self-review to an experiment
+
+Self-review synthesis (S1, [`prompts/schedules/self-review-synthesis.md`](../prompts/schedules/self-review-synthesis.md)
+and the legacy template in `skills/cp-self-review/SKILL.md`) ends with zero to three **experiment proposals**:
+evidence, hypothesis, baseline/candidate, evaluation, authority and rollback, outcome "not run". S1 executes none of
+them and grants nothing; a follow-up runs only as its own job under covering authority. Where a proposal targets a
+worker role, evaluate it with the existing arms above — one role at a time, held-out cases kept held out, model and
+effort fixed. S1 itself is not an eval surface, so a proposal about synthesis states "evaluator unavailable" rather
+than inventing a score. Link the outcome evidence (result files, PR, CI run) back to the proposal's S1 report.
+
 ## Parent classification cases (routing T6)
 
 The corpus above scores **worker** prompts. `evals/parent-routing.json` scores
