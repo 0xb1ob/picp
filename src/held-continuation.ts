@@ -164,6 +164,7 @@ export class HeldContinuation {
 	/** Jobs whose continuation is mid-drive (one at a time per lane). */
 	readonly #driving = new Set<string>();
 	readonly #timers = new Map<string, { identity: string; trigger: ContinuationTrigger; cancel: () => void }>();
+	readonly #ciOutcomes = new Map<string, Promise<ContinuationOutcome>>();
 	#stopped = false;
 
 	constructor(deps: HeldContinuationDeps) {
@@ -174,6 +175,7 @@ export class HeldContinuation {
 		this.#stopped = true;
 		for (const timer of this.#timers.values()) timer.cancel();
 		this.#timers.clear();
+		this.#ciOutcomes.clear();
 	}
 
 	/** True while a continuation step sequence is driving this job (HeldRelease never releases it then). */
@@ -242,13 +244,22 @@ export class HeldContinuation {
 		void this.trigger({ jobId: result.job_id, event: "envelope", ...(result.generation !== undefined ? { generation: result.generation } : {}) });
 	}
 
-	onCi(jobId: string, observation: { event: ContinuationEvent; head_sha: string; run_identity?: string }): void {
-		void this.trigger({
+	onCi(jobId: string, observation: { event: ContinuationEvent; head_sha: string; run_identity?: string; key?: string }): void {
+		const run = this.trigger({
 			jobId,
 			event: observation.event,
 			...(observation.head_sha ? { head: observation.head_sha } : {}),
 			...(observation.run_identity ? { run: observation.run_identity } : {}),
 		});
+		if (observation.key) {
+			if (this.#ciOutcomes.size >= CONTINUATION_KEY_MEMORY) this.#ciOutcomes.clear();
+			this.#ciOutcomes.set(observation.key, run);
+		}
+	}
+
+	/** The outcome `onCi` produced for a CI watch key, for the CI-green wake rule; undefined when none was recorded. */
+	ciOutcome(key: string): Promise<ContinuationOutcome> | undefined {
+		return this.#ciOutcomes.get(key);
 	}
 
 	/** Right after the verdict's wake-up is sent (`afterWakeup`): only a passing diff review has anything to continue. */

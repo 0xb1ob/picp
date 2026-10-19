@@ -4,15 +4,19 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CiObservation } from "./ci-watch.ts";
 import type { CommandPost } from "./command-post.ts";
 import { type DurableWakeupEntry, isSafeJobId, LAYOUT } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
+import type { ContinuationOutcome, HeldContinuation } from "./held-continuation.ts";
 import { cpNext, type NextActionKind, type NextResult } from "./next.ts";
+import { homeProjectResolver } from "./project-report.ts";
 import type { RunRegistry } from "./runs.ts";
 
 export const NEXT_CACHE_MAX_AGE_MS = 60_000;
 export const RESOLVE_REFRESH_WAIT_MS = 10_000;
 export const QUIET_NEXT_KINDS = ["wait", "no_mandate", "draining"] as const;
+export const CI_RULE_WAIT_MS = 30_000;
 
 const isQuietKind = (kind: string): boolean => (QUIET_NEXT_KINDS as readonly string[]).includes(kind);
 const firstLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
@@ -43,7 +47,7 @@ export function isResolveStop(id: string): boolean {
 
 /** Notify text the bridge relays straight to the operator. */
 export function isRelayOnlyNotice(text: string): boolean {
-	return /^(?:\[[^\]\n]+\] )?(?:HELD PR LANDED — |HELD PR STOPPED — \S+ \(continuation, next: resolve\))/.test(text);
+	return /^(?:\[[^\]\n]+\] )?(?:HELD PR LANDED — |HELD PR STOPPED — \S+ \(continuation, next: resolve\)|CI GREEN — .* handled in code, no parent turn\.)/.test(text);
 }
 
 /** A custom message a wake rule sent with no parent turn; the bridge relays it. */
@@ -124,22 +128,34 @@ export class NextCache {
 	}
 }
 
-export type WakeRulesPost = NextPost & Pick<CommandPost, "durableWakeups" | "runs">;
+export type WakeRulesPost = NextPost & Pick<CommandPost, "durableWakeups" | "runs"> & { continuation: Pick<HeldContinuation, "ciOutcome"> };
 
 export interface WakeRulesDeps {
 	home: () => string | undefined;
 	post: () => WakeRulesPost;
+	/** Read on every `next()`, so a caller may set it after construction. */
 	override?: typeof cpNext;
 	resweep: () => void;
 	now?: () => number;
 	refreshWaitMs?: number;
+	ciWaitMs?: number;
 }
+
+export type CiRuling = { suppress: true; relay: string; keys: string[] } | { suppress: false };
 
 /** The rules wakeup-surfaces asks before it wakes the parent. */
 export function createWakeRules(deps: WakeRulesDeps) {
 	const now = deps.now ?? Date.now;
 	const cache = new NextCache();
 	const journaled = new Set<string>();
+	const decided = new Map<string, WakeRulePayload>();
+	const runsOf = (): Pick<RunRegistry, "open"> | undefined => {
+		try {
+			return deps.post().runs;
+		} catch {
+			return undefined;
+		}
+	};
 	let refreshing = false;
 	const home = (): string | undefined => {
 		try {
@@ -176,6 +192,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
 					cache.fail("timed out", now());
 					resolve();
 				}, deps.refreshWaitMs ?? RESOLVE_REFRESH_WAIT_MS);
+				timer.unref();
 			});
 			void Promise.race([next().then(() => undefined, () => undefined), timeout]).finally(() => {
 				clearTimeout(timer);
@@ -193,24 +210,71 @@ export function createWakeRules(deps: WakeRulesDeps) {
 		}
 	};
 
-	/** A resolve stop with the switch on and a fresh, quiet cp_next is relayed, not a turn; journaled once per id. */
+	/** A resolve stop with the switch on and a fresh, quiet cp_next is relayed, not a turn; `delivered` journals it. */
 	const relayOnly = (entry: Pick<DurableWakeupEntry, "id" | "job_id">): boolean => {
 		if (!isResolveStop(entry.id)) return false;
 		try {
 			if (!wakeRulesEnabled(home())) return false;
 			const state = cache.fresh(now());
 			const quiet = "kind" in state && isQuietKind(state.kind);
-			if (!journaled.has(entry.id)) {
-				journaled.add(entry.id);
-				const reason = "kind" in state ? `cp_next ${state.kind}` : state.reason;
-				const nextKind = "kind" in state ? { next_kind: state.kind } : {};
-				journalWakeRule(deps.post().runs, entry.job_id, { wake_rule: "held_stop_resolve", decision: quiet ? "relayed" : "woke", reason, ...nextKind });
-			}
+			const reason = "kind" in state ? `cp_next ${state.kind}` : state.reason;
+			const nextKind = "kind" in state ? { next_kind: state.kind } : {};
+			decided.set(entry.id, { wake_rule: "held_stop_resolve", decision: quiet ? "relayed" : "woke", reason, ...nextKind });
 			return quiet;
 		} catch {
 			return false;
 		}
 	};
 
-	return { next, deferSweep, relayOnly, cache };
+	/** After a durable wake was sent: journal its resolve decision once per id. Returns true for the sweep. */
+	const delivered = (entry: Pick<DurableWakeupEntry, "id" | "job_id">): true => {
+		const payload = decided.get(entry.id);
+		decided.delete(entry.id);
+		if (payload && !journaled.has(entry.id)) {
+			journaled.add(entry.id);
+			journalWakeRule(runsOf(), entry.job_id, payload);
+		}
+		return true;
+	};
+
+	/** A single green CI fact the continuation already turned into a review is relayed and confirmed, not a turn. */
+	const ciGreen = async (observations: readonly CiObservation[]): Promise<CiRuling> => {
+		const only = observations.length === 1 ? observations[0] : undefined;
+		if (!only || only.event !== "ci_green") return { suppress: false };
+		const woke = (reason: string, extra: Record<string, unknown> = {}): CiRuling => {
+			journalWakeRule(runsOf(), only.job_id, { wake_rule: "ci_green", decision: "woke", reason, ...extra });
+			return { suppress: false };
+		};
+		try {
+			const at = home();
+			if (!at || !wakeRulesEnabled(at)) return woke("kill switch");
+			const pending = deps.post().continuation.ciOutcome(only.key);
+			if (!pending) return woke("no continuation outcome");
+			const waitMs = deps.ciWaitMs ?? CI_RULE_WAIT_MS;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const bound = new Promise<undefined>((resolve) => {
+				timer = setTimeout(resolve, waitMs, undefined);
+				timer.unref();
+			});
+			const outcome: ContinuationOutcome | undefined = await Promise.race([pending, bound]).finally(() => clearTimeout(timer));
+			if (!outcome) return woke(`continuation unsettled after ${waitMs}ms`);
+			const reviewing = outcome.action === "review_started" || outcome.action === "review_pending";
+			if (outcome.job_id !== only.job_id || !reviewing || outcome.next !== "review") return woke(`outcome ${outcome.action}/${outcome.next ?? "none"}`);
+			let kind: NextActionKind;
+			try {
+				kind = (await next()).action.kind;
+			} catch (error) {
+				return woke(`cp_next failed: ${firstLine(error)}`);
+			}
+			if (!isQuietKind(kind)) return woke(`cp_next ${kind}`, { next_kind: kind });
+			const project = homeProjectResolver(at)(only.job_id);
+			const relay = `${project ? `[${project}] ` : ""}CI GREEN — ${outcome.reason} — handled in code, no parent turn.${only.pr_url ? ` ${only.pr_url}` : ""}`;
+			journalWakeRule(runsOf(), only.job_id, { wake_rule: "ci_green", decision: "suppressed", reason: outcome.reason, next_kind: kind, action: outcome.action });
+			return { suppress: true, relay, keys: [only.key] };
+		} catch (error) {
+			return woke(`rule failed: ${firstLine(error)}`);
+		}
+	};
+
+	return { next, deferSweep, relayOnly, delivered, ciGreen, cache };
 }

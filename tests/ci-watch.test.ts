@@ -1556,3 +1556,22 @@ test("jje.2 fail closed: a head-bearing CI or verdict trigger whose owning head 
 	b.heads.delete("cp-ci");
 	assert.equal((await b.continuation.trigger({ jobId: "cp-ci", event: "ci_green", head: HEAD })).action, "done");
 });
+
+// System-one PR2: the CI-green wake rule only reads the outcome `onCi` recorded under the watch key; a review already
+// in flight starts none (A2.3), and nothing is remembered past `stop()`.
+test("onCi records its outcome per CI key; a pending review starts no second review", async (t) => {
+	const b = continuationBench({ records: [heldRecord("cp-4wz"), heldRecord("cp-pend")] });
+	t.after(() => b.continuation.stop());
+	b.script.set("cp-4wz", ["review"]);
+	b.continuation.onCi("cp-4wz", { event: "ci_green", head_sha: HEAD, key: "k1" });
+	assert.equal((await b.continuation.ciOutcome("k1"))?.action, "review_started");
+	assert.deepEqual(b.reviews, ["cp-4wz"]);
+	b.script.set("cp-pend", ["review"]);
+	b.pending.add("cp-pend");
+	b.continuation.onCi("cp-pend", { event: "ci_green", head_sha: HEAD, key: "k2" });
+	assert.equal((await b.continuation.ciOutcome("k2"))?.action, "review_pending");
+	assert.deepEqual(b.reviews, ["cp-4wz"], "review_pending starts no cp_review");
+	assert.equal(b.continuation.ciOutcome("unknown"), undefined);
+	b.continuation.stop();
+	assert.equal(b.continuation.ciOutcome("k1"), undefined);
+});

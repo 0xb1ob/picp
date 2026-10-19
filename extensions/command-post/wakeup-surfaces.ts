@@ -364,7 +364,8 @@ export function createWakeupSurfaces(
 
 	const landedNotified = new Set<string>();
 	const wakeRules = createWakeRules({
-		home: () => commandPost().home, post: commandPost, override: late.next, resweep: () => surfaceDurableWakeups(),
+		home: () => commandPost().home, post: commandPost, resweep: () => surfaceDurableWakeups(),
+		get override() { return late.next; },
 	});
 	const surfaceDurableWakeups = (): void => {
 		// Reentrant drains during reconciliation must not race the caller's first prompt.
@@ -392,7 +393,7 @@ export function createWakeupSurfaces(
 					{ durable_id: entry.id, ...(relayOnly ? { relay_only: true } : {}) },
 					!isQuietWakeup(entry.id) && !relayOnly,
 				);
-				return sent ? true : suppressionReason;
+				return sent ? wakeRules.delivered(entry) : suppressionReason;
 			});
 			confirmQuietArrivals();
 		} catch {
@@ -615,7 +616,9 @@ export function createWakeupSurfaces(
 				// the notice and the wake-up below by at most one bound, never forever.
 				await recheckDeferredRows({ kind: "ci" });
 				const text = formatCiNotice(observations, projectOf());
-				operatorNotify(s.live, text, "info");
+				const ruled = await wakeRules.ciGreen(observations);
+				operatorNotify(s.live, ruled.suppress ? ruled.relay : text, "info");
+				if (ruled.suppress) return void post.confirmCi(ruled.keys);
 				const jobs = new Set(observations.map((observation) => observation.job_id));
 				const only = jobs.size === 1 ? observations[0]?.job_id : undefined;
 				const generation = fleetGeneration(post.fleet, only);

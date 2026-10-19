@@ -856,12 +856,16 @@ test("issue #2: a wake carries the envelope summary verbatim; a killed_unreporte
 test("a landed continuation reaches the operator once without a parent reply", async (t) => {
 	const landed = { id: "continuation:done:cp-land:1", content: "[demo] HELD PR LANDED — cp-land\n  https://github.com/o/r/pull/7" };
 	const resolve = { id: "continuation:cp-fix:1:abc123def456:ci:resolve", content: "[demo] HELD PR STOPPED — cp-fix (continuation, next: resolve)\n  cp-fix: promoted" };
+	const ciGreen = { id: "ci:cp-held", content: "[demo] CI GREEN — cp-held: cp_review attempt 1 started on aaaaaaaaaaaa — handled in code, no parent turn. https://github.com/o/r/pull/7" };
 	// System-one PR1: a relay-only resolve stop relays like a landing; one that woke the parent (no relay_only, no
-	// notify) must not also be relayed, or the operator would hear it twice.
+	// notify) must not also be relayed, or the operator would hear it twice. PR2: a CI-green line handled in code
+	// relays once from its notify alone (a custom message beside it adds none); the ordinary cp-ci notice relays none.
 	const cases = [
 		...[true, false].map((startup) => ({ name: `startup=${startup}`, wake: { ...landed, startup }, relays: 1 })),
 		...[true, false].map((startup) => ({ name: `resolve relay_only startup=${startup}`, wake: { ...resolve, relay_only: true, startup }, relays: 1 })),
 		{ name: "resolve that woke the parent", wake: { ...resolve, notify: false, startup: false }, relays: 0 },
+		...[true, false].map((startup) => ({ name: `ci green handled in code startup=${startup}`, wake: { ...ciGreen, startup }, relays: 1 })),
+		{ name: "ci green that woke the parent", wake: { ...ciGreen, content: "[demo] CI/PR OBSERVED — 1 new fact about a held PR", startup: true }, relays: 0 },
 	];
 	for (const c of cases) await t.test(c.name, async (t) => {
 		const home = createScratchHome();
