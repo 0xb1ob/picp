@@ -12,7 +12,8 @@ function segments(c: PrChip): [string, string][] {
  if (c.kind === "issue") return c.state === null ? [["pr-chip-num", `#${c.number}`]] : [["pr-chip-num", `issue #${c.number}`], ["pr-chip-state", c.closed_by ? `closed by #${c.closed_by.number}` : "open"],
   ...(c.job_status ? [["pr-chip-job", jobText(c.job_status)] as [string, string]] : [])];
  return [["pr-chip-num", `#${c.number}`], ["pr-chip-state", c.state === "merged" && c.merge_sha ? `merged ${sha7(c.merge_sha)}` : c.state ?? "unknown"],
-  ...(c.ci ? [[`pr-chip-ci pr-chip-ci-${c.ci}`, c.ci === "unreadable" ? "CI unreadable" : `CI ${c.ci}`] as [string, string]] : []),
+  // Red CI reuses `.job-ci-red` (jobs.css), the palette rule's sanctioned coral for red CI.
+  ...(c.ci ? [[`pr-chip-ci pr-chip-ci-${c.ci}${c.ci === "red" ? " job-ci-red" : ""}`, c.ci === "unreadable" ? "CI unreadable" : `CI ${c.ci}`] as [string, string]] : []),
   ...(c.review ? [[`pr-chip-review pr-chip-review-${c.review}`, `review ${c.review}`] as [string, string]] : [])];
 }
 
