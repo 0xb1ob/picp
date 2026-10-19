@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
  * Chrome over CDP, PNGs plus manifest.json.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips [--chrome /usr/bin/google-chrome] --out <dir>`
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -99,6 +99,24 @@ if (args.stage === "chips") {
 		say("p1", "2026-10-15T08:04:30Z", "Assistant", `**[picp]** CI is green on ${gh}/pull/355 and its review is running; #357 waits on CI after a revise.`, { links }),
 		say("p2", "2026-10-15T08:04:35Z", "Assistant", "**[picp]** #356 merged and closes #328. #330 is still open, #329 has no record, and `#7` in code stays text.\n\n- #358 closed unmerged\n- #359 has a stale receipt", { links }),
 		say("p3", "2026-10-15T08:04:38Z", "Assistant", `Another repo: ${long}/pull/1234567 is red.`),
+	];
+}
+/** Rollup: three turns about one PR (a job's CI wake, its review relay, a job-less HELD PR LANDED), then another job and you. */
+if (args.stage === "rollup") {
+	const url = "https://github.com/o/picp/pull/360", a = "cp-rollup-pr-a-long-job-identifier", b = "cp-other-job";
+	sessions.pr_chips = { [url]: { kind: "pr", url, number: 360, repo: "o/picp", job_id: a, head_sha: "3f2a9c1e".padEnd(40, "0"), state: "merged", merge_sha: "9b77e02".padEnd(40, "1"),
+		closed_by: null, job_status: null, ci: "green", review: "pass" } };
+	const notice = (id: string, at: string, job: string | null, text: string) => say(id, at, "cp-bridge", text, { kind: "system", tag: "bridge", bridge: { kind: job ? "wake" : "held_pr_landed", job, id: null, receipt: null } });
+	sessions.entries = [...entries,
+		notice("u1", "2026-10-15T08:04:20Z", a, "CI finished green on the pushed head 3f2a9c1."),
+		say("v1", "2026-10-15T08:04:25Z", "Assistant", `**[picp]** ${a}: CI is green on ${url}; starting the review.`),
+		notice("u2", "2026-10-15T08:04:40Z", a, "Review attempt 1 started on 3f2a9c1."),
+		say("v2", "2026-10-15T08:04:45Z", "Assistant", `**[picp]** ${a}: review is running on ${url}. Nothing to decide yet.`),
+		notice("u3", "2026-10-15T08:05:10Z", null, "HELD PR LANDED"),
+		say("v3", "2026-10-15T08:05:15Z", "Assistant", `**[picp]** ${url} merged as 9b77e02 after a passing review; the worktree is torn down and the job is closed.`),
+		notice("u4", "2026-10-15T08:05:30Z", b, "Worker reported done."),
+		say("v4", "2026-10-15T08:05:35Z", "Assistant", `**[picp]** ${b} finished; no PR for this one.`),
+		say("v5", "2026-10-15T08:05:50Z", "Operator", "Thanks. Anything else waiting?"),
 	];
 }
 const body = (text: string) => ({ kind: "message" as const, text });
@@ -244,6 +262,11 @@ try {
 			const wide = chips.filter((c: { wide: boolean }) => c.wide).map((c: { text: string }) => c.text);
 			if (wide.length) throw new Error(`${name}: chips wider than their bubble: ${wide.join(", ")}`);
 		}
+		if (stage === "rollup") {
+			const card = await evaluate(`(() => { const t = document.querySelector(".session-rollup-toggle"); return { cards: document.querySelectorAll(".session-rollup").length, toggle: t ? t.getBoundingClientRect().height : 0, chip: !!document.querySelector(".session-rollup-head .pr-chip") }; })()`);
+			if (card.cards !== 1 || !card.chip) throw new Error(`${name}: ${card.cards} rollups (chip ${card.chip}), not one with its PR chip`);
+			if (width < 900 && card.toggle < 44) throw new Error(`${name}: the rollup toggle is ${card.toggle}px tall, under 44`);
+		}
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
 		if (stage === "pr4" && facts.thread_pills.some((w: number) => w > 240)) throw new Error(`${name}: a # thread pill is ${facts.thread_pills.join("/")} px wide, not compact`);
@@ -262,17 +285,21 @@ try {
 	const stage = args.stage!;
 	for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
 		for (const theme of ["dark", "light"] as const) {
-			await capture(`${stage}-${device}-${theme}-${width}x${height}`, transcript, width, height, theme, loaded, "bottom");
+			// Scroll only the transcript to the rollup: the card's head sits above the bottom-pinned view.
+			const toRollup: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-rollup").getBoundingClientRect().top - t.getBoundingClientRect().top - 48; })()`, "true"];
+			await capture(`${stage}-${device}-${theme}-${width}x${height}`, transcript, width, height, theme, loaded, "bottom", stage === "rollup" ? [toRollup] : []);
 			if (stage === "pr1") await capture(`pr1-${device}-${theme}-top-${width}x${height}`, transcript, width, height, theme, loaded, "top");
 			if (stage === "chips") await capture(`chips-${device}-${theme}-first-${width}x${height}`, transcript, width, height, theme, loaded, "bottom",
 				[[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".pr-chip").closest(".session-entry, .session-bubble").getBoundingClientRect().top - t.getBoundingClientRect().top - 24; })()`, "true"]]);
+			if (stage === "rollup") await capture(`rollup-open-${device}-${theme}-${width}x${height}`, transcript, width, height, theme, loaded, "bottom",
+				[[`document.querySelector(".session-rollup-toggle").click()`, `document.querySelector(".session-rollup-toggle").getAttribute("aria-expanded") === "true"`], toRollup]);
 		}
 	}
 	if (stage === "pr1") {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
 		if (leak.background !== "#111110") throw new Error(`Overview took the Sessions light palette (${leak.background})`);
-	} else if (stage !== "chips") {
+	} else if (stage !== "chips" && stage !== "rollup") {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.
