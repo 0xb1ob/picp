@@ -7,6 +7,7 @@ import { assignThreads, INBOX_REPLAY_PREFIX } from "./thread-turns.ts";
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
+import { attachPrChips } from "./pr-chips.ts";
 import { decisions } from "./overview-decisions.ts";
 import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
@@ -287,11 +288,12 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  const window = windowed(cards,(e)=>e.ask?.state === "open");
  entries = window.entries; truncated ||= window.cut;
  attachNoticePaths(state,entries);
+ const pr_chips = attachPrChips(state,entries);
  return {
   generated_at: new Date(now).toISOString(), selected: "you", session_id: selected?.id ?? null,
   parent: rows.parent, workers, entries, title: "Operator ↔ you", subtitle: "Full transcript", warnings, truncated,
   transcript: true, operator_session: selected?.id ?? null, operator_sessions: files.map((file) => ({id:file.id,at:file.at})),
-  open_asks: askDetails(state,d.awaiting.items,now,d),
+  open_asks: askDetails(state,d.awaiting.items,now,d), pr_chips,
  };
 }
 
@@ -342,5 +344,6 @@ export function sessionsView(state: ViewerState, tier: SessionTier, workerId: st
    for (const e of entries) if (e.send_id) e.trace=(bySend.get(e.send_id) ?? []).flatMap(trace);
   }
  }
- return {generated_at:new Date(now).toISOString(),selected:tier,session_id:tier === "parent" ? rows.parent.id : selected?.id ?? null,parent:rows.parent,workers,entries:entries.slice(-300),title:tier === "you" ? "Operator ↔ you" : tier === "parent" ? "CP parent" : selected?.id ?? "Workers",subtitle:tier === "you" ? "Recorded decisions and questions" : tier === "workers" && selected ? modelText({model:selected.context?.model ?? selected.model,thinking:selected.thinking}) : "",warnings,truncated,operator_context:operatorContext(state,windows)};
+ const shown=entries.slice(-300), pr_chips=attachPrChips(state,shown);
+ return {generated_at:new Date(now).toISOString(),selected:tier,session_id:tier === "parent" ? rows.parent.id : selected?.id ?? null,parent:rows.parent,workers,entries:shown,title:tier === "you" ? "Operator ↔ you" : tier === "parent" ? "CP parent" : selected?.id ?? "Workers",subtitle:tier === "you" ? "Recorded decisions and questions" : tier === "workers" && selected ? modelText({model:selected.context?.model ?? selected.model,thinking:selected.thinking}) : "",warnings,truncated,operator_context:operatorContext(state,windows),pr_chips};
 }

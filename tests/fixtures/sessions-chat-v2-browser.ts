@@ -1,6 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
- * Chrome over CDP, PNGs plus manifest.json. `--stage pr1|pr2|pr3|pr4|pr5 [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Chrome over CDP, PNGs plus manifest.json.
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,12 +11,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LAYOUT } from "../../src/contracts.ts";
-import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../../src/viewer/api-types.ts";
+import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, PrChip, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../../src/viewer/api-types.ts";
 import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -81,6 +82,24 @@ if (args.stage === "pr4" || args.stage === "pr5") {
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
+}
+/** Chips: every PR state, CI and review value, the three issue forms, a long repo name, and a `#7` code span. */
+if (args.stage === "chips") {
+	const gh = "https://github.com/o/picp", long = "https://github.com/an-organisation-with-a-long-name/a-repository-name-that-keeps-going-for-wrapping";
+	const pr = (n: number, over: Partial<PrChip>, base = gh): PrChip => ({ kind: "pr", url: `${base}/pull/${n}`, number: n, repo: base.slice(19), job_id: `cp-chip-${n}`, head_sha: "3f2a9c1e".padEnd(40, "0"),
+		state: "open", merge_sha: null, closed_by: null, job_status: null, ci: null, review: null, ...over });
+	const issue = (n: number, over: Partial<PrChip>): PrChip => ({ ...pr(n, { kind: "issue", head_sha: null, job_id: null, state: null }), url: `${gh}/issues/${n}`, ...over });
+	const chips = [pr(355, { state: "draft", ci: "green", review: "running" }), pr(356, { state: "merged", merge_sha: "9b77e02".padEnd(40, "1"), ci: "green", review: "pass" }),
+		pr(357, { state: "open", ci: "pending", review: "revise" }), pr(358, { state: "closed", ci: "red", head_sha: null }), pr(359, { state: "unknown", ci: "unreadable" }),
+		pr(1234567, { state: "open", ci: "red", review: "revise" }, long),
+		issue(328, { state: "closed", closed_by: { url: `${gh}/pull/356`, number: 356 }, job_id: "cp-issue-328", job_status: "closed" }), issue(330, { state: "open", job_id: "cp-issue-330", job_status: "in_progress" }), issue(329, {})];
+	sessions.pr_chips = Object.fromEntries(chips.map(c => [c.url, c]));
+	const links = Object.fromEntries(chips.filter(c => c.repo === "o/picp").map(c => [`#${c.number}`, c.url]));
+	sessions.entries = [...entries,
+		say("p1", "2026-10-15T08:04:30Z", "Assistant", `**[picp]** CI is green on ${gh}/pull/355 and its review is running; #357 waits on CI after a revise.`, { links }),
+		say("p2", "2026-10-15T08:04:35Z", "Assistant", "**[picp]** #356 merged and closes #328. #330 is still open, #329 has no record, and `#7` in code stays text.\n\n- #358 closed unmerged\n- #359 has a stale receipt", { links }),
+		say("p3", "2026-10-15T08:04:38Z", "Assistant", `Another repo: ${long}/pull/1234567 is red.`),
+	];
 }
 const body = (text: string) => ({ kind: "message" as const, text });
 const control: ControlStatusResponse = {
@@ -219,6 +238,12 @@ try {
 					.filter(e => e.getClientRects().length && e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent),
 				small_fields: [...document.querySelectorAll("textarea, select, input")].filter(e => e.getClientRects().length && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.getAttribute("aria-label")) }; })()`);
 		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
+		if (stage === "chips") {
+			const chips = await evaluate(`[...document.querySelectorAll(".pr-chip")].map(c => { const body = c.closest(".session-body"); return { text: c.textContent, wide: !!body && c.getBoundingClientRect().width > body.getBoundingClientRect().width + 0.5 }; })`);
+			if (chips.length !== 9) throw new Error(`${name}: ${chips.length} chips rendered, not 9`);
+			const wide = chips.filter((c: { wide: boolean }) => c.wide).map((c: { text: string }) => c.text);
+			if (wide.length) throw new Error(`${name}: chips wider than their bubble: ${wide.join(", ")}`);
+		}
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
 		if (stage === "pr4" && facts.thread_pills.some((w: number) => w > 240)) throw new Error(`${name}: a # thread pill is ${facts.thread_pills.join("/")} px wide, not compact`);
@@ -239,13 +264,15 @@ try {
 		for (const theme of ["dark", "light"] as const) {
 			await capture(`${stage}-${device}-${theme}-${width}x${height}`, transcript, width, height, theme, loaded, "bottom");
 			if (stage === "pr1") await capture(`pr1-${device}-${theme}-top-${width}x${height}`, transcript, width, height, theme, loaded, "top");
+			if (stage === "chips") await capture(`chips-${device}-${theme}-first-${width}x${height}`, transcript, width, height, theme, loaded, "bottom",
+				[[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".pr-chip").closest(".session-entry, .session-bubble").getBoundingClientRect().top - t.getBoundingClientRect().top - 24; })()`, "true"]]);
 		}
 	}
 	if (stage === "pr1") {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
 		if (leak.background !== "#111110") throw new Error(`Overview took the Sessions light palette (${leak.background})`);
-	} else {
+	} else if (stage !== "chips") {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.

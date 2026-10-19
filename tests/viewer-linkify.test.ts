@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { build } from "esbuild";
 import { parseHTML } from "linkedom";
-import { linkify, localPaths } from "../src/viewer/linkify.ts";
+import { hashRefs, linkify, localPaths } from "../src/viewer/linkify.ts";
 import { composerHref, DECISIONS_HREF, decisionsFallback, route, screenDataUrl } from "../viewer-app/routes.ts";
 import { createResource, type Stream } from "../viewer-app/resource.ts";
 import { REPO_ROOT } from "./harness/index.ts";
@@ -25,6 +25,14 @@ test("linkify: http URLs, trailing punctuation, parens, markdown links, unsafe s
  const files = "#files?root=home&path=state%2Fruns%2Fcp-a%2Fartifact.md";
  assert.deepEqual(linkify(text, { [path]: files }), [{ text: "wrote " }, { text: path, href: files }, { text: ". and /home/u/.pi-command-post/gone.md" }], "a resolved path goes to Files; an unresolved one stays text");
  assert.deepEqual(localPaths("src/viewer/a.ts and /etc/passwd"), [], "only .pi-command-post paths");
+});
+
+test("linkify: #N links only through `local`; anchors, entities and ## headings are never refs", () => {
+ const text = "PR #355 (and #12), not #0, x#9, https://x.io/a#3, &#39; or ##7";
+ assert.deepEqual(hashRefs(text), ["#355", "#12"], "the server resolves exactly these");
+ const pr = "https://github.com/o/r/pull/355";
+ assert.deepEqual(linkify("PR #355 and #12.", { "#355": pr }), [{ text: "PR " }, ext("#355", pr), { text: " and #12." }], "an unresolved #N stays text");
+ assert.deepEqual(linkify("see #355"), [{ text: "see #355" }], "no `local`, no link");
 });
 
 test("route: Operator ↔ you opens on the Full transcript; transcript=0 is Decisions; a refused default falls back", async () => {

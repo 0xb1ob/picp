@@ -146,6 +146,18 @@ export interface SessionsResponse {
  operator_context?: ContextUsage;
  /** Full transcript only: every open ask, oldest first, for the block pinned above the composer — never windowed. */
  open_asks?: AwaitingDetail[];
+ /** Live PR and issue chips by URL (src/viewer/pr-chips.ts), from files the viewer already reads; no GitHub call. */
+ pr_chips?: Record<string, PrChip>;
+}
+/** One PR or issue as a Sessions chip; every null field is unknown on disk and never rendered. */
+export interface PrChip {
+ kind: "pr" | "issue"; url: string; number: number; repo: string;
+ job_id: string | null; head_sha: string | null;
+ state: "draft" | "open" | "merged" | "closed" | "unknown" | null; merge_sha: string | null;
+ closed_by: { url: string; number: number } | null; job_status: "open" | "in_progress" | "closed" | null;
+ ci: "pending" | "green" | "red" | "unreadable" | null;
+ /** `running` while a diff review is pending, else the recorded verdict for the head (pass, revise, …). */
+ review: string | null;
 }
 export interface FileRoot extends Root { phase: string | null; head: string | null; pr_url: string | null; paused: boolean }
 export interface FilesResponse {

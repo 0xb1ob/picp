@@ -1,13 +1,22 @@
+import { useContext } from "preact/hooks";
 import { linkify } from "../../src/viewer/linkify.ts";
+import { PrChipLink, PrChips } from "./PrChip.tsx";
 
 type Links = Record<string,string> | undefined;
-/** Text with its links as elements (linkify.ts): external ones open in a new tab; nothing is ever raw HTML. */
-export function Linked({text,links}: {text:string;links?:Links}) {
- return <>{linkify(text,links).map((s,i)=>s.href ? <a key={i} href={s.href} {...(s.external ? {target:"_blank",rel:"noopener noreferrer"} : {})}>{s.text}</a> : s.text)}</>;
+/**
+ * Text with its links as elements (linkify.ts): external ones open in a new tab; nothing is ever raw HTML.
+ * A link with a chip in context (PrChips) renders as that chip unless `chips` is false.
+ */
+export function Linked({text,links,chips = true}: {text:string;links?:Links;chips?:boolean}) {
+ const known = useContext(PrChips);
+ return <>{linkify(text,links).map((s,i)=>{
+  const key = s.href?.replace(/\/+$/,""), chip = chips && key && Object.hasOwn(known,key) ? known[key] : undefined;
+  return chip ? <PrChipLink key={i} chip={chip}/> : s.href ? <a key={i} href={s.href} {...(s.external ? {target:"_blank",rel:"noopener noreferrer"} : {})}>{s.text}</a> : s.text;
+ })}</>;
 }
-/** Inline markdown: `code` and **bold**, everything else linked text. */
+/** Inline markdown: `code` and **bold**, everything else linked text. A code span never chips. */
 export function InlineText({text,links}: {text:string;links?:Links}) {
- return <>{text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part,i)=>i % 2 === 1 && part.startsWith("`") ? <code key={i}><Linked text={part.slice(1,-1)} links={links}/></code> : i % 2 === 1 ? <strong key={i}>{part.slice(2,-2)}</strong> : <Linked key={i} text={part} links={links}/>)}</>;
+ return <>{text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part,i)=>i % 2 === 1 && part.startsWith("`") ? <code key={i}><Linked text={part.slice(1,-1)} links={links} chips={false}/></code> : i % 2 === 1 ? <strong key={i}>{part.slice(2,-2)}</strong> : <Linked key={i} text={part} links={links}/>)}</>;
 }
 
 export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[];sub?:Record<number,Extract<Block,{kind:"list"}>>} | {kind:"table";head:string[];rows:string[][]};
