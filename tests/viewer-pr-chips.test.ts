@@ -167,8 +167,21 @@ test("envelope summaries are parsed once while the file is unchanged", (t) => {
 	h.fleet([job("cp-env2", "held", "https://github.com/o/picp/pull/357")]);
 	h.ledger([{ id: "cp-env2", status: "open", labels: ["project:picp"] }]);
 	h.put(h.run("cp-env2", "envelope.json"), { envelope: { summary: "Closes #331." } });
+	const start = envelopeReads.count;
 	const first = attachPrChips(h.state, [say("[picp] #331 #357")]);
 	const before = envelopeReads.count;
+	assert.equal(before, start + 1);
 	assert.deepEqual(attachPrChips(h.state, [say("[picp] #331 #357")]), first);
 	assert.equal(envelopeReads.count, before);
+});
+
+// A PR-only attach (no issue chip) must not read any envelope; the closers map is lazy.
+test("PR-only chips never read envelopes", (t) => {
+	const h = home(t);
+	h.fleet([job("cp-env3", "held", "https://github.com/o/picp/pull/358")]);
+	h.ledger([{ id: "cp-env3", status: "open", labels: ["project:picp"] }]);
+	h.put(h.run("cp-env3", "envelope.json"), { envelope: { summary: "Closes #332." } });
+	const start = envelopeReads.count;
+	assert.equal(attachPrChips(h.state, [say("[picp] #358")])["https://github.com/o/picp/pull/358"]?.kind, "pr");
+	assert.equal(envelopeReads.count, start);
 });
