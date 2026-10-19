@@ -27,7 +27,8 @@ import { useViewportFit } from "../viewport-fit.ts";
 import { NewThread, ThreadChips, ThreadPicker, ThreadSidebar } from "../components/ThreadNav.tsx";
 import { QuickReplies } from "../components/QuickReplies.tsx";
 import { threadBands, threadFilter, type ThreadsView, threadsReady } from "../threads.ts";
-import { dayKey, dayStarts, lastDay, replyAsk, type Row, rows } from "../session-rows.ts";
+import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
+import { RelayRollup } from "../components/RelayRollup.tsx";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -76,10 +77,7 @@ function readSeen(): string[] | null {
  catch (error) { console.warn(`seen decisions unreadable, starting over: ${(error as Error).message}`); return null; }
 }
 
-/** The prompting side of a transcript (sessions-view.ts SIDES: the user turns) sits on the right; everything the session says on the left. */
-const OWN = new Set(["Operator","Operator → parent","Parent"]);
 const isBubble = (e: SessionEntry) => e.kind === "say" || e.kind === "via";
-const isOwn = (e: SessionEntry) => e.kind === "via" || OWN.has(e.who);
 /** Consecutive messages from one author within this gap share one header (who and time). */
 const GROUP_GAP_MS = 5 * 60_000;
 /** An opened relay longer than this many lines shows its head, the rest behind "Show more". */
@@ -93,6 +91,7 @@ function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  let prev: SessionEntry | undefined;
  for (const row of rowList) {
   if (row.kind === "steps") { if (row.notice) prev = undefined; continue; }
+  if (row.kind === "rollup") { for (const id of groupStarts(row.turns.flat(), days)) starts.add(id); prev = undefined; continue; }
   const e = row.entry;
   if (!isBubble(e)) { prev = undefined; continue; }
   const gap = prev && e.at && prev.at ? Date.parse(e.at)-Date.parse(prev.at) : 0;
@@ -304,10 +303,12 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const order=new Map(data.entries.map((e,i)=>[e.id,i]));
  const rowList=rows(shown,dayStarts(shown,beforeDay),order);
  // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
- const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), rl=rows(list,days,order), st=groupStarts(rl,days); return rl.flatMap(row=>{
-  const head=row.kind === "entry" ? row.entry : row.notice ?? row.entries[0]!, label=days.get(head.id);
-  const node=row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/>;
-  const out=label ? [dayPill(head.id,head.at,label),node] : [node];
+ // Tools on, every row stands alone: rollups fold relay turns only in the chat view of the operator transcript.
+ const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), base=rows(list,days,order), rl=data.transcript === true && !showTools ? rollups(base,days,order,data.pr_chips ?? {},replyAt) : base, st=groupStarts(rl,days);
+ const node=(row:Row):ComponentChild=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : row.kind === "steps" ? <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/> : <RelayRollup key={row.key} row={row} render={node}/>;
+ return rl.flatMap(row=>{
+  const head=rowHead(row), label=days.get(head.id);
+  const out=label ? [dayPill(head.id,head.at,label),node(row)] : [node(row)];
   return replies && row.kind === "entry" && row.entry.id === replyAt ? [...out,replies] : out;
  });};
  const edge=(side:"before"|"after",list:SessionEntry[],word:string,prev:string | null)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list,prev)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);

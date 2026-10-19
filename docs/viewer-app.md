@@ -605,6 +605,15 @@ summary says `Closes|Fixes|Resolves #N`), else `open` when either record names i
 it is a plain link chip. Code spans, tool output and every screen outside Sessions keep plain anchors. `--stage chips`
 captures every state at 1440 and 390 px and fails on a chip wider than its bubble.
 
+Relay rollups (Sessions chat, client only): in the operator transcript with Tools off, two or more consecutive turns —
+a cp-bridge notice (or the steps it opens) plus the session's replies right after it — fold into one `.session-rollup`
+card (`rollups()` in `viewer-app/session-rows.ts`, `components/RelayRollup.tsx`). The subject key is `pr:<url>` when the
+turn's replies name exactly one PR chip, else the head job's one PR chip, else `job:<id>`; a turn with neither stays
+separate. A run never crosses another subject, an operator message or card, a day start, a thread or a source-order gap,
+and ends before the quick-reply anchor's turn. The header shows the subject chip from `pr_chips` and the job link; the
+latest turn is always shown and `N earlier updates` (`aria-expanded`, 44 px on the phone) reveals the rest through the
+same row renderer. `--stage rollup` captures it collapsed and opened at 1440 and 390 px.
+
 The conversation header (chat v2) shows the avatar, the name and one state line from recorded facts only: the operator
 transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle, a missing `busy` is "Status unknown",
 an unreadable status says so, an older file is "Historical transcript"), then the session's recorded model and ctx;
