@@ -592,6 +592,19 @@ open card fails the run if a `cp_integrate` or `fetch_content` name is clipped, 
 one x. `pr3` adds Chats with a selected, a new, a done and a long thread, `Waiting N` and `Waiting ?`, and an empty
 Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks, history, offline) and the header filter.
 
+Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
+`src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the
+last 256 KB of `runs/<id>/events.jsonl` (`integration_advanced step:"ready"`, `ci_observed pr_closed`), `ci-watch.json`,
+recorded reviews and `review-<n>/pending.json`, the ledger's `external_ref`, and `data/projects.json` — never a GitHub
+call; chips refresh on the existing 2 s stream. A PR reads `merged`, `closed`, `unknown` (an open receipt on a finished
+job), `draft` (not readied by `cp_integrate`) or `open`, then `CI pending|green|red|unreadable` and `review
+running|<verdict>` only when recorded; the title names `head <sha7>` only when one is on disk. A `#N` in a registered
+project's message links to its fleet PR, else (GitHub) to the issue URL; an unresolved `#N` stays text. An issue reads
+`closed by #PR` only when that PR's merge receipt exists (the PR's job carries the issue as `external_ref`, or its envelope
+summary says `Closes|Fixes|Resolves #N`), else `open` when either record names it, plus `job <status>`; with no record
+it is a plain link chip. Code spans, tool output and every screen outside Sessions keep plain anchors. `--stage chips`
+captures every state at 1440 and 390 px and fails on a chip wider than its bubble.
+
 The conversation header (chat v2) shows the avatar, the name and one state line from recorded facts only: the operator
 transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle, a missing `busy` is "Status unknown",
 an unreadable status says so, an older file is "Historical transcript"), then the session's recorded model and ctx;

@@ -1,11 +1,11 @@
 /**
- * Message text as link segments (transcript-links): `[label](http…)`, a bare `http(s)://` URL, and a bare
- * `/…/.pi-command-post/…` path. Pure and DOM-free — the server finds the paths to resolve with `localPaths`,
+ * Message text as link segments (transcript-links): `[label](http…)`, a bare `http(s)://` URL, a bare
+ * `/…/.pi-command-post/…` path and a `#N`. Pure and DOM-free: the server resolves `localPaths`/`hashRefs` into `local`,
  * the viewer renders `linkify` segments as elements. Only `http:`/`https:` ever become external links.
  */
 export type LinkSegment = { text: string; href?: string; external?: boolean };
 
-const TOKEN = /\[([^\]\n]+)\]\((https?:\/\/[^\s()]+)\)|\b(https?:\/\/[^\s<>"'`]+)|(?<![\w./~-])(\/[^\s<>"'`]*?\/\.pi-command-post\/[^\s<>"'`]*)/g;
+const TOKEN = /\[([^\]\n]+)\]\((https?:\/\/[^\s()]+)\)|\b(https?:\/\/[^\s<>"'`]+)|(?<![\w./~-])(\/[^\s<>"'`]*?\/\.pi-command-post\/[^\s<>"'`]*)|(?<![\w#/&;-])(#[1-9]\d{0,6})\b/g;
 
 /** Drop trailing `.,:;` and any unbalanced closing `)` or `]` (a balanced `(…)` inside a URL stays). */
 function trim(token: string): string {
@@ -27,9 +27,9 @@ export function linkify(text: string, local: Record<string, string> = {}): LinkS
  for (const m of text.matchAll(TOKEN)) {
   plain(text.slice(at, m.index));
   if (m[1] !== undefined) { out.push({ text: m[1], href: m[2]!, external: true }); at = m.index + m[0].length; continue; }
-  const url = m[3] !== undefined, token = trim(m[3] ?? m[4]!);
+  const url = m[3] !== undefined, token = m[5] ?? trim(m[3] ?? m[4]!);
   const href = url ? (/^https?:\/\/./.test(token) ? token : undefined) : local[token];
-  if (href) out.push(url ? { text: token, href, external: true } : { text: token, href });
+  if (href) out.push(url || (m[5] !== undefined && /^https?:\/\//.test(href)) ? { text: token, href, external: true } : { text: token, href });
   else plain(token);
   at = m.index + token.length;
  }
@@ -40,4 +40,9 @@ export function linkify(text: string, local: Record<string, string> = {}): LinkS
 /** Every bare `.pi-command-post` path `linkify` would look up, so the server resolves exactly those. */
 export function localPaths(text: string): string[] {
  return [...new Set([...text.matchAll(TOKEN)].filter((m) => m[4] !== undefined).map((m) => trim(m[4]!)))];
+}
+
+/** Every `#N` reference `linkify` would look up in `local`; one the server leaves unresolved stays plain text. */
+export function hashRefs(text: string): string[] {
+ return [...new Set([...text.matchAll(TOKEN)].flatMap((m) => m[5] !== undefined ? [m[5]] : []))];
 }

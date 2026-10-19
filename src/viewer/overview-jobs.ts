@@ -64,6 +64,11 @@ export function ciUnreadable(state: ViewerState, jobs: Json[]): {project: string
  for (const job of jobs) if (denied.has(String(job.job_id))) byProject.set(String(job.project), [...byProject.get(String(job.project)) ?? [], String(job.job_id)]);
  return [...byProject].sort(([a],[b]) => a.localeCompare(b)).map(([project,job_ids]) => ({project,job_ids}));
 }
+/** The job's current head: a parked head, else the ci-watch row's, else the envelope's; null when none is recorded. */
+export function jobHead(state: ViewerState, job: Json, ciRow: Json | undefined): string | null {
+ const envelope = obj(readObject(join(state.stateDir,"runs",String(job.job_id),"envelope.json"))?.envelope);
+ return parkedHead(job) ?? [ciRow?.head_sha,envelope?.head_sha].find((v): v is string => typeof v === "string" && SHA.test(v)) ?? null;
+}
 /** `rows`: the dashboard's job rows, every finished one included (`dashboard(state,now,Infinity)`), computed once by `overview`. */
 export function flights(state: ViewerState, jobs: Json[], escalations: Json[], now: number, rows: readonly JobRow[]): FlightJob[] {
  const watched = readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
@@ -73,8 +78,7 @@ export function flights(state: ViewerState, jobs: Json[], escalations: Json[], n
  return jobs.filter(j => ["waiting","held","launching"].includes(String(j.phase)) || (j.phase === "awaiting_merge" && !quiescent(j))).map(job => {
   const id = String(job.job_id); const status = readStatus(state,id);
   const ci = ciRows.find(row => row?.job_id === id);
-  const envelope = obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
-  const head = parkedHead(job) ?? [ci?.head_sha,envelope?.head_sha].find((v): v is string => typeof v === "string" && SHA.test(v)) ?? null;
+  const head = jobHead(state,job,ci);
   const started = status?.started_at ?? job.dispatched_at;
   const exited = status?.exited_at ?? obj(job.worker)?.exited_at;
   const elapsed = parkedSeconds(job) ?? (timestamp(started) ? Math.max(0, ((timestamp(exited) ? Date.parse(exited) : now) - Date.parse(started))/1000) : null);

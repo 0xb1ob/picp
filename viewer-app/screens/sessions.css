@@ -202,6 +202,19 @@
 .md li > ul, .md li > ol { margin-top: 2px; }
 .md li { white-space: pre-wrap; }
 .md a { color: var(--blue); overflow-wrap: anywhere; }
+.md a.pr-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; max-width: 100%; min-height: 22px; padding: 0 8px; vertical-align: middle;
+ border: 1px solid var(--border); border-radius: 999px; color: var(--secondary); font-size: 12px; line-height: 20px; text-decoration: none; overflow-wrap: anywhere; }
+.md a.pr-chip:hover { border-color: var(--dim); }
+.pr-chip-num { color: var(--text); font-weight: 600; }
+.pr-chip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.pr-chip-open .pr-chip-dot { background: var(--green); }
+.pr-chip-draft .pr-chip-dot { background: transparent; border: 1.5px solid var(--dim); }
+.pr-chip-merged .pr-chip-dot { background: var(--blue); }
+.pr-chip-closed .pr-chip-dot { background: var(--coral); }
+.pr-chip-ci-green, .pr-chip-review-pass { color: var(--green); }
+.pr-chip-ci-pending, .pr-chip-review-running { color: var(--amber); }
+.pr-chip-ci-red, .pr-chip-review-revise { color: var(--coral); }
+.pr-chip-ci-unreadable { color: var(--dim); }
 .md code { padding: 1px 5px; background: var(--background); border-radius: 5px; font-size: 13px; }
 .md .md-code { max-width: 100%; margin: 0; padding: 10px 12px; overflow-x: auto; background: var(--background); border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: pre; overflow-wrap: normal; }
 .md .md-code code { padding: 0; background: none; font-size: 12px; }
