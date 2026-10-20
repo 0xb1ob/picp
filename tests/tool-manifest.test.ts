@@ -44,5 +44,4 @@ test("optional tools are never required, and each says why and how to get it", (
 		assert.ok(!(REQUIRED_TOOLS as readonly string[]).includes(tool), `${tool} is optional`);
 		assert.ok(OPTIONAL_TOOL_INFO[tool].why && OPTIONAL_TOOL_INFO[tool].install, tool);
 	}
-	assert.ok(!/https?:/.test(OPTIONAL_TOOL_INFO.br.install), "br's install is not a guessed URL");
 });

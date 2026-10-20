@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import type { IntakeResult } from "../../src/intake.ts";
+import { isMultiHomeDir } from "../../src/mode.ts";
 import { formatNext } from "../../src/next.ts";
 import { nextFor } from "../../src/wake-rules.ts";
 import {
@@ -40,6 +41,8 @@ const PINNED = "external-tool --db '/legacy/item.db' show item-2 --json";
 const BR_REF = "br --db '/legacy/.beads/beads.db' show item-4 --json";
 const RETIRED_HINT = /cp_tracker|import-beads/;
 const TOOL_ADVICE = /\bbr\b|--db|BEADS|cp_tracker|import-beads/;
+const RETIRED_WHAT = "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.";
+const RETIRED_FIX = "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.";
 const OLD_JOB_GUIDELINE = "When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it); " +
 	"for a br tracker, pin the project's beads DB with --db and its absolute path (`br --db /abs/path/.beads/beads.db show <id> --json`) " +
 	"so it still works from a leased worktree — the ledger points at issues, it does not copy them.";
@@ -158,6 +161,22 @@ test("retired integration: an existing home keeps its data and runs the native l
 
 	const reopened = await ledger.update(DEFERRED, { status: "open" });
 	assert.deepEqual([reopened.status, reopened.tracker?.item_id, reopened.external_ref], ["open", "item-2", PINNED]);
+
+	// Doctor names retired files by existence only, with the exact generic text; another tool's directory
+	// beside the runtime root is listed for review and kept, and no finding advises a retired tool.
+	const report = await post.doctor();
+	const retiredState = report.findings.filter((f) => f.check === "storage.retired_integration");
+	assert.deepEqual(retiredState.map((f) => [f.severity, f.what, f.fix, f.detail]), [["warn", RETIRED_WHAT, RETIRED_FIX, `${join(LAYOUT.data, "trackers.json")}, ${join(LAYOUT.state, "tracker-sync.json")}`]]);
+	const strayHome = report.findings.find((f) => f.check === "storage.home");
+	assert.ok(strayHome?.detail?.split("; ").includes(".beads"), strayHome?.detail);
+	assert.match(strayHome?.fix ?? "", /keep what another tool owns \(nothing here moves or deletes it\)/);
+	for (const f of report.findings) assert.doesNotMatch(`${f.check} ${f.what} ${f.fix ?? ""}`, TOOL_ADVICE, `${f.check} advises a retired tool`);
+
+	// Existing-home layout: another tool's directory is no nested-home marker any more; the generic ignore line is.
+	const nested = join(home.path, LAYOUT.runtimeDir);
+	assert.equal(isMultiHomeDir(nested), true, "nothing but the generic marker names the parent a home");
+	writeFileSync(join(home.path, ".gitignore"), `${LAYOUT.runtimeDir}/\n`);
+	assert.equal(isMultiHomeDir(nested), false, "with the generic marker the nested root is the parent's, never a flat home");
 
 	for (const [file, body] of Object.entries(retired)) assert.equal(readFileSync(join(home.path, file), "utf8"), body, `${file} untouched`);
 	assert.equal(existsSync(calls), false, "no external_ref was ever executed and br never ran");

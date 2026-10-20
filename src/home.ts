@@ -75,15 +75,14 @@ export function isStandardApp(packageRoot: string = PACKAGE_ROOT, env: NodeJS.Pr
 
 /**
  * The home a `.pi-command-post`-named directory is the *nested* runtime root
- * of, if any: its parent has `.beads/`, or a `.gitignore` or
- * `.git/info/exclude` listing `.pi-command-post/`. Such a directory is flat by
+ * of, if any: its parent has a `.gitignore` or `.git/info/exclude` listing
+ * `.pi-command-post/`. Such a directory is flat by
  * name but belongs to that parent home — `storage.alias` warns on it, and mode
  * resolution never takes it for a flat standard home.
  */
 export function enclosingHome(dir: string): { home: string; evidence: string } | undefined {
 	if (runtimeDirFor(dir) !== "") return undefined;
 	const parent = dirname(resolve(dir));
-	if (existsSync(join(parent, ".beads"))) return { home: parent, evidence: ".beads/ present" };
 	for (const list of [".gitignore", ".git/info/exclude"]) {
 		const file = join(parent, list);
 		let text = "";

@@ -85,14 +85,11 @@ export function installScriptHint(tool: RequiredTool): string {
 
 /**
  * Optional host tools (P2i): doctor reports them as optional (never a warning),
- * and `src/service/install.ts` reports them and never fails on them. br has no
- * install method verifiable from `br --help` or this repo, so none is run: the
- * installer prints `install` instead of guessing a URL.
+ * and `src/service/install.ts` reports them and never fails on them; neither runs `sudo`.
  */
-export const OPTIONAL_TOOLS = ["br", "tmux"] as const;
+export const OPTIONAL_TOOLS = ["tmux"] as const;
 export type OptionalTool = (typeof OPTIONAL_TOOLS)[number];
 export const OPTIONAL_TOOL_INFO: Readonly<Record<OptionalTool, { why: string; install: string }>> = Object.freeze({
-	br: { why: "only beads-backed projects need the beads CLI", install: "install br (beads_rust) with the method its own repository README documents; no URL is guessed or run here" },
 	tmux: { why: "only a remote operator seat uses it (ssh or tmux onto the session)", install: "install tmux with your package manager (e.g. `sudo apt-get install -y tmux`, `brew install tmux`); sudo is never run here" },
 });
 

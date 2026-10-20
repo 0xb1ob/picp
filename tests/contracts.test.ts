@@ -1009,7 +1009,6 @@ test("the jobs document lives in the runtime dotdir, which is never committed", 
 	assert.equal(LAYOUT.runtimeDir, ".pi-command-post");
 	assert.equal(LAYOUT.jobsFile, ".pi-command-post/jobs.json");
 	assert.ok(NEVER_COMMIT_PATHS.includes(".pi-command-post/"));
-	assert.ok(NEVER_COMMIT_PATHS.includes(".beads/"), "the frozen archive stays uncommittable");
 	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_job"));
 	assert.deepEqual(JOB_STATUSES, ["open", "in_progress", "deferred", "closed"]);
 });
@@ -1174,7 +1173,7 @@ test("one runtime root in both modes, before and after configuration (cp-u3i2)",
 	};
 	assert.deepEqual({ ...LAYOUT }, expected, "unconfigured LAYOUT is the one-root layout");
 	assert.deepEqual(layoutFor("multi"), expected);
-	assert.deepEqual([...NEVER_COMMIT_PATHS], [".pi-command-post/", ".beads/"]);
+	assert.deepEqual([...NEVER_COMMIT_PATHS], [".pi-command-post/"]);
 	assert.equal(currentLayoutMode(), undefined);
 
 	configureLayout("multi");
@@ -1184,7 +1183,7 @@ test("one runtime root in both modes, before and after configuration (cp-u3i2)",
 	configureLayout("multi"); // same mode again: fine
 });
 
-test("layoutFor(multi) keeps one root; neverCommitFor(multi) lists .beads", () => {
+test("layoutFor(multi) keeps one root; neverCommitFor(multi) is that root only", () => {
 	for (const mode of MODES) {
 		const layout = layoutFor(mode);
 		assert.equal(layout.data, ".pi-command-post/data");
@@ -1192,7 +1191,7 @@ test("layoutFor(multi) keeps one root; neverCommitFor(multi) lists .beads", () =
 		assert.equal(layout.projects, ".pi-command-post/projects");
 		assert.equal(layout.operatorWorkspace, ".pi-command-post/operator");
 	}
-	assert.deepEqual(neverCommitFor("multi"), [".pi-command-post/", ".beads/"]);
+	assert.deepEqual(neverCommitFor("multi"), [".pi-command-post/"]);
 });
 
 test("the retired-field archive is never committable, in either mode", () => {

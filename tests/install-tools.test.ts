@@ -255,7 +255,7 @@ test("real script: an unknown tool argument is rejected before anything runs", (
 
 test("real script: restricting to one already-present tool exits 0", (t) => {
 	// `git` is a hard prerequisite of this checkout existing at all, so this is
-	// safe to assert without depending on br/treehouse/pi's presence — except
+	// safe to assert without depending on treehouse/pi's presence — except
 	// that some CI images put more than one `git` on PATH (the runner's own
 	// install plus a bundled copy), which the installer correctly refuses to
 	// paper over (see `planOrInstall`'s "never shadow" rule) and reports as

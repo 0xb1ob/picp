@@ -101,7 +101,6 @@ completed, the lease stays and teardown names what is missing.
 | `systemd --user` (Linux) | optional | cp-daemon keeps the parent and dashboard running everywhere; with `systemd --user` it also comes back after a reboot by itself, without it you run the printed start command (or `--crontab`) |
 | [Tailscale](https://tailscale.com) | recommended | the dashboard binds to one address of this machine; the Tailscale one keeps it to your tailnet |
 | `tmux` or herdr | optional | lets the dashboard's **Start session** button open an operator session |
-| `br` (beads CLI) | optional | only for projects that track work in beads |
 
 The installer also installs the pi packages workers load and the pi-lens host
 tools (`typescript-language-server`, `typescript`, `@ast-grep/cli`) with

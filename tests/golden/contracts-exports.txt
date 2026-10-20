@@ -310,7 +310,7 @@ LEDGER_PREFIX_PATTERN	value	be414b07abc002a0	8b9f60e471e86a5c
 LEGACY_JOB_FIELDS	value	6e6683803c4a2a3a	4f36ea757ebce99a
 LEGACY_ROLE_ALIASES	value	aae3045414f95ecc	6a94f43a3c23d1f9
 LONG_TOOL_CALL_SECONDS	value	6b1b29c2819b6840	983bd614bb5afece
-Layout	type	b2114b37ae8fd725	-
+Layout	type	53e8c03dcb9eb272	-
 LegacyJobFields	type	223afe8be7d06be3	-
 LegacyTrackerLink	type	05ab940d5ec414a5	-
 LegacyTrackerLinkSchema	value	b46106a1823b10d3	58bf8498c85383af
@@ -364,7 +364,7 @@ ModeSetting	type	9f7883f937d32f8c	-
 ModeSettingSchema	value	a79ab3608ba3dd9d	9d70ed6a4429d91a
 ModeSettings	type	7fd1b6fa1c513410	-
 ModeSettingsSchema	value	285879f2a7ca51c6	2f609ffa2a8df8d0
-NEVER_COMMIT_PATHS	value	f943508c3d8c3401	950769fa777aed11
+NEVER_COMMIT_PATHS	value	f943508c3d8c3401	a9d4fe1ead24a645
 OPEN_JOB_STATUSES	value	8ae535ae0130c823	1fccd4d12c43ae6a
 OriginSchema	value	0fb985f616fa3b7f	de2ffc395dea77cd
 PARENT_BRIDGE_FLAGS	value	12ece8c4f16dff59	6d184b1da4b05a9c
@@ -672,7 +672,7 @@ layoutFor	value	450180c26cf74160	ba0ec8ea54419432
 layoutForHome	value	3f3cc27b052470ae	1f4c4199de549bc9
 looksLikeAuthorization	value	0bbe1d31228aefc6	2ded89cfee1063a6
 missingArtifactSections	value	6dd5ba3ca05052c8	a83d546e09108cec
-neverCommitFor	value	6e9ea76ef482d253	1080a2a38c3665e6
+neverCommitFor	value	f26264cc47ebc8f5	1080a2a38c3665e6
 normalizeLegacyRoles	value	1ab16b55d306df9c	ca1e9f09ba9ac2b1
 parseCheckpointAwaitingId	value	7cb36ab1c05fe202	49477f7f3c577cb7
 parseCheckpointFileName	value	80a0472e39bfbed2	6b6eb72177de157a

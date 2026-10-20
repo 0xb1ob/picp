@@ -32,7 +32,6 @@ never by probing, with no fallback or alias:
     tasks/  handoffs/  reports/<topic>/  scratch/
   jobs.json  jobs-legacy-fields.jsonl  settings.json
 ~/.pi-command-post/app/  the standard home's code checkout (not state; never a home itself)
-<home>/.beads/ br's frozen archive; br owns it, command-post never reads it
 ```
 
 Resolution (`src/home.ts` `describeHome`): `CP_HOME` wins; then the standard
@@ -51,8 +50,8 @@ and names the parent to use instead.
   `LAYOUT` (`data`, `state`, `projects`, `operatorWorkspace`, `runtimeDir`, every
   `*File`) and `paths.*`, configured per process by `configureLayout(mode, home)`.
   A flat root is `layoutFor("multi", "")`.
-- `.gitignore` has exactly two runtime entries, `.pi-command-post/` and
-  `.beads/`. `NEVER_COMMIT_PATHS` is `[".pi-command-post/", ".beads/"]`.
+- `.gitignore` has exactly one runtime entry, `.pi-command-post/`.
+  `NEVER_COMMIT_PATHS` is `[".pi-command-post/"]`.
 - A project's clone path is never stored: `paths.projectDir(name)` derives it,
   and a `data/projects.json` record carrying `path` is refused.
 - The shipped routing template has one location, the tracked
@@ -158,7 +157,6 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `<home>/.pi-command-post/operator/{tasks,handoffs,reports/<topic>,scratch}/` | nothing in code | the operator workspace | H | the **operator session** and the human only |
 | `<home>/.pi-command-post/jobs.json`, `jobs-legacy-fields.jsonl`, `settings.json` | `src/ledger.ts`; `settings.json` is read-only in code (`src/mode.ts`) | ledger, mode preference | H | code (`cp_job`); settings.json: operator |
 | `<home>/.pi-command-post/bin/cloudflared` (0755, dir 0700) | `src/tunnel/cloudflared.ts` `provisionCloudflared`, called by `cp-tunnel up` (remote dashboard PR 2d) | the pinned official cloudflared, used only when no compatible one is on PATH: SHA256-verified, probed in an exclusive temp file beside it, then renamed into place; a failure leaves neither; an existing `bin/` is narrowed to 0700 | H | code only |
-| `<home>/.beads/` | br only; `src/doctor.ts` checks it exists | frozen br archive, never read | H | nobody through command-post |
 | `<package-root>/USER.md` | the operator, by hand | optional context (gitignored) | H | the operator only |
 
 ### Outside the home
@@ -231,27 +229,39 @@ Warn-only; each finding names its fix ([`src/storage.ts`](../src/storage.ts)):
 - **`storage.home`** (multi mode only): in a checkout home, untracked paths
   that `.gitignore` does not cover (`git ls-files --others --exclude-standard
   --directory`); in a home without `.git`, any top-level entry other than
-  `.pi-command-post/`, `.beads/`, `.gitignore` and `operator-targets/` — or, in
+  `.pi-command-post/`, `.gitignore` and `operator-targets/` — or, in
   a flat standard home, other than the layout's own top-level entries,
-  `settings.json`, `app/`, `.beads/` and `operator-targets/`. A leftover
-  top-level `data/`, `state/` or `projects/` in a nested home shows up here.
+  `settings.json`, `app/` and `operator-targets/`. A leftover
+  top-level `data/`, `state/` or `projects/` in a nested home shows up here;
+  any other entry is listed for review and kept (nothing moves or deletes it).
 - **`storage.alias`** (multi mode only): a flat-named home whose parent is
-  itself a home (`enclosingHome`: it has `.beads/`, or a `.gitignore` or
+  itself a home (`enclosingHome`: a `.gitignore` or
   `.git/info/exclude` listing `.pi-command-post/`) — the session was pointed
   (by `CP_HOME`, a setting or a launch directory) at another home's runtime root.
 - **`storage.handoffs_dir`:** `data/operator.json` is not valid JSON, or its
   `handoffs_dir` is outside the home.
+- **`storage.retired_integration`:** `data/trackers.json` or
+  `state/tracker-sync.json` exists (existence only, never parsed): "Retired
+  integration state is present and ignored. Native jobs and history remain
+  available; automatic intake and write-back are disabled." Fix: keep the files
+  for your records; ask the operator to configure any external workflow
+  explicitly in home standing orders.
 - Otherwise one `storage` ok.
 
-## `BEADS_DIR` and `.beads`
+## Retired integration state
 
-`.beads/` stays at `<home>/.beads/` — in the standard home that is
-`~/.pi-command-post/.beads/`, beside the runtime entries. It is br's directory, not command-post's:
-nothing in command-post reads it, and `/doctor`'s `ledger.beads_archive` reports it
-as one warning: nothing reads it any more; keep it for your records. `BEADS_DIR` is
-not a setting: workers never inherit one and dispatch sets none.
-So `.gitignore` and `neverCommitFor("multi")` keep `.beads/`, and `storage.home`
-treats it as known.
+An existing home may still hold `data/trackers.json`, `state/tracker-sync.json`
+and `state/tracker-tasks/` from a retired integration, and other tools'
+directories beside the runtime root. Nothing in command-post reads, moves or
+deletes them; native jobs and their history are unaffected. `/doctor`'s
+`storage.retired_integration` names the two files by existence only (it never
+parses them), and `storage.home` lists any other top-level directory for review.
+No external workflow runs unless the operator configures it in home standing orders.
+
+A nested home is recognized only by a `.gitignore` or `.git/info/exclude`
+listing `.pi-command-post/` (or by `CP_HOME`). A home that had no such marker
+should add the `.pi-command-post/` ignore line, with the parent stopped, before
+upgrading.
 
 ## Moving an old multi home
 

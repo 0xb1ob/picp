@@ -88,7 +88,6 @@ test("a flat home passes doctor's scaffold and storage checks, app/ and settings
 	scaffoldHome({ home, env: {}, packageRoot: REPO_ROOT });
 	mkdirSync(join(home, "app"), { recursive: true });
 	writeFileSync(join(home, "settings.json"), JSON.stringify({ schema_version: 1, mode: "multi" }));
-	mkdirSync(join(home, ".beads"), { recursive: true });
 	const noRun = () => assert.fail("a home without .git never runs git");
 	assert.deepEqual(storageFindings(home, noRun).map((f) => [f.check, f.severity]), [["storage", "ok"]]);
 	writeFileSync(join(home, "stray.md"), "notes\n");
