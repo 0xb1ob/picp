@@ -32,13 +32,17 @@ function checked(findings: DoctorFinding[]): DoctorFinding[] {
 	return findings;
 }
 
-test("a home with only .pi-command-post/, .beads/ and .gitignore is one ok storage finding", (t) => {
+test("a home with only .pi-command-post/ and .gitignore is one ok storage finding; another tool's directory is kept", (t) => {
 	const dir = home(t);
-	mkdirSync(join(dir, ".beads"));
-	writeFileSync(join(dir, ".gitignore"), ".pi-command-post/\n.beads/\n");
+	writeFileSync(join(dir, ".gitignore"), ".pi-command-post/\n");
 	writeFileSync(join(dir, LAYOUT.fleetFile), "{}");
 	writeFileSync(join(dir, LAYOUT.state, "parent.lock"), "");
 	assert.deepEqual(checked(storageFindings(dir, noRun)).map((f) => [f.check, f.severity]), [["storage", "ok"]]);
+
+	mkdirSync(join(dir, ".external-tool"));
+	const [external] = checked(storageFindings(dir, noRun));
+	assert.deepEqual([external?.check, external?.severity, external?.detail], ["storage.home", "warn", ".external-tool"]);
+	assert.match(external?.fix ?? "", /keep what another tool owns \(nothing here moves or deletes it\)/);
 });
 
 test("storage.home: a leftover top-level state/ in a home without .git is a warn", (t) => {
@@ -58,7 +62,7 @@ test("storage.alias: a flat-named home inside another home warns and names the p
 	mkdirSync(flat, { recursive: true });
 	assert.deepEqual(checked(storageFindings(flat, noRun)).map((f) => f.check), ["storage"], "a parent that is not a home: no alias");
 
-	writeFileSync(join(parent.path, ".gitignore"), ".pi-command-post/\n.beads/\n");
+	writeFileSync(join(parent.path, ".gitignore"), ".pi-command-post/\n");
 	const [alias] = checked(storageFindings(flat, noRun));
 	assert.equal(alias?.check, "storage.alias");
 	assert.equal(alias?.severity, "warn");

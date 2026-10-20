@@ -594,12 +594,13 @@ async function queuedThroughCompaction(t: { after(fn: () => unknown): void }, sc
 
 	rpc.send({ type: "prompt", id: "run", message: "Queue compaction, then finish your reply." });
 	await waitFor(() => provider.requests(script).length, (n) => n >= 2, { timeoutMs: 30_000, what: "the reply turn to be in flight" });
+	// self_compact already queued under the 1-token trigger; raised before the reply turn settles, no later settle
+	// can ask for a second compaction.
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
 	const sent = await controlRequest(control, "send", { kind: "message", text: "list the validator owner wallets" });
 	assert.ok(sent.ok && (sent.result as { state: string }).state === "queued", JSON.stringify(sent));
 	const id = (sent.result as { id: string }).id;
 	await rpc.waitFor((r) => r.type === "extension_ui_request" && r.message === "self_compact completed", 60_000);
-	// Over the 1-token trigger every later settle would ask for another compaction: one is the scenario.
-	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
 
 	const journal = () => {
 		const file = controlJournalFile(stateDir);
@@ -635,7 +636,8 @@ test("rpc bridge: a message queued before a self-compaction is held through it a
 	await waitFor(() => run.states(), (s) => s.at(-1) === "delivered", { timeoutMs: 60_000, what: `delivery after the re-hand: ${JSON.stringify(run.states())}` });
 	assert.deepEqual(run.states(), ["request", "queued", "injected", "injected", "delivered"]);
 	assert.equal(run.journal()[3]?.reason, "re-handed: not seen in the session when the turn settled");
-	const consumed = run.consumed();
+	// `delivered` is journaled at message_start; the user message_end reaches rpc stdout later.
+	const consumed = await waitFor(() => run.consumed(), (c) => c.length >= 1, { timeoutMs: 30_000, what: "pi to consume the message" });
 	assert.equal(consumed.length, 1, "pi consumed the message once");
 	const records = run.rpc.records();
 	assert.ok(records.findIndex((r) => r.type === "compaction_end") < records.indexOf(consumed[0]!), "held through the compaction");

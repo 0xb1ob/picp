@@ -149,5 +149,5 @@ Dispatch refreshes a leased worktree's dependencies before the worker starts: wh
 | `tests/` | unit and end-to-end suites against a mock provider |
 
 There is no separate fleet CLI: `bin/` holds only the installer, the operator
-launcher and the dashboard. `.pi-command-post/` and `.beads/` are never
-committed; a guard enforces it.
+launcher and the dashboard. `.pi-command-post/` is never committed; a guard
+enforces it.

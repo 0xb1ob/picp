@@ -20,9 +20,9 @@ const STATE_RECORD_SUFFIXES = [".json", ".jsonl", ".lock", ".sock", ".log", ".tm
 /** A home with no `.git` (a standard, managed or `CP_HOME` home) may hold only these at its top level. */
 const KNOWN_TOP_LEVEL = (): string[] =>
 	LAYOUT.runtimeDir
-		? [LAYOUT.runtimeDir, ".beads", ".gitignore", "operator-targets"]
+		? [LAYOUT.runtimeDir, ".gitignore", "operator-targets"]
 		: // A flat home is its runtime root: the layout's own top-level entries, the mode settings, the code checkout.
-			[...new Set(Object.values(LAYOUT).filter(Boolean).map((path) => path.split("/")[0] as string)), "settings.json", "app", ".beads", "operator-targets"];
+			[...new Set(Object.values(LAYOUT).filter(Boolean).map((path) => path.split("/")[0] as string)), "settings.json", "app", "operator-targets"];
 /** The runtime root, as doctor names it: `.pi-command-post/`, or the home itself for a flat home. */
 const rootName = (): string => (LAYOUT.runtimeDir ? `${LAYOUT.runtimeDir}/` : "the home itself");
 const LISTED = 10;
@@ -30,7 +30,7 @@ const LISTED = 10;
 /** Never throws: doctor reports a broken environment, it does not crash on one. */
 export function storageFindings(home: string, run: CommandRunner): DoctorFinding[] {
 	try {
-		const findings = [...stateFindings(home), ...aliasFindings(home), ...homeFindings(home, run), ...handoffsFindings(home)];
+		const findings = [...stateFindings(home), ...aliasFindings(home), ...homeFindings(home, run), ...handoffsFindings(home), ...retiredFindings(home)];
 		if (findings.length) return findings;
 		return [{ check: "storage", severity: "ok", what: `home-local files are under the runtime root, ${rootName()} (docs/storage.md)` }];
 	} catch (error) {
@@ -77,11 +77,11 @@ function homeFindings(home: string, run: CommandRunner): DoctorFinding[] {
 	return [{
 		check: "storage.home",
 		severity: "warn",
-		what: `${stray.length} home entr${stray.length === 1 ? "y" : "ies"} outside the runtime root ${rootName()} and .beads/`,
+		what: `${stray.length} home entr${stray.length === 1 ? "y" : "ies"} outside the runtime root ${rootName()}`,
 		detail: boundedList(stray, { max: LISTED }),
 		fix: LAYOUT.runtimeDir
-			? `a top-level data/, state/ or projects/ is the old layout: move it under the runtime root ${LAYOUT.runtimeDir}/ with the parent stopped; operator material goes in ${LAYOUT.operatorWorkspace}/ (docs/storage.md)`
-			: `a flat home holds only its runtime root's own entries, app/ and .beads/: operator material goes in ${LAYOUT.operatorWorkspace}/ (docs/storage.md)`,
+			? `a top-level data/, state/ or projects/ is the old layout: move it under the runtime root ${LAYOUT.runtimeDir}/ with the parent stopped; operator material goes in ${LAYOUT.operatorWorkspace}/; review any other entry and keep what another tool owns (nothing here moves or deletes it) (docs/storage.md)`
+			: `a flat home holds only its runtime root's own entries and app/: operator material goes in ${LAYOUT.operatorWorkspace}/; review any other entry and keep what another tool owns (nothing here moves or deletes it) (docs/storage.md)`,
 	}];
 }
 
@@ -126,5 +126,18 @@ function handoffsFindings(home: string): DoctorFinding[] {
 		what: `${LAYOUT.data}/operator.json handoffs_dir is outside the home`,
 		detail: value.slice(0, 2000),
 		fix: `point handoffs_dir at ${join(home, LAYOUT.operatorWorkspace, "handoffs")}, or drop it for the default ${LAYOUT.state}/operator/ (docs/storage.md)`,
+	}];
+}
+
+/** Existence only: retired integration files are never parsed, probed or acted on. */
+function retiredFindings(home: string): DoctorFinding[] {
+	const present = [join(LAYOUT.data, "trackers.json"), join(LAYOUT.state, "tracker-sync.json")].filter((file) => existsSync(join(home, file)));
+	if (!present.length) return [];
+	return [{
+		check: "storage.retired_integration",
+		severity: "warn",
+		what: "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.",
+		detail: present.join(", "),
+		fix: "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.",
 	}];
 }

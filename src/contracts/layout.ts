@@ -64,7 +64,7 @@ export interface Layout {
 	runtimeDir: string;
 	/** The operator session's own workspace: tasks, handoffs, reports, scratch (cp-u3i2). */
 	operatorWorkspace: string;
-	/** The jobs ledger — what br's `.beads/` used to be. */
+	/** The jobs ledger (`jobs.json`). */
 	jobsFile: string;
 	/**
 	 * Append-only record of the `type`/`priority` values a job carried before
@@ -170,7 +170,7 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 
 /** Paths that must never be committed or pushed (T19 guard). The mode parameter is always `multi`. */
 export function neverCommitFor(mode: Mode): string[] {
-	return [`${RUNTIME_DIR}/`, ".beads/"];
+	return [`${RUNTIME_DIR}/`];
 }
 
 /**

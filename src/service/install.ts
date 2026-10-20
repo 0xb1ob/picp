@@ -30,13 +30,12 @@
  *                       data/daemon.json (home and app untouched)
  *   --dry-run           probe and print; change nothing (never prompts)
  *   --yes, --no-prompt  take every default without asking
- *   --with-br, --no-br  answer the br (beads CLI) prompt
  *   --no-pi-packages    do not `pi install` the worker packages
  *   --no-self-package   accepted, no effect (single-project mode was removed)
  *
  * P2i adds, after the required tools: gh login, the pi-lens host tools, the pi
  * packages workers load (`ROLE_PACKAGES`), and the
- * optional br/tmux/push/provider-login checks. Prompts read /dev/tty, so
+ * optional tmux/push/provider-login checks. Prompts read /dev/tty, so
  * `curl | sh` still asks; with no terminal every prompt takes its default.
  *
  * Every step prints `ok|changed|skip|fail: <step>: <detail>`; exit 1 on any fail.
@@ -114,8 +113,6 @@ export interface InstallFlags {
 	"dry-run"?: boolean;
 	yes?: boolean;
 	"no-prompt"?: boolean;
-	"with-br"?: boolean;
-	"no-br"?: boolean;
 	"no-pi-packages"?: boolean;
 	"no-self-package"?: boolean;
 }
@@ -123,7 +120,7 @@ export interface InstallFlags {
 export function parseInstallArgs(argv: readonly string[]): InstallFlags {
 	const text = { type: "string" } as const;
 	const flag = { type: "boolean" } as const;
-	return parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "with-br": flag, "no-br": flag, "no-pi-packages": flag, "no-self-package": flag } }).values;
+	return parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "no-pi-packages": flag, "no-self-package": flag } }).values;
 }
 
 
@@ -231,11 +228,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	} else step("ok", "tools", `required tools on PATH: ${REQUIRED_TOOLS.map((tool) => (tool === "treehouse" ? "treehouse (required, not optional: every dispatch leases a treehouse worktree)" : tool)).join(", ")}`);
 	const prompting = !dry && flags.yes !== true && flags["no-prompt"] !== true;
 	const answer = (question: string): string => (prompting ? ports.ask(question)?.trim() ?? "" : "");
-	const yes = (question: string, fallback: boolean): boolean => {
-		const reply = answer(`${question} [${fallback ? "Y/n" : "y/N"}] `).toLowerCase();
-		return reply === "" ? fallback : reply.startsWith("y");
-	};
-	extras(flags, ports, app, home, step, yes);
+	extras(flags, ports, app, step);
 	// 7b's refusals before anything is written; a failed prerequisite or a refused gateway writes and starts nothing.
 	const dataDir = join(home, layoutForHome("multi", home).data);
 	const gateway = gatewayStep({ flags, ports, dataDir, keyFile: gatewayKeyFile(ports.env), force, dry, step });
@@ -447,28 +440,8 @@ function configuredSources(text: string | undefined): string[] | undefined {
 	}
 }
 
-/**
- * `projectTracker`'s two beads sources, by this home's own layout (the process LAYOUT is
- * unconfigured here): an active beads connection in data/trackers.json, or a registered
- * project whose clone has `.beads/beads.db`. Either makes the br prompt default to yes.
- */
-function beadsTracked(ports: InstallPorts, home: string): boolean {
-	const layout = layoutForHome("multi", home);
-	const parsed = <T>(path: string): T | undefined => {
-		try {
-			return JSON.parse(ports.read(path) ?? "null") ?? undefined;
-		} catch {
-			return undefined; // unreadable: doctor names it; the prompt keeps its plain default
-		}
-	};
-	const trackers = parsed<{ connections?: Array<{ adapter?: string; status?: string }> }>(join(home, layout.data, "trackers.json"));
-	if ((trackers?.connections ?? []).some((connection) => connection.adapter === "beads" && connection.status === "active")) return true;
-	const registry = parsed<{ projects?: Array<{ name?: string }> }>(join(home, layout.projectsFile));
-	return (registry?.projects ?? []).some((project) => typeof project.name === "string" && ports.exists(join(home, layout.projects, project.name, ".beads", "beads.db")));
-}
-
 /** Step 3a (P2i): gh login, pi-lens host tools, worker pi packages, this checkout as a package, optional tools, provider login. */
-function extras(flags: InstallFlags, ports: InstallPorts, app: string, home: string, step: Step, yes: (question: string, fallback: boolean) => boolean): void {
+function extras(flags: InstallFlags, ports: InstallPorts, app: string, step: Step): void {
 	const ok = (command: string, ...args: string[]) => ports.run(command, args).status === 0;
 	const run = (name: string, command: string, args: string[]): void => {
 		const line = [command, ...args].join(" ");
@@ -504,13 +477,7 @@ function extras(flags: InstallFlags, ports: InstallPorts, app: string, home: str
 		}
 	}
 
-	const { br, tmux } = OPTIONAL_TOOL_INFO;
-	if (ok("br", "--version")) step("ok", "br", "on PATH (optional)");
-	else {
-		const beads = beadsTracked(ports, home);
-		const want = flags["with-br"] === true || (flags["no-br"] !== true && yes(`Install the br (beads) CLI? Optional: ${br.why}${beads ? "; this home has a beads tracker" : ""}.`, beads));
-		step("skip", "br", want ? `not on PATH; ${br.install}` : `not on PATH (optional: ${br.why}); not wanted, --with-br says how to get it`);
-	}
+	const { tmux } = OPTIONAL_TOOL_INFO;
 	if (ok("tmux", "-V")) step("ok", "tmux", "on PATH (optional)");
 	else step("skip", "tmux", `not on PATH (optional: ${tmux.why}); ${tmux.install}`);
 

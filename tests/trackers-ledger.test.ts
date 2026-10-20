@@ -5,7 +5,7 @@ import { validateJobsDocument } from "../src/contracts.ts";
 import { createScratchLedger } from "./harness/index.ts";
 
 // A retired tracker link is inert native metadata: native writes keep it, and the document
-// still refuses two jobs linking one item (picp-t4n / cp-remove-beads-pr1b-t68e).
+// still refuses two jobs linking one item (cp-remove-beads-pr1b-t68e).
 test("ordinary create is unchanged by tracker links, and the document refuses a duplicate key", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());

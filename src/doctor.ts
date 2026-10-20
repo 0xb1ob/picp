@@ -15,8 +15,8 @@
  *
  * The ledger checks (spec 2026-09-04) are read-only over the jobs document:
  * does it parse, are the ids and the dependency graph sound, does the
- * environment's prefix agree with the document's, is it outgrowing whole-file
- * rewrites, and is a leftover `.beads/` named for what it now is — an archive.
+ * environment's prefix agree with the document's, and is it outgrowing whole-file
+ * rewrites.
  */
 
 import { execFileSync } from "node:child_process";
@@ -447,8 +447,8 @@ export class Doctor {
 	}
 
 	/**
-	 * The recorded incident: a homebrew `br` 0.2.19 and a `~/.local/bin` 0.5.2,
-	 * where which one answered depended on the shell's PATH order, so `br ready`
+	 * The recorded incident: two installs of one CLI at different versions,
+	 * where which one answered depended on the shell's PATH order, so a command
 	 * worked in one terminal and failed in another.
 	 *
 	 * What is flagged is **conflicting versions**, not duplicate paths: version
@@ -494,11 +494,10 @@ export class Doctor {
 	// -- ledger -------------------------------------------------------------
 
 	/**
-	 * The jobs document (spec 2026-09-04). Six findings, all read-only: the file
+	 * The jobs document (spec 2026-09-04). Five findings, all read-only: the file
 	 * parses and validates; ids are unique and carry the prefix; the dependency
 	 * graph is closed and acyclic; the environment's prefix agrees with the
-	 * document's; the document is not outgrowing whole-file rewrites; and a
-	 * leftover `.beads/` is named for what it is now — an archive.
+	 * document's; and the document is not outgrowing whole-file rewrites.
 	 */
 	#ledger(): DoctorFinding[] {
 		const home = this.#options.home;
@@ -596,10 +595,6 @@ export class Doctor {
 					}
 				: { check: "ledger.size", severity: "ok", what: `${doc.jobs.length} job(s) (warning past ${JOBS_SIZE_WARNING})` },
 		);
-		const beads = join(home, ".beads");
-		if (existsSync(beads)) {
-			findings.push({ check: "ledger.beads_archive", severity: "warn", what: ".beads/ is still present beside the jobs document", detail: beads, fix: "nothing reads it any more; keep it for your records" });
-		}
 		return findings;
 	}
 
@@ -1275,8 +1270,7 @@ export class Doctor {
 				}),
 			);
 			// Uniform over NEVER_COMMIT_PATHS (cp-rnr): the T19 guard refuses to
-			// stage any of them, so a .gitignore that omits one is a real gap. The
-			// build-time exemption for `.beads/` is gone with the tracked ledger.
+			// stage any of them, so a .gitignore that omits one is a real gap.
 			if (missing.length > 0) {
 				findings.push({
 					check: "home.gitignore",
@@ -1448,7 +1442,7 @@ export class Doctor {
 					severity: "error",
 					what: "state/fleet.json cannot be read",
 					detail: (error as Error).message.slice(0, 600),
-					fix: "move state/fleet.json aside to start clean; in-flight jobs are still in br and in state/runs/",
+					fix: "move state/fleet.json aside to start clean; in-flight jobs are still in the jobs document and in state/runs/",
 				},
 			];
 		}

@@ -417,9 +417,9 @@ test("bash may describe a diff-review directory but never emit its contents", (t
 
 // -- ledger -----------------------------------------------------------------
 
-test("the ledger has no bash surface any more: br-shaped commands are neither blocked nor special", (t) => {
+test("the ledger has no bash surface any more: ledger-shaped commands are neither blocked nor special", (t) => {
 	const b = bench(t);
-	for (const command of ["br show cp-research-1", "br list --status open", "br ready --json"]) {
+	for (const command of ["external-tool show cp-research-1", "external-tool list --status open", "external-tool ready --json"]) {
 		assert.equal(b.bash(command), undefined, `${command} is an ordinary command now`);
 	}
 	assert.ok(!(GUARD_CODES as readonly string[]).includes("ledger_inlines_artifact"));
@@ -432,7 +432,6 @@ test("staging or pushing runtime state is blocked, source is not", (t) => {
 	for (const command of [
 		"git add .pi-command-post/state/fleet.json",
 		"git add .pi-command-post/data/learnings.md",
-		"git add .beads/issues.jsonl",
 		"git add .pi-command-post/jobs.json",
 		// The retired type/priority values a mutation archived (2026-09-05). It
 		// sits beside the ledger in both modes precisely so this guard covers it.
@@ -441,7 +440,7 @@ test("staging or pushing runtime state is blocked, source is not", (t) => {
 		"git add .pi-command-post/projects/acme",
 		"git commit -m wip .pi-command-post/state/fleet.json",
 		"git -C /tmp/elsewhere add .pi-command-post",
-		"cd $HOME && git add .beads",
+		"cd $HOME && git add .pi-command-post",
 		`git add ${join(b.home, LAYOUT.runs, "cp-research-1/events.jsonl")}`,
 		"git rm -r --cached .pi-command-post",
 	]) {
@@ -460,22 +459,9 @@ test("staging or pushing runtime state is blocked, source is not", (t) => {
 	]) {
 		assert.equal(b.bash(command), undefined, `${command} was blocked`);
 	}
+	assert.equal(b.bash("git add .pi-command-post/state/fleet.json", "/tmp/worktrees/picp")?.code, "never_commit_path", "from any cwd");
 });
 
-test("only the home's own .beads/ is never-commit; a project worktree tracks its .beads/", (t) => {
-	const b = bench(t);
-	const worktree = "/tmp/worktrees/picp";
-	for (const command of ["git add .beads/issues.jsonl", "git commit -m beads .beads/issues.jsonl", "git add .beads"]) {
-		assert.equal(b.bash(command, worktree), undefined, `${command} in a project worktree was blocked`);
-	}
-	assert.equal(b.bash(`git -C ${worktree} add .beads/issues.jsonl`), undefined, "-C a worktree from the home is allowed");
-	assert.equal(b.bash(`cd ${worktree} && git add .beads/issues.jsonl`), undefined, "cd to a worktree is allowed");
-	for (const command of ["git add .beads/issues.jsonl", `git add ${join(b.home, ".beads/issues.jsonl")}`]) {
-		assert.equal(b.bash(command)?.code, "never_commit_path", `${command} in the home was allowed`);
-	}
-	assert.equal(b.bash(`git add ${join(b.home, ".beads")}`, worktree)?.code, "never_commit_path");
-	assert.equal(b.bash("git add .pi-command-post/state/fleet.json", worktree)?.code, "never_commit_path");
-});
 
 test("bulk staging is blocked in the home and allowed elsewhere", (t) => {
 	const b = bench(t);

@@ -8,8 +8,8 @@
  *     parent's context is how a fleet controller turns into an implementer.
  *  2. **The ledger never holds an artifact body.** `state/artifacts/<job-id>/
  *     report.md` is the only home of findings, so no ledger read can leak one.
- *  3. **`data/ state/ projects/ .pi-command-post/` and the home's `.beads/`
- *     are never committed or pushed.** They are runtime truth, not source.
+ *  3. **`data/ state/ projects/ .pi-command-post/` are never committed or
+ *     pushed.** They are runtime truth, not source.
  *
  * Here they are `tool_call` guards: a decision function over the tool name and
  * its arguments, returning a block reason the model can act on. Policy is code,
@@ -83,8 +83,8 @@ const WRITING_TOOLS = new Set(["edit", "write"]);
  * Bash programs that actually emit, move or open a file's *contents* — the
  * shapes named in the guard's brief ("cat/read/less/more/head/tail/cp/mv and
  * friends") plus the other common content-surfacing tools. A program outside
- * this set that merely *names* an artifact path in one of its arguments (`br
- * create -d "..."`, `echo`, `printf`, a commit message) never reads the body,
+ * this set that merely *names* an artifact path in one of its arguments (`gh
+ * issue create --body "..."`, `echo`, `printf`, a commit message) never reads the body,
  * so it is not on this list.
  */
 const REAL_READ_COMMANDS = new Set([
@@ -545,8 +545,8 @@ export class ContextGuard {
 	}
 
 	/**
-	 * Which never-commit root a token falls under, if any. The runtime dir is refused by its leading segment from any
-	 * cwd; `.beads/` only inside this home's copy (a project tracks its own), or by segment when the git target is hidden.
+	 * Which never-commit root a token falls under, if any: by its leading segment from any cwd, or by
+	 * resolving inside this home's copy.
 	 */
 	#neverCommitPath(token: string, where: Omit<GitTarget, "subcommand">): string | undefined {
 		const raw = (token.startsWith("@") ? token.slice(1) : token).replace(/^\.\//, "");
@@ -555,7 +555,7 @@ export class ContextGuard {
 		const resolved = resolve(where.target, raw);
 		for (const never of NEVER_COMMIT_PATHS) {
 			const name = never.replace(/\/$/, "");
-			if (head === name && (name !== ".beads" || where.unresolved)) return never;
+			if (head === name) return never;
 			if (isInside(resolved, resolve(this.#home, name)) || isInside(resolved, resolve(this.#canonicalHome, name))) {
 				return never;
 			}
