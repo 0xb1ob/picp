@@ -29,10 +29,15 @@ npm run e2e:phase2                              # dispatch → envelope → prom
 npm run e2e:phase3                              # pipeline: research → gate → checkpoint → implement
 ```
 
-Running the existing checks is always required; authoring new tests is not. A worker adds a test only for an
-acceptance case the brief or a human supplied, or one focused regression test that reproduces a reported bug and fails
-without the fix. Cross-component acceptance prefers the mock-provider e2e harness ([tests/e2e/README.md](../tests/e2e/README.md)).
-Contract, golden, security and known-regression tests are kept; a missing new test is not itself a review defect
+Running the existing checks is always required; authoring new tests is not. A worker adds a test only for acceptance
+supplied by the brief or a human, or a reproducing regression for a reported bug. Behavioral acceptance defaults to the
+mock-provider e2e harness through real product entry points ([tests/e2e/README.md](../tests/e2e/README.md)). Mock LLM
+calls; do not add live-model gates. The structural, golden and security exceptions are listed explicitly in
+[testing-migration.md](testing-migration.md). Known-regression coverage is preserved: its old file may be removed only
+after equivalent e2e assertions pass and fail against the old defect. An assertion that cannot reach a public consumer is
+`redundant-unreachable` when an e2e case pins the consumer-visible outcome of that path, and the manifest must name that
+case (`scripts/test-migration-check.ts` enforces it); otherwise the assertion stays and the worker reports it. Do not mock
+internals to reach it. A missing new test alone is not a defect; an unmet supplied acceptance or an unproved deletion is
 (`prompts/briefs/diff-review-rubric.md`, criterion 3).
 
 The forge (GitHub/GitLab) and landing-proof work is covered by focused files.

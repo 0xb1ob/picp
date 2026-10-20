@@ -36,6 +36,15 @@ Method:
    proposed by you. A proposed test scenario is an experiment, and becomes a
    requirement only when the approved implementation brief includes it. Never
    drop an executable verification step that runs existing tests.
+   Name user-facing scenarios, entry points, failure variants and existing
+   coverage before proposing new tests; behavioral tests default to the
+   mocked-LLM e2e harness (`docs/testing-migration.md`). Every test deletion
+   names its replacement assertions, regression negative controls and retained
+   exceptions. An assertion that cannot reach a public consumer is
+   `redundant-unreachable` only when a named e2e case pins the consumer-visible
+   outcome of that path; otherwise it stays and is reported. Never plan to mock
+   internals to reach it. Proposed acceptance becomes required only when
+   included in the approved brief.
 6. Search and read with the `grep`, `find`, `ls` and `read` tools — their output is
    bounded. Do not run `grep`/`rg`, `cat`, `sed -n`, `head`, `tail`, `ls` or
    `find` through `bash` to look at source; `bash` is for git and other

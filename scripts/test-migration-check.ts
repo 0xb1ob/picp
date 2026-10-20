@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import ts from "typescript";
 
-const DISPOSITIONS = new Set(["pending", "e2e", "retained", "exception", "deleted"]);
+const DISPOSITIONS = new Set(["convert", "e2e", "retained", "exception", "deleted"]);
 
 interface Args {
 	base?: string;
@@ -96,14 +96,25 @@ function main(): number {
 	const current = currentTestFiles();
 	const currentSet = new Set(current);
 
+	const prs = new Map<string, { behavior: string; target: string; cases: string }>();
+	for (const [pr = "", behavior = "", target = "", cases = ""] of rows(section(doc, "prs", findings))) {
+		if (prs.has(pr)) findings.push(`${pr}: more than one conversion PR row`);
+		if (!/^\d\d$/.test(behavior) || !target.startsWith("tests/e2e/")) findings.push(`${pr}: needs a behavior id and a tests/e2e/ target`);
+		prs.set(pr, { behavior, target, cases });
+	}
+
 	const disposition = new Map<string, { kind: string; owner: string; evidence: string }>();
 	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(doc, "baseline", findings))) {
 		if (disposition.has(path)) findings.push(`${path}: more than one baseline disposition`);
 		if (!baseSet.has(path)) findings.push(`${path}: listed in the baseline but not a test file at ${base.slice(0, 12)}`);
 		if (!DISPOSITIONS.has(kind)) findings.push(`${path}: unknown disposition "${kind}"`);
-		if (kind !== "pending" && kind !== "deleted" && !evidence) findings.push(`${path}: ${kind} without evidence`);
+		if (kind !== "deleted" && !evidence) findings.push(`${path}: ${kind} without evidence`);
 		if (kind !== "deleted" && !currentSet.has(path)) findings.push(`${path}: missing from the tree but not dispositioned deleted`);
 		if (kind === "deleted" && currentSet.has(path)) findings.push(`${path}: dispositioned deleted but still present`);
+		const pr = prs.get(owner);
+		if (kind === "convert" && !evidence.startsWith(`behavior ${pr?.behavior ?? "?"}`)) {
+			findings.push(`${path}: convert needs a conversion PR owner and "behavior <id>" evidence (got ${owner}, "${evidence}")`);
+		}
 		disposition.set(path, { kind, owner, evidence });
 	}
 	for (const path of baseFiles) if (!disposition.has(path)) findings.push(`${path}: baseline file with no disposition`);
@@ -178,7 +189,20 @@ function main(): number {
 		counts[kind] = (counts[kind] ?? 0) + 1;
 		owners.set(owner, counts);
 	}
-	for (const [owner, counts] of [...owners].sort()) console.log(`  ${owner || "(no owner)"}: ${Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(", ")}`);
+	const byOwner = [...owners].sort(([a], [b]) => a.localeCompare(b, "en", { numeric: true }));
+	for (const [owner, counts] of byOwner) console.log(`  ${owner || "(no owner)"}: ${Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(", ")}`);
+	console.log("conversion PRs (owned baseline files; static declarations at the baseline and in the tree):");
+	const census = { files: 0, base: 0, tree: 0 };
+	for (const [pr, { behavior, target, cases }] of prs) {
+		const owned = [...disposition].filter(([, entry]) => entry.owner === pr).map(([path]) => path);
+		const atBase = owned.reduce((sum, path) => sum + (baseCounts.get(path) ?? 0), 0);
+		const inTree = decls(owned.filter((path) => currentSet.has(path)));
+		census.files += owned.length;
+		census.base += atBase;
+		census.tree += inTree;
+		console.log(`  ${pr} behavior ${behavior} → ${target} (${cases} cases): ${owned.length} files, ${atBase} baseline / ${inTree} tree declarations`);
+	}
+	console.log(`  total: ${census.files} files, ${census.base} baseline / ${census.tree} tree declarations`);
 	if (args.runnerLog) console.log(`runner-executed (${args.runnerLog}): ${Object.entries(runnerTotals(readFileSync(args.runnerLog, "utf8"))).map(([k, n]) => `${k} ${n}`).join(", ")}`);
 	for (const finding of findings) console.error(`FAIL ${finding}`);
 	console.log(findings.length ? `${findings.length} finding(s)` : "manifest ok");
