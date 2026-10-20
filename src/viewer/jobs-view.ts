@@ -14,7 +14,7 @@ import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, typ
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
 import { forwardedCi, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
-import { reportsView } from "./reports-view.ts";
+import { boardReports } from "./reports-view.ts";
 import { reportFile } from "./job-report.ts";
 import { deployView } from "./deploy-view.ts";
 
@@ -163,7 +163,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   ...(deploy ? {deploy} : {}),
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,report_href:reportFile(state,id) ? `#report/${id}` : null,
-  reports:reportsView(state,undefined,now).reports.filter(report=>report.job_ids.includes(id)),
+  reports:boardReports(state).filter(report=>report.job_ids.includes(id)),
   run_href:file ? `/api/job/${encodeURIComponent(id)}/events` : null,asks:base.awaiting.items.filter(a=>a.job_ids.includes(id) || decision.escalations.value.some(q=>q.id===a.source_escalation && strings(q.job_ids).includes(id))),questions:base.parent_questions.filter(q=>q.job_ids.includes(id)),
   warnings:[...data.warnings,...(malformed || events.availability==="unavailable" ? [{section:"timeline",message:"Some recorded events are unavailable or malformed."}] : [])]};
 }
