@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Viewer Jobs page (and Job detail, Reports, Schedules) uses the shell's full-width phone gutter like Overview (cp-jobs-mobile-fullwidth-k6se): the 358px centred column cap is gone, so on phones wider than 390px the content lines up with the top bar and long titles get the extra width. Desktop (>=900px) unchanged. Migration: none. Rollback: revert.
+
 - Sessions chat folds consecutive relay turns about one PR, else one job, into a rollup card (cp-sessions-rollup-b-ucht, PR B of 2): the subject's live chip, the job link and the latest relay, with "N earlier updates" behind a toggle. Turns naming neither, other subjects, operator messages, asks, day, thread or source gaps and the quick-reply anchor never fold; Tools on shows every row. Client only: no API change. Migration: none. Rollback: revert.
 
 - Sessions chat shows live PR and issue chips (cp-sessions-pr-chips-a-724i, PR A of 2). A PR URL, or a `#N` of a registered project that names a fleet PR, renders as a chip with its state (draft/open/merged/closed/unknown), CI and review; an issue `#N` or URL renders `open` or `closed by #PR` (merge receipt on record) plus its ledger job's status, and an unknown issue is a plain link chip. `GET /api/sessions` gains `pr_chips`, read only from files the viewer already reads (no GitHub call), so chips update on the existing stream; `overview-jobs.ts` exports `jobHead` for the shared head rule. Migration: none (optional response field). Rollback: revert.
