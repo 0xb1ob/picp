@@ -61,17 +61,21 @@ function services(state: ViewerState): OverviewResponse["services"] {
 }
 /** #323: `state/next-snapshot.json` (src/next.ts `writeNextSnapshot`); an off-schema row makes it unavailable, never empty. */
 function linedUp(state: ViewerState): OverviewResponse["lined_up"] {
+ const none = {at:null, project:null, empty_since:null, items:[], unavailable:[]};
+ let older = false;
  const read = source<Omit<OverviewResponse["lined_up"],"availability">>(() => {
   const s = parseObject(readBounded(join(state.stateDir,"next-snapshot.json")));
+  // A pre-v2 snapshot (bead rows) is rewritten by the next cp_next: not yet written, never an error.
+  if (typeof s?.schema_version === "number" && s.schema_version < 2) { older = true; return none; }
   const items = Array.isArray(s?.items) ? s.items.map(obj) : [undefined];
   const unavailable = Array.isArray(s?.unavailable) ? s.unavailable.map(obj) : [undefined];
-  if (!s || !timestamp(s.at) || items.some(i => !i || !(i.kind === "bead" ? text(i.id) : i.kind === "job" && typeof i.id === "string" && isSafeId(i.id)) || typeof i.project !== "string" || !text(i.verdict) || typeof i.reason !== "string")
+  if (!s || s.schema_version !== 2 || !timestamp(s.at) || items.some(i => !i || i.kind !== "job" || typeof i.id !== "string" || !isSafeId(i.id) || typeof i.project !== "string" || !text(i.verdict) || typeof i.reason !== "string")
    || unavailable.some(u => !u || typeof u.project !== "string" || typeof u.error !== "string")) throw new Error("invalid snapshot");
   return {at:String(s.at), project:str(s.project) ?? null, empty_since:timestamp(s.empty_since) ? s.empty_since : null,
-   items:items.map(i => ({kind:i!.kind as "job" | "bead", id:String(i!.id), project:String(i!.project), title:str(i!.title) ?? null, verdict:String(i!.verdict), reason:String(i!.reason)})),
+   items:items.map(i => ({kind:"job" as const, id:String(i!.id), project:String(i!.project), title:str(i!.title) ?? null, verdict:String(i!.verdict), reason:String(i!.reason)})),
    unavailable:unavailable.map(u => ({project:String(u!.project), error:String(u!.error)}))};
- }, {at:null, project:null, empty_since:null, items:[], unavailable:[]});
- return {availability:read.availability, ...read.value};
+ }, none);
+ return {availability:older ? "missing" : read.availability, ...read.value};
 }
 /**
  * Audit P3 #19: `state/main-ci.json` (src/main-ci.ts `MainCiStore`), re-derived here because viewer modules import

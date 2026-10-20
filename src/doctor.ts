@@ -51,7 +51,6 @@ import {
 	SCOPES,
 	SCHEMA_VERSION,
 	stripLegacyJobFields,
-	type TrackerConnection,
 	validate,
 	validateDoctorReport,
 	isScriptFleetRecord,
@@ -78,7 +77,6 @@ import { describeRuntime } from "./mode.ts";
 import { listProfiles } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
 import { resolveLedgerPrefix } from "./scaffold.ts";
-import { activeTrackerUnder } from "./trackers/config.ts";
 import {
 	boundedList,
 	describeEffortDrift,
@@ -600,20 +598,7 @@ export class Doctor {
 		);
 		const beads = join(home, ".beads");
 		if (existsSync(beads)) {
-			let live: TrackerConnection | undefined;
-			try {
-				live = activeTrackerUnder(home, beads);
-			} catch (error) {
-				findings.push({ check: "ledger.beads_archive", severity: "warn", what: ".beads/ may be a live tracker endpoint: the tracker connections cannot be read", detail: (error as Error).message, fix: "do not delete .beads/; repair data/trackers.json, then re-run /doctor" });
-				return findings;
-			}
-			findings.push(
-				live
-					? { check: "ledger.beads_archive", severity: "ok", what: `.beads/ is the live endpoint of tracker ${live.id}`, detail: live.endpoint, fix: "never delete it: it holds live tracker state" }
-					: doc.jobs.length > 0
-						? { check: "ledger.beads_archive", severity: "warn", what: ".beads/ is still present beside the jobs document", detail: beads, fix: "no active tracker connection uses it: it is a frozen archive of closed br issues and is safe to delete once you no longer want to read it" }
-						: { check: "ledger.beads_archive", severity: "ok", what: ".beads/ present and the jobs document is empty — not imported yet", detail: beads, fix: "run `/cp-jobs import-beads` once to carry the open br issues over" },
-			);
+			findings.push({ check: "ledger.beads_archive", severity: "warn", what: ".beads/ is still present beside the jobs document", detail: beads, fix: "nothing reads it any more; keep it for your records" });
 		}
 		return findings;
 	}

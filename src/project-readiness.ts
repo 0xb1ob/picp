@@ -1,14 +1,13 @@
-/** `cp_project add`'s readiness block (#329): forge, CI access and tracker, plus what to tell the project's user. */
+/** `cp_project add`'s readiness block (#329): forge and CI access, plus what to tell the project's user. */
 
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "./ci-access.ts";
 import { ciAccessFinding } from "./ci-access-doctor.ts";
 import type { CommandRunner } from "./doctor.ts";
 import { resolveForgeRepository } from "./forge-url.ts";
 import type { EnsureCloneResult } from "./projects.ts";
-import { type ProjectTracker, projectTracker } from "./trackers/config.ts";
 
 /** Advisory: a failed probe prints `unknown`, never "no CI" or gh's output; a throwing `run` propagates. */
-export function formatReadiness(home: string, project: EnsureCloneResult["project"], clonePath: () => string, run: CommandRunner): string {
+export function formatReadiness(home: string, project: EnsureCloneResult["project"], run: CommandRunner): string {
 	const { name } = project;
 	const forge = resolveForgeRepository(project.clone_url, project.forge);
 	const forgeLine = forge.ok ? `${forge.repository.kind} (${forge.repository.path})` : `unknown: ${forge.detail}`;
@@ -32,18 +31,6 @@ export function formatReadiness(home: string, project: EnsureCloneResult["projec
 					: "picp reads this repository's GitHub Actions results for each pull request.";
 	}
 
-	let tracker: ProjectTracker | undefined, trackerError: string | undefined;
-	try {
-		tracker = projectTracker(home, name, clonePath);
-	} catch (error) {
-		trackerError = (error as Error).message;
-	}
-	const trackerLine = trackerError !== undefined
-		? `unknown: ${trackerError}`
-		: !tracker
-			? `none — connect one with cp_tracker connect project=${name} adapter=beads endpoint=<path to beads.db>`
-			: tracker.adapter === "beads" ? `beads (${tracker.db}, from the ${tracker.source})` : `github (${tracker.connection_id})`;
-	const tellTracker = tracker ? `Work items come from its ${tracker.adapter} tracker.` : "Work arrives as requests to the operator; no tracker is connected.";
 
 	const kind = forge.ok ? forge.repository.kind : undefined;
 	const request = kind === "gitlab" ? "merge request" : "pull request";
@@ -57,7 +44,6 @@ export function formatReadiness(home: string, project: EnsureCloneResult["projec
 		"  readiness (advisory, never blocks add; re-run cp_project add to check again):",
 		`    forge:   ${forgeLine}`,
 		`    CI:      ${ci}`,
-		`    tracker: ${trackerLine}`,
-		`  tell the user: picp is set up for ${name}. ${tellMerge} ${tellCi} ${tellTracker}`,
+		`  tell the user: picp is set up for ${name}. ${tellMerge} ${tellCi} Work arrives as requests to the operator.`,
 	].join("\n");
 }

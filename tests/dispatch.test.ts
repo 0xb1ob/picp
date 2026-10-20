@@ -328,30 +328,6 @@ test("4B1-T7: at the cap dispatch releases the one idle held author into a reser
 	assert.equal(readRunEvents(b.home, "cp-aaa1").filter((event) => event.type === "held_released").length, 2);
 });
 
-test("dispatch snapshots referenced beads for the worker and reviewers, including missing refs", { skip: SKIP, timeout: 180_000 }, async (t) => {
-	const b = await bench(t);
-	const job = await b.ledger.create({ title: "reference snapshot", project: "demo", kind: "ship", delivery: "pr" });
-	const task = "Implement cp-abc and cp-missing as a read-only follow-up.";
-	// The project's own DB (as its tracker connection resolves it) reaches the snapshot and the worker env.
-	const db = join(b.home, "tracker db", "beads.db");
-	const ledger = new Ledger({ home: b.ledger.home, knownProjects: ["demo"], beadsDbFor: (project) => project === "demo" ? db : undefined });
-	const dispatcher = b.makeDispatcher({ ledger, referenceExec: async (_command, args) => {
-		assert.equal(args[1], db);
-		if (args.includes("cp-missing")) throw new Error("not found");
-		return JSON.stringify([{ id: "cp-abc", title: "Requirement", status: "open", description: "Preserve this acceptance criterion verbatim." }]);
-	} });
-	const result = await dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false });
-	assert.equal(result.receipt, "accepted");
-	const frozen = readFileSync(join(b.home, paths.originalTaskFile(job.id)), "utf8");
-	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
-	assert.ok(frozen.startsWith(task));
-	assert.match(frozen, /Preserve this acceptance criterion verbatim\./);
-	assert.match(frozen, /cp-missing: br unavailable: Error: not found/);
-	assert.doesNotMatch(frozen, /### (read-only|follow-up)/);
-	assert.ok(frozen.includes(`BEADS_DIR points to \`${join(b.home, "tracker db")}\``));
-	assert.ok(brief.includes(frozen), "worker and reviewers see the identical snapshot");
-});
-
 test("dispatch: ledger -> routing -> lease -> branch -> brief -> worker -> fleet", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t, {
 		script: [
