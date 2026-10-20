@@ -127,11 +127,13 @@ function main(): number {
 	const unmapped = new Map<string, number>();
 	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(doc, "assertions", findings))) {
 		if (!disposition.has(path)) findings.push(`assertion map names ${path}, which is not a baseline file`);
-		if (status === "mapped" && !scenarios.has(scenario)) findings.push(`${path}: "${assertion}" maps to unknown scenario ${scenario}`);
-		else if (status === "unreachable") {
+		const pinned = status === "mapped" || status === "redundant-unreachable";
+		if (pinned && !scenarios.has(scenario)) findings.push(`${path}: "${assertion}" is ${status} but names no known e2e scenario (got "${scenario}")`);
+		if (status === "redundant-unreachable" && !note) findings.push(`${path}: "${assertion}" is redundant-unreachable with no reason or approval`);
+		if (status === "unreachable") {
 			if (!note) findings.push(`${path}: "${assertion}" is unreachable with no reason`);
 			unmapped.set(path, (unmapped.get(path) ?? 0) + 1);
-		} else if (status !== "mapped") findings.push(`${path}: "${assertion}" has unknown status "${status}"`);
+		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
 	const patches = new Map([...doc.matchAll(/<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g)].map((m) => [m[1] as string, `${m[2]}\n`]));

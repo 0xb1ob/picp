@@ -25,22 +25,28 @@ identifier, counted on the TypeScript AST). Static declarations are not executed
 | `e2e` | Already an e2e acceptance file (`tests/e2e/`) | the reason it stays |
 | `retained` | Kept on purpose; not deletable yet | the reason and a link |
 | `exception` | Structural, golden, contract or security check kept by policy | the policy link |
-| `deleted` | Removed; every assertion mapped and a negative control recorded | assertion map + regression row |
+| `deleted` | Removed; every assertion mapped or redundant-unreachable, and a negative control recorded | assertion map + regression row |
+
+## Method
+
+An assertion that cannot reach a public consumer is `redundant-unreachable` when an e2e case pins the
+consumer-visible outcome of that path; otherwise it stays and the worker reports it. Do not mock internals to
+reach it. This is the standing rule for P1–P24. The checker accepts `redundant-unreachable` only with a named,
+existing scenario, and refuses to delete a file that still holds an `unreachable` assertion.
 
 ## PR ledger
 
 | PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
 |---|---|---|---|---|
-| P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 0 | 400 → 401 | 4,488 → 4,490 |
+| P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
 
-P0 was planned as 400 → 400 files and 4,487 → 4,486 declarations, with `tests/ci-run-ref.test.ts` deleted. The
-deletion did not happen: four of its assertions cannot reach a public consumer (see the assertion map). The plan
-says such an assertion keeps the file "until a genuine boundary contract or approved redundant-case disposition
-exists". Incoming files from the parallel E2E A/B/C jobs are listed under Incoming as they land, not in the
-baseline. The P0 counts are on P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`); they start at 4,488,
-not 4,487, because `tests/e2e/planner-blocked.test.ts` gained one declaration after the pinned baseline. Baseline
-files keep changing on main, so the checker prints the live tree's counts rather than trusting this row
-(after merging main at `52d14e3`: 401 files, 4,496 declarations).
+P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
+unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
+`redundant-unreachable`, as approved by the main session under ask-0088e0332d00 on 2026-10-20. Incoming files
+from the parallel E2E A/B/C jobs are listed under Incoming as they land, not in the baseline. The P0 counts are
+taken on P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`). They start at 4,488, not 4,487, because
+`tests/e2e/planner-blocked.test.ts` gained one declaration after the pinned baseline. Baseline files keep
+changing on main, so the checker prints the live tree's counts instead of trusting this row.
 
 ## Scenarios
 
@@ -58,25 +64,26 @@ consumers under test are the CI watch tick and its wake text (`src/ci-watch.ts`)
 
 ## Assertion map
 
-Status `mapped` names the scenario that pins the same behaviour at a public consumer. Status `unreachable` means no
-public consumer can feed the helper that input today, so the e2e can only pin the consumer outcome.
+Disposition `mapped` names the scenario that pins the same behaviour at a public consumer. `redundant-unreachable`
+means no public consumer can feed the helper that input today. The named scenario pins the consumer-visible
+outcome of that path instead (see Method). `unreachable`, with no pinning scenario, blocks the file's deletion.
 
 <!-- manifest:assertions -->
-| Unit file | Assertion | Scenario | Status | Note |
+| Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
 | `tests/ci-run-ref.test.ts` | failedRunOn picks the completed failure on HEAD over another head's failure | 01-1 | mapped | wrong-head failure (older sha) never named; run 6 on the pushed head is |
 | `tests/ci-run-ref.test.ts` | failedRunOn skips skipped, neutral and success runs | 01-1 | mapped | runs 2-4 precede run 6; negative control NC-01 |
-| `tests/ci-run-ref.test.ts` | failedRunOn skips an in_progress run | — | unreachable | a failed verdict needs every head run complete: with run 7 in_progress beside run 6 the watch emits no ci_failed |
+| `tests/ci-run-ref.test.ts` | failedRunOn skips an in_progress run | 01-1 | redundant-unreachable | a failed verdict needs every head run complete: with run 7 in_progress beside run 6 the watch emits no ci_failed; 01-1 pins no reference while a run is unfinished; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | failedRunOn is undefined when only green or unfinished runs exist | 01-1 | mapped | unfinished and fixed phases: no run reference in facts, reason or wake |
-| `tests/ci-run-ref.test.ts` | failedRunOn is undefined for an undefined head | — | unreachable | every consumer passes a string head; with no head cp_integrate stops at "no head commit" (pinned by 01-2) |
+| `tests/ci-run-ref.test.ts` | failedRunOn is undefined for an undefined head | 01-2 | redundant-unreachable | every consumer passes a string head; 01-2 pins cp_integrate stopping at "no head commit" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | runUrl derives the github.com Actions URL from the PR URL | 01-1 | mapped | exact (run 6 https://github.com/example/demo/actions/runs/6) in wake, fact and promote |
 | `tests/ci-run-ref.test.ts` | runUrl is undefined for an enterprise host | 01-2 | mapped | ghe.example.com: run 16 by id only; negative control NC-03 |
 | `tests/ci-run-ref.test.ts` | runUrl is undefined for a branch-name PR ref | 01-2 | mapped | cp_integrate with the branch as its PR ref: (run 17) and no link |
-| `tests/ci-run-ref.test.ts` | runUrl is undefined for an undefined PR URL | — | unreachable | cp_integrate passes `view.url ?? pr`, always a string; the watch's `pr?.url` absence is not exercised |
+| `tests/ci-run-ref.test.ts` | runUrl is undefined for an undefined PR URL | 01-2 | redundant-unreachable | cp_integrate passes `view.url ?? pr`, always a string; 01-2 pins a non-github.com PR ref naming the run by id with no link; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | ciRunRef + formatRunRef render the id and URL of a github.com failure | 01-1 | mapped | negative controls NC-01 and NC-02 |
 | `tests/ci-run-ref.test.ts` | ciRunRef gives the id alone for an enterprise host | 01-2 | mapped | wake observation run_id 16, run_url absent |
 | `tests/ci-run-ref.test.ts` | formatRunRef of an id alone is " (run N)" | 01-2 | mapped | (run 16) and (run 17) at the end of the ci fact |
-| `tests/ci-run-ref.test.ts` | ciRunRef of a legacy run without databaseId is {} | — | unreachable | readActionsCi refuses an id-less row, so no consumer sees one; 01-2 pins "could not read CI", no reference |
+| `tests/ci-run-ref.test.ts` | ciRunRef of a legacy run without databaseId is {} | 01-2 | redundant-unreachable | readActionsCi refuses an id-less row, so no consumer sees one; 01-2 pins "could not read CI" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | formatRunRef of {} is "" | 01-1 | mapped | held facts for superseded, in_progress and green heads carry no reference |
 <!-- /manifest:assertions -->
 
@@ -210,7 +217,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/ci-evidence.test.ts` | pending | P1 | |
 | `tests/ci-host-tools.test.ts` | pending | P1 | |
 | `tests/ci-infra-rerun.test.ts` | pending | P1 | |
-| `tests/ci-run-ref.test.ts` | retained | P0 | pilot deletion blocked: 4 assertions unreachable from a public consumer (see Assertion map) |
+| `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
 | `tests/ci-wait.test.ts` | pending | P1 | |
 | `tests/ci-watch.test.ts` | pending | P1 | |
 | `tests/contract-injection.test.ts` | pending | P1 | |
