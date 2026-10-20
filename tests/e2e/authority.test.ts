@@ -10,7 +10,8 @@ import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, LAYOUT, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { liveUsageJobs } from "../../src/mandate-usage.ts";
+import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
+import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -80,9 +81,9 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 			}
 		},
 		requests,
-		job: async (title: string, risk?: "high") =>
-			(await post.ledger().create({ title, project: "demo", delivery: "local", kind: "ship", ...(risk ? { risk } : {}) })).id,
-		issue: (job_ids: string[], over: { ask_on?: ("merge" | "risk:high")[]; job_cap?: number; tokens?: number; expiry?: string } = {}) =>
+		job: async (title: string, risk?: "high", over: { labels?: string[]; kind?: "ship" | "research"; delivery?: "pr" | "local" } = {}) =>
+			(await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "local", kind: over.kind ?? "ship", ...(risk ? { risk } : {}), ...(over.labels ? { labels: over.labels } : {}) })).id,
+		issue: (job_ids: string[], over: { ask_on?: ("merge" | "risk:high")[]; job_cap?: number; tokens?: number; expiry?: string; dispatch_parallelism?: number } = {}) =>
 			post.mandates.issue({
 				projects: ["demo"],
 				objective: "authority e2e",
@@ -91,7 +92,9 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 				job_cap: over.job_cap ?? 10,
 				ask_on: over.ask_on ?? [],
 				job_ids,
+				...(over.dispatch_parallelism ? { dispatch_parallelism: over.dispatch_parallelism } : {}),
 			}),
+		provider,
 		/** An accepted dispatch reaches the provider through a live worker. */
 		accepted: async (jobId: string) => {
 			const result = await dispatch(jobId);
@@ -212,4 +215,75 @@ test("authority: token raises stay inside the ceiling, the USD cap never moves, 
 	assert.deepEqual((await s.accepted(overflow))?.budget, { tokens: 1_000, cost_usd: 3 });
 	budgets(2_000, cap + 2);
 	assert.deepEqual((await s.accepted(next))?.budget, { tokens: 2_000, cost_usd: 3 }, "a second raise on the same live CommandPost applies");
+});
+
+test("authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const s = await stack(t, "auth-held", 1_500);
+	const [held, second, third] = [await s.job("held pr", undefined, { delivery: "pr" }), await s.job("second"), await s.job("third")];
+	// Held spends 6,040 tokens; second 1,520 per model call (two or more calls, under 7,500 alone): only together
+	// do they reach the 7,500 cap.
+	const grant = s.issue([held, second, third], { job_cap: 2, dispatch_parallelism: 1, tokens: 7_500 });
+	const usage = { prompt_tokens: 3_000, completion_tokens: 20 };
+	const head = () => execFileSync("git", ["-C", s.record(held)?.worktree as string, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	const model = s.provider.addScript("auth-held-pr", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `printf 'held\\n' >> README.md && git add -A && git commit -q -m held && git push -q -u origin ${held}` } }], usage },
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: held, kind: "ship", status: "done", summary: "Added a line.", branch: held, head_sha: head(), pr_url: "https://github.com/example/demo/pull/7" }) }], usage },
+		{ kind: "text", text: "reported", usage: { prompt_tokens: 10, completion_tokens: 10 } },
+	], { onExhausted: "repeat" });
+	const dispatched = await s.post.dispatch({ jobId: held, task: "Add a line to README.md.", model, fetch: false });
+	assert.equal("mandate_id" in dispatched ? dispatched.mandate_id : undefined, grant.id);
+	await waitFor(() => s.record(held), (record) => record?.phase === "held", { timeoutMs: 60_000, what: "the PR job's envelope to be held" });
+	assert.equal(s.post.mandates.get(grant.id)?.status, "active", "the held job alone stays under the token cap");
+
+	// dispatch_parallelism 1: the held job has reported, so the one slot is free.
+	assert.equal((await s.accepted(second)).mandate_id, grant.id);
+	const status = () => s.post.mandates.get(grant.id)?.pause_reason;
+	await waitFor(status, (reason) => reason === "token_cap", { timeoutMs: 60_000, what: "held + second spend to reach the token cap" });
+	raiseTokenCap(s.post.mandates, grant.id, { tokens: 1_000_000, reason: "keep the job cap in view" }, liveUsageJobs(s.post.fleet, s.post.runs));
+	await s.refused(third, new RegExp(`mandate ${grant.id} job cap 2 reached — no new dispatch`));
+	assert.equal(s.record(held)?.phase, "held");
+});
+
+test("authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const s = await stack(t, "auth-ops");
+	const ops = (title: string, labels: string[], risk?: "high") => s.job(title, risk, { kind: "research", labels });
+	const preview = (jobId: string, over: { risk?: "low"; profile?: string } = {}) => s.post.previewDispatch({ jobId, task: "Pull the remote logs.", ...over });
+	const view = async (jobId: string, over?: { risk?: "low"; profile?: string }) => {
+		const result = await preview(jobId, over);
+		return [result.profile, "routing" in result ? result.routing.risk : undefined];
+	};
+	assert.deepEqual(await view(await ops("deploy", ["ops:deploy"]), { risk: "low" }), ["ops", "high"], "a deploy is high whatever the caller says");
+	assert.deepEqual(await view(await ops("process", ["ops:process"])), ["ops", "high"]);
+	const pull = await ops("pull", ["ops:pull"]);
+	assert.deepEqual(await view(pull), ["ops", "low"]);
+	const riskyPull = await ops("risky pull", ["ops:pull"], "high");
+	assert.deepEqual(await view(riskyPull), ["ops", "high"], "a recorded high still wins");
+	const plain = await ops("plain research", []);
+	assert.equal((await preview(plain, { profile: "planner" })).profile, "planner", "a non-ops job keeps its own profile");
+
+	await assert.rejects(preview(plain, { profile: "ops" }), /the ops profile needs an ops:<pull\|deploy\|process> label/);
+	await assert.rejects(preview(pull, { profile: "planner" }), /an ops:pull job runs the ops profile, not planner/);
+	await assert.rejects(preview(await s.job("ship pull", undefined, { labels: ["ops:pull"], delivery: "pr" })), /an ops job is kind:research delivery:local/);
+	await assert.rejects(preview(await ops("two", ["ops:pull", "ops:deploy"])), /exactly one ops:<pull\|deploy\|process> label/);
+	await assert.rejects(preview(await ops("unknown", ["ops:reboot"])), /found ops:reboot/);
+
+	// The ops profile is read-only research, yet an ops job acts on a remote host: risk:high still asks.
+	const readOnly = await s.job("read-only research", "high", { kind: "research" });
+	s.issue([readOnly, riskyPull], { ask_on: ["risk:high"] });
+	assert.equal((await preview(readOnly, { profile: "planner" })).mandate_gate, undefined, "read-only planning is never gated");
+	assert.equal((await preview(riskyPull)).mandate_gate, "would ask: risk:high");
+
+	const [holder, wanting, other] = [await s.job("holder", undefined, { labels: ["resource:tg-session"] }), await s.job("wanting", undefined, { labels: ["resource:tg-session"] }), await s.job("other", undefined, { labels: ["resource:mt5-2"] })];
+	await s.accepted(holder);
+	await s.refused(wanting, new RegExp(`resource:tg-session is leased by live job ${holder} — it is released when ${holder} is torn down`));
+	await s.accepted(other);
+	assert.equal((await s.post.tearDown(holder, { force: true })).torn_down, true);
+	await s.accepted(wanting);
+
+	// A failed job's re-dispatch meets its own leftover branch in preflight, before any resource check: never a
+	// self-conflict. The operator path tears it down first, and a torn-down record holds no lease.
+	recordRecoveryAttempt(s.home, wanting, "crash");
+	await s.post.manager.get(wanting)?.worker.kill("SIGKILL");
+	await waitFor(() => s.record(wanting), (record) => record?.phase === "failed", { timeoutMs: 60_000, what: "the killed worker to be classified" });
+	await assert.rejects(s.post.dispatch({ jobId: wanting, task: "Add a line to README.md.", fetch: false }), (error: Error) => /branch_exists/.test(error.message) && !/leased by live job/.test(error.message));
 });
