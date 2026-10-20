@@ -73,11 +73,11 @@
  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 /*
- * Light Sessions: the design's light artboard, for the whole Sessions shell (rail included) on a light-scheme browser.
- * Every other screen keeps the dark :root palette. Links and accents darken for text on a light ground.
+ * Light Sessions: the design's light artboard, for the whole Sessions shell (rail included) and the Report page on a
+ * light-scheme browser. Every other screen keeps the dark :root palette. Links and accents darken for text on a light ground.
  */
 @media (prefers-color-scheme: light) {
- .shell-sessions {
+ .shell-sessions, .shell-report {
   color-scheme: light; color: var(--text);
   --page: #d6d2c8; --background: #f4f2ed; --nav: #ebe8e1; --surface: #ebe8e1; --raised: #ffffff;
   --divider: #e2ded5; --transcript-divider: #e2ded5; --nav-selected: #e0dcd2; --toggle: #e0dcd2; --tab-selected: #e0dcd2;

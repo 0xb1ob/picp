@@ -65,6 +65,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Sessions | `#sessions?view=you`, `#sessions?view=you&transcript=1&session=<file-id>`, `#sessions?view=parent`, `#sessions?view=workers&id=<id>` |
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Reports / Schedules / Files / Settings | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` / `#settings` |
+| Job report | `#report/<safe-id>`: the job's `state/artifacts/<id>/report.md` rendered as a page (`GET /api/report/<id>`; its images from `GET /api/report/<id>/files/<path>`, png/jpeg/gif/webp inside that dir only); linked from the job page and the Reports page's Job reports section |
 | Search | Shell dialog (f7g.7), available from every screen |
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
@@ -554,7 +555,7 @@ request accepts it, with `vary: accept-encoding`; the event stream never is. Has
 
 Each tick still GETs the screen's URL; only the body shrinks. Screen views (`/api/overview`, `/api/jobs`, `/api/board`,
 `/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`,
-`/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`, plus `/api/job/<id>/transcript` and
+`/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`, `/api/report/<id>`, plus `/api/job/<id>/transcript` and
 `/api/operator/control`, keyed with its `?sends=` query) tag each 200 with `x-cp-version`. The app sends the
 version it holds as `x-cp-delta-base`; when the server still holds that version for the same principal (local or the
 remote device) and URL (16 per key, 48 MiB total, process memory), and the keyed diff (`src/viewer/json-delta.ts`) is

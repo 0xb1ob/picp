@@ -1,6 +1,6 @@
 /**
  * Read-only dashboard HTTP surface: the app, JSON projections, refresh SSE,
- * and published board artifacts. Requests read recorded state only, with two
+ * published board artifacts and job reports (job-report.ts). Requests read recorded state only, with two
  * write routes: `POST|DELETE /api/push/subscription` stores or removes this
  * browser's Web Push subscription under `data/push/subscriptions/` (push-api.ts),
  * and `POST /api/operator/message` forwards one message, decision click or abort
@@ -28,6 +28,7 @@ import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
 import { statsView } from "./stats-view.ts";
 import { reportsView } from "./reports-view.ts";
+import { jobReport, reportImage } from "./job-report.ts";
 import { schedulesView } from "./schedules-view.ts";
 import { overview } from "./overview-view.ts";
 import { sessionsView, readWorkerTranscript } from "./sessions-view.ts";
@@ -416,11 +417,24 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/stream": {
-			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res, streamValidity(req)); return; }
+			if (["overview", "awaiting", "decided", "decisions", "sessions", "files", "map", "jobs", "job", "board", "reports", "report", "schedules", "stats"].includes(url.searchParams.get("view") ?? "")) { refreshStream(req, res, streamValidity(req)); return; }
 			send(res, 404, "text/plain; charset=utf-8", "no such view\n");
 			return;
 		}
 		default:
+			if (url.pathname.startsWith("/api/report/")) {
+				const match = /^\/api\/report\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/files\/(.+))?$/.exec(url.pathname);
+				if (match?.[2] !== undefined) {
+					const image = reportImage(options, match[1]!, match[2]);
+					if (image) send(res, 200, image.type, image.body, { "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox" });
+					else send(res, 404, "text/plain; charset=utf-8", "no such report image\n");
+					return;
+				}
+				const report = match ? jobReport(options, match[1]!) : undefined;
+				if (report) sendView(req, res, report);
+				else sendJson(res, 404, { error: "no such report" });
+				return;
+			}
 			if (url.pathname.startsWith("/api/job/")) {
 				const match = /^\/api\/job\/([^/]+)(\/events|\/transcript)?$/.exec(url.pathname);
 				let id = ""; try { id = decodeURIComponent(match?.[1] ?? ""); } catch { /* Invalid encoding is not a job id. */ }

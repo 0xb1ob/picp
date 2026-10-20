@@ -142,7 +142,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
    {data.questions.map(q => <section class="job-question" key={q.id}><h2>{q.kind === "final_fix" ? "Final-fix approval open" : "Parent question open"}</h2><p><code>{q.id}</code> · {q.question}</p><p>Being handled by the operator session.</p></section>)}
    {data.asks.map(ask => <section class="job-question job-question-awaiting" key={ask.id}><h2>Awaiting you</h2><p>{ask.question}</p>{ask.options.map(option => <CopyReply key={option.label} reply={option.reply}/>)}</section>)}
    {job.summary && <Summary key={job.id} text={job.summary}/>}{job.failure && <p class="job-failure">{job.failure}</p>}
-   {data.reports.length > 0 && <div class="job-links job-report-links">{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Web report · {report.title} ↗</a>)}</div>}
+   {(data.report_href || data.reports.length > 0) && <div class="job-links job-report-links">{data.report_href && <a href={data.report_href}>Report · report.md</a>}{data.reports.map(report => <a key={report.slug} href={report.href} target="_blank" rel="noopener noreferrer">Web report · {report.title} ↗</a>)}</div>}
   </div>
   <div class="job-tabs" role="tablist">{tabs.map(name => <button type="button" role="tab" key={name} aria-selected={active === name} class={active === name ? "job-tab job-tab-on" : "job-tab"} onClick={() => setTab(name)}>{name === "details" ? "Details" : name === "transcript" ? "Transcript" : "Timeline"}</button>)}</div>
   <div class="job-detail-body">
