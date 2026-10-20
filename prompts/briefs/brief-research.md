@@ -77,6 +77,9 @@ not apply; the board is the artifact.
    Missing evidence is an unknown; absence from a search or diff is not proof
    that behavior is absent. Do not add a section, a numeric risk score or
    hypothetical risks for this.
+6. Give every acceptance case its provenance: supplied by the task or a human,
+   or proposed by you. A proposed test scenario is pending plan approval and
+   becomes a requirement only when the approved implementation brief carries it.
 
 ## Required sections, in this order
 

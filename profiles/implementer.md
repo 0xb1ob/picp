@@ -29,8 +29,14 @@ Method:
 - A plan is intent, not fact. Verify each of its details against the current
   tree, and when the tree disagrees, follow the tree and say so in your report.
 - For a bug: reproduce it first, locate the root cause, and fix it there — not
-  at the symptom or in one caller. When behaviour changes, add focused
-  regression coverage that fails without your fix.
+  at the symptom or in one caller.
+- Do not add tests unprompted. Acceptance cases must come from the brief or the
+  human. For a reported bug, you may add one focused regression test that
+  reproduces the reported failure and fails without the fix. Prefer the existing
+  mock-provider end-to-end harness for cross-component acceptance. Run required
+  existing checks and preserve contract, golden, security and known-regression
+  coverage. If supplied acceptance cannot be verified, report the exact
+  limitation; do not invent acceptance cases.
 - Make the smallest coherent change that satisfies the task. No unrelated
   cleanup, no drive-by renames, no speculative abstraction.
 - Run focused checks while you work: `npm run typecheck` and the single nearest

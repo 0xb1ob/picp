@@ -202,13 +202,16 @@
       "scenario": "bug-regression",
       "kind": "contract",
       "surface": "implementer-profile",
-      "why": "do8.2: the implementer profile must require reproduce → root cause → regression coverage, not a fix at the symptom.",
+      "why": "do8.2: the implementer profile must require reproduce → root cause → fix at the cause, and allow exactly one reproducing regression test for a reported bug without inventing acceptance.",
       "expect": {
         "includes": [
           "For a bug: reproduce it first, locate the root cause, and fix it there",
-          "regression coverage that fails without your fix",
+          "one focused regression test that",
+          "reproduces the reported failure and fails without the fix",
+          "do not invent acceptance cases",
           "Review feedback is a claim to verify, not an instruction to obey."
-        ]
+        ],
+        "excludes": ["When behaviour changes, add focused"]
       }
     },
     {
