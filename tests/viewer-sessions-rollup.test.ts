@@ -85,22 +85,40 @@ function stage(t: TestContext, tools = false) {
 	return { root, click: (node: Element | null) => act(() => { node!.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true })); }) };
 }
 
-test("rollup card: the latest relay and the subject chip; earlier updates open behind an aria-expanded toggle", async t => {
+test("rollup card: the latest relay under one meta line; earlier updates and the latest notice open behind one toggle", async t => {
 	const s = stage(t);
 	await act(() => mount(s.root, view(turns)));
 	const card = s.root.querySelectorAll(".session-rollup");
 	assert.equal(card.length, 1, "(j) one card");
 	assert.match(card[0]!.textContent!, /latest update/);
-	assert.doesNotMatch(card[0]!.textContent!, /first update|second update/, "earlier turns are hidden");
-	assert.match(card[0]!.querySelector(".session-rollup-head a.pr-chip")?.textContent ?? "", /#355/);
-	assert.equal(card[0]!.querySelector(".session-rollup-head a.session-rollup-job")?.getAttribute("href")?.includes("cp-a"), true, "the chip's job links its transcript");
-	const toggle = card[0]!.querySelector("button.session-rollup-toggle")!;
+	assert.doesNotMatch(card[0]!.textContent!, /first update|second update|HELD PR LANDED/, "earlier turns and the latest notice are hidden");
+	assert.equal(card[0]!.querySelector(".session-rollup-head"), null, "(b) the latest relay chips #355, so the card has no header chip");
+	assert.equal(card[0]!.querySelectorAll("a.pr-chip").length, 1, "(b) the chip shows once");
+	assert.ok(card[0]!.querySelector(".session-bubble a.pr-chip"), "(b) the inline chip is the one kept");
+	const meta = card[0]!.querySelectorAll(".session-rollup-meta");
+	assert.equal(meta.length, 1, "(a) one meta line");
+	assert.equal(meta[0]!.textContent, "09:00·cp-a·2 earlier · 1 notice ▸", "(a) time · job · earlier · notice");
+	assert.equal(meta[0]!.querySelector("a.session-rollup-job")?.getAttribute("href")?.includes("cp-a"), true, "the job links its transcript");
+	assert.equal(card[0]!.querySelectorAll(".session-bridge").length, 0, "(a) no notice row of its own");
+	const toggle = meta[0]!.querySelector("button.session-rollup-toggle")!;
 	assert.equal(toggle.getAttribute("aria-expanded"), "false");
-	assert.match(toggle.textContent!, /^2 earlier updates/);
 	await s.click(toggle);
 	assert.equal(s.root.querySelector("button.session-rollup-toggle")!.getAttribute("aria-expanded"), "true");
 	const text = s.root.querySelector(".session-rollup")!.textContent!;
-	assert.ok(text.indexOf("first update") >= 0 && text.indexOf("first update") < text.indexOf("second update") && text.indexOf("second update") < text.indexOf("latest update"), "earlier turns above the latest, in order");
+	const at = (word: string) => text.indexOf(word);
+	assert.ok(at("first update") >= 0 && at("first update") < at("second update") && at("second update") < at("HELD PR LANDED") && at("HELD PR LANDED") < at("latest update"),
+		"(e) one tap opens earlier turns and the latest notice above the latest relay, in order");
+});
+
+test("rollup card: the header chip stays when the latest relay does not chip the PR; no meta line outside a rollup", async t => {
+	const s = stage(t);
+	const quiet = [wake("w1", "cp-a"), relay("r1", "first update"), wake("w2", "cp-a"), relay("r2", "second update")];
+	await act(() => mount(s.root, view(quiet, { pr_chips: { [URL]: pr(URL, "cp-a") } })));
+	assert.match(s.root.querySelector(".session-rollup .session-rollup-head a.pr-chip")?.textContent ?? "", /#355/, "(b) the header one when the body has none");
+	assert.equal(s.root.querySelectorAll(".session-rollup a.pr-chip").length, 1);
+	await act(() => mount(s.root, view(quiet.slice(0, 2))));
+	assert.equal(s.root.querySelectorAll(".session-rollup, .session-rollup-meta").length, 0, "(c) a lone turn: no card, no meta line");
+	assert.match(s.root.textContent!, /first update/);
 });
 
 test("rollup card: Tools on forms no rollup", async t => {

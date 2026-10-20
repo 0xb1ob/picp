@@ -14,10 +14,16 @@ export function Linked({text,links,chips = true}: {text:string;links?:Links;chip
   return chip ? <PrChipLink key={i} chip={chip}/> : s.href ? <a key={i} href={s.href} {...(s.external ? {target:"_blank",rel:"noopener noreferrer"} : {})}>{s.text}</a> : s.text;
  })}</>;
 }
+const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
 /** Inline markdown: `code` and **bold**, everything else linked text. A code span never chips. */
 export function InlineText({text,links}: {text:string;links?:Links}) {
- return <>{text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part,i)=>i % 2 === 1 && part.startsWith("`") ? <code key={i}><Linked text={part.slice(1,-1)} links={links} chips={false}/></code> : i % 2 === 1 ? <strong key={i}>{part.slice(2,-2)}</strong> : <Linked key={i} text={part} links={links}/>)}</>;
+ return <>{text.split(INLINE).map((part,i)=>i % 2 === 1 && part.startsWith("`") ? <code key={i}><Linked text={part.slice(1,-1)} links={links} chips={false}/></code> : i % 2 === 1 ? <strong key={i}>{part.slice(2,-2)}</strong> : <Linked key={i} text={part} links={links}/>)}</>;
 }
+const blockTexts = (b: Block): string[] => b.kind === "code" ? [] : b.kind === "table" ? [...b.head, ...b.rows.flat()]
+ : b.kind === "list" ? [...b.items, ...Object.values(b.sub ?? {}).flatMap(blockTexts)] : [b.text];
+/** The hrefs, trailing slashes trimmed, that `Markdown` renders as chips when PrChips knows them. */
+export const chipHrefs = (text: string, links?: Links): string[] => blocks(text).flatMap(blockTexts)
+ .flatMap(t => t.split(INLINE).filter((_,i) => i % 2 === 0)).flatMap(t => linkify(t,links).flatMap(s => s.href ? [s.href.replace(/\/+$/,"")] : []));
 
 export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[];sub?:Record<number,Extract<Block,{kind:"list"}>>} | {kind:"table";head:string[];rows:string[][]};
 const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
