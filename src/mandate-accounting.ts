@@ -180,10 +180,10 @@ export function projectWideCapWarning(mandate: Mandate, all: readonly Mandate[],
 	return `warning: ${mandate.id} is project-wide, so its job cap ${mandate.job_cap} counts every job dispatched in ${mandate.projects.join(", ")} while it stands${shared}; prefer a named-jobs grant (job_ids) with home-default bounds`;
 }
 
-/** Why `mandate` cannot take a tracker import (B4) into `project`/`kind`: only an active, uncapped named-jobs (batch) grant can. */
+/** Why `mandate` cannot enroll a job into `project`/`kind`: only an active, uncapped named-jobs (batch) grant can. */
 export function batchRefusal(mandate: Mandate | undefined, id: string, job: { project: string; kind: JobKind }, jobs: readonly MandateUsageJob[], now: string): string | undefined {
 	if (!mandate) return `no mandate ${id}`;
-	if (!mandate.job_ids?.length) return `${id} is project-wide (no job_ids); tracker import runs only under a named-jobs (batch) grant`;
+	if (!mandate.job_ids?.length) return `${id} is project-wide (no job_ids); enrollment runs only under a named-jobs (batch) grant`;
 	if (!isActive(mandate, now)) return `${id} is ${mandate.status === "active" ? "expired" : mandate.status}`;
 	if (!mandate.projects.includes(job.project)) return `${id} does not cover project ${job.project}`;
 	if (mandate.exclusions?.job_kinds?.includes(job.kind)) return `${id} excludes ${job.kind} jobs`;

@@ -1,9 +1,8 @@
-/** Tracker connections — data/trackers.json — and a job's tracker link (B2). Import via src/contracts.ts. */
+/** Tracker connections — data/trackers.json. Import via src/contracts.ts; a job's legacy link lives in jobs.ts. */
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, PROJECT_NAME_PATTERN, validate, type ValidationResult } from "./core.ts";
-import { MandateIdSchema } from "./mandates.ts";
 
 /** `github` is admitted by the contract now; its adapter is B6 and refused visibly until then. */
 export const TRACKER_ADAPTERS = ["beads", "github"] as const;
@@ -80,17 +79,3 @@ export function validateTrackersFile(value: unknown): ValidationResult<TrackersF
 	return errors.length === 0 ? shape : { ok: false, errors };
 }
 
-/** A job's stable tracker identity: `(connection_id, item_id)` is unique across the whole ledger history. */
-export const TrackerLinkSchema = Type.Object(
-	{
-		connection_id: Type.String({ pattern: TRACKER_CONNECTION_ID_PATTERN }),
-		item_id: Type.String({ pattern: TRACKER_ITEM_ID_PATTERN }),
-		linked_at: IsoTimestampSchema,
-		/** Written by B4 import. */
-		mandate_id: Type.Optional(MandateIdSchema),
-		/** Written by B4 import: sha256 of the frozen task text. */
-		task_sha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
-	},
-	{ additionalProperties: false },
-);
-export type TrackerLink = Static<typeof TrackerLinkSchema>;

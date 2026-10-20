@@ -27,7 +27,6 @@ import { registerMandateTools } from "./tools-mandate.ts";
 import { registerProjectMemoryTools } from "./tools-project-memory.ts";
 import { registerReviewTools } from "./tools-review.ts";
 import { registerScheduleTools } from "./tools-schedule.ts";
-import { registerTrackerTools } from "./tools-tracker.ts";
 import { registerAwaitingMergeTick } from "./awaiting-merge-tick.ts";
 import { registerPushTick } from "./push-tick.ts";
 import { registerServiceAlertTick } from "./service-alert-tick.ts";
@@ -97,7 +96,6 @@ export default function (pi: ExtensionAPI): void {
 	registerScheduleTools(pi, deps, () => s.parentLock !== undefined, (get) => { s.scheduleRunner = get; }, (result) => session.wakeEnvelope(result), (deliver) => {
 		if (wakeups.compactHold.offer(deliver) === "send") deliver();
 	});
-	registerTrackerTools(pi, deps, () => s.parentLock !== undefined);
 	registerPushTick(pi, deps, () => s.parentLock !== undefined);
 	registerServiceAlertTick(pi, deps, () => s.parentLock !== undefined);
 	registerAwaitingMergeTick(pi, deps, () => s.parentLock !== undefined);

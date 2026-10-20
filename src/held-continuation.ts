@@ -104,8 +104,6 @@ export interface HeldContinuationDeps {
 	relay?: HeldContinuationDeps["notify"];
 	runs?: RunRegistry;
 	maxSteps?: number;
-	/** One line naming the tracker write-back for a landed job (laf); never throws. */
-	writeBack?: (jobId: string) => string;
 	/** True while `state/drain.json` is on disk: no step is taken (no review, merge or rerun); a throw reads as draining. */
 	draining?: () => boolean;
 	/** A held PR landed (`done`): its dependents may be released (`ArmedDispatches.release`); never throws into the step. */
@@ -146,12 +144,11 @@ function bounded(text: string): string {
 	return text.length > HOLD_REASON_MAX ? `${text.slice(0, HOLD_REASON_MAX)}… (truncated, ${text.length} chars)` : text;
 }
 
-export function formatContinuationNotice(jobId: string, next: string, reason: string, prUrl?: string, extra?: string): string {
+export function formatContinuationNotice(jobId: string, next: string, reason: string, prUrl?: string): string {
 	return [
 		`HELD PR ${next === "done" ? "LANDED" : "STOPPED"} — ${jobId} (continuation, next: ${next})`,
 		`  ${reason}`,
 		...(prUrl ? [`  ${prUrl}`] : []),
-		...(extra ? [`  ${extra}`] : []),
 		`  ${NEXT_HINT[next] ?? NEXT_HINT.surface}`,
 	].join("\n");
 }
@@ -463,7 +460,7 @@ export class HeldContinuation {
 			deliver({
 				id: boundedWakeupId(next === "done" ? `continuation:done:${jobId}:${generation}` : `continuation:${jobId}:${generation}:${tag}`),
 				job_id: jobId,
-				content: formatContinuationNotice(jobId, next, reason, prUrl, next === "done" ? this.#deps.writeBack?.(jobId) : undefined),
+				content: formatContinuationNotice(jobId, next, reason, prUrl),
 				// A stop is stale once the job is done; the landing notice is about exactly that.
 				...(next === "done" ? {} : { keys: [jobId] }),
 			});

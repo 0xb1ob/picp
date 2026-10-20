@@ -666,9 +666,9 @@ export class Ledger {
 		});
 	}
 
-	/** Dispatch claim: in_progress + the worker alias that holds it. Never a deferred job (a B4 import not yet enrolled). */
+	/** Dispatch claim: in_progress + the worker alias that holds it. Never a deferred job: reopening one is explicit. */
 	async claim(id: string, assignee: string): Promise<Job> {
-		if ((await this.show(id)).status === "deferred") throw new LedgerError(`${id} is deferred: run cp_tracker import again to finish enrollment`);
+		if ((await this.show(id)).status === "deferred") throw new LedgerError(`${id} is deferred; review its task and authority, then use cp_job update status=open when authorized`);
 		return this.update(id, { status: "in_progress", assignee });
 	}
 
@@ -741,7 +741,7 @@ export class Ledger {
 
 	// -- import -------------------------------------------------------------
 
-	/** Append pre-built records (the `.beads/` importer). A duplicate id refuses the whole batch. */
+	/** Append pre-built records. A duplicate id refuses the whole batch. */
 	async importJobs(jobs: readonly Job[]): Promise<void> {
 		await this.#mutate((doc) => {
 			const existing = new Set(doc.jobs.map((job) => job.id));

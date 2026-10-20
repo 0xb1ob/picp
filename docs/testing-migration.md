@@ -26,6 +26,7 @@ identifier, counted on the TypeScript AST). Static declarations are not executed
 | `retained` | Kept on purpose; not deletable yet | the reason and a link |
 | `exception` | Structural, golden, contract or security check kept by policy | the policy link (see Exceptions) |
 | `deleted` | Removed; every assertion mapped or redundant-unreachable, and a negative control recorded | assertion map + regression row |
+| `deleted-with-feature` | Removed with the production feature it tested; nothing is left to patch back | owner names the removing PR/job; evidence cites the removed source modules |
 
 P1 completed the manifest: the checker refuses any other disposition, so a new baseline row cannot stay undecided.
 
@@ -41,13 +42,21 @@ A `convert` file is deleted only by its owner PR, and only when every assertion 
 every regression it guards has a negative control. A file whose assertions belong to another unfinished behavior is split
 or waits; a partly converted file is never counted as removed.
 
+A test file whose production feature is removed is `deleted-with-feature`, not `deleted`: no consumer remains, so it
+needs no assertion map and no negative control. Its owner must name the removing PR (`#123`) or job (`cp-…`), and its
+evidence must cite the removed `src/` or `extensions/` modules it tested; the checker confirms each cited path is gone.
+A kept file that loses declarations with a removed feature gets one `feature-removed` row per lost declaration in the
+Feature-removed section: its baseline title (still absent from the tree) and the removing PR/job. The checker accepts a
+net loss in a kept file only when that many rows cover it. Decided by the main session as programme owner under
+ask-0088e0332d00, 2026-10-21.
+
 ## PR ledger
 
 | PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
 |---|---|---|---|---|
 | P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
 | P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
-| P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 401 → 401 | 4,500 → 4,502 |
+| P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -349,7 +358,20 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/ci-evidence.test.ts` | P0 | behavior 01, scenarios 01-1 and 01-2 |
 | `tests/e2e/authority.test.ts` | P2 | behavior 02, scenarios 02-1 to 02-4 |
 | `tests/viewer-job-report.test.ts` | #380 | unit test landed on main after the baseline (viewer job report pages); recorded by P2 so the check stays at 0 findings, disposition left to its behavior's PR |
+| `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
+| `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | accept and reject paths of `deleted-with-feature` and `feature-removed` |
 <!-- /manifest:incoming -->
+
+## Feature-removed
+
+Declarations a kept baseline file lost with a removed production feature (see Method). One row per lost title.
+
+<!-- manifest:feature-removed -->
+| Unit file | Declaration | Removed by | Note |
+|---|---|---|---|
+| `tests/jobs-tool.test.ts` | parseJobsArgs: ready by default, list flags, show needs an id, import-beads | cp-remove-beads-pr1-0f3z (#379) | importer subcommand removed; the rest is kept under a new title |
+| `tests/jobs-tool.test.ts` | cp_job create auto-links a job whose br ref names a bead on the active connection, and says why otherwise (laf) | cp-remove-beads-pr1-0f3z (#379) | tracker auto-link removed |
+<!-- /manifest:feature-removed -->
 
 ## Baseline
 
@@ -484,7 +506,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/layout-capture.test.ts` | exception | P1 | contract: assembled layout; operator ask-0088e0332d00 (Exceptions) |
 | `tests/layout-flat.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/leases.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
-| `tests/ledger-import.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/ledger-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/ledger-import.ts` |
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
@@ -636,11 +658,11 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/tool-manifest.test.ts` | exception | P1 | contract: installed tool surface; operator ask-0088e0332d00 (Exceptions) |
 | `tests/trackers-beads.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/trackers-config.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
-| `tests/trackers-import.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/trackers-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/import.ts` |
 | `tests/trackers-ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
-| `tests/trackers-link.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
-| `tests/trackers-sync.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
-| `tests/trackers-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/trackers-link.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/link.ts`, `src/trackers/sync.ts` |
+| `tests/trackers-sync.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/sync.ts`, `src/trackers/sync-store.ts` |
+| `tests/trackers-tool.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `extensions/command-post/tools-tracker.ts`, `src/trackers/sync-store.ts` |
 | `tests/tunnel-cli.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/tunnel-cloudflared.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/tunnel-qr.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
