@@ -31,9 +31,6 @@ import { inFlightRecord, selectGrant } from "./mandate-permission.ts";
 import type { PipelineStore } from "./pipeline.ts";
 import { execRunner } from "./doctor.ts";
 import { homeCheckoutFinding, PACKAGE_ROOT } from "./home.ts";
-import type { ProjectRegistry } from "./projects.ts";
-import type { CommandRunner } from "./merge-ask.ts";
-import { formatReadyBeads, readReadyBeads, type ReadyBeads } from "./ready-beads.ts";
 import { readDrain } from "./drain.ts";
 import { runnerOwns } from "./schedule-runner.ts";
 import { selfReviewRole } from "./schedule-self-review.ts";
@@ -44,8 +41,6 @@ import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
-	registry?: ProjectRegistry;
-	beadExec?: CommandRunner;
 	ledger: Ledger;
 	fleet: FleetStore;
 	mandates: MandateStore;
@@ -90,7 +85,6 @@ export interface NextResult {
 	warning?: string;
 	/** Waiting/launching fleet records across every mandate: informational, never an admission quota; `live_workers` is one grant's scope only. */
 	fleet_live_workers?: number;
-	ready_beads?: ReadyBeads[];
 	mandate?: NextMandateView;
 	run?: { id: string; schedule_id: string; spend_usd: number; tokens: number; live_workers: number; parallelism: number };
 	/** Open, unblocked jobs this mandate covers — the parent's dispatch candidates without reading files. */
@@ -101,8 +95,8 @@ export interface NextResult {
 	escalation_id?: string;
 	/** The other covering mandates' own results, each with its own action and mission-end escalation. */
 	others?: NextResult[];
-	/** Readiness behind the answer (every ledger-ready job, unfiltered beads, the spawn queue), for the snapshot only. */
-	lined_up?: { jobs: Job[]; beads: ReadyBeads[]; queued: string[] };
+	/** Readiness behind the answer (every ledger-ready job, the spawn queue), for the snapshot only. */
+	lined_up?: { jobs: Job[]; queued: string[] };
 }
 
 function jobProject(job: Job): string | undefined {
@@ -147,14 +141,6 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const now = isoTimestamp((ports.now ?? (() => new Date()))());
 	const fleetLive = fleetJobs.filter((job) => job.phase === "waiting" || job.phase === "launching").length;
 	const grants = ports.mandates.sweep(now, fleetJobs);
-	const beads = ports.registry ? await readReadyBeads(ports.registry, ports.ledger, project, ports.beadExec) : [];
-	const visibleBeads = beads.filter((row) => {
-		if (row.error) return true;
-		// A bead becomes an unscheduled job, which no schedule grant covers (schedlater S3): only the grants that could
-		// carry it decide whether a slot is free. Their inFlight already excludes scheduled records (schedule_id).
-		const active = grants.filter((grant) => grant.status === "active" && !grant.schedule_grant && grant.projects.includes(row.project));
-		return !active.length || active.some((grant) => mandateSpend(grant, fleetJobs).inFlight < (grant.dispatch_parallelism ?? 1));
-	});
 	const schedules = ports.mandates.scheduleMandates();
 	const scopeOf = (job: Job) => scheduleScope(scheduleIdOf(job.labels), schedules);
 	const blocked = blockedJobs(ports.ledger, grants, now, project, schedules, openRunOf(ports.mandates.scheduleRuns));
@@ -206,7 +192,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
 	}
 	if (candidates.length === 0 && runResults.length === 0) {
-		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, ready_beads: visibleBeads, lined_up: { jobs: readyJobs, beads, queued: ports.queued?.() ?? [] }, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
+		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, lined_up: { jobs: readyJobs, queued: ports.queued?.() ?? [] }, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
@@ -238,9 +224,8 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
-	primary.ready_beads = visibleBeads;
 	const others = results.filter((result) => result !== primary);
-	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, beads, queued: [...queued] } };
+	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, queued: [...queued] } };
 }
 
 async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: readonly Job[], fleetJobs: readonly FleetRecord[], selected: ReadonlyMap<string, ReturnType<typeof selectGrant>>, queued: ReadonlySet<string>, expanded: ReadonlySet<string>): Promise<NextResult> {
@@ -382,7 +367,6 @@ export function formatNext(result: NextResult): string {
 	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${result.action.reason}`);
 	if (result.escalation_id) lines.push(`escalation: ${result.escalation_id}`);
 	for (const other of result.others ?? []) lines.push(needsAction(other) ? formatNext(other) : compactOther(other));
-	lines.push(...formatReadyBeads(result.ready_beads ?? []));
 	return lines.join("\n");
 }
 
@@ -406,10 +390,12 @@ export function dedupeNext(seen: Map<string, { text: string; at: string }>, scop
 	return text;
 }
 
-export interface NextSnapshotItem { kind: "job" | "bead"; id: string; project: string; title: string | null; verdict: string; reason: string }
+export interface NextSnapshotItem { kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string }
+/** Bumped when retired rows left the snapshot: the viewer reads only this version, an older cache is unavailable. */
+export const NEXT_SNAPSHOT_VERSION = 2;
 /** `state/next-snapshot.json` (#323): the last cp_next answer as the viewer's "Lined up" strip reads it. */
 export interface NextSnapshot {
-	schema_version: 1; at: string; project: string | null; action: NextAction; items: NextSnapshotItem[];
+	schema_version: typeof NEXT_SNAPSHOT_VERSION; at: string; project: string | null; action: NextAction; items: NextSnapshotItem[];
 	/** Evidence that could not be read; any row here means the snapshot never claims "nothing queued". */
 	unavailable: { project: string; error: string }[];
 	empty_since: string | null;
@@ -417,7 +403,7 @@ export interface NextSnapshot {
 
 export const nextSnapshotFile = (home: string): string => join(home, LAYOUT.state, "next-snapshot.json");
 
-/** Each ready job with its grant's verdict, blocked and spawn-queued jobs, ready beads with no job. */
+/** Each ready job with its grant's verdict, blocked and spawn-queued jobs. */
 export function nextSnapshot(result: NextResult, at: string, project?: string, previous?: Partial<NextSnapshot>): NextSnapshot {
 	const items: NextSnapshotItem[] = [];
 	const unavailable: NextSnapshot["unavailable"] = [];
@@ -435,15 +421,12 @@ export function nextSnapshot(result: NextResult, at: string, project?: string, p
 		if (lined!.queued.includes(job.id)) add(job, "queued", "cp_dispatch queued it; it starts when a spawn slot frees");
 		else add(job, "uncovered", "ready, but not a dispatch candidate under any active grant");
 	}
-	for (const row of lined?.beads ?? []) {
-		if (row.error) unavailable.push({ project: row.project, error: `ready beads unavailable: ${row.error}` });
-		for (const id of row.ids) items.push({ kind: "bead", id, project: row.project, title: null, verdict: "no job", reason: "ready bead with no job" });
-	}
 	if (!lined) unavailable.push({ project: project ?? "all projects", error: `not read: ${result.action.reason}` });
 	const empty = !items.length && !unavailable.length;
 	const scope = project ?? null;
-	const since = previous?.project === scope && typeof previous?.empty_since === "string" ? previous.empty_since : at;
-	return { schema_version: 1, at, project: scope, action: result.action, items, unavailable, empty_since: empty ? since : null };
+	const current = previous?.schema_version === NEXT_SNAPSHOT_VERSION && previous.project === scope;
+	const since = current && typeof previous?.empty_since === "string" ? previous.empty_since : at;
+	return { schema_version: NEXT_SNAPSHOT_VERSION, at, project: scope, action: result.action, items, unavailable, empty_since: empty ? since : null };
 }
 
 /** Overwrites the snapshot; an empty answer keeps the previous one's `empty_since` for the same scope. */

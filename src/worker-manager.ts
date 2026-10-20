@@ -91,9 +91,6 @@ export const STRIPPED_ENV_KEYS: readonly string[] = Object.freeze([
 	"PI_MODEL",
 	"PI_PROVIDER",
 	"PI_REASONING_LEVEL",
-	/** A worker's beads database comes only from dispatch (the project's own tracker), never the parent's environment. */
-	"BEADS_DIR",
-	"BEADS_DB",
 ]);
 
 /**

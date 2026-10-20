@@ -14,8 +14,6 @@ import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../.
 import { parsePrUrl } from "../../src/ci-watch.ts";
 import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
-import { TrackerStore } from "../../src/trackers/config.ts";
-import { writeBackLine } from "../../src/trackers/link.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -112,7 +110,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			"Advance one delivery:pr job's merge by exactly one step, and verify that step's postcondition: read CI " +
 			"for the pushed head, read whether the repository itself permits the merge unforced (mergeStateStatus, " +
 			"cp-x7i), update the branch server-side only when GitHub says BEHIND or a readable rule requires it, " +
-			"merge, record the receipt, tear down and close the br issue. " +
+			"merge, record the receipt, tear down and close the job. " +
 			"Idempotent and resumable — it recomputes which step is due from git and gh every call, so a restarted " +
 			"parent picks up where it stopped. Branch on `next`, never on the prose: advance | wait | review | resolve | retry | " +
 			"surface | done. next: review means no passing cp_review on this head — run cp_review on that head, never re-review an unchanged one. " +
@@ -239,8 +237,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				return { content: [{ type: "text", text }], details: result };
 			}
 			return {
-				// laf: a landed job names its tracker write-back; writeBackLine reads local files only and never throws.
-				content: [{ type: "text", text: result.next === "done" ? `${formatIntegration(result)}\n  ${writeBackLine(post.home, () => post.ledger(), () => new TrackerStore({ home: post.home, registry: post.registry }).list(), params.job_id)}` : formatIntegration(result) }],
+				content: [{ type: "text", text: formatIntegration(result) }],
 				details: result,
 			};
 		},

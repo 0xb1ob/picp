@@ -142,9 +142,6 @@ import { Teardown, type TeardownCallOptions, type TeardownResult } from "./teard
 import { type RenderOptions, RunWatcher, type RunView } from "./watch.ts";
 import { type DrainProjection, WorkerManager } from "./worker-manager.ts";
 import { tryResolveWorkerPackages } from "./worker-packages.ts";
-import { idleBeadObserver, readReadyBeads } from "./ready-beads.ts";
-import { projectBeadsDb, TrackerStore } from "./trackers/config.ts";
-import { writeBackLine } from "./trackers/link.ts";
 
 export interface CommandPostOptions {
 	/** Command post home: where `data/`, `state/` and `projects/` live. */
@@ -177,8 +174,6 @@ export interface CommandPostOptions {
 	runtime?: Runtime;
 	/** Called once per accepted envelope (notify the operator, update the widget). */
 	onReported?: (result: IntakeResult) => void;
-	/** One evidence-only notice when the last working slot becomes idle. */
-	onIdleBeads?: (text: string) => void;
 	/** The live parent's compact hold (cp-35d0 S6): a new drain is refused and a running one cannot finish `drained` while true. */
 	parentControlBusy?: () => boolean;
 	/**
@@ -333,14 +328,7 @@ export class CommandPost {
 		this.profilesDir = join(options.packageRoot, "profiles");
 		this.briefsDir = join(options.packageRoot, "prompts/briefs");
 		this.registry = new ProjectRegistry({ home: options.home });
-		const observeIdle = options.onIdleBeads ? idleBeadObserver(
-			() => readReadyBeads(this.registry, this.ledger()), options.onIdleBeads, () => this.fleet.read().jobs,
-		) : undefined;
-		this.fleet = new FleetStore({ home: options.home, ...(observeIdle ? {
-			onChanged: (before, after) => { void observeIdle(before, after).catch((error) => {
-				process.stderr.write(`idle bead notice failed: ${String(error)}\n`);
-			}); },
-		} : {}) });
+		this.fleet = new FleetStore({ home: options.home });
 		this.capacity = new CapacityReader({ home: options.home, env: options.parentEnv ?? process.env, fleet: this.fleet });
 		// cp-epy2 §4.2: the pool root is per home, read from the environment this
 		// parent was started with. `resolvePoolRoot` omits the key when nothing is
@@ -624,7 +612,6 @@ export class CommandPost {
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			relay: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,
-			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 			onLanded: () => void this.armedDispatches.release(), // unload-parent PR2: a landed blocker may release armed dependents
 		});
 		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });
@@ -1105,7 +1092,6 @@ export class CommandPost {
 			home: this.home,
 			knownProjects: this.registry.names(),
 			archivedProjects: this.registry.archivedNames(),
-			beadsDbFor: (project) => projectBeadsDb(this.home, project, () => this.registry.pathOf(project)),
 		});
 	}
 
@@ -1389,7 +1375,7 @@ export class CommandPost {
 		});
 	}
 
-	/** `/status`: files plus a br join for titles (degrades if br is missing). */
+	/** `/status`: files plus a ledger join for titles. */
 	async status(query: StatusQuery = {}): Promise<StatusSnapshot> {
 		return this.statusReporter().snapshot(query);
 	}

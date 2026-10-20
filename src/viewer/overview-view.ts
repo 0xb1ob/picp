@@ -65,10 +65,11 @@ function linedUp(state: ViewerState): OverviewResponse["lined_up"] {
   const s = parseObject(readBounded(join(state.stateDir,"next-snapshot.json")));
   const items = Array.isArray(s?.items) ? s.items.map(obj) : [undefined];
   const unavailable = Array.isArray(s?.unavailable) ? s.unavailable.map(obj) : [undefined];
-  if (!s || !timestamp(s.at) || items.some(i => !i || !(i.kind === "bead" ? text(i.id) : i.kind === "job" && typeof i.id === "string" && isSafeId(i.id)) || typeof i.project !== "string" || !text(i.verdict) || typeof i.reason !== "string")
+  // Only the current version (src/next.ts NEXT_SNAPSHOT_VERSION): an older cache is unavailable until cp_next.
+  if (!s || s.schema_version !== 2 || !timestamp(s.at) || items.some(i => !i || i.kind !== "job" || typeof i.id !== "string" || !isSafeId(i.id) || typeof i.project !== "string" || !text(i.verdict) || typeof i.reason !== "string")
    || unavailable.some(u => !u || typeof u.project !== "string" || typeof u.error !== "string")) throw new Error("invalid snapshot");
   return {at:String(s.at), project:str(s.project) ?? null, empty_since:timestamp(s.empty_since) ? s.empty_since : null,
-   items:items.map(i => ({kind:i!.kind as "job" | "bead", id:String(i!.id), project:String(i!.project), title:str(i!.title) ?? null, verdict:String(i!.verdict), reason:String(i!.reason)})),
+   items:items.map(i => ({kind:"job" as const, id:String(i!.id), project:String(i!.project), title:str(i!.title) ?? null, verdict:String(i!.verdict), reason:String(i!.reason)})),
    unavailable:unavailable.map(u => ({project:String(u!.project), error:String(u!.error)}))};
  }, {at:null, project:null, empty_since:null, items:[], unavailable:[]});
  return {availability:read.availability, ...read.value};

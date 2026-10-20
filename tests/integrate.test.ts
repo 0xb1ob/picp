@@ -21,7 +21,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromCheckpoints, isDerivedAwaitingId, obsoleteDeclaredReason } from "../src/awaiting.ts";
@@ -38,6 +38,7 @@ import {
 	REVIEW_MAX_ATTEMPTS,
 	DiffVerdictSchema,
 	EMPTY_USAGE,
+	LAYOUT,
 	isoTimestamp,
 	paths,
 	parseCheckpointAwaitingId,
@@ -71,7 +72,6 @@ import {
 } from "../src/integrate.ts";
 import { CiRerunStore, maybeRerunInfra } from "../src/ci-infra-rerun.ts";
 import type { CommandRunner, MergeStoreOptions } from "../src/merges.ts";
-import { trackersFile } from "../src/trackers/config.ts";
 import { MergeStore } from "../src/merges.ts";
 import { RunRegistry } from "../src/runs.ts";
 import type { TeardownResult } from "../src/teardown.ts";
@@ -1146,31 +1146,28 @@ test("operator bridge writes a hold without a running parent; parent status sees
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
-test("cp_integrate appends the tracker write-back line on next: done, and only then (laf)", async (t) => {
+test("cp_integrate's done result carries no tracker advice for a legacy-linked job beside retired config", async (t) => {
 	const b = await benchOf(t);
-	const file = trackersFile(b.home);
+	const file = join(b.home, LAYOUT.data, "trackers.json");
 	mkdirSync(join(file, ".."), { recursive: true });
-	writeFileSync(file, JSON.stringify({ schema_version: 1, connections: [
-		{ id: "demo-beads", project: "demo", adapter: "beads", endpoint: "/dbs/demo.db", intake_enabled: false, write_enabled: true, status: "active", connected_at: "2026-09-01T00:00:00Z" },
-	] }));
-	const job = { id: BR, title: "linked", status: "closed", labels: ["project:demo", "kind:ship", "delivery:pr"], tracker: { connection_id: "demo-beads", item_id: "b-9" } };
+	writeFileSync(file, "{ retired, malformed");
+	const job = { id: BR, title: "linked", status: "closed", labels: ["project:demo", "kind:ship", "delivery:pr"], tracker: { connection_id: "demo-x", item_id: "x-9" } };
 	let calls = 0;
 	const tools = new Map<string, HoldTool>();
 	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
 		commandPost: () => ({
-			home: b.home, registry: {}, ledger: () => ({ read: () => ({ jobs: [job] }), normalizeRef: (ref: string) => ref }),
+			home: b.home, registry: {}, ledger: () => ({ read: () => ({ jobs: [job] }) }),
 			// Call 1 merges; call 2 records the receipt and runs to done.
 			integrate: (request: { jobId: string }) => (calls++ === 0 ? b.integrator() : b.integrator({ pr: mergedPr() })).advance(request),
 		}),
 		setLive: () => {}, refreshWidget: () => {},
 	} as never);
 	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: BR }, undefined, undefined, {});
-	const merged = await invoke();
-	assert.equal(merged.details.next, "advance");
-	assert.ok(!merged.content[0]!.text.includes("tracker write-back"), merged.content[0]!.text);
+	assert.equal((await invoke()).details.next, "advance");
 	const done = await invoke();
 	assert.equal(done.details.next, "done");
-	assert.ok(done.content[0]!.text.includes(`\n  tracker write-back: demo-beads/b-9 closes with ${PR_URL} on the next write-back tick`), done.content[0]!.text);
+	assert.doesNotMatch(done.content[0]!.text, /tracker|write-back/, done.content[0]!.text);
+	assert.equal(readFileSync(file, "utf8"), "{ retired, malformed", "retired config is never read or rewritten");
 });
 
 test("cp_integrate says a review is already in flight on next: review, and leaves details alone", async (t) => {

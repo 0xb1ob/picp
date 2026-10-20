@@ -20,10 +20,9 @@
 import { captureCheckpoint, checkpointRef, deleteCheckpoint } from "./checkpoint-ref.ts";
 import { referencedMaterial } from "./task-references.ts";
 import { repoMap } from "./repo-map.ts";
-import type { CommandRunner } from "./merge-ask.ts";
 import type { CapacityReader } from "./capacity.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	type Delivery,
 	type FleetRecord,
@@ -401,7 +400,6 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	/** When present, a settle with no envelope gets one prompt to report. */
 	settle?: SettleWatcher;
 	bounds?: HardBoundsWatch;
-	/** Read-only reference lookup, injected in tests. */ referenceExec?: CommandRunner;
 	/** git runner, injected in tests. */
 	git?: GitRunner;
 	now?: () => Date;
@@ -665,9 +663,7 @@ export class Dispatcher {
 			const deps = await prepareNodeDeps(lease.path, options.deps);
 
 			// --- 5. brief and shared reference snapshot ----------------------
-			const beadsDb = options.ledger.beadsDb(labels.project);
-			const references = await referencedMaterial({ task: task.forInference, externalRef: issue.external_ref, prefix: options.ledger.read().prefix,
-				clone, worktree: lease.path, home: options.home, exec: options.referenceExec, ...(beadsDb ? { beadsDb } : {}), ...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
+			const references = await referencedMaterial({ task: task.forInference, worktree: lease.path, home: options.home, ...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
 			const boundNote = bound ? `\n\n> ${boundPrNote(bound)}\n` : "";
 			const originalTask = task.forInference + references + boundNote;
 			const runDir = join(options.home, paths.runDir(issue.id));
@@ -714,7 +710,6 @@ export class Dispatcher {
 				brief,
 				sessionDir: join(options.home, LAYOUT.sessions),
 				sessionName: issue.id,
-				...(beadsDb ? { extraEnv: { BEADS_DIR: dirname(beadsDb) } } : {}),
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 			});
 			recorder.markSpawned({

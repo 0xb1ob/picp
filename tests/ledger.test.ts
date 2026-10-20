@@ -8,9 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync, execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type Job, LAYOUT } from "../src/contracts.ts";
@@ -23,7 +21,6 @@ import {
 	Ledger,
 	LedgerError,
 	mintJobId,
-	normalizeExternalRef,
 	normalizeJobTitle,
 	openBlockersOf,
 	parseJobLabels,
@@ -32,16 +29,6 @@ import {
 } from "../src/ledger.ts";
 import { recordAssessedRisk } from "../src/ledger-filter.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
-
-/** True when a usable `br` is on PATH (harness pattern for treehouse; see harness/treehouse.ts). */
-function brAvailable(): boolean {
-	try {
-		execFileSync("br", ["--version"], { stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
-}
 
 const NOW = new Date("2026-09-04T10:00:00Z");
 
@@ -210,7 +197,6 @@ test("reserved extra labels refuse before minting or writing, including identica
 	for (const label of ["project:demo", "project:other", "delivery:local", "delivery:board", "kind:ship", "kind:research", "risk:low", "risk:high"]) {
 		const input = { title: "bad", project: "demo", delivery: "local", kind: "ship", risk: "low", labels: [label] } as const;
 		await assert.rejects(ledger.create(input), /labels/);
-		await assert.rejects(ledger.createTracked({ ...input, tracker: { connection_id: "demo", item_id: "bad" } }), /labels/);
 		assert.equal(readFileSync(ledger.file, "utf8"), before, label);
 	}
 	assert.equal(mints, 0, "refused intake never mints an id");
@@ -219,9 +205,9 @@ test("reserved extra labels refuse before minting or writing, including identica
 test("legacy conflicting labels remain readable and searchable, refuse writes, and permit ID repair", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());
-	const ledger = new Ledger({ home: scratch.path, beadsDbFor: () => "/demo/beads.db" });
+	const ledger = new Ledger({ home: scratch.path });
 	for (const extra of ["project:other", "delivery:board", "kind:research", "risk:bogus"]) {
-		const bad = { ...JOB, labels: [...JOB.labels, extra], external_ref: "br show old --json" };
+		const bad = { ...JOB, labels: [...JOB.labels, extra], external_ref: "external-tool show old --json" };
 		writeFileSync(ledger.file, JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [bad, { ...JOB, id: "cp-b", title: "healthy" }] }));
 		const before = readFileSync(ledger.file, "utf8");
 		assert.equal((await ledger.list()).length, 2);
@@ -311,23 +297,19 @@ test("script declarations persist only for ship/local with a safe repository-rel
 test("findDuplicate: project+title or external_ref, open jobs only", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["demo", "other"] });
 	t.after(() => scratch.cleanup());
-	const dbPath = "/abs/demo/.beads/beads.db";
-	const ledger = new Ledger({
-		home: scratch.path,
-		knownProjects: ["demo", "other"],
-		beadsDbFor: (project) => (project === "demo" ? dbPath : undefined),
-	});
+	const ledger = new Ledger({ home: scratch.path, knownProjects: ["demo", "other"] });
 	assert.equal(normalizeJobTitle("  Fix   the Thing "), "fix the thing");
+	const ref = "external-tool show item --json";
 	const job = await ledger.create({
 		title: "fix the thing",
 		project: "demo",
 		delivery: "pr",
-		externalRef: "br show cp-nz95 --json",
+		externalRef: ref,
 	});
-	const pinned = `br --db '${dbPath}' show cp-nz95 --json`;
-	assert.equal(job.external_ref, pinned);
+	assert.equal(job.external_ref, ref, "stored exactly as given");
 	assert.equal(ledger.findDuplicate({ title: "FIX  the thing", project: "demo" })?.id, job.id);
-	assert.equal(ledger.findDuplicate({ title: "unrelated", project: "demo", externalRef: "br show cp-nz95 --json" })?.id, job.id);
+	assert.equal(ledger.findDuplicate({ title: "unrelated", project: "demo", externalRef: ref })?.id, job.id);
+	assert.equal(ledger.findDuplicate({ title: "unrelated", project: "demo", externalRef: "external-tool --db /x show item --json" }), undefined, "variants are not inferred equal");
 	assert.equal(ledger.findDuplicate({ title: "fix the thing", project: "other" }), undefined);
 	await ledger.close(job.id, "done");
 	assert.equal(ledger.findDuplicate({ title: "fix the thing", project: "demo" }), undefined, "closed jobs do not match");
@@ -349,7 +331,7 @@ test("external_ref is a pointer to wherever the issue lives: a url, a path, or t
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());
 	const { ledger } = scratch;
-	const refs = ["https://github.com/o/r/issues/1", "docs/issues/42.md", "br show cp-nz95 --json", "ENG-123"];
+	const refs = ["https://github.com/o/r/issues/1", "docs/issues/42.md", "external-tool show item --json", "ENG-123"];
 	for (const ref of refs) {
 		const job = await ledger.create({ title: `for ${ref}`, project: "demo", delivery: "pr", externalRef: `  ${ref}  ` });
 		assert.equal(job.external_ref, ref, "stored trimmed, otherwise verbatim");
@@ -357,162 +339,37 @@ test("external_ref is a pointer to wherever the issue lives: a url, a path, or t
 	assert.equal(scratch.document().jobs.length, refs.length);
 });
 
-// ---------------------------------------------------------------------------
-// br --db pinning (pi-command-post-external-ref-br-db-52x): a bare `br show
-// <id> --json` only works from the project's own checkout, because a leased
-// worktree's `.beads/` is gitignored. Pin it with `--db` and the project's
-// absolute beads.db path instead, at create time and (for older jobs) on show.
-// ---------------------------------------------------------------------------
-
-test("normalizeExternalRef pins a bare `br show <id> --json`, shell-quoted; every other shape passes through unchanged", () => {
-	const db = "/projects/demo/.beads/beads.db";
-	assert.equal(normalizeExternalRef("br show cp-nz95 --json", db), `br --db '${db}' show cp-nz95 --json`);
-	assert.equal(normalizeExternalRef("br show cp-nz95 --json", undefined), "br show cp-nz95 --json", "no resolvable DB: unchanged");
-	assert.equal(normalizeExternalRef("https://github.com/o/r/issues/1", db), "https://github.com/o/r/issues/1", "a url is not a br command");
-	assert.equal(normalizeExternalRef("docs/issues/42.md", db), "docs/issues/42.md", "a file path is not a br command");
-	assert.equal(normalizeExternalRef("ENG-123", db), "ENG-123", "another tracker's id is not a br command");
-	assert.equal(
-		normalizeExternalRef("br --db /already/pinned.db show cp-nz95 --json", db),
-		"br --db /already/pinned.db show cp-nz95 --json",
-		"already pinned: unchanged, even to a different DB",
-	);
-	assert.equal(normalizeExternalRef("br list --status open", db), "br list --status open", "a different br command: unchanged");
-	// A path with a space, a `$`, and a literal single quote: still one shell word, safely.
-	const weird = "/projects/My Demo $HOME's Repo/.beads/beads.db";
-	assert.equal(
-		normalizeExternalRef("br show cp-nz95 --json", weird),
-		`br --db '/projects/My Demo $HOME'\\''s Repo/.beads/beads.db' show cp-nz95 --json`,
-	);
-});
-
-test("create pins a bare br show ref to the project's beads DB when the caller wires one", async (t) => {
+test("an old command-shaped ref reads verbatim through every query path, with no write and no updated_at bump", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());
-	const dbPath = "/projects/demo/.beads/beads.db";
-	const ledger = new Ledger({ home: scratch.path, knownProjects: ["demo"], beadsDbFor: (project) => (project === "demo" ? dbPath : undefined) });
-	const job = await ledger.create({ title: "x", project: "demo", delivery: "pr", externalRef: "br show cp-nz95 --json" });
-	assert.equal(job.external_ref, `br --db '${dbPath}' show cp-nz95 --json`);
-	const other = await ledger.create({ title: "y", project: "demo", delivery: "pr", externalRef: "https://github.com/o/r/issues/1" });
-	assert.equal(other.external_ref, "https://github.com/o/r/issues/1", "a url is never rewritten");
+	const { ledger } = scratch;
+	const ref = "external-tool show item --json";
+	const open = await ledger.create({ title: "old job", project: "demo", delivery: "pr", externalRef: ref });
+	const closed = await ledger.create({ title: "old, closed", project: "demo", delivery: "pr", externalRef: `${ref} --closed` });
+	await ledger.close(closed.id, "done");
+	const before = readFileSync(ledger.file, "utf8");
+	assert.equal((await ledger.show(open.id)).external_ref, ref, "show");
+	assert.equal((await ledger.list({ project: "demo" }))[0]?.external_ref, ref, "list");
+	assert.equal((await ledger.ready({ project: "demo" }))[0]?.external_ref, ref, "ready");
+	assert.equal((await ledger.history({ project: "demo" }))[0]?.external_ref, `${ref} --closed`, "history");
+	assert.equal(readFileSync(ledger.file, "utf8"), before, "reads wrote nothing to disk");
+	assert.equal((await ledger.show(open.id)).updated_at, open.updated_at);
 });
 
-test("an older job stored with a bare br show ref reads pinned through every query path, with no write and no updated_at bump", async (t) => {
+test("a legacy tracker link stays inert: preserved by native writes, still unique, and a deferred job is never claimed", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["demo"] });
 	t.after(() => scratch.cleanup());
-	const dbPath = "/projects/demo/.beads/beads.db";
-	// Written by a caller with no resolver (an older job, or a bare-ref command run before this DB was pinned).
-	const created = await new Ledger({ home: scratch.path, knownProjects: ["demo"] }).create({
-		title: "old job",
-		project: "demo",
-		delivery: "pr",
-		externalRef: "br show cp-old --json",
-	});
-	const onDiskBefore = readFileSync(scratch.ledger.file, "utf8");
-	assert.equal(scratch.document().jobs.find((j) => j.id === created.id)?.external_ref, "br show cp-old --json");
-
-	const ledger = new Ledger({ home: scratch.path, knownProjects: ["demo"], beadsDbFor: (project) => (project === "demo" ? dbPath : undefined) });
-	const pinned = `br --db '${dbPath}' show cp-old --json`;
-
-	// Every query path projects the same pinned view — not just show().
-	const shown = await ledger.show(created.id);
-	assert.equal(shown.external_ref, pinned, "show");
-	const [listed] = await ledger.list({ project: "demo" });
-	assert.equal(listed?.external_ref, pinned, "list");
-	const [ready] = await ledger.ready({ project: "demo" });
-	assert.equal(ready?.external_ref, pinned, "ready");
-	const [history] = await ledger.history({ project: "demo" });
-	assert.equal(history, undefined, "not closed yet, so absent from history");
-
-	// A read never mutates: the document on disk, byte for byte, and updated_at, are untouched.
-	assert.equal(readFileSync(scratch.ledger.file, "utf8"), onDiskBefore, "show/list/ready wrote nothing to disk");
-	assert.equal(scratch.document().jobs.find((j) => j.id === created.id)?.external_ref, "br show cp-old --json", "still bare on disk");
-	assert.equal(scratch.document().jobs.find((j) => j.id === created.id)?.updated_at, created.updated_at, "updated_at did not move");
-
-	// Calling it again is exactly as pure: same projected value, same untouched disk.
-	const again = await ledger.show(created.id);
-	assert.equal(again.external_ref, pinned);
-	assert.equal(again.updated_at, created.updated_at);
-	assert.equal(readFileSync(scratch.ledger.file, "utf8"), onDiskBefore);
+	const { ledger } = scratch;
+	const tracker = { connection_id: "demo-x", item_id: "x-1", linked_at: "2026-09-01T00:00:00Z", task_sha256: "a".repeat(64) };
+	const old = { ...JOB, status: "deferred" as const, tracker };
+	writeFileSync(ledger.file, JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [old] }));
+	await assert.rejects(ledger.claim(old.id, "w"), /is deferred; review its task and authority, then use cp_job update status=open when authorized/);
+	await ledger.comment(old.id, "still here");
+	await ledger.update(old.id, { status: "open" });
+	assert.deepEqual((await ledger.show(old.id)).tracker, tracker, "native writes keep the link byte-for-byte");
+	writeFileSync(ledger.file, JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [old, { ...JOB, id: "cp-b", tracker }] }));
+	await assert.rejects(ledger.comment(old.id, "dup"), /link the same tracker item/);
 });
-
-test("a closed job with a bare br show ref is projected pinned through history() and blocked()", async (t) => {
-	const scratch = createScratchLedger({ knownProjects: ["demo"] });
-	t.after(() => scratch.cleanup());
-	const dbPath = "/projects/demo/.beads/beads.db";
-	const plain = new Ledger({ home: scratch.path, knownProjects: ["demo"] });
-	const closed = await plain.create({ title: "old, closed", project: "demo", delivery: "pr", externalRef: "br show cp-closed --json" });
-	await plain.close(closed.id, "done");
-	const blockedOne = await plain.create({ title: "blocked", project: "demo", delivery: "pr", externalRef: "br show cp-blocked --json" });
-	const blockerOne = await plain.create({ title: "blocker", project: "demo", delivery: "pr" });
-	await plain.addDep(blockedOne.id, blockerOne.id);
-
-	const ledger = new Ledger({ home: scratch.path, knownProjects: ["demo"], beadsDbFor: (project) => (project === "demo" ? dbPath : undefined) });
-	const [history] = await ledger.history({ project: "demo" });
-	assert.equal(history?.external_ref, `br --db '${dbPath}' show cp-closed --json`);
-	const blockedRows = await ledger.blocked();
-	const row = blockedRows.find((j) => j.id === blockedOne.id);
-	assert.equal(row?.external_ref, `br --db '${dbPath}' show cp-blocked --json`);
-});
-
-test(
-	"the pinned form runs from a fresh leased worktree with no .beads/; the bare form does not (root cause, not just the string)",
-	{ skip: brAvailable() ? false : "br must be on PATH" },
-	async (t) => {
-		const projectDir = mkdtempSync(join(tmpdir(), "cp-beads-project-"));
-		const worktreeDir = mkdtempSync(join(tmpdir(), "cp-beads-worktree-"));
-		t.after(() => {
-			rmSync(projectDir, { recursive: true, force: true });
-			rmSync(worktreeDir, { recursive: true, force: true });
-		});
-		execFileSync("git", ["init", "-q"], { cwd: projectDir });
-		execFileSync("br", ["init", "--prefix", "test", "-q"], { cwd: projectDir });
-		const created = JSON.parse(execFileSync("br", ["create", "hello", "--json"], { cwd: projectDir, encoding: "utf8" })) as
-			| { id: string }
-			| Array<{ id: string }>;
-		const issueId = Array.isArray(created) ? created.at(0)!.id : created.id;
-		const dbPath = join(projectDir, ".beads", "beads.db");
-
-		assert.equal(normalizeExternalRef(`br show ${issueId} --json`, dbPath), `br --db '${dbPath}' show ${issueId} --json`);
-
-		// The bug this fixes: the bare form fails from a worktree with no .beads/.
-		assert.throws(() => execFileSync("br", ["show", issueId, "--json"], { cwd: worktreeDir, stdio: ["ignore", "pipe", "pipe"] }));
-
-		// The pinned form succeeds from that same fresh worktree: no cd, no br init.
-		const shownOut = execFileSync("br", ["--db", dbPath, "show", issueId, "--json"], { cwd: worktreeDir, encoding: "utf8" });
-		const shown = JSON.parse(shownOut) as { id: string } | Array<{ id: string }>;
-		assert.equal(Array.isArray(shown) ? shown.at(0)!.id : shown.id, issueId);
-	},
-);
-
-test(
-	"the stored ref is one valid shell word even when the project's checkout path has a space in it",
-	{ skip: brAvailable() ? false : "br must be on PATH" },
-	async (t) => {
-		const projectDir = mkdtempSync(join(tmpdir(), "cp beads project "));
-		const worktreeDir = mkdtempSync(join(tmpdir(), "cp-beads-worktree-"));
-		t.after(() => {
-			rmSync(projectDir, { recursive: true, force: true });
-			rmSync(worktreeDir, { recursive: true, force: true });
-		});
-		assert.ok(projectDir.includes(" "), "the fixture path must actually contain a space to test anything");
-		execFileSync("git", ["init", "-q"], { cwd: projectDir });
-		execFileSync("br", ["init", "--prefix", "test", "-q"], { cwd: projectDir });
-		const created = JSON.parse(execFileSync("br", ["create", "hello", "--json"], { cwd: projectDir, encoding: "utf8" })) as
-			| { id: string }
-			| Array<{ id: string }>;
-		const issueId = Array.isArray(created) ? created.at(0)!.id : created.id;
-		const dbPath = join(projectDir, ".beads", "beads.db");
-
-		const ref = normalizeExternalRef(`br show ${issueId} --json`, dbPath);
-		assert.equal(ref, `br --db '${dbPath}' show ${issueId} --json`);
-
-		// The stored ref is meant to be run verbatim in a shell; prove it actually
-		// parses as one command and resolves to the right DB from a fresh worktree.
-		const out = execSync(ref, { cwd: worktreeDir, encoding: "utf8" });
-		const shown = JSON.parse(out) as { id: string } | Array<{ id: string }>;
-		assert.equal(Array.isArray(shown) ? shown.at(0)!.id : shown.id, issueId);
-	},
-);
 
 // ---------------------------------------------------------------------------
 // lifecycle

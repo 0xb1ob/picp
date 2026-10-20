@@ -10,8 +10,6 @@ import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPE
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
-import { TrackerStore } from "../../src/trackers/config.ts";
-import { autoLink } from "../../src/trackers/link.ts";
 import { currentRuntime } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
@@ -30,7 +28,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 		name: "cp_ask",
 		label: "Ask",
 		description:
-			"Ask a small question about a registered project: creates one br issue (kind:research, delivery:answer) and " +
+			"Ask a small question about a registered project: creates one job (kind:research, delivery:answer) and " +
 			"dispatches a read-only worker to answer it. Returns the dispatch record as JSON — the answer itself lands as " +
 			"a card in the operator's transcript and never enters this session. Use it when the deliverable is an answer a " +
 			"human reads once; if the deliverable is a plan an implementer acts on, that is kind:research, and if it is a " +
@@ -46,7 +44,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			project: Type.Optional(
 				Type.String({ description: "Registered project name" }),
 			),
-			question: Type.String({ description: "The question, as the operator asked it. It becomes the br title and the worker's task." }),
+			question: Type.String({ description: "The question, as the operator asked it. It becomes the job title and the worker's task." }),
 			model: Type.Optional(Type.String({ description: "Explicit provider/model-id override" })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "Explicit effort override" })),
 		}),
@@ -76,14 +74,14 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 		name: "cp_dispatch",
 		label: "Dispatch",
 		description:
-			"Dispatch a declared script or a br job to a fresh worker: preflight, mandate, lease and branch. " +
+			"Dispatch a declared script or a ledger job to a fresh worker: preflight, mandate, lease and branch. " +
 			"Returns the dispatch record as JSON. Refuses (with a promote instruction) when the job or its " +
 			"worktree already has a live worker. `scope` and `risk` are the resource-routing inputs (see their own " +
 			"descriptions); they are independent of the workflow choice cp_pipeline classify advises on, and each " +
 			"overrides only its own axis. dry_run previews the route without taking anything.",
-		promptSnippet: "Dispatch a br job to a worker (cp_dispatch)",
+		promptSnippet: "Dispatch a ledger job to a worker (cp_dispatch)",
 		promptGuidelines: [
-			"Use cp_dispatch to start work on a br job; never do the job yourself.",
+			"Use cp_dispatch to start work on a ledger job; never do the job yourself.",
 			"A ship job cut from a synthesis gets a short fix list as task_file that carries the approved slice verbatim (acceptance, files, constraints, test plan), not the previous report inlined as task; the reviewer sees only that file. Do not re-open a merged job and do not raise the compact threshold so a long reread fits.",
 			"cp_dispatch returning state:promote means send the existing worker a new brief instead of dispatching.",
 			"cp_dispatch with dry_run:true answers 'which model and effort would this job get, and why' and takes nothing. It is optional — never a required step before a dispatch — and it reserves nothing: the dispatch recomputes from the live config. Reach for it when a job is uncertain or expensive, not as a habit.",
@@ -192,14 +190,6 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				};
 			}
 			const post = commandPost(ctx.modelRegistry);
-			// laf: link before dispatching (the job exists either way); a tracker problem never refuses a dispatch.
-			let trackerLine: string | undefined;
-			try {
-				const job = await post.ledger().show(params.job_id);
-				if (job.external_ref && !job.tracker) trackerLine = await autoLink(post.ledger(), job, new TrackerStore({ home: post.home, registry: post.registry }).list());
-			} catch (error) {
-				trackerLine = `not linked to a tracker bead: ${(error as Error).message.split("\n")[0]}`;
-			}
 			// 4b-2: a queued job starts when a slot frees; a second dispatch would race it.
 			const queuedAt = post.dispatchQueue.position(params.job_id);
 			if (queuedAt !== undefined) throw new Error(`${params.job_id} is already queued at position ${queuedAt} — it starts when a worker slot frees; the outcome arrives as a wake-up. Do not re-dispatch.`);
@@ -265,7 +255,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			}
 			refreshWidget(ctx);
 			return {
-				content: [{ type: "text", text: `${formatDispatchResult(result)}${trackerLine ? `\n  tracker: ${trackerLine}` : ""}${armedLine}` }],
+				content: [{ type: "text", text: `${formatDispatchResult(result)}${armedLine}` }],
 				details: { ...result },
 			};
 		},

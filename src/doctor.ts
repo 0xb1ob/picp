@@ -16,7 +16,7 @@
  * The ledger checks (spec 2026-09-04) are read-only over the jobs document:
  * does it parse, are the ids and the dependency graph sound, does the
  * environment's prefix agree with the document's, is it outgrowing whole-file
- * rewrites, and is a leftover `.beads/` named for what it now is — an archive.
+ * rewrites, and is retired integration state named as ignored.
  */
 
 import { execFileSync } from "node:child_process";
@@ -51,7 +51,6 @@ import {
 	SCOPES,
 	SCHEMA_VERSION,
 	stripLegacyJobFields,
-	type TrackerConnection,
 	validate,
 	validateDoctorReport,
 	isScriptFleetRecord,
@@ -78,7 +77,6 @@ import { describeRuntime } from "./mode.ts";
 import { listProfiles } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
 import { resolveLedgerPrefix } from "./scaffold.ts";
-import { activeTrackerUnder } from "./trackers/config.ts";
 import {
 	boundedList,
 	describeEffortDrift,
@@ -500,7 +498,7 @@ export class Doctor {
 	 * parses and validates; ids are unique and carry the prefix; the dependency
 	 * graph is closed and acyclic; the environment's prefix agrees with the
 	 * document's; the document is not outgrowing whole-file rewrites; and a
-	 * leftover `.beads/` is named for what it is now — an archive.
+	 * retired integration state is named as ignored, never parsed and never advised for deletion.
 	 */
 	#ledger(): DoctorFinding[] {
 		const home = this.#options.home;
@@ -598,23 +596,15 @@ export class Doctor {
 					}
 				: { check: "ledger.size", severity: "ok", what: `${doc.jobs.length} job(s) (warning past ${JOBS_SIZE_WARNING})` },
 		);
-		const beads = join(home, ".beads");
-		if (existsSync(beads)) {
-			let live: TrackerConnection | undefined;
-			try {
-				live = activeTrackerUnder(home, beads);
-			} catch (error) {
-				findings.push({ check: "ledger.beads_archive", severity: "warn", what: ".beads/ may be a live tracker endpoint: the tracker connections cannot be read", detail: (error as Error).message, fix: "do not delete .beads/; repair data/trackers.json, then re-run /doctor" });
-				return findings;
-			}
-			findings.push(
-				live
-					? { check: "ledger.beads_archive", severity: "ok", what: `.beads/ is the live endpoint of tracker ${live.id}`, detail: live.endpoint, fix: "never delete it: it holds live tracker state" }
-					: doc.jobs.length > 0
-						? { check: "ledger.beads_archive", severity: "warn", what: ".beads/ is still present beside the jobs document", detail: beads, fix: "no active tracker connection uses it: it is a frozen archive of closed br issues and is safe to delete once you no longer want to read it" }
-						: { check: "ledger.beads_archive", severity: "ok", what: ".beads/ present and the jobs document is empty — not imported yet", detail: beads, fix: "run `/cp-jobs import-beads` once to carry the open br issues over" },
-			);
-		}
+		// Existence only: retired state is never parsed, so a malformed file cannot break doctor or startup.
+		const retired = [join(home, LAYOUT.data, "trackers.json"), join(home, LAYOUT.state, "tracker-sync.json")].filter((path) => existsSync(path));
+		if (retired.length) findings.push({
+			check: "storage.retired_integration",
+			severity: "warn",
+			what: "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.",
+			detail: retired.join(", "),
+			fix: "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.",
+		});
 		return findings;
 	}
 

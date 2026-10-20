@@ -94,7 +94,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `wake-rules.json` | read in `src/wake-rules.ts` on every evaluation; never written by code | system-one wake-rules kill switch: `{"enabled": false}` turns rule-handled wakes back into parent turns with no restart; absent = on, unreadable or invalid = off (`docs/contracts.md` §Rule-handled wakes) | H | the operator, by hand |
 | `standing-orders.md` | `src/parent-context.ts` (created once) | parent preference template | H | code once, then the operator or the operator session |
 | `learnings.md candidates.md archive.md curation.jsonl` | `src/memory.ts`, `src/curation.ts` | memory tiers | H | code (`cp_memory`) |
-| `trackers.json` | `src/trackers/config.ts` | tracker connections (an endpoint may name `<home>/.beads/beads.db`) | H | code (`cp_tracker`) |
+| `trackers.json` | none (retired; `src/doctor.ts` checks existence only) | legacy tracker connections, never read | H | nobody; keep for your records |
 | `push/config.json`, `push/vapid.key` (0600) | `src/push/keys.ts` via `npm run push:init` | Web Push origin and keys | H | code, operator-run |
 | `push/subscriptions/<id>.json` (0600) | the **viewer**: `src/viewer/push-subscriptions.ts` (a request-time write, and a device revoke removing that device's own through `src/viewer/device-store.ts`); the parent: `src/push/sweep.ts` (removes a gone device) | one subscribed device each; a remote device's record adds `device_id` + `origin` (both or neither), and a legacy record without them keeps its local/tailnet behaviour unchanged | H | code: a viewer request-time write, and the push sweep |
 | `tunnel.json` | `cp-tunnel up`/`down` (`src/tunnel/cli.ts`, remote dashboard PR 2d), each change a new revision under the O_EXCL `tunnel.lock` (holder pid) | the desired tunnel config `{schema_version, enabled, mode, port, binary, hostname?, token_file?, tunnel_id?, zone_id?, account_id?, revision}` (the Cloudflare ids only after `--api-token-file`; no credential: a named token is the file `token_file` names, by default the 0600 `tunnel/token` cp-tunnel copied), read strictly by `src/service/daemon-tunnel-files.ts` `readTunnelConfig` for cp-daemon's cloudflared controller and the viewer's remote runtime; its presence, or `devices.json`'s, turns on cp-daemon's `device-notify` role (`remoteFeatureConfigured`) | H | code only |
@@ -121,10 +121,11 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `daemon-runtime.json` | `src/service/daemon-runtime.ts` (the cp-daemon inner), atomic replace | per-unit pids, states, start history, viewer hold and the health/update `next_due` timers; `device-notify` only on a home with the remote feature (absent in older records) | H | code only |
 | `daemon.log`, `daemon.prev.log` | `src/service/daemon-outer.ts` (the outer's and children's output; over 5 MiB copied to `daemon.prev.log` and truncated) | the cp-daemon log, read by `cp-daemon log` and the reload/start failure tails | H | code only |
 | `daemon-crontab.tmp` | `src/service/daemon-backend.ts` (`cp-install --crontab`, removed after `crontab <file>`) | the new crontab, handed to `crontab` as a file | H | code only |
-| `drain.json schedules.json tracker-sync.json push-deliveries.json wakeup-replay.json bridge-retry.jsonl main-ci.json ci-reruns.json next-snapshot.json` (`bridge-retry.jsonl` is the outer-retry journal, including `outer_retry_reservation_failed`) | `src/drain.ts`, `src/scheduler.ts`, `src/trackers/sync-store.ts`, `src/push/deliveries.ts`, `extensions/command-post/wakeup-surfaces.ts`, `src/cp-bridge.ts`, `src/main-ci.ts`, `src/ci-infra-rerun.ts`, `src/next.ts` | runtime records | H | code only |
+| `drain.json schedules.json push-deliveries.json wakeup-replay.json bridge-retry.jsonl main-ci.json ci-reruns.json next-snapshot.json` (`bridge-retry.jsonl` is the outer-retry journal, including `outer_retry_reservation_failed`) | `src/drain.ts`, `src/scheduler.ts`, `src/push/deliveries.ts`, `extensions/command-post/wakeup-surfaces.ts`, `src/cp-bridge.ts`, `src/main-ci.ts`, `src/ci-infra-rerun.ts`, `src/next.ts` | runtime records | H | code only |
+| `tracker-sync.json` | none (retired; `src/doctor.ts` checks existence only) | legacy write-back intents, never read | H | nobody; keep for your records |
 | `schedule-runs.json` | `src/schedule-runs.ts` (sole owner/writer; validated atomic replace) | durable run snapshots, membership, authority audit, cap notices and the run's queued result card (`result`, PR1; cards are posted only for runs closed within the last 7 days) | H | code only; activated policy fires; P4 preserves this store |
 | `schedule-policies.json` | `src/schedule-runs.ts` (sole owner/writer; queued validation and atomic replace) | saved policy revisions and per-schedule activation pointer | H | code only; authenticated save/adopt and P4 backup-first startup import |
-| `tracker-tasks/<id>.md` | `src/trackers/import.ts` | imported task text | H | code |
+| `tracker-tasks/<id>.md` | none (retired) | frozen task text an older job's `task_file` note may still name | H | nobody; read as an ordinary file |
 | `repo-map/<project>/<commit>.md` | `src/repo-map.ts` | repo-map cache | H | code |
 | `runs/<id>/…` (brief, tasks, events, status, gate/review/quality runs, merge, integration, questions, …) | `src/dispatch.ts`, `src/recovery.ts`, `src/run-artifacts.ts`, `src/gate.ts`, `src/diff-review.ts`, `src/quality.ts`, `src/pipeline.ts`, `src/supersede.ts`, `src/questions.ts`, `src/task-addenda.ts`, `src/script-runner.ts`, `src/final-fix.ts`, `src/plan-followup.ts` | per-job run records, reviewer scratch | H | code; a **worker** writes `envelope*.json` and a reviewer `verdict*.json` only through `extensions/worker-reporter/` |
 | `artifacts/<id>/report.md` | the **worker's** artifact heredoc (`prompts/briefs/brief-research.md`, `brief-qa.md`); `src/artifacts.ts`, `src/intake.ts`, `src/teardown.ts` | research/QA artifact | H | the worker writes; the parent moves or deletes it, never reads it |
@@ -157,7 +158,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `<home>/.pi-command-post/operator/{tasks,handoffs,reports/<topic>,scratch}/` | nothing in code | the operator workspace | H | the **operator session** and the human only |
 | `<home>/.pi-command-post/jobs.json`, `jobs-legacy-fields.jsonl`, `settings.json` | `src/ledger.ts`; `settings.json` is read-only in code (`src/mode.ts`) | ledger, mode preference | H | code (`cp_job`); settings.json: operator |
 | `<home>/.pi-command-post/bin/cloudflared` (0755, dir 0700) | `src/tunnel/cloudflared.ts` `provisionCloudflared`, called by `cp-tunnel up` (remote dashboard PR 2d) | the pinned official cloudflared, used only when no compatible one is on PATH: SHA256-verified, probed in an exclusive temp file beside it, then renamed into place; a failure leaves neither; an existing `bin/` is narrowed to 0700 | H | code only |
-| `<home>/.beads/` | br only; code reads it (`src/doctor.ts`, `src/ledger-import.ts`) | frozen br archive / read-only tracker DB | H | nobody through command-post |
+| `<home>/.beads/` | none; command-post code no longer reads it | external directory, preserved as is | H | nobody through command-post |
 | `<package-root>/USER.md` | the operator, by hand | optional context (gitignored) | H | the operator only |
 
 ### Outside the home
@@ -244,19 +245,10 @@ Warn-only; each finding names its fix ([`src/storage.ts`](../src/storage.ts)):
 
 ## `BEADS_DIR` and `.beads`
 
-`.beads/` stays at `<home>/.beads/` — in the standard home that is
-`~/.pi-command-post/.beads/`, beside the runtime entries. It is br's directory, not command-post's:
-code only reads it (`br --db … --no-auto-flush --no-auto-import`), and
-`/doctor`'s `ledger.beads_archive` reports it: ok while an active tracker
-connection's endpoint lives under it (live tracker state, never delete), the
-"frozen archive, safe to delete" warning only when none does. `BEADS_DIR` is not a stored
-setting: dispatch derives it per worker from the project's tracker
-(`projectBeadsDb`: an active connection's `endpoint`, else
-`<clone>/.beads/beads.db`, never the home's own `.beads`). Moving `.beads/`
-would force rewriting `data/trackers.json` and every recorded `br --db` path,
-and a stale hand-typed `br --db <old path>` silently creates an empty database.
-So `.gitignore` and `neverCommitFor("multi")` keep `.beads/`, and `storage.home`
-treats it as known.
+`.beads/` stays at `<home>/.beads/` if an old home has one. Command-post neither reads
+nor writes it, injects no `BEADS_DIR` into workers and never advises deleting it. Until
+the home-rules cleanup lands, `.gitignore` and `neverCommitFor("multi")` keep `.beads/`,
+and `storage.home` treats it as known.
 
 ## Moving an old multi home
 

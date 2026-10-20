@@ -12,7 +12,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { FleetStore } from "../src/fleet.ts";
 import type { Ledger } from "../src/ledger.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { cpNext, dedupeNext, formatNext, type NextPorts, type NextSnapshot, nextSnapshot, nextSnapshotFile, writeNextSnapshot } from "../src/next.ts";
+import { cpNext, dedupeNext, formatNext, NEXT_SNAPSHOT_VERSION, type NextPorts, type NextSnapshot, nextSnapshot, nextSnapshotFile, writeNextSnapshot } from "../src/next.ts";
 import { mandateDisplay } from "../src/viewer/mandates-map-view.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { registerSendStatusTools } from "../extensions/command-post/tools-send-status.ts";
@@ -929,8 +929,8 @@ test("#323 snapshot: verdicts per job, nothing queued keeps its since, unread ev
 	assert.deepEqual(byId(verdicts(queued)), byId([[other, "wait"], [after.id, "blocked"], [head, "queued"]]));
 	assert.match(queued.items.find((item) => item.id === other)!.reason, /dispatch-parallelism 1 is full .*1 queued/, "why a ready job is not running");
 
-	const failed = nextSnapshot({ ready: [], action: { kind: "wait", reason: "x" }, lined_up: { jobs: [], beads: [{ project: "demo", ids: [], error: "ENOENT" }], queued: [] } }, "2026-10-01T12:00:00Z");
-	assert.deepEqual([failed.unavailable, failed.empty_since], [[{ project: "demo", error: "ready beads unavailable: ENOENT" }], null], "a failed tracker read is not nothing queued");
+	assert.equal(queued.schema_version, NEXT_SNAPSHOT_VERSION, "every write carries the current snapshot version");
+	assert.ok(queued.items.every((item) => item.kind === "job"), "native job rows only");
 	writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ state: "draining", started_at: "2026-08-27T12:00:00Z", deadline: "2026-08-27T12:10:00Z", timeout_s: 600, jobs: [] }));
 	const drained = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
 	assert.match(drained.unavailable[0]!.error, /^not read: draining since/);
