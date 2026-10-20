@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Viewer job reports render as web pages (cp-report-markdown-renderer-ka6w): `#report/<id>` shows `state/artifacts/<id>/report.md` as a document (headings, lists, tables that scroll sideways on phones, code, quotes, links in a new tab, images from the job's own artifact dir), in dark and, on a light-scheme browser, light. New read routes `GET /api/report/<id>` and `GET /api/report/<id>/files/<path>` (png/jpeg/gif/webp only, contained after symlinks). The job page links "Report · report.md" beside any published board; Reports gains a Job reports section. Raw HTML in a report stays text. Migration: none. Rollback: revert.
+
 - Viewer Jobs page (and Job detail, Reports, Schedules) uses the shell's full-width phone gutter like Overview (cp-jobs-mobile-fullwidth-k6se): the 358px centred column cap is gone, so on phones wider than 390px the content lines up with the top bar and long titles get the extra width. Desktop (>=900px) unchanged. Migration: none. Rollback: revert.
 
 - Sessions chat folds consecutive relay turns about one PR, else one job, into a rollup card (cp-sessions-rollup-b-ucht, PR B of 2): the subject's live chip, the job link and the latest relay, with "N earlier updates" behind a toggle. Turns naming neither, other subjects, operator messages, asks, day, thread or source gaps and the quick-reply anchor never fold; Tools on shows every row. Client only: no API change. Migration: none. Rollback: revert.

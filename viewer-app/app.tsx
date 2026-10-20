@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { DecisionsResponse, OverviewResponse, BoardResponse, JobResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse, StatsResponse } from "../src/viewer/api-types.ts";
+import type { DecisionsResponse, OverviewResponse, BoardResponse, JobResponse, JobReportResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse, StatsResponse } from "../src/viewer/api-types.ts";
 import { Stats, statsApiUrl } from "./screens/Stats.tsx";
 import { type Route, decisionsFallback, screenDataUrl } from "./routes.ts";
 import { useControl } from "./use-control.ts";
@@ -11,6 +11,7 @@ import { Jobs } from "./screens/Jobs.tsx";
 import { JobDetail } from "./screens/JobDetail.tsx";
 import { Board } from "./screens/Board.tsx";
 import { Reports } from "./screens/Reports.tsx";
+import { JobReport } from "./screens/JobReport.tsx";
 import { Schedules } from "./screens/Schedules.tsx";
 import { Settings } from "./screens/Settings.tsx";
 import { useSettingsControl } from "./use-settings-control.ts";
@@ -55,7 +56,7 @@ export function App() {
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
  if (current.screen === "settings") return <SettingsPage current={current}/>;
  if (current.screen === "stats") return <StatsPage current={current}/>;
- return ["jobs","job","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}?${current.query ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
+ return ["jobs","job","report","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}?${current.query ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
 function useSection(current: Route, loaded: boolean) {
@@ -91,8 +92,8 @@ export function StatsPage({current}: {current:Route}) {
  </Shell>;
 }
 function JobsRoute({current}:{current:Route}) {
- const url = current.screen === "job" ? `/api/job/${encodeURIComponent(current.jobId!)}` : `/api/${current.screen}`;
- const resource = useScreenData<JobsResponse | JobResponse | BoardResponse | ReportsResponse | SchedulesResponse>(url,`/api/stream?view=${current.screen}`);
+ const url = current.screen === "job" ? `/api/job/${encodeURIComponent(current.jobId!)}` : current.screen === "report" ? `/api/report/${encodeURIComponent(current.jobId!)}` : `/api/${current.screen}`;
+ const resource = useScreenData<JobsResponse | JobResponse | JobReportResponse | BoardResponse | ReportsResponse | SchedulesResponse>(url,`/api/stream?view=${current.screen}`);
  const data = resource.data;
  const summary = data && "awaiting_count" in data ? data : null;
  const scheduleControl = useScheduleControl(current.screen === "schedules", data?.generated_at ?? null);
@@ -101,7 +102,7 @@ function JobsRoute({current}:{current:Route}) {
   {missing ? <NotFound {...missing}/> : <>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{data && " · showing last recorded data"}</p>}
   {summary?.warnings.map(w=><p role="alert" class="overview-error" key={w.section}>{w.section}: {w.message}</p>)}
-  {data ? current.screen === "job" ? <JobDetail data={data as JobResponse} initial={current.query === "tab=transcript" ? "transcript" : undefined}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  {data ? current.screen === "job" ? <JobDetail data={data as JobResponse} initial={current.query === "tab=transcript" ? "transcript" : undefined}/> : current.screen === "report" ? <JobReport data={data as JobReportResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
   </>}
  </Shell>;
 }

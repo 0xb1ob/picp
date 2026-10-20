@@ -7,7 +7,7 @@ import { HeaderSlot, ShellContext } from "./Shell.tsx";
 
 /** The page title a route shows before its screen has data: Board, Map and a job are Jobs views. */
 export function routeTitle(route: Route): string {
- return ["board","map","job"].includes(route.screen) ? "Jobs" : navigation.find(n => n.id === route.screen)?.label ?? "Overview";
+ return route.screen === "report" ? "Report" : ["board","map","job"].includes(route.screen) ? "Jobs" : navigation.find(n => n.id === route.screen)?.label ?? "Overview";
 }
 
 /**
