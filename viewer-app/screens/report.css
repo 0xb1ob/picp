@@ -35,5 +35,5 @@
  .report-table th, .report-table td { min-width: 72px; max-width: 240px; }
 }
 .report-image { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
-.report-refused { padding: 1px 6px; border: 1px dashed var(--error-border); border-radius: 5px; color: var(--coral); font-size: 13px; }
+.report-refused { padding: 1px 6px; border: 1px dashed var(--border); border-radius: 5px; color: var(--dim); font-size: 13px; }
 .report-local-link { color: var(--text); text-decoration: underline dotted; }
