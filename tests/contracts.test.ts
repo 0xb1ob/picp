@@ -930,7 +930,7 @@ test("docs/contracts.md documents every contract surface", () => {
 });
 
 // ---------------------------------------------------------------------------
-// cp-epy2 §4.2: a per-home br prefix, and the ids it mints
+// cp-epy2 §4.2: a per-home id prefix, and the ids it mints
 // ---------------------------------------------------------------------------
 
 test("ledger prefixes are lowercase, short and letter-led, or rejected", () => {

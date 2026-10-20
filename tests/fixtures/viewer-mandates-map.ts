@@ -1,7 +1,7 @@
 import type { MandateItem, MapNode, MapResponse } from "../../src/viewer/api-types.ts";
 
 export const mapTitle = "[c-parent-host] host the parent RPC pipe outside the operator process without losing tool results";
-export const mapObjective = "Land the hygiene-ranking beads, one reviewed PR per bead. Preserve recorded decisions and operator ownership while making long real-world titles, dependency relations, usage accounting, and existing review gates readable on both phone and desktop screens.";
+export const mapObjective = "Land the hygiene-ranking items, one reviewed PR per item. Preserve recorded decisions and operator ownership while making long real-world titles, dependency relations, usage accounting, and existing review gates readable on both phone and desktop screens.";
 export function mapQaFixture(): MapResponse {
  const mandate=(id:string,status:string,project:string):MandateItem=>({id,status,projects:[project],objective:mapObjective,expiry:status==="expired" || status==="paused" ? "2026-09-25T00:00:00Z" : "2026-09-27T00:00:00Z",pause_reason:null,ask_on:["risk:high"],spend_cap:{usd:100,tokens:10000000},job_cap:12,dispatch_parallelism:4,spend:{usd:38.1,tokens:2460000,jobs:6,inFlight:2},job_ids:[]});
  const items=[mandate("md-old","expired","aaa-old"),mandate("md-paused","paused","aaa-paused"),mandate("md-live","active","pi-command-post-system"),mandate("md-revoked","revoked","aaa-old"),{...mandate("md-closed","closed","pi-command-post-system"),closed_at:"2026-09-26T11:03:00Z"}];

@@ -137,7 +137,7 @@ test("conflicting and duplicate reserved labels refuse with no write or receipt;
 test("list marks legacy label faults and preserves search and narrow repair", async (t) => {
 	const { ports: p, scratch } = ports(t);
 	const good = await scratch.ledger.create({ title: "good", project: "demo", delivery: "local" });
-	const bad = { ...good, id: "cp-legacy", title: "legacy", external_ref: "br show old --json", labels: [...good.labels, "delivery:board"] };
+	const bad = { ...good, id: "cp-legacy", title: "legacy", external_ref: "external-tool show old --json", labels: [...good.labels, "delivery:board"] };
 	const doc = scratch.document();
 	doc.jobs.unshift(bad);
 	writeFileSync(scratch.ledger.file, JSON.stringify(doc));
@@ -233,7 +233,7 @@ test("intake: three-item list with one dep; re-run creates nothing", async (t) =
 	const two = (await runJobAction({ action: "create", title: "two", project: "demo", delivery: "local", kind: "research" }, p)).details.job as { id: string };
 	const three = (
 		await runJobAction(
-			{ action: "create", title: "three", project: "demo", delivery: "pr", kind: "ship", external_ref: "br show cp-nz95 --json" },
+			{ action: "create", title: "three", project: "demo", delivery: "pr", kind: "ship", external_ref: "external-tool show cp-nz95 --json" },
 			p,
 		)
 	).details.job as { id: string; external_ref?: string };
@@ -244,13 +244,13 @@ test("intake: three-item list with one dep; re-run creates nothing", async (t) =
 		listed.find((j) => j.id === three.id)?.blocked_by,
 		[one.id],
 	);
-	assert.equal(three.external_ref, "br show cp-nz95 --json");
+	assert.equal(three.external_ref, "external-tool show cp-nz95 --json");
 	assert.deepEqual(created, [one.id, two.id, three.id]);
 
 	const againOne = await runJobAction({ action: "create", title: "One", project: "demo", delivery: "pr", kind: "ship" }, p);
 	const againTwo = await runJobAction({ action: "create", title: "two", project: "demo", delivery: "local", kind: "research" }, p);
 	const againThree = await runJobAction(
-		{ action: "create", title: "other title", project: "demo", delivery: "pr", external_ref: "br show cp-nz95 --json" },
+		{ action: "create", title: "other title", project: "demo", delivery: "pr", external_ref: "external-tool show cp-nz95 --json" },
 		p,
 	);
 	assert.equal((againOne.details.job as { id: string }).id, one.id);
@@ -282,12 +282,12 @@ test("cp_job script create dedupes only identical actions and shows the declarat
 test("cp_job create stores a non-url external_ref and show prints it as the ref line", async (t) => {
 	const { ports: p } = ports(t);
 	const created = await runJobAction(
-		{ action: "create", title: "port the thing", project: "demo", delivery: "pr", external_ref: "br show cp-nz95 --json" },
+		{ action: "create", title: "port the thing", project: "demo", delivery: "pr", external_ref: "external-tool show cp-nz95 --json" },
 		p,
 	);
 	const id = (created.details.job as { id: string }).id;
 	const shown = await runJobAction({ action: "show", job_id: id }, p);
-	assert.match(shown.text, /ref:\s+br show cp-nz95 --json/);
+	assert.match(shown.text, /ref:\s+external-tool show cp-nz95 --json/);
 	assert.ok(!shown.text.includes("priority:"), "the detail no longer has a priority line");
 });
 
@@ -441,7 +441,7 @@ test("registerJobs wires cp_job and /cp-jobs to the same ledger", async (t) => {
 
 	await commands.get("cp-jobs")!.handler("", ctx);
 	assert.match(emitted[0] ?? "", /via tool/, "the command reads what the tool wrote");
-	await commands.get("cp-jobs")!.handler("import-beads", ctx);
+	await commands.get("cp-jobs")!.handler("import-tracker", ctx);
 	assert.match(emitted[1] ?? "", /usage: \/cp-jobs/, "the retired importer is an unknown subcommand");
 });
 

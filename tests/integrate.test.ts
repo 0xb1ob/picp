@@ -82,14 +82,14 @@ import { formatContinuationNotice, HeldContinuation } from "../src/held-continua
 import { deadlineClock, writeWindowPass } from "./harness/review-window.ts";
 import { answerActions, type FakeRun } from "./harness/actions-api.ts";
 import { readReviewMergeWindow } from "../src/review-merge-window.ts";
-const BR = "cp-int1";
+const JOB_ID = "cp-int1";
 const PR_URL = "https://github.com/o/r/pull/61";
 const HEAD_A = "aaaaaaaaaaaa1111111111111111111111111111";
 const HEAD_B = "bbbbbbbbbbbb2222222222222222222222222222";
 const MERGE_COMMIT = "cccccccccccc3333333333333333333333333333";
 const BASE_TIP = "dddddddddddd4444444444444444444444444444";
 const FORK_POINT = "eeeeeeeeeeee5555555555555555555555555555";
-const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: `PR for ${BR}`, url: PR_URL };
+const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: `PR for ${JOB_ID}`, url: PR_URL };
 
 function writeReviewPass(
 	home: string,
@@ -106,7 +106,7 @@ function writeReviewPass(
 	const verdictKind = extra.verdict ?? "pass";
 	const verdict = {
 		schema_version: SCHEMA_VERSION,
-		job_id: BR,
+		job_id: JOB_ID,
 		attempt,
 		verdict: verdictKind,
 		cause: extra.cause ?? (verdictKind === "revise" || verdictKind === "escalate" ? "policy" : null),
@@ -120,8 +120,8 @@ function writeReviewPass(
 	const parsed = validate<DiffVerdict>(DiffVerdictSchema, verdict);
 	assert.ok(parsed.ok, parsed.ok ? "" : parsed.errors.join("; "));
 	const file = extra.equivalentTo
-		? join(home, paths.reviewEquivalenceFile(BR, head))
-		: join(home, paths.reviewFile(BR, attempt));
+		? join(home, paths.reviewEquivalenceFile(JOB_ID, head))
+		: join(home, paths.reviewFile(JOB_ID, attempt));
 	mkdirSync(join(file, ".."), { recursive: true });
 	writeFileSync(file, JSON.stringify(verdict));
 }
@@ -265,7 +265,7 @@ function openPr(): PrJson {
 		state: "OPEN",
 		mergeable: "MERGEABLE",
 		mergeStateStatus: "CLEAN",
-		headRefName: BR,
+		headRefName: JOB_ID,
 		headRefOid: HEAD_A,
 		baseRefName: "main",
 	};
@@ -356,10 +356,10 @@ function runnerFor(world: World, calls: Calls, worktree?: string): CommandRunner
 		if (bin === "git") {
 			if (args[0] === "fetch") {
 				// `git fetch origin main` in the clone is the retention policy's own
-				// (cp-wcy5); `--prune` is the freshness check's and `<BR>` is the sync
+				// (cp-wcy5); `--prune` is the freshness check's and `<JOB_ID>` is the sync
 				// step's, and neither is what `baseFetchFails` is about.
 				const target = args[args.length - 1] ?? "";
-				if (world.baseFetchFails && cwd !== worktree && target !== BR && target !== "--prune") {
+				if (world.baseFetchFails && cwd !== worktree && target !== JOB_ID && target !== "--prune") {
 					return { status: 128, stdout: "", stderr: world.baseFetchFails };
 				}
 				return { status: 0, stdout: "", stderr: "" };
@@ -429,25 +429,25 @@ function runnerFor(world: World, calls: Calls, worktree?: string): CommandRunner
 				if (worktree !== undefined && cwd === worktree) {
 					// The proof asks origin for the *base* tip from the same place, and it
 					// has to be answerable (or unanswerable) on its own.
-					if (args[args.length - 1] !== BR) {
+					if (args[args.length - 1] !== JOB_ID) {
 						if (world.syncBaseLsRemoteFails) return { status: 128, stdout: "", stderr: world.syncBaseLsRemoteFails };
 						const base = world.syncBaseSha ?? BASE_TIP;
 						return { status: 0, stdout: base.length > 0 ? `${base}\trefs/heads/main\n` : "", stderr: "" };
 					}
 					if (world.syncLsRemoteFails) return { status: 128, stdout: "", stderr: world.syncLsRemoteFails };
 					const sha = world.syncRemoteSha ?? HEAD_A;
-					return { status: 0, stdout: sha.length > 0 ? `${sha}\trefs/heads/${BR}\n` : "", stderr: "" };
+					return { status: 0, stdout: sha.length > 0 ? `${sha}\trefs/heads/${JOB_ID}\n` : "", stderr: "" };
 				}
 				// In the clone: the head branch (`#branchOnRemote`), or the base tip the
 				// retention policy proves reachability against.
-				if (args[args.length - 1] !== BR) {
+				if (args[args.length - 1] !== JOB_ID) {
 					if (world.pruneBaseLsRemoteFails) return { status: 128, stdout: "", stderr: world.pruneBaseLsRemoteFails };
 					const base = world.pruneBaseSha ?? BASE_TIP;
 					return { status: 0, stdout: base.length > 0 ? `${base}\trefs/heads/main\n` : "", stderr: "" };
 				}
 				return {
 					status: 0,
-					stdout: world.branchOnRemote ? `${HEAD_A}\trefs/heads/${BR}\n` : "",
+					stdout: world.branchOnRemote ? `${HEAD_A}\trefs/heads/${JOB_ID}\n` : "",
 					stderr: "",
 				};
 			}
@@ -534,10 +534,10 @@ async function benchOf(
 	const sent: Array<{ jobId: string; message: string }> = [];
 	const closed: Array<{ id: string; reason: string }> = [];
 	const teardowns: string[] = [];
-	const worktree = join(home.path, "worktrees", BR);
+	const worktree = join(home.path, "worktrees", JOB_ID);
 
 	await fleet.add({
-		job_id: BR,
+		job_id: JOB_ID,
 		project: "demo",
 		kind: "ship",
 		delivery: "pr",
@@ -554,7 +554,7 @@ async function benchOf(
 			started_at: isoTimestamp(),
 		},
 		worktree,
-		branch: BR,
+		branch: JOB_ID,
 		dispatched_at: isoTimestamp(),
 		usage: EMPTY_USAGE,
 		receipts: [PR_RECEIPT],
@@ -571,7 +571,7 @@ async function benchOf(
 				torn_down: true,
 				reason: "pushed",
 				worktree,
-				branch: BR,
+				branch: JOB_ID,
 				lease_returned: true,
 				artifacts_removed: false,
 			} satisfies TeardownResult;
@@ -598,8 +598,8 @@ async function benchOf(
 		approve(head: string) {
 			const store = new CheckpointStore(home.path, { kind: "merge" });
 			const scope = head.slice(0, 12);
-			store.request({ jobId: BR, scope, question: `Merge ${PR_URL} for ${BR} at ${scope}?` });
-			store.decide(BR, true, { by: "operator command", scope });
+			store.request({ jobId: JOB_ID, scope, question: `Merge ${PR_URL} for ${JOB_ID} at ${scope}?` });
+			store.decide(JOB_ID, true, { by: "operator command", scope });
 		},
 		integrator(worldPatch = {}, options = {}) {
 			const world = defaultWorld(worldPatch);
@@ -644,25 +644,25 @@ for (const fallback of [false, true]) {
 	test(`30-second review minimum and hold race: ${fallback ? "approved human checkpoint" : "repository permission"}`, async (t) => {
 		const b = await benchOf(t);
 		const clock = deadlineClock("2026-10-07T10:00:00Z");
-		writeWindowPass(b.home, BR, HEAD_A, clock.now().toISOString());
+		writeWindowPass(b.home, JOB_ID, HEAD_A, clock.now().toISOString());
 		if (fallback) b.approve(HEAD_A);
 		const world = fallback ? { pr: { ...openPr(), mergeStateStatus: undefined } } : {};
 		const integrator = b.integrator(world, { now: clock.now });
 		clock.tick(Date.parse("2026-10-07T10:00:30Z") - 1);
-		const waiting = await integrator.advance({ jobId: BR });
+		const waiting = await integrator.advance({ jobId: JOB_ID });
 		assert.equal(waiting.next, "wait");
 		assert.equal(waiting.review_resume_at, "2026-10-07T10:00:30.000Z");
 		assert.equal(count(b, "gh pr merge"), 0);
 		const holds = new IntegrationHolds(b.home);
-		holds.hold(BR, "pause after verdict");
+		holds.hold(JOB_ID, "pause after verdict");
 		clock.tick(clock.now().getTime() + 1);
-		const held = await integrator.advance({ jobId: BR });
+		const held = await integrator.advance({ jobId: JOB_ID });
 		assert.equal(held.next, "wait");
 		assert.match(held.reason, /hold/);
 		assert.equal(held.review_resume_at, undefined);
 		assert.equal(count(b, "gh pr merge"), 0);
-		holds.release(BR);
-		const merged = await integrator.advance({ jobId: BR });
+		holds.release(JOB_ID);
+		const merged = await integrator.advance({ jobId: JOB_ID });
 		assert.equal(merged.next, "advance");
 		assert.equal(merged.record.merge_authority?.kind, fallback ? "human_checkpoint" : "repo_derived");
 		assert.equal(count(b, "gh pr merge"), 1);
@@ -672,7 +672,7 @@ for (const fallback of [false, true]) {
 		for (const change of ["hold", "unreadable_hold", "head", "ci", "permission", "none"]) {
 			const b = await benchOf(t);
 			const clock = deadlineClock("2026-10-07T10:00:00Z");
-			writeWindowPass(b.home, BR, HEAD_A, clock.now().toISOString());
+			writeWindowPass(b.home, JOB_ID, HEAD_A, clock.now().toISOString());
 			if (fallback) b.approve(HEAD_A);
 			const world = defaultWorld(fallback ? { pr: { ...openPr(), mergeStateStatus: undefined } } : {});
 			const integrator = b.integrator(world, { now: clock.now, run: runnerFor(world, b.calls, b.worktree) });
@@ -686,15 +686,15 @@ for (const fallback of [false, true]) {
 				reviewWindow: (jobId, head) => readReviewMergeWindow(b.home, jobId, head, clock.now()),
 				now: clock.now, schedule: clock.schedule, notify: () => {} });
 			t.after(() => continuation.stop());
-			assert.equal((await continuation.trigger({ jobId: BR, event: "verdict", head: HEAD_A })).action, "wait");
+			assert.equal((await continuation.trigger({ jobId: JOB_ID, event: "verdict", head: HEAD_A })).action, "wait");
 			assert.equal(count(b, "gh pr view"), 0, "verdict handback only reads local evidence");
-			if (change === "hold") new IntegrationHolds(b.home).hold(BR, "during window");
-			if (change === "unreadable_hold") { const file = new IntegrationHolds(b.home).file(BR); mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, "{"); }
+			if (change === "hold") new IntegrationHolds(b.home).hold(JOB_ID, "during window");
+			if (change === "unreadable_hold") { const file = new IntegrationHolds(b.home).file(JOB_ID); mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, "{"); }
 			if (change === "head") world.pr = { ...openPr(), headRefOid: HEAD_B };
 			if (change === "ci") world.runs = [{ status: "in_progress", conclusion: null, headSha: HEAD_A }];
 			if (change === "permission") world.pr = { ...openPr(), mergeStateStatus: "BLOCKED" };
 			clock.tick(Date.parse("2026-10-07T10:00:30Z"));
-			await continuation.serialize(BR, async () => {});
+			await continuation.serialize(JOB_ID, async () => {});
 			assert.equal(count(b, "gh pr merge"), change === "none" ? 1 : 0, change);
 			assert.equal(clock.tasks.size, 0, "no timer retries a stopped/waiting result");
 		}
@@ -721,7 +721,7 @@ function mergedPr(head = HEAD_A): PrJson {
 		mergeable: "MERGEABLE",
 		mergedAt: "2026-09-01T10:00:00Z",
 		mergeCommit: { oid: MERGE_COMMIT },
-		headRefName: BR,
+		headRefName: JOB_ID,
 		headRefOid: head,
 		baseRefName: "main",
 	};
@@ -743,13 +743,13 @@ function isActionsRead(args: readonly string[]): boolean {
 
 test("a durable operator hold prevents a green, reviewed PR from merging, and still names its CI", async (t) => {
 	const b = await benchOf(t);
-	const file = join(b.home, paths.runDir(BR), "integration-hold.json");
+	const file = join(b.home, paths.runDir(JOB_ID), "integration-hold.json");
 	mkdirSync(join(file, ".."), { recursive: true });
-	writeFileSync(file, JSON.stringify({ job_id: BR, reason: "browser QA", held_at: isoTimestamp() }));
-	const result = await b.integrator().advance({ jobId: BR });
+	writeFileSync(file, JSON.stringify({ job_id: JOB_ID, reason: "browser QA", held_at: isoTimestamp() }));
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "wait");
 	assert.equal(result.step, "merge");
-	assert.match(result.reason, new RegExp(`^${BR}: CI green on aaaaaaaaaaaa; integration held: browser QA`));
+	assert.match(result.reason, new RegExp(`^${JOB_ID}: CI green on aaaaaaaaaaaa; integration held: browser QA`));
 	assert.ok(result.facts.includes(`gh: ${PR_URL} is OPEN at aaaaaaaaaaaa`), result.facts.join("\n"));
 	assert.ok(result.facts.some((fact) => /^ci: green — /.test(fact)), result.facts.join("\n"));
 	assert.equal(result.head_sha, HEAD_A);
@@ -762,28 +762,28 @@ test("a durable operator hold prevents a green, reviewed PR from merging, and st
 test("integration hold persists across instances; explicit release resumes with fresh gates", async (t) => {
 	const b = await benchOf(t);
 	const holds = new IntegrationHolds(b.home);
-	holds.hold(BR, "  browser QA  ");
-	assert.equal(new IntegrationHolds(b.home).get(BR)?.reason, "browser QA");
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
+	holds.hold(JOB_ID, "  browser QA  ");
+	assert.equal(new IntegrationHolds(b.home).get(JOB_ID)?.reason, "browser QA");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "wait");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "wait");
 	assert.equal(b.calls.length, 6);
 	onlyHeldReads(b.calls);
-	new IntegrationHolds(b.home).release(BR);
-	holds.release(BR); // Releasing twice is harmless.
-	assert.equal(holds.get(BR), undefined);
-	const pending = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A }] }).advance({ jobId: BR });
+	new IntegrationHolds(b.home).release(JOB_ID);
+	holds.release(JOB_ID); // Releasing twice is harmless.
+	assert.equal(holds.get(JOB_ID), undefined);
+	const pending = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A }] }).advance({ jobId: JOB_ID });
 	assert.equal(pending.next, "wait");
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
 test("a held red head uses one sourced CI repair while integration remains paused", async (t) => {
 	const b = await benchOf(t);
 	const holds = new IntegrationHolds(b.home);
-	const hold = holds.hold(BR, "browser QA");
+	const hold = holds.hold(JOB_ID, "browser QA");
 	const runs = [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 37458827243, attempt: 1 }];
-	const result = await b.integrator({ runs }, { infraRerun: async () => assert.fail("no infra rerun while held") }).advance({ jobId: BR });
+	const result = await b.integrator({ runs }, { infraRerun: async () => assert.fail("no infra rerun while held") }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "resolve");
 	assert.equal(result.step, "ci");
 	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
@@ -796,9 +796,9 @@ test("a held red head uses one sourced CI repair while integration remains pause
 	assert.match(b.sent[0]!.message, /integration hold remains active/);
 	assert.equal(b.calls.length, 4, "PR, Actions runs + jobs, then confirming PR read only");
 	onlyHeldReads(b.calls);
-	assert.deepEqual(holds.get(BR), hold);
+	assert.deepEqual(holds.get(JOB_ID), hold);
 	assert.equal(b.teardowns.length + b.closed.length, 0);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
 	assert.equal(b.awaiting().list().length, 0);
 });
 
@@ -822,21 +822,21 @@ test("held repair requires an open, proven branch and current-head failed CI", a
 	for (const world of cases) {
 		const b = await benchOf(t);
 		const holds = new IntegrationHolds(b.home);
-		const hold = holds.hold(BR, "QA");
-		const result = await b.integrator(world).advance({ jobId: BR });
+		const hold = holds.hold(JOB_ID, "QA");
+		const result = await b.integrator(world).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait", JSON.stringify(world));
 		assert.equal(b.sent.length + b.teardowns.length + b.closed.length, 0);
-		assert.deepEqual(holds.get(BR), hold);
+		assert.deepEqual(holds.get(JOB_ID), hold);
 		onlyHeldReads(b.calls);
 	}
 	for (const stdout of ["{", "null", "{}", '[{"conclusion":"failure"}]']) {
 		const b = await benchOf(t);
-		new IntegrationHolds(b.home).hold(BR, "QA");
+		new IntegrationHolds(b.home).hold(JOB_ID, "QA");
 		const run = runnerFor(defaultWorld(heldRed), b.calls);
 		const result = await b.integrator({}, { run: async (cwd, bin, args) => {
 			const answer = await run(cwd, bin, args);
 			return isActionsRead(args) ? { ...answer, stdout } : answer;
-		} }).advance({ jobId: BR });
+		} }).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait", stdout);
 		assert.equal(b.sent.length, 0);
 		onlyHeldReads(b.calls);
@@ -846,20 +846,20 @@ test("held repair requires an open, proven branch and current-head failed CI", a
 test("held repair refuses blocked/unreadable reports and unfinished worktree operations", async (t) => {
 	for (const hazard of ["blocked", "unreadable", "rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"]) {
 		const b = await benchOf(t);
-		new IntegrationHolds(b.home).hold(BR, "QA");
+		new IntegrationHolds(b.home).hold(JOB_ID, "QA");
 		if (hazard === "blocked") writeBlockedEnvelope(b.home, HEAD_A);
-		else if (hazard === "unreadable") writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
+		else if (hazard === "unreadable") writeFileSync(join(b.home, paths.envelopeFile(JOB_ID)), "{");
 		else {
 			const gitDir = join(b.worktree, "linked-git");
 			mkdirSync(gitDir, { recursive: true });
 			writeFileSync(join(b.worktree, ".git"), `gitdir: ${gitDir}\n`);
 			writeFileSync(join(gitDir, hazard), "in progress");
 		}
-		const result = await b.integrator(heldRed).advance({ jobId: BR });
+		const result = await b.integrator(heldRed).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "surface", hazard);
 		assert.equal(b.sent.length, 0);
 		assert.equal(result.record.resolve_attempts, 0);
-		assert.ok(new IntegrationHolds(b.home).get(BR));
+		assert.ok(new IntegrationHolds(b.home).get(JOB_ID));
 		onlyHeldReads(b.calls);
 	}
 });
@@ -867,11 +867,11 @@ test("held repair refuses blocked/unreadable reports and unfinished worktree ope
 test("held repair waits for active, failed, terminal or unreported fleet records", async (t) => {
 	for (const phase of ["waiting", "launching", "failed", "done", "unreported", "held"] as const) {
 		const b = await benchOf(t);
-		new IntegrationHolds(b.home).hold(BR, "QA");
-		const record = b.fleet.require(BR);
+		new IntegrationHolds(b.home).hold(JOB_ID, "QA");
+		const record = b.fleet.require(JOB_ID);
 		const changed = { ...record, phase, ...(phase === "held" ? { reported_at: undefined } : {}) };
 		const mock = t.mock.method(b.fleet, "get", () => changed);
-		const result = await b.integrator(heldRed).advance({ jobId: BR });
+		const result = await b.integrator(heldRed).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait", phase);
 		assert.equal(b.sent.length, 0);
 		assert.equal(result.record.resolve_attempts, 0);
@@ -885,7 +885,7 @@ test("held repair revalidates after paused CI and confirming PR reads", async (t
 		for (const change of ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "unreadable-report", "waiting", "generation", "hazard", "hold-reason", "closed", "branch", "unreadable-pr"]) {
 			const b = await benchOf(t);
 			const holds = new IntegrationHolds(b.home);
-			holds.hold(BR, "QA");
+			holds.hold(JOB_ID, "QA");
 			const world = defaultWorld(heldRed);
 			const run = runnerFor(world, b.calls);
 			let enter!: () => void;
@@ -901,18 +901,18 @@ test("held repair revalidates after paused CI and confirming PR reads", async (t
 				}
 				return run(cwd, bin, args);
 			} });
-			const advancing = integration.advance({ jobId: BR });
+			const advancing = integration.advance({ jobId: JOB_ID });
 			await entered;
 			try {
 				if (change === "drain" || change === "invalid-drain") writeFileSync(drainFile(b.home), change === "drain" ? JSON.stringify({ started_at: isoTimestamp(), jobs: [] }) : "{");
-				if (change === "invalid-hold") writeFileSync(holds.file(BR), "{");
-				if (change === "release") holds.release(BR);
+				if (change === "invalid-hold") writeFileSync(holds.file(JOB_ID), "{");
+				if (change === "release") holds.release(JOB_ID);
 				if (change === "blocked") writeBlockedEnvelope(b.home, HEAD_A);
-				if (change === "unreadable-report") writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
-				if (change === "waiting") await b.fleet.patch(BR, { phase: "waiting" });
-				if (change === "generation") await b.fleet.patch(BR, { supersessions: 1 });
+				if (change === "unreadable-report") writeFileSync(join(b.home, paths.envelopeFile(JOB_ID)), "{");
+				if (change === "waiting") await b.fleet.patch(JOB_ID, { phase: "waiting" });
+				if (change === "generation") await b.fleet.patch(JOB_ID, { supersessions: 1 });
 				if (change === "hazard") mkdirSync(join(b.worktree, ".git", "rebase-merge"), { recursive: true });
-				if (change === "hold-reason") holds.hold(BR, "updated QA reason");
+				if (change === "hold-reason") holds.hold(JOB_ID, "updated QA reason");
 				if (change === "closed") world.pr = { ...openPr(), state: "CLOSED" };
 				if (change === "branch") world.pr = { ...openPr(), headRefName: "other" };
 				if (change === "unreadable-pr") world.pr = { fail: "HTTP 403" };
@@ -930,40 +930,40 @@ test("held repair revalidates after paused CI and confirming PR reads", async (t
 test("held repair uses the cumulative allowance across heads, green reads and restarts", async (t) => {
 	const b = await benchOf(t);
 	const holds = new IntegrationHolds(b.home);
-	holds.hold(BR, "QA");
-	assert.equal((await b.integrator(heldRed).advance({ jobId: BR })).next, "resolve");
-	const green = await b.integrator().advance({ jobId: BR });
+	holds.hold(JOB_ID, "QA");
+	assert.equal((await b.integrator(heldRed).advance({ jobId: JOB_ID })).next, "resolve");
+	const green = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(green.next, "wait");
 	assert.equal(green.record.resolve_attempts, 1);
 	for (const head of [HEAD_A, HEAD_B]) {
-		const red = await b.integrator(onHead(head, "failure")).advance({ jobId: BR });
+		const red = await b.integrator(onHead(head, "failure")).advance({ jobId: JOB_ID });
 		assert.equal(red.next, "surface");
 		assert.equal(red.record.resolve_attempts, 1);
 	}
 	assert.equal(b.sent.length, 1);
-	assert.ok(holds.get(BR));
+	assert.ok(holds.get(JOB_ID));
 	onlyHeldReads(b.calls);
 });
 
 test("held repair surfaces sender refusal without spending an attempt or removing the hold", async (t) => {
 	const b = await benchOf(t);
 	const holds = new IntegrationHolds(b.home);
-	const hold = holds.hold(BR, "QA");
-	const result = await b.integrator(heldRed, { send: async () => { throw new Error("repair permission refused"); } }).advance({ jobId: BR });
+	const hold = holds.hold(JOB_ID, "QA");
+	const result = await b.integrator(heldRed, { send: async () => { throw new Error("repair permission refused"); } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.equal(result.resolve_error, "repair permission refused");
 	assert.equal(result.record.resolve_attempts, 0);
-	assert.deepEqual(holds.get(BR), hold);
+	assert.deepEqual(holds.get(JOB_ID), hold);
 	onlyHeldReads(b.calls);
 });
 
 test("picp-wzq: a drain (or an unreadable drain file) under a hold starts no process and says CI was not read", async (t) => {
 	for (const body of [JSON.stringify({ started_at: isoTimestamp(), jobs: [] }), "{"]) {
 		const b = await benchOf(t);
-		new IntegrationHolds(b.home).hold(BR, "browser QA");
+		new IntegrationHolds(b.home).hold(JOB_ID, "browser QA");
 		mkdirSync(join(drainFile(b.home), ".."), { recursive: true });
 		writeFileSync(drainFile(b.home), body);
-		const result = await b.integrator().advance({ jobId: BR });
+		const result = await b.integrator().advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait");
 		assert.deepEqual(b.calls, []);
 		assert.equal(result.facts.filter((fact) => fact.startsWith("ci: not read — ")).length, 1, result.facts.join("\n"));
@@ -981,11 +981,11 @@ for (const permission of ["CLEAN", undefined]) {
 		const integration = b.integrator({}, {
 			run: async (cwd, bin, args, options) => {
 				const result = await run(cwd, bin, args, options);
-				if (bin === "gh" && isActionsRead(args)) holds.hold(BR, "QA requested during CI read");
+				if (bin === "gh" && isActionsRead(args)) holds.hold(JOB_ID, "QA requested during CI read");
 				return result;
 			},
 		});
-		const result = await integration.advance({ jobId: BR });
+		const result = await integration.advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait");
 		assert.match(result.reason, /QA requested during CI read/);
 		// picp-wzq: the pre-merge hold keeps what this step already read.
@@ -993,8 +993,8 @@ for (const permission of ["CLEAN", undefined]) {
 		assert.equal(result.head_sha, HEAD_A);
 		assert.equal(result.pr_url, PR_URL);
 		assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
-		holds.release(BR);
-		const resumed = await b.integrator({ pr: world.pr }).advance({ jobId: BR });
+		holds.release(JOB_ID);
+		const resumed = await b.integrator({ pr: world.pr }).advance({ jobId: JOB_ID });
 		assert.equal(resumed.next, "advance");
 		assert.equal(resumed.record.merge_authority?.kind, permission === "CLEAN" ? "repo_derived" : "human_checkpoint");
 	});
@@ -1004,16 +1004,16 @@ test("invalid or unreadable integration holds fail closed and can be explicitly 
 	const b = await benchOf(t);
 	const holds = new IntegrationHolds(b.home);
 	for (const value of ["{", "{}", JSON.stringify({ job_id: "other-job", reason: "QA", held_at: isoTimestamp() })]) {
-		holds.hold(BR, "QA");
-		writeFileSync(holds.file(BR), value);
-		const result = await b.integrator().advance({ jobId: BR });
+		holds.hold(JOB_ID, "QA");
+		writeFileSync(holds.file(JOB_ID), value);
+		const result = await b.integrator().advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait");
 		assert.match(result.reason, /invalid integration hold|integration hold unreadable/);
 		assert.deepEqual(b.calls, []);
 		assert.ok(result.facts.includes("ci: not read — the hold could not be read"), result.facts.join("\n"));
-		holds.release(BR);
+		holds.release(JOB_ID);
 	}
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "advance");
 });
 
 test("integration holds reject missing jobs, unsafe ids, non-PR jobs and empty reasons", async (t) => {
@@ -1022,15 +1022,15 @@ test("integration holds reject missing jobs, unsafe ids, non-PR jobs and empty r
 	assert.throws(() => holds.hold("missing", "QA"), /no fleet record/);
 	assert.throws(() => holds.release("missing"), /no fleet record/);
 	assert.throws(() => holds.hold("../escape", "QA"));
-	assert.throws(() => holds.hold(BR, "  "), /reason/);
-	assert.throws(() => holds.hold(BR, "x".repeat(2001)), /reason/);
-	assert.equal(holds.get(BR), undefined);
-	await b.fleet.patch(BR, { delivery: "local" });
-	assert.throws(() => holds.hold(BR, "QA"), /delivery:pr ship job/);
-	assert.throws(() => holds.release(BR), /delivery:pr ship job/);
+	assert.throws(() => holds.hold(JOB_ID, "  "), /reason/);
+	assert.throws(() => holds.hold(JOB_ID, "x".repeat(2001)), /reason/);
+	assert.equal(holds.get(JOB_ID), undefined);
+	await b.fleet.patch(JOB_ID, { delivery: "local" });
+	assert.throws(() => holds.hold(JOB_ID, "QA"), /delivery:pr ship job/);
+	assert.throws(() => holds.release(JOB_ID), /delivery:pr ship job/);
 });
 
-const MAIN_RED_REASON = `${BR}: main is red since ${HEAD_B.slice(0, 12)}: structure; rebase onto origin/main and pass CI to merge`;
+const MAIN_RED_REASON = `${JOB_ID}: main is red since ${HEAD_B.slice(0, 12)}: structure; rebase onto origin/main and pass CI to merge`;
 /** cp-oc0m: an active mandate covers "demo" and this machine's gh login is "me". */
 const OWN_SCOPE = { mainCiScope: async () => ({ enforce: true as const, login: "me" }) };
 
@@ -1039,18 +1039,18 @@ test("k52: a latched-red main holds the merge unless the head contains origin/ma
 	const store = new MainCiStore({ home: b.home });
 	store.setRed("demo", HEAD_B, { failing: "structure", login: "me" });
 	for (const world of [{ ancestor: false }, { ancestor: "unreadable" as const }, { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }, { runs: [] }]) {
-		const result = await b.integrator(world, OWN_SCOPE).advance({ jobId: BR });
+		const result = await b.integrator(world, OWN_SCOPE).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "wait", JSON.stringify(world));
 		assert.equal(result.reason, MAIN_RED_REASON);
 	}
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
 	// No merge-authorization fallback around the latch: the workflows probe that precedes it never ran.
 	assert.equal(b.calls.some((call) => call.includes("actions/workflows")), false);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
 	// Fix-forward: origin/main is an ancestor of the branch and CI is green on the pushed head.
-	const fix = await b.integrator({}, OWN_SCOPE).advance({ jobId: BR });
+	const fix = await b.integrator({}, OWN_SCOPE).advance({ jobId: JOB_ID });
 	assert.notEqual(fix.next, "wait");
-	assert.ok(b.calls.includes(`git merge-base --is-ancestor origin/main origin/${BR}`));
+	assert.ok(b.calls.includes(`git merge-base --is-ancestor origin/main origin/${JOB_ID}`));
 	assert.ok(fix.facts.some((fact) => /fix-forward/.test(fact)));
 });
 
@@ -1058,12 +1058,12 @@ test("k52: another project's latch, a corrupt main-ci.json, and a cleared latch 
 	const b = await benchOf(t);
 	const store = new MainCiStore({ home: b.home });
 	store.setRed("some-other-project", HEAD_B, { login: "me" });
-	assert.notEqual((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR })).next, "wait");
+	assert.notEqual((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: JOB_ID })).next, "wait");
 	const c = await benchOf(t);
 	const corruptStore = new MainCiStore({ home: c.home });
 	corruptStore.setRed("demo", HEAD_B, { login: "me" });
 	writeFileSync(corruptStore.file, "{not json");
-	const corrupt = await c.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR });
+	const corrupt = await c.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: JOB_ID });
 	assert.notEqual(corrupt.next, "wait");
 	assert.ok(corrupt.facts.some((fact) => fact.includes("main-ci.json unreadable")));
 });
@@ -1073,9 +1073,9 @@ test("k52: setRed twice then clear resumes the ordinary flow", async (t) => {
 	const store = new MainCiStore({ home: b.home });
 	store.setRed("demo", HEAD_B, { failing: "structure", login: "me" });
 	store.setRed("demo", HEAD_A, { failing: "other", login: "me" });
-	assert.equal((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: BR })).reason, MAIN_RED_REASON);
+	assert.equal((await b.integrator({ ancestor: false }, OWN_SCOPE).advance({ jobId: JOB_ID })).reason, MAIN_RED_REASON);
 	store.clear("demo");
-	assert.equal((await b.integrator({}, OWN_SCOPE).advance({ jobId: BR })).next, "advance");
+	assert.equal((await b.integrator({}, OWN_SCOPE).advance({ jobId: JOB_ID })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
@@ -1089,7 +1089,7 @@ test("k52/cp-oc0m: no active mandate, an unreadable login, a foreign row or no s
 	for (const [label, mainCiScope, login] of scopes) {
 		const b = await benchOf(t);
 		new MainCiStore({ home: b.home }).setRed("demo", HEAD_B, { failing: "structure", login });
-		const result = await b.integrator({ ancestor: false }, mainCiScope ? { mainCiScope } : {}).advance({ jobId: BR });
+		const result = await b.integrator({ ancestor: false }, mainCiScope ? { mainCiScope } : {}).advance({ jobId: JOB_ID });
 		assert.notEqual(result.next, "wait", label);
 		assert.ok(result.facts.some((fact) => /^main-ci: .*not blocking/.test(fact)), label);
 		assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1, label);
@@ -1120,17 +1120,17 @@ test("operator bridge writes a hold without a running parent; parent status sees
 	const bridge = tools.get("cp_parent")!;
 	const missing = await bridge.execute("missing", { action: "integration_hold" });
 	assert.equal(missing.isError, true);
-	const empty = await bridge.execute("empty", { action: "integration_hold", job_id: BR, reason: " " });
+	const empty = await bridge.execute("empty", { action: "integration_hold", job_id: JOB_ID, reason: " " });
 	assert.equal(empty.isError, true);
-	const held = await bridge.execute("hold", { action: "integration_hold", job_id: BR, reason: "operator browser QA" });
+	const held = await bridge.execute("hold", { action: "integration_hold", job_id: JOB_ID, reason: "operator browser QA" });
 	assert.notEqual(held.isError, true);
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "wait");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "wait");
 	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
 		commandPost: () => ({ home: b.home, integrator: b.integrator(), integrate: (request: { jobId: string }) => b.integrator().advance(request) }),
 		setLive: () => {}, refreshWidget: () => {},
 	} as never);
 	const parent = tools.get("cp_integrate")!;
-	const invoke = (params: Record<string, unknown>) => parent.execute("parent", { job_id: BR, ...params }, undefined, undefined, {});
+	const invoke = (params: Record<string, unknown>) => parent.execute("parent", { job_id: JOB_ID, ...params }, undefined, undefined, {});
 	const status = await invoke({ action: "status" });
 	assert.equal((status.details.hold as { reason: string }).reason, "operator browser QA");
 	// picp-wzq: status prints the record's facts (CI read while held) and the watcher's line; this fake post has no ciWatch.
@@ -1139,9 +1139,9 @@ test("operator bridge writes a hold without a running parent; parent status sees
 	assert.equal(status.details.ci_watch, null);
 	await invoke({ action: "release" });
 	await invoke({ action: "hold", reason: "parent QA" });
-	assert.equal(new IntegrationHolds(b.home).get(BR)?.reason, "parent QA");
+	assert.equal(new IntegrationHolds(b.home).get(JOB_ID)?.reason, "parent QA");
 	assert.equal((await invoke({ action: "advance" })).details.next, "wait");
-	await bridge.execute("release", { action: "integration_release", job_id: BR });
+	await bridge.execute("release", { action: "integration_release", job_id: JOB_ID });
 	assert.equal((await invoke({ action: "advance" })).details.next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
@@ -1151,7 +1151,7 @@ test("cp_integrate's done result carries no tracker advice for a legacy-linked j
 	const file = join(b.home, LAYOUT.data, "trackers.json");
 	mkdirSync(join(file, ".."), { recursive: true });
 	writeFileSync(file, "{ retired, malformed");
-	const job = { id: BR, title: "linked", status: "closed", labels: ["project:demo", "kind:ship", "delivery:pr"], tracker: { connection_id: "demo-x", item_id: "x-9" } };
+	const job = { id: JOB_ID, title: "linked", status: "closed", labels: ["project:demo", "kind:ship", "delivery:pr"], tracker: { connection_id: "demo-x", item_id: "x-9" } };
 	let calls = 0;
 	const tools = new Map<string, HoldTool>();
 	registerIntegrateTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never, {
@@ -1162,7 +1162,7 @@ test("cp_integrate's done result carries no tracker advice for a legacy-linked j
 		}),
 		setLive: () => {}, refreshWidget: () => {},
 	} as never);
-	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: BR }, undefined, undefined, {});
+	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: JOB_ID }, undefined, undefined, {});
 	assert.equal((await invoke()).details.next, "advance");
 	const done = await invoke();
 	assert.equal(done.details.next, "done");
@@ -1178,7 +1178,7 @@ test("cp_integrate says a review is already in flight on next: review, and leave
 		commandPost: () => ({ home: b.home, reviewRuns: { pending: () => pending }, integrate: (request: { jobId: string }) => b.integrator().advance(request) }),
 		setLive: () => {}, refreshWidget: () => {},
 	} as never);
-	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: BR }, undefined, undefined, {});
+	const invoke = () => tools.get("cp_integrate")!.execute("call", { job_id: JOB_ID }, undefined, undefined, {});
 	const idle = await invoke();
 	assert.equal(idle.details.next, "review");
 	assert.ok(!idle.content[0]!.text.includes("already in flight"), idle.content[0]!.text);
@@ -1193,7 +1193,7 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 
 	// Call 1: GitHub itself would take this merge unforced (mergeStateStatus
 	// CLEAN), and CI is green — merge directly, no checkpoint minted.
-	const merged = await b.integrator().advance({ jobId: BR });
+	const merged = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 	assert.equal(merged.next, "advance");
 	const mergeCall = b.calls.find((line) => line.startsWith("gh pr merge"));
@@ -1204,7 +1204,7 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 	assert.equal(binding.head, HEAD_A, "--match-head-commit must be followed by the verified head");
 	assert.ok(!mergeCall.includes("--delete-branch"), "deleting the head here is what forces `force` at teardown");
 	assert.equal(
-		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
+		b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }),
 		undefined,
 		"a permitted merge never mints a checkpoint",
 	);
@@ -1212,13 +1212,13 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 	assert.equal(merged.record.merge_authority?.merge_state_status, "CLEAN");
 
 	// Call 2: record → sync → teardown → delete head → close.
-	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.equal(done.step, "done");
 	assert.equal(done.next, "done");
 	assert.equal(done.merge?.recorded, true);
 	assert.equal(done.merge?.receipt.authority?.kind, "repo_derived");
 	assert.equal(b.teardowns.length, 1);
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${PR_URL}` }]);
 
 	// The three end-state facts the parent is left to check (§Decision 6).
 	assert.deepEqual(done.end_state, {
@@ -1228,14 +1228,14 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 		pr_receipt_status: "merged",
 		br_closed: true,
 	});
-	assert.ok(existsSync(join(b.home, paths.mergeFile(BR))));
+	assert.ok(existsSync(join(b.home, paths.mergeFile(JOB_ID))));
 
 	// Ordering: the head branch is deleted only after teardown ran.
 	const deleteIndex = b.calls.findIndex((line) => line.startsWith("git push origin --delete"));
 	assert.ok(deleteIndex >= 0, "the head branch was never deleted");
 	assert.equal(b.teardowns.length, 1);
 
-	const kinds = readRunEvents(b.home, BR).map((event) => event.type);
+	const kinds = readRunEvents(b.home, JOB_ID).map((event) => event.type);
 	assert.ok(kinds.includes("integration_advanced"));
 	assert.ok(kinds.includes("integration_permitted"), "the permission decision is journaled before the merge");
 
@@ -1245,22 +1245,22 @@ test("permitted (mergeStateStatus CLEAN) and green merges immediately, with no c
 
 test("#326: the after-merge port's line lands once in the integrate facts; no port leaves the tail unchanged", async (t) => {
 	const b = await benchOf(t);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const seen: string[] = [];
-	const done = await b.integrator({ pr: mergedPr() }, { afterRecorded: async (receipt) => (seen.push(receipt.job_id), "after-merge deploy cp-dep1 created") }).advance({ jobId: BR });
+	const done = await b.integrator({ pr: mergedPr() }, { afterRecorded: async (receipt) => (seen.push(receipt.job_id), "after-merge deploy cp-dep1 created") }).advance({ jobId: JOB_ID });
 	assert.equal(done.next, "done");
-	assert.deepEqual(seen, [BR]);
+	assert.deepEqual(seen, [JOB_ID]);
 	assert.equal(done.record.facts.filter((fact) => fact === "after-merge deploy cp-dep1 created").length, 1, done.record.facts.join("\n"));
 	const plain = await benchOf(t);
-	await plain.integrator().advance({ jobId: BR });
-	const untouched = await plain.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	await plain.integrator().advance({ jobId: JOB_ID });
+	const untouched = await plain.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.ok(!untouched.record.facts.some((fact) => fact.startsWith("after-merge")));
 });
 
 test("--admin, --auto and --delete-branch are never issued, across every path in this file", async (t) => {
 	const b = await benchOf(t);
-	await b.integrator().advance({ jobId: BR });
-	await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
+	await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	for (const line of b.calls) {
 		assert.ok(!line.includes("--admin"), `an admin bypass was issued: ${line}`);
 		assert.ok(!line.includes("--auto"), `auto-merge was armed: ${line}`);
@@ -1270,15 +1270,15 @@ test("--admin, --auto and --delete-branch are never issued, across every path in
 
 test("picp-d0p: a bound PR's head branch is never deleted — kept, said so, and the job still closes", async (t) => {
 	const b = await benchOf(t, { bound_pr: { number: 61, url: PR_URL, base: "main" } });
-	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.equal(done.step, "done");
 	assert.equal(done.next, "done");
 	assert.equal(b.teardowns.length, 1);
-	assert.ok(done.record.facts.includes(`origin/${BR} kept: bound PR branch, not created by ${BR}`), done.record.facts.join("\n"));
+	assert.ok(done.record.facts.includes(`origin/${JOB_ID} kept: bound PR branch, not created by ${JOB_ID}`), done.record.facts.join("\n"));
 	assert.ok(!b.calls.some((line) => line.startsWith("git push origin --delete")), "a bound PR's branch is not this job's to delete");
 	assert.equal(done.merge?.receipt.bound, true);
 	assert.match(done.record.reason ?? "", /head kept \(bound PR\)/);
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${PR_URL}` }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -1288,14 +1288,14 @@ test("picp-d0p: a bound PR's head branch is never deleted — kept, said so, and
 test("advance after a finished integration is a no-op: no second merge, no second close", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
-	await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
+	await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.equal(b.closed.length, 1);
 
-	const again = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: BR });
+	const again = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: JOB_ID });
 	assert.equal(again.next, "done");
 	assert.equal(again.merge?.recorded, false, "the receipt already existed");
-	assert.equal(b.closed.length, 1, "the br issue is closed once");
+	assert.equal(b.closed.length, 1, "the job is closed once");
 	assert.equal(b.teardowns.length, 1, "teardown ran once");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 1);
 });
@@ -1303,11 +1303,11 @@ test("advance after a finished integration is a no-op: no second merge, no secon
 test("a parent restart between merge and record is resumed from what gh reports", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	const merged = await b.integrator().advance({ jobId: BR });
+	const merged = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 
 	// Simulate the parent dying here: a brand new Integrator, nothing in memory.
-	const resumed = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	const resumed = await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.equal(resumed.next, "done");
 	assert.equal(resumed.merge?.recorded, true);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 1, "the merge is not re-issued");
@@ -1323,17 +1323,17 @@ test("the fallback checkpoint (an unreadable merge verdict): no authorization, a
 	// never as permission, and falls to the per-head human checkpoint.
 	const unreadable = { ...openPr(), mergeStateStatus: undefined };
 
-	const missing = await b.integrator({ pr: unreadable }).advance({ jobId: BR });
+	const missing = await b.integrator({ pr: unreadable }).advance({ jobId: JOB_ID });
 	assert.equal(missing.next, "surface");
 	assert.match(missing.reason, /evidence is not authorization/);
 
-	const stillPending = await b.integrator({ pr: unreadable }).advance({ jobId: BR });
+	const stillPending = await b.integrator({ pr: unreadable }).advance({ jobId: JOB_ID });
 	assert.equal(stillPending.next, "surface");
 	assert.match(stillPending.reason, /awaiting a human/);
 
 	// The pending record was written by the first call above; only a human answers it.
-	b.mergeCheckpoints().decide(BR, false, { by: "operator command", scope: HEAD_A.slice(0, 12) });
-	const declined = await b.integrator({ pr: unreadable }).advance({ jobId: BR });
+	b.mergeCheckpoints().decide(JOB_ID, false, { by: "operator command", scope: HEAD_A.slice(0, 12) });
+	const declined = await b.integrator({ pr: unreadable }).advance({ jobId: JOB_ID });
 	assert.equal(declined.next, "surface");
 	assert.match(declined.reason, /declined/);
 
@@ -1352,14 +1352,14 @@ test("an approval names the commit it approves: a moved head has no authorizatio
 			pr: { ...openPr(), mergeStateStatus: undefined, headRefOid: HEAD_B },
 			runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }],
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 
 	assert.equal(moved.step, "authorize");
 	assert.equal(moved.next, "surface");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0, "a sha nobody approved is never merged");
-	const forB = b.mergeCheckpoints().get(BR, { scope: HEAD_B.slice(0, 12) });
+	const forB = b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_B.slice(0, 12) });
 	assert.equal(forB?.decision, "pending", "a new authorization is requested for the new head");
-	const forA = b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) });
+	const forA = b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) });
 	assert.equal(forA?.decision, "approved", "the old answer is never overwritten, and never inherited");
 });
 
@@ -1370,11 +1370,11 @@ test("the fallback merge binds to the authorized head too: --match-head-commit o
 	// The repo's own verdict is unreadable, so this is the human-checkpoint
 	// fallback — the path whose only other tie between the answer and the commit
 	// is the checkpoint's file name.
-	const merged = await b.integrator({ pr: { ...openPr(), mergeStateStatus: undefined } }).advance({ jobId: BR });
+	const merged = await b.integrator({ pr: { ...openPr(), mergeStateStatus: undefined } }).advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 	assert.equal(merged.next, "advance");
 	assert.equal(merged.record.merge_authority?.kind, "human_checkpoint", "this must be the fallback path, not the repo-derived one");
-	assert.equal(merged.record.merge_authority?.checkpoint_file, paths.checkpointFile(BR, "merge", HEAD_A.slice(0, 12)));
+	assert.equal(merged.record.merge_authority?.checkpoint_file, paths.checkpointFile(JOB_ID, "merge", HEAD_A.slice(0, 12)));
 
 	const mergeCall = b.calls.find((line) => line.startsWith("gh pr merge"));
 	assert.ok(mergeCall, "the merge was not issued");
@@ -1395,7 +1395,7 @@ test("a force-push landing after the human's answer is refused by the binding: r
 	// as real `gh` refuses it, so the commit nobody authorized never merges.
 	const result = await b
 		.integrator({ pr: { ...openPr(), mergeStateStatus: undefined }, remoteHeadAtMerge: HEAD_B })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "retry", "a refused merge is operational: the next call re-reads the head");
@@ -1406,25 +1406,25 @@ test("a force-push landing after the human's answer is refused by the binding: r
 	// Nothing was mutated: no receipt, no merge authority, no teardown, no close.
 	assert.equal(result.merge, undefined, "a refusal records no merge receipt");
 	assert.equal(result.record.merge_authority, undefined, "no authority is claimed for a merge that never happened");
-	assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))), "no merge receipt file may exist");
+	assert.ok(!existsSync(join(b.home, paths.mergeFile(JOB_ID))), "no merge receipt file may exist");
 	assert.equal(b.teardowns.length, 0);
 	assert.deepEqual(b.closed, []);
-	const job = b.fleet.get(BR);
+	const job = b.fleet.get(JOB_ID);
 	assert.equal(job?.phase, "held", "the job is not marked merged or done");
 	assert.equal(job?.receipts?.find((receipt) => receipt.kind === "pr")?.status, "open");
 
 	// The approval for A survives untouched, and A was never re-approved for B.
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) })?.decision, "approved");
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_B.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) })?.decision, "approved");
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_B.slice(0, 12) }), undefined);
 });
 
 test("the repo-derived merge is refused the same way when the head moves under it (cp-n1a)", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ remoteHeadAtMerge: HEAD_B }).advance({ jobId: BR });
+	const result = await b.integrator({ remoteHeadAtMerge: HEAD_B }).advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "retry");
 	assert.equal(result.merge, undefined);
-	assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))));
+	assert.ok(!existsSync(join(b.home, paths.mergeFile(JOB_ID))));
 	assert.equal(b.teardowns.length, 0);
 });
 
@@ -1439,7 +1439,7 @@ const STRICT_RULES = [
 
 test("CLEAN, green and reviewed on a stale base merges the original head, with no update-branch (item 33)", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ ancestor: false }).advance({ jobId: BR });
+	const result = await b.integrator({ ancestor: false }).advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "advance");
 	assert.equal(updateBranchCalls(b.calls), 0, "a base GitHub does not require current is never rebased onto");
@@ -1450,7 +1450,7 @@ test("CLEAN, green and reviewed on a stale base merges the original head, with n
 
 test("BEHIND is updated server-side once, and the old head's CI and review do not carry over", async (t) => {
 	const b = await benchOf(t);
-	const behind = await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BEHIND" } }).advance({ jobId: BR });
+	const behind = await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BEHIND" } }).advance({ jobId: JOB_ID });
 	assert.equal(behind.step, "fresh");
 	assert.equal(behind.next, "advance");
 	assert.equal(behind.head_sha, undefined, "the moved head is not carried forward");
@@ -1461,12 +1461,12 @@ test("BEHIND is updated server-side once, and the old head's CI and review do no
 
 	// The update landed head B; only head A has green CI and a review pass.
 	const movedPr = { ...openPr(), headRefOid: HEAD_B };
-	const stale = await b.integrator({ pr: movedPr }).advance({ jobId: BR });
+	const stale = await b.integrator({ pr: movedPr }).advance({ jobId: JOB_ID });
 	assert.equal(stale.step, "ci");
 	assert.equal(stale.next, "wait", "green CI on the superseded head is not green");
 	const unreviewed = await b
 		.integrator({ pr: movedPr, runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(unreviewed.next, "review", "a review of the old head does not cover the new one");
 	assert.equal(updateBranchCalls(b.calls), 1, "updated exactly once");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1477,7 +1477,7 @@ test("BLOCKED on a stale base without a readable up-to-date rule stays merge pen
 		const b = await benchOf(t);
 		const result = await b
 			.integrator({ ancestor: false, pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" }, ...(rules ? { rules: rules as World["rules"] } : {}) })
-			.advance({ jobId: BR });
+			.advance({ jobId: JOB_ID });
 		assert.equal(result.step, "permit");
 		assert.equal(result.next, "surface");
 		assert.equal(updateBranchCalls(b.calls), 0, `no speculative rebase (rules: ${JSON.stringify(rules)})`);
@@ -1488,14 +1488,14 @@ test("BLOCKED on a stale base without a readable up-to-date rule stays merge pen
 test("BLOCKED with a strict required-checks rule and a stale base is updated once; unreadable ancestry never is", async (t) => {
 	const b = await benchOf(t);
 	const blocked = { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" };
-	const updated = await b.integrator({ ancestor: false, pr: blocked, rules: STRICT_RULES }).advance({ jobId: BR });
+	const updated = await b.integrator({ ancestor: false, pr: blocked, rules: STRICT_RULES }).advance({ jobId: JOB_ID });
 	assert.equal(updated.step, "fresh");
 	assert.equal(updated.next, "advance");
 	assert.equal(updateBranchCalls(b.calls), 1);
 
 	for (const ancestor of ["unreadable", true] as const) {
 		const c = await benchOf(t);
-		const result = await c.integrator({ ancestor, pr: blocked, rules: STRICT_RULES }).advance({ jobId: BR });
+		const result = await c.integrator({ ancestor, pr: blocked, rules: STRICT_RULES }).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "surface", `ancestor=${ancestor}`);
 		assert.equal(updateBranchCalls(c.calls), 0, `ancestor=${ancestor}: no speculative rebase`);
 		assert.equal(c.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1506,19 +1506,19 @@ test("a stale base with red CI, a conflict or a moved head never triggers update
 	const red = await benchOf(t);
 	const redResult = await red
 		.integrator({ ancestor: false, runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }] })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(redResult.next, "resolve");
 	assert.equal(updateBranchCalls(red.calls), 0);
 
 	const conflict = await benchOf(t);
 	const conflictResult = await conflict
 		.integrator({ ancestor: false, pr: { ...openPr(), mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(conflictResult.step, "conflict");
 	assert.equal(updateBranchCalls(conflict.calls), 0);
 
 	const moved = await benchOf(t);
-	const movedResult = await moved.integrator({ ancestor: false, permHead: HEAD_B }).advance({ jobId: BR });
+	const movedResult = await moved.integrator({ ancestor: false, permHead: HEAD_B }).advance({ jobId: JOB_ID });
 	assert.equal(movedResult.next, "wait");
 	assert.equal(updateBranchCalls(moved.calls), 0);
 
@@ -1529,7 +1529,7 @@ test("a stale base with red CI, a conflict or a moved head never triggers update
 
 test("unknown mergeability never causes a rebase or a merge", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ ancestor: false, pr: { ...openPr(), mergeStateStatus: "UNKNOWN" } }).advance({ jobId: BR });
+	const result = await b.integrator({ ancestor: false, pr: { ...openPr(), mergeStateStatus: "UNKNOWN" } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "retry");
 	assert.equal(updateBranchCalls(b.calls), 0);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1540,7 +1540,7 @@ test("a completed green run on a superseded sha is not green", async (t) => {
 	b.approve(HEAD_A);
 	const result = await b
 		.integrator({ runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "ci");
 	assert.equal(result.next, "wait");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1551,21 +1551,21 @@ test("CI still running on the pushed head merges nothing and asks nobody", async
 	b.approve(HEAD_A);
 	const result = await b
 		.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "wait");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
 test("a repo that HAS workflows but no run yet on this head still falls back to a per-head checkpoint (cp-e0c/C7)", async (t) => {
 	const b = await benchOf(t);
-	const asked = await b.integrator({ runs: [] }).advance({ jobId: BR });
+	const asked = await b.integrator({ runs: [] }).advance({ jobId: JOB_ID });
 	assert.equal(asked.step, "authorize");
 	assert.equal(asked.next, "surface");
-	assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), "a checkpoint must exist for a CI-less branch");
+	assert.ok(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), "a checkpoint must exist for a CI-less branch");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 
 	b.approve(HEAD_A);
-	const merged = await b.integrator({ runs: [] }).advance({ jobId: BR });
+	const merged = await b.integrator({ runs: [] }).advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 	assert.equal(merged.record.merge_authority?.kind, "human_checkpoint");
 	// Both fallback triggers bind the head, not just the unreadable-verdict one.
@@ -1577,31 +1577,31 @@ test("a repo that HAS workflows but no run yet on this head still falls back to 
 // Exact-head reads cannot see an older sha's run, so zero runs on the head asks one more Actions read: the branch's
 // runs. Runs on an older sha keep main's `superseded` wait (a fresh push); none at all is C7; a failed read is C7's
 // unreadable case. The branch read only ever picks between those — it is never green evidence for the head.
-const BRANCH_RUNS = `gh api repos/{owner}/{repo}/actions/runs?branch=${BR}&per_page=100&page=1`;
+const BRANCH_RUNS = `gh api repos/{owner}/{repo}/actions/runs?branch=${JOB_ID}&per_page=100&page=1`;
 
 test("zero runs on a fresh head with branch runs on an older sha is superseded: wait, no checkpoint", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_B, workflowName: "ci" }] }).advance({ jobId: BR });
+	const result = await b.integrator({ runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_B, workflowName: "ci" }] }).advance({ jobId: JOB_ID });
 	assert.deepEqual([result.step, result.next], ["ci", "wait"], result.reason);
 	assert.match(result.reason, /no CI run has started on aaaaaaa yet \(latest run is on bbbbbbb\)/);
 	const reads = b.calls.filter((line) => line.startsWith("gh api repos/{owner}/{repo}/actions/runs?"));
 	assert.deepEqual(reads.map((line) => line.includes("head_sha=")), [true, false], "exact head first, then the branch");
 	assert.ok(b.calls.includes(BRANCH_RUNS), b.calls.join("\n"));
 	assert.equal(b.calls.some((line) => line.includes("actions/workflows")), false, "superseded never reaches C7");
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
 });
 
 test("zero runs on the head and none on the branch takes C7: workflows present asks a human, none is no CI", async (t) => {
 	const present = await benchOf(t);
-	const asked = await present.integrator({ runs: [] }).advance({ jobId: BR });
+	const asked = await present.integrator({ runs: [] }).advance({ jobId: JOB_ID });
 	assert.deepEqual([asked.step, asked.next], ["authorize", "surface"]);
 	assert.ok(present.calls.includes(BRANCH_RUNS));
-	assert.ok(present.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+	assert.ok(present.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }));
 
 	const none = await benchOf(t);
-	const noCi = await none.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: BR });
+	const noCi = await none.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: JOB_ID });
 	assert.ok(none.calls.includes(BRANCH_RUNS));
-	assert.equal(none.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `no CI mints no checkpoint: ${noCi.reason}`);
+	assert.equal(none.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined, `no CI mints no checkpoint: ${noCi.reason}`);
 });
 
 test("an unreadable branch-runs read is C7 unreadable: the per-head checkpoint even when workflows say none", async (t) => {
@@ -1614,10 +1614,10 @@ test("an unreadable branch-runs read is C7 unreadable: the per-head checkpoint e
 		const run = runnerFor(defaultWorld({ runs: [], workflows: NO_WORKFLOWS }), b.calls, b.worktree);
 		const result = await b
 			.integrator({ runs: [], workflows: NO_WORKFLOWS }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), answer) : run(cwd, bin, args, options)) })
-			.advance({ jobId: BR });
+			.advance({ jobId: JOB_ID });
 		assert.deepEqual([result.step, result.next], ["authorize", "surface"], result.reason);
 		assert.ok(result.facts.some((fact) => fact.startsWith("ci: branch runs unreadable")), result.facts.join("\n"));
-		assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }));
+		assert.ok(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }));
 		assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	}
 });
@@ -1629,7 +1629,7 @@ test("the branch-runs read is never green evidence: a green run on the head seen
 	const run = runnerFor(defaultWorld({ runs: [] }), b.calls, b.worktree);
 	const result = await b
 		.integrator({ runs: [] }, { run: async (cwd, bin, args, options) => (String(args[1]).includes("/actions/runs?branch=") ? (b.calls.push(`${bin} ${args.join(" ")}`), { status: 0, stdout: answerActions(String(args[1]), [green])!, stderr: "" }) : run(cwd, bin, args, options)) })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.notEqual(result.step, "merge");
 	assert.ok(!result.facts.some((fact) => fact.startsWith("ci: green")), result.facts.join("\n"));
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1645,13 +1645,13 @@ const NO_WORKFLOWS = { total_count: 0, workflows: [] };
 
 test("a repository that reports zero workflows merges on the repo's own authority, minting no checkpoint", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: BR });
+	const result = await b.integrator({ runs: [], workflows: NO_WORKFLOWS }).advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "advance");
 	assert.equal(result.record.merge_authority?.kind, "repo_derived");
 	assert.equal(result.record.merge_authority?.merge_state_status, "CLEAN");
 	assert.equal(
-		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
+		b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }),
 		undefined,
 		"a repo with no CI configured never spends a human authorization",
 	);
@@ -1678,11 +1678,11 @@ test("a repository with no CI whose merge the repo itself refuses still surfaces
 			workflows: NO_WORKFLOWS,
 			pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" },
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "permit");
 	assert.equal(result.next, "surface");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
 	const items = b.awaiting().list();
 	assert.equal(items.length, 1);
 	assert.match(items[0]?.decision ?? "", /merge pending/i);
@@ -1697,10 +1697,10 @@ test("an unreadable workflows probe is not 'no CI': every failure shape still mi
 	];
 	for (const [label, workflows] of failures) {
 		const b = await benchOf(t);
-		const result = await b.integrator({ runs: [], workflows }).advance({ jobId: BR });
+		const result = await b.integrator({ runs: [], workflows }).advance({ jobId: JOB_ID });
 		assert.equal(result.step, "authorize", label);
 		assert.equal(result.next, "surface", label);
-		assert.ok(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), `${label} must still ask a human`);
+		assert.ok(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), `${label} must still ask a human`);
 		assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0, label);
 		assert.ok(
 			result.facts.some((fact) => fact.startsWith("ci configuration: unreadable (")),
@@ -1716,10 +1716,10 @@ test("a red head is still never a merge ask, whatever the workflows endpoint say
 			runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci" }],
 			workflows: NO_WORKFLOWS,
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "resolve");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
 	// A red head short-circuits before the probe: there is nothing to establish.
 	assert.ok(!b.calls.some((line) => line.includes("actions/workflows")));
 });
@@ -1732,13 +1732,13 @@ test("blocked by required reviews raises a merge-pending reminder and attempts n
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "permit");
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /merge pending|will not take the merge/i);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	assert.equal(
-		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
+		b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }),
 		undefined,
 		"a repo refusal never mints a checkpoint",
 	);
@@ -1753,14 +1753,14 @@ test("blocked with the rules unreadable still raises a reminder, never a merge",
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
 
 test("UNSTABLE is treated as pending, not permitted — a non-required check we cannot see must not be merged over", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ pr: { ...openPr(), mergeStateStatus: "UNSTABLE" } }).advance({ jobId: BR });
+	const result = await b.integrator({ pr: { ...openPr(), mergeStateStatus: "UNSTABLE" } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
@@ -1771,44 +1771,44 @@ const count = (b: Bench, prefix: string) => b.calls.filter((line) => line.starts
 test("jje.5: a draft with no pass on its current head is a hold: review, never ready, a reminder or an escalation", async (t) => {
 	for (const reviewHead of [false, HEAD_B] as const) {
 		const b = await benchOf(t, {}, { reviewHead });
-		const result = await b.integrator({ pr: draftPr() }).advance({ jobId: BR });
+		const result = await b.integrator({ pr: draftPr() }).advance({ jobId: JOB_ID });
 		assert.deepEqual([result.next, count(b, "gh pr ready"), count(b, "gh pr merge")], ["review", 0, 0], `pass on ${reviewHead}`);
-		assert.equal(b.awaiting().list().length + new EscalationStore({ home: b.home }).list({ jobId: BR }).length, 0);
+		assert.equal(b.awaiting().list().length + new EscalationStore({ home: b.home }).list({ jobId: JOB_ID }).length, 0);
 	}
 });
 
 test("jje.5: a reviewed draft head is marked ready once and re-read; the ready PR then merges CLEAN", async (t) => {
 	const b = await benchOf(t);
-	const ready = await b.integrator({ pr: draftPr() }).advance({ jobId: BR });
+	const ready = await b.integrator({ pr: draftPr() }).advance({ jobId: JOB_ID });
 	assert.deepEqual([ready.next, ready.head_sha, count(b, "gh pr view"), count(b, "gh pr merge")], ["advance", HEAD_A, 3, 0]);
-	assert.equal((await b.integrator().advance({ jobId: BR })).step, "merge");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).step, "merge");
 	assert.deepEqual(b.calls.filter((line) => line.startsWith("gh pr ready")), [`gh pr ready ${PR_URL}`], "an already-ready PR is never readied again");
 	assert.equal(matchHeadBinding(b.calls.find((line) => line.startsWith("gh pr merge")) ?? "")?.head, HEAD_A);
 	// The CI-unreadable checkpoint path readies a reviewed draft before it asks a human.
 	const noCi = await benchOf(t);
-	const fallback = await noCi.integrator({ pr: draftPr(), runs: [], workflows: { fail: "HTTP 403" } }).advance({ jobId: BR });
-	assert.deepEqual([fallback.next, count(noCi, "gh pr ready"), noCi.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) })], ["advance", 1, undefined]);
+	const fallback = await noCi.integrator({ pr: draftPr(), runs: [], workflows: { fail: "HTTP 403" } }).advance({ jobId: JOB_ID });
+	assert.deepEqual([fallback.next, count(noCi, "gh pr ready"), noCi.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) })], ["advance", 1, undefined]);
 });
 
 test("jje.5: a head that moves across gh pr ready waits for its own review; a refused ready surfaces once", async (t) => {
 	const moved = await benchOf(t);
 	const green = (head: string) => ({ status: "completed", conclusion: "success", headSha: head });
 	const world = moved.integrator({ pr: draftPr(), readyMovesHead: HEAD_B, runs: [green(HEAD_A), green(HEAD_B)] });
-	const wait = await world.advance({ jobId: BR });
+	const wait = await world.advance({ jobId: JOB_ID });
 	assert.deepEqual([wait.next, wait.head_sha, count(moved, "gh pr merge")], ["wait", HEAD_B, 0]);
 	assert.deepEqual(moved.calls.filter((line) => line.startsWith("gh pr ready")), [`gh pr ready ${PR_URL}`, `gh pr ready --undo ${PR_URL}`]);
 	assert.match(wait.reason, /head moved to bbbbbbbbbbbb.*; returned to draft/);
 	// Same GitHub: the moved, unreviewed head still reads as a draft, so it is held for review and never readied.
-	const held = await world.advance({ jobId: BR });
+	const held = await world.advance({ jobId: JOB_ID });
 	assert.equal(held.next, "review", "the new head is unreviewed");
 	assert.ok(held.facts.some((fact) => /permission: pending \(draft\)/.test(fact)), "the moved head remains a draft");
 	assert.equal(count(moved, "gh pr ready"), 2, "no second ready for the unreviewed head");
 	const stuck = await benchOf(t);
-	const refusedUndo = await stuck.integrator({ pr: draftPr(), readyMovesHead: HEAD_B, undoFails: "HTTP 502" }).advance({ jobId: BR });
+	const refusedUndo = await stuck.integrator({ pr: draftPr(), readyMovesHead: HEAD_B, undoFails: "HTTP 502" }).advance({ jobId: JOB_ID });
 	assert.deepEqual([refusedUndo.next, count(stuck, "gh pr merge")], ["surface", 0]);
 	assert.match(refusedUndo.reason, /gh pr ready --undo refused \(HTTP 502\), so an unreviewed head reads ready/);
 	const refused = await benchOf(t);
-	const result = await refused.integrator({ pr: draftPr(), readyFails: "GraphQL: forbidden" }).advance({ jobId: BR });
+	const result = await refused.integrator({ pr: draftPr(), readyFails: "GraphQL: forbidden" }).advance({ jobId: JOB_ID });
 	assert.deepEqual([result.next, count(refused, "gh pr view"), count(refused, "gh pr merge")], ["surface", 2, 0]);
 	assert.match(result.reason, /gh pr ready refused: GraphQL: forbidden/);
 });
@@ -1820,16 +1820,16 @@ test("an approved checkpoint can never merge what the repository refuses", async
 	b.approve(HEAD_A);
 	const result = await b
 		.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0, "an approval never overrides a repo refusal");
-	const checkpoint = b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) });
+	const checkpoint = b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) });
 	assert.equal(checkpoint?.decision, "approved", "the stale approval itself is left untouched");
 });
 
 test("the head moving during the permission re-read voids the decision; nothing merges", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ permHead: HEAD_B }).advance({ jobId: BR });
+	const result = await b.integrator({ permHead: HEAD_B }).advance({ jobId: JOB_ID });
 	assert.equal(result.step, "permit");
 	assert.equal(result.next, "wait");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0, "a moved head is never merged");
@@ -1838,15 +1838,15 @@ test("the head moving during the permission re-read voids the decision; nothing 
 
 test("a merge-pending reminder is withdrawn once the repo permits the merge, and never re-declared for a second decline", async (t) => {
 	const b = await benchOf(t);
-	await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } }).advance({ jobId: BR });
+	await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } }).advance({ jobId: JOB_ID });
 	assert.equal(b.awaiting().list().filter((item) => item.state === "open").length, 1);
 
 	// A repeat call with the same refusal must not mint a second row.
-	await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } }).advance({ jobId: BR });
+	await b.integrator({ pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" } }).advance({ jobId: JOB_ID });
 	assert.equal(b.awaiting().list().length, 1, "re-declaring the same refusal updates one row, never mints a second");
 
 	// The repo now permits it: the merge lands and the reminder is withdrawn.
-	const merged = await b.integrator().advance({ jobId: BR });
+	const merged = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 	const items = b.awaiting().list();
 	assert.equal(items.length, 1);
@@ -1857,7 +1857,7 @@ test("an armed auto-merge is refused, not re-issued: cp_integrate never relies o
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), autoMergeRequest: {} } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "permit");
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /auto-merge/);
@@ -1872,7 +1872,7 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 37458827243 }] })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 
 	assert.equal(result.step, "ci");
 	assert.equal(result.next, "resolve");
@@ -1883,13 +1883,13 @@ test("CI red on the pushed head promotes the implementer and never asks for a me
 	assert.ok(result.facts.some((fact) => /^ci: failed — .*\(run 37458827243 https:\/\/github\.com\/o\/r\/actions\/runs\/37458827243\)$/.test(fact)), result.facts.join("\n"));
 	// cp-c1ur N6: a red head was never advanced server-side — no such claim, no reset, no force push.
 	assert.doesNotMatch(b.sent[0]!.message, /advanced on the server|force-with-lease|git reset/);
-	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${BR}`));
-	assert.match(b.sent[0]!.message, new RegExp(`git fetch origin && git merge origin/${BR}`));
-	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count origin/${BR}\\.\\.HEAD`));
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${JOB_ID}`));
+	assert.match(b.sent[0]!.message, new RegExp(`git fetch origin && git merge origin/${JOB_ID}`));
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count origin/${JOB_ID}\\.\\.HEAD`));
 	assert.match(b.sent[0]!.message, /plain\s+`git push`/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 	assert.equal(
-		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
+		b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }),
 		undefined,
 		"a red head is never a merge ask at all",
 	);
@@ -1913,23 +1913,23 @@ test("unload-parent PR2: an infra-only red head is rerun once and waits; a secon
 	const infraRerun = rerunFor(b.home);
 	const red = (attempt: number) => ({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A, workflowName: "ci", databaseId: 77, attempt }] });
 
-	const first = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
+	const first = await b.integrator(red(1), { infraRerun }).advance({ jobId: JOB_ID });
 	assert.deepEqual([first.step, first.next], ["ci", "wait"], first.reason);
 	assert.match(first.reason, /reran the failed jobs once/);
 	assert.deepEqual(gh, ["repos/{owner}/{repo}/actions/runs/77/attempts/1/jobs", "run rerun 77"]);
 	assert.equal(b.sent.length, 0, "no implementer promote for an infra failure");
 
-	const again = await b.integrator(red(1), { infraRerun }).advance({ jobId: BR });
+	const again = await b.integrator(red(1), { infraRerun }).advance({ jobId: JOB_ID });
 	assert.equal(again.next, "resolve", "the claim is spent: the same head never gets a second rerun");
 	assert.ok(again.facts.some((fact) => /was spent at/.test(fact)), again.facts.join("\n"));
 	assert.equal(b.sent.length, 1);
 
 	const fresh = await benchOf(t);
-	const secondAttempt = await fresh.integrator(red(2), { infraRerun: rerunFor(fresh.home) }).advance({ jobId: BR });
+	const secondAttempt = await fresh.integrator(red(2), { infraRerun: rerunFor(fresh.home) }).advance({ jobId: JOB_ID });
 	assert.equal(secondAttempt.next, "resolve", "attempt 2 failing is the parent's");
 	failedStep = "Run suite (typecheck + tests)";
 	const tests = await benchOf(t);
-	const testFailure = await tests.integrator(red(1), { infraRerun: rerunFor(tests.home) }).advance({ jobId: BR });
+	const testFailure = await tests.integrator(red(1), { infraRerun: rerunFor(tests.home) }).advance({ jobId: JOB_ID });
 	assert.equal(testFailure.next, "resolve");
 	assert.ok(testFailure.facts.some((fact) => /a test\/build failure is the implementer's/.test(fact)), testFailure.facts.join("\n"));
 	assert.equal(tests.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -1938,12 +1938,12 @@ test("unload-parent PR2: an infra-only red head is rerun once and waits; a secon
 test("duplicate red CI waits for the active repair, then surfaces a completed failure", async (t) => {
 	const b = await benchOf(t);
 	const world = { runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] };
-	assert.equal((await b.integrator(world).advance({ jobId: BR })).next, "resolve");
-	await b.fleet.patch(BR, { phase: "waiting" });
-	assert.equal((await b.integrator(world).advance({ jobId: BR })).next, "resolve");
+	assert.equal((await b.integrator(world).advance({ jobId: JOB_ID })).next, "resolve");
+	await b.fleet.patch(JOB_ID, { phase: "waiting" });
+	assert.equal((await b.integrator(world).advance({ jobId: JOB_ID })).next, "resolve");
 	assert.equal(b.sent.length, 1);
-	await b.fleet.patch(BR, { phase: "held" });
-	assert.equal((await b.integrator(world).advance({ jobId: BR })).next, "surface");
+	await b.fleet.patch(JOB_ID, { phase: "held" });
+	assert.equal((await b.integrator(world).advance({ jobId: JOB_ID })).next, "surface");
 });
 
 for (const permission of ["CLEAN", undefined]) {
@@ -1954,10 +1954,10 @@ for (const permission of ["CLEAN", undefined]) {
 			b.approve(HEAD_A);
 			await reopen(b);
 			// launching is currently script/local-only; exercise the merge guard without writing an invalid fleet.
-			const waiting = b.fleet.require(BR);
+			const waiting = b.fleet.require(JOB_ID);
 			const mock = phase === "launching" ? t.mock.method(b.fleet, "get", () => ({ ...waiting, phase })) : undefined;
 			const integration = b.integrator({ pr: { ...openPr(), mergeStateStatus: permission } });
-			const result = await integration.advance({ jobId: BR });
+			const result = await integration.advance({ jobId: JOB_ID });
 			assert.equal(result.next, "resolve");
 			assert.match(result.reason, new RegExp(`worker phase ${phase}`));
 			assert.match(result.reason, /wait for its report/i);
@@ -1966,7 +1966,7 @@ for (const permission of ["CLEAN", undefined]) {
 			assert.equal(result.record.resolve_attempts, 0, "waiting never spends another promotion");
 			mock?.mock.restore();
 			await reportFix(b, HEAD_A);
-			const resumed = await integration.advance({ jobId: BR });
+			const resumed = await integration.advance({ jobId: JOB_ID });
 			assert.equal(resumed.next, "advance");
 			assert.equal(resumed.record.merge_authority?.kind, permission === "CLEAN" ? "repo_derived" : "human_checkpoint");
 			assert.equal(merges(b).length, 1);
@@ -1985,16 +1985,16 @@ for (const permission of ["CLEAN", undefined]) {
 				if (bin === "gh" && args[0] === "pr" && args[1] === "view" && ++views === 2) await reopen(b);
 				return result;
 			},
-		}).advance({ jobId: BR });
+		}).advance({ jobId: JOB_ID });
 		assert.equal(result.next, "resolve");
 		assert.match(result.reason, /worker phase waiting/);
 		assert.equal(merges(b).length, 0);
 		assert.equal(result.record.resolve_attempts, 0);
 		await reportFix(b, HEAD_B);
-		assert.equal((await b.integrator(onHead(HEAD_B)).advance({ jobId: BR })).next, "review", "the next report still needs a current-head review");
+		assert.equal((await b.integrator(onHead(HEAD_B)).advance({ jobId: JOB_ID })).next, "review", "the next report still needs a current-head review");
 		writeReviewPass(b.home, HEAD_B, { attempt: 2 });
 		b.approve(HEAD_B);
-		const resumed = await b.integrator({ ...onHead(HEAD_B), pr: { ...openPr(), headRefOid: HEAD_B, mergeStateStatus: permission } }).advance({ jobId: BR });
+		const resumed = await b.integrator({ ...onHead(HEAD_B), pr: { ...openPr(), headRefOid: HEAD_B, mergeStateStatus: permission } }).advance({ jobId: JOB_ID });
 		assert.equal(resumed.next, "advance");
 		assert.equal(matchHeadBinding(merges(b)[0] ?? "")?.head, HEAD_B);
 	});
@@ -2017,11 +2017,11 @@ test("picp-03o: integration cannot merge while its promotion is still in flight"
 			return { receipt: "delivered" };
 		},
 	});
-	const first = integration.advance({ jobId: BR });
+	const first = integration.advance({ jobId: JOB_ID });
 	await entered.promise;
 	try {
 		world.runs = defaultWorld().runs;
-		assert.equal((await integration.advance({ jobId: BR })).next, "resolve");
+		assert.equal((await integration.advance({ jobId: JOB_ID })).next, "resolve");
 		assert.equal(merges(b).length, 0);
 	} finally {
 		release.resolve();
@@ -2031,7 +2031,7 @@ test("picp-03o: integration cannot merge while its promotion is still in flight"
 
 test("red CI waits for a working implementer even before an integration promotion", async (t) => {
 	const b = await benchOf(t, { phase: "waiting" });
-	const result = await b.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }).advance({ jobId: BR });
+	const result = await b.integrator({ runs: [{ status: "completed", conclusion: "failure", headSha: HEAD_A }] }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "resolve");
 	assert.equal(b.sent.length, 0);
 });
@@ -2053,10 +2053,10 @@ test("duplicate red CI does not send again while promotion is in flight", async 
 			return { receipt: "delivered" };
 		},
 	});
-	const first = integrator.advance({ jobId: BR });
+	const first = integrator.advance({ jobId: JOB_ID });
 	await entered.promise;
 	try {
-		assert.equal((await integrator.advance({ jobId: BR })).next, "resolve");
+		assert.equal((await integrator.advance({ jobId: JOB_ID })).next, "resolve");
 		assert.equal(sends, 1);
 	} finally {
 		release.resolve();
@@ -2078,64 +2078,64 @@ test("4B1-T4: promoting(job) is true while the repair send is in flight, and Hel
 		},
 	});
 	const workers = fakeWorkerManager(b.home, 5);
-	workers.spawn(BR);
+	workers.spawn(JOB_ID);
 	const held = new HeldRelease({
 		home: b.home, fleet: b.fleet, manager: workers.manager,
 		busy: { sending: () => false, promoting: (id) => integrator.promoting(id), driving: () => false },
 		integration: () => undefined, journal: () => {},
 	});
-	await b.fleet.patch(BR, { phase: "held" });
-	assert.equal(integrator.promoting(BR), false);
-	assert.deepEqual(held.releasable(), [BR]);
-	const first = integrator.advance({ jobId: BR });
+	await b.fleet.patch(JOB_ID, { phase: "held" });
+	assert.equal(integrator.promoting(JOB_ID), false);
+	assert.deepEqual(held.releasable(), [JOB_ID]);
+	const first = integrator.advance({ jobId: JOB_ID });
 	await entered.promise;
 	try {
-		assert.equal(integrator.promoting(BR), true);
+		assert.equal(integrator.promoting(JOB_ID), true);
 		assert.deepEqual(held.releasable(), []);
 	} finally {
 		release.resolve();
 		await first;
 	}
-	assert.equal(integrator.promoting(BR), false);
+	assert.equal(integrator.promoting(JOB_ID), false);
 });
 
 test("a conflict is handed back once, as a merge and a plain push — never a rebase, reset or force push", async (t) => {
 	const b = await benchOf(t);
-	const first = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	const first = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: JOB_ID });
 	assert.equal(first.step, "conflict");
 	assert.equal(first.next, "resolve");
 	assert.equal(b.sent.length, 1);
 	// cp-c1ur N6: the conflict hand-back used to prescribe reset --hard, rebase and --force-with-lease.
 	assert.doesNotMatch(b.sent[0]!.message, /git reset|git rebase|force-with-lease/);
-	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${BR}`));
-	assert.match(b.sent[0]!.message, new RegExp(`git merge origin/${BR}`));
+	assert.match(b.sent[0]!.message, new RegExp(`rev-list --count HEAD\\.\\.origin/${JOB_ID}`));
+	assert.match(b.sent[0]!.message, new RegExp(`git merge origin/${JOB_ID}`));
 	assert.match(b.sent[0]!.message, /git fetch origin && git merge origin\/main/);
 	assert.match(b.sent[0]!.message, /plain `git push`/);
 	assert.match(b.sent[0]!.message, /both sides survive/);
 
 	// A second failure is the operator's, never a third automated attempt.
-	const second = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	const second = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: JOB_ID });
 	assert.equal(second.next, "surface");
 	assert.equal(b.sent.length, 1, "one promote, then a human");
-	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 1);
+	assert.equal(readRunEvents(b.home, JOB_ID).filter((event) => event.type === "integration_surfaced").length, 1);
 
 	// picp-0lj: the same head does not hand the conflict off again.
-	const third = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	const third = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: JOB_ID });
 	assert.equal(third.next, "wait");
 	assert.match(third.reason, /until the branch moves/);
 	assert.equal(b.sent.length, 1);
-	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 1);
+	assert.equal(readRunEvents(b.home, JOB_ID).filter((event) => event.type === "integration_surfaced").length, 1);
 
 	// A moved branch is a new handoff, still once.
-	const moved = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	const moved = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: JOB_ID });
 	assert.equal(moved.next, "resolve");
 	assert.equal(b.sent.length, 2);
-	const movedAgain = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	const movedAgain = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: JOB_ID });
 	assert.equal(movedAgain.next, "surface");
-	const movedQuiet = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: BR });
+	const movedQuiet = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING", headRefOid: HEAD_B } }).advance({ jobId: JOB_ID });
 	assert.equal(movedQuiet.next, "wait");
 	assert.equal(b.sent.length, 2);
-	assert.equal(readRunEvents(b.home, BR).filter((event) => event.type === "integration_surfaced").length, 2);
+	assert.equal(readRunEvents(b.home, JOB_ID).filter((event) => event.type === "integration_surfaced").length, 2);
 });
 
 test("no live implementer surfaces; nothing is dispatched in its place", async (t) => {
@@ -2145,15 +2145,15 @@ test("no live implementer surfaces; nothing is dispatched in its place", async (
 			{ pr: { ...openPr(), mergeable: "CONFLICTING" } },
 			{
 				send: async () => {
-					throw new Error(`${BR} has no live worker in this session`);
+					throw new Error(`${JOB_ID} has no live worker in this session`);
 				},
 			},
 		)
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /no live worker/);
 	// A failed promote does not spend the handoff: the same head can still be asked once.
-	const asked = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	const asked = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: JOB_ID });
 	assert.equal(asked.next, "resolve");
 	assert.equal(b.sent.length, 1);
 });
@@ -2162,7 +2162,7 @@ test("with no sender wired at all, a conflict surfaces rather than silently stal
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }, { noSender: true })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 });
 
@@ -2172,12 +2172,12 @@ test("with no sender wired at all, a conflict surfaces rather than silently stal
 
 test("a PR merged externally jumps straight to record; nothing re-merges", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	const result = await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "done");
 	assert.equal(result.merge?.recorded, true);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0, "we did not merge it, GitHub did");
 	assert.equal(
-		b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }),
+		b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }),
 		undefined,
 		"nothing is authorized after the fact",
 	);
@@ -2187,9 +2187,9 @@ test("a PR closed unmerged surfaces and writes no receipt", async (t) => {
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), state: "CLOSED" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
-	assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))));
+	assert.ok(!existsSync(join(b.home, paths.mergeFile(JOB_ID))));
 	assert.equal(b.teardowns.length, 0);
 	assert.equal(b.closed.length, 0);
 });
@@ -2204,7 +2204,7 @@ function gitlabMr(observation: Partial<ChangeRequestObservation> | Exclude<Obser
 		readChangeRequest: async () => {
 			asked.push(ref);
 			if ("ok" in observation) return observation;
-			return { ok: true, observation: { provider: "gitlab", url: MR_URL, number: 7, state: "merged", source_branch: BR, target_branch: "develop", head_sha: HEAD_A, squash_commit_sha: MERGE_COMMIT, merged_at: "2026-10-07T10:00:00Z", ...observation } };
+			return { ok: true, observation: { provider: "gitlab", url: MR_URL, number: 7, state: "merged", source_branch: JOB_ID, target_branch: "develop", head_sha: HEAD_A, squash_commit_sha: MERGE_COMMIT, merged_at: "2026-10-07T10:00:00Z", ...observation } };
 		},
 	});
 }
@@ -2213,7 +2213,7 @@ test("forge PR 3: a GitLab MR merged into a non-main target records, tears down 
 	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
 	const asked: string[] = [];
 	const options = { observer: gitlabMr({}, asked) };
-	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR });
+	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: JOB_ID });
 	assert.equal(done.next, "done", done.reason);
 	assert.deepEqual(asked, [MR_URL, MR_URL], "integrate and the merge store each read the MR once");
 	const receipt = done.merge?.receipt;
@@ -2223,10 +2223,10 @@ test("forge PR 3: a GitLab MR merged into a non-main target records, tears down 
 	assert.equal(receipt?.strategy, "squash", "squash evidence is what the forge observed");
 	assert.equal(receipt?.head_branch_deleted, true, "the source branch was already gone on origin");
 	assert.ok(!b.calls.some((line) => line.startsWith("git push origin --delete")), "a deleted source branch is not deleted again");
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${MR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${MR_URL}` }]);
 	assert.equal(b.teardowns.length, 1);
 
-	const again = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR });
+	const again = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: JOB_ID });
 	assert.equal(again.next, "done");
 	assert.equal(again.merge?.recorded, false, "the receipt is not rewritten");
 	assert.equal(b.closed.length, 1, "the job is not closed twice");
@@ -2237,14 +2237,14 @@ test("forge PR 3: a GitLab MR merged into a non-main target records, tears down 
 test("#250 review: a GitLab merge-commit MR records the observed strategy, never the caller's, then tears down and closes", async (t) => {
 	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
 	const options = { observer: gitlabMr({ squash_commit_sha: undefined, merge_commit_sha: MERGE_COMMIT }) };
-	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: BR, strategy: "squash" });
+	const done = await b.integrator({ branchOnRemote: false }, options).advance({ jobId: JOB_ID, strategy: "squash" });
 	assert.equal(done.next, "done", done.reason);
 	const receipt = done.merge?.receipt;
 	assert.equal(receipt?.merge_commit_sha, MERGE_COMMIT, "the merge commit is the landing commit");
 	assert.equal(receipt?.strategy, "unknown", "no squash evidence and the request's strategy is not an observation");
 	assert.equal(receipt?.base_branch, "develop");
 	assert.equal(b.teardowns.length, 1);
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${MR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${MR_URL}` }]);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh ")).length, 0);
 });
 
@@ -2260,18 +2260,18 @@ test("forge PR 3: open, closed, foreign, unreadable and held GitLab MRs stop wit
 	];
 	for (const [name, observation, next, reason] of cases) {
 		const b = await benchOf(t, { receipts: [MR_RECEIPT] });
-		const result = await b.integrator({}, { observer: gitlabMr(observation) }).advance({ jobId: BR });
+		const result = await b.integrator({}, { observer: gitlabMr(observation) }).advance({ jobId: JOB_ID });
 		assert.equal(result.next, next, `${name}: ${result.reason}`);
 		assert.match(result.reason, reason, name);
 		assert.deepEqual(b.calls, [], `${name}: no gh ready/CI/merge/rebase and no git`);
-		assert.ok(!existsSync(join(b.home, paths.mergeFile(BR))), `${name}: no receipt`);
-		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `${name}: no merge approval fallback`);
+		assert.ok(!existsSync(join(b.home, paths.mergeFile(JOB_ID))), `${name}: no receipt`);
+		assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined, `${name}: no merge approval fallback`);
 		assert.equal(b.teardowns.length + b.closed.length + b.sent.length, 0, name);
 	}
 
 	const held = await benchOf(t, { receipts: [MR_RECEIPT] });
-	new IntegrationHolds(held.home).hold(BR, "operator pause");
-	const waiting = await held.integrator({}, { observer: () => assert.fail("a held job reads nothing") }).advance({ jobId: BR });
+	new IntegrationHolds(held.home).hold(JOB_ID, "operator pause");
+	const waiting = await held.integrator({}, { observer: () => assert.fail("a held job reads nothing") }).advance({ jobId: JOB_ID });
 	assert.equal(waiting.next, "wait");
 	assert.match(waiting.reason, /GitLab CI is not read in v1.*integration held: operator pause/);
 	assert.deepEqual(held.calls, []);
@@ -2280,17 +2280,17 @@ test("forge PR 3: open, closed, foreign, unreadable and held GitLab MRs stop wit
 test("forge PR 3: a base that contradicts the merge receipt surfaces before anything moves, and a bound source is kept", async (t) => {
 	const b = await benchOf(t, { receipts: [MR_RECEIPT] });
 	const observer = gitlabMr({});
-	await b.integrator({ branchOnRemote: false }, { observer, teardown: { teardown: async () => assert.fail("no teardown yet") } as TeardownLike }).advance({ jobId: BR }).catch(() => undefined);
-	assert.ok(existsSync(join(b.home, paths.mergeFile(BR))), "the receipt landed before the teardown refused");
+	await b.integrator({ branchOnRemote: false }, { observer, teardown: { teardown: async () => assert.fail("no teardown yet") } as TeardownLike }).advance({ jobId: JOB_ID }).catch(() => undefined);
+	assert.ok(existsSync(join(b.home, paths.mergeFile(JOB_ID))), "the receipt landed before the teardown refused");
 	const calls = b.calls.length;
-	const wrong = await b.integrator({}, { observer }).advance({ jobId: BR, base: "main" });
+	const wrong = await b.integrator({}, { observer }).advance({ jobId: JOB_ID, base: "main" });
 	assert.equal(wrong.next, "surface");
 	assert.match(wrong.reason, /landed on develop, not main\. Nothing was touched; re-run without base/);
 	assert.equal(b.calls.length, calls, "no git ran against the wrong base");
 	assert.equal(b.closed.length, 0);
 
 	const bound = await benchOf(t, { receipts: [MR_RECEIPT], bound_pr: { number: 7, url: MR_URL, base: "develop" } });
-	const kept = await bound.integrator({}, { observer: gitlabMr({}) }).advance({ jobId: BR });
+	const kept = await bound.integrator({}, { observer: gitlabMr({}) }).advance({ jobId: JOB_ID });
 	assert.equal(kept.next, "done", kept.reason);
 	assert.ok(!bound.calls.some((line) => line.startsWith("git push origin --delete")), "a bound MR's source is not this job's to delete");
 });
@@ -2299,7 +2299,7 @@ test("a PR whose head branch is not this job's branch is refused, untouched", as
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { ...openPr(), headRefName: "someone-else" } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /not this\s+job's delivery|not this job's delivery/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -2311,7 +2311,7 @@ test("a PR whose head branch is not this job's branch is refused, untouched", as
 
 test("a gh 403 mutates nothing and asks to be retried, carrying the first stderr line", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator({ pr: { fail: "HTTP 403: Resource not accessible\nmore" } }).advance({ jobId: BR });
+	const result = await b.integrator({ pr: { fail: "HTTP 403: Resource not accessible\nmore" } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "retry");
 	assert.match(result.reason, /403/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -2320,7 +2320,7 @@ test("a gh 403 mutates nothing and asks to be retried, carrying the first stderr
 test("a rate-limited Actions CI read stops before the merge, not after it", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	const result = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: BR });
+	const result = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: JOB_ID });
 	assert.equal(result.step, "ci");
 	assert.equal(result.next, "retry");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -2329,10 +2329,10 @@ test("a rate-limited Actions CI read stops before the merge, not after it", asyn
 test("an Actions CI read refused for permission names the token and what it needs in the reason (ask-81b54d83f0b2)", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	const result = await b.integrator({ runs: { fail: "HTTP 403: Resource not accessible by personal access token" } }).advance({ jobId: BR });
+	const result = await b.integrator({ runs: { fail: "HTTP 403: Resource not accessible by personal access token" } }).advance({ jobId: JOB_ID });
 	assert.deepEqual([result.step, result.next], ["ci", "retry"]);
 	assert.match(result.reason, /CI unreadable — token lacks Actions read; needs fine-grained PAT: Actions read/);
-	const limited = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: BR });
+	const limited = await b.integrator({ runs: { fail: "API rate limit exceeded" } }).advance({ jobId: JOB_ID });
 	assert.doesNotMatch(limited.reason, /token lacks/, "a rate limit is not a permission verdict");
 });
 
@@ -2350,7 +2350,7 @@ test("a denied, partial or malformed Actions jobs read never merges or readies t
 		const run = runnerFor(defaultWorld({ pr: draftPr() }), b.calls, b.worktree);
 		const result = await b
 			.integrator({}, { run: async (cwd, bin, args, options) => (bin === "gh" && String(args[1]).includes("/jobs") ? answer : run(cwd, bin, args, options)) })
-			.advance({ jobId: BR });
+			.advance({ jobId: JOB_ID });
 		assert.deepEqual([result.step, result.next], ["ci", "retry"], result.reason);
 		assert.equal(b.calls.filter((line) => /^gh pr (merge|ready)/.test(line)).length, 0, `answer ${index}`);
 		if (index === 0) assert.match(result.reason, /CI unreadable — token lacks Actions read/);
@@ -2361,7 +2361,7 @@ test("a missing gh surfaces, and names force as the operator's honest exit rathe
 	const b = await benchOf(t);
 	const result = await b
 		.integrator({ pr: { fail: "spawn gh ENOENT", status: 127 } })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /gh is not available/);
 	assert.match(result.reason, /proves nothing/);
@@ -2375,8 +2375,8 @@ test("a worktree left behind origin is resynced before teardown, never forced", 
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
-	const done = await b.integrator({ pr: mergedPr(), worktreeHead: HEAD_B }).advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
+	const done = await b.integrator({ pr: mergedPr(), worktreeHead: HEAD_B }).advance({ jobId: JOB_ID });
 	assert.equal(done.next, "done");
 	assert.ok(
 		b.calls.some((line) => line === `git reset --hard ${HEAD_A}`),
@@ -2395,23 +2395,23 @@ test("the reset names the sha ls-remote reported, never the remote-tracking ref"
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	// origin's tip for the branch is MERGE_COMMIT; the *ref* name would have been
 	// `origin/cp-int1`, and the two are different strings on purpose.
 	const done = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, syncRemoteSha: MERGE_COMMIT })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(done.next, "done");
 	const resets = b.calls.filter((line) => line.startsWith("git reset"));
 	assert.deepEqual(resets, [`git reset --hard ${MERGE_COMMIT}`]);
 	// Which git question was asked, not merely which answer came back: the sha
 	// came from origin, and the tracking ref was never named as a revision.
 	assert.ok(
-		b.calls.includes(`git ls-remote --heads origin ${BR}`),
+		b.calls.includes(`git ls-remote --heads origin ${JOB_ID}`),
 		"the base must be resolved by asking origin",
 	);
 	assert.ok(
-		!b.calls.some((line) => line.startsWith("git reset") && line.includes(`origin/${BR}`)),
+		!b.calls.some((line) => line.startsWith("git reset") && line.includes(`origin/${JOB_ID}`)),
 		"a remote-tracking ref must never be what the worktree is reset to",
 	);
 	assert.ok(
@@ -2431,10 +2431,10 @@ test("a stale remote-tracking ref cannot satisfy the sync: only the ls-remote sh
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const done = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, trackingRefUnresolvable: true })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(done.next, "done");
 	assert.ok(b.calls.includes(`git reset --hard ${HEAD_A}`));
 	assert.equal(b.teardowns.length, 1);
@@ -2444,14 +2444,14 @@ test("origin unreachable for the branch is a refusal, not a fallback to the ref"
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({
 			pr: mergedPr(),
 			worktreeHead: HEAD_B,
 			syncLsRemoteFails: "fatal: could not read from remote repository",
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.ok(
 		!b.calls.some((line) => line.startsWith("git reset")),
 		"an unreadable answer from origin is never permission to reset",
@@ -2464,10 +2464,10 @@ test("origin naming no such ref is a refusal, not a fallback to the ref", async 
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, syncRemoteSha: "" })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.ok(
 		!b.calls.some((line) => line.startsWith("git reset")),
 		"an absent ref on origin is never permission to reset",
@@ -2483,10 +2483,10 @@ test("a clean worktree holding unpushed commits is never reset either", async (t
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, worktreeAhead: 2 })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "sync");
 	assert.equal(result.next, "surface");
 	assert.ok(!b.calls.some((line) => line.startsWith("git reset")), "unpushed commits must never be discarded");
@@ -2498,10 +2498,10 @@ test("a worktree whose divergence cannot be read is left alone, not reset", asyn
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, worktreeAheadFails: "fatal: bad revision" })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.ok(!b.calls.some((line) => line.startsWith("git reset")), "an unreadable count is not zero");
 });
@@ -2510,10 +2510,10 @@ test("a dirty worktree is never reset: it surfaces instead", async (t) => {
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, worktreeDirty: true })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "sync");
 	assert.equal(result.next, "surface");
 	assert.equal(b.teardowns.length, 0);
@@ -2549,10 +2549,10 @@ async function syncWith(t: Parameters<typeof benchOf>[0], world: Partial<World>)
 	const b = await benchOf(t);
 	mkdirSync(b.worktree, { recursive: true });
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), worktreeHead: HEAD_B, syncRemoteSha: MERGE_COMMIT, worktreeAhead: 2, ...world })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	return { b, result };
 }
 
@@ -2581,7 +2581,7 @@ test("the 7-refusal shape: pre-rebase commits whose content the base already car
 	assert.ok(salvage < reset, "the discarded head must be on a ref *before* the reset, not after");
 	assert.match(
 		b.calls[salvage] ?? "",
-		new RegExp(`^git update-ref refs/cp-salvage/${BR}/\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z ${HEAD_B}$`),
+		new RegExp(`^git update-ref refs/cp-salvage/${JOB_ID}/\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z ${HEAD_B}$`),
 		"the rescue ref must be named for the job and point at the head being discarded",
 	);
 
@@ -2597,7 +2597,7 @@ test("the 7-refusal shape: pre-rebase commits whose content the base already car
 	assert.ok(fact, "the sync fact is missing");
 	assert.match(fact, /2 pre-rebase commit\(s\) were discarded/);
 	assert.match(fact, /patch-id [0-9a-f]{12}/);
-	assert.match(fact, new RegExp(`kept at refs/cp-salvage/${BR}/`));
+	assert.match(fact, new RegExp(`kept at refs/cp-salvage/${JOB_ID}/`));
 });
 
 test("the dangerous inverse: content the base does not carry is never reset away", async (t) => {
@@ -2664,8 +2664,8 @@ const REF_ORPHAN = `refs/cp-salvage/cp-old2/2026-09-01T11-00-00Z`;
 async function integrateWith(t: Parameters<typeof benchOf>[0], world: Partial<World>) {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	await b.integrator(world).advance({ jobId: BR });
-	const result = await b.integrator({ pr: mergedPr(), ...world }).advance({ jobId: BR });
+	await b.integrator(world).advance({ jobId: JOB_ID });
+	const result = await b.integrator({ pr: mergedPr(), ...world }).advance({ jobId: JOB_ID });
 	return { b, result };
 }
 
@@ -2721,7 +2721,7 @@ test("a rescue ref whose commit the base provably carries is pruned; one it does
 	assert.match(keptFact, new RegExp(`${SALVAGED_ORPHAN.slice(0, 12)} is not reachable from main`));
 
 	// And it is journaled, with both lists.
-	const event = readRunEvents(b.home, BR)
+	const event = readRunEvents(b.home, JOB_ID)
 		.filter((entry) => entry.type === "integration_advanced")
 		.map((entry) => entry.payload as Record<string, unknown>)
 		.find((payload) => payload.step === "prune_salvage");
@@ -2848,7 +2848,7 @@ test("the per-call bound examines SALVAGE_PRUNE_MAX refs in refname order and ke
 	assert.ok(overflow, `no overflow fact in ${JSON.stringify(result.facts)}`);
 	assert.match(overflow, new RegExp(`^1 further rescue ref\\(s\\) were not examined this call \\(bound ${SALVAGE_PRUNE_MAX}\\) and are kept$`));
 
-	const event = readRunEvents(b.home, BR)
+	const event = readRunEvents(b.home, JOB_ID)
 		.filter((entry) => entry.type === "integration_advanced")
 		.map((entry) => entry.payload as Record<string, unknown>)
 		.find((payload) => payload.step === "prune_salvage");
@@ -2904,7 +2904,7 @@ test("a half-finished rebase in the worktree is surfaced, never automated over",
 	const b = await benchOf(t);
 	mkdirSync(join(b.worktree, ".git", "rebase-merge"), { recursive: true });
 	b.approve(HEAD_A);
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /rebase is in progress/);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -2921,53 +2921,53 @@ test("a half-finished rebase in the worktree is surfaced, never automated over",
 test("a head branch that cannot be deleted keeps everything else, and says so", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator({ pr: mergedPr(), deleteFails: "remote: refusing to delete a protected branch" })
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "delete_head");
 	assert.equal(result.next, "retry");
 	// The merge and the teardown already happened and must not be re-attempted.
 	assert.equal(result.merge?.recorded, true);
 	assert.equal(b.teardowns.length, 1);
-	assert.equal(b.closed.length, 0, "the br issue is closed only after the head is gone");
+	assert.equal(b.closed.length, 0, "the job is closed only after the head is gone");
 	assert.match(result.reason, /merged and torn down/);
 
 	// And it resumes: the next call re-reads the facts and finishes.
-	const finished = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: BR });
+	const finished = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: JOB_ID });
 	assert.equal(finished.next, "done");
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${PR_URL}` }]);
 	assert.equal(b.teardowns.length, 1, "teardown is not run twice");
 });
 
 test("a job close that fails leaves a merged, torn-down job in a retryable state", async (t) => {
 	const b = await benchOf(t);
 	b.approve(HEAD_A);
-	await b.integrator().advance({ jobId: BR });
+	await b.integrator().advance({ jobId: JOB_ID });
 	const result = await b
 		.integrator(
 			{ pr: mergedPr() },
 			{
 				ledger: {
 					async close() {
-						throw new Error("br: database is locked");
+						throw new Error("ledger: database is locked");
 					},
 				},
 			},
 		)
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "close");
 	assert.equal(result.next, "retry");
 	assert.match(result.reason, /the job is still open/);
 	// Everything that did land is still true, and is reported as such.
 	assert.equal(result.merge?.recorded, true);
 	assert.equal(b.teardowns.length, 1);
-	assert.ok(existsSync(join(b.home, paths.mergeFile(BR))));
+	assert.ok(existsSync(join(b.home, paths.mergeFile(JOB_ID))));
 
-	const finished = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: BR });
+	const finished = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: JOB_ID });
 	assert.equal(finished.next, "done");
 	assert.equal(finished.end_state?.br_closed, true);
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${PR_URL}` }]);
 });
 
 test("OPP-007: a retry notice keeps the reason's effects and never claims nothing was mutated", async (t) => {
@@ -2975,19 +2975,19 @@ test("OPP-007: a retry notice keeps the reason's effects and never claims nothin
 	// an unknown merge outcome (gh exit 1), and a landed merge whose cleanup failed. The old hint said
 	// "nothing was mutated" under a reason saying "merged and torn down".
 	const notice = (result: { next: string; reason: string; pr_url?: string }) =>
-		formatContinuationNotice(BR, result.next, result.reason, result.pr_url);
-	const pre = await (await benchOf(t)).integrator({ pr: { fail: "HTTP 403: Resource not accessible" } }).advance({ jobId: BR });
+		formatContinuationNotice(JOB_ID, result.next, result.reason, result.pr_url);
+	const pre = await (await benchOf(t)).integrator({ pr: { fail: "HTTP 403: Resource not accessible" } }).advance({ jobId: JOB_ID });
 	const unknown = await benchOf(t);
 	unknown.approve(HEAD_A);
-	const unsure = await unknown.integrator({ mergeFails: "connection reset by peer" }).advance({ jobId: BR });
+	const unsure = await unknown.integrator({ mergeFails: "connection reset by peer" }).advance({ jobId: JOB_ID });
 	const landed = await benchOf(t);
 	landed.approve(HEAD_A);
-	await landed.integrator().advance({ jobId: BR });
-	const partial = await landed.integrator({ pr: mergedPr(), deleteFails: "protected branch" }).advance({ jobId: BR });
+	await landed.integrator().advance({ jobId: JOB_ID });
+	const partial = await landed.integrator({ pr: mergedPr(), deleteFails: "protected branch" }).advance({ jobId: JOB_ID });
 	for (const [result, reason] of [[pre, /403/], [unsure, /connection reset by peer/], [partial, /merged and torn down/]] as const) {
 		const text = notice(result);
 		assert.equal(result.next, "retry");
-		assert.match(text, new RegExp(`HELD PR STOPPED — ${BR} \\(continuation, next: retry\\)`));
+		assert.match(text, new RegExp(`HELD PR STOPPED — ${JOB_ID} \\(continuation, next: retry\\)`));
 		assert.match(text, reason, "the integration reason stays visible");
 		assert.match(text, /resumes, never starting over/);
 	}
@@ -3009,7 +3009,7 @@ test("src/ci-wait.ts still refuses a worker's blocking watch (this design promis
 
 test("an unreviewed head refuses before merge: next is review, no gh mutation", async (t) => {
 	const b = await benchOf(t, {}, { reviewHead: false });
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(result.step, "review");
 	assert.equal(result.head_sha, HEAD_A);
@@ -3021,7 +3021,7 @@ test("an unreviewed head refuses before merge: next is review, no gh mutation", 
 
 test("a passing cp_review on this head lets the merge proceed", async (t) => {
 	const b = await benchOf(t);
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "advance");
 	assert.ok(b.calls.some((line) => line.startsWith("gh pr merge")));
@@ -3035,7 +3035,7 @@ test("a recorded patch-equivalent pass is accepted as reviewed", async (t) => {
 			pr: { ...openPr(), headRefOid: HEAD_B },
 			runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }],
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "advance");
 	assert.ok(b.calls.some((line) => line.startsWith("gh pr merge")));
@@ -3048,7 +3048,7 @@ test("a head that moved after the pass is not reviewed", async (t) => {
 			pr: { ...openPr(), headRefOid: HEAD_B },
 			runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }],
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(result.head_sha, HEAD_B);
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
@@ -3057,7 +3057,7 @@ test("a head that moved after the pass is not reviewed", async (t) => {
 test("a revise verdict is not a pass", async (t) => {
 	const b = await benchOf(t, {}, { reviewHead: false });
 	writeReviewPass(b.home, HEAD_A, { verdict: "revise" });
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
@@ -3065,7 +3065,7 @@ test("a revise verdict is not a pass", async (t) => {
 test("a flagged escalate without an approved diff checkpoint is not reviewed", async (t) => {
 	const b = await benchOf(t, {}, { reviewHead: false });
 	writeReviewPass(b.home, HEAD_A, { verdict: "escalate", cause: "flagged" });
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
@@ -3074,9 +3074,9 @@ test("an approved diff checkpoint on a flagged escalate of this head lets the me
 	const b = await benchOf(t, {}, { reviewHead: false });
 	writeReviewPass(b.home, HEAD_A, { verdict: "escalate", cause: "flagged" });
 	const diff = new CheckpointStore(b.home, { kind: "diff" });
-	diff.request({ jobId: BR, question: "Accept the flagged diff?" });
-	diff.decide(BR, true, { by: "operator command" });
-	const result = await b.integrator().advance({ jobId: BR });
+	diff.request({ jobId: JOB_ID, question: "Accept the flagged diff?" });
+	diff.decide(JOB_ID, true, { by: "operator command" });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.step, "merge");
 	assert.equal(result.next, "advance");
 	assert.ok(b.calls.some((line) => line.startsWith("gh pr merge")));
@@ -3087,9 +3087,9 @@ test("a historical pass or approved flag on a truncated subject never authorizes
 	writeReviewPass(b.home, HEAD_A, { truncated: true });
 	writeReviewPass(b.home, HEAD_A, { attempt: 2, verdict: "escalate", cause: "flagged", truncated: true });
 	const diff = new CheckpointStore(b.home, { kind: "diff" });
-	diff.request({ jobId: BR, question: "Accept the flagged diff?" });
-	diff.decide(BR, true, { by: "operator command" });
-	const result = await b.integrator().advance({ jobId: BR });
+	diff.request({ jobId: JOB_ID, question: "Accept the flagged diff?" });
+	diff.decide(JOB_ID, true, { by: "operator command" });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
@@ -3098,14 +3098,14 @@ test("an approved diff checkpoint does not cover a head that moved after the fla
 	const b = await benchOf(t, {}, { reviewHead: false });
 	writeReviewPass(b.home, HEAD_A, { verdict: "escalate", cause: "flagged" });
 	const diff = new CheckpointStore(b.home, { kind: "diff" });
-	diff.request({ jobId: BR, question: "Accept the flagged diff?" });
-	diff.decide(BR, true, { by: "operator command" });
+	diff.request({ jobId: JOB_ID, question: "Accept the flagged diff?" });
+	diff.decide(JOB_ID, true, { by: "operator command" });
 	const result = await b
 		.integrator({
 			pr: { ...openPr(), headRefOid: HEAD_B },
 			runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }],
 		})
-		.advance({ jobId: BR });
+		.advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 0);
 });
@@ -3113,7 +3113,7 @@ test("an approved diff checkpoint does not cover a head that moved after the fla
 test("the human_checkpoint fallback refuses an unreviewed head the same way", async (t) => {
 	const b = await benchOf(t, {}, { reviewHead: false });
 	b.approve(HEAD_A);
-	const result = await b.integrator({ pr: { ...openPr(), mergeStateStatus: undefined } }).advance({ jobId: BR });
+	const result = await b.integrator({ pr: { ...openPr(), mergeStateStatus: undefined } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "review");
 	assert.equal(result.step, "review");
 	assert.match(result.reason, /cp_review/);
@@ -3122,7 +3122,7 @@ test("the human_checkpoint fallback refuses an unreviewed head the same way", as
 
 test("cp_integrate refuses a job that is not a delivery:pr ship job", async (t) => {
 	const b = await benchOf(t, { kind: "research", delivery: "pipeline" });
-	await assert.rejects(() => b.integrator().advance({ jobId: BR }), /delivery:pr ship job/);
+	await assert.rejects(() => b.integrator().advance({ jobId: JOB_ID }), /delivery:pr ship job/);
 });
 
 test("one job's three authorizations are three files, three ids, and never each other", async (t) => {
@@ -3131,44 +3131,44 @@ test("one job's three authorizations are three files, three ids, and never each 
 	const diff = new CheckpointStore(b.home, { kind: "diff" });
 	const merge = new CheckpointStore(b.home, { kind: "merge" });
 
-	ship.request({ jobId: BR, question: "ship the plan?" });
-	diff.request({ jobId: BR, question: "ship this diff?" });
-	merge.request({ jobId: BR, scope: HEAD_A.slice(0, 12), question: `merge at ${HEAD_A.slice(0, 12)}?` });
-	merge.request({ jobId: BR, scope: HEAD_B.slice(0, 12), question: `merge at ${HEAD_B.slice(0, 12)}?` });
+	ship.request({ jobId: JOB_ID, question: "ship the plan?" });
+	diff.request({ jobId: JOB_ID, question: "ship this diff?" });
+	merge.request({ jobId: JOB_ID, scope: HEAD_A.slice(0, 12), question: `merge at ${HEAD_A.slice(0, 12)}?` });
+	merge.request({ jobId: JOB_ID, scope: HEAD_B.slice(0, 12), question: `merge at ${HEAD_B.slice(0, 12)}?` });
 
 	// Three distinct files, each addressed by its own store.
-	assert.equal(paths.checkpointFile(BR), `.pi-command-post/state/checkpoints/${BR}.json`);
-	assert.equal(paths.checkpointFile(BR, "diff"), `.pi-command-post/state/checkpoints/${BR}.diff.json`);
+	assert.equal(paths.checkpointFile(JOB_ID), `.pi-command-post/state/checkpoints/${JOB_ID}.json`);
+	assert.equal(paths.checkpointFile(JOB_ID, "diff"), `.pi-command-post/state/checkpoints/${JOB_ID}.diff.json`);
 	assert.equal(
-		paths.checkpointFile(BR, "merge", HEAD_A.slice(0, 12)),
-		`.pi-command-post/state/checkpoints/${BR}.merge-${HEAD_A.slice(0, 12)}.json`,
+		paths.checkpointFile(JOB_ID, "merge", HEAD_A.slice(0, 12)),
+		`.pi-command-post/state/checkpoints/${JOB_ID}.merge-${HEAD_A.slice(0, 12)}.json`,
 	);
 
 	// listPending reports the *job id*, not a file stem: `<id>.diff` was never one.
 	assert.deepEqual(
 		ship.listPending().map((entry) => entry.job_id),
-		[BR],
+		[JOB_ID],
 	);
 	assert.deepEqual(
 		diff.listPending().map((entry) => entry.job_id),
-		[BR],
+		[JOB_ID],
 	);
 	const pendingMerges = merge.listPending();
 	assert.equal(pendingMerges.length, 2, "one authorization per head sha");
-	for (const entry of pendingMerges) assert.equal(entry.job_id, BR);
+	for (const entry of pendingMerges) assert.equal(entry.job_id, JOB_ID);
 
 	// And four distinct Awaiting-you ids, so none of them is unanswerable.
 	const ids = deriveFromCheckpoints([...ship.listPending(), ...diff.listPending(), ...pendingMerges]).map(
 		(row) => row.id,
 	);
 	assert.equal(new Set(ids).size, 4, `ids collided: ${ids.join(", ")}`);
-	assert.ok(ids.includes(`aw-checkpoint-${BR}`), "the ship row must keep the id it always had");
+	assert.ok(ids.includes(`aw-checkpoint-${JOB_ID}`), "the ship row must keep the id it always had");
 	// The suffix mirrors the file name, and is collision-safe for the same reason
 	// that name is: a job id can never contain a `.`.
-	assert.ok(ids.includes(`aw-checkpoint-${BR}.diff`));
-	assert.ok(ids.includes(`aw-checkpoint-${BR}.merge-${HEAD_A.slice(0, 12)}`));
-	assert.deepEqual(parseCheckpointAwaitingId(`aw-checkpoint-${BR}.merge-${HEAD_A.slice(0, 12)}`), {
-		job_id: BR,
+	assert.ok(ids.includes(`aw-checkpoint-${JOB_ID}.diff`));
+	assert.ok(ids.includes(`aw-checkpoint-${JOB_ID}.merge-${HEAD_A.slice(0, 12)}`));
+	assert.deepEqual(parseCheckpointAwaitingId(`aw-checkpoint-${JOB_ID}.merge-${HEAD_A.slice(0, 12)}`), {
+		job_id: JOB_ID,
 		kind: "merge",
 		scope: HEAD_A.slice(0, 12),
 	});
@@ -3177,7 +3177,7 @@ test("one job's three authorizations are three files, three ids, and never each 
 });
 
 test("the generated conflict message is the promote text, not a model's prose", () => {
-	const message = conflictMessage({ jobId: BR, branch: BR, prUrl: PR_URL, base: "main" });
+	const message = conflictMessage({ jobId: JOB_ID, branch: JOB_ID, prUrl: PR_URL, base: "main" });
 	assert.match(message, /git fetch origin && git merge origin\/main/);
 	assert.match(message, /second PR, never a new branch/);
 });
@@ -3192,39 +3192,39 @@ const NO_FLAG = { destructive_scope: false, scope_growth: false, blocking_unknow
 
 /** The fix report: intake's own record shape, as the worker would have filed it. */
 function writeShipEnvelope(home: string, head: string): void {
-	const envelope = { job_id: BR, kind: "ship", status: "done", summary: "fixed", branch: BR, head_sha: head, pr_url: PR_URL } as Envelope;
-	const stored: EnvelopeRecord = { schema_version: SCHEMA_VERSION, job_id: BR, received_at: isoTimestamp(), attempt: 1, envelope };
-	writeFileSync(join(home, paths.envelopeFile(BR)), JSON.stringify(stored));
+	const envelope = { job_id: JOB_ID, kind: "ship", status: "done", summary: "fixed", branch: JOB_ID, head_sha: head, pr_url: PR_URL } as Envelope;
+	const stored: EnvelopeRecord = { schema_version: SCHEMA_VERSION, job_id: JOB_ID, received_at: isoTimestamp(), attempt: 1, envelope };
+	writeFileSync(join(home, paths.envelopeFile(JOB_ID)), JSON.stringify(stored));
 }
 
 /** Five reviews on HEAD_A; the fifth is a complete capped revise, so its one final-fix question is pending. */
 function capAt(home: string, extra: { truncated?: boolean } = {}): Checkpoint | undefined {
 	for (let attempt = 1; attempt < REVIEW_MAX_ATTEMPTS; attempt += 1) writeReviewPass(home, HEAD_A, { attempt, verdict: "revise" });
 	const capped: DiffVerdict = {
-		schema_version: SCHEMA_VERSION, job_id: BR, attempt: REVIEW_MAX_ATTEMPTS, verdict: "escalate", cause: "policy", flags: NO_FLAG,
+		schema_version: SCHEMA_VERSION, job_id: JOB_ID, attempt: REVIEW_MAX_ATTEMPTS, verdict: "escalate", cause: "policy", flags: NO_FLAG,
 		reasons: ["[severity: high] [confidence: high] the retry path is untested", `review cap: this is review ${REVIEW_MAX_ATTEMPTS} of ${REVIEW_MAX_ATTEMPTS}`],
 		decided_at: isoTimestamp(), head_sha: HEAD_A, diff_stat: { files: 1, truncated: extra.truncated ?? false },
 		...(extra.truncated ? {} : { model: "mock/reviewer" }),
 	};
-	writeFileSync(join(home, paths.reviewFile(BR, REVIEW_MAX_ATTEMPTS)), JSON.stringify(capped));
+	writeFileSync(join(home, paths.reviewFile(JOB_ID, REVIEW_MAX_ATTEMPTS)), JSON.stringify(capped));
 	writeShipEnvelope(home, HEAD_A);
-	const review = { job_id: BR, verdict: "revise" as const, flags: NO_FLAG, reasons: ["the retry path is untested"], revisions: ["add a test for the retry path"] };
+	const review = { job_id: JOB_ID, verdict: "revise" as const, flags: NO_FLAG, reasons: ["the retry path is untested"], revisions: ["add a test for the retry path"] };
 	return requestFinalFix(home, { verdict: capped, review, prUrl: PR_URL });
 }
 
 function answerFinalFix(home: string, approved: boolean, by = "operator-quote"): void {
-	new CheckpointStore(home, { kind: "final_fix" }).decide(BR, approved, { by, basis: { operator_quote: QUOTE }, scope: HEAD_A.slice(0, 12) });
+	new CheckpointStore(home, { kind: "final_fix" }).decide(JOB_ID, approved, { by, basis: { operator_quote: QUOTE }, scope: HEAD_A.slice(0, 12) });
 }
 
 /** The live implementer: cp_send reopens the envelope slot, exactly as `Sender` does. */
 function reopeningSender(b: Bench): (jobId: string, message: string) => Promise<{ receipt: string }> {
 	return async (jobId, message) => (b.sent.push({ jobId, message }), await reopen(b), { receipt: "delivered" });
 }
-const reopen = (b: Bench) => reopenEnvelopeSlot({ home: b.home, fleet: b.fleet, runs: b.runs, jobId: BR, reason: "test promote" });
+const reopen = (b: Bench) => reopenEnvelopeSlot({ home: b.home, fleet: b.fleet, runs: b.runs, jobId: JOB_ID, reason: "test promote" });
 
 async function reportFix(b: Bench, head: string): Promise<void> {
 	writeShipEnvelope(b.home, head);
-	await b.fleet.patch(BR, { reported_at: isoTimestamp(), phase: "held" });
+	await b.fleet.patch(JOB_ID, { reported_at: isoTimestamp(), phase: "held" });
 }
 
 /** Capped, approved on a quote, promoted once and reported at HEAD_B. */
@@ -3233,7 +3233,7 @@ async function reportedFix(t: { after(fn: () => void | Promise<void>): void }): 
 	capAt(b.home);
 	answerFinalFix(b.home, true);
 	const send = { send: reopeningSender(b) };
-	await b.integrator({}, send).advance({ jobId: BR });
+	await b.integrator({}, send).advance({ jobId: JOB_ID });
 	await reportFix(b, HEAD_B);
 	return { b, send };
 }
@@ -3248,37 +3248,37 @@ test("jje.3: one operator approval and exactly one reported fix merge the fix he
 	assert.match(asked?.evidence?.join("\n") ?? "", /add a test for the retry path/);
 	const send = { send: reopeningSender(b) };
 
-	const pending = await b.integrator({}, send).advance({ jobId: BR });
-	assert.deepEqual([pending.next, pending.reason.includes(`aw-checkpoint-${BR}.final-fix-${HEAD_A.slice(0, 12)}`), b.sent.length], ["surface", true, 0]);
+	const pending = await b.integrator({}, send).advance({ jobId: JOB_ID });
+	assert.deepEqual([pending.next, pending.reason.includes(`aw-checkpoint-${JOB_ID}.final-fix-${HEAD_A.slice(0, 12)}`), b.sent.length], ["surface", true, 0]);
 
 	answerFinalFix(b.home, true);
-	const promoted = await b.integrator({}, send).advance({ jobId: BR });
-	assert.deepEqual([promoted.next, b.sent.length, readFinalFixRecord(b.home, BR)?.fix_generation], ["resolve", 1, 2]);
+	const promoted = await b.integrator({}, send).advance({ jobId: JOB_ID });
+	assert.deepEqual([promoted.next, b.sent.length, readFinalFixRecord(b.home, JOB_ID)?.fix_generation], ["resolve", 1, 2]);
 	assert.match(b.sent[0]?.message ?? "", /- add a test for the retry path\n- the retry path is untested/);
 
-	const waiting = await b.integrator({}, send).advance({ jobId: BR });
+	const waiting = await b.integrator({}, send).advance({ jobId: JOB_ID });
 	assert.equal(waiting.next, "resolve", "an unreported fix is not a fix");
 	assert.equal(b.sent.length, 1, "the implementer is promoted exactly once");
 
 	await reportFix(b, HEAD_B);
-	const merged = await b.integrator(onHead(HEAD_B), send).advance({ jobId: BR });
+	const merged = await b.integrator(onHead(HEAD_B), send).advance({ jobId: JOB_ID });
 	assert.equal(merged.step, "merge");
 	assert.equal(matchHeadBinding(merges(b)[0] ?? "")?.head, HEAD_B, "--match-head-commit binds the fix head");
 	assert.ok(merged.facts.some((fact) => /operator-approved final fix at bbbbbbbbbbbb/.test(fact)));
-	const { capped_head, pr_url, fix_generation, fix_head, decided_by, basis } = readFinalFixRecord(b.home, BR) ?? {};
+	const { capped_head, pr_url, fix_generation, fix_head, decided_by, basis } = readFinalFixRecord(b.home, JOB_ID) ?? {};
 	assert.deepEqual({ capped_head, pr_url, fix_generation, fix_head, decided_by, basis }, { capped_head: HEAD_A, pr_url: PR_URL, fix_generation: 2, fix_head: HEAD_B, decided_by: "operator-quote", basis: { operator_quote: QUOTE } });
-	assert.equal(existsSync(join(b.home, paths.reviewFile(BR, REVIEW_MAX_ATTEMPTS + 1))), false, "no sixth review");
+	assert.equal(existsSync(join(b.home, paths.reviewFile(JOB_ID, REVIEW_MAX_ATTEMPTS + 1))), false, "no sixth review");
 });
 
 test("jje.3: a push after the fix report, or a second report, voids the final fix for good", async (t) => {
 	for (const later of ["push", "report"] as const) {
 		const { b, send } = await reportedFix(t);
 		if (later === "report") await reopen(b).then(() => reportFix(b, HEAD_B));
-		const moved = await b.integrator(onHead(later === "push" ? HEAD_C : HEAD_B), send).advance({ jobId: BR });
+		const moved = await b.integrator(onHead(later === "push" ? HEAD_C : HEAD_B), send).advance({ jobId: JOB_ID });
 		assert.equal(moved.next, "surface", later);
 		assert.match(moved.reason, /is void/);
-		assert.ok(readFinalFixRecord(b.home, BR)?.invalidated, `${later}: the void is recorded`);
-		const back = await b.integrator(onHead(HEAD_B), send).advance({ jobId: BR });
+		assert.ok(readFinalFixRecord(b.home, JOB_ID)?.invalidated, `${later}: the void is recorded`);
+		const back = await b.integrator(onHead(HEAD_B), send).advance({ jobId: JOB_ID });
 		assert.equal(back.next, "surface", `${later}: a voided fix never comes back`);
 		assert.equal(merges(b).length, 0, later);
 	}
@@ -3289,30 +3289,30 @@ test("jje.3: approval is bound to its PR and its capped head, and needs an opera
 		const b = await benchOf(t, {}, { reviewHead: false });
 		capAt(b.home);
 		// /cp-authorize and the Awaiting dialog carry no quote, so they cannot approve it.
-		assert.throws(() => new CheckpointStore(b.home, { kind: "final_fix" }).decide(BR, true, { by: "operator command", scope: HEAD_A.slice(0, 12) }), /only with an operator quote/);
+		assert.throws(() => new CheckpointStore(b.home, { kind: "final_fix" }).decide(JOB_ID, true, { by: "operator command", scope: HEAD_A.slice(0, 12) }), /only with an operator quote/);
 		answerFinalFix(b.home, true);
 		const world = how === "other-pr" ? { pr: { ...openPr(), url: "https://github.com/o/r/pull/62" } } : onHead(HEAD_B);
-		const result = await b.integrator(world, { send: reopeningSender(b) }).advance({ jobId: BR });
+		const result = await b.integrator(world, { send: reopeningSender(b) }).advance({ jobId: JOB_ID });
 		assert.match(result.reason, how === "other-pr" ? /another PR never inherits it/ : /head moved to bbbbbbbbbbbb before promotion/);
-		assert.deepEqual([result.next, b.sent.length, merges(b).length, readFinalFixRecord(b.home, BR)], ["surface", 0, 0, undefined], how);
+		assert.deepEqual([result.next, b.sent.length, merges(b).length, readFinalFixRecord(b.home, JOB_ID)], ["surface", 0, 0, undefined], how);
 	}
 });
 
 test("jje.3: a later report (even at the same head) or another PR drops the fix head from the merge-ask gate at once", async (t) => {
 	for (const how of ["report", "pr"] as const) {
 		const { b } = await reportedFix(t);
-		assert.equal(resolveFinalFix(b.home, b.fleet.require(BR), HEAD_B).state, "accepted", "the fix report binds HEAD_B");
-		assert.deepEqual(readReviewPassHeads(b.home, BR), [HEAD_B]);
+		assert.equal(resolveFinalFix(b.home, b.fleet.require(JOB_ID), HEAD_B).state, "accepted", "the fix report binds HEAD_B");
+		assert.deepEqual(readReviewPassHeads(b.home, JOB_ID), [HEAD_B]);
 		if (how === "report") await reopen(b).then(() => reportFix(b, HEAD_B));
-		else await b.fleet.patch(BR, { receipts: [{ ...PR_RECEIPT, url: "https://github.com/o/r/pull/62" }] });
-		assert.deepEqual(readReviewPassHeads(b.home, BR), [], `${how}: never exposed before integrate re-resolves it`);
-		if (how === "report") assert.ok(readFinalFixRecord(b.home, BR)?.invalidated, "the new generation voids it for good");
+		else await b.fleet.patch(JOB_ID, { receipts: [{ ...PR_RECEIPT, url: "https://github.com/o/r/pull/62" }] });
+		assert.deepEqual(readReviewPassHeads(b.home, JOB_ID), [], `${how}: never exposed before integrate re-resolves it`);
+		if (how === "report") assert.ok(readFinalFixRecord(b.home, JOB_ID)?.invalidated, "the new generation voids it for good");
 	}
 });
 
 test("jje.3: red CI on the approved fix head never merges", async (t) => {
 	const { b, send } = await reportedFix(t);
-	const red = await b.integrator(onHead(HEAD_B, "failure"), send).advance({ jobId: BR });
+	const red = await b.integrator(onHead(HEAD_B, "failure"), send).advance({ jobId: JOB_ID });
 	assert.equal(red.step, "ci");
 	assert.equal(merges(b).length, 0);
 });
@@ -3323,19 +3323,19 @@ test("jje.3: declined, mandate-granted or truncated caps cannot merge and spawn 
 		const asked = capAt(b.home, { truncated: how === "truncated" });
 		if (how === "truncated") {
 			assert.equal(asked, undefined, "an incomplete subject declares no final fix");
-			new CheckpointStore(b.home, { kind: "final_fix" }).request({ jobId: BR, scope: HEAD_A.slice(0, 12), question: "forged?" });
+			new CheckpointStore(b.home, { kind: "final_fix" }).request({ jobId: JOB_ID, scope: HEAD_A.slice(0, 12), question: "forged?" });
 		}
 		answerFinalFix(b.home, how !== "declined", how === "mandate" ? "mandate:md-abcd" : "operator-quote");
-		const result = await b.integrator({}, { send: reopeningSender(b) }).advance({ jobId: BR });
-		assert.deepEqual([result.step === "merge", b.sent.length, merges(b).length, readFinalFixRecord(b.home, BR)], [false, 0, 0, undefined], `${how}: nothing is promoted or merged`);
+		const result = await b.integrator({}, { send: reopeningSender(b) }).advance({ jobId: JOB_ID });
+		assert.deepEqual([result.step === "merge", b.sent.length, merges(b).length, readFinalFixRecord(b.home, JOB_ID)], [false, 0, 0, undefined], `${how}: nothing is promoted or merged`);
 	}
 });
 
 test("jje.5: the approved final-fix head of a draft is marked ready, then merges", async (t) => {
 	const { b, send } = await reportedFix(t);
-	const ready = await b.integrator({ ...onHead(HEAD_B), pr: { ...draftPr(), headRefOid: HEAD_B } }, send).advance({ jobId: BR });
+	const ready = await b.integrator({ ...onHead(HEAD_B), pr: { ...draftPr(), headRefOid: HEAD_B } }, send).advance({ jobId: JOB_ID });
 	assert.deepEqual([ready.next, count(b, "gh pr ready"), merges(b).length], ["advance", 1, 0]);
-	await b.integrator(onHead(HEAD_B), send).advance({ jobId: BR });
+	await b.integrator(onHead(HEAD_B), send).advance({ jobId: JOB_ID });
 	assert.equal(matchHeadBinding(merges(b)[0] ?? "")?.head, HEAD_B);
 });
 
@@ -3359,7 +3359,7 @@ test("human_handoff never hands off pending, superseded, red or unreadable CI, a
 	];
 	for (const [label, world, step, next] of cases) {
 		const b = await benchOf(t);
-		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: JOB_ID });
 		assert.deepEqual([result.step, result.next], [step, next], label);
 		assert.equal(handoffRows(b).length, 0, `${label}: no handoff row`);
 		assert.deepEqual(mutations(b), [], `${label}: no merge, no update-branch`);
@@ -3374,10 +3374,10 @@ test("human_handoff never hands off pending, superseded, red or unreadable CI, a
 		["mergeStateStatus not reported", { pr: { ...openPr(), mergeStateStatus: undefined } }],
 	] as Array<[string, Partial<World>]>) {
 		const b = await benchOf(t);
-		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: JOB_ID });
 		assert.deepEqual([result.step, result.next], ["permit", "surface"], label);
 		assert.ok(result.facts.some((fact) => fact.includes("not handed off, no merge checkpoint")), label);
-		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, `${label}: no checkpoint`);
+		assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined, `${label}: no checkpoint`);
 		assert.equal(b.awaiting().list().length, 0, `${label}: no row`);
 		assert.deepEqual(mutations(b), [], label);
 	}
@@ -3394,15 +3394,15 @@ test("human_handoff hands a reviewed, green PR to a human: CLEAN, BEHIND, review
 	];
 	for (const [label, world] of cases) {
 		const b = await benchOf(t);
-		const result = await b.integrator(world, HANDOFF).advance({ jobId: BR });
+		const result = await b.integrator(world, HANDOFF).advance({ jobId: JOB_ID });
 		assert.deepEqual([result.step, result.next, result.head_sha], ["permit", "surface", HEAD_A], label);
 		assert.deepEqual(mutations(b), [], `${label}: never merged or update-branched`);
 		const rows = handoffRows(b);
 		assert.equal(rows.length, 1, label);
 		assert.equal(rows[0]?.state, "open", label);
 		assert.match(rows[0]?.decision ?? "", new RegExp(HEAD_A.slice(0, 12)), label);
-		assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined, label);
-		assert.ok(readRunEvents(b.home, BR).some((event) => event.type === "integration_permitted" && (event.payload as { policy?: string }).policy === "human_handoff"), label);
+		assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined, label);
+		assert.ok(readRunEvents(b.home, JOB_ID).some((event) => event.type === "integration_permitted" && (event.payload as { policy?: string }).policy === "human_handoff"), label);
 	}
 });
 
@@ -3411,23 +3411,23 @@ test("human_handoff with a strict up-to-date rule: no handoff until CI is green 
 	const strict = { ancestor: false, pr: { ...openPr(), mergeStateStatus: "BLOCKED", reviewDecision: "" }, rules: STRICT_RULES } as const;
 	const pendingCi = { runs: [{ status: "in_progress", conclusion: null, headSha: HEAD_A, workflowName: "ci" }] };
 	const b = await benchOf(t, {}, { reviewHead: HEAD_B });
-	const pending = await b.integrator({ ...strict, ...pendingCi }, HANDOFF).advance({ jobId: BR });
+	const pending = await b.integrator({ ...strict, ...pendingCi }, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([pending.step, pending.next], ["ci", "wait"], "pending CI under a strict rule waits");
 	assert.equal(handoffRows(b).length, 0, "pending CI: no handoff row");
-	const unreviewed = await b.integrator(strict, HANDOFF).advance({ jobId: BR });
+	const unreviewed = await b.integrator(strict, HANDOFF).advance({ jobId: JOB_ID });
 	assert.equal(unreviewed.next, "review", "green CI with a pass only on a superseded head is a review hold");
 	assert.equal(handoffRows(b).length, 0, "no current-head pass: no handoff row");
 	assert.deepEqual(mutations(b), [], "never merged or update-branched while held");
 
 	writeReviewPass(b.home, HEAD_A, { attempt: 2 });
-	const handed = await b.integrator(strict, HANDOFF).advance({ jobId: BR });
+	const handed = await b.integrator(strict, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([handed.step, handed.next, handed.head_sha], ["permit", "surface", HEAD_A]);
 	assert.equal(handoffRows(b).length, 1, "handed off once CI is green and the current head passed");
 	assert.deepEqual(mutations(b), [], "handed off, never update-branched or merged");
 
 	// Same strict rule on a current base: GitHub holds on checks, which never hands off.
 	const current = await benchOf(t);
-	const held = await current.integrator({ ...strict, ancestor: true }, HANDOFF).advance({ jobId: BR });
+	const held = await current.integrator({ ...strict, ancestor: true }, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([held.step, held.next], ["permit", "surface"]);
 	assert.equal(handoffRows(current).length, 0, "a checks hold under a strict rule is not handed off");
 	assert.deepEqual(mutations(current), []);
@@ -3435,38 +3435,38 @@ test("human_handoff with a strict up-to-date rule: no handoff until CI is green 
 
 test("human_handoff: no pass is a review hold, a draft is readied first, and repo policy is argv-identical", async (t) => {
 	const unreviewed = await benchOf(t, {}, { reviewHead: false });
-	const review = await unreviewed.integrator({}, HANDOFF).advance({ jobId: BR });
+	const review = await unreviewed.integrator({}, HANDOFF).advance({ jobId: JOB_ID });
 	assert.equal(review.next, "review");
 	assert.equal(unreviewed.awaiting().list().length, 0);
 
 	const draft = await benchOf(t);
-	const ready = await draft.integrator({ pr: draftPr() }, HANDOFF).advance({ jobId: BR });
+	const ready = await draft.integrator({ pr: draftPr() }, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([ready.next, count(draft, "gh pr ready"), handoffRows(draft).length], ["advance", 1, 0]);
-	const handed = await draft.integrator({}, HANDOFF).advance({ jobId: BR });
+	const handed = await draft.integrator({}, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([handed.next, handoffRows(draft).length, mutations(draft).length], ["surface", 1, 0]);
 
 	const plain = await benchOf(t);
-	await plain.integrator().advance({ jobId: BR });
+	await plain.integrator().advance({ jobId: JOB_ID });
 	const repo = await benchOf(t);
-	await repo.integrator({}, { policy: "repo" }).advance({ jobId: BR });
+	await repo.integrator({}, { policy: "repo" }).advance({ jobId: JOB_ID });
 	assert.deepEqual(repo.calls, plain.calls, "repo policy changes no argv");
 	assert.ok(repo.calls.some((line) => line.startsWith("gh pr merge")));
 });
 
 test("human_handoff: a change request's new head is reviewed and handed off again on the same row", async (t) => {
 	const b = await benchOf(t);
-	await b.integrator({}, HANDOFF).advance({ jobId: BR });
+	await b.integrator({}, HANDOFF).advance({ jobId: JOB_ID });
 	const [first] = handoffRows(b);
 	assert.ok(first);
 
 	const onB = { pr: { ...openPr(), headRefOid: HEAD_B }, runs: [{ status: "completed", conclusion: "success", headSha: HEAD_B, workflowName: "ci" }] };
-	const unreviewed = await b.integrator(onB, HANDOFF).advance({ jobId: BR });
+	const unreviewed = await b.integrator(onB, HANDOFF).advance({ jobId: JOB_ID });
 	assert.equal(unreviewed.next, "review", "a new head needs its own pass");
 	assert.equal(handoffRows(b).length, 1);
 	assert.match(handoffRows(b)[0]?.decision ?? "", new RegExp(HEAD_A.slice(0, 12)), "the row still names the old head until the next handoff");
 
 	writeReviewPass(b.home, HEAD_B, { attempt: 2 });
-	const again = await b.integrator(onB, HANDOFF).advance({ jobId: BR });
+	const again = await b.integrator(onB, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([again.next, again.head_sha], ["surface", HEAD_B]);
 	const rows = handoffRows(b);
 	assert.equal(rows.length, 1, "one row, updated in place");
@@ -3477,10 +3477,10 @@ test("human_handoff: a change request's new head is reviewed and handed off agai
 
 test("human_handoff: the human's merge lands through the ordinary MERGED path and the row goes obsolete", async (t) => {
 	const b = await benchOf(t);
-	await b.integrator({}, HANDOFF).advance({ jobId: BR });
-	const done = await b.integrator({ pr: mergedPr() }, HANDOFF).advance({ jobId: BR });
+	await b.integrator({}, HANDOFF).advance({ jobId: JOB_ID });
+	const done = await b.integrator({ pr: mergedPr() }, HANDOFF).advance({ jobId: JOB_ID });
 	assert.deepEqual([done.step, done.next, done.merge?.recorded, b.teardowns.length], ["done", "done", true, 1]);
-	assert.deepEqual(b.closed, [{ id: BR, reason: `merged: ${PR_URL}` }]);
+	assert.deepEqual(b.closed, [{ id: JOB_ID, reason: `merged: ${PR_URL}` }]);
 	assert.deepEqual(mutations(b), [], "the command post never merged it");
 	const row = handoffRows(b)[0];
 	assert.ok(row);
@@ -3492,30 +3492,30 @@ test("human_handoff parks the handed-off job (awaiting_merge PR6): GitHub's base
 	const facts: ParkFacts[] = [];
 	const park = async (jobId: string, seen: ParkFacts): Promise<ParkResult> => {
 		facts.push(seen);
-		const parked = { cycle: 1, ...seen, branch: BR, released_at: seen.handed_at, frozen_seconds: 60, frozen_usage: EMPTY_USAGE };
+		const parked = { cycle: 1, ...seen, branch: JOB_ID, released_at: seen.handed_at, frozen_seconds: 60, frozen_usage: EMPTY_USAGE };
 		await b.fleet.mutate((jobs) => {
 			const job = jobs.find((candidate) => candidate.job_id === jobId)!;
 			Object.assign(job, { phase: "awaiting_merge", awaiting_merge: parked, worker: { ...job.worker, exited_at: seen.handed_at } });
 		});
 		return { job_id: jobId, parked: true, awaiting_merge: parked };
 	};
-	const handed = await b.integrator({ pr: { ...openPr(), baseRefName: "release" } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	const handed = await b.integrator({ pr: { ...openPr(), baseRefName: "release" } }, { ...HANDOFF, park }).advance({ jobId: JOB_ID, base: "main" });
 	assert.deepEqual([handed.step, handed.next, handed.head_sha], ["permit", "wait", HEAD_A]);
 	assert.deepEqual(facts.map((seen) => [seen.pr_url, seen.repo, seen.head_sha, seen.base]), [[PR_URL, "o/r", HEAD_A, "release"]], "the PR's own base, not the request's");
 	assert.ok(handed.facts.some((fact) => fact.startsWith("human_handoff: parked with the team")));
 	assert.equal(handoffRows(b).length, 0, "a parked PR declares no human-review row");
 	assert.deepEqual(mutations(b), []);
 	const before = b.calls.length;
-	const again = await b.integrator({}, { ...HANDOFF, park }).advance({ jobId: BR });
+	const again = await b.integrator({}, { ...HANDOFF, park }).advance({ jobId: JOB_ID });
 	assert.deepEqual([again.step, again.next, b.calls.length, facts.length], ["start", "wait", before, 1], "parked: no gh, git or park call");
 
 	const refused = await benchOf(t);
 	const failing = async (jobId: string): Promise<ParkResult> => ({ job_id: jobId, parked: false, failure: { code: "gate_refused", message: "dirty: uncommitted changes", fix: "commit" } });
-	const legacy = await refused.integrator({}, { ...HANDOFF, park: failing }).advance({ jobId: BR });
+	const legacy = await refused.integrator({}, { ...HANDOFF, park: failing }).advance({ jobId: JOB_ID });
 	assert.deepEqual([legacy.step, legacy.next], ["permit", "surface"], "a park that cannot finish keeps today's handoff");
 	assert.match(legacy.reason, /Not parked \(gate_refused\)/);
 	assert.equal(handoffRows(refused).length, 1);
-	assert.equal(refused.fleet.require(BR).phase, "held");
+	assert.equal(refused.fleet.require(JOB_ID).phase, "held");
 	assert.deepEqual(mutations(refused), []);
 });
 
@@ -3523,15 +3523,15 @@ test("human_handoff parks on the trimmed observed base only; an empty baseRefNam
 	// Regression: an empty baseRefName fell back to the request's base and parked against a base GitHub never reported.
 	const seen: string[] = [];
 	const park = async (jobId: string, facts: ParkFacts): Promise<ParkResult> => (seen.push(facts.base), { job_id: jobId, parked: false, failure: { code: "gate_refused", message: "stop", fix: "none" } });
-	await (await benchOf(t)).integrator({ pr: { ...openPr(), baseRefName: " release " } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	await (await benchOf(t)).integrator({ pr: { ...openPr(), baseRefName: " release " } }, { ...HANDOFF, park }).advance({ jobId: JOB_ID, base: "main" });
 	assert.deepEqual(seen, ["release"], "the trimmed observed base");
 
 	const b = await benchOf(t);
-	const legacy = await b.integrator({ pr: { ...openPr(), baseRefName: "  " } }, { ...HANDOFF, park }).advance({ jobId: BR, base: "main" });
+	const legacy = await b.integrator({ pr: { ...openPr(), baseRefName: "  " } }, { ...HANDOFF, park }).advance({ jobId: JOB_ID, base: "main" });
 	assert.deepEqual([legacy.step, legacy.next, seen.length], ["permit", "surface", 1], "no observed base: never parked");
 	assert.match(legacy.reason, /Not parked \(not_parkable\): GitHub reported no base branch/);
 	assert.equal(handoffRows(b).length, 1);
-	assert.equal(b.fleet.require(BR).phase, "held");
+	assert.equal(b.fleet.require(JOB_ID).phase, "held");
 	assert.deepEqual(mutations(b), []);
 });
 
@@ -3540,9 +3540,9 @@ test("human_handoff parks on the trimmed observed base only; an empty baseRefNam
 // ---------------------------------------------------------------------------
 
 function writeBlockedEnvelope(home: string, head?: string, blockers: string[] = ["screenshots are not in the PR"]): void {
-	mkdirSync(join(home, paths.runDir(BR)), { recursive: true });
-	const envelope = { job_id: BR, kind: "ship", status: "blocked", summary: "not finished", blockers, branch: BR, ...(head ? { head_sha: head } : {}) };
-	writeFileSync(join(home, paths.envelopeFile(BR)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: BR, received_at: isoTimestamp(), attempt: 1, envelope }));
+	mkdirSync(join(home, paths.runDir(JOB_ID)), { recursive: true });
+	const envelope = { job_id: JOB_ID, kind: "ship", status: "blocked", summary: "not finished", blockers, branch: JOB_ID, ...(head ? { head_sha: head } : {}) };
+	writeFileSync(join(home, paths.envelopeFile(JOB_ID)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: JOB_ID, received_at: isoTimestamp(), attempt: 1, envelope }));
 }
 
 const touched = (b: Bench) => b.calls.filter((call) => /^gh (pr merge|pr update-branch|pr ready|run)/.test(call));
@@ -3550,25 +3550,25 @@ const touched = (b: Bench) => b.calls.filter((call) => /^gh (pr merge|pr update-
 test("N3: a blocked live report stops a green, reviewed PR before anything is touched", async (t) => {
 	const b = await benchOf(t);
 	writeBlockedEnvelope(b.home, HEAD_A);
-	const result = await b.integrator().advance({ jobId: BR });
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.deepEqual([result.step, result.next], ["start", "surface"]);
 	assert.match(result.reason, /blocked/);
 	assert.match(result.reason, /cp_send/);
 	assert.ok(result.record.facts.includes("blocker: screenshots are not in the PR"));
 	assert.deepEqual(touched(b), []);
 	assert.equal(b.sent.length, 0);
-	assert.equal(b.mergeCheckpoints().get(BR, { scope: HEAD_A.slice(0, 12) }), undefined);
-	assert.ok(readRunEvents(b.home, BR).some((event) => event.type === "integration_surfaced"));
+	assert.equal(b.mergeCheckpoints().get(JOB_ID, { scope: HEAD_A.slice(0, 12) }), undefined);
+	assert.ok(readRunEvents(b.home, JOB_ID).some((event) => event.type === "integration_surfaced"));
 
 	writeShipEnvelope(b.home, HEAD_A);
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
 test("N3: a blocked job whose PR a human merged on GitHub still finishes", async (t) => {
 	const b = await benchOf(t);
 	writeBlockedEnvelope(b.home, HEAD_A);
-	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: BR });
+	const done = await b.integrator({ pr: mergedPr() }).advance({ jobId: JOB_ID });
 	assert.deepEqual([done.next, done.merge?.recorded, b.teardowns.length], ["done", true, 1]);
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
 });
@@ -3586,7 +3586,7 @@ for (const permission of ["CLEAN", undefined]) {
 				return result;
 			},
 		});
-		const result = await integration.advance({ jobId: BR });
+		const result = await integration.advance({ jobId: JOB_ID });
 		assert.equal(result.next, "surface");
 		assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
 	});
@@ -3594,14 +3594,14 @@ for (const permission of ["CLEAN", undefined]) {
 
 test("N3: an unreadable envelope.json fails closed; a missing one is unchanged", async (t) => {
 	const b = await benchOf(t);
-	mkdirSync(join(b.home, paths.runDir(BR)), { recursive: true });
-	writeFileSync(join(b.home, paths.envelopeFile(BR)), "{");
-	const result = await b.integrator().advance({ jobId: BR });
+	mkdirSync(join(b.home, paths.runDir(JOB_ID)), { recursive: true });
+	writeFileSync(join(b.home, paths.envelopeFile(JOB_ID)), "{");
+	const result = await b.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.match(result.reason, /unreadable/);
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
-	rmSync(join(b.home, paths.envelopeFile(BR)));
-	assert.equal((await b.integrator().advance({ jobId: BR })).next, "advance");
+	rmSync(join(b.home, paths.envelopeFile(JOB_ID)));
+	assert.equal((await b.integrator().advance({ jobId: JOB_ID })).next, "advance");
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
@@ -3618,13 +3618,13 @@ test("N3/PR90: a ci_green continuation on a blocked report stops once, visibly, 
 		head: () => HEAD_A,
 		notify: (notice) => void notices.push(notice),
 	});
-	const outcome = await continuation.trigger({ jobId: BR, event: "ci_green", head: HEAD_A });
+	const outcome = await continuation.trigger({ jobId: JOB_ID, event: "ci_green", head: HEAD_A });
 	assert.deepEqual([outcome.action, outcome.next], ["stopped", "surface"]);
 	assert.equal(notices.length, 1);
 	assert.match(notices[0]?.content ?? "", /HELD PR STOPPED — cp-int1/);
 	assert.match(notices[0]?.content ?? "", /screenshots are not in the PR/);
 	assert.equal(b.calls.some((call) => call.startsWith("gh pr merge")), false);
-	await continuation.trigger({ jobId: BR, event: "envelope", generation: 1 });
+	await continuation.trigger({ jobId: JOB_ID, event: "envelope", generation: 1 });
 	assert.equal(notices.length, 2);
 	assert.equal(notices[1]?.id, notices[0]?.id);
 });
@@ -3632,7 +3632,7 @@ test("N3/PR90: a ci_green continuation on a blocked report stops once, visibly, 
 test("N3: a blocked report surfaces before a conflict promote", async (t) => {
 	const b = await benchOf(t);
 	writeBlockedEnvelope(b.home, HEAD_A);
-	const result = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: BR });
+	const result = await b.integrator({ pr: { ...openPr(), mergeable: "CONFLICTING" } }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.equal(b.sent.length, 0);
 });

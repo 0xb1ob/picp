@@ -9,6 +9,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { RETIRED_PATTERN } from "../../scripts/check-retired-integration.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import type { IntakeResult } from "../../src/intake.ts";
@@ -34,17 +35,17 @@ const AT = "2026-01-01T00:00:00Z";
 const OPEN = "cp-legacy-open";
 const DEFERRED = "cp-legacy-deferred";
 const CLOSED = "cp-legacy-closed";
-const BR_JOB = "cp-legacy-br";
+const DB_JOB = "cp-legacy-db";
 const LINK = { connection_id: "legacy-x", item_id: "item-1", linked_at: AT };
 const OPAQUE = "external-tool show item --json";
 const PINNED = "external-tool --db '/legacy/item.db' show item-2 --json";
-const BR_REF = "br --db '/legacy/.beads/beads.db' show item-4 --json";
-const RETIRED_HINT = /cp_tracker|import-beads/;
-const TOOL_ADVICE = /\bbr\b|--db|BEADS|cp_tracker|import-beads/;
+const DB_REF = "legacy-cli --db '/legacy/.tracker/tracker.db' show item-4 --json";
+const RETIRED_HINT = /cp_tracker|\/cp-jobs import/;
+const TOOL_ADVICE = new RegExp(`${RETIRED_PATTERN.source}|--db|cp_tracker`, "i");
 const RETIRED_WHAT = "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.";
 const RETIRED_FIX = "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.";
 const OLD_JOB_GUIDELINE = "When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it); " +
-	"for a br tracker, pin the project's beads DB with --db and its absolute path (`br --db /abs/path/.beads/beads.db show <id> --json`) " +
+	"for a CLI tracker, pin the project's DB with --db and its absolute path (`legacy-cli --db /abs/path/tracker.db show <id> --json`) " +
 	"so it still works from a leased worktree — the ledger points at issues, it does not copy them.";
 
 function legacyJob(id: string, status: string, extra: Record<string, unknown>): Record<string, unknown> {
@@ -91,9 +92,8 @@ test("retired integration: an existing home keeps its data and runs the native l
 	// A command-shaped ref must never run: fakes on PATH record any invocation.
 	const bin = join(home.path, "fake-bin");
 	const calls = join(home.path, "external-calls.log");
-	const leak = join(home.path, "worker-db-env.log");
 	mkdirSync(bin, { recursive: true });
-	for (const tool of ["external-tool", "br"]) {
+	for (const tool of ["external-tool", "legacy-cli"]) {
 		writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${calls}'\n`);
 		chmodSync(join(bin, tool), 0o755);
 	}
@@ -103,7 +103,7 @@ test("retired integration: an existing home keeps its data and runs the native l
 		[join(LAYOUT.data, "trackers.json")]: "{ retired, malformed connections",
 		[join(LAYOUT.state, "tracker-sync.json")]: "[ malformed retired intents",
 		[join(LAYOUT.state, "tracker-tasks", `${OPEN}.md`)]: "frozen task snapshot\n",
-		[join(".beads", "beads.db")]: "legacy database bytes",
+		[join(".tracker", "tracker.db")]: "legacy database bytes",
 	};
 	for (const [file, body] of Object.entries(retired)) {
 		mkdirSync(join(home.path, file, ".."), { recursive: true });
@@ -113,13 +113,11 @@ test("retired integration: an existing home keeps its data and runs the native l
 		legacyJob(OPEN, "open", { external_ref: OPAQUE, tracker: LINK }),
 		legacyJob(DEFERRED, "deferred", { external_ref: PINNED, tracker: { ...LINK, item_id: "item-2" } }),
 		legacyJob(CLOSED, "closed", { external_ref: "external-tool show item-3 --json", tracker: { ...LINK, item_id: "item-3" }, closed_at: AT, close_reason: "done" }),
-		legacyJob(BR_JOB, "open", { external_ref: BR_REF, tracker: { ...LINK, item_id: "item-4" } }),
+		legacyJob(DB_JOB, "open", { external_ref: DB_REF, tracker: { ...LINK, item_id: "item-4" } }),
 	] }));
 
 	const reported: IntakeResult[] = [];
-	// A parent that still exports a retired database must not hand it to the worker.
-	const dbEnv = { BEADS_DIR: join(home.path, ".beads"), BEADS_DB: join(home.path, ".beads", "beads.db") };
-	const post = (own.post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env, ...dbEnv }, onReported: (result) => reported.push(result) }));
+	const post = (own.post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, onReported: (result) => reported.push(result) }));
 	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
 	const clone = post.registry.pathOf("demo");
 	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
@@ -131,32 +129,32 @@ test("retired integration: an existing home keeps its data and runs the native l
 	const open = await ledger.show(OPEN);
 	assert.deepEqual([open.tracker, open.external_ref, open.comments.length], [LINK, OPAQUE, 1]);
 	assert.equal((await ledger.list({ all: true })).length, 4);
-	assert.deepEqual((await ledger.ready()).map((job) => job.id).sort(), [BR_JOB, OPEN].sort());
+	assert.deepEqual((await ledger.ready()).map((job) => job.id).sort(), [DB_JOB, OPEN].sort());
 	await assert.rejects(ledger.claim(DEFERRED, "operator"), /is deferred; review its task and authority, then use cp_job update status=open when authorized/);
 	assert.equal((await ledger.show(DEFERRED)).status, "deferred");
-	assert.doesNotMatch(formatNext(await nextFor(post)), /bead|tracker/i, "cp_next reads native jobs only");
+	assert.doesNotMatch(formatNext(await nextFor(post)), new RegExp(`${RETIRED_PATTERN.source}|tracker`, "i"), "cp_next reads native jobs only");
 
 	const model = provider.addScript("retired-ship", [
-		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `{ test -z "$BEADS_DIR" && test -z "$BEADS_DB"; } || echo leaked > '${leak}'; printf 'export const x = 2;\\n' > src/app.ts && git add -A && git commit -q -m 'bump x' && git push -q -u origin ${BR_JOB}` } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `printf 'export const x = 2;\\n' > src/app.ts && git add -A && git commit -q -m 'bump x' && git push -q -u origin ${DB_JOB}` } }] },
 		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({
-			job_id: BR_JOB, kind: "ship", status: "done", summary: "Bumped x.", branch: BR_JOB,
-			head_sha: treehouseHead(home.path, BR_JOB),
+			job_id: DB_JOB, kind: "ship", status: "done", summary: "Bumped x.", branch: DB_JOB,
+			head_sha: treehouseHead(home.path, DB_JOB),
 		}) }] },
 	]);
 	agentDir.writeModels(provider);
 	// The task names the job's own id: no inferred issue lookup may follow from it.
-	const dispatched = await post.dispatch({ jobId: BR_JOB, task: `Bump x to 2 in src/app.ts (${BR_JOB}).`, model, fetch: false });
+	const dispatched = await post.dispatch({ jobId: DB_JOB, task: `Bump x to 2 in src/app.ts (${DB_JOB}).`, model, fetch: false });
 	assert.equal(dispatched.state, "dispatched");
-	const brief = readFileSync(join(home.path, paths.briefFile(BR_JOB)), "utf8");
-	assert.doesNotMatch(brief, /legacy-x|item-4|tracker|BEADS_DIR|Referenced material/i, "no lookup of the legacy link or ref reaches the brief");
+	const brief = readFileSync(join(home.path, paths.briefFile(DB_JOB)), "utf8");
+	assert.doesNotMatch(brief, /legacy-x|item-4|tracker|Referenced material/i, "no lookup of the legacy link or ref reaches the brief");
 	assert.doesNotMatch(brief, RETIRED_HINT);
-	await waitFor(() => readFleet(home.path).jobs.find((job) => job.job_id === BR_JOB), (job) => job?.phase === "held", { timeoutMs: 60_000, what: "the envelope" });
+	await waitFor(() => readFleet(home.path).jobs.find((job) => job.job_id === DB_JOB), (job) => job?.phase === "held", { timeoutMs: 60_000, what: "the envelope" });
 	assert.equal(reported.at(-1)?.next, "teardown");
 	assert.doesNotMatch(JSON.stringify(reported), RETIRED_HINT);
-	assert.equal((await post.tearDown(BR_JOB)).torn_down, true);
-	await ledger.close(BR_JOB, "landed on origin");
-	const landed = await ledger.show(BR_JOB);
-	assert.deepEqual([landed.status, landed.tracker?.item_id, landed.external_ref], ["closed", "item-4", BR_REF]);
+	assert.equal((await post.tearDown(DB_JOB)).torn_down, true);
+	await ledger.close(DB_JOB, "landed on origin");
+	const landed = await ledger.show(DB_JOB);
+	assert.deepEqual([landed.status, landed.tracker?.item_id, landed.external_ref], ["closed", "item-4", DB_REF]);
 	assert.deepEqual(await ledger.show(OPEN), open, "an untouched legacy job reads back unchanged");
 
 	const reopened = await ledger.update(DEFERRED, { status: "open" });
@@ -168,7 +166,7 @@ test("retired integration: an existing home keeps its data and runs the native l
 	const retiredState = report.findings.filter((f) => f.check === "storage.retired_integration");
 	assert.deepEqual(retiredState.map((f) => [f.severity, f.what, f.fix, f.detail]), [["warn", RETIRED_WHAT, RETIRED_FIX, `${join(LAYOUT.data, "trackers.json")}, ${join(LAYOUT.state, "tracker-sync.json")}`]]);
 	const strayHome = report.findings.find((f) => f.check === "storage.home");
-	assert.ok(strayHome?.detail?.split("; ").includes(".beads"), strayHome?.detail);
+	assert.ok(strayHome?.detail?.split("; ").includes(".tracker"), strayHome?.detail);
 	assert.match(strayHome?.fix ?? "", /keep what another tool owns \(nothing here moves or deletes it\)/);
 	for (const f of report.findings) assert.doesNotMatch(`${f.check} ${f.what} ${f.fix ?? ""}`, TOOL_ADVICE, `${f.check} advises a retired tool`);
 
@@ -179,8 +177,7 @@ test("retired integration: an existing home keeps its data and runs the native l
 	assert.equal(isMultiHomeDir(nested), false, "with the generic marker the nested root is the parent's, never a flat home");
 
 	for (const [file, body] of Object.entries(retired)) assert.equal(readFileSync(join(home.path, file), "utf8"), body, `${file} untouched`);
-	assert.equal(existsSync(calls), false, "no external_ref was ever executed and br never ran");
-	assert.equal(existsSync(leak), false, "the worker saw no retired database environment");
+	assert.equal(existsSync(calls), false, "no external_ref was ever executed and no legacy CLI ran");
 	assert.equal(provider.remaining("retired-ship"), 0);
 });
 

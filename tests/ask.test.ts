@@ -45,7 +45,7 @@ test("/cp-ask fails closed on a missing project, a missing question and a dangli
 });
 
 test("cp_ask is a parent-only tool, and no shipped profile holds it", () => {
-	// Recursion guard: it creates a br issue and spawns a worker.
+	// Recursion guard: it creates a job and spawns a worker.
 	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_ask"));
 	// It moves the fleet, so it needs this home's parent lock.
 	assert.ok(FLEET_MUTATING_TOOLS.includes("cp_ask"));

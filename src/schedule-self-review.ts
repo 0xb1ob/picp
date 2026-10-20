@@ -20,7 +20,7 @@ const LIVE: readonly string[] = ["launching", "waiting"];
 
 interface Reader { role: string; title: string; sources: string; focus: string; third?: 0 | 1 | 2 }
 const SLICE_SOURCES = "`state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/`";
-const SLICE_FOCUS = "tool errors, waste, CI, treehouse, wrong repo (including bare `br`), rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs)";
+const SLICE_FOCUS = "tool errors, waste, CI, treehouse, wrong repo, rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs)";
 export const SELF_REVIEW_READERS: readonly Reader[] = [
 	{ role: "L1", title: "Review parent session errors",
 		sources: "`state/sessions/cp-parent*.jsonl` (archives) and the live session: the `sessionFile` named in `state/sessions/cp-parent-control.json`, a worker-style `<iso>_<uuid>.jsonl` name, read when its interval overlaps the window",

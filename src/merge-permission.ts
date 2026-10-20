@@ -1,5 +1,5 @@
 /**
- * Repo-derived merge permission (cp-e0c, answering br cp-x7i).
+ * Repo-derived merge permission (cp-e0c, answering cp-x7i).
  *
  * The operator's answer, verbatim: "If a given repository allows merging
  * without force then assume you can merge, if repository does not allow to

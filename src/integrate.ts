@@ -165,7 +165,7 @@ export interface IntegratorOptions {
 	fleet: FleetStore;
 	merges: MergeStore;
 	teardown: TeardownLike;
-	/** Built per call by the caller, like every other br consumer. */
+	/** Built per call by the caller, like every other ledger consumer. */
 	ledger: () => LedgerLike;
 	/** Where `gh` and `git` run: the job's canonical project clone, resolved by
 	 * the caller (which knows the registry and the worktree fallback). */
@@ -236,7 +236,7 @@ export interface EndState {
 	fleet_done: boolean;
 	closed_reason?: string;
 	pr_receipt_status?: string;
-	/** The br issue was closed with a reason by this tool. */
+	/** The job was closed with a reason by this tool. */
 	br_closed: boolean;
 }
 
@@ -1112,7 +1112,7 @@ export class Integrator {
 		const record = fleet.get(jobId);
 		const done = record?.phase === "done";
 		// The one place a stored step is read rather than recomputed, and only for
-		// the last, non-destructive link: br has no cheap "is it closed?" this module
+		// the last, non-destructive link: the ledger has no cheap "is it closed?" this module
 		// already holds, and re-closing a closed issue is an error, not a no-op. So a
 		// second `advance` after a finished integration is a genuine no-op (§Test 2).
 		const alreadyClosed = this.get(jobId)?.step === "done";
@@ -1191,7 +1191,7 @@ export class Integrator {
 			facts.push(`origin/${branch} is already gone`);
 		}
 
-		// 5. close the br issue, with a reason. Always a reason (AGENTS.md §Backlog).
+		// 5. close the job, with a reason. Always a reason (AGENTS.md §Backlog).
 		let brClosed = alreadyClosed;
 		try {
 			if (!alreadyClosed) {

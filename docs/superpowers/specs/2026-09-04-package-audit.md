@@ -1,7 +1,7 @@
 # In-house code vs pi.dev packages — audit
 
 Date: 2026-09-04. Status: decided in conversation (item 2 of the three-item
-sequence; item 1 is `2026-09-04-drop-br-ledger-design.md`, item 3 is the
+sequence; item 1 is the in-house job ledger, item 3 is the
 single-project mode). This is a record, not a spec: nothing here is built.
 
 ## Question
@@ -19,7 +19,7 @@ rather than READMEs where a claim mattered:
 1. A catalogue sweep of pi.dev (5,458 packages; server-rendered, `name=`,
    `type=`, `sort=downloads|recent` query parameters; monthly downloads on each
    card equal npm's monthly count) plus npm search on the `pi-package` keyword
-   and the GitHub topic. Every package touching tasks, todos, kanban, beads,
+   and the GitHub topic. Every package touching tasks, todos, kanban, issue trackers,
    subagents, worktrees, memory, statuslines/widgets, review, attach, doctor
    and pager was tabulated.
 2. A verification pass on the strongest candidates: exports, dependencies,
@@ -44,7 +44,7 @@ Nothing was installed.
 | Project registry with clone-on-demand; parent lock; atomic JSON store; `/status --json`; CI wake-ups keyed to a held PR's head sha | none | none | Not on the registry in any usable shape. `@hank-warren/pi-github-actions-watch` is deprecated by its author; `proper-lockfile` is an npm library several packages use internally, not a pi package. | catalogue sweep |
 | Background task runtime with completion wake-ups; delegated read-only child; multi-model review | `pi-background-tasks` (107.7K, 2.5.0, 2026-09-04) | none | Its Anthropic provider extension loads globally and refuses non-OAuth credentials (this home uses an API key); peers pin pi 0.81–0.84 (this home runs 0.85); `bg_run` is a second shell tool the parent's `tool_call` guards do not inspect; `bg_delegate`/`bg_result` return bodies inline into the parent's context. The one gap it named (reviewer tool calls blocking the parent) is closed in-house by `2026-09-05-async-reviewers-design.md`, which borrows two of its rules: publish only after the result is durable, and only after the caller holds the task id. | `pi.dev/packages/pi-background-tasks`; package `docs/api/eventbus-v1.md`, `docs/subsystems/anthropic-attribution.md`, `src/core/registry.ts` L2287-2327 |
 | Questionnaire overlay | `@juicesharp/rpiv-ask-user-question` (117K, 2.9.0, 2026-09-01) | in use | Already the dependency behind `/cp-decide`. No change. | `package.json` |
-| Job ledger | none | decided in item 1 | Replaced by the in-house jobs document; see `2026-09-04-drop-br-ledger-design.md` §Problem for the ledger candidates and why each fell short. | — |
+| Job ledger | none | decided in item 1 | Replaced by the in-house jobs document; see [`docs/contracts.md` §Ledger](../../contracts.md#ledger). | — |
 
 ## Decision
 

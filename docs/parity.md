@@ -133,7 +133,7 @@ the write-ups themselves stay where they were written.
 | `teardown-research.md` (research gate: clean + no local commits) | `Teardown` research gate, `tests/teardown.test.ts` |
 | `operating-knowledge.md` (merged auto-deleted head; ledger membership queries; promote-not-spawn; parallel PRs) | `merged_head_deleted` check; unpaged membership queries; `decideOccupancy`; AGENTS.md §Fan out |
 | `model-routing.md` (rubric table) | `data/routing.json` rubric rows; the table is reproduced in `tests/routing.test.ts` |
-| `br-slug-install.md`, `br-tracker-research.md` (pinned br, migrate-schema) | retired with br (spec 2026-09-04); `/doctor` checks the jobs document instead |
+| two notes on the former external job tracker (install and research) | retired with the in-house ledger (spec 2026-09-04); `/doctor` checks the jobs document instead |
 | `ai-memory-research.md` (tiers, budgets, decay) | `src/memory.ts` constants + the file headers |
 | `origin-scoping.md` | out of scope (Slack), `origin` field preserved |
 

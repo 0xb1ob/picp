@@ -12,12 +12,12 @@
  * a file the caller names and returns nothing but metadata.
  *
  * T19 amendment to the ported design: command-post mirrored the body into a
- * `br` comment (`artifact:v1`) because `cmdp teardown` deleted
+ * ledger comment (`artifact:v1`) because `cmdp teardown` deleted
  * `state/artifacts/<id>`. Here teardown keeps the directory unless the operator
  * asks for cleanup, so the file system *is* the durable store — and mirroring a
- * body into a ledger whose `br show --json` inlines comment bodies would
+ * body into a ledger whose show output inlines comment bodies would
  * manufacture the exact hazard the T19 guard exists to contain. `add()`
- * therefore registers a file into the store; it never copies a body into br.
+ * therefore registers a file into the store; it never copies a body into the ledger.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";

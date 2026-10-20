@@ -357,7 +357,7 @@ test("scope and risk are inferred from a job's words when nobody supplied them",
 	assert.equal(both.reasons.length, 2);
 });
 
-test("risk inference skips locally negated verbs and ordinary authority prose (bead b-qbi.2)", () => {
+test("risk inference skips locally negated verbs and ordinary authority prose (b-qbi.2)", () => {
 	for (const text of [
 		"Never force-push; open a PR",
 		"Do not force-push the branch, open a PR",
@@ -408,7 +408,7 @@ test("risk inference: a negated match followed by an affirmative one gates on th
 	assert.deepEqual(riskKeywords("never force-push; force-push the fix branch"), ["force-push"]);
 });
 
-test("risk inference: a negation governs only its own verb, not a risk word further on (bead b-qbi.6)", () => {
+test("risk inference: a negation governs only its own verb, not a risk word further on (b-qbi.6)", () => {
 	for (const [text, word] of [
 		["Deploy without tests to production", "production"],
 		["Do not wait to purge the table", "purge"],
@@ -1391,7 +1391,7 @@ test(
 		const escalated = await b.advanceThrough(oldResearchId);
 		assert.equal(escalated.state, "escalated");
 
-		// The replacement research job: a real br issue, dep-linked like any other.
+		// The replacement research job: a real job, dep-linked like any other.
 		const ledger = b.post.ledger();
 		const replacement = await ledger.create({
 			title: "research: bump x, take 2",

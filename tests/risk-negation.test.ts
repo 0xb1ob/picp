@@ -20,7 +20,7 @@ test("safety constraints do not infer or warn about high risk (dbn)", () => {
 	}
 });
 
-test("risk inference skips brief negations with up to three intervening words (bead nfm)", () => {
+test("risk inference skips brief negations with up to three intervening words (nfm)", () => {
 	for (const text of [
 		"No migration is required",
 		"No database migration",
@@ -181,8 +181,8 @@ test("positive evidence and recorded risk survive safety wording (dbn)", () => {
 
 test("riskkw-f10: the four refused jobs' keyword senses infer no risk", () => {
 	for (const text of [
-		"Doctor incorrectly calls the live .beads tracker database 'a frozen archive, safe to delete'. The bead body is authoritative for acceptance.",
-		"stop advising users to delete .beads",
+		"Doctor incorrectly calls the live .tracker database 'a frozen archive, safe to delete'. The issue body is authoritative for acceptance.",
+		"stop advising users to delete .tracker",
 		"Keep tracker runSync running after backfill failure and test integration write-back",
 		"Fix tracker-tick backfill failure skipping runSync and add the missing cp_integrate write-back test from PR #340 review.",
 		"Fix src/trackers/backfill.ts for cp-tracker-backfill-sync-ne5t",
@@ -216,7 +216,7 @@ test("riskkw-f10: real risk wording stays high", () => {
 		"Fix the delete path so it removes rows",
 		"Backfill step: rewrite every row",
 		"Backfill the accounts table and drop the legacy column",
-		"stop advising deletion and delete the .beads directory",
+		"stop advising deletion and delete the .tracker directory",
 		"Deploy to prod-us-east",
 		"Edit config/credentials.yml",
 		"Add src/migrations/002_drop_users.sql",

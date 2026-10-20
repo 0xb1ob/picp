@@ -1461,7 +1461,7 @@ test("extractBareIssueRef: a PR-labelled #N is prose, never issue intake; a real
 	assert.deepEqual(extractBareIssueRef("close APR #4"), undefined, "APR is not an issue-task word");
 });
 
-test("extractBareIssueRef: only explicit issue-task contexts count; incidental status numbers do not (bead b-qbi.2)", () => {
+test("extractBareIssueRef: only explicit issue-task contexts count; incidental status numbers do not (b-qbi.2)", () => {
 	for (const prose of ["after #220 merged, tidy the docs", "ship the follow-up to #220", "land it as in PR #7 and #9", "cp-jxqp #3 of 5"]) {
 		assert.equal(extractBareIssueRef(prose), undefined, prose);
 	}

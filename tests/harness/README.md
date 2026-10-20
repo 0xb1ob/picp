@@ -5,7 +5,7 @@ import from `tests/harness/`.**
 
 | Module | What it gives you |
 |---|---|
-| `mock-provider.ts` | scriptable `openai-completions` server: text, tool-call sequences (args split across deltas), empty answers, HTTP error injection (`429`, `repeat: N`), hangs; per-script cursors and recorded request bodies. A tool call's `args` may be a **function of the request** — the only way to script a call whose arguments contain an id minted at runtime (a `br create` id): the brief is in the request, so the test reads the id back out of it. A throw in that callback answers HTTP 500 rather than hanging the client. |
+| `mock-provider.ts` | scriptable `openai-completions` server: text, tool-call sequences (args split across deltas), empty answers, HTTP error injection (`429`, `repeat: N`), hangs; per-script cursors and recorded request bodies. A tool call's `args` may be a **function of the request** — the only way to script a call whose arguments contain an id minted at runtime (a `cp_job create` id): the brief is in the request, so the test reads the id back out of it. A throw in that callback answers HTTP 500 rather than hanging the client. |
 | `agent-dir.ts` | hermetic `PI_CODING_AGENT_DIR` (temp settings + `models.json`, `defaultProjectTrust: never`, offline) so tests cannot see or touch operator credentials |
 | `pi-child.ts` | spawn a pi RPC child; `buildPiArgs` applies the contract trust policy (`WORKER_REQUIRED_FLAGS`); `prompt()`, `waitForSettled()`, `getState()`, `eventsOfType()` |
 | `rpc.ts` | strict LF JSONL framing + id-correlated waits (never `node:readline`) |

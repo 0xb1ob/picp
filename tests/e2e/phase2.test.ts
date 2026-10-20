@@ -1,7 +1,7 @@
 /**
  * MILESTONE m2 — intake to teardown, end to end, on the mock provider.
  *
- * Everything here is the real thing except the model: a real `br` ledger, a
+ * Everything here is the real thing except the model: a real jobs ledger, a
  * real project registry and clone, a real treehouse lease, a real
  * `pi --mode rpc` worker, real git pushes to a fixture remote. Only the
  * model's answers are scripted, which is what makes the whole path
@@ -63,7 +63,7 @@ interface Fleet {
 }
 
 /**
- * A complete command post in a temp directory: home + br workspace + project
+ * A complete command post in a temp directory: home + jobs ledger + project
  * registry + cloned project + treehouse pool + mock provider.
  */
 async function fleet(
@@ -78,7 +78,7 @@ async function fleet(
 	const provider = await MockProvider.start();
 	const agentDir = createAgentDir({ provider });
 
-	// br workspace lives in the home, exactly as it does in a real command post.
+	// The jobs ledger lives in the home, exactly as it does in a real command post.
 	initJobsDocument(home.path, "cp");
 
 	if (options.budgets) {

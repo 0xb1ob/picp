@@ -30,13 +30,13 @@ import {
 	waitFor,
 } from "./harness/index.ts";
 
-const BR = "cp-run1";
+const JOB_ID = "cp-run1";
 
 function ev(seq: number, source: "pi" | "cp", type: string, payload: unknown = {}, tsSeconds = seq): RunEvent {
 	return {
 		seq,
 		ts: isoTimestamp(new Date(Date.UTC(2026, 7, 27, 12, 0, tsSeconds))),
-		job_id: BR,
+		job_id: JOB_ID,
 		source,
 		type,
 		payload,
@@ -74,7 +74,7 @@ const SCRIPTED: RunEvent[] = [
 ];
 
 test("projection matches a scripted event sequence", () => {
-	const status = projectEvents(BR, SCRIPTED);
+	const status = projectEvents(JOB_ID, SCRIPTED);
 	assert.equal(status.phase, "idle");
 	assert.equal(status.turns, 2);
 	assert.equal(status.tool_calls, 2);
@@ -98,7 +98,7 @@ test("projection matches a scripted event sequence", () => {
 });
 
 test("phase transitions and current tool follow the events", () => {
-	let state = initialProjection(BR);
+	let state = initialProjection(JOB_ID);
 	assert.equal(state.status.phase, "starting");
 
 	state = applyEvent(state, ev(1, "pi", "agent_start"));
@@ -123,7 +123,7 @@ test("phase transitions and current tool follow the events", () => {
 });
 
 test("streaming usage is neither double counted nor invisible", () => {
-	let state = initialProjection(BR);
+	let state = initialProjection(JOB_ID);
 	state = applyEvent(state, ev(1, "pi", "message_update", { usage: { input: 10, output: 5, totalTokens: 15 } }));
 	assert.equal(state.status.usage.total_tokens, 15, "in-flight usage is visible");
 
@@ -144,9 +144,9 @@ test("streaming usage is neither double counted nor invisible", () => {
 test("recorder writes an append-only log and an atomic projection", () => {
 	const home = createScratchHome();
 	try {
-		const recorder = RunRecorder.open({ home: home.path, jobId: BR, meta: { pid: 42 } });
-		assert.ok(existsSync(join(home.path, paths.runDir(BR))));
-		assert.equal(readRunStatus(home.path, BR).phase, "starting");
+		const recorder = RunRecorder.open({ home: home.path, jobId: JOB_ID, meta: { pid: 42 } });
+		assert.ok(existsSync(join(home.path, paths.runDir(JOB_ID))));
+		assert.equal(readRunStatus(home.path, JOB_ID).phase, "starting");
 
 		for (const event of SCRIPTED) {
 			recorder.record(event.source, event.type, event.payload as Record<string, unknown>);
@@ -156,31 +156,31 @@ test("recorder writes an append-only log and an atomic projection", () => {
 		assert.equal(status.turns, 2);
 
 		// The file matches the in-memory projection exactly.
-		assert.deepEqual(readRunStatus(home.path, BR), status);
+		assert.deepEqual(readRunStatus(home.path, JOB_ID), status);
 
 		// events.jsonl is LF JSONL with monotonic seq and no rewriting.
-		const raw = readFileSync(join(home.path, paths.eventsFile(BR)), "utf8");
+		const raw = readFileSync(join(home.path, paths.eventsFile(JOB_ID)), "utf8");
 		assert.ok(raw.endsWith("\n"));
 		const events = parseEventLog(raw);
 		assert.deepEqual(
 			events.map((event) => event.seq),
 			SCRIPTED.map((_, index) => index + 1),
 		);
-		assert.deepEqual(readRunEvents(home.path, BR).length, SCRIPTED.length);
+		assert.deepEqual(readRunEvents(home.path, JOB_ID).length, SCRIPTED.length);
 
 		// Reopening appends after the existing log and recovers the projection.
-		const reopened = RunRecorder.open({ home: home.path, jobId: BR });
+		const reopened = RunRecorder.open({ home: home.path, jobId: JOB_ID });
 		assert.equal(reopened.status.turns, 2);
 		assert.equal(reopened.seq, SCRIPTED.length);
 		reopened.cp("shutdown_requested", {});
-		const after = readEventLog(home.path, BR);
+		const after = readEventLog(home.path, JOB_ID);
 		assert.equal(after.length, SCRIPTED.length + 1);
 		assert.equal(after.at(-1)?.seq, SCRIPTED.length + 1);
 		assert.equal(after.at(-1)?.type, "shutdown_requested");
 
 		// The log wins: a corrupted cache is recoverable from it.
-		writeFileSync(join(home.path, paths.statusFile(BR)), "{}\n");
-		const rebuilt = rebuildStatus(home.path, BR);
+		writeFileSync(join(home.path, paths.statusFile(JOB_ID)), "{}\n");
+		const rebuilt = rebuildStatus(home.path, JOB_ID);
 		assert.equal(rebuilt.turns, 2);
 		assert.equal(rebuilt.event_count, SCRIPTED.length + 1);
 		reopened.close();
@@ -192,14 +192,14 @@ test("recorder writes an append-only log and an atomic projection", () => {
 test("a corrupt log is refused, never silently replaced", () => {
 	const home = createScratchHome();
 	try {
-		const recorder = RunRecorder.open({ home: home.path, jobId: BR });
+		const recorder = RunRecorder.open({ home: home.path, jobId: JOB_ID });
 		recorder.cp("spawned", { pid: 1 });
 		recorder.close();
 		// Truncated/garbled tail: reopening must fail loudly rather than start a
 		// fresh log over the top of history.
-		appendFileSync(join(home.path, paths.eventsFile(BR)), "{not json\n");
-		assert.throws(() => RunRecorder.open({ home: home.path, jobId: BR }), SyntaxError);
-		assert.throws(() => rebuildStatus(home.path, BR), SyntaxError);
+		appendFileSync(join(home.path, paths.eventsFile(JOB_ID)), "{not json\n");
+		assert.throws(() => RunRecorder.open({ home: home.path, jobId: JOB_ID }), SyntaxError);
+		assert.throws(() => rebuildStatus(home.path, JOB_ID), SyntaxError);
 	} finally {
 		home.cleanup();
 	}
@@ -208,14 +208,14 @@ test("a corrupt log is refused, never silently replaced", () => {
 test("every persisted projection satisfies the contract validator", () => {
 	const home = createScratchHome();
 	try {
-		const recorder = RunRecorder.open({ home: home.path, jobId: BR });
+		const recorder = RunRecorder.open({ home: home.path, jobId: JOB_ID });
 		for (const event of SCRIPTED) {
 			recorder.record(event.source, event.type, event.payload as Record<string, unknown>);
 			// readRunStatus validates; a violation throws here, not in production.
-			readRunStatus(home.path, BR);
+			readRunStatus(home.path, JOB_ID);
 		}
 		recorder.cp("process_exit", { code: 0, signal: null });
-		assert.equal(readRunStatus(home.path, BR).phase, "exited");
+		assert.equal(readRunStatus(home.path, JOB_ID).phase, "exited");
 		recorder.close();
 	} finally {
 		home.cleanup();
@@ -225,13 +225,13 @@ test("every persisted projection satisfies the contract validator", () => {
 test("N2: a logged tool_execution_update keeps its call id but never its streamed partialResult", () => {
 	const home = createScratchHome();
 	try {
-		const recorder = RunRecorder.open({ home: home.path, jobId: BR });
+		const recorder = RunRecorder.open({ home: home.path, jobId: JOB_ID });
 		recorder.pi({ type: "tool_execution_start", toolCallId: "c1", toolName: "bash" });
 		recorder.pi({ type: "tool_execution_update", toolCallId: "c1", toolName: "bash", partialResult: { content: [{ type: "text", text: "STREAMED-SECRET" }] } });
 		recorder.close();
-		const raw = readFileSync(join(home.path, paths.eventsFile(BR)), "utf8");
+		const raw = readFileSync(join(home.path, paths.eventsFile(JOB_ID)), "utf8");
 		assert.doesNotMatch(raw, /STREAMED-SECRET|partialResult/);
-		const update = readEventLog(home.path, BR).find((event) => event.type === "tool_execution_update");
+		const update = readEventLog(home.path, JOB_ID).find((event) => event.type === "tool_execution_update");
 		assert.equal((update?.payload as { toolCallId?: string }).toolCallId, "c1");
 	} finally {
 		home.cleanup();
@@ -263,7 +263,7 @@ const POST_EXIT: RunEvent[] = [
 ];
 
 test("events arriving after the observed close keep the projection valid", () => {
-	const status = projectEvents(BR, POST_EXIT);
+	const status = projectEvents(JOB_ID, POST_EXIT);
 	assert.equal(status.phase, "exited", "a closed process cannot be working again");
 	assert.equal(status.exit_code, 0);
 	assert.equal(status.exited_at, POST_EXIT[3]?.ts);
@@ -295,7 +295,7 @@ const SUPPRESSED_AFTER_CLOSE: RunEvent[] = [
 ];
 
 test("a suppressed wake-up is logged but never counts as activity", () => {
-	const status = projectEvents(BR, SUPPRESSED_AFTER_CLOSE);
+	const status = projectEvents(JOB_ID, SUPPRESSED_AFTER_CLOSE);
 	// The log is still the history: nothing is dropped.
 	assert.equal(status.event_count, SUPPRESSED_AFTER_CLOSE.length);
 	// But a message the parent declined to send is not this run doing anything.
@@ -310,7 +310,7 @@ test("a suppressed wake-up is logged but never counts as activity", () => {
 });
 
 test("a suppressed wake-up does not refresh a live run's idle age either", () => {
-	let state = initialProjection(BR);
+	let state = initialProjection(JOB_ID);
 	state = applyEvent(state, ev(1, "pi", "agent_settled"));
 	const settled = state.status.last_activity_at;
 	state = applyEvent(state, ev(2, "cp", "wakeup_suppressed", { kind: "ci", issued_at: "2026-08-27T11:00:00Z" }, 600));
@@ -321,18 +321,18 @@ test("a suppressed wake-up does not refresh a live run's idle age either", () =>
 test("a run whose events outlived the process can still be opened, revived and torn down", () => {
 	const home = createScratchHome();
 	try {
-		const file = join(home.path, paths.eventsFile(BR));
-		mkdirSync(join(home.path, paths.runDir(BR)), { recursive: true });
+		const file = join(home.path, paths.eventsFile(JOB_ID));
+		mkdirSync(join(home.path, paths.runDir(JOB_ID)), { recursive: true });
 		writeFileSync(file, POST_EXIT.map((event) => `${JSON.stringify(event)}\n`).join(""));
 
 		// Both cp_revive and cp_teardown reach the run through the registry: this
 		// call is the one that used to throw and leave the job with no exit.
 		const registry = new RunRegistry(home.path);
-		const recorder = registry.open(BR);
+		const recorder = registry.open(JOB_ID);
 		assert.equal(recorder.status.phase, "exited");
-		assert.equal(readRunStatus(home.path, BR).phase, "exited");
-		recorder.cp("shutdown_requested", { job_id: BR, forced: true });
-		assert.equal(readRunStatus(home.path, BR).phase, "exited");
+		assert.equal(readRunStatus(home.path, JOB_ID).phase, "exited");
+		recorder.cp("shutdown_requested", { job_id: JOB_ID, forced: true });
+		assert.equal(readRunStatus(home.path, JOB_ID).phase, "exited");
 
 		// A relaunch is what reopens liveness — an event never does.
 		recorder.cp("worker_revived", { pid: 5151, session_file: join(home.path, "s.jsonl"), model: "mock/script-x" });
@@ -342,10 +342,10 @@ test("a run whose events outlived the process can still be opened, revived and t
 		assert.equal(recorder.status.pid, 5151, "the revived process is the one on the record");
 		recorder.record("pi", "agent_start", {});
 		assert.equal(recorder.status.phase, "working");
-		assert.equal(readRunStatus(home.path, BR).phase, "working");
+		assert.equal(readRunStatus(home.path, JOB_ID).phase, "working");
 
 		// And the log still rebuilds to exactly what the writer had in memory.
-		assert.deepEqual(rebuildStatus(home.path, BR), recorder.status);
+		assert.deepEqual(rebuildStatus(home.path, JOB_ID), recorder.status);
 		registry.closeAll();
 	} finally {
 		home.cleanup();
@@ -353,7 +353,7 @@ test("a run whose events outlived the process can still be opened, revived and t
 });
 
 test("initialStatus is a valid, minimal projection", () => {
-	const status = initialStatus(BR, { model: "m" });
+	const status = initialStatus(JOB_ID, { model: "m" });
 	assert.equal(status.phase, "starting");
 	assert.equal(status.event_count, 0);
 	assert.equal(status.reported, false);
