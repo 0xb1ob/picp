@@ -548,11 +548,8 @@ A missing or malformed value is a **load failure**: a worker that cannot say
 which job it is must not run. Briefs never carry secrets, and the worker's
 environment is the only channel for identity.
 
-The worker environment builder strips an inherited `BEADS_DIR`/`BEADS_DB` and never
-selects the home's `.beads`. Dispatch sets `BEADS_DIR` explicitly from the project's
-tracker (`projectBeadsDb`: its active connection's endpoint, else an existing
-`<clone>/.beads/beads.db`, else none) so `br show <id>` resolves from leased worktrees too. Reference use is
-read-only by instruction, not a filesystem restriction; no database is created.
+The worker environment builder strips an inherited `BEADS_DIR`/`BEADS_DB` and dispatch
+sets none: a worker never sees a retired tracker database.
 
 `self_assessment` is ported from the command-post research envelope
 (`confidence`, `scope`, `blocking_unknowns`, `destructive_scope`,
@@ -2498,23 +2495,15 @@ Scoring coverage against that `Goal` is scoring the plan against itself.
 So the parent freezes the task and hands it to the reviewer as a second file:
 
 At dispatch, `src/task-references.ts` appends the same **Referenced material**
-section to the worker brief and frozen task: a `br show` external reference
-(including its pinned database), beads named in the task using the ledger's
-configured prefix (seeded from `CP_LEDGER_PREFIX`, with the stored prefix taking
-precedence), and absolute file paths outside the leased
-worktree and the home's `state/` (checked through symlinks). Bead snapshots carry
-id, title, status and description verbatim; files carry their text. Lookups run
-against the canonical clone, without a shell, with a five-second command timeout.
-There are at most 10 unique references, 4 KiB per entry and 24 KiB total, with
-explicit truncation notes. Missing/unreadable references and unavailable `br`
-become named notes, not dispatch failures. Prefix matching never depends on `br`
-availability: only IDs with the configured prefix become task-text candidates,
-so ordinary hyphenated prose produces no lookup notes. Named lookup failures
-share the same reference count and byte caps.
+section to the worker brief and frozen task: absolute file paths outside the leased
+worktree and the home's `state/` (checked through symlinks), plus the foreign-CI line
+for a foreign PR job. Files carry their text; `external_ref` and ids named in the
+task are never looked up. There are at most 10 unique references, 4 KiB per entry and
+24 KiB total, with explicit truncation notes. Missing/unreadable files become named
+notes, not dispatch failures, and share the same caps.
 Credential-shaped referenced content is withheld with the existing safety guard's
-explicit diagnostic rather than leaked into a brief. When the home has a beads
-database, the section also names its path and `BEADS_DIR`, with a read-only usage
-note. With neither references nor a home database there is no section.
+explicit diagnostic rather than leaked into a brief. With no references there is no
+section.
 The `taskFile` itself remains a pointer in the brief; references are
 discovered from its body, which is still frozen in full. Both reviewer paths copy
 this enriched frozen task, so they see the same reference snapshot as the worker.
@@ -8206,7 +8195,7 @@ accepted, from `open` through `in_progress` to `closed` with a reason, and the
 closed jobs are the job history. Issues live wherever the operator says in the
 prompt; a job points at its issue through `external_ref` — one non-empty line,
 at most 1000 characters: a tracker URL, a file path, or the command that shows
-the task (`br show <id> --json` for a `br` tracker). The store never holds an
+the task, stored verbatim and never run. The store never holds an
 issue body (T19); the one-line rule is what keeps the field a pointer. A job
 has no `type` and no `priority` (retired 2026-09-05: nothing read them;
 `ready` orders by `created_at`, grouping is `blocked_by`). A document written
@@ -8735,26 +8724,16 @@ run history as audit. Disable restored schedules until the operator deliberately
 settings added after the snapshot must be re-added. Never downgrade below P2b with open run members:
 older authority code cannot safely judge them. Preserve the backups/manifest through rollback.
 
-**Trackers (B2).** Each registered project has at most one active tracker
-connection in `data/trackers.json` (`TrackerConnectionSchema`,
-`validateTrackersFile`, `src/trackers/config.ts`); no tool writes it any more, and
-it is read only for ready-bead discovery and a project's beads database below. A
-job's optional `tracker: { connection_id, item_id, linked_at }` link is inert legacy
-metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique across open
-and closed history, preserved by every native write, and never acted on.
-A project's beads database resolves in one place (`projectTracker`): its active
-beads connection's endpoint, else `<clone>/.beads/beads.db` when that file
-exists, else none. The home's `.beads` is **never** inherited — not in ready-bead
-discovery or the idle notice, not when a bare `br show` ref is pinned or
-verified, not in dispatch-time reference snapshots, and not in a worker's
-`BEADS_DIR` (set only by dispatch from that database; a parent
-`BEADS_DIR`/`BEADS_DB` is stripped). An active github connection shows a visible
-ready-beads error row. An active beads connection with `intake_enabled` off has no
-ready beads at all (N15): `cp_next` lists none and the idle notice never names
-them (a clone-local database has no connection, so it is still read). The idle
-notice fires only when nothing is `launching`, `waiting`, `held` or
-`awaiting_merge` — a held or parked PR is work in flight — and an unchanged
-bead-id set (in any order) is announced once.
+**Retired: tracker connections and ready-bead discovery (cp-remove-beads-pr1b-t68e).**
+`data/trackers.json` is retired: nothing reads, validates or writes it, so a malformed
+one cannot break startup. A job's optional `tracker: { connection_id, item_id, linked_at }`
+link is inert legacy metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique
+across open and closed history, preserved by every native write, and never acted on.
+`cp_next` and its `state/next-snapshot.json` (`schema_version: 2`) list native jobs only;
+the viewer reads an older version as not yet written ("Refreshes on next scheduling pass"), an unknown one
+as unavailable, never either as nothing queued.
+There is no idle notice. Dispatch injects no tracker database: a worker's inherited
+`BEADS_DIR`/`BEADS_DB` is stripped and none is set.
 
 **Retired: tracker import, link and write-back (B4/B5/laf).** `cp_tracker`, its 60 s
 write-back tick, `/cp-jobs import-beads` and auto-linking on `cp_job create` and
@@ -8785,37 +8764,21 @@ operator named, and nothing had read the ref before trusting it.
 `cp_job create` (so `cp_pipeline start` and `cp_ask` are covered the same way
 the moment either ever passes one through `Ledger.create`): a GitHub
 `issues|pull` url calls `gh api repos/<o>/<r>/issues/<n>` (the issues endpoint
-returns PRs too, with a `pull_request` key); a `--db`-pinned `br show` ref runs
-the exact command the ledger already stores and reads `status` (a bare `br show`
-ref whose project has no beads database is not run at all — it is noted as
-unverified, never read against the home's or the cwd's `.beads`); a bare file path is an
-`existsSync`; anything else is `unverifiable`, not an error. A **mismatch** —
+returns PRs too, with a `pull_request` key); a bare file path is an
+`existsSync`; anything else, a command-shaped ref included, is opaque and
+`unverifiable`: stored verbatim, never run, not an error. A **mismatch** —
 the kind an issue/pull url implies does not match what came back, the state is
 not `open`, or a 404/missing path — refuses the `cp_job create` call before
 anything is written and raises one `conflicting_acceptance` escalation per
 project (`raiseConflictingRef`/`EscalationStore.appendToOpenQuestion`, so two
 bad refs named in the same mission read as one open question, not two).
-`unverifiable` and a `gh`/`br` transport failure are **not** mismatches —
+`unverifiable` and a `gh` transport failure are **not** mismatches —
 ignorance is not a finding — and the job is created normally with the fact (or
 the failure) recorded on `notes`, which `cp_job show` then prints.
 
-**Deferred-bead overrides (picp-t4n).** On retry, a verified `br` bead still in
-`deferred` may pass this state check when its project's `verify-<project>`
-`conflicting_acceptance` escalation has an answered `override`. New refusal
-records carry optional `deferred_refs`: exact references after the same project
-DB pin used for verification and storage. Aggregated questions retain each
-explicitly checked deferred reference once; a reference that would be truncated
-out of the question gets its own escalation. A single refusal too long to show
-completely records no override reference. A legacy record without `deferred_refs`
-counts only when its complete single-reference question matches the current
-refusal and explicitly pins the DB; bare legacy refs cannot identify a database.
-Substrings, aggregated or truncated legacy questions grant no exception.
-The created job's notes retain the verified deferred state and the exact `es-`
-id used. No bead or answered escalation is mutated. Other refs, databases,
-projects, closed/missing/wrong-kind refs and every other intake or dispatch gate
-still follow their existing checks. This is admission for that reference, not
-dispatch authority.
-
+**Retired: deferred-bead overrides (picp-t4n).** With command refs no longer
+verified there is no deferred-bead state to admit. Escalation records may still
+carry `deferred_refs` from old journals; nothing writes or reads it any more.
 
 Every job carries labels, and they are the dispatchability contract:
 

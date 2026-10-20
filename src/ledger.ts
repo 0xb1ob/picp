@@ -33,7 +33,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { normalizeExternalRef } from "./beads.ts";
 import {
 	collectLegacyJobFields,
 	type Delivery,
@@ -100,7 +99,6 @@ function labelValue(labels: readonly string[], prefix: string, strict = true): s
 	return found[0];
 }
 
-export { normalizeExternalRef } from "./beads.ts";
 
 /** Intake dedupe key: trim, collapse whitespace, case-fold. */
 export function normalizeJobTitle(title: string): string {
@@ -312,14 +310,6 @@ export interface LedgerOptions {
 	knownProjects?: readonly string[];
 	/** Registered but archived projects: known, yet refused for new jobs. */
 	archivedProjects?: readonly string[];
-	/**
-	 * Resolve a project name to its beads DB's absolute path: the project's
-	 * active tracker connection, else `<checkout>/.beads/beads.db` when it exists —
-	 * never the home's `.beads`. Used to pin a bare `br show <id> --json`
-	 * external_ref to that DB (a leased worktree's `.beads/` is gitignored).
-	 * Absent, or no DB: refs pass through unchanged.
-	 */
-	beadsDbFor?: (project: string) => string | undefined;
 	/** Injected in tests to force id collisions. */
 	random?: (max: number) => number;
 }
@@ -333,11 +323,8 @@ export interface IntakeInput {
 	risk?: Risk;
 	description?: string;
 	/**
-	 * Where the issue lives: a tracker url, a file path, or the command that
-	 * shows it (for a `br` tracker, `br --db <absolute path to the project's
-	 * .beads/beads.db> show <id> --json`; a bare `br show <id> --json` is
-	 * rewritten to that form when the project has a discoverable DB). One line;
-	 * the ledger points, never copies.
+	 * Where the issue lives: a url, a file path, or a command that shows it.
+	 * One opaque line, stored verbatim and never run.
 	 */
 	externalRef?: string;
 	/** Checked-in POSIX repository-relative script; only ship/local jobs. */
@@ -409,22 +396,12 @@ export class Ledger {
 
 	// -- intake -------------------------------------------------------------
 
-	/** Verification and storage must read the same tracker, never the parent's cwd. */
-	normalizeRef(ref: string, project: string): string {
-		return normalizeExternalRef(ref.trim(), this.beadsDb(project));
-	}
-
-	/** The project's own beads DB (connection or clone-local), or undefined. */
-	beadsDb(project: string): string | undefined {
-		return this.#options.beadsDbFor?.(project);
-	}
-
 	async create(input: IntakeInput): Promise<Job> {
 		const prepared = this.#prepare(input);
 		const { title, externalRef } = prepared;
 		return this.#mutate((doc) => {
 			const duplicate = doc.jobs.find((job) => job.status !== "closed" && (
-				(externalRef !== undefined && this.#projected(job).external_ref === externalRef) ||
+				(externalRef !== undefined && job.external_ref === externalRef) ||
 				(labelValue(job.labels, LABEL_PREFIX.project, false) === input.project && normalizeJobTitle(job.title) === normalizeJobTitle(title))
 			));
 			if (duplicate && duplicate.script?.path !== input.scriptPath) {
@@ -434,47 +411,7 @@ export class Ledger {
 		});
 	}
 
-	/** The job linked to tracker item `(connectionId, itemId)`, in any status, or undefined. */
-	findTracked(connectionId: string, itemId: string): Job | undefined {
-		const job = this.read().jobs.find((candidate) => candidate.tracker?.connection_id === connectionId && candidate.tracker.item_id === itemId);
-		return job ? this.#projected(job) : undefined;
-	}
-
-	/**
-	 * Exactly one job per `(connection_id, item_id)` across all history (B2): the key
-	 * check runs inside the mutation queue, so concurrent calls agree. An open unlinked
-	 * job already carrying the same ref is refused, never linked silently. No title dedupe. `deferred` keeps it out of `ready()` (B4).
-	 */
-	async createTracked(input: IntakeInput & { tracker: { connection_id: string; item_id: string; mandate_id?: string; task_sha256?: string }; deferred?: boolean }): Promise<{ job: Job; created: boolean }> {
-		const prepared = this.#prepare(input);
-		const { connection_id, item_id } = input.tracker;
-		return this.#mutate((doc) => {
-			const linked = doc.jobs.find((job) => job.tracker?.connection_id === connection_id && job.tracker.item_id === item_id);
-			if (linked) return { job: this.#projected(linked), created: false };
-			const unlinked = prepared.externalRef === undefined ? undefined
-				: doc.jobs.find((job) => job.status !== "closed" && !job.tracker && this.#projected(job).external_ref === prepared.externalRef);
-			if (unlinked) throw new LedgerError(`${unlinked.id} already tracks ${prepared.externalRef} without a tracker link; not linked automatically`);
-			return { job: this.#build(doc, prepared, input, { tracker: { ...input.tracker, linked_at: isoTimestamp(this.#now()) }, ...(input.deferred ? { status: "deferred" as const } : {}) }), created: true };
-		});
-	}
-
-	/** Link an existing job to one tracker item (laf): idempotent; another item, or an item another job links, is refused. */
-	async link(id: string, link: { connection_id: string; item_id: string }): Promise<{ job: Job; linked: boolean }> {
-		return this.#mutate((doc) => {
-			const job = this.#require(doc, id);
-			const same = job.tracker?.connection_id === link.connection_id && job.tracker.item_id === link.item_id;
-			if (job.tracker && !same) throw new LedgerError(`${id} is already linked to ${job.tracker.connection_id}/${job.tracker.item_id}`);
-			const other = doc.jobs.find((j) => j.id !== id && j.tracker?.connection_id === link.connection_id && j.tracker.item_id === link.item_id);
-			if (other) throw new LedgerError(`${other.id} already links ${link.connection_id}/${link.item_id}`);
-			if (!same) {
-				job.tracker = { connection_id: link.connection_id, item_id: link.item_id, linked_at: isoTimestamp(this.#now()) };
-				job.updated_at = job.tracker.linked_at;
-			}
-			return { job: this.#projected(job), linked: !same };
-		});
-	}
-
-	/** Intake validation and normalization shared by `create` and `createTracked`. */
+	/** Intake validation shared by every create path. */
 	#prepare(input: IntakeInput): { title: string; labels: string[]; externalRef: string | undefined } {
 		const title = input.title.trim();
 		if (title.length === 0) throw new LedgerError("intake needs a title");
@@ -498,13 +435,12 @@ export class Ledger {
 		if (this.#options.archivedProjects?.includes(input.project)) {
 			throw new LedgerError(`project ${JSON.stringify(input.project)} is archived — unarchive it (cp_project unarchive) before creating jobs`);
 		}
-		let externalRef = input.externalRef?.trim();
+		const externalRef = input.externalRef?.trim();
 		if (externalRef !== undefined && (externalRef.length === 0 || /[\r\n]/.test(externalRef) || externalRef.length > 1000)) {
 			throw new LedgerError(
-				`external ref must be one non-empty line (a tracker url, a file path, or the command that shows the issue, e.g. \`br --db /abs/path/.beads/beads.db show <id> --json\`), got ${JSON.stringify(input.externalRef)}`,
+				`external ref must be one non-empty line (a url, a file path, or the command that shows the issue), got ${JSON.stringify(input.externalRef)}`,
 			);
 		}
-		if (externalRef !== undefined) externalRef = this.normalizeRef(externalRef, input.project);
 		for (const label of input.labels ?? []) {
 			if (label.includes(",") || label.trim().length === 0) throw new LedgerError(`label ${JSON.stringify(label)} may not contain a comma or be empty`);
 		}
@@ -518,7 +454,7 @@ export class Ledger {
 	}
 
 	/** Mint an id and push the new open job; runs inside `#mutate`. */
-	#build(doc: JobsDocument, prepared: { title: string; labels: string[]; externalRef: string | undefined }, input: IntakeInput, extra: Partial<Job> = {}): Job {
+	#build(doc: JobsDocument, prepared: { title: string; labels: string[]; externalRef: string | undefined }, input: IntakeInput): Job {
 		const id = mintJobId(doc.prefix, new Set(doc.jobs.map((job) => job.id)), {
 			...(input.slug !== undefined ? { slug: input.slug } : {}),
 			...(this.#options.random ? { random: this.#options.random } : {}),
@@ -537,29 +473,26 @@ export class Ledger {
 			...(input.scriptPath !== undefined ? { script: { path: input.scriptPath } } : {}),
 			...(prepared.externalRef !== undefined ? { external_ref: prepared.externalRef } : {}),
 			...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
-			...extra,
 		};
 		doc.jobs.push(job);
 		return job;
 	}
 
 	/**
-	 * Open job already recorded for this intake: same `external_ref` (after the
-	 * same pin as `create`), or same project + normalized title. Closed jobs do
+	 * Open job already recorded for this intake: the same trimmed `external_ref`,
+	 * or same project + normalized title. Closed jobs do
 	 * not match — finished work may be filed again. Used by `cp_job create` only;
 	 * pipeline/`cp_ask` still mint.
 	 */
 	findDuplicate(input: Pick<IntakeInput, "title" | "project" | "externalRef">): Job | undefined {
 		const titleKey = normalizeJobTitle(input.title);
 		if (titleKey.length === 0) return undefined;
-		let incomingRef = input.externalRef?.trim();
-		if (incomingRef) incomingRef = this.normalizeRef(incomingRef, input.project);
+		const incomingRef = input.externalRef?.trim();
 		for (const job of this.read().jobs) {
 			if (job.status === "closed") continue;
-			const projected = this.#projected(job);
-			if (incomingRef && projected.external_ref === incomingRef) return projected;
+			if (incomingRef && job.external_ref === incomingRef) return job;
 			if (labelValue(job.labels, LABEL_PREFIX.project, false) === input.project && normalizeJobTitle(job.title) === titleKey) {
-				return projected;
+				return job;
 			}
 		}
 		return undefined;
@@ -568,33 +501,30 @@ export class Ledger {
 	// -- queries ------------------------------------------------------------
 
 	async show(id: string): Promise<Job> {
-		return this.#projected(this.#require(this.read(), id));
+		return this.#require(this.read(), id);
 	}
 
 	async list(filter: ListFilter = {}): Promise<Job[]> {
-		return filterJobs(this.read(), filter).map((job) => this.#projected(job));
+		return filterJobs(this.read(), filter);
 	}
 
 	/** Open, unblocked, not deferred — the only queue dispatch may pull from. */
 	async ready(filter: Omit<ListFilter, "status" | "all"> = {}): Promise<Job[]> {
 		const doc = this.read();
 		return filterJobs(doc, { ...filter, status: "open" })
-			.filter((job) => isReady(doc, job))
-			.map((job) => this.#projected(job));
+			.filter((job) => isReady(doc, job));
 	}
 
 	/** Every non-closed job waiting on an unresolved (open or dropped) blocker. */
 	async blocked(): Promise<Job[]> {
 		const doc = this.read();
 		return doc.jobs
-			.filter((job) => job.status !== "closed" && openBlockersOf(doc, job.id).length > 0)
-			.map((job) => this.#projected(job));
+			.filter((job) => job.status !== "closed" && openBlockersOf(doc, job.id).length > 0);
 	}
 
 	/** Closed jobs are the job history; newest close first. */
 	async history(filter: Omit<ListFilter, "status" | "all"> = {}): Promise<Job[]> {
 		return filterJobs(this.read(), { ...filter, status: "closed" })
-			.map((job) => this.#projected(job))
 			.sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? "") || a.id.localeCompare(b.id));
 	}
 
@@ -606,7 +536,7 @@ export class Ledger {
 	/** Dependency records retain status and close reason, including landed history. */
 	async dependenciesOf(id: string): Promise<Job[]> {
 		const doc = this.read();
-		return this.#require(doc, id).blocked_by.map((blocker) => this.#projected(this.#require(doc, blocker)));
+		return this.#require(doc, id).blocked_by.map((blocker) => this.#require(doc, blocker));
 	}
 
 	/** Apply a journaled dropped-dependency answer once, atomically with its audit comment. */
@@ -757,23 +687,6 @@ export class Ledger {
 		const job = doc.jobs.find((candidate) => candidate.id === id);
 		if (!job) throw new LedgerError(`${id}: no such job in ${this.file}`);
 		return job;
-	}
-
-	/**
-	 * The read-time view of a job: an older job stored with a bare `br show
-	 * <id> --json` ref (from before this DB was pinned) is shown pinned to the
-	 * project's beads DB, exactly as `create()` would store it today, whenever
-	 * one resolves. Pure and non-persisting — every query path (`show`, `list`,
-	 * `ready`, `blocked`, `history`) computes the same view over whatever is on
-	 * disk, so a read never rewrites `updated_at` and an older job reads
-	 * correctly through every one of them, not just `show`. A ref that is
-	 * already pinned, or for which no DB resolves, passes through unchanged.
-	 */
-	#projected(job: Job): Job {
-		if (!job.external_ref) return job;
-		const project = labelValue(job.labels, LABEL_PREFIX.project, false);
-		const normalized = project ? this.normalizeRef(job.external_ref, project) : job.external_ref;
-		return normalized === job.external_ref ? job : { ...job, external_ref: normalized };
 	}
 
 	/** Read → mutate a clone → validate → archive retired fields → atomic write, serialized per file. */

@@ -209,7 +209,7 @@ test("the reviewer gate waits for CI, then carries its state into the brief; pas
 	const off = new ForeignCiWatch({ ...b.deps, home: offHome.path, disabled: () => "gh is not available" });
 	assert.match((await off.gate(reviewer))!.line, /CI unknown — the CI watch is off \(gh is not available\)/);
 
-	const snapshot = await referencedMaterial({ task: "review it", prefix: "cp", clone: b.home, worktree: b.home, home: b.home, foreignCi: `${PR}: CI unknown — PR merged.` });
+	const snapshot = await referencedMaterial({ task: "review it", worktree: b.home, home: b.home, foreignCi: `${PR}: CI unknown — PR merged.` });
 	assert.match(snapshot, /### Foreign CI\nhttps:\/\/github\.com\/acme\/widgets\/pull\/7: CI unknown — PR merged\./);
 });
 

@@ -554,48 +554,19 @@ test("ledger.prefix warns when the environment disagrees with the document; ledg
 	assert.match(size?.what ?? "", new RegExp(`${JOBS_SIZE_WARNING + 1} jobs`));
 });
 
-test("ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete", async (t) => {
+test("ledger.beads_archive: a leftover .beads/ is one warning that never advises import or deletion", async (t) => {
 	const fx = fixture(t, { ledger: false });
 	mkdirSync(join(fx.home.path, ".beads"), { recursive: true });
-	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [JOB_ROW] });
-	const finding = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
-	assert.equal(finding?.severity, "warn");
-	assert.match(finding?.fix ?? "", /safe to delete/);
-
-	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [] });
-	const empty = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
-	assert.equal(empty?.severity, "ok");
-	assert.match(empty?.what ?? "", /not imported yet/);
-	assert.match(empty?.fix ?? "", /\/cp-jobs import-beads/);
-});
-
-test("ledger.beads_archive: a .beads/ that an active tracker connection uses is ok and never advised for deletion", async (t) => {
-	const fx = fixture(t, { ledger: false });
-	const beads = join(fx.home.path, ".beads");
-	mkdirSync(beads, { recursive: true });
-	writeFileSync(join(beads, "beads.db"), "");
-	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [JOB_ROW] });
-	const connection = { id: "demo-beads", project: "demo", adapter: "beads", endpoint: realpathSync(join(beads, "beads.db")), intake_enabled: false, write_enabled: true, status: "active", connected_at: "2026-09-01T00:00:00Z" };
-	const trackers = (connections: object[]) => {
-		mkdirSync(join(fx.home.path, LAYOUT.data), { recursive: true });
-		writeFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, connections }));
-	};
-
-	trackers([connection]);
-	const live = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
-	assert.equal(live?.severity, "ok", JSON.stringify(live));
-	assert.match(live?.what ?? "", /live endpoint of tracker demo-beads/);
-	assert.doesNotMatch(`${live?.what} ${live?.fix}`, /safe to delete/);
-
-	trackers([{ ...connection, status: "disconnected", disconnected_at: "2026-09-02T00:00:00Z" }]);
-	const archive = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
-	assert.equal(archive?.severity, "warn");
-	assert.match(archive?.fix ?? "", /safe to delete/);
-
+	mkdirSync(join(fx.home.path, LAYOUT.data), { recursive: true });
+	// Retired tracker config is never read: a malformed one changes nothing.
 	writeFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), "{nope");
-	const unreadable = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
-	assert.equal(unreadable?.severity, "warn");
-	assert.match(unreadable?.fix ?? "", /do not delete/);
+	for (const jobs of [[JOB_ROW], []]) {
+		writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs });
+		const finding = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+		assert.equal(finding?.severity, "warn");
+		assert.match(finding?.fix ?? "", /keep it for your records/);
+		assert.doesNotMatch(`${finding?.what} ${finding?.fix}`, /import-beads|delete|cp_tracker/);
+	}
 });
 
 test("state.job_id_migration: a pre-rename fleet file is an error until the sweep runs", async (t) => {

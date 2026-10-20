@@ -401,7 +401,6 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	/** When present, a settle with no envelope gets one prompt to report. */
 	settle?: SettleWatcher;
 	bounds?: HardBoundsWatch;
-	/** Read-only reference lookup, injected in tests. */ referenceExec?: CommandRunner;
 	/** git runner, injected in tests. */
 	git?: GitRunner;
 	now?: () => Date;
@@ -665,9 +664,8 @@ export class Dispatcher {
 			const deps = await prepareNodeDeps(lease.path, options.deps);
 
 			// --- 5. brief and shared reference snapshot ----------------------
-			const beadsDb = options.ledger.beadsDb(labels.project);
-			const references = await referencedMaterial({ task: task.forInference, externalRef: issue.external_ref, prefix: options.ledger.read().prefix,
-				clone, worktree: lease.path, home: options.home, exec: options.referenceExec, ...(beadsDb ? { beadsDb } : {}), ...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
+			const references = await referencedMaterial({ task: task.forInference, worktree: lease.path, home: options.home,
+				...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
 			const boundNote = bound ? `\n\n> ${boundPrNote(bound)}\n` : "";
 			const originalTask = task.forInference + references + boundNote;
 			const runDir = join(options.home, paths.runDir(issue.id));
@@ -714,7 +712,6 @@ export class Dispatcher {
 				brief,
 				sessionDir: join(options.home, LAYOUT.sessions),
 				sessionName: issue.id,
-				...(beadsDb ? { extraEnv: { BEADS_DIR: dirname(beadsDb) } } : {}),
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 			});
 			recorder.markSpawned({
