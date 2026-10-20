@@ -171,7 +171,7 @@ export function registerProjectMemoryTools(
 			}
 			let readiness: string;
 			try {
-				readiness = formatReadiness(registry.home, result.project, () => registry.pathOf(result.project.name), ciRun);
+				readiness = formatReadiness(registry.home, result.project, ciRun);
 			} catch (error) {
 				readiness = `  readiness: unknown (${(error as Error).message}); add itself succeeded`;
 			}

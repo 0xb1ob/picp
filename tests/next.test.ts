@@ -929,8 +929,6 @@ test("#323 snapshot: verdicts per job, nothing queued keeps its since, unread ev
 	assert.deepEqual(byId(verdicts(queued)), byId([[other, "wait"], [after.id, "blocked"], [head, "queued"]]));
 	assert.match(queued.items.find((item) => item.id === other)!.reason, /dispatch-parallelism 1 is full .*1 queued/, "why a ready job is not running");
 
-	const failed = nextSnapshot({ ready: [], action: { kind: "wait", reason: "x" }, lined_up: { jobs: [], beads: [{ project: "demo", ids: [], error: "ENOENT" }], queued: [] } }, "2026-10-01T12:00:00Z");
-	assert.deepEqual([failed.unavailable, failed.empty_since], [[{ project: "demo", error: "ready beads unavailable: ENOENT" }], null], "a failed tracker read is not nothing queued");
 	writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ state: "draining", started_at: "2026-08-27T12:00:00Z", deadline: "2026-08-27T12:10:00Z", timeout_s: 600, jobs: [] }));
 	const drained = nextSnapshot(await cpNext(ports, "demo"), "2026-10-01T12:00:00Z", "demo");
 	assert.match(drained.unavailable[0]!.error, /^not read: draining since/);

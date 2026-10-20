@@ -71,7 +71,7 @@ export type NextPost = Pick<CommandPost, "packageRoot" | "ledger" | "registry" |
 /** One in-process `cpNext` over the command post's own ports. */
 export async function nextFor(post: NextPost, override?: typeof cpNext): Promise<NextResult> {
 	return (override ?? cpNext)({
-		packageRoot: post.packageRoot, ledger: post.ledger(), registry: post.registry,
+		packageRoot: post.packageRoot, ledger: post.ledger(),
 		fleet: post.fleet, mandates: post.mandates, escalations: post.escalations, pipelines: post.pipelines,
 		queued: () => post.dispatchQueue.ids(),
 	});

@@ -32,7 +32,7 @@ never by probing, with no fallback or alias:
     tasks/  handoffs/  reports/<topic>/  scratch/
   jobs.json  jobs-legacy-fields.jsonl  settings.json
 ~/.pi-command-post/app/  the standard home's code checkout (not state; never a home itself)
-<home>/.beads/ br's frozen archive; br owns it, command-post only reads it
+<home>/.beads/ br's frozen archive; br owns it, command-post never reads it
 ```
 
 Resolution (`src/home.ts` `describeHome`): `CP_HOME` wins; then the standard
@@ -94,7 +94,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `wake-rules.json` | read in `src/wake-rules.ts` on every evaluation; never written by code | system-one wake-rules kill switch: `{"enabled": false}` turns rule-handled wakes back into parent turns with no restart; absent = on, unreadable or invalid = off (`docs/contracts.md` §Rule-handled wakes) | H | the operator, by hand |
 | `standing-orders.md` | `src/parent-context.ts` (created once) | parent preference template | H | code once, then the operator or the operator session |
 | `learnings.md candidates.md archive.md curation.jsonl` | `src/memory.ts`, `src/curation.ts` | memory tiers | H | code (`cp_memory`) |
-| `trackers.json` | `src/trackers/config.ts` | tracker connections (an endpoint may name `<home>/.beads/beads.db`), read only | H | nobody; its tool was retired |
+| `trackers.json` | none (retired) | tracker connections from a retired integration; never read, a malformed one is harmless | H | nobody; its tool was retired |
 | `push/config.json`, `push/vapid.key` (0600) | `src/push/keys.ts` via `npm run push:init` | Web Push origin and keys | H | code, operator-run |
 | `push/subscriptions/<id>.json` (0600) | the **viewer**: `src/viewer/push-subscriptions.ts` (a request-time write, and a device revoke removing that device's own through `src/viewer/device-store.ts`); the parent: `src/push/sweep.ts` (removes a gone device) | one subscribed device each; a remote device's record adds `device_id` + `origin` (both or neither), and a legacy record without them keeps its local/tailnet behaviour unchanged | H | code: a viewer request-time write, and the push sweep |
 | `tunnel.json` | `cp-tunnel up`/`down` (`src/tunnel/cli.ts`, remote dashboard PR 2d), each change a new revision under the O_EXCL `tunnel.lock` (holder pid) | the desired tunnel config `{schema_version, enabled, mode, port, binary, hostname?, token_file?, tunnel_id?, zone_id?, account_id?, revision}` (the Cloudflare ids only after `--api-token-file`; no credential: a named token is the file `token_file` names, by default the 0600 `tunnel/token` cp-tunnel copied), read strictly by `src/service/daemon-tunnel-files.ts` `readTunnelConfig` for cp-daemon's cloudflared controller and the viewer's remote runtime; its presence, or `devices.json`'s, turns on cp-daemon's `device-notify` role (`remoteFeatureConfigured`) | H | code only |
@@ -158,7 +158,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `<home>/.pi-command-post/operator/{tasks,handoffs,reports/<topic>,scratch}/` | nothing in code | the operator workspace | H | the **operator session** and the human only |
 | `<home>/.pi-command-post/jobs.json`, `jobs-legacy-fields.jsonl`, `settings.json` | `src/ledger.ts`; `settings.json` is read-only in code (`src/mode.ts`) | ledger, mode preference | H | code (`cp_job`); settings.json: operator |
 | `<home>/.pi-command-post/bin/cloudflared` (0755, dir 0700) | `src/tunnel/cloudflared.ts` `provisionCloudflared`, called by `cp-tunnel up` (remote dashboard PR 2d) | the pinned official cloudflared, used only when no compatible one is on PATH: SHA256-verified, probed in an exclusive temp file beside it, then renamed into place; a failure leaves neither; an existing `bin/` is narrowed to 0700 | H | code only |
-| `<home>/.beads/` | br only; code reads it (`src/doctor.ts`) | frozen br archive / read-only tracker DB | H | nobody through command-post |
+| `<home>/.beads/` | br only; `src/doctor.ts` checks it exists | frozen br archive, never read | H | nobody through command-post |
 | `<package-root>/USER.md` | the operator, by hand | optional context (gitignored) | H | the operator only |
 
 ### Outside the home
@@ -247,15 +247,9 @@ Warn-only; each finding names its fix ([`src/storage.ts`](../src/storage.ts)):
 
 `.beads/` stays at `<home>/.beads/` — in the standard home that is
 `~/.pi-command-post/.beads/`, beside the runtime entries. It is br's directory, not command-post's:
-code only reads it (`br --db … --no-auto-flush --no-auto-import`), and
-`/doctor`'s `ledger.beads_archive` reports it: ok while an active tracker
-connection's endpoint lives under it (live tracker state, never delete), the
-"frozen archive, safe to delete" warning only when none does. `BEADS_DIR` is not a stored
-setting: dispatch derives it per worker from the project's tracker
-(`projectBeadsDb`: an active connection's `endpoint`, else
-`<clone>/.beads/beads.db`, never the home's own `.beads`). Moving `.beads/`
-would force rewriting `data/trackers.json` and every recorded `br --db` path,
-and a stale hand-typed `br --db <old path>` silently creates an empty database.
+nothing in command-post reads it, and `/doctor`'s `ledger.beads_archive` reports it
+as one warning: nothing reads it any more; keep it for your records. `BEADS_DIR` is
+not a setting: workers never inherit one and dispatch sets none.
 So `.gitignore` and `neverCommitFor("multi")` keep `.beads/`, and `storage.home`
 treats it as known.
 

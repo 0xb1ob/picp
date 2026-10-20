@@ -142,8 +142,6 @@ import { Teardown, type TeardownCallOptions, type TeardownResult } from "./teard
 import { type RenderOptions, RunWatcher, type RunView } from "./watch.ts";
 import { type DrainProjection, WorkerManager } from "./worker-manager.ts";
 import { tryResolveWorkerPackages } from "./worker-packages.ts";
-import { idleBeadObserver, readReadyBeads } from "./ready-beads.ts";
-import { projectBeadsDb } from "./trackers/config.ts";
 
 export interface CommandPostOptions {
 	/** Command post home: where `data/`, `state/` and `projects/` live. */
@@ -176,8 +174,6 @@ export interface CommandPostOptions {
 	runtime?: Runtime;
 	/** Called once per accepted envelope (notify the operator, update the widget). */
 	onReported?: (result: IntakeResult) => void;
-	/** One evidence-only notice when the last working slot becomes idle. */
-	onIdleBeads?: (text: string) => void;
 	/** The live parent's compact hold (cp-35d0 S6): a new drain is refused and a running one cannot finish `drained` while true. */
 	parentControlBusy?: () => boolean;
 	/**
@@ -332,14 +328,7 @@ export class CommandPost {
 		this.profilesDir = join(options.packageRoot, "profiles");
 		this.briefsDir = join(options.packageRoot, "prompts/briefs");
 		this.registry = new ProjectRegistry({ home: options.home });
-		const observeIdle = options.onIdleBeads ? idleBeadObserver(
-			() => readReadyBeads(this.registry, this.ledger()), options.onIdleBeads, () => this.fleet.read().jobs,
-		) : undefined;
-		this.fleet = new FleetStore({ home: options.home, ...(observeIdle ? {
-			onChanged: (before, after) => { void observeIdle(before, after).catch((error) => {
-				process.stderr.write(`idle bead notice failed: ${String(error)}\n`);
-			}); },
-		} : {}) });
+		this.fleet = new FleetStore({ home: options.home });
 		this.capacity = new CapacityReader({ home: options.home, env: options.parentEnv ?? process.env, fleet: this.fleet });
 		// cp-epy2 §4.2: the pool root is per home, read from the environment this
 		// parent was started with. `resolvePoolRoot` omits the key when nothing is
@@ -1103,7 +1092,6 @@ export class CommandPost {
 			home: this.home,
 			knownProjects: this.registry.names(),
 			archivedProjects: this.registry.archivedNames(),
-			beadsDbFor: (project) => projectBeadsDb(this.home, project, () => this.registry.pathOf(project)),
 		});
 	}
 
