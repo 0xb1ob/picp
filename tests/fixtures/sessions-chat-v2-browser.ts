@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
  * Chrome over CDP, PNGs plus manifest.json.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup [--chrome /usr/bin/google-chrome] --out <dir>`
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -117,6 +117,17 @@ if (args.stage === "rollup") {
 		notice("u4", "2026-10-15T08:05:30Z", b, "Worker reported done."),
 		say("v4", "2026-10-15T08:05:35Z", "Assistant", `**[picp]** ${b} finished; no PR for this one.`),
 		say("v5", "2026-10-15T08:05:50Z", "Operator", "Thanks. Anything else waiting?"),
+	];
+}
+/** Notice: a bridge wake naming a draft PR chips it like the relay's turn card below it. */
+if (args.stage === "notice") {
+	const url = "https://github.com/o/picp/pull/381", job = "cp-e2e-migration-p2-tyir";
+	sessions.pr_chips = { [url]: { kind: "pr", url, number: 381, repo: "o/picp", job_id: job, head_sha: "5cda64f5989e".padEnd(40, "0"), state: "draft", merge_sha: null,
+		closed_by: null, job_status: null, ci: "green", review: "pass" } };
+	sessions.entries = [...entries,
+		say("u1", "2026-10-15T08:04:20Z", "cp-bridge", `[picp] CI GREEN — ${job}: cp_review attempt 2 started on 5cda64f5989e — handled in code, no parent turn. ${url}`,
+			{ kind: "system", tag: "bridge", bridge: { kind: "wake", job, id: null, receipt: null } }),
+		say("v1", "2026-10-15T08:04:25Z", "Assistant", `**[picp]** ${job}: review is running on ${url}.`),
 	];
 }
 const body = (text: string) => ({ kind: "message" as const, text });
@@ -261,6 +272,10 @@ try {
 			if (chips.length !== 9) throw new Error(`${name}: ${chips.length} chips rendered, not 9`);
 			const wide = chips.filter((c: { wide: boolean }) => c.wide).map((c: { text: string }) => c.text);
 			if (wide.length) throw new Error(`${name}: chips wider than their bubble: ${wide.join(", ")}`);
+		}
+		if (stage === "notice") {
+			const display = await evaluate(`[".session-bridge a.pr-chip", ".session-bubble a.pr-chip"].map(s => { const c = document.querySelector(s); return c ? getComputedStyle(c).display : "missing"; })`);
+			if (display.join() !== "inline-flex,inline-flex") throw new Error(`${name}: notice and card chips display ${display.join(", ")}, not inline-flex`);
 		}
 		if (stage === "rollup") {
 			const card = await evaluate(`(() => { const t = document.querySelector(".session-rollup-toggle"), m = document.querySelector(".session-rollup-meta"); return { cards: document.querySelectorAll(".session-rollup").length, toggle: t ? t.getBoundingClientRect().height : 0, chips: document.querySelectorAll(".session-rollup .pr-chip").length, meta: m ? m.getBoundingClientRect().height : 0, wraps: m ? m.scrollWidth > m.clientWidth : true }; })()`);

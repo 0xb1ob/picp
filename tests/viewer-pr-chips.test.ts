@@ -117,7 +117,7 @@ test("(l) issue chips: closed by a merged PR (ledger ref or envelope Closes), op
 	assert.deepEqual(chips["https://github.com/o/picp/issues/330"]!.closed_by, { url: "https://github.com/o/picp/pull/356", number: 356 });
 	assert.equal(chips["https://github.com/o/picp/issues/329"]!.state, null, "no record in either index: no state");
 	const rendered = ui.html(entry.text, entry.links, chips);
-	assert.match(rendered, /issue #328<\/span><span class="pr-chip-state">closed by #355<\/span><span class="pr-chip-job">job closed/);
+	assert.match(rendered, /issue #328<\/span> <span class="pr-chip-state">closed by #355<\/span> <span class="pr-chip-job">job closed/);
 	const { document } = parseHTML(`<div>${rendered}</div>`);
 	assert.equal(document.querySelector("a.issue-chip.pr-chip-none")?.textContent, "#329");
 	h.ledger([{ id: "cp-issue-328-x", status: "in_progress", labels: ["project:picp"], external_ref: ISSUE }]);
