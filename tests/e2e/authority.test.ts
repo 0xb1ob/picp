@@ -4,11 +4,11 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { DEFAULT_BUDGET_CONFIG, LAYOUT, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_BUDGET_CONFIG, LAYOUT, type Mandate, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { liveUsageJobs } from "../../src/mandate-usage.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
@@ -484,4 +484,123 @@ test("authority: keyword risk inference skips negated, excluded and benign sense
 			assert.deepEqual([preview.routing.risk, preview.routing.provenance?.risk], [risk, inputsFrom]);
 		}
 	}
+});
+
+test("authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	type Args = Record<string, unknown>;
+	const call = (id: string, args: Args | (() => Args)) => ({ id, name: "cp_mandate", args: typeof args === "function" ? args : () => args });
+	const step = (...calls: ReturnType<typeof call>[]) => ({ kind: "tool_calls" as const, calls });
+	const done = { kind: "text" as const, text: "done" };
+	const set = (key: string, value: string) => ({ action: "defaults_set", key, value });
+	const first = "tidy the README";
+	let grants: () => Mandate[] = () => [];
+	const grant = (objective: string) => grants().find((mandate) => mandate.objective === objective);
+	const raise = (id: string, spend_tokens: number) => call(id, () => ({ action: "raise_tokens", mandate_id: grant(first)?.id, spend_tokens, reason: "ceiling probe" }));
+	const issue = (id: string, objective: string, projects = ["demo"], over: Args = {}) => call(id, { action: "issue", projects, objective, ...over });
+	const s = await stack(t, "auth-defaults", 100, [
+		step(call("show0", { action: "defaults_show" }), issue("issue0", first)),
+		step(call("view0", () => ({ action: "show", mandate_id: grant(first)?.id }))),
+		done,
+		step(call("show1", { action: "defaults_show" })),
+		step(call("cap", set("job_cap", "9"))),
+		step(call("ask", set("ask_on", "merge, risk:high"))),
+		step(call("bogus", set("bogus", "1")), call("nan", set("job_cap", "not-a-number"))),
+		step(call("ceiling", set("token_ceiling", "50000000"))),
+		step(raise("over", 60_000_000)),
+		step(issue("issue1", "after the edits")),
+		done,
+		step(issue("agree", "agreeing overrides", ["demo", "other"], { spend_usd: 99 })),
+		done,
+		step(issue("disagree", "disagreeing overrides", ["demo", "other"])),
+		step(issue("dated", "dated", ["demo"], { expiry: "2030-01-01T00:00:00Z" })),
+		done,
+		step(call("invalid", { action: "defaults_show" })),
+		done,
+		step(raise("unreadable", 20_000_000)),
+		done,
+	]);
+	grants = () => s.post.mandates.list();
+	const other = createScratchRepo({ name: "other", files: { "README.md": "# other\n" } });
+	t.after(() => other.cleanup());
+	await s.post.registry.register({ name: "other", clone_url: other.remote as string, delivery: "pr" });
+	const file = join(s.home, LAYOUT.mandateDefaultsFile);
+	const ends = new Map<string, Awaited<ReturnType<typeof s.parent>>[number]>();
+	const prompt = async (text: string) => {
+		for (const end of await s.parent(text)) ends.set(String(end.toolCallId), end);
+	};
+	const said = (id: string) => JSON.stringify(ends.get(id)?.result);
+	const ok = (id: string) => assert.notEqual(ends.get(id)?.isError, true, `${id}: ${said(id)}`);
+	const failed = (id: string, pattern: RegExp) => assert.ok(ends.get(id)?.isError === true && pattern.test(said(id)), `${id}: ${said(id)}`);
+
+	// A fresh home: the first session scaffolds the scope's conservative defaults, and a bare issue resolves from them.
+	assert.equal(existsSync(file), false);
+	await prompt("Show the mandate defaults, then fix the README under a grant.");
+	const written = JSON.parse(readFileSync(file, "utf8"));
+	assert.deepEqual(
+		[written.expiry_hours, written.spend_usd, written.spend_tokens, written.token_ceiling, written.job_cap, written.dispatch_parallelism],
+		[8, 100, 10_000_000, 100_000_000, 3, 3],
+	);
+	assert.equal(written.notes.dispatch_parallelism, "jobs under the grant that may run at once; set 1 for serial");
+	assert.deepEqual([[...written.allowed_actions].sort(), written.ask_on], [["implement", "merge", "plan", "repair", "review"], ["risk:high"]]);
+	assert.deepEqual(written.exclude_paths, [".github/workflows/", "secrets/", "**/.env*"]);
+	for (const shown of [/expiry_hours: 8/, /spend_usd: 100/, /conservative so a stale mandate/]) assert.match(said("show0"), shown);
+	ok("issue0");
+	const bare = grant(first);
+	assert.deepEqual(bare?.projects, ["demo"]);
+	assert.ok(Object.keys(bare?.provenance ?? {}).length > 0 && Object.values(bare?.provenance ?? {}).every((from) => from === "home"), JSON.stringify(bare?.provenance));
+	assert.ok(Math.abs(Date.parse(bare?.expiry ?? "") - Date.parse(bare?.issued_at ?? "") - 8 * 3_600_000) < 60_000, "expiry is issued_at + expiry_hours");
+	assert.match(said("view0"), /field sources:/);
+	assert.match(said("view0"), /expiry_hours:home/);
+
+	// An operator edit survives the next session's scaffold; defaults_set writes, refuses junk, and a lowered ceiling binds.
+	writeFileSync(file, JSON.stringify({ ...written, spend_usd: 42, dispatch_parallelism: 1 }));
+	await prompt("Tune the mandate defaults.");
+	assert.match(said("show1"), /spend_usd: 42/);
+	assert.match(said("show1"), /dispatch_parallelism: 1/);
+	ok("cap");
+	ok("ask");
+	ok("ceiling");
+	assert.match(said("ceiling"), /token_ceiling: 50000000/);
+	failed("bogus", /bogus/);
+	failed("nan", /not-a-number|job_cap/);
+	failed("over", /token_ceiling 50000000/);
+	const edited = JSON.parse(readFileSync(file, "utf8"));
+	assert.deepEqual([edited.job_cap, edited.ask_on, edited.token_ceiling], [9, ["merge", "risk:high"], 50_000_000]);
+	ok("issue1");
+	const after = grant("after the edits");
+	assert.deepEqual([after?.job_cap, after?.dispatch_parallelism, after?.ask_on, after?.provenance?.dispatch_parallelism], [9, 1, ["merge", "risk:high"], "home"]);
+
+	// Project overrides apply only when every named project agrees, whatever their key order; explicit beats both.
+	const overrides = (demo: Args, rest: Args) => {
+		const path = join(s.home, LAYOUT.projectsFile);
+		const doc = JSON.parse(readFileSync(path, "utf8"));
+		for (const project of doc.projects) project.mandate = project.name === "demo" ? demo : rest;
+		writeFileSync(path, JSON.stringify(doc));
+	};
+	const demo = { spend_usd: 25, job_cap: 5, allowed_actions: ["implement", "review"], expiry_hours: 1 };
+	overrides(demo, { expiry_hours: 1, allowed_actions: ["implement", "review"], job_cap: 5, spend_usd: 25 });
+	await prompt("Issue a grant over both projects.");
+	ok("agree");
+	const agreed = grant("agreeing overrides");
+	assert.deepEqual([agreed?.spend_cap, agreed?.job_cap, agreed?.allowed_actions], [{ usd: 99, tokens: 10_000_000 }, 5, ["implement", "review"]]);
+	assert.deepEqual(
+		[agreed?.provenance?.spend_usd, agreed?.provenance?.job_cap, agreed?.provenance?.spend_tokens, agreed?.provenance?.allowed_actions],
+		["explicit", "project", "home", "project"],
+	);
+	overrides(demo, { ...demo, job_cap: 6 });
+	await prompt("Issue a grant over both projects, then a dated one.");
+	ok("disagree");
+	ok("dated");
+	const split = grant("disagreeing overrides");
+	assert.deepEqual([split?.job_cap, split?.spend_cap.usd, split?.provenance?.job_cap], [9, 42, "home"], "disagreement falls through to home");
+	const dated = grant("dated");
+	assert.deepEqual([dated?.expiry, dated?.provenance?.expiry_hours], ["2030-01-01T00:00:00Z", "explicit"], "an explicit expiry beats expiry_hours");
+
+	// An invalid defaults file is refused, never guessed; an unreadable one leaves nothing parent-raisable.
+	writeFileSync(file, JSON.stringify({ ...edited, job_cap: 0 }));
+	await prompt("Show the mandate defaults.");
+	failed("invalid", /job_cap/);
+	writeFileSync(file, "{ not json");
+	await prompt("Raise the grant's token cap.");
+	failed("unreadable", /token_ceiling 0\b/);
 });

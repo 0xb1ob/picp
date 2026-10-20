@@ -58,7 +58,7 @@ ask-0088e0332d00, 2026-10-21.
 | P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
 | P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
 | P2b (cp-e2e-migration-p2b-3e1w) | behavior 02, second slice: held-job cap counting and ops jobs (02-5, 02-6) in `tests/e2e/authority.test.ts`. The other 11 behavior-02 files move to P2c (job to be created by the main session). | 1 (`tests/ops-jobs.test.ts`) | 398 → 397 | 4,467 → 4,465 |
-| P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7) and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 10 behavior-02 files move to P2d. | 1 (`tests/risk-negation.test.ts`) | 394 → 393 | 4,414 → 4,402 |
+| P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7), mandate defaults and the issue ladder (02-8), and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 9 behavior-02 files move to P2d. | 2 (`tests/risk-negation.test.ts`, `tests/mandate-defaults.test.ts`) | 394 → 392 | 4,414 → 4,392 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -108,8 +108,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 |---|---|---|---|
 | P2 | 02 | `tests/e2e/authority.test.ts` | 4 |
 | P2b | 02 | `tests/e2e/authority.test.ts` | adds 02-5 and 02-6 |
-| P2c | 02 | `tests/e2e/authority.test.ts` | adds 02-7 |
-| P2d | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-7 |
+| P2c | 02 | `tests/e2e/authority.test.ts` | adds 02-7 and 02-8 |
+| P2d | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-8 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
@@ -217,6 +217,7 @@ moves first.
 | 02-5 | `tests/e2e/authority.test.ts` | authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot |
 | 02-6 | `tests/e2e/authority.test.ts` | authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource |
 | 02-7 | `tests/e2e/authority.test.ts` | authority: keyword risk inference skips negated, excluded and benign senses; the risk:high ask names every word it matched |
+| 02-8 | `tests/e2e/authority.test.ts` | authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -285,6 +286,17 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 | `tests/risk-negation.test.ts` | cp-wkv1: no-migration notes, plan evidence sections, spend tokens and audit remedies infer no risk | 02-7 | mapped | eleven texts preview low |
 | `tests/risk-negation.test.ts` | cp-wkv1: real operational risk stays high next to the new benign senses | 02-7 | mapped | eighteen texts named with their exact words in the ask |
 | `tests/risk-negation.test.ts` | cp-wkv1: an excluded section at the end of the task or an excluded-heading title never swallows the job description | 02-7 | mapped | description "Delete the production database" names delete, production under a Self-assessment-ended task and under seven excluded-heading titles; "Render it." previews low |
+| `tests/mandate-defaults.test.ts` | loadMandateDefaults falls back to the scaffold values when the file does not exist | 02-8 | redundant-unreachable | every reader runs in a pi session, and session start scaffolds the file with exactly these values first; 02-8 asserts the scaffolded values and a bare issue resolved from them |
+| `tests/mandate-defaults.test.ts` | scaffold writes data/mandate-defaults.json once with the conservative values; an operator edit survives | 02-8 | mapped | the first parent session creates the file (values, notes, actions, ask_on, exclude_paths); spend_usd 42 shows after the next session |
+| `tests/mandate-defaults.test.ts` | an existing home's dispatch_parallelism 1 survives scaffold and resolves as is | 02-8 | mapped | defaults_show shows 1 after the next session; the next bare issue has dispatch_parallelism 1 from home |
+| `tests/mandate-defaults.test.ts` | an invalid file is refused rather than guessed | 02-8 | mapped | job_cap 0 makes cp_mandate defaults_show an error naming job_cap |
+| `tests/mandate-defaults.test.ts` | defaults_set writes, rejects an unknown key or a non-number; token_ceiling binds; an unreadable file fails closed | 02-8 | mapped | cp_mandate defaults_set job_cap/ask_on/token_ceiling; bogus and not-a-number error; raise_tokens past 50000000 and under "{ not json" (ceiling 0) are refused |
+| `tests/mandate-defaults.test.ts` | formatMandateDefaults prints every field and its note | 02-8 | mapped | defaults_show text carries expiry_hours, spend_usd and the conservative note |
+| `tests/mandate-defaults.test.ts` | the ladder: explicit wins over project, project over home | 02-8 | mapped | spend_usd 99 explicit, job_cap and allowed_actions from the project, spend_tokens from home, each with its provenance |
+| `tests/mandate-defaults.test.ts` | expiry comes from expiry_hours when no explicit expiry is given | 02-8 | mapped | a bare issue expires issued_at + 8 h with provenance home |
+| `tests/mandate-defaults.test.ts` | an explicit expiry wins over a project expiry_hours | 02-8 | mapped | `dated` keeps 2030-01-01 with provenance explicit under a project expiry_hours 1 |
+| `tests/mandate-defaults.test.ts` | 'fix example-infra #17' resolves into one complete grant; show names every field's source | 02-8 | mapped | issue with projects and objective only: every provenance is home; cp_mandate show prints field sources and expiry_hours:home |
+| `tests/mandate-defaults.test.ts` | identical project overrides agree regardless of key order; a differing one falls through | 02-8 | mapped | agreeing overrides in a different key order apply; job_cap 6 on one project falls through to home; negative control NC-12 |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -312,6 +324,7 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-09 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-09-ops-lease | 693734ac1563a6fca17c1fe9be919aabf92cbe8719238a7ba2de1c4651df0e62 | `wanting` dispatches beside a live holder of resource:tg-session (missing expected rejection) | pass |
 | NC-10 | `tests/risk-negation.test.ts` | b63fe8457e763e7e4a2b5c31b1be6c12cc235fe7 | 02-7 | NC-10-negation | ce33b2293ec4566920d332b54dccf06d83a2f713f86fb698718f758befca78bb | "no migration" names the risk word migration, expected none | pass |
 | NC-11 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-11-held-jobs | b0cd9e923ba17aa39b1e02d55a94369572668e0fcab68794f9371a5b27dad546 | `third` passes the job cap 2 with the held job uncounted and is refused only by dispatch-parallelism | pass |
+| NC-12 | `tests/mandate-defaults.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-8 | NC-12-override-order | 330071f2749a42ddfd58350bdaf005f9e7e34e5063a20f1e71428b56e74366a0 | two agreeing overrides in a different key order fall through to home: job_cap 9, home allowed_actions | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -566,6 +579,28 @@ NC-11 stops counting a held job toward the grant's job count, and nothing else:
 ℹ fail 1
 ```
 
+NC-12 brings back the key-order-sensitive override comparison (cur.2.6), so agreeing overrides fall through to home:
+
+<!-- patch:NC-12-override-order -->
+```diff
+--- a/src/mandate-defaults.ts
++++ b/src/mandate-defaults.ts
+@@ -310,3 +310,3 @@ export function resolveMandateGrant(
+ export function sameProjectMandateOverride(a: ProjectMandateOverride | undefined, b: ProjectMandateOverride | undefined): boolean {
+-	return canonicalJson(a) === canonicalJson(b);
++	return JSON.stringify(a) === JSON.stringify(b);
+ }
+```
+
+```
+✖ authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+    actual: [ { usd: 99, tokens: 10000000 }, 9, [ 'plan', 'implement', 'review', 'repair', 'merge' ] ],
+    expected: [ { usd: 99, tokens: 10000000 }, 5, [ 'implement', 'review' ] ],
+ℹ pass 0
+ℹ fail 1
+```
+
 ## Incoming
 
 Test files added after the baseline, with the PR that owns them.
@@ -759,7 +794,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/mandate-defaults.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
+| `tests/mandate-defaults.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-8 or redundant-unreachable (Assertion map); negative control NC-12 |
 | `tests/mandate-selection.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
 | `tests/mandate-supplement.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
 | `tests/mandate-usage.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
