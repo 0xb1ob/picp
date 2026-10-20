@@ -63,7 +63,7 @@ test("Jobs, detail and Board render empty, failed and awaiting states; board fil
  assert.doesNotMatch(screen("Board",board),/board-view board-phone/,"the toggle is no longer phone-only");
 });
 
-test("desktop layout: Jobs rows carry the column cells, detail splits summary from facts, the phone cap lifts at >=900px",async()=>{
+test("desktop layout: Jobs rows carry the column cells, detail splits summary from facts, no phone column cap",async()=>{
  const buildResult=await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Jobs} from "./viewer-app/screens/Jobs.tsx"; import {JobDetail} from "./viewer-app/screens/JobDetail.tsx"; export const screen=(name,data)=>render(h({Jobs,JobDetail}[name],{data}));',loader:"tsx",resolveDir:REPO_ROOT},bundle:true,write:false,platform:"node",format:"esm",jsx:"automatic",jsxImportSource:"preact",loader:{".css":"empty"}});
  const {screen}=await import(`data:text/javascript;base64,${Buffer.from(buildResult.outputFiles![0]!.contents).toString("base64")}`);
  const job:ViewerJob={id:"cp-wide",project:"demo",title:"A long title ".repeat(20),phase:"working",model:"wide-model",script_path:null,elapsed_seconds:600,limit_seconds:7200,head:"b".repeat(40),ci:"green",review:null,review_attempts:0,routing:"explicit",note:null,ledger_status:null,ledger_disagrees:false,mandate_id:null,cost_usd:1.5,pr_url:null,pr_status:null,finished_at:null,finished_today:false,merge_sha:null,failure:null,summary:null,blockers:[]};
@@ -118,8 +118,8 @@ test("desktop layout: Jobs rows carry the column cells, detail splits summary fr
  assert.equal(detailDoc.querySelector(".job-detail-side .job-summary"),null,"summary stays separate from facts");
  assert.match(detail,/<\/div><div class="job-detail-side"><dl class="job-facts">.*<dt>CI<\/dt>.*<dt>Review<\/dt>.*<\/dl><div class="job-links">.*<\/div><\/div><\/div><\/div>/);
  const desktop=(file:string)=>readFileSync(join(REPO_ROOT,"viewer-app/screens",file),"utf8").split("@media (min-width: 900px) {")[1] ?? "";
- assert.match(readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8"),/^\.jobs-screen, \.job-detail \{ max-width: 358px;/, "the phone layout keeps its 358px column");
- assert.match(desktop("jobs.css"),/\.jobs-screen, \.job-detail \{ max-width: none;/);
+ // Phone uses the shell gutter like Overview: a capped, centred column doubled it on wider phones (dc-20261020150542).
+ assert.doesNotMatch(readFileSync(join(REPO_ROOT,"viewer-app/screens/jobs.css"),"utf8"),/\.jobs-screen[^{]*\{[^}]*(max-width|margin)/);
  assert.match(desktop("jobs.css"),/\.reports-grid \{ display: grid;/);
  assert.match(desktop("job-detail.css"),/\.job-detail-body \{ display: grid;/);
 });
