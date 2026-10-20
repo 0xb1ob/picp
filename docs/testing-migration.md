@@ -90,10 +90,14 @@ held PR job counts toward the job cap and the spend cap but never holds a dispat
 one reviewable slice. They move to P2c, a job the main session creates. NC-05 and NC-06 name `tests/mandate.test.ts`,
 which pins the same rule at unit level and stays until it is converted.
 
-P2c (cp-e2e-migration-p2c-wtsd) adds 02-7 and folds in the P2b review's two lows: NC-11 drops a held job from the job
-count alone, and 02-5 raises the paused grant's token cap through `cp_mandate raise_tokens` in the parent. 02-6 still
-spends the recovery attempt with a direct `recordRecoveryAttempt`: only a real worker death spends it, and that death
-would revive the worker the scenario needs dead.
+P2c (cp-e2e-migration-p2c-wtsd) adds 02-7 (keyword risk inference, replacing `tests/risk-negation.test.ts`) and 02-8
+(mandate defaults and the issue ladder through a real pi parent, replacing `tests/mandate-defaults.test.ts`), and folds
+in the P2b review's two lows: NC-11 drops a held job from the job count alone, and 02-5 raises the paused grant's token
+cap through `cp_mandate raise_tokens` in the parent. 02-6 still spends the recovery attempt with a direct
+`recordRecoveryAttempt`: only a real worker death spends it, and that death would revive the worker the scenario needs
+dead. The other 9 behavior-02 files move to P2d. All 11 cannot fit one PR: their deletions alone are 201 KB of diff
+before any scenario or map row, against the 250 KB slice. `tests/risk-batch.test.ts` pins a failing withdraw that no
+entry point can produce, and `tests/risk-warning.test.ts` pins schedule-fire grants that need a scheduler scenario.
 
 ## Conversion PRs
 
@@ -528,10 +532,11 @@ NC-09 leases a resource only to a reported (held) holder, not a working one:
 ℹ fail 1
 ```
 
-NC-10 and NC-11 (P2c) were run the same way, with `--test-name-pattern` on the one scenario each patch breaks; the
-clean run of the whole file afterwards gave 7 pass, 0 fail. NC-10 names `b63fe8457e76` (#66), the commit that put the
+NC-10 to NC-12 (P2c) were run the same way, with `--test-name-pattern` on the one scenario each patch breaks; the
+clean run of the whole file afterwards gave 8 pass, 0 fail. NC-10 names `b63fe8457e76` (#66), the commit that put the
 negation filter on the shared risk-match path. NC-11 is the P2b review's job-cap control: it drops a held job from the
 grant's job count only, leaving its spend and slot rules alone, and names the release that carries the rule as NC-05 does.
+NC-12 names that release too: the key-order fix (cur.2.6) has no separate commit.
 
 NC-10 stops skipping negated risk words:
 

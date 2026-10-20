@@ -552,7 +552,7 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	assert.match(said("view0"), /field sources:/);
 	assert.match(said("view0"), /expiry_hours:home/);
 
-	// An operator edit survives the next session's scaffold; defaults_set writes, refuses junk, and a lowered ceiling binds.
+	// An operator edit survives the next session's scaffold; defaults_set writes, refuses junk; a lowered ceiling binds.
 	writeFileSync(file, JSON.stringify({ ...written, spend_usd: 42, dispatch_parallelism: 1 }));
 	await prompt("Tune the mandate defaults.");
 	assert.match(said("show1"), /spend_usd: 42/);
