@@ -274,7 +274,7 @@ test("daemonFindings: nothing installed is silent; legacy files warn; not runnin
 	writeFileSync(paths.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "exit-code" }, viewer: { state: "running" } } }));
 	const noModel = daemonFindings(run, home, unitDir, probe)[0];
 	assert.match(noModel?.what ?? "", /no parent model \(exit 78\)/);
-	for (const re of [/Settings/, /cp-daemon reload/, /cp-install --parent-model <provider\/model> --force/, /cp_parent start/]) {
+	for (const re of [/Settings/, /read-only unless an operator session/, /cp-daemon reload/, /cp-install --parent-model <provider\/model> --force/, /cp_parent start/]) {
 		assert.match(noModel?.fix ?? "", re);
 	}
 
