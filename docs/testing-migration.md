@@ -21,19 +21,26 @@ identifier, counted on the TypeScript AST). Static declarations are not executed
 
 | Disposition | Meaning | Evidence required |
 |---|---|---|
-| `pending` | Not yet decided; P1 completes the manifest | none |
+| `convert` | Candidate for its owner PR's e2e conversion; stays until that PR passes the deletion gate | `behavior <id>` of a Conversion PRs row |
 | `e2e` | Already an e2e acceptance file (`tests/e2e/`) | the reason it stays |
 | `retained` | Kept on purpose; not deletable yet | the reason and a link |
-| `exception` | Structural, golden, contract or security check kept by policy | the policy link |
+| `exception` | Structural, golden, contract or security check kept by policy | the policy link (see Exceptions) |
 | `deleted` | Removed; every assertion mapped or redundant-unreachable, and a negative control recorded | assertion map + regression row |
 | `deleted-with-feature` | Removed with the production feature it tested; nothing is left to patch back | owner names the removing PR/job; evidence cites the removed source modules |
 
+P1 completed the manifest: the checker refuses any other disposition, so a new baseline row cannot stay undecided.
+
 ## Method
 
-An assertion that cannot reach a public consumer is `redundant-unreachable` when an e2e case pins the
-consumer-visible outcome of that path; otherwise it stays and the worker reports it. Do not mock internals to
-reach it. This is the standing rule for P1–P24. The checker accepts `redundant-unreachable` only with a named,
+Standing rule 3, approved by the main session under ask-0088e0332d00 on 2026-10-20: an assertion that cannot reach a
+public consumer is `redundant-unreachable` when an e2e case pins the consumer-visible outcome of that path. The e2e case
+must be named, and the checker enforces it. Otherwise the assertion stays and the worker reports it. Do not mock
+internals to reach it. This rule holds for P1–P24. The checker accepts `redundant-unreachable` only with a named,
 existing scenario, and refuses to delete a file that still holds an `unreachable` assertion.
+
+A `convert` file is deleted only by its owner PR, and only when every assertion in it has a row in the assertion map and
+every regression it guards has a negative control. A file whose assertions belong to another unfinished behavior is split
+or waits; a partly converted file is never counted as removed.
 
 A test file whose production feature is removed is `deleted-with-feature`, not `deleted`: no consumer remains, so it
 needs no assertion map and no negative control. Its owner must name the removing PR (`#123`) or job (`cp-…`), and its
@@ -48,6 +55,7 @@ ask-0088e0332d00, 2026-10-21.
 | PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
 |---|---|---|---|---|
 | P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
+| P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -56,6 +64,116 @@ from the parallel E2E A/B/C jobs are listed under Incoming as they land, not in 
 taken on P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`). They start at 4,488, not 4,487, because
 `tests/e2e/planner-blocked.test.ts` gained one declaration after the pinned baseline. Baseline files keep
 changing on main, so the checker prints the live tree's counts instead of trusting this row.
+
+P1 (cp-e2e-migration-p1-policy-census-gtep) deletes no test. It applies the e2e-default test policy and standing
+rule 3 to `AGENTS.md`, the implementer and planner profiles, the ship and research briefs, the diff-review rubric,
+`docs/development.md`, `tests/e2e/README.md` and `evals/corpus.json`. It gives every baseline path a final
+disposition, and the checker now prints each conversion PR's census.
+
+## Conversion PRs
+
+One row per later PR. Its candidate deletion set is every baseline row whose owner is that PR. The checker prints
+each PR's exact file count and its static declarations, both at the baseline and in the live tree; the live tree is
+the count at that PR's own base. Per the plan, a PR's local count goes from `F` files / `D` declarations to 1 file
+(0 when it extends an existing e2e file) / `N` declarations. The suite delta is `1−F` files and `N−D` declarations.
+`N` may rise when uncovered acceptance needs it.
+
+<!-- manifest:prs -->
+| PR | Behavior | Target | Proposed cases |
+|---|---|---|---|
+| P2 | 02 | `tests/e2e/authority.test.ts` | 4 |
+| P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
+| P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
+| P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
+| P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
+| P7 | 03 | `tests/e2e/dispatch-acceptance.test.ts` | up to 4 |
+| P8 | 04 | `tests/e2e/worker-recovery.test.ts` | 5 |
+| P9 | 11 | `tests/e2e/operator-delivery.test.ts` | 5 |
+| P10 | 09 | `tests/e2e/decisions.test.ts` | up to 3 |
+| P11 | 10 | `tests/e2e/research-delivery.test.ts` | up to 4 |
+| P12 | 16 | `tests/e2e/remote-access.test.ts` | 5 |
+| P13 | 12 | `tests/e2e/schedules.test.ts` | 5 |
+| P14 | 15 | `tests/e2e/service.test.ts` | 5 |
+| P15 | 13 | `tests/e2e/project-tracker.test.ts` | 4 |
+| P16 | 14 | `tests/e2e/configuration.test.ts` | 4 |
+| P17 | 17 | `tests/e2e/viewer-control.test.ts` | 3 |
+| P18 | 18 | `tests/e2e/viewer-jobs.test.ts` | 4 |
+| P19 | 19 | `tests/e2e/viewer-conversations.test.ts` | 4 |
+| P20 | 20 | `tests/e2e/viewer-settings.test.ts` | 3 |
+| P21 | 21 | `tests/e2e/viewer-serving.test.ts` | 4 |
+| P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
+| P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
+| P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
+<!-- /manifest:prs -->
+
+<!-- census -->
+Census snapshot, printed by the checker on `03ed8749a76085c9938517b6f149bb49ebe7a8fd`; the checker's live output wins over this table.
+
+| PR | Behavior | Files `F` | Declarations `D` at baseline | Declarations `D` at `03ed8749a760` |
+|---|---|---|---|---|
+| P2 | 02 | 14 | 151 | 151 |
+| P3 | 05 | 30 | 603 | 603 |
+| P4 | 06 | 10 | 164 | 164 |
+| P5 | 07 | 7 | 55 | 55 |
+| P6 | 08 | 9 | 74 | 74 |
+| P7 | 03 | 11 | 128 | 128 |
+| P8 | 04 | 20 | 310 | 310 |
+| P9 | 11 | 28 | 350 | 350 |
+| P10 | 09 | 18 | 267 | 267 |
+| P11 | 10 | 16 | 255 | 255 |
+| P12 | 16 | 14 | 104 | 104 |
+| P13 | 12 | 18 | 141 | 141 |
+| P14 | 15 | 19 | 337 | 337 |
+| P15 | 13 | 13 | 160 | 160 |
+| P16 | 14 | 17 | 181 | 181 |
+| P17 | 17 | 11 | 71 | 71 |
+| P18 | 18 | 22 | 194 | 194 |
+| P19 | 19 | 24 | 165 | 166 |
+| P20 | 20 | 9 | 64 | 64 |
+| P21 | 21 | 12 | 55 | 55 |
+| P22 | 22 | 13 | 91 | 91 |
+| P23 | 23 | 5 | 121 | 121 |
+| P24 | 24 | 4 | 38 | 38 |
+| total | | 344 | 4079 | 4080 |
+<!-- /census -->
+
+Reconciled against the plan's behavior map, which names its candidates by bare name:
+
+- `tests/model-call-failure-recovery.test.ts` is listed under 04 and 14; it is owned by 04 (P8) only.
+- `tests/awaiting-merge-resume.test.ts` is listed under 18 and 23; it is owned by 18 (P18) only.
+- `restartActivity` (08) and `viewer-pending-sends` (17) are not test files, and neither is `blocked-jobs` (23):
+  `src/blocked-jobs.ts` exists, `tests/blocked-jobs.test.ts` does not. None of these names is a deletion.
+- `tests/script-jobs.test.ts` was in no row. It is owned by 04 (P8): its cases are script-worker lease, spawn-claim
+  and restart recovery.
+
+## Exceptions
+
+These 36 baseline files stay as non-e2e checks. The operator kept them by approving the plan ("Pilot, then
+continue", ask-0088e0332d00). A behavioral case inside one of them may still move to e2e, but the file and the
+contract it holds stay. Also kept, though outside the 400-file count: `scripts/test-file-guard.ts`, every
+`tests/golden/` fixture a kept test reads, `evals/corpus.json`, `evals/results/contract.json` and `npm run eval:check`.
+
+- 26 contract, golden and guard files. Contract and golden: `tests/actions-ci-policy.test.ts` (the disallowed forge
+  read surface), `tests/ci-wait.test.ts` (worker report-and-stop), `tests/contract.test.ts`,
+  `tests/contract-injection.test.ts`, `tests/contracts.test.ts`, `tests/contracts-anchors.test.ts` and
+  `tests/contracts-exports.test.ts` (schema, prompt and export consistency, golden compatibility),
+  `tests/evals.test.ts` (the offline prompt corpus), `tests/extension-deps.test.ts` and
+  `tests/pi-server-dependency.test.ts` (package boundaries), `tests/layout-capture.test.ts`,
+  `tests/parent-session.test.ts`, `tests/planner-artifact.test.ts` and `tests/profiles.test.ts` (assembled layout,
+  session, role and artifact contracts), `tests/schedule-policy.test.ts` (static authority policy),
+  `tests/tool-manifest.test.ts` (installed tool surface), and `tests/viewer-palette.test.ts`, `tests/status.test.ts`,
+  `tests/widget.test.ts` and `tests/watch.test.ts` (design and TUI goldens). Guards: `tests/ci-host-tools.test.ts`
+  (CI never silently skips treehouse acceptance), `tests/structure.test.ts` (module size and structure), and
+  `tests/test-concurrency-bound.test.ts`, `tests/test-file-guard.test.ts`, `tests/test-runner-bounds.test.ts` and
+  `tests/timeout-floor.test.ts` (verification integrity).
+- 10 security guards, kept as exhaustive local adversarial checks beside the e2e denial cases:
+  `tests/worker-credential-guard.test.ts`, `tests/worker-history-guard.test.ts`, `tests/worker-host-guard.test.ts`,
+  `tests/worker-merge-guard.test.ts`, `tests/worker-role-tools.test.ts`, `tests/worker-session-policy.test.ts`,
+  `tests/operator-tool-guard.test.ts`, `tests/forge-url.test.ts`, `tests/web-access.test.ts`,
+  `tests/web-egress.test.ts`.
+
+Pairing, remote authorization and MCP access are not exceptions. They convert, and every negative assertion in them
+moves first.
 
 ## Scenarios
 
@@ -82,7 +200,7 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 |---|---|---|---|---|
 | `tests/ci-run-ref.test.ts` | failedRunOn picks the completed failure on HEAD over another head's failure | 01-1 | mapped | wrong-head failure (older sha) never named; run 6 on the pushed head is |
 | `tests/ci-run-ref.test.ts` | failedRunOn skips skipped, neutral and success runs | 01-1 | mapped | runs 2-4 precede run 6; negative control NC-01 |
-| `tests/ci-run-ref.test.ts` | failedRunOn skips an in_progress run | 01-1 | redundant-unreachable | a failed verdict needs every head run complete: with run 7 in_progress beside run 6 the watch emits no ci_failed; 01-1 pins no reference while a run is unfinished; approved by main session under ask-0088e0332d00, 2026-10-20 |
+| `tests/ci-run-ref.test.ts` | failedRunOn skips an in_progress run | 01-1 | redundant-unreachable | consumers call ciRunRef only on a failed verdict, and `evaluateMergeAskCi` (`src/merge-ask.ts`) answers in_progress, never failed, while any run on the head is unfinished. 01-1 pins only that outcome: run 5 in_progress on the pushed head, no failure beside it, gives `ci: in_progress`, `next: wait`, no run reference and no watch observation. No case puts an in_progress run beside a completed failure; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | failedRunOn is undefined when only green or unfinished runs exist | 01-1 | mapped | unfinished and fixed phases: no run reference in facts, reason or wake |
 | `tests/ci-run-ref.test.ts` | failedRunOn is undefined for an undefined head | 01-2 | redundant-unreachable | every consumer passes a string head; 01-2 pins cp_integrate stopping at "no head commit" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | runUrl derives the github.com Actions URL from the PR URL | 01-1 | mapped | exact (run 6 https://github.com/example/demo/actions/runs/6) in wake, fact and promote |
@@ -102,6 +220,10 @@ Each patch was applied to this worktree's `src/` (no other checkout), `npm run t
 run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipped. The bug commit is
 `90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
 reverted; each patch puts back one rule it introduced.
+
+What `--verify-regressions` checks: only that each recorded patch block hashes to its sha256, and that the bug commit
+exists in this repository. It does not apply the patch, and it does not rerun the e2e. The failing and fixed runs
+quoted below were run by hand when each control was recorded, and they are evidence only to that extent.
 
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
@@ -233,79 +355,79 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 <!-- manifest:baseline -->
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
-| `tests/actions-ci-policy.test.ts` | pending | P1 | |
-| `tests/actions-ci.test.ts` | pending | P1 | |
-| `tests/after-merge.test.ts` | pending | P1 | |
-| `tests/answer-card.test.ts` | pending | P1 | |
-| `tests/answer-delivery.test.ts` | pending | P1 | |
-| `tests/answered-restart.test.ts` | pending | P1 | |
-| `tests/answered.test.ts` | pending | P1 | |
-| `tests/artifacts.test.ts` | pending | P1 | |
-| `tests/ask-guard.test.ts` | pending | P1 | |
-| `tests/ask.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-lifecycle.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-park.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-resume.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-tick.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-viewer.test.ts` | pending | P1 | |
-| `tests/awaiting-merge-watch.test.ts` | pending | P1 | |
-| `tests/awaiting-merge.test.ts` | pending | P1 | |
-| `tests/awaiting-obsolete.test.ts` | pending | P1 | |
-| `tests/awaiting-one-decision.test.ts` | pending | P1 | |
-| `tests/awaiting-rows.test.ts` | pending | P1 | |
-| `tests/awaiting-ui.test.ts` | pending | P1 | |
-| `tests/awaiting.test.ts` | pending | P1 | |
-| `tests/bounds.test.ts` | pending | P1 | |
-| `tests/bridge-reattach.test.ts` | pending | P1 | |
-| `tests/budgets.test.ts` | pending | P1 | |
-| `tests/capacity.test.ts` | pending | P1 | |
-| `tests/checkpoint-root.test.ts` | pending | P1 | |
-| `tests/ci-access.test.ts` | pending | P1 | |
-| `tests/ci-configured.test.ts` | pending | P1 | |
-| `tests/ci-evidence.test.ts` | pending | P1 | |
-| `tests/ci-host-tools.test.ts` | pending | P1 | |
-| `tests/ci-infra-rerun.test.ts` | pending | P1 | |
+| `tests/actions-ci-policy.test.ts` | exception | P1 | contract: disallowed forge read surface; operator ask-0088e0332d00 (Exceptions) |
+| `tests/actions-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/after-merge.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/answer-card.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/answer-delivery.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/answered-restart.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/answered.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/artifacts.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/ask-guard.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/ask.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/awaiting-merge-lifecycle.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/awaiting-merge-park.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/awaiting-merge-resume.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs); also listed under 23, owned here only |
+| `tests/awaiting-merge-tick.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/awaiting-merge-viewer.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/awaiting-merge-watch.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/awaiting-merge.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/awaiting-obsolete.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/awaiting-one-decision.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/awaiting-rows.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/awaiting-ui.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/awaiting.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/bounds.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/budgets.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/capacity.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/ci-access.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-configured.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-evidence.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-host-tools.test.ts` | exception | P1 | guard: CI never silently skips treehouse acceptance; operator ask-0088e0332d00 (Exceptions) |
+| `tests/ci-infra-rerun.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
-| `tests/ci-wait.test.ts` | pending | P1 | |
-| `tests/ci-watch.test.ts` | pending | P1 | |
-| `tests/contract-injection.test.ts` | pending | P1 | |
-| `tests/contract.test.ts` | pending | P1 | |
-| `tests/contracts-anchors.test.ts` | pending | P1 | |
-| `tests/contracts-exports.test.ts` | pending | P1 | |
-| `tests/contracts.test.ts` | pending | P1 | |
-| `tests/control-pending.test.ts` | pending | P1 | |
-| `tests/cp-bridge-reattach.test.ts` | pending | P1 | |
-| `tests/cp-bridge-restart.test.ts` | pending | P1 | |
-| `tests/cp-bridge.test.ts` | pending | P1 | |
-| `tests/curation.test.ts` | pending | P1 | |
-| `tests/daemon-backend.test.ts` | pending | P1 | |
-| `tests/daemon-cli.test.ts` | pending | P1 | |
-| `tests/daemon-files.test.ts` | pending | P1 | |
-| `tests/daemon-outer.test.ts` | pending | P1 | |
-| `tests/daemon-runtime.test.ts` | pending | P1 | |
-| `tests/daemon-tunnel-files.test.ts` | pending | P1 | |
-| `tests/daemon-tunnel.test.ts` | pending | P1 | |
-| `tests/dashboard-compaction.test.ts` | pending | P1 | |
-| `tests/dashboard-control-images.test.ts` | pending | P1 | |
-| `tests/dashboard-control-remote.test.ts` | pending | P1 | |
-| `tests/dashboard-control.test.ts` | pending | P1 | |
-| `tests/dashboard-restart.test.ts` | pending | P1 | |
-| `tests/decide-listing.test.ts` | pending | P1 | |
-| `tests/decide.test.ts` | pending | P1 | |
-| `tests/decision-context.test.ts` | pending | P1 | |
-| `tests/deferred-recheck.test.ts` | pending | P1 | |
-| `tests/dependency-dispatch.test.ts` | pending | P1 | |
-| `tests/device-notifications.test.ts` | pending | P1 | |
-| `tests/device-notify.test.ts` | pending | P1 | |
-| `tests/diff-review.test.ts` | pending | P1 | |
-| `tests/dispatch-preview-tool.test.ts` | pending | P1 | |
-| `tests/dispatch-queue-tool.test.ts` | pending | P1 | |
-| `tests/dispatch-queue-wiring.test.ts` | pending | P1 | |
-| `tests/dispatch-queue.test.ts` | pending | P1 | |
-| `tests/dispatch.test.ts` | pending | P1 | |
-| `tests/doctor.test.ts` | pending | P1 | |
-| `tests/drain-stale-gate.test.ts` | pending | P1 | |
-| `tests/drain.test.ts` | pending | P1 | |
+| `tests/ci-wait.test.ts` | exception | P1 | contract: worker report-and-stop policy and guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/ci-watch.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/contract-injection.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
+| `tests/contract.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
+| `tests/contracts-anchors.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
+| `tests/contracts-exports.test.ts` | exception | P1 | golden: export compatibility; operator ask-0088e0332d00 (Exceptions) |
+| `tests/contracts.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
+| `tests/control-pending.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/cp-bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/cp-bridge-restart.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/cp-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/curation.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
+| `tests/daemon-backend.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/daemon-cli.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/daemon-files.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/daemon-outer.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/daemon-runtime.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/daemon-tunnel-files.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/daemon-tunnel.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/dashboard-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/dashboard-control-images.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/dashboard-control-remote.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/dashboard-control.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/dashboard-restart.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/decide-listing.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/decide.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/decision-context.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/deferred-recheck.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/dependency-dispatch.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/device-notifications.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/device-notify.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/diff-review.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/dispatch-preview-tool.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/dispatch-queue-tool.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/dispatch-queue-wiring.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/dispatch-queue.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/dispatch.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/doctor.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/drain-stale-gate.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/drain.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
 | `tests/e2e/awaiting-count.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/e2e/awaiting.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/e2e/bounds.test.ts` | e2e | P1 | existing e2e acceptance file |
@@ -325,192 +447,192 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/e2e/silent-stops.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/e2e/single-mode-refused.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/e2e/worker-mcp.test.ts` | e2e | P1 | existing e2e acceptance file |
-| `tests/envelope-correction.test.ts` | pending | P1 | |
-| `tests/escalation-backstop.test.ts` | pending | P1 | |
-| `tests/escalation-relay-watch.test.ts` | pending | P1 | |
-| `tests/escalation.test.ts` | pending | P1 | |
-| `tests/evals.test.ts` | pending | P1 | |
-| `tests/extension-deps.test.ts` | pending | P1 | |
-| `tests/extension-load.test.ts` | pending | P1 | |
-| `tests/failure-announcer.test.ts` | pending | P1 | |
-| `tests/failures.test.ts` | pending | P1 | |
-| `tests/fake-parent-tracker.test.ts` | pending | P1 | |
-| `tests/fleet.test.ts` | pending | P1 | |
-| `tests/foreign-ci-watch.test.ts` | pending | P1 | |
-| `tests/forge-observers.test.ts` | pending | P1 | |
-| `tests/forge-runtime.test.ts` | pending | P1 | |
-| `tests/forge-url.test.ts` | pending | P1 | |
-| `tests/gate-replacement.test.ts` | pending | P1 | |
-| `tests/gate.test.ts` | pending | P1 | |
-| `tests/gateway-key.test.ts` | pending | P1 | |
-| `tests/guards.test.ts` | pending | P1 | |
-| `tests/harness.test.ts` | pending | P1 | |
-| `tests/held-release.test.ts` | pending | P1 | |
-| `tests/home-checkout.test.ts` | pending | P1 | |
-| `tests/human-handoff.test.ts` | pending | P1 | |
-| `tests/install-nudge.test.ts` | pending | P1 | |
-| `tests/install-tools.test.ts` | pending | P1 | |
-| `tests/intake-settle-atomicity.test.ts` | pending | P1 | |
-| `tests/intake.test.ts` | pending | P1 | |
-| `tests/integrate-held-ci.test.ts` | pending | P1 | |
-| `tests/integrate.test.ts` | pending | P1 | |
-| `tests/job-skills.test.ts` | pending | P1 | |
-| `tests/jobs-tool.test.ts` | pending | P1 | |
-| `tests/json-store.test.ts` | pending | P1 | |
-| `tests/landing-proof.test.ts` | pending | P1 | |
-| `tests/layout-capture.test.ts` | pending | P1 | |
-| `tests/layout-flat.test.ts` | pending | P1 | |
-| `tests/leases.test.ts` | pending | P1 | |
+| `tests/envelope-correction.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/escalation-backstop.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/escalation-relay-watch.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/escalation.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/evals.test.ts` | exception | P1 | contract: offline assembled prompt corpus; operator ask-0088e0332d00 (Exceptions) |
+| `tests/extension-deps.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |
+| `tests/extension-load.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
+| `tests/failure-announcer.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
+| `tests/foreign-ci-watch.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/gate-replacement.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/gate.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/gateway-key.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/guards.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
+| `tests/harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/held-release.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/home-checkout.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/human-handoff.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/install-nudge.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/install-tools.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/intake-settle-atomicity.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/intake.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/integrate-held-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/integrate.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/json-store.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/landing-proof.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/layout-capture.test.ts` | exception | P1 | contract: assembled layout; operator ask-0088e0332d00 (Exceptions) |
+| `tests/layout-flat.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/leases.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/ledger-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/ledger-import.ts` |
-| `tests/ledger.test.ts` | pending | P1 | |
-| `tests/live-harness.test.ts` | pending | P1 | |
-| `tests/main-ci.test.ts` | pending | P1 | |
-| `tests/mandate-defaults.test.ts` | pending | P1 | |
-| `tests/mandate-selection.test.ts` | pending | P1 | |
-| `tests/mandate-supplement.test.ts` | pending | P1 | |
-| `tests/mandate-usage.test.ts` | pending | P1 | |
-| `tests/mandate.test.ts` | pending | P1 | |
-| `tests/mcp-access.test.ts` | pending | P1 | |
-| `tests/memory.test.ts` | pending | P1 | |
-| `tests/merge-ask.test.ts` | pending | P1 | |
-| `tests/merge-permission.test.ts` | pending | P1 | |
-| `tests/merges.test.ts` | pending | P1 | |
-| `tests/mode.test.ts` | pending | P1 | |
-| `tests/model-call-failure-recovery.test.ts` | pending | P1 | |
-| `tests/next.test.ts` | pending | P1 | |
-| `tests/operator-answers.test.ts` | pending | P1 | |
-| `tests/operator-asks.test.ts` | pending | P1 | |
-| `tests/operator-cache-warming.test.ts` | pending | P1 | |
-| `tests/operator-compact.test.ts` | pending | P1 | |
-| `tests/operator-context.test.ts` | pending | P1 | |
-| `tests/operator-decide-vs-ask-evals.test.ts` | pending | P1 | |
-| `tests/operator-delivery.test.ts` | pending | P1 | |
-| `tests/operator-note.test.ts` | pending | P1 | |
-| `tests/operator-outbox-host.test.ts` | pending | P1 | |
-| `tests/operator-outbox.test.ts` | pending | P1 | |
-| `tests/operator-relaunch.test.ts` | pending | P1 | |
-| `tests/operator-session-log.test.ts` | pending | P1 | |
-| `tests/operator-target-real-home.test.ts` | pending | P1 | |
-| `tests/operator-threads-bridge.test.ts` | pending | P1 | |
-| `tests/operator-threads-journal.test.ts` | pending | P1 | |
-| `tests/operator-tool-guard.test.ts` | pending | P1 | |
-| `tests/ops-jobs.test.ts` | pending | P1 | |
-| `tests/output.test.ts` | pending | P1 | |
-| `tests/parent-compact-hold.test.ts` | pending | P1 | |
-| `tests/parent-context.test.ts` | pending | P1 | |
-| `tests/parent-control.test.ts` | pending | P1 | |
-| `tests/parent-delivery.test.ts` | pending | P1 | |
-| `tests/parent-hosts-harness.test.ts` | pending | P1 | |
-| `tests/parent-lock.test.ts` | pending | P1 | |
-| `tests/parent-outbox.test.ts` | pending | P1 | |
-| `tests/parent-routing-evals.test.ts` | pending | P1 | |
-| `tests/parent-session.test.ts` | pending | P1 | |
-| `tests/parked-ci.test.ts` | pending | P1 | |
-| `tests/pi-hashline-compaction.test.ts` | pending | P1 | |
-| `tests/pi-lens-headless.test.ts` | pending | P1 | |
-| `tests/pi-server-dependency.test.ts` | pending | P1 | |
-| `tests/pi-version-nudge.test.ts` | pending | P1 | |
-| `tests/pipeline-classify-tool.test.ts` | pending | P1 | |
-| `tests/pipeline.test.ts` | pending | P1 | |
-| `tests/plan-followup.test.ts` | pending | P1 | |
-| `tests/plan-view.test.ts` | pending | P1 | |
-| `tests/plan-viewer.test.ts` | pending | P1 | |
-| `tests/planner-artifact.test.ts` | pending | P1 | |
-| `tests/pr-bind.test.ts` | pending | P1 | |
-| `tests/pr-resolve.test.ts` | pending | P1 | |
-| `tests/preflight.test.ts` | pending | P1 | |
-| `tests/profiles.test.ts` | pending | P1 | |
-| `tests/project-report.test.ts` | pending | P1 | |
-| `tests/projects.test.ts` | pending | P1 | |
-| `tests/provider-retry.test.ts` | pending | P1 | |
-| `tests/push-keys.test.ts` | pending | P1 | |
-| `tests/push-status.test.ts` | pending | P1 | |
-| `tests/push-sweep.test.ts` | pending | P1 | |
-| `tests/push-tick.test.ts` | pending | P1 | |
-| `tests/push-webpush.test.ts` | pending | P1 | |
-| `tests/quality.test.ts` | pending | P1 | |
-| `tests/questions.test.ts` | pending | P1 | |
-| `tests/quota.test.ts` | pending | P1 | |
+| `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/mandate-defaults.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mandate-selection.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mandate-supplement.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mandate-usage.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mandate.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
+| `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
+| `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/merge-permission.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/merges.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/mode.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/model-call-failure-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); also listed under 14, owned here only |
+| `tests/next.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
+| `tests/operator-answers.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/operator-asks.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/operator-cache-warming.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-compact.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/operator-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/operator-decide-vs-ask-evals.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/operator-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-note.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-outbox-host.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-outbox.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-relaunch.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/operator-session-log.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-target-real-home.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-threads-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-threads-journal.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/operator-tool-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/ops-jobs.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/output.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-compact-hold.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/parent-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/parent-control.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-hosts-harness.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-lock.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/parent-outbox.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-routing-evals.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/parent-session.test.ts` | exception | P1 | contract: assembled parent session; operator ask-0088e0332d00 (Exceptions) |
+| `tests/parked-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/pi-hashline-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/pi-lens-headless.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
+| `tests/pi-server-dependency.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |
+| `tests/pi-version-nudge.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/pipeline-classify-tool.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/pipeline.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/plan-followup.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/plan-view.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/plan-viewer.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/planner-artifact.test.ts` | exception | P1 | contract: planner artifact; operator ask-0088e0332d00 (Exceptions) |
+| `tests/pr-bind.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/pr-resolve.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/preflight.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/profiles.test.ts` | exception | P1 | contract: role profiles and briefs; operator ask-0088e0332d00 (Exceptions) |
+| `tests/project-report.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/projects.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/provider-retry.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/push-keys.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/push-status.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/push-sweep.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/push-tick.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/push-webpush.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/quality.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/questions.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/quota.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
 | `tests/ready-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/ready-beads.ts`, `src/trackers/config.ts` |
-| `tests/recovery.test.ts` | pending | P1 | |
-| `tests/relay-preflight.test.ts` | pending | P1 | |
-| `tests/relay-scope.test.ts` | pending | P1 | |
-| `tests/repo-map.test.ts` | pending | P1 | |
-| `tests/restart-intake.test.ts` | pending | P1 | |
-| `tests/review-approval.test.ts` | pending | P1 | |
-| `tests/review-context.test.ts` | pending | P1 | |
-| `tests/review-merge-window.test.ts` | pending | P1 | |
-| `tests/review-runs.test.ts` | pending | P1 | |
-| `tests/review-tool.test.ts` | pending | P1 | |
-| `tests/reviewer-model.test.ts` | pending | P1 | |
-| `tests/revive.test.ts` | pending | P1 | |
-| `tests/risk-batch.test.ts` | pending | P1 | |
-| `tests/risk-negation.test.ts` | pending | P1 | |
-| `tests/risk-preapproval.test.ts` | pending | P1 | |
-| `tests/risk-warning.test.ts` | pending | P1 | |
-| `tests/routing-integration.test.ts` | pending | P1 | |
-| `tests/routing.test.ts` | pending | P1 | |
-| `tests/run-artifacts.test.ts` | pending | P1 | |
-| `tests/scaffold.test.ts` | pending | P1 | |
-| `tests/schedule-activation.test.ts` | pending | P1 | |
-| `tests/schedule-authority.test.ts` | pending | P1 | |
-| `tests/schedule-control.test.ts` | pending | P1 | |
-| `tests/schedule-cutover.test.ts` | pending | P1 | |
-| `tests/schedule-expand.test.ts` | pending | P1 | |
-| `tests/schedule-grant.test.ts` | pending | P1 | |
-| `tests/schedule-migrations.test.ts` | pending | P1 | |
-| `tests/schedule-native-migration.test.ts` | pending | P1 | |
-| `tests/schedule-native-tool.test.ts` | pending | P1 | |
-| `tests/schedule-native.test.ts` | pending | P1 | |
-| `tests/schedule-org-review.test.ts` | pending | P1 | |
-| `tests/schedule-policy.test.ts` | pending | P1 | |
-| `tests/schedule-results.test.ts` | pending | P1 | |
-| `tests/schedule-run-now.test.ts` | pending | P1 | |
-| `tests/schedule-runner.test.ts` | pending | P1 | |
-| `tests/schedule-runs.test.ts` | pending | P1 | |
-| `tests/schedule-self-review.test.ts` | pending | P1 | |
-| `tests/schedule-wake.test.ts` | pending | P1 | |
-| `tests/scheduler.test.ts` | pending | P1 | |
-| `tests/script-jobs.test.ts` | pending | P1 | |
-| `tests/send-first-gate.test.ts` | pending | P1 | |
-| `tests/send.test.ts` | pending | P1 | |
-| `tests/service-alerts.test.ts` | pending | P1 | |
-| `tests/service-health.test.ts` | pending | P1 | |
-| `tests/service-install.test.ts` | pending | P1 | |
-| `tests/service-models.test.ts` | pending | P1 | |
-| `tests/service-supervise.test.ts` | pending | P1 | |
-| `tests/service-units.test.ts` | pending | P1 | |
-| `tests/service-update.test.ts` | pending | P1 | |
-| `tests/session-tools.test.ts` | pending | P1 | |
-| `tests/settings-control.test.ts` | pending | P1 | |
-| `tests/settings-lock.test.ts` | pending | P1 | |
-| `tests/settings-policy.test.ts` | pending | P1 | |
-| `tests/settings-write.test.ts` | pending | P1 | |
-| `tests/settings.test.ts` | pending | P1 | |
-| `tests/settle-recovery.test.ts` | pending | P1 | |
-| `tests/settle.test.ts` | pending | P1 | |
-| `tests/shipped-seen.test.ts` | pending | P1 | |
-| `tests/skill-catalog.test.ts` | pending | P1 | |
-| `tests/stale-notice-context.test.ts` | pending | P1 | |
-| `tests/state-migrations.test.ts` | pending | P1 | |
-| `tests/stats-view.test.ts` | pending | P1 | |
-| `tests/stats-wakeup-drift.test.ts` | pending | P1 | |
-| `tests/status-block.test.ts` | pending | P1 | |
-| `tests/status-wait-reasons.test.ts` | pending | P1 | |
-| `tests/status.test.ts` | pending | P1 | |
-| `tests/storage.test.ts` | pending | P1 | |
-| `tests/structure.test.ts` | pending | P1 | |
-| `tests/suggest.test.ts` | pending | P1 | |
-| `tests/supersede.test.ts` | pending | P1 | |
-| `tests/sync-lossless.test.ts` | pending | P1 | |
-| `tests/task-addenda.test.ts` | pending | P1 | |
-| `tests/task-references.test.ts` | pending | P1 | |
-| `tests/teardown.test.ts` | pending | P1 | |
-| `tests/test-concurrency-bound.test.ts` | pending | P1 | |
-| `tests/test-file-guard.test.ts` | pending | P1 | |
-| `tests/test-runner-bounds.test.ts` | pending | P1 | |
-| `tests/timeout-floor.test.ts` | pending | P1 | |
-| `tests/tool-manifest.test.ts` | pending | P1 | |
+| `tests/recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/relay-preflight.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/relay-scope.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/repo-map.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/restart-intake.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/review-approval.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-context.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-merge-window.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/risk-batch.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/risk-negation.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/risk-preapproval.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/risk-warning.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/routing-integration.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/routing.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/run-artifacts.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/scaffold.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/schedule-activation.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-authority.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-control.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-cutover.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-expand.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-grant.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-migrations.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-native-migration.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-native-tool.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-native.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-org-review.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-policy.test.ts` | exception | P1 | contract: static schedule authority policy; operator ask-0088e0332d00 (Exceptions) |
+| `tests/schedule-results.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-run-now.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-runner.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-runs.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-self-review.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/schedule-wake.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/scheduler.test.ts` | convert | P13 | behavior 12 (Schedules) |
+| `tests/script-jobs.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); P1 amendment, in no plan row |
+| `tests/send-first-gate.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/send.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/service-alerts.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-health.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-install.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-models.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-supervise.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-units.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/service-update.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/session-tools.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/settings-control.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/settings-lock.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/settings-policy.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/settings-write.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/settings.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/settle-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/settle.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/shipped-seen.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/skill-catalog.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/stale-notice-context.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/state-migrations.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/stats-view.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/stats-wakeup-drift.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/status-block.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/status-wait-reasons.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/status.test.ts` | exception | P1 | golden: status TUI; operator ask-0088e0332d00 (Exceptions) |
+| `tests/storage.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/structure.test.ts` | exception | P1 | guard: module size and repository structure; operator ask-0088e0332d00 (Exceptions) |
+| `tests/suggest.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/supersede.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
+| `tests/sync-lossless.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/task-addenda.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/task-references.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
+| `tests/teardown.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/test-concurrency-bound.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
+| `tests/test-file-guard.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
+| `tests/test-runner-bounds.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
+| `tests/timeout-floor.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
+| `tests/tool-manifest.test.ts` | exception | P1 | contract: installed tool surface; operator ask-0088e0332d00 (Exceptions) |
 | `tests/trackers-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/beads.ts`, `src/trackers/adapter.ts` |
 | `tests/trackers-config.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/config.ts`, `src/trackers/adapter.ts` |
 | `tests/trackers-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/import.ts`, `src/trackers/config.ts` |
@@ -518,119 +640,119 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/trackers-link.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/link.ts`, `src/trackers/sync.ts` |
 | `tests/trackers-sync.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/sync.ts`, `src/trackers/sync-store.ts` |
 | `tests/trackers-tool.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `extensions/command-post/tools-tracker.ts`, `src/trackers/sync-store.ts` |
-| `tests/tunnel-cli.test.ts` | pending | P1 | |
-| `tests/tunnel-cloudflared.test.ts` | pending | P1 | |
-| `tests/tunnel-qr.test.ts` | pending | P1 | |
-| `tests/user-context.test.ts` | pending | P1 | |
-| `tests/verify-external-ref.test.ts` | pending | P1 | |
-| `tests/version-records.test.ts` | pending | P1 | |
-| `tests/version-view.test.ts` | pending | P1 | |
-| `tests/viewer-answers-http.test.ts` | pending | P1 | |
-| `tests/viewer-answers-ui.test.ts` | pending | P1 | |
-| `tests/viewer-app-build.test.ts` | pending | P1 | |
-| `tests/viewer-app-http.test.ts` | pending | P1 | |
-| `tests/viewer-app-live.test.ts` | pending | P1 | |
-| `tests/viewer-app-navigation.test.ts` | pending | P1 | |
-| `tests/viewer-app-render.test.ts` | pending | P1 | |
-| `tests/viewer-bind-host.test.ts` | pending | P1 | |
-| `tests/viewer-boards.test.ts` | pending | P1 | |
-| `tests/viewer-compression-http.test.ts` | pending | P1 | |
-| `tests/viewer-context-usage.test.ts` | pending | P1 | |
-| `tests/viewer-control-http.test.ts` | pending | P1 | |
-| `tests/viewer-control-ui.test.ts` | pending | P1 | |
-| `tests/viewer-copy-reply.test.ts` | pending | P1 | |
-| `tests/viewer-decision-card.test.ts` | pending | P1 | |
-| `tests/viewer-decision-render.test.ts` | pending | P1 | |
-| `tests/viewer-decisions.test.ts` | pending | P1 | |
-| `tests/viewer-delta-http.test.ts` | pending | P1 | |
-| `tests/viewer-deploy.test.ts` | pending | P1 | |
-| `tests/viewer-device-control.test.ts` | pending | P1 | |
-| `tests/viewer-device-notices-ui.test.ts` | pending | P1 | |
-| `tests/viewer-device-notices.test.ts` | pending | P1 | |
-| `tests/viewer-device-store.test.ts` | pending | P1 | |
-| `tests/viewer-devices-ui.test.ts` | pending | P1 | |
-| `tests/viewer-explorer.test.ts` | pending | P1 | |
-| `tests/viewer-job-detail-render.test.ts` | pending | P1 | |
-| `tests/viewer-job-transcript-render.test.ts` | pending | P1 | |
-| `tests/viewer-jobs-qa.test.ts` | pending | P1 | |
-| `tests/viewer-jobs-render.test.ts` | pending | P1 | |
-| `tests/viewer-jobs.test.ts` | pending | P1 | |
-| `tests/viewer-json-delta.test.ts` | pending | P1 | |
-| `tests/viewer-linkify.test.ts` | pending | P1 | |
-| `tests/viewer-mandates-map-render.test.ts` | pending | P1 | |
-| `tests/viewer-mandates-map.test.ts` | pending | P1 | |
-| `tests/viewer-map-edges.test.ts` | pending | P1 | |
-| `tests/viewer-mobile-keyboard.test.ts` | pending | P1 | |
-| `tests/viewer-model-list.test.ts` | pending | P1 | |
-| `tests/viewer-more-menu.test.ts` | pending | P1 | |
-| `tests/viewer-not-found.test.ts` | pending | P1 | |
-| `tests/viewer-operator-composer-images.test.ts` | pending | P1 | |
-| `tests/viewer-operator-composer.test.ts` | pending | P1 | |
-| `tests/viewer-operator-relaunch.test.ts` | pending | P1 | |
-| `tests/viewer-operator-restart.test.ts` | pending | P1 | |
-| `tests/viewer-operator.test.ts` | pending | P1 | |
-| `tests/viewer-overview.test.ts` | pending | P1 | |
-| `tests/viewer-pairing.test.ts` | pending | P1 | |
-| `tests/viewer-palette.test.ts` | pending | P1 | |
-| `tests/viewer-performance.test.ts` | pending | P1 | |
-| `tests/viewer-pr-chips.test.ts` | pending | P1 | |
-| `tests/viewer-push-http.test.ts` | pending | P1 | |
-| `tests/viewer-push-ui.test.ts` | pending | P1 | |
-| `tests/viewer-queued-bubbles.test.ts` | pending | P1 | |
-| `tests/viewer-remote-control.test.ts` | pending | P1 | |
-| `tests/viewer-remote-http.test.ts` | pending | P1 | |
-| `tests/viewer-remote-runtime.test.ts` | pending | P1 | |
-| `tests/viewer-reports.test.ts` | pending | P1 | |
-| `tests/viewer-restart-ui.test.ts` | pending | P1 | |
-| `tests/viewer-schedule-control-http.test.ts` | pending | P1 | |
-| `tests/viewer-schedule-control-ui.test.ts` | pending | P1 | |
-| `tests/viewer-schedule-editor.test.ts` | pending | P1 | |
-| `tests/viewer-schedule-run-groups.test.ts` | pending | P1 | |
-| `tests/viewer-schedules.test.ts` | pending | P1 | |
-| `tests/viewer-search.test.ts` | pending | P1 | |
-| `tests/viewer-service-worker.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-chat-v2.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-files-render.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-files.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-qa.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-rollup.test.ts` | pending | P1 | |
-| `tests/viewer-sessions-skills.test.ts` | pending | P1 | |
-| `tests/viewer-settings-http.test.ts` | pending | P1 | |
-| `tests/viewer-settings-ui.test.ts` | pending | P1 | |
-| `tests/viewer-stats-render.test.ts` | pending | P1 | |
-| `tests/viewer-thread-turns.test.ts` | pending | P1 | |
-| `tests/viewer-threads-http.test.ts` | pending | P1 | |
-| `tests/viewer-threads-ui.test.ts` | pending | P1 | |
-| `tests/viewer-transcript-chat.test.ts` | pending | P1 | |
-| `tests/viewer-transcript-tools.test.ts` | pending | P1 | |
-| `tests/viewer-upload-http.test.ts` | pending | P1 | |
-| `tests/viewer-upload-metadata.test.ts` | pending | P1 | |
-| `tests/viewer-uploads.test.ts` | pending | P1 | |
-| `tests/viewer-version-badge.test.ts` | pending | P1 | |
-| `tests/viewer-workbench.test.ts` | pending | P1 | |
-| `tests/viewer.test.ts` | pending | P1 | |
-| `tests/wake-rules.test.ts` | pending | P1 | |
-| `tests/wakeup-head-sources.test.ts` | pending | P1 | |
-| `tests/wakeup-journal.test.ts` | pending | P1 | |
-| `tests/wakeups.test.ts` | pending | P1 | |
-| `tests/watch.test.ts` | pending | P1 | |
-| `tests/web-access.test.ts` | pending | P1 | |
-| `tests/web-egress.test.ts` | pending | P1 | |
-| `tests/wedged.test.ts` | pending | P1 | |
-| `tests/widget.test.ts` | pending | P1 | |
+| `tests/tunnel-cli.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/tunnel-cloudflared.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/tunnel-qr.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/user-context.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
+| `tests/verify-external-ref.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/version-records.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/version-view.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
+| `tests/viewer-answers-http.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-answers-ui.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-app-build.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-app-http.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-app-live.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-app-navigation.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-app-render.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-bind-host.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-boards.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/viewer-compression-http.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-context-usage.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-control-http.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-control-ui.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-copy-reply.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-decision-card.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-decision-render.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-decisions.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-delta-http.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-deploy.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-device-control.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-device-notices-ui.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-device-notices.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-device-store.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-devices-ui.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-explorer.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-job-detail-render.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-job-transcript-render.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-jobs-qa.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-jobs-render.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-jobs.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-json-delta.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-linkify.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-mandates-map-render.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-mandates-map.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-map-edges.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-mobile-keyboard.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-model-list.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-more-menu.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-not-found.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-operator-composer-images.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-operator-composer.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-operator-relaunch.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/viewer-operator-restart.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
+| `tests/viewer-operator.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-overview.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-pairing.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-palette.test.ts` | exception | P1 | golden: viewer design palette; operator ask-0088e0332d00 (Exceptions) |
+| `tests/viewer-performance.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-pr-chips.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
+| `tests/viewer-push-http.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/viewer-push-ui.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/viewer-queued-bubbles.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-remote-control.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-remote-http.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-remote-runtime.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
+| `tests/viewer-reports.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/viewer-restart-ui.test.ts` | convert | P17 | behavior 17 (Dashboard decisions/control) |
+| `tests/viewer-schedule-control-http.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-schedule-control-ui.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-schedule-editor.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-schedule-run-groups.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-schedules.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-search.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-service-worker.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/viewer-sessions-chat-v2.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-sessions-files-render.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-sessions-files.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-sessions-qa.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-sessions-rollup.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-sessions-skills.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-settings-http.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-settings-ui.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-stats-render.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
+| `tests/viewer-thread-turns.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-threads-http.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-threads-ui.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-transcript-chat.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-transcript-tools.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-upload-http.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-upload-metadata.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-uploads.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer-version-badge.test.ts` | convert | P20 | behavior 20 (Dashboard schedules/settings) |
+| `tests/viewer-workbench.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
+| `tests/viewer.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
+| `tests/wake-rules.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/wakeup-head-sources.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/wakeup-journal.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/wakeups.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/watch.test.ts` | exception | P1 | golden: watch TUI; operator ask-0088e0332d00 (Exceptions) |
+| `tests/web-access.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/web-egress.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/wedged.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/widget.test.ts` | exception | P1 | golden: widget TUI; operator ask-0088e0332d00 (Exceptions) |
 | `tests/worker-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested the worker database env and item lookup over `src/beads.ts` |
-| `tests/worker-compaction.test.ts` | pending | P1 | |
-| `tests/worker-credential-guard.test.ts` | pending | P1 | |
-| `tests/worker-history-guard.test.ts` | pending | P1 | |
-| `tests/worker-host-guard.test.ts` | pending | P1 | |
-| `tests/worker-manager.test.ts` | pending | P1 | |
-| `tests/worker-mcp.test.ts` | pending | P1 | |
-| `tests/worker-merge-guard.test.ts` | pending | P1 | |
-| `tests/worker-packages.test.ts` | pending | P1 | |
-| `tests/worker-process.test.ts` | pending | P1 | |
-| `tests/worker-reporter.test.ts` | pending | P1 | |
-| `tests/worker-role-tools.test.ts` | pending | P1 | |
-| `tests/worker-session-policy.test.ts` | pending | P1 | |
-| `tests/worker-spawn-reserve.test.ts` | pending | P1 | |
-| `tests/worktree-deps.test.ts` | pending | P1 | |
+| `tests/worker-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/worker-credential-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-history-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-host-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-manager.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worker-mcp.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worker-merge-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-packages.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worker-process.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worker-reporter.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worker-role-tools.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-session-policy.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
+| `tests/worker-spawn-reserve.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/worktree-deps.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 <!-- /manifest:baseline -->

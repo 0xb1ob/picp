@@ -8,15 +8,15 @@
     "package_version": "0.1.0",
     "prompts": {
       "profiles/gate-reviewer.md": "sha256:56fea35c51e770a6880061b49da7f4e1ddf8916d4da00488dcea49858ea60194",
-      "profiles/implementer.md": "sha256:c52537a15b3d854bc02747406ad959373a517cc5f3861ec8734199651b7e1c31",
+      "profiles/implementer.md": "sha256:ea0ce27d4daa0fd7eb45a8edf71633c56b82214a9a72d47e5e7bac35c95e14a3",
       "profiles/ops.md": "sha256:f25824650d5fda0324104ab255690c6c7b9eb04aeed5d910576f23434f954af1",
-      "profiles/planner.md": "sha256:28e8b3b9329ac225db97003a15c0b43fa59130502035f7c3b1746862f98ea925",
+      "profiles/planner.md": "sha256:acbb7f0b763f26f53fe826ffc17a489ddb4fd49bcad11217dc231288d240e677",
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-ops.md": "sha256:bcdf5f310a27eef18e7fa0069ea6f2b500e8892fdd4755510cc03e7411732f5e",
       "prompts/briefs/brief-qa.md": "sha256:bdeb191091274f5f218b4e9c1b5cf3b368fab137ce3757af2a3eca5e115e5d82",
-      "prompts/briefs/brief-research.md": "sha256:58be175d7a628099e8c4bb8054160ce5cec9709e1e926c888b58c9c41c947f46",
-      "prompts/briefs/brief-ship.md": "sha256:ef8196cd67cf5870cc8348802b8ec4b2f29d6ff4f3c9a26897e351738bf07ece",
-      "prompts/briefs/diff-review-rubric.md": "sha256:ea700887fca43656cf26063aec25538be93ae56547386aa53f8da525b011fd2b",
+      "prompts/briefs/brief-research.md": "sha256:cca5ed64345ff0d9c996248a14fcf4ac055ed4dc9d389bc53dd06ef64204bcec",
+      "prompts/briefs/brief-ship.md": "sha256:7a42962dba6344d9196448eac5224ad84b772622c4d7d7375eed46695ac2ff54",
+      "prompts/briefs/diff-review-rubric.md": "sha256:c1716628029cdadbf0b211de87ab62a0aa92bdfcf2b353ce38c91849c0d9653d",
       "prompts/briefs/gate-rubric.md": "sha256:908ba286759f2ab16dd55e180be93004bf9be5cc839407141c6d64b16ed33431",
       "prompts/briefs/quality-completeness.md": "sha256:ab88d30ce35a3e261d0171307a5b91734fbb0bc3f43324b6e48a408782fd79c8",
       "prompts/briefs/quality-verify.md": "sha256:b77bc3e5a72e083be1af72c3284dec2c83c8e4ddcd17085aa312196b593591da"
@@ -25,7 +25,7 @@
   "corpus": {
     "version": 1,
     "cases": 50,
-    "sha": "sha256:a6fb976c30bbf7f69100c67605d10b5d4a66c8210694c81f124d994c547642f7"
+    "sha": "sha256:fb1fdf5f54ba411e1b1663b6d529972fa2771a159fe86f5abdc3b176284dfae2"
   },
   "metrics": {
     "cases_scored": 22,
@@ -333,7 +333,32 @@
           "ok": true
         },
         {
+          "name": "includes \"acceptance defaults to the mock-provider e2e harness through real product\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Mock LLM calls; do not add live-model\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"only when an e2e case pins the consumer-visible outcome of that path; name\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"internals to reach it.\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
           "name": "excludes \"When behaviour changes, add focused\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "excludes \"mock-provider end-to-end harness for cross-component acceptance\"",
           "bucket": "contract",
           "ok": true
         }
@@ -536,6 +561,16 @@
           "name": "includes \"absence from a search or diff is not proof that behavior is absent.\"",
           "bucket": "contract",
           "ok": true
+        },
+        {
+          "name": "includes \"names its replacement assertions, regression negative controls and retained\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"`redundant-unreachable` only when a named e2e case pins the consumer-visible\"",
+          "bucket": "contract",
+          "ok": true
         }
       ]
     },
@@ -729,6 +764,21 @@
         },
         {
           "name": "includes \"`pass` means no blocking\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"tests default to mocked-LLM e2e through real entry points; require an\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"verify the assertion/regression mapping, old-defect failure and fixed pass,\"",
+          "bucket": "contract",
+          "ok": true
+        },
+        {
+          "name": "includes \"Do not demand a new test merely because\"",
           "bucket": "contract",
           "ok": true
         },

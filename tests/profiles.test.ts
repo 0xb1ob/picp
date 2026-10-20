@@ -577,6 +577,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 		[/unless Review scope applies, open exactly one\s+PR/, "step 6 names its one exception"],
 		[/each stage is still reviewed/, "staging never skips review"],
 		[/add no tests unprompted; acceptance cases come from the job below or a human/, "test authoring follows supplied acceptance"],
+		[/Behavioral acceptance defaults to the mock-provider e2e harness[^\n]*never mock internals to reach it/, "e2e default and standing rule 3"],
 		[/never `~\/\.pi`[^]*copy only `models\.json`[^]*`0700`[^]*`trap/i, "agent isolation: models.json only, 0700 temp dir outside the worktree, trap cleanup"],
 		[/audit `git log -p[^`]*`[^]*never printing a matched line/i, "branch patch history is audited for credentials without printing them"],
 	];
@@ -587,7 +588,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
 	const tooLong = `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`;
-	assert.ok(ship.length < 10750, tooLong);
+	assert.ok(ship.length < 11250, tooLong);
 	assert.match(ship, /credential comes only from the env var or file your task names[^]*never search files or the home/);
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");
