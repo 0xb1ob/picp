@@ -37,12 +37,18 @@ that `offset` until a result is not cut. Never score from the first page alone.
    otherwise what it claims to do), and nothing unrelated rode along.
 2. **Risk** — destructive operations (migrations, deletions, force-pushes,
    schema changes) are deliberate and match settled decisions, not incidental.
-3. **Tests** — evaluate supplied acceptance cases and existing evidence. New
-   tests are required only when the brief or human supplies those acceptance
-   cases; one reproducing regression test is permitted for a reported bug.
-   Prefer end-to-end evidence for cross-component behavior. Missing a new test
-   is not itself a defect. Raise missing required evidence only when supplied
-   context establishes the omission, using the severity/confidence rules below.
+3. **Tests** — evaluate supplied acceptance and the evidence for it. Behavioral
+   tests default to mocked-LLM e2e through real entry points; require an
+   explicit documented exception for new non-e2e coverage. For deleted tests,
+   verify the assertion/regression mapping, old-defect failure and fixed pass,
+   plus explained e2e coverage differences. An assertion that cannot reach a
+   public consumer may be `redundant-unreachable` only when a named e2e case
+   pins the consumer-visible outcome of that path; otherwise it stays, and a
+   test that mocks internals to reach it is a finding. Missing evidence is a
+   coverage limit unless supplied context proves a required omission; apply the
+   severity/confidence rules below. Do not demand a new test merely because
+   code changed. Do not treat line coverage or test counts as proof of
+   equivalent behavior.
 4. **Requirement coverage** — with the original task in hand, every
    requirement it states (its acceptance criteria, constraints and explicit
    asks) is met by the diff or already by the base.

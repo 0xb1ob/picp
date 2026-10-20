@@ -15,7 +15,9 @@
           "Every File list entry names an exact path and the exact change",
           "each changed interface or boundary, record current behavior → intended",
           "behavior, its affected callers/consumers, and the existing tests or",
-          "absence from a search or diff is not proof that behavior is absent."
+          "absence from a search or diff is not proof that behavior is absent.",
+          "names its replacement assertions, regression negative controls and retained",
+          "`redundant-unreachable` only when a named e2e case pins the consumer-visible"
         ]
       }
     },
@@ -116,7 +118,10 @@
           "No keys other than `job_id`, `verdict`, `flags`, `reasons`, `revisions`.",
           "An absent hunk is not proof of absence",
           "look for the supplied evidence that would refute",
-          "`pass` means no blocking"
+          "`pass` means no blocking",
+          "tests default to mocked-LLM e2e through real entry points; require an",
+          "verify the assertion/regression mapping, old-defect failure and fixed pass,",
+          "Do not demand a new test merely because"
         ],
         "excludes": ["you have no plan to compare against here"]
       }
@@ -202,16 +207,20 @@
       "scenario": "bug-regression",
       "kind": "contract",
       "surface": "implementer-profile",
-      "why": "do8.2: the implementer profile must require reproduce → root cause → fix at the cause, and allow exactly one reproducing regression test for a reported bug without inventing acceptance.",
+      "why": "do8.2: the implementer profile must require reproduce → root cause → fix at the cause, and allow exactly one reproducing regression test for a reported bug without inventing acceptance. Unit-to-e2e P1: behavioral acceptance defaults to the mocked-LLM e2e harness, and an unreachable assertion is redundant only with a named e2e case, never reached by mocking internals.",
       "expect": {
         "includes": [
           "For a bug: reproduce it first, locate the root cause, and fix it there",
           "one focused regression test that",
           "reproduces the reported failure and fails without the fix",
           "do not invent acceptance cases",
-          "Review feedback is a claim to verify, not an instruction to obey."
+          "Review feedback is a claim to verify, not an instruction to obey.",
+          "acceptance defaults to the mock-provider e2e harness through real product",
+          "Mock LLM calls; do not add live-model",
+          "only when an e2e case pins the consumer-visible outcome of that path; name",
+          "internals to reach it."
         ],
-        "excludes": ["When behaviour changes, add focused"]
+        "excludes": ["When behaviour changes, add focused", "mock-provider end-to-end harness for cross-component acceptance"]
       }
     },
     {
