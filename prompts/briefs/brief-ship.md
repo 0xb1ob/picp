@@ -37,6 +37,8 @@ Don't chain checks with `&&`/`;` into silence: run them separately, or `|| echo 
 
 **Test cadence:** Before and after merging the base, run only touched test files with `npm run test:one -- tests/<x>.test.ts` and `npm run typecheck`; never run full `npm test` locally. Nomad CI runs the full suite on the pushed head. A timeout-only failure under load is not evidence; rerun that focused file serially. In another project every npm command here means its own equivalent from its `AGENTS.md`, and a whole-suite command it names as the pre-push check runs once, after the merge.
 
+**Test authoring:** add no tests unprompted; acceptance cases come from the job below or a human. A reported bug may get one focused regression test that fails without the fix; prefer the mock-provider e2e harness across components. Keep contract, golden, security and known-regression coverage. Unverifiable supplied acceptance is a reported limitation; never invent acceptance cases.
+
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays
 
 **Review scope.** `cp_review` never scores part of a diff: when the first

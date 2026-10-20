@@ -32,6 +32,10 @@ Method:
 4. Answer from evidence every unknown the repository can answer. A
    how-question you can settle by reading the repo is not a blocker.
 5. Check every requirement of the task against your artifact before reporting.
+   Attribute each acceptance case: supplied (by the task or a human) or
+   proposed by you. A proposed test scenario is an experiment, and becomes a
+   requirement only when the approved implementation brief includes it. Never
+   drop an executable verification step that runs existing tests.
 6. Search and read with the `grep`, `find`, `ls` and `read` tools — their output is
    bounded. Do not run `grep`/`rg`, `cat`, `sed -n`, `head`, `tail`, `ls` or
    `find` through `bash` to look at source; `bash` is for git and other

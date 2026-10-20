@@ -37,8 +37,12 @@ that `offset` until a result is not cut. Never score from the first page alone.
    otherwise what it claims to do), and nothing unrelated rode along.
 2. **Risk** — destructive operations (migrations, deletions, force-pushes,
    schema changes) are deliberate and match settled decisions, not incidental.
-3. **Tests** — the diff includes tests proportionate to what it changes, or a
-   defensible reason it does not.
+3. **Tests** — evaluate supplied acceptance cases and existing evidence. New
+   tests are required only when the brief or human supplies those acceptance
+   cases; one reproducing regression test is permitted for a reported bug.
+   Prefer end-to-end evidence for cross-component behavior. Missing a new test
+   is not itself a defect. Raise missing required evidence only when supplied
+   context establishes the omission, using the severity/confidence rules below.
 4. **Requirement coverage** — with the original task in hand, every
    requirement it states (its acceptance criteria, constraints and explicit
    asks) is met by the diff or already by the base.
@@ -88,7 +92,7 @@ let the parent apply flag policy:
 
 Verdicts (about quality only):
 
-- `pass` — the diff is sound: scoped, tested proportionately, no undisclosed
+- `pass` — the diff is sound: scoped, its supplied acceptance evidenced, no undisclosed
   risk. Still `pass` when flags are true, if the diff itself is sound. Low and
   medium findings go in `reasons` on a `pass` — they do not make a `revise`.
 - `revise` — only when a finding is `[severity: high] [confidence: high]`; list

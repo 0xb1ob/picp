@@ -445,7 +445,9 @@ test("the implementer profile states the implementation method, not just the pub
 		[/plan is intent, not fact/i, "a plan is verified against the tree"],
 		[/reproduce it first/i, "reproduce a bug before fixing it"],
 		[/root cause/i, "fix at the root cause"],
-		[/regression coverage/i, "add regression coverage when behaviour changes"],
+		[/Do not add tests unprompted/, "no unsolicited tests: acceptance comes from the brief or the human"],
+		[/one focused regression test that\s+reproduces the reported failure and fails without the fix/i, "a reported bug may get one reproducing regression test"],
+		[/preserve contract, golden, security and known-regression\s+coverage/i, "existing contract and regression coverage stays"],
 		[/smallest coherent change/i, "smallest coherent in-scope change"],
 		[/no unrelated\s+cleanup/i, "no unrelated cleanup"],
 		[/focused checks/i, "run focused checks while working"],
@@ -574,6 +576,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 		[/run steps 1–5 as\s+written, skip step 6, then steps 8–9/, "review scope follows the checklist, never replaces it"],
 		[/unless Review scope applies, open exactly one\s+PR/, "step 6 names its one exception"],
 		[/each stage is still reviewed/, "staging never skips review"],
+		[/add no tests unprompted; acceptance cases come from the job below or a human/, "test authoring follows supplied acceptance"],
 		[/never `~\/\.pi`[^]*copy only `models\.json`[^]*`0700`[^]*`trap/i, "agent isolation: models.json only, 0700 temp dir outside the worktree, trap cleanup"],
 		[/audit `git log -p[^`]*`[^]*never printing a matched line/i, "branch patch history is audited for credentials without printing them"],
 	];
@@ -584,7 +587,7 @@ test("brief-ship is one compact delivery checklist that keeps every safeguard", 
 	// The brief is bounded so further edits must stay concise.
 	assert.doesNotMatch(ship, /bypass|without (a )?review|raise the cap/i, "the review scope paragraph grants no bypass");
 	const tooLong = `brief-ship is ${ship.length} chars; compact it or raise the ceiling on purpose`;
-	assert.ok(ship.length < 10350, tooLong);
+	assert.ok(ship.length < 10750, tooLong);
 	assert.match(ship, /credential comes only from the env var or file your task names[^]*never search files or the home/);
 	assert.equal(ship.match(/job_id: "\$\{job_id\}"/g)?.length, 1, "exactly one report_result example");
 	assert.equal(ship.match(/^## /gm)?.length, 1, "exactly one checklist section");

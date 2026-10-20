@@ -29,6 +29,12 @@ npm run e2e:phase2                              # dispatch → envelope → prom
 npm run e2e:phase3                              # pipeline: research → gate → checkpoint → implement
 ```
 
+Running the existing checks is always required; authoring new tests is not. A worker adds a test only for an
+acceptance case the brief or a human supplied, or one focused regression test that reproduces a reported bug and fails
+without the fix. Cross-component acceptance prefers the mock-provider e2e harness ([tests/e2e/README.md](../tests/e2e/README.md)).
+Contract, golden, security and known-regression tests are kept; a missing new test is not itself a review defect
+(`prompts/briefs/diff-review-rubric.md`, criterion 3).
+
 The forge (GitHub/GitLab) and landing-proof work is covered by focused files.
 They need no live forge, token or network. GitLab is a fake HTTP transport that
 throws on an unexpected request, `gh` is an injected runner, and the git proof
