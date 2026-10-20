@@ -263,8 +263,10 @@ try {
 			if (wide.length) throw new Error(`${name}: chips wider than their bubble: ${wide.join(", ")}`);
 		}
 		if (stage === "rollup") {
-			const card = await evaluate(`(() => { const t = document.querySelector(".session-rollup-toggle"); return { cards: document.querySelectorAll(".session-rollup").length, toggle: t ? t.getBoundingClientRect().height : 0, chip: !!document.querySelector(".session-rollup-head .pr-chip") }; })()`);
-			if (card.cards !== 1 || !card.chip) throw new Error(`${name}: ${card.cards} rollups (chip ${card.chip}), not one with its PR chip`);
+			const card = await evaluate(`(() => { const t = document.querySelector(".session-rollup-toggle"), m = document.querySelector(".session-rollup-meta"); return { cards: document.querySelectorAll(".session-rollup").length, toggle: t ? t.getBoundingClientRect().height : 0, chips: document.querySelectorAll(".session-rollup .pr-chip").length, meta: m ? m.getBoundingClientRect().height : 0, wraps: m ? m.scrollWidth > m.clientWidth : true }; })()`);
+			if (card.cards !== 1 || card.chips < 1) throw new Error(`${name}: ${card.cards} rollups (${card.chips} chips), not one with its PR chip`);
+			if (!name.includes("open") && card.chips !== 1) throw new Error(`${name}: the rollup shows its PR chip ${card.chips} times, not once`);
+			if (card.meta > 48 || card.wraps) throw new Error(`${name}: the rollup meta line is ${card.meta}px tall or overflows, not one line`);
 			if (width < 900 && card.toggle < 44) throw new Error(`${name}: the rollup toggle is ${card.toggle}px tall, under 44`);
 		}
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);

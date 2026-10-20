@@ -610,9 +610,12 @@ a cp-bridge notice (or the steps it opens) plus the session's replies right afte
 card (`rollups()` in `viewer-app/session-rows.ts`, `components/RelayRollup.tsx`). The subject key is `pr:<url>` when the
 turn's replies name exactly one PR chip, else the head job's one PR chip, else `job:<id>`; a turn with neither stays
 separate. A run never crosses another subject, an operator message or card, a day start, a thread or a source-order gap,
-and ends before the quick-reply anchor's turn. The header shows the subject chip from `pr_chips` and the job link; the
-latest turn is always shown and `N earlier updates` (`aria-expanded`, 44 px on the phone) reveals the rest through the
-same row renderer. `--stage rollup` captures it collapsed and opened at 1440 and 390 px.
+and ends before the quick-reply anchor's turn. The card shows the subject chip from `pr_chips` only when the latest relay
+does not already chip that PR inline, then one muted meta line that never wraps (`time · job · N earlier · N notice`,
+the job id ellipsized first), then the latest relay. The meta line's one toggle (`aria-expanded`, 44 px on the phone)
+opens the earlier turns and the latest turn's bridge notice in place through the same row renderer; with neither, no
+meta line renders. `--stage rollup` captures it collapsed and opened at 1440 and 390 px and fails on a wrapped meta
+line or a doubled chip.
 
 The conversation header (chat v2) shows the avatar, the name and one state line from recorded facts only: the operator
 transcript reads `GET /api/operator/control` (`busy` true/false is Working/Idle, a missing `busy` is "Status unknown",
