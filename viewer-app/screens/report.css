@@ -29,6 +29,11 @@
 .report-table tbody tr:last-child td { border-bottom: 0; }
 .report-table th { background: var(--background); color: var(--muted); font-weight: 600; }
 .report-table a { overflow-wrap: normal; }
+/* Phone: columns keep a readable width and the table scrolls sideways instead of squeezing every cell to a sliver. */
+@media (max-width: 899px) {
+ .report-table table { width: max-content; }
+ .report-table th, .report-table td { min-width: 72px; max-width: 240px; }
+}
 .report-image { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
 .report-refused { padding: 1px 6px; border: 1px dashed var(--error-border); border-radius: 5px; color: var(--coral); font-size: 13px; }
 .report-local-link { color: var(--text); text-decoration: underline dotted; }
