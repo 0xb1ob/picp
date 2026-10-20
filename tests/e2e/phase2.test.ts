@@ -463,8 +463,9 @@ test("m2: an unspent crash is revived once, in place, on the same lease", { skip
 	assert.ok(managed, "the manager owns the worker it spawned");
 	await waitFor(
 		() => readRunStatus(f.home, jobId),
-		(status) => status.phase === "working",
-		{ timeoutMs: 60_000, what: "the worker to start working" },
+		// In the tool, not merely `working`: a kill before the first assistant message leaves no session file to revive.
+		(status) => status.current_tool?.name === "bash",
+		{ timeoutMs: 60_000, what: "the worker to enter its bash call" },
 	);
 	const leaseId = readFleet(f.home).jobs[0]?.lease_id;
 	await managed.worker.kill("SIGKILL");
@@ -492,7 +493,8 @@ test("m2: a forced teardown racing an automatic revive never claims a lease it d
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);
 	assert.ok(managed, "the manager owns the worker it spawned");
-	await waitFor(() => readRunStatus(f.home, jobId), (status) => status.phase === "working", { timeoutMs: 60_000, what: "the worker to start working" });
+	// In the tool, not merely `working`: a kill before the first assistant message leaves no session file to revive.
+	await waitFor(() => readRunStatus(f.home, jobId), (status) => status.current_tool?.name === "bash", { timeoutMs: 60_000, what: "the worker to enter its bash call" });
 	// The overlap, made deterministic: automatic recovery's revive is held at its
 	// first step (Reviver.plan) by a gate this test controls, so the revive is
 	// provably in flight — claimed, not finished — when the operator forces a
@@ -549,10 +551,12 @@ test("m2: a drained restart then an explicit revive completes the same job once,
 	const f = await fleet(t, { ownsHome: true });
 	const jobId = await f.intake("survive a drained restart", { delivery: "local", slug: "drained" });
 	const [commit, report] = shipSteps(f.home, jobId, { push: false });
-	// Commit, then settle unreported twice (the turn and its one report nudge); the report waits for the revive.
-	const model = f.script("m2-drain", [commit!, { kind: "text", text: "paused for the restart" }, { kind: "text", text: "still paused" }, report!]);
+	// Commit, then settle unreported three times: the turn and its two recovery prompts (an unpushed commit gets
+	// MAX_RECOVERY_PROMPTS, not one nudge). Waiting on recovery_exhausted means no prompt is still coming, so the
+	// worker is truly idle; with one step short, the second prompt raced the drain and ate the revive's report.
+	const model = f.script("m2-drain", [commit!, { kind: "text", text: "paused for the restart" }, { kind: "text", text: "still paused" }, { kind: "text", text: "paused again" }, report!]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
-	await waitFor(() => f.post.manager.get(jobId)?.worker.settledCount ?? 0, (count) => count >= 2, { timeoutMs: 60_000, what: "the worker and its report nudge to settle" });
+	await waitFor(() => readEventLog(f.home, jobId), (events) => events.some((event) => event.type === "recovery_exhausted"), { timeoutMs: 60_000, what: "automatic recovery to be spent with the worker idle" });
 	const before = readFleet(f.home).jobs[0];
 	assert.ok(before?.lease_id);
 

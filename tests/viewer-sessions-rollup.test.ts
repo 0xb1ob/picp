@@ -4,6 +4,8 @@
  * gaps, operator messages or the quick-reply anchor, and Tools on shows every row on its own.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { build } from "esbuild";
 import { parseHTML } from "linkedom";
@@ -126,6 +128,22 @@ test("rollup card: Tools on forms no rollup", async t => {
 	await act(() => mount(s.root, view(turns)));
 	assert.equal(s.root.querySelectorAll(".session-rollup").length, 0, "(k)");
 	assert.match(s.root.textContent!, /first update/);
+});
+
+test("a bridge-notice row chips a PR like the turn card: same elements and classes, separated text, the pill rule", async t => {
+	// Operator report: a notice's chip read "#381draftCI greenreview pass" as bare underlined text with a stray bar
+	// (the unstyled draft dot), because the chip's pill rule was scoped to Markdown bubbles only.
+	const s = stage(t);
+	const chips = { [URL]: { ...pr(URL, "cp-a"), state: "draft", review: "pass" } as PrChip };
+	await act(() => mount(s.root, view([wake("w1", "cp-a", { text: `CI GREEN — cp-a: review attempt 2 started on ${URL}` }), relay("r1", `turn card: ${URL}`)], { pr_chips: chips })));
+	const notice = s.root.querySelector(".session-bridge a.pr-chip"), card = s.root.querySelector(".session-bubble a.pr-chip");
+	assert.ok(notice && card, "both rows chip the PR");
+	const parts = (a: Element) => [...a.children].map(c => [c.className, c.textContent]);
+	assert.deepEqual(parts(notice), [["pr-chip-dot", ""], ["pr-chip-num", "#355"], ["pr-chip-state", "draft"], ["pr-chip-ci pr-chip-ci-green", "CI green"], ["pr-chip-review pr-chip-review-pass", "review pass"]], "(a)");
+	assert.deepEqual([notice.className, parts(notice)], [card.className, parts(card)], "(a) the turn card's chip, class for class");
+	assert.equal(notice.textContent, "#355 draft CI green review pass", "(b) separated, never #355draft");
+	const rule = readFileSync(join(REPO_ROOT, "viewer-app/screens/sessions.css"), "utf8").match(/^([^{}\n]*a\.pr-chip) \{ display: inline-flex;/m)?.[1];
+	assert.ok(rule && notice.matches(rule) && card.matches(rule), `(a) the pill rule reaches the notice row: ${rule}`);
 });
 
 test("rollup card: quick replies still render at their anchor, after the turn they follow", () => {

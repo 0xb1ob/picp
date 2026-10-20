@@ -1,4 +1,4 @@
-import { createContext } from "preact";
+import { createContext, Fragment } from "preact";
 import type { PrChip } from "../../src/viewer/api-types.ts";
 
 /** Sessions' chips by URL; the empty default keeps `Markdown` everywhere else a plain anchor. */
@@ -31,6 +31,7 @@ export function PrChipLink({ chip }: { chip: PrChip }) {
  const label = sentence(chip);
  return <a class={`pr-chip pr-chip-${chip.state ?? "none"}${chip.kind === "issue" ? " issue-chip" : ""}`} href={chip.url} target="_blank" rel="noopener noreferrer" title={label} aria-label={label}>
   {chip.state !== null && <span class="pr-chip-dot" aria-hidden="true"/>}
-  {segments(chip).map(([cls, text], i) => <span key={i} class={cls}>{text}</span>)}
+  {/* Spaces keep the text apart ("#N draft") where chip CSS is absent; flex drops them and spaces by gap. */}
+  {segments(chip).map(([cls, text], i) => <Fragment key={i}>{i > 0 && " "}<span class={cls}>{text}</span></Fragment>)}
  </a>;
 }
