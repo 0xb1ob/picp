@@ -56,6 +56,7 @@ ask-0088e0332d00, 2026-10-21.
 |---|---|---|---|---|
 | P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
 | P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
+| P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -70,6 +71,15 @@ rule 3 to `AGENTS.md`, the implementer and planner profiles, the ship and resear
 `docs/development.md`, `tests/e2e/README.md` and `evals/corpus.json`. It gives every baseline path a final
 disposition, and the checker now prints each conversion PR's census.
 
+P2 (cp-e2e-migration-p2-tyir) adds `tests/e2e/authority.test.ts` (4 cases, scenarios 02-1 to 02-4) and deletes
+`tests/budgets.test.ts` (2 declarations): all six of its assertions map to 02-4, under negative control NC-04.
+P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate
+moves to behavior 06 / P4. Their baseline rows name those owners, and none is deleted before its assertions are
+mapped one by one. Two of the plan's assumptions did not hold against the tree. An operator-paused or
+revoked grant is *silent* for dispatch (`GRANT_MATRIX`, `src/mandate-permission.ts`), not refusing: 02-2 pins that
+such a dispatch runs under no grant. A replacing `issue` supersedes the old grant's open ask by itself, so 02-3 pins
+the superseded record and an empty later `supersede_stale` sweep. Held-job cap counting belongs to P2b.
+
 ## Conversion PRs
 
 One row per later PR. Its candidate deletion set is every baseline row whose owner is that PR. The checker prints
@@ -82,6 +92,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
 | P2 | 02 | `tests/e2e/authority.test.ts` | 4 |
+| P2b | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-4 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
@@ -182,6 +193,10 @@ moves first.
 |---|---|---|
 | 01-1 | `tests/e2e/ci-evidence.test.ts` | ci evidence: wake, cp_integrate and the promote name only the current head's failing run, and none once it is gone |
 | 01-2 | `tests/e2e/ci-evidence.test.ts` | ci evidence: absent head, absent run id, a branch-name PR ref and an enterprise host never fabricate an Actions link |
+| 02-1 | `tests/e2e/authority.test.ts` | authority: a scoped mandate dispatches the job it names under its id; an unnamed job is not its to speak for |
+| 02-2 | `tests/e2e/authority.test.ts` | authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work |
+| 02-3 | `tests/e2e/authority.test.ts` | authority: a risk:high answer authorizes only the job it names; a replacing grant supersedes the open ask |
+| 02-4 | `tests/e2e/authority.test.ts` | authority: token raises stay inside the ceiling, the USD cap never moves, and budgets.json is re-read live |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -212,6 +227,12 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 | `tests/ci-run-ref.test.ts` | formatRunRef of an id alone is " (run N)" | 01-2 | mapped | (run 16) and (run 17) at the end of the ci fact |
 | `tests/ci-run-ref.test.ts` | ciRunRef of a legacy run without databaseId is {} | 01-2 | redundant-unreachable | readActionsCi refuses an id-less row, so no consumer sees one; 01-2 pins "could not read CI" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | formatRunRef of {} is "" | 01-1 | mapped | held facts for superseded, in_progress and green heads carry no reference |
+| `tests/budgets.test.ts` | with no data/budgets.json, per_job_tokens and spawn_cap are the fleet defaults | 02-4 | mapped | with no budgets file on disk, the spender's record carries DEFAULT_BUDGET_CONFIG's per_job_tokens and per_job_cost_usd, and an eleventh dispatch is refused "spawn cap reached (10/10 workers)" |
+| `tests/budgets.test.ts` | a raise written after the parent started reaches per_job_tokens on the live manager | 02-4 | mapped | `overflow` dispatches with budget.tokens 1,000 from a file written after the CommandPost was built; negative control NC-04 |
+| `tests/budgets.test.ts` | the raised per_job_cost_usd reaches the live manager | 02-4 | mapped | `overflow` and `next` dispatch with budget.cost_usd 3 |
+| `tests/budgets.test.ts` | spawn_cap is not stale independently of the rest of the budget config | 02-4 | mapped | spawn_cap 11, written after start, admits `overflow` that the default 10 refused; negative control NC-04 |
+| `tests/budgets.test.ts` | CommandPost.budgets() sees the raise without reconstruction | 02-4 | mapped | dispatch reads the budget through budgets(); `overflow`'s record shows the raise |
+| `tests/budgets.test.ts` | a second raise on the same live CommandPost also takes effect | 02-4 | mapped | the second write (2,000 tokens, spawn_cap 12) dispatches `next` with 2,000 as an eleventh live worker |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -231,6 +252,7 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-01 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-01-green | e5cc55b97d22e820228a709e858fbe2f7294fcc8dce00aa980f63982c09660f3 | wake observation names run 2 (skipped), not run 6 | pass |
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
 | NC-03 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-2 | NC-03-host | 0bb48b55ddc16d72b68109e136da58d310bb118ebbe641f411e9ba7980ef6ac0 | the enterprise ci fact links ghe.example.com/…/actions/runs/16 | pass |
+| NC-04 | `tests/budgets.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-4 | NC-04-budgets | b8262869069a8a4a19ff794bf37b176539f3574d54373523f6e0b03804229851 | spawn_cap 11 written after start does not admit `overflow` (spawn cap reached (10/10 workers)) | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -301,6 +323,31 @@ NC-03 derives an Actions link for any host:
 ℹ fail 1
 ```
 
+NC-04 puts back the cp-sr5 defect `tests/budgets.test.ts` guarded: the manager's budget getter is a snapshot taken
+when the CommandPost is built, so a `data/budgets.json` written later never reaches a dispatch. The file has no
+separate fix commit in this repository's history; the bug commit column names the release that carries the getter.
+
+<!-- patch:NC-04-budgets -->
+```diff
+--- a/src/command-post.ts
++++ b/src/command-post.ts
+@@ -384,3 +384,3 @@
+ 			workerReporterPath: join(options.packageRoot, "extensions/worker-reporter/index.ts"),
+-			budget: () => this.budgets(),
++			budget: ((snapshot) => () => snapshot)(this.budgets()),
+ 			questions: this.questions,
+```
+
+```
+✔ authority: a scoped mandate dispatches the job it names under its id; an unnamed job is not its to speak for
+✔ authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work
+✔ authority: a risk:high answer authorizes only the job it names; a replacing grant supersedes the open ask
+✖ authority: token raises stay inside the ceiling, the USD cap never moves, and budgets.json is re-read live
+  Error: spawn cap reached (10/10 workers): cp-0d02, cp-s0e0, cp-2jeu, cp-d91l, cp-i96u, cp-0otr, cp-bkjz, cp-t474, …
+ℹ pass 3
+ℹ fail 1
+```
+
 ## Incoming
 
 Test files added after the baseline, with the PR that owns them.
@@ -309,6 +356,8 @@ Test files added after the baseline, with the PR that owns them.
 | File | PR | Note |
 |---|---|---|
 | `tests/e2e/ci-evidence.test.ts` | P0 | behavior 01, scenarios 01-1 and 01-2 |
+| `tests/e2e/authority.test.ts` | P2 | behavior 02, scenarios 02-1 to 02-4 |
+| `tests/viewer-job-report.test.ts` | #380 | unit test landed on main after the baseline (viewer job report pages); recorded by P2 so the check stays at 0 findings, disposition left to its behavior's PR |
 | `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
 | `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | accept and reject paths of `deleted-with-feature` and `feature-removed` |
 <!-- /manifest:incoming -->
@@ -353,8 +402,8 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/bounds.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
-| `tests/budgets.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/capacity.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
+| `tests/capacity.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/ci-access.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/ci-configured.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
@@ -461,11 +510,11 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/mandate-defaults.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/mandate-selection.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/mandate-supplement.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/mandate-usage.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/mandate.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/mandate-defaults.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/mandate-selection.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/mandate-supplement.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/mandate-usage.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/mandate.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
 | `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
@@ -490,7 +539,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-threads-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-threads-journal.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-tool-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ops-jobs.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/ops-jobs.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
 | `tests/output.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-compact-hold.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/parent-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
@@ -526,7 +575,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/push-webpush.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
 | `tests/quality.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/questions.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
-| `tests/quota.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/quota.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
 | `tests/ready-beads.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/relay-preflight.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
@@ -540,10 +589,10 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/risk-batch.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/risk-negation.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/risk-preapproval.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
-| `tests/risk-warning.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/risk-batch.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/risk-negation.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/risk-preapproval.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/risk-warning.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
 | `tests/routing-integration.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/routing.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/run-artifacts.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
@@ -568,7 +617,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/schedule-wake.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/scheduler.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/script-jobs.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); P1 amendment, in no plan row |
-| `tests/send-first-gate.test.ts` | convert | P2 | behavior 02 (Mandate, budgets and authority) |
+| `tests/send-first-gate.test.ts` | convert | P4 | behavior 06 (Wake delivery); moved from P2: it pins the send-first wake hold, not authority |
 | `tests/send.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/service-alerts.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/service-health.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
