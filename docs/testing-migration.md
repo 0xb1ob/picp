@@ -37,8 +37,10 @@ P0 was planned as 400 → 400 files and 4,487 → 4,486 declarations, with `test
 deletion did not happen: four of its assertions cannot reach a public consumer (see the assertion map). The plan
 says such an assertion keeps the file "until a genuine boundary contract or approved redundant-case disposition
 exists". Incoming files from the parallel E2E A/B/C jobs are listed under Incoming as they land, not in the
-baseline. The P0 counts start at 4,488, not 4,487, because `tests/e2e/planner-blocked.test.ts` gained one
-declaration between the pinned baseline and P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`).
+baseline. The P0 counts are on P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`); they start at 4,488,
+not 4,487, because `tests/e2e/planner-blocked.test.ts` gained one declaration after the pinned baseline. Baseline
+files keep changing on main, so the checker prints the live tree's counts rather than trusting this row
+(after merging main at `52d14e3`: 401 files, 4,496 declarations).
 
 ## Scenarios
 
