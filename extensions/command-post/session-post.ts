@@ -274,10 +274,6 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 				continuation: true,
 				// cp-35d0 S6: no drain starts, and none finishes drained, while the parent's compact hold is on.
 				parentControlBusy: () => wakeups.compactHold.holding,
-				// Evidence for the bridge, not a request to dispatch or grant authority.
-				onIdleBeads: (text) => pi.sendMessage({
-					customType: "cp-idle-beads", content: text, display: true,
-				}, { triggerTurn: false }),
 				// An envelope is news: it reaches the parent as a custom message so
 				// the session acts on it, with the headline only — never a body.
 				onReported: (result) => {

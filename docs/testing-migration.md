@@ -359,7 +359,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/authority.test.ts` | P2 | behavior 02, scenarios 02-1 to 02-4 |
 | `tests/viewer-job-report.test.ts` | #380 | unit test landed on main after the baseline (viewer job report pages); recorded by P2 so the check stays at 0 findings, disposition left to its behavior's PR |
 | `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
-| `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | accept and reject paths of `deleted-with-feature` and `feature-removed` |
+| `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -371,6 +371,37 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 |---|---|---|---|
 | `tests/jobs-tool.test.ts` | parseJobsArgs: ready by default, list flags, show needs an id, import-beads | cp-remove-beads-pr1-0f3z (#379) | importer subcommand removed; the rest is kept under a new title |
 | `tests/jobs-tool.test.ts` | cp_job create auto-links a job whose br ref names a bead on the active connection, and says why otherwise (laf) | cp-remove-beads-pr1-0f3z (#379) | tracker auto-link removed |
+| `tests/trackers-ledger.test.ts` | createTracked mints exactly one job per (connection_id, item_id), even under concurrency | cp-remove-beads-pr1b-t68e | `Ledger.createTracked` removed with tracker import |
+| `tests/trackers-ledger.test.ts` | closed and dropped linked jobs still dedupe; equal titles on different keys are distinct jobs | cp-remove-beads-pr1b-t68e | `Ledger.createTracked` removed with tracker import |
+| `tests/trackers-ledger.test.ts` | an open unlinked job with the same ref is refused, never linked automatically | cp-remove-beads-pr1b-t68e | `Ledger.createTracked` removed with tracker import |
+| `tests/worker-beads.test.ts` | a worker's BEADS_DIR comes only from dispatch, never the home's .beads or the parent environment | cp-remove-beads-pr1b-t68e | dispatch database injection removed; the parent-env strip is kept under a new title |
+| `tests/task-references.test.ts` | resolves own-prefix beads and pinned external refs once, preserving text | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | missing beads and unavailable br are explicit nonfatal material | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | unavailable br names a custom-prefix bead even without another reference | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | br down never turns read-only or follow-up prose into references | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | reads real br show JSON using the configured prefix | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | bead responses accept legacy objects and diagnose malformed output | cp-remove-beads-pr1b-t68e | worker bead snapshots removed |
+| `tests/task-references.test.ts` | bare references use only the resolved project database, never the home's | cp-remove-beads-pr1b-t68e | worker bead snapshots and database injection removed |
+| `tests/dispatch.test.ts` | dispatch snapshots referenced beads for the worker and reviewers, including missing refs | cp-remove-beads-pr1b-t68e | worker bead snapshots and database injection removed |
+| `tests/projects.test.ts` | cp_project add readiness: delivery:local wording, a connected tracker, and a throwing probe never fails add | cp-remove-beads-pr1b-t68e | tracker readiness line removed; the rest is kept under a new title |
+| `tests/jobs-tool.test.ts` | create verifies the selected project's pinned database before recording array beads | cp-remove-beads-pr1b-t68e | command-ref verification removed |
+| `tests/jobs-tool.test.ts` | a bare ref is not pinned to or verified against the home database, while explicit pins win | cp-remove-beads-pr1b-t68e | command-ref pinning removed |
+| `tests/jobs-tool.test.ts` | cp_job create: a br show ref with status closed refuses | cp-remove-beads-pr1b-t68e | command-ref verification removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: an answered legacy override admits only its deferred bead and records the es | cp-remove-beads-pr1b-t68e | deferred-bead admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: aggregated overrides bind exact pinned deferred refs, never another bead, DB, project or mismatch | cp-remove-beads-pr1b-t68e | deferred-bead admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: a capped question cannot authorize an undisclosed deferred ref | cp-remove-beads-pr1b-t68e | deferred-bead admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: only an answered override on this admission escalation counts | cp-remove-beads-pr1b-t68e | deferred-bead admission override removed |
+| `tests/verify-external-ref.test.ts` | br show ref: closed status is a mismatch; open is not | cp-remove-beads-pr1b-t68e | command-ref verification removed |
+| `tests/verify-external-ref.test.ts` | br --db pinned ref: the db path is unquoted and passed through as one arg | cp-remove-beads-pr1b-t68e | command-ref verification removed |
+| `tests/verify-external-ref.test.ts` | br arrays preserve open and closed states; malformed responses stay diagnostic | cp-remove-beads-pr1b-t68e | command-ref verification removed |
+| `tests/doctor.test.ts` | ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete | cp-remove-beads-pr1b-t68e | import and live-connection advice removed; kept under a new title |
+| `tests/doctor.test.ts` | ledger.beads_archive: a .beads/ that an active tracker connection uses is ok and never advised for deletion | cp-remove-beads-pr1b-t68e | tracker connections removed |
+| `tests/ledger.test.ts` | normalizeExternalRef pins a bare `br show <id> --json`, shell-quoted; every other shape passes through unchanged | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
+| `tests/ledger.test.ts` | create pins a bare br show ref to the project's beads DB when the caller wires one | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
+| `tests/ledger.test.ts` | an older job stored with a bare br show ref reads pinned through every query path, with no write and no updated_at bump | cp-remove-beads-pr1b-t68e | read-time ref projection removed |
+| `tests/ledger.test.ts` | a closed job with a bare br show ref is projected pinned through history() and blocked() | cp-remove-beads-pr1b-t68e | read-time ref projection removed |
+| `tests/ledger.test.ts` | the pinned form runs from a fresh leased worktree with no .beads/; the bare form does not (root cause, not just the string) | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
+| `tests/ledger.test.ts` | the stored ref is one valid shell word even when the project's checkout path has a space in it | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
 <!-- /manifest:feature-removed -->
 
 ## Baseline
@@ -576,7 +607,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/quality.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/questions.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/quota.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/ready-beads.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
+| `tests/ready-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1b-t68e | tested `src/ready-beads.ts`, `src/trackers/config.ts` |
 | `tests/recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/relay-preflight.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/relay-scope.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
@@ -656,8 +687,8 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/test-runner-bounds.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
 | `tests/timeout-floor.test.ts` | exception | P1 | guard: executable verification integrity; operator ask-0088e0332d00 (Exceptions) |
 | `tests/tool-manifest.test.ts` | exception | P1 | contract: installed tool surface; operator ask-0088e0332d00 (Exceptions) |
-| `tests/trackers-beads.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
-| `tests/trackers-config.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
+| `tests/trackers-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1b-t68e | tested `src/trackers/beads.ts`, `src/trackers/adapter.ts` |
+| `tests/trackers-config.test.ts` | deleted-with-feature | cp-remove-beads-pr1b-t68e | tested `src/trackers/config.ts`, `src/contracts/trackers.ts` |
 | `tests/trackers-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/import.ts` |
 | `tests/trackers-ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/trackers-link.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/link.ts`, `src/trackers/sync.ts` |
