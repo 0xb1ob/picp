@@ -537,7 +537,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/verify-external-ref.test.ts` | br show ref: closed status is a mismatch; open is not | cp-remove-beads-pr1b-t68e | command-ref verification removed |
 | `tests/verify-external-ref.test.ts` | br --db pinned ref: the db path is unquoted and passed through as one arg | cp-remove-beads-pr1b-t68e | command-ref verification removed |
 | `tests/verify-external-ref.test.ts` | br arrays preserve open and closed states; malformed responses stay diagnostic | cp-remove-beads-pr1b-t68e | command-ref verification removed |
-| `tests/doctor.test.ts` | ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete | cp-remove-beads-pr1b-t68e | import and live-connection advice removed; kept under a new title |
+| `tests/doctor.test.ts` | ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete | cp-remove-beads-pr1b-t68e | import and live-connection advice removed; kept under a new title, which cp-remove-beads-pr2-6exd replaced with the `storage.retired_integration` case |
 | `tests/doctor.test.ts` | ledger.beads_archive: a .beads/ that an active tracker connection uses is ok and never advised for deletion | cp-remove-beads-pr1b-t68e | tracker connections removed |
 | `tests/ledger.test.ts` | normalizeExternalRef pins a bare `br show <id> --json`, shell-quoted; every other shape passes through unchanged | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
 | `tests/ledger.test.ts` | create pins a bare br show ref to the project's beads DB when the caller wires one | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
@@ -545,6 +545,13 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger.test.ts` | a closed job with a bare br show ref is projected pinned through history() and blocked() | cp-remove-beads-pr1b-t68e | read-time ref projection removed |
 | `tests/ledger.test.ts` | the pinned form runs from a fresh leased worktree with no .beads/; the bare form does not (root cause, not just the string) | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
 | `tests/ledger.test.ts` | the stored ref is one valid shell word even when the project's checkout path has a space in it | cp-remove-beads-pr1b-t68e | command-ref pinning removed; refs are opaque |
+| `tests/guards.test.ts` | the ledger has no bash surface any more: br-shaped commands are neither blocked nor special | cp-remove-beads-pr2-6exd | product-named commands replaced by generic ones; kept under a new title |
+| `tests/guards.test.ts` | only the home's own .beads/ is never-commit; a project worktree tracks its .beads/ | cp-remove-beads-pr2-6exd | home directory never-commit exception removed (`src/guards.ts`, `src/contracts/layout.ts`); the any-cwd runtime-root case moved into the staging test |
+| `tests/doctor.test.ts` | the one runtime root plus .beads covers runtime state | cp-remove-beads-pr2-6exd | never-commit exception removed; kept under a new title |
+| `tests/contracts.test.ts` | layoutFor(multi) keeps one root; neverCommitFor(multi) lists .beads | cp-remove-beads-pr2-6exd | never-commit exception removed; kept under a new title |
+| `tests/storage.test.ts` | a home with only .pi-command-post/, .beads/ and .gitignore is one ok storage finding | cp-remove-beads-pr2-6exd | known-directory allowance removed (`src/storage.ts`); kept under a new title |
+| `tests/service-install.test.ts` | install: the br prompt defaults to no, to yes with a beads tracker; --with-br / --no-br answer it | cp-remove-beads-pr2-6exd | optional CLI prompt, probe and flags removed (`src/service/install.ts`, `src/tool-manifest.ts`) |
+| `tests/service-install.test.ts` | install: tmux and br missing, gh logged out and no provider login are reported, never fatal | cp-remove-beads-pr2-6exd | optional CLI step removed; kept under a new title |
 <!-- /manifest:feature-removed -->
 
 ## Baseline

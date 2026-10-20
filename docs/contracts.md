@@ -135,10 +135,9 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
     operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
-.beads/                   frozen archive of the retired br ledger (gitignored; safe to delete; left in place)
 ```
 
-`.pi-command-post/` and `.beads/` are never committed or pushed
+`.pi-command-post/` is never committed or pushed
 (`NEVER_COMMIT_PATHS`; enforced by the T19 guard, not by good manners); see
 [storage.md](storage.md).
 
@@ -3979,7 +3978,7 @@ move is the right one.
 | `artifact_body_read` | `read`/`grep` on a path in the store; any bash command that would emit one | `cp_artifact get` with an out file, `cp_artifact path`, or `ls`/`stat`/`wc` |
 | `artifact_body_write` | `edit`/`write` into the store | the artifact is the worker's deliverable; `cp_artifact add` files one |
 | `ledger_inlines_artifact` | `br show`/`comments`/`export` naming an **artifact-bearing** id | `br list`/`br ready` for status, `cp_artifact get` for the body |
-| `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`, and `.beads/` in multi mode) | commit source only |
+| `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
 | `canonical_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push in a canonical clone under `projects/` (N12); a plain `git -C <clone> switch <branch>`, the preflight fix, stays allowed | `cp_check`/`cp_dispatch` fetch the clone themselves, `cp_integrate` syncs after a merge |
@@ -4000,7 +3999,7 @@ classified segment by segment, so `ls state/artifacts && cat …` is blocked on
 its second segment.
 
 `never_commit_path` matches two ways, both fail-closed: a leading path segment
-that names one of the roots (`cd <home> && git add .beads` is the case
+that names one of the roots (`cd <home> && git add .pi-command-post` is the case
 that motivates it) and any path that resolves inside this home's copy of one.
 `data.json`, `src/data/x.ts` and, since cp-u3i2, a top-level `state/x` are not
 matches — the roots are home-relative names, not substrings.
@@ -7766,14 +7765,15 @@ Slack. Three rules carried over, and they are the design:
    *reports*: a dead worker is a `warn` with the revive command, and moving it to
    `failed` stays reconcile's job (`session_start`).
 
-Checks: `host.*` (git, br, treehouse, pi — all four required), `ledger.*`,
+Checks: `host.*` (git, treehouse, pi, gh required; tmux optional), `ledger.*`,
 `package.*` (worker-reporter, profiles validate, one profile per role, every
 `briefTemplate` exists), `config.*` (routing/budgets/projects parse) including
 `config.budget.<profile>` (each profile's live effective ceiling against the
 current `data/budgets.json`, `warn` when the fleet config clamps it — cp-sr5),
 `models.*`, `scaffold.*`, `home.gitignore`, `fleet.*`, `session.tools`, and
 `storage.*` (warn-only: stray files in `state/`, home entries outside
-`.pi-command-post/` and `.beads/`, a `handoffs_dir` outside the home; see
+`.pi-command-post/` (listed for review, never moved), a `handoffs_dir` outside the home,
+retired integration files by existence only (`storage.retired_integration`); see
 [storage.md](storage.md#doctor-checks)).
 
 When the home is also the running package's source checkout, `/doctor`
@@ -8153,7 +8153,7 @@ This checkout is therefore always a multi home.
 **Layout** (`configureLayout(mode)`; a second call with another mode throws):
 one runtime root (cp-u3i2): `data`, `state`, `projects` and
 `operatorWorkspace` resolve under `.pi-command-post/`;
-`NEVER_COMMIT_PATHS` is `[".pi-command-post/", ".beads/"]`; see
+`NEVER_COMMIT_PATHS` is `[".pi-command-post/"]`; see
 [storage.md](storage.md).
 
 **The contract**: pi loads `AGENTS.md` only from the working directory and

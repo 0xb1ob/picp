@@ -63,10 +63,10 @@ test("gitignore keeps runtime state out of the repo", () => {
 	const ignored = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8")
 		.split("\n")
 		.map((line) => line.trim());
-	// cp-u3i2: exactly the one runtime root plus br's `.beads/`; the shipped
+	// cp-u3i2: exactly the one runtime root; the shipped
 	// default rubric template now lives in tracked `defaults/`, so `data/` needs
 	// no negation and no top-level entry at all.
-	assert.deepEqual(NEVER_COMMIT_PATHS, [".pi-command-post/", ".beads/"]);
+	assert.deepEqual(NEVER_COMMIT_PATHS, [".pi-command-post/"]);
 	for (const entry of [...NEVER_COMMIT_PATHS, "node_modules/"]) {
 		assert.ok(ignored.includes(entry), `missing .gitignore entry ${entry}`);
 	}

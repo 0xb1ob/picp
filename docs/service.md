@@ -98,9 +98,7 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
    - every pi package a worker role loads (`ROLE_PACKAGES`) missing from
      `~/.pi/agent/settings.json` → `pi install npm:<name>` (pins kept; your other packages and
      their order untouched; settings.json is never edited here). `--no-pi-packages` skips;
-   - `br` (beads CLI), **optional**, prompt default **no**, **yes** when `data/trackers.json` has an
-     active beads connection or a registered project's clone has `.beads/beads.db`; `--with-br`/`--no-br` answer it. Its install method is not verifiable
-     here, so the installer prints how instead of guessing a URL. `tmux` is reported, never required;
+   - `tmux` is reported, never required;
    - no provider in `~/.pi/agent/auth.json` → prints "run `pi`, then /login" (credentials never handled);
 3b. the viewer host (`CP_VIEWER_HOST`, see below);
 3c. the models (`CP_PARENT_MODEL`, `CP_OPERATOR_MODEL`, see below);
@@ -126,7 +124,7 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
 11. waits ≤ 90 s for the host's parent and prints its `/doctor`, then `cp-daemon status`.
 
 Flags: `--home --app --port --parent-model --operator-model --viewer-host --gateway-url --gateway-key-file --push-origin --force --no-start
---crontab --no-update --uninstall --dry-run --yes --no-prompt --with-br --no-br
+--crontab --no-update --uninstall --dry-run --yes --no-prompt
 --no-pi-packages --no-self-package` (`--no-self-package` is accepted and has no effect: the self-package step went with single-project mode). Prompts read `/dev/tty`, so `curl | sh`
 still asks; with no terminal, `--yes`, `--no-prompt` or `--dry-run` every prompt
 takes its default. `--dry-run` probes and prints and changes nothing (the code

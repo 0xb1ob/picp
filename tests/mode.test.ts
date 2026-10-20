@@ -161,7 +161,7 @@ test("another home's nested .pi-command-post is never taken for a flat standard 
 	const nested = join(checkout, ".pi-command-post");
 	for (const dir of [LAYOUT.projects, LAYOUT.state]) mkdirSync(join(checkout, dir), { recursive: true });
 	mkdirSync(join(checkout, ".git"));
-	writeFileSync(join(checkout, ".gitignore"), ".pi-command-post/\n.beads/\n");
+	writeFileSync(join(checkout, ".gitignore"), ".pi-command-post/\n");
 	t.after(() => rmSync(checkout, { recursive: true, force: true }));
 	// The nested root has projects/ and state/ at its top, but it is the checkout's, not a home of its own.
 	assert.equal(isMultiHomeDir(nested), false);

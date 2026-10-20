@@ -36,7 +36,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp teardown <job-id> [--research]` | ported (improved) | `cp_teardown`; the kind comes from the fleet record, so the flag cannot disagree with the job | `tests/teardown.test.ts` |
 | `cmdp status [--json] [--origin]` | ported | `/status` + widget → [`src/status.ts`](../src/status.ts) | `tests/status.test.ts` + goldens |
 | `cmdp status --html --serve --port --pane` | out of scope | HTML dashboard deferred; `fleet.json` + `runs/` are shaped to feed one later | README.md out-of-scope |
-| `cmdp doctor` | ported | `/doctor` → [`src/doctor.ts`](../src/doctor.ts), plus the ledger checks (document shape, ids, dependency graph, prefix, size, `.beads/` archive) | `tests/doctor.test.ts` + golden |
+| `cmdp doctor` | ported | `/doctor` → [`src/doctor.ts`](../src/doctor.ts), plus the ledger checks (document shape, ids, dependency graph, prefix, size) | `tests/doctor.test.ts` + golden |
 | `cmdp models` (catalog, families, TTL cache, allowlist) | ported (narrowed) | pi owns the model registry (`/models`, `get_available_models`); the allowlist and rubric are `data/routing.json`, availability is probed with real auth in `/doctor` | `tests/routing.test.ts`, `tests/doctor.test.ts` |
 | `cmdp threads bind\|unbind\|list\|events\|status\|log` | out of scope | Slack | README.md out-of-scope |
 | `cmdp relay` | out of scope | Slack | README.md out-of-scope |
@@ -118,7 +118,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | membership queries are never paged | mechanised | `ready`/`blocked`/`blockersOf` are computed over the whole document; there is no page to fall off | `tests/ledger.test.ts`, `tests/status.test.ts` — **found by this audit**; the fail-open case was `cp-i2s` |
 | Memory (three files, budgets, tiers, decay, capture/curation, retrieval) | ported | [`src/memory.ts`](../src/memory.ts) + `skills/cp-memory` | `tests/memory.test.ts` |
 | Curation as a human-run pass ("a curation pass promotes ones that generalize") | mechanised | the pass is the parent's own ([`src/curation.ts`](../src/curation.ts)): promotion is bounded (3/day, 60-line ceiling), never pinned, evidence-required, append-only and journalled to `data/curation.jsonl` before the file changes; a superseded/disproven candidate is permanently unpromotable; retirement is a reason+evidence move to the archive | `tests/curation.test.ts` (one test per property) |
-| State files: never commit `data/ state/ projects/` or the home's `.beads/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home; a project's `.beads/` stays stageable | `tests/guards.test.ts` |
+| State files: never commit `data/ state/ projects/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home | `tests/guards.test.ts` |
 | Slack tokens in `state/slack/tokens.env` (mode 600) | out of scope | no Slack; brief secret-scanning covers the general hazard | `tests/worker-manager.test.ts` (`assertBriefIsSafe`) |
 
 ## 4. Reports (ported *knowledge*, not prose)

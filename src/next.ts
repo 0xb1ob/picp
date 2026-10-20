@@ -393,7 +393,8 @@ export function dedupeNext(seen: Map<string, { text: string; at: string }>, scop
 export interface NextSnapshotItem { kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string }
 /** `state/next-snapshot.json` (#323): the last cp_next answer as the viewer's "Lined up" strip reads it. */
 export interface NextSnapshot {
-	/** 2: native job rows only; the viewer treats any other version as unavailable. */
+	/** 2: native job rows only. An older version reads as not yet written (the viewer shows "Refreshes on next
+	 * scheduling pass"); an unknown version is unavailable. */
 	schema_version: 2; at: string; project: string | null; action: NextAction; items: NextSnapshotItem[];
 	/** Evidence that could not be read; any row here means the snapshot never claims "nothing queued". */
 	unavailable: { project: string; error: string }[];

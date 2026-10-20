@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { install, type InstallFlags, type InstallPorts, parseInstallArgs, type RunResult, workerPackageSpecs } from "../src/service/install.ts";
 import { DAEMON_UNIT, HEALTH_TIMER, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, PARENT_UNIT, renderUnits, UPDATE_TIMER, VIEW_UNIT } from "../src/service/units.ts";
 import { daemonPaths } from "../src/service/daemon-files.ts";
-import { PI_LENS_TOOLS } from "../src/tool-manifest.ts";
+import { PI_LENS_TOOLS, REQUIRED_TOOLS } from "../src/tool-manifest.ts";
 import { ROLE_PACKAGES } from "../src/worker-packages.ts";
 import { configureLayout, layoutForHome } from "../src/contracts.ts";
 import { gatewayKeyFile, readGatewayKey } from "../src/gateway-key.ts";
@@ -515,34 +515,16 @@ test("install: configured packages are skipped, the human's packages untouched, 
 	assert.ok(!broken.calls.some((call) => call.startsWith("pi install")));
 });
 
-test("install: the br prompt defaults to no, to yes with a beads tracker; --with-br / --no-br answer it", async (t) => {
-	const missing = { "br --version": { status: 127 } };
-	const user = scratch(t);
-	const plain = fake(user, missing);
-	assert.equal(await install(flags(user), plain.ports), 0);
-	assert.ok(plain.questions.some((q) => q.startsWith("Install the br (beads) CLI?") && q.endsWith("[y/N] ")), plain.questions.join("\n"));
-	assert.ok(plain.lines.some((line) => line.startsWith("skip: br: not on PATH (optional") && line.includes("not wanted")));
-
-	const tracked = fake(scratch(t), missing);
-	tracked.files.set(join(tracked.ports.env.HOME!, ".pi-command-post/data/trackers.json"), JSON.stringify({ schema_version: 1, connections: [{ id: "x-beads", adapter: "beads", status: "active" }] }));
-	assert.equal(await install(flags(tracked.ports.env.HOME!), tracked.ports), 0);
-	assert.ok(tracked.questions.some((q) => q.startsWith("Install the br (beads) CLI?") && q.includes("beads tracker") && q.endsWith("[Y/n] ")));
-	assert.ok(tracked.lines.some((line) => line.startsWith("skip: br: not on PATH; install br")), tracked.lines.join("\n"));
-
-	const cloned = fake(scratch(t), missing);
-	const user2 = cloned.ports.env.HOME!;
-	cloned.files.set(join(user2, ".pi-command-post/data/projects.json"), JSON.stringify({ schema_version: 1, projects: [{ name: "other" }, { name: "tracked" }] }));
-	cloned.files.set(join(user2, ".pi-command-post/projects/tracked/.beads/beads.db"), "");
-	assert.equal(await install(flags(cloned.ports.env.HOME!), cloned.ports), 0);
-	assert.ok(cloned.questions.some((q) => q.startsWith("Install the br (beads) CLI?") && q.endsWith("[Y/n] ")), "a project clone's .beads/beads.db is a beads tracker too");
-
-	for (const [flag, want] of [["with-br", true], ["no-br", false]] as const) {
-		const f = fake(scratch(t), missing);
-		await install(flags(f.ports.env.HOME!, { [flag]: true }), f.ports);
-		assert.ok(!f.questions.some((q) => q.includes("br (beads)")), `--${flag} is the answer`);
-		assert.equal(f.lines.some((line) => line.startsWith("skip: br: not on PATH; install br")), want);
-	}
-	assert.ok(plain.calls.every((call) => !/curl|\bsudo\b/.test(call)), "no guessed URL, no sudo");
+test("install: no external tracker CLI is probed, offered or flagged, even with retired tracker state", async (t) => {
+	const f = fake(scratch(t));
+	const user = f.ports.env.HOME!;
+	f.files.set(join(user, ".pi-command-post/data/trackers.json"), "{ retired, malformed");
+	f.files.set(join(user, ".pi-command-post/data/projects.json"), JSON.stringify({ schema_version: 1, projects: [{ name: "tracked" }] }));
+	assert.equal(await install(flags(user), f.ports), 0, f.lines.join("\n"));
+	assert.doesNotMatch([...f.calls, ...f.questions, ...f.lines].join("\n"), /tracker|--with-/i, "no tracker CLI step, prompt or flag");
+	const probed = f.calls.filter((call) => call.endsWith(" --version")).map((call) => call.split(" ")[0]);
+	const surviving: readonly string[] = [...PI_LENS_TOOLS.commands, ...REQUIRED_TOOLS];
+	assert.deepEqual(probed.filter((tool) => !surviving.includes(tool!)), [], "only surviving tools are probed");
 });
 
 test("install: no terminal takes every default; --yes asks nothing; a typed answer wins", async (t) => {
@@ -565,12 +547,11 @@ test("install: no terminal takes every default; --yes asks nothing; a typed answ
 	assert.ok(typed.calls.some((call) => call.includes("push-init.ts --origin https://cp.example")), typed.calls.join("\n"));
 });
 
-test("install: tmux and br missing, gh logged out and no provider login are reported, never fatal", async (t) => {
+test("install: tmux missing, gh logged out and no provider login are reported, never fatal", async (t) => {
 	const user = scratch(t);
-	const f = fake(user, { "br --version": { status: 127 }, "tmux -V": { status: 127 }, "gh auth status": { status: 1 }, "gh api user": { status: 1 } });
+	const f = fake(user, { "tmux -V": { status: 127 }, "gh auth status": { status: 1 }, "gh api user": { status: 1 } });
 	assert.equal(await install(flags(user), f.ports), 0, f.lines.join("\n"));
 	assert.ok(f.lines.some((line) => line.startsWith("skip: tmux: not on PATH (optional")));
-	assert.ok(f.lines.some((line) => line.startsWith("skip: br: not on PATH")));
 	assert.ok(f.lines.some((line) => line.startsWith("skip: gh: not logged in") && line.includes("gh auth login")));
 	assert.ok(!f.calls.includes("gh auth login"), "login is the human's");
 	assert.ok(f.lines.some((line) => line.startsWith("skip: login: no provider") && line.includes("/login")));

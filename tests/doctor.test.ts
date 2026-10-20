@@ -494,7 +494,7 @@ test("ledger.file: a missing document is an error naming the scaffold; a sound o
 	for (const check of ["ledger.ids", "ledger.deps", "ledger.prefix", "ledger.size"]) {
 		assert.equal(report.findings.find((f) => f.check === check)?.severity, "ok", check);
 	}
-	assert.ok(!report.findings.some((f) => f.check === "ledger.beads_archive"), "no .beads/, no archive finding");
+	assert.ok(!report.findings.some((f) => f.check === "storage.retired_integration"), "a fresh home has no retired-state finding");
 });
 
 test("ledger.file: not JSON or the wrong shape is an error with the parser's words", async (t) => {
@@ -554,18 +554,20 @@ test("ledger.prefix warns when the environment disagrees with the document; ledg
 	assert.match(size?.what ?? "", new RegExp(`${JOBS_SIZE_WARNING + 1} jobs`));
 });
 
-test("ledger.beads_archive: a leftover .beads/ is one warning that never advises import or deletion", async (t) => {
+test("storage.retired_integration: retired state files are one existence-only warning, never parsed", async (t) => {
 	const fx = fixture(t, { ledger: false });
-	mkdirSync(join(fx.home.path, ".beads"), { recursive: true });
 	mkdirSync(join(fx.home.path, LAYOUT.data), { recursive: true });
-	// Retired tracker config is never read: a malformed one changes nothing.
-	writeFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), "{nope");
-	for (const jobs of [[JOB_ROW], []]) {
-		writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs });
-		const finding = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	mkdirSync(join(fx.home.path, LAYOUT.state), { recursive: true });
+	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [JOB_ROW] });
+	// A malformed file is never read, so it changes nothing; either file alone is evidence.
+	for (const file of [join(LAYOUT.data, "trackers.json"), join(LAYOUT.state, "tracker-sync.json")]) {
+		writeFileSync(join(fx.home.path, file), "{nope");
+		const finding = (await fx.doctor()).findings.find((f) => f.check === "storage.retired_integration");
 		assert.equal(finding?.severity, "warn");
-		assert.match(finding?.fix ?? "", /keep it for your records/);
-		assert.doesNotMatch(`${finding?.what} ${finding?.fix}`, /import-beads|delete|cp_tracker/);
+		assert.equal(finding?.what, "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.");
+		assert.equal(finding?.fix, "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.");
+		assert.equal(finding?.detail, file);
+		rmSync(join(fx.home.path, file));
 	}
 });
 
@@ -1273,16 +1275,16 @@ test("a missing scaffold is advisory; an unwritable one is an error", async (t) 
 	}
 });
 
-test("the one runtime root plus .beads covers runtime state", async (t) => {
+test("the one runtime root covers runtime state", async (t) => {
 	const home = fixture(t);
-	writeFileSync(join(home.home.path, ".gitignore"), ".pi-command-post/\n.beads/\n");
+	writeFileSync(join(home.home.path, ".gitignore"), ".pi-command-post/\n");
 	const finding = find(await home.doctor(), "home.gitignore")[0];
 	assert.equal(finding?.severity, "ok");
 });
 
 test("a .gitignore that lists only the old top-level roots warns about the runtime root", async (t) => {
 	const home = fixture(t);
-	writeFileSync(join(home.home.path, ".gitignore"), "/data/*\nstate/\nprojects/\n.beads/\n");
+	writeFileSync(join(home.home.path, ".gitignore"), "/data/*\nstate/\nprojects/\n");
 	const finding = find(await home.doctor(), "home.gitignore")[0];
 	assert.equal(finding?.severity, "warn");
 	assert.match(finding?.what ?? "", /\.pi-command-post\//);
@@ -1294,7 +1296,7 @@ test("a .gitignore that does not cover runtime state is a warning", async (t) =>
 	const report = await home.doctor();
 	const finding = find(report, "home.gitignore")[0];
 	assert.equal(finding?.severity, "warn");
-	// cp-rnr: every NEVER_COMMIT_PATHS root is demanded, `.beads/` included — the
+	// cp-rnr: every NEVER_COMMIT_PATHS root is demanded — the
 	// guard refuses to stage all of them, so an omission is a real gap.
 	for (const entry of NEVER_COMMIT_PATHS) {
 		assert.ok((finding?.what ?? "").includes(entry), `${entry} is not demanded: ${finding?.what}`);
@@ -1311,7 +1313,7 @@ test("a corrupt fleet file is an error that protects the jobs", async (t) => {
 	const report = await home.doctor();
 	const finding = find(report, "fleet.file")[0];
 	assert.equal(finding?.severity, "error");
-	assert.match(finding?.fix ?? "", /still in br and in state\/runs/);
+	assert.match(finding?.fix ?? "", /still in the jobs document and in state\/runs/);
 });
 
 test("a dead worker, a vanished worktree and a missing run dir each get their own finding", async (t) => {
@@ -1468,7 +1470,7 @@ test(
 		`no model findings: ${report.findings.map((finding) => finding.check).join(",")}`,
 	);
 	// T30: `session_start` now scaffolds the home (data/, state/, projects/, and a
-	// ledger when br is there), so by the time doctor runs a fresh home is *ready*
+	// jobs ledger), so by the time doctor runs a fresh home is *ready*
 	// rather than merely tolerated. Before T30 these were warn/"created on first
 	// use".
 	for (const key of ["data", "state", "projects"]) {

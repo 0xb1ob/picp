@@ -45,7 +45,7 @@ function realRun(step: InstallStep): void {
 			return;
 		case "curl":
 			// The tool's own published quick-install (see src/tool-manifest.ts):
-			// both br and treehouse ship a self-detecting `curl | sh` one-liner.
+			// treehouse ships a self-detecting `curl | sh` one-liner.
 			execFileSync("/bin/sh", ["-c", `curl -fsSL "${step.url}" | sh`], { stdio: "inherit" });
 			return;
 		case "manual":
