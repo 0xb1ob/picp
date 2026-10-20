@@ -143,8 +143,7 @@ import { type RenderOptions, RunWatcher, type RunView } from "./watch.ts";
 import { type DrainProjection, WorkerManager } from "./worker-manager.ts";
 import { tryResolveWorkerPackages } from "./worker-packages.ts";
 import { idleBeadObserver, readReadyBeads } from "./ready-beads.ts";
-import { projectBeadsDb, TrackerStore } from "./trackers/config.ts";
-import { writeBackLine } from "./trackers/link.ts";
+import { projectBeadsDb } from "./trackers/config.ts";
 
 export interface CommandPostOptions {
 	/** Command post home: where `data/`, `state/` and `projects/` live. */
@@ -624,7 +623,6 @@ export class CommandPost {
 			notify: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			relay: (notice) => this.#journalDurable({ ...notice, kind: "recovery" }),
 			runs: this.runs,
-			writeBack: (jobId) => writeBackLine(options.home, () => this.ledger(), () => new TrackerStore({ home: options.home, registry: this.registry }).list(), jobId),
 			onLanded: () => void this.armedDispatches.release(), // unload-parent PR2: a landed blocker may release armed dependents
 		});
 		this.heldRelease = new HeldRelease({ home: options.home, fleet: this.fleet, manager: this.manager, busy: { sending: (id) => this.sender.sending(id), promoting: (id) => this.integrator.promoting(id), driving: (id) => this.continuation.driving(id) }, integration: (id) => this.integrator.get(id), journal: (id, kind, payload) => this.runs.open(id).cp(kind, payload) });

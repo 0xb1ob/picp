@@ -351,13 +351,12 @@ test("issue #2: dep_remove refuses a blocker whose worker never reported, warns 
 	assert.doesNotMatch(closed.text, /warning/);
 });
 
-test("parseJobsArgs: ready by default, list flags, show needs an id, import-beads", () => {
+test("parseJobsArgs: ready by default, list flags, show needs an id", () => {
 	assert.deepEqual(parseJobsArgs(""), { kind: "ready" });
 	assert.deepEqual(parseJobsArgs("ready --project demo"), { kind: "ready", project: "demo" });
 	assert.deepEqual(parseJobsArgs("list --all --status closed --project demo"), { kind: "list", all: true, status: "closed", project: "demo" });
 	assert.deepEqual(parseJobsArgs("list"), { kind: "list", all: false });
 	assert.deepEqual(parseJobsArgs("show cp-a1b2"), { kind: "show", jobId: "cp-a1b2" });
-	assert.deepEqual(parseJobsArgs("import-beads"), { kind: "import-beads" });
 	assert.throws(() => parseJobsArgs("show"), /needs a job id/);
 	assert.throws(() => parseJobsArgs("list --status bogus"), /--status must be one of/);
 	assert.throws(() => parseJobsArgs("frobnicate"), /usage: \/cp-jobs/);
@@ -443,7 +442,7 @@ test("registerJobs wires cp_job and /cp-jobs to the same ledger", async (t) => {
 	await commands.get("cp-jobs")!.handler("", ctx);
 	assert.match(emitted[0] ?? "", /via tool/, "the command reads what the tool wrote");
 	await commands.get("cp-jobs")!.handler("import-beads", ctx);
-	assert.match(emitted[1] ?? "", /no \.beads\/issues\.jsonl under/, "a home without .beads/ is told so, not crashed");
+	assert.match(emitted[1] ?? "", /usage: \/cp-jobs/, "the retired importer is an unknown subcommand");
 });
 
 test("create resolves project through the runtime: required", async (t) => {
@@ -717,27 +716,4 @@ test("picp-t4n: only an answered override on this admission escalation counts", 
 			assert.equal(scratch.document().jobs.length, 0);
 		});
 	}
-});
-
-test("cp_job create auto-links a job whose br ref names a bead on the active connection, and says why otherwise (laf)", async (t) => {
-	const { ports: p } = ports(t);
-	const conn = { id: "demo-beads", project: "demo", adapter: "beads", endpoint: "/dbs/demo.db", intake_enabled: false, write_enabled: true, status: "active", connected_at: "2026-09-01T00:00:00Z" } as const;
-	const found = async (url: string) => ({ status: "found", kind: "br", state: "open", title: "bead", url }) as const;
-	const linked = await runJobAction(
-		{ action: "create", title: "fix b-1", project: "demo", kind: "ship", delivery: "pr", external_ref: "br --db '/dbs/demo.db' show b-1 --json" },
-		{ ...p, trackers: () => [conn], verifyRef: found },
-	);
-	assert.equal((linked.details.job as { tracker?: { item_id: string } }).tracker?.item_id, "b-1");
-	assert.match(linked.text, /tracker: linked to demo-beads\/b-1/);
-	const again = await runJobAction(
-		{ action: "create", title: "fix b-1", project: "demo", kind: "ship", delivery: "pr", external_ref: "br --db '/dbs/demo.db' show b-1 --json" },
-		{ ...p, trackers: () => [conn], verifyRef: found },
-	);
-	assert.match(again.text, /tracker: linked to demo-beads\/b-1/, "the idempotent hit reports the link it already has");
-	const url = await runJobAction(
-		{ action: "create", title: "fix 9", project: "demo", delivery: "pr", external_ref: "https://github.com/o/r/issues/9" },
-		{ ...p, trackers: () => [conn], verifyRef: async () => ({ status: "found", kind: "issue", state: "open", title: "bug", url: "https://github.com/o/r/issues/9" }) as const },
-	);
-	assert.match(url.text, /tracker: not linked to a tracker bead: external_ref is not a br show command/);
-	assert.equal((url.details.job as { tracker?: unknown }).tracker, undefined);
 });

@@ -5,8 +5,7 @@
  *    argument typed in the schema so a malformed call is refused at the
  *    boundary. It returns the affected job (or the list) and never anything
  *    the ledger does not store.
- *  - **`/cp-jobs`** is the operator's: `ready`, `list`, `show` (read-only) and
- *    the one write, `import-beads`.
+ *  - **`/cp-jobs`** is the operator's: `ready`, `list` and `show`, all read-only.
  *
  * Three refusals live here and not in `Ledger`, because the model is the only
  * caller that could make them by accident: closing a job a live worker holds
@@ -21,15 +20,12 @@ import { type Static, Type } from "typebox";
 import type { CommandPost } from "../../src/command-post.ts";
 import { operatorTextsFromEntries } from "../../src/decide.ts";
 import { addTaskAddendum } from "../../src/task-addenda.ts";
-import { DELIVERIES, JOB_KINDS, JOB_STATUSES, jobLabelErrors, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime, type TrackerConnection } from "../../src/contracts.ts";
+import { DELIVERIES, JOB_KINDS, JOB_STATUSES, jobLabelErrors, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime } from "../../src/contracts.ts";
 import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.ts";
-import { formatBeadsImport, importBeads } from "../../src/ledger-import.ts";
 import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
-import { TrackerStore } from "../../src/trackers/config.ts";
-import { autoLink } from "../../src/trackers/link.ts";
 import { BR_SHOW_RE, describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
 
 export const JOB_ACTIONS = [
@@ -112,8 +108,6 @@ export interface JobPorts {
 	verifyRef?: (ref: string) => Promise<RefVerification>;
 	/** create: where a refused/unverifiable ref's escalation and note are written. */
 	escalations: () => EscalationStore;
-	/** create: tracker connections, to auto-link a job whose external_ref names a bead on its project's active connection (laf). */
-	trackers?: () => readonly TrackerConnection[];
 }
 
 export interface JobActionResult {
@@ -176,18 +170,6 @@ function listResult(jobs: Job[], empty: string): JobActionResult {
 	};
 }
 
-/** create: auto-link a job whose ref names a bead (laf). Never fails the create; no ref or no port adds nothing. */
-async function linkCreated(ledger: Ledger, job: Job, ports: JobPorts): Promise<{ text: string; job: Job; details: { tracker?: string } }> {
-	if (!ports.trackers || !job.external_ref) return { text: "", job, details: {} };
-	let line: string;
-	try {
-		line = await autoLink(ledger, job, ports.trackers());
-	} catch (error) {
-		line = `not linked to a tracker bead: ${(error as Error).message.split("\n")[0]}`;
-	}
-	return { text: `\n  tracker: ${line}`, job: await ledger.show(job.id), details: { tracker: line } };
-}
-
 /** The policy behind `cp_job`. Pure over its ports; the tool and the tests call this. */
 export async function runJobAction(params: JobActionInput, ports: JobPorts): Promise<JobActionResult> {
 	const { ledger } = ports;
@@ -222,8 +204,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				}
 				await admitScheduledMember(runs, existing);
 				ports.noteCreated?.(existing.id);
-				const linked = await linkCreated(ledger, existing, ports);
-				return { text: `created ${existing.id}: ${formatJobLine(existing)}${linked.text}`, details: { job: linked.job, existing: true, ...linked.details } };
+				return { text: `created ${existing.id}: ${formatJobLine(existing)}`, details: { job: existing, existing: true } };
 			}
 			// pi-command-post-autonomy-programme-cur.4.5: a ref is checked once, only on the create that
 			// would actually mint a job \u2014 the idempotent hit above already carries whatever the first
@@ -274,9 +255,8 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const job = refNote ? await ledger.update(created.id, { notes: refNote }) : created;
 			await admitScheduledMember(runs, job);
 			ports.noteCreated?.(job.id);
-			const linked = await linkCreated(ledger, job, ports);
 			const riskLine = params.risk ? `\n  risk: ${params.risk} recorded on the job (the risk:high gate reads it; routing does not lower on it)` : "";
-			return { text: `created ${job.id}: ${formatJobLine(job)}${riskLine}${linked.text}`, details: { job: linked.job, ...linked.details } };
+			return { text: `created ${job.id}: ${formatJobLine(job)}${riskLine}`, details: { job } };
 		}
 		case "show": {
 			const job = await ledger.show(need(params, "job_id"));
@@ -393,10 +373,9 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 export type JobsCommand =
 	| { kind: "ready"; project?: string }
 	| { kind: "list"; project?: string; all: boolean; status?: JobStatus }
-	| { kind: "show"; jobId: string }
-	| { kind: "import-beads" };
+	| { kind: "show"; jobId: string };
 
-const USAGE = "usage: /cp-jobs [ready [--project N] | list [--all] [--status S] [--project N] | show <job-id> | import-beads]";
+const USAGE = "usage: /cp-jobs [ready [--project N] | list [--all] [--status S] [--project N] | show <job-id>]";
 
 export function parseJobsArgs(args: string): JobsCommand {
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -427,8 +406,6 @@ export function parseJobsArgs(args: string): JobsCommand {
 			if (!jobId || jobId.startsWith("--")) throw new Error(`/cp-jobs show needs a job id — ${USAGE}`);
 			return { kind: "show", jobId };
 		}
-		case "import-beads":
-			return { kind: "import-beads" };
 		default:
 			throw new Error(`/cp-jobs: unknown subcommand ${JSON.stringify(head)} — ${USAGE}`);
 	}
@@ -457,7 +434,6 @@ export function portsFor(post: CommandPost, runtime: Runtime): JobPorts {
 		ledger: post.ledger(),
 		resolveProject: (given) => resolveProjectArg(runtime, given, "cp_job create"),
 		escalations: () => post.escalations,
-		trackers: () => new TrackerStore({ home: post.home, registry: post.registry }).list(),
 		hasLiveWorker: (jobId) => {
 			try {
 				const phase = post.fleet.get(jobId)?.phase;
@@ -509,9 +485,9 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 	});
 
 	pi.registerCommand("cp-jobs", {
-		description: "The job ledger: ready (default), list [--all] [--status S] [--project N], show <job-id>, import-beads",
+		description: "The job ledger: ready (default), list [--all] [--status S] [--project N], show <job-id>",
 		getArgumentCompletions: (prefix: string) => {
-			const words = ["ready", "list", "show", "import-beads", "--all", "--status", "--project"]
+			const words = ["ready", "list", "show", "--all", "--status", "--project"]
 				.filter((word) => word.startsWith(prefix))
 				.map((word) => ({ value: word, label: word }));
 			return words.length > 0 ? words : null;
@@ -541,9 +517,6 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 						break;
 					case "show":
 						text = (await runJobAction({ action: "show", job_id: command.jobId }, p)).text;
-						break;
-					case "import-beads":
-						text = formatBeadsImport(await importBeads(post.ledger()));
 						break;
 				}
 				ports.emit(ctx, "cp-jobs", text);

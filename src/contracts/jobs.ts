@@ -7,7 +7,20 @@ import { RISKS } from "./routing.ts";
 
 import { REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./reviews.ts";
 import { DelegationProvenanceFields } from "./escalations.ts";
-import { TrackerLinkSchema } from "./trackers.ts";
+import { MandateIdSchema } from "./mandates.ts";
+
+/** Retired integration's link on old jobs: inert metadata, kept so existing ledgers validate and round-trip. */
+export const LegacyTrackerLinkSchema = Type.Object(
+	{
+		connection_id: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" }),
+		item_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$" }),
+		linked_at: IsoTimestampSchema,
+		mandate_id: Type.Optional(MandateIdSchema),
+		task_sha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+	},
+	{ additionalProperties: false },
+);
+export type LegacyTrackerLink = Static<typeof LegacyTrackerLinkSchema>;
 
 /** Append-only authorized scope, with the body frozen even when its source was a file. */
 export const TaskAddendumSchema = Type.Object(
@@ -80,8 +93,8 @@ export const JobSchema = Type.Object(
 		/** Where the issue lives: a tracker url, a file path, or the command that shows it. One line; a pointer, never a body. */
 		external_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\r\\n]+$" })),
 		script: Type.Optional(ScriptDeclarationSchema),
-		/** Stable tracker identity (B2); unique across open and closed jobs. */
-		tracker: Type.Optional(TrackerLinkSchema),
+		/** Legacy link, inert: nothing reads it to act; still unique across open and closed jobs. */
+		tracker: Type.Optional(LegacyTrackerLinkSchema),
 		blocked_by: Type.Array(JobIdSchema),
 		comments: Type.Array(JobCommentSchema),
 		created_at: IsoTimestampSchema,

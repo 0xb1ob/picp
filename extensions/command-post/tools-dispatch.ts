@@ -10,8 +10,6 @@ import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPE
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
-import { TrackerStore } from "../../src/trackers/config.ts";
-import { autoLink } from "../../src/trackers/link.ts";
 import { currentRuntime } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
@@ -192,14 +190,6 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				};
 			}
 			const post = commandPost(ctx.modelRegistry);
-			// laf: link before dispatching (the job exists either way); a tracker problem never refuses a dispatch.
-			let trackerLine: string | undefined;
-			try {
-				const job = await post.ledger().show(params.job_id);
-				if (job.external_ref && !job.tracker) trackerLine = await autoLink(post.ledger(), job, new TrackerStore({ home: post.home, registry: post.registry }).list());
-			} catch (error) {
-				trackerLine = `not linked to a tracker bead: ${(error as Error).message.split("\n")[0]}`;
-			}
 			// 4b-2: a queued job starts when a slot frees; a second dispatch would race it.
 			const queuedAt = post.dispatchQueue.position(params.job_id);
 			if (queuedAt !== undefined) throw new Error(`${params.job_id} is already queued at position ${queuedAt} — it starts when a worker slot frees; the outcome arrives as a wake-up. Do not re-dispatch.`);
@@ -265,7 +255,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			}
 			refreshWidget(ctx);
 			return {
-				content: [{ type: "text", text: `${formatDispatchResult(result)}${trackerLine ? `\n  tracker: ${trackerLine}` : ""}${armedLine}` }],
+				content: [{ type: "text", text: `${formatDispatchResult(result)}${armedLine}` }],
 				details: { ...result },
 			};
 		},

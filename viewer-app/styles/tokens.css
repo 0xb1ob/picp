@@ -74,7 +74,8 @@
 }
 /*
  * Light Sessions: the design's light artboard, for the whole Sessions shell (rail included) and the Report page on a
- * light-scheme browser. Every other screen keeps the dark :root palette. Links and accents darken for text on a light ground.
+ * light-scheme browser. Every other screen keeps the dark :root palette. Links and accents darken for text on a light
+ * ground.
  */
 @media (prefers-color-scheme: light) {
  .shell-sessions, .shell-report {

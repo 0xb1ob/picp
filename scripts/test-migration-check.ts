@@ -5,9 +5,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
-const DISPOSITIONS = new Set(["convert", "e2e", "retained", "exception", "deleted"]);
+const DISPOSITIONS = new Set(["convert", "e2e", "retained", "exception", "deleted", "deleted-with-feature"]);
+const GONE = new Set(["deleted", "deleted-with-feature"]);
+/** Names a removing PR (`#123`) or job id (`cp-…`); a programme phase alone (`P1`) does not. */
+const REMOVER_RE = /#\d+|\bcp-[a-z0-9][a-z0-9-]*/;
 
 interface Args {
 	base?: string;
@@ -54,16 +58,60 @@ function git(...args: string[]): string {
 	return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28 });
 }
 
-/** Calls whose callee is the bare identifier `test`: the repository's case declarations. */
-function countDeclarations(path: string, source: string): number {
+/** Titles of the bare-`test` calls (the case declarations); a non-literal title is `<expr>`. */
+export function declarationTitles(path: string, source: string): string[] {
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
-	let count = 0;
+	const titles: string[] = [];
 	const visit = (node: ts.Node): void => {
-		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "test") count += 1;
+		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "test") {
+			const title = node.arguments[0];
+			titles.push(title && (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title)) ? title.text : "<expr>");
+		}
 		ts.forEachChild(node, visit);
 	};
 	visit(file);
-	return count;
+	return titles;
+}
+
+function countDeclarations(path: string, source: string): number {
+	return declarationTitles(path, source).length;
+}
+
+/** A `deleted-with-feature` row: owner names the removing PR/job; evidence cites removed source modules. */
+export function deletedWithFeatureFindings(path: string, owner: string, evidence: string, exists: (path: string) => boolean): string[] {
+	const findings: string[] = [];
+	if (!REMOVER_RE.test(owner)) findings.push(`${path}: deleted-with-feature owner must name the removing PR or job (got "${owner}")`);
+	const sources = [...evidence.matchAll(/\b(?:src|extensions)\/[\w./-]+\.ts\b/g)].map((match) => match[0]);
+	if (sources.length === 0) findings.push(`${path}: deleted-with-feature names no removed source module (src/… or extensions/…)`);
+	for (const source of sources) if (exists(source)) findings.push(`${path}: deleted-with-feature cites ${source}, which still exists`);
+	return findings;
+}
+
+/**
+ * Lost declarations in kept files: each `feature-removed` row names a title present at the baseline, absent from the
+ * tree, and the removing PR/job; a file's net loss must be covered by that many rows.
+ */
+export function featureRemovedFindings(
+	rows: readonly string[][],
+	lost: ReadonlyMap<string, { before: number; after: number }>,
+	titles: (path: string) => { base: readonly string[]; tree: readonly string[] },
+): string[] {
+	const findings: string[] = [];
+	const covered = new Map<string, Set<string>>();
+	for (const [path = "", declaration = "", remover = ""] of rows) {
+		const seen = covered.get(path) ?? new Set<string>();
+		if (seen.has(declaration)) findings.push(`${path}: feature-removed "${declaration}" listed twice`);
+		if (!REMOVER_RE.test(remover)) findings.push(`${path}: feature-removed "${declaration}" must name the removing PR or job`);
+		const { base, tree } = titles(path);
+		if (!base.includes(declaration)) findings.push(`${path}: feature-removed "${declaration}" is not a baseline declaration`);
+		if (tree.includes(declaration)) findings.push(`${path}: feature-removed "${declaration}" is still declared`);
+		covered.set(path, seen.add(declaration));
+	}
+	for (const [path, { before, after }] of lost) {
+		const notes = covered.get(path)?.size ?? 0;
+		if (before - after > notes) findings.push(`${path}: ${before} → ${after} declarations with no deletion record (${notes} feature-removed note(s))`);
+	}
+	return findings;
 }
 
 function currentTestFiles(): string[] {
@@ -109,8 +157,9 @@ function main(): number {
 		if (!baseSet.has(path)) findings.push(`${path}: listed in the baseline but not a test file at ${base.slice(0, 12)}`);
 		if (!DISPOSITIONS.has(kind)) findings.push(`${path}: unknown disposition "${kind}"`);
 		if (kind !== "deleted" && !evidence) findings.push(`${path}: ${kind} without evidence`);
-		if (kind !== "deleted" && !currentSet.has(path)) findings.push(`${path}: missing from the tree but not dispositioned deleted`);
-		if (kind === "deleted" && currentSet.has(path)) findings.push(`${path}: dispositioned deleted but still present`);
+		if (!GONE.has(kind) && !currentSet.has(path)) findings.push(`${path}: missing from the tree but not dispositioned deleted`);
+		if (GONE.has(kind) && currentSet.has(path)) findings.push(`${path}: dispositioned ${kind} but still present`);
+		if (kind === "deleted-with-feature") findings.push(...deletedWithFeatureFindings(path, owner, evidence, existsSync));
 		const pr = prs.get(owner);
 		if (kind === "convert" && !evidence.startsWith(`behavior ${pr?.behavior ?? "?"}`)) {
 			findings.push(`${path}: convert needs a conversion PR owner and "behavior <id>" evidence (got ${owner}, "${evidence}")`);
@@ -175,10 +224,15 @@ function main(): number {
 	const baseCounts = new Map(baseFiles.map((path) => [path, countDeclarations(path, git("show", `${base}:${path}`))]));
 	const baseDecls = [...baseCounts.values()].reduce((sum, n) => sum + n, 0);
 	const decls = (paths: readonly string[]) => paths.reduce((sum, path) => sum + countDeclarations(path, readFileSync(path, "utf8")), 0);
+	const lost = new Map<string, { before: number; after: number }>();
 	for (const [path, before] of baseCounts) {
 		const after = currentSet.has(path) ? decls([path]) : 0;
-		if (after < before && disposition.get(path)?.kind !== "deleted") findings.push(`${path}: ${before} → ${after} declarations with no deletion record`);
+		if (after < before && !GONE.has(disposition.get(path)?.kind ?? "")) lost.set(path, { before, after });
 	}
+	findings.push(...featureRemovedFindings(rows(section(doc, "feature-removed", findings)), lost, (path) => ({
+		base: baseFiles.includes(path) ? declarationTitles(path, git("show", `${base}:${path}`)) : [],
+		tree: currentSet.has(path) ? declarationTitles(path, readFileSync(path, "utf8")) : [],
+	})));
 	const kept = current.filter((path) => baseSet.has(path));
 	const added = current.filter((path) => !baseSet.has(path));
 	console.log(`baseline ${base.slice(0, 12)}: ${baseFiles.length} files, ${baseDecls} static declarations`);
@@ -209,9 +263,11 @@ function main(): number {
 	return findings.length ? 1 : 0;
 }
 
-try {
-	process.exitCode = main();
-} catch (error) {
-	console.error(`FAIL ${(error as Error).message}`);
-	process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	try {
+		process.exitCode = main();
+	} catch (error) {
+		console.error(`FAIL ${(error as Error).message}`);
+		process.exitCode = 1;
+	}
 }
