@@ -26,7 +26,7 @@ import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from
 import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
-import { describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
+import { BR_SHOW_RE, describeRefMismatch, describeRefVerification, type RefVerification, verifyExternalRef } from "../../src/verify-external-ref.ts";
 
 export const JOB_ACTIONS = [
 	"create",
@@ -63,7 +63,7 @@ export const JobActionSchema = Type.Object(
 		external_ref: Type.Optional(
 			Type.String({
 				description:
-					"create: where the issue lives — a url, a file path, or the command that shows it (stored as given, never run); one line, never the body",
+					"create: where the issue lives — a tracker url, a file path, or the command that shows it (for a br tracker: `br --db <absolute path to project's .beads/beads.db> show <id> --json`, so it still works from a leased worktree); one line, never the body",
 			}),
 		),
 		script_path: Type.Optional(Type.String({ description: "create only: checked-in POSIX repository-relative shell script; requires kind:ship delivery:local" })),
@@ -103,7 +103,7 @@ export interface JobPorts {
 	resolveProject: (given: string | undefined) => string;
 	/**
 	 * create: verifies `external_ref` before the job is recorded (pi-command-post-autonomy-programme-cur.4.5).
-	 * Defaults to `verifyExternalRef`; overridden in tests to script `gh` responses.
+	 * Defaults to `verifyExternalRef`; overridden in tests to script `gh`/`br` responses.
 	 */
 	verifyRef?: (ref: string) => Promise<RefVerification>;
 	/** create: where a refused/unverifiable ref's escalation and note are written. */
@@ -212,17 +212,33 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			// ignorance, not a mismatch, and lands on the job as a note instead.
 			let refNote: string | undefined;
 			if (params.external_ref !== undefined) {
-				const ref = params.external_ref.trim();
-				const verification = await (ports.verifyRef ? ports.verifyRef(ref) : verifyExternalRef(ref, { cwd: ledger.home }));
-				const mismatch = describeRefMismatch(ref, verification);
+				const ref = ledger.normalizeRef(params.external_ref, project);
+				const bare = BR_SHOW_RE.exec(ref);
+				// No project DB: a bare br ref is never read against the home's (or cwd's) database.
+				const verification: RefVerification = bare && !bare[1]
+					? { status: "unreachable", message: `no beads database is configured for project ${project} (cp_tracker connect, or <clone>/.beads); bare br ref not verified` }
+					: await (ports.verifyRef ? ports.verifyRef(ref) : verifyExternalRef(ref, { cwd: ledger.home }));
+				const mismatch = describeRefMismatch(params.external_ref, verification);
 				if (mismatch) {
 					const anchorJobId = `verify-${project}`;
-					await raiseConflictingRef(ports.escalations(), { anchorJobId, ref, found: mismatch });
-					throw new Error(
-						`cp_job create refused: ${mismatch} \u2014 raised a conflicting_acceptance escalation (job_ids [${anchorJobId}]); relay it, do not dispatch`,
-					);
+					const store = ports.escalations();
+					const deferred = verification.status === "found" && verification.kind === "br" && verification.state === "deferred";
+					const override = deferred ? store.list({ jobId: anchorJobId, kind: "conflicting_acceptance", status: "answered" }).find((item) =>
+						item.job_ids.length === 1 && item.answer?.trim().toLowerCase() === "override" &&
+						item.answered_at !== undefined && item.answered_at >= item.created_at &&
+						(item.deferred_refs !== undefined ? item.deferred_refs.includes(ref)
+							// Legacy records lack structured refs: require the complete single-ref question and an explicit DB pin.
+							: BR_SHOW_RE.exec(params.external_ref ?? "")?.[1] !== undefined && item.question === `external_ref check failed — ${params.external_ref}: ${mismatch}`)) : undefined;
+					if (!override) {
+						await raiseConflictingRef(store, { anchorJobId, ref: params.external_ref, found: mismatch, ...(deferred ? { deferredRef: ref } : {}) });
+						throw new Error(
+							`cp_job create refused: ${mismatch} \u2014 raised a conflicting_acceptance escalation (job_ids [${anchorJobId}]); relay it, do not dispatch`,
+						);
+					}
+					refNote = `${describeRefVerification(verification)}; deferred-bead admission override: ${override.id}`;
+				} else {
+					refNote = describeRefVerification(verification);
 				}
-				refNote = describeRefVerification(verification);
 			}
 			const created = await ledger.create({
 				title,
@@ -451,7 +467,7 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 		promptGuidelines: [
 			"Every job needs project (a registered name) and delivery (pr|local); add kind ship|research when it helps routing.",
 			"Pass risk on cp_job create only when the operator or the spec states it (never invent it): a recorded low turns a keyword-only risk:high into a warning, a recorded high always gates.",
-			"When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it) — the ledger points at issues, it does not copy them, and never runs a ref.",
+			"When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it); for a br tracker, pin the project's beads DB with --db and its absolute path (`br --db /abs/path/.beads/beads.db show <id> --json`) so it still works from a leased worktree — the ledger points at issues, it does not copy them.",
 			"cp_job create is idempotent: the same project + title, or the same external_ref, returns the existing open job. Echo each id. A repeated list creates nothing new.",
 			"cp_job ready is the queue; cp_next says which of it the active mandate covers and what to do next.",
 			"cp_job close/drop is for dropping work (`dropped: …`). Finished research and Q&A close on cp_teardown; ship jobs close on cp_integrate. A live worker is torn down first.",

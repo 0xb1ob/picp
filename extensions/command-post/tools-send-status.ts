@@ -171,7 +171,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			"Render the STATUS BLOCK (AGENTS.md \u00a7Status block) from disk facts merged with your " +
 			"judgment. It is opt-in \u2014 call it when a status summary is asked for or useful, not on every turn \u2014 and always instead of hand-typing the four markdown tables. In progress and Shipped are " +
 			"assembled from the same run projection /status and /watch read; you supply labels (falls back to the " +
-			"job title), blocked reasons, and the Awaiting you rows, which exist in no file. A merge-approval row is gated on " +
+			"br title), blocked reasons, and the Awaiting you rows, which exist in no file. A merge-approval row is gated on " +
 			"CI for that branch's current head (cp-gmy): it is deferred while CI runs, refused while CI is red, and raised " +
 			"by the extension itself the moment CI completes green on that head or a cp_review passes on it — no call to this " +
 			"tool is needed for that, and the tool prints why a row is still deferred under the table. " +
@@ -182,7 +182,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 			"cp_status_block is opt-in: ordinary turns do not call it (the status line already shows the fleet); call it once when the operator asks for a status summary or a turn needs the full picture, instead of typing STATUS BLOCK tables by hand.",
 			"A row deferred on CI or on a missing review raises itself: the extension re-gates every deferred row when CI completes on the held head (the cp-ci watch) and when a cp_review passes on it, so no render is needed to release one.",
 			"A row deferred on an unknown CI state may become readable with no event at all: invoke cp_status_block manually when you think observability came back \u2014 the render re-gates the row, and never bypasses the gate.",
-			"Only supply a label when the job title would not read plainly to the operator; an omitted label falls back to the title.",
+			"Only supply a label when the br title would not read plainly to the operator; an omitted label falls back to the title.",
 			"Awaiting you is the one table this tool cannot derive: give type (approval|design|authorization|escalation), decision, why and blocks for every open human decision. Open escalations are merged from the store.",
 			"Blocked rows name a real dependency, CI check, gate or worker — never a human decision; a human decision belongs in awaiting instead.",
 			"Pass a merge-approval row whenever you want one: the tool checks CI for that branch's current head itself and defers the ask until it has finished, so you never have to time the question.",
@@ -196,7 +196,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 						job_id: Type.String({ description: "The job this label names" }),
 						label: Type.String({ maxLength: MAX_LABEL_CHARS, description: "Plain-language label; bounded so one long label cannot blow up the layout" }),
 					}),
-					{ description: "Per-job human labels; a job without one falls back to its job title, then its bare id" },
+					{ description: "Per-job human labels; a job without one falls back to its br title, then its bare id" },
 				),
 			),
 			blocked: Type.Optional(

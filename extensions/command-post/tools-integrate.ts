@@ -110,7 +110,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 			"Advance one delivery:pr job's merge by exactly one step, and verify that step's postcondition: read CI " +
 			"for the pushed head, read whether the repository itself permits the merge unforced (mergeStateStatus, " +
 			"cp-x7i), update the branch server-side only when GitHub says BEHIND or a readable rule requires it, " +
-			"merge, record the receipt, tear down and close the job. " +
+			"merge, record the receipt, tear down and close the br issue. " +
 			"Idempotent and resumable — it recomputes which step is due from git and gh every call, so a restarted " +
 			"parent picks up where it stopped. Branch on `next`, never on the prose: advance | wait | review | resolve | retry | " +
 			"surface | done. next: review means no passing cp_review on this head — run cp_review on that head, never re-review an unchanged one. " +

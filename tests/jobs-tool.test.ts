@@ -137,7 +137,7 @@ test("conflicting and duplicate reserved labels refuse with no write or receipt;
 test("list marks legacy label faults and preserves search and narrow repair", async (t) => {
 	const { ports: p, scratch } = ports(t);
 	const good = await scratch.ledger.create({ title: "good", project: "demo", delivery: "local" });
-	const bad = { ...good, id: "cp-legacy", title: "legacy", external_ref: "external-tool show old --json", labels: [...good.labels, "delivery:board"] };
+	const bad = { ...good, id: "cp-legacy", title: "legacy", external_ref: "br show old --json", labels: [...good.labels, "delivery:board"] };
 	const doc = scratch.document();
 	doc.jobs.unshift(bad);
 	writeFileSync(scratch.ledger.file, JSON.stringify(doc));
@@ -233,7 +233,7 @@ test("intake: three-item list with one dep; re-run creates nothing", async (t) =
 	const two = (await runJobAction({ action: "create", title: "two", project: "demo", delivery: "local", kind: "research" }, p)).details.job as { id: string };
 	const three = (
 		await runJobAction(
-			{ action: "create", title: "three", project: "demo", delivery: "pr", kind: "ship", external_ref: "external-tool show item --json" },
+			{ action: "create", title: "three", project: "demo", delivery: "pr", kind: "ship", external_ref: "br show cp-nz95 --json" },
 			p,
 		)
 	).details.job as { id: string; external_ref?: string };
@@ -244,13 +244,13 @@ test("intake: three-item list with one dep; re-run creates nothing", async (t) =
 		listed.find((j) => j.id === three.id)?.blocked_by,
 		[one.id],
 	);
-	assert.equal(three.external_ref, "external-tool show item --json");
+	assert.equal(three.external_ref, "br show cp-nz95 --json");
 	assert.deepEqual(created, [one.id, two.id, three.id]);
 
 	const againOne = await runJobAction({ action: "create", title: "One", project: "demo", delivery: "pr", kind: "ship" }, p);
 	const againTwo = await runJobAction({ action: "create", title: "two", project: "demo", delivery: "local", kind: "research" }, p);
 	const againThree = await runJobAction(
-		{ action: "create", title: "other title", project: "demo", delivery: "pr", external_ref: "external-tool show item --json" },
+		{ action: "create", title: "other title", project: "demo", delivery: "pr", external_ref: "br show cp-nz95 --json" },
 		p,
 	);
 	assert.equal((againOne.details.job as { id: string }).id, one.id);
@@ -282,12 +282,12 @@ test("cp_job script create dedupes only identical actions and shows the declarat
 test("cp_job create stores a non-url external_ref and show prints it as the ref line", async (t) => {
 	const { ports: p } = ports(t);
 	const created = await runJobAction(
-		{ action: "create", title: "port the thing", project: "demo", delivery: "pr", external_ref: "external-tool show item --json" },
+		{ action: "create", title: "port the thing", project: "demo", delivery: "pr", external_ref: "br show cp-nz95 --json" },
 		p,
 	);
 	const id = (created.details.job as { id: string }).id;
 	const shown = await runJobAction({ action: "show", job_id: id }, p);
-	assert.match(shown.text, /ref:\s+external-tool show item --json/);
+	assert.match(shown.text, /ref:\s+br show cp-nz95 --json/);
 	assert.ok(!shown.text.includes("priority:"), "the detail no longer has a priority line");
 });
 
@@ -476,6 +476,48 @@ test("the cp_job schema refuses the retired type and priority arguments, on crea
 	assert.equal(validate(JobActionSchema, { ...create, nonsense: 1 }).ok, false, "any unnamed argument is a refusal, not a silent drop");
 });
 
+test("create verifies the selected project's pinned database before recording array beads", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const db = join(scratch.path, "selected project", ".beads", "beads.db");
+	p.ledger = new Ledger({ home: scratch.path, beadsDbFor: (project) => project === "demo" ? db : undefined });
+	let state = "closed";
+	const verifyRef = (ref: string) => verifyExternalRef(ref, {
+		cwd: "/wrong-project",
+		exec: async (_command, args) => {
+			assert.deepEqual(args, ["--db", db, "--no-auto-flush", "--no-auto-import", "show", "cp-array", "--json"]);
+			return JSON.stringify([{ title: "Array bead", status: state }]);
+		},
+	});
+	const input = { action: "create", title: "array", project: "demo", delivery: "pr", external_ref: "br show cp-array --json" } as const;
+	await assert.rejects(runJobAction(input, { ...p, verifyRef }), /closed.*Array bead/);
+	assert.equal((await p.ledger.list()).length, 0);
+	assert.equal(p.escalations().list().length, 1);
+	state = "open";
+	const result = await runJobAction(input, { ...p, verifyRef });
+	assert.match((result.details.job as { notes: string }).notes, /verified: br open/);
+});
+
+test("a bare ref is not pinned to or verified against the home database, while explicit pins win", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	mkdirSync(join(scratch.path, ".beads"));
+	writeFileSync(join(scratch.path, ".beads", "beads.db"), "");
+	p.ledger = new Ledger({ home: scratch.path, beadsDbFor: () => undefined });
+	const ref = "br show cp-home --json";
+	let verified = 0;
+	const result = await runJobAction({ action: "create", title: "home", project: "demo", delivery: "pr", external_ref: ref }, {
+		...p, verifyRef: async (resolved) => {
+			verified++;
+			return { status: "found", kind: "br", state: "open", title: "Home", url: resolved };
+		},
+	});
+	assert.equal(verified, 0, "no br call against the home (or cwd) database");
+	assert.equal((result.details.job as { external_ref: string }).external_ref, ref);
+	assert.match((result.details.job as { notes: string }).notes, /no beads database is configured for project demo/);
+	assert.equal(p.ledger.normalizeRef("br --db '/explicit/beads.db' show cp-home --json", "demo"), "br --db '/explicit/beads.db' show cp-home --json");
+	const projectLedger = new Ledger({ home: scratch.path, beadsDbFor: () => "/project/beads.db" });
+	assert.equal(projectLedger.normalizeRef(ref, "demo"), "br --db '/project/beads.db' show cp-home --json");
+});
+
 // -- external_ref verification (pi-command-post-autonomy-programme-cur.4.5) ------------------
 
 test("cp_job create refuses a merged-PR ref at an issue url, and two bad refs in one project escalate once", async (t) => {
@@ -535,23 +577,143 @@ test("cp_job create: gh unreachable records a note and proceeds, no refusal", as
 	assert.equal(p.escalations().open().length, 0);
 });
 
-test("cp_job create: a command-shaped ref is opaque, and an answered legacy override admits nothing", async (t) => {
+test("cp_job create: a br show ref with status closed refuses", async (t) => {
 	const { ports: p } = ports(t);
-	const ref = "external-tool show item --json";
-	const store = p.escalations();
-	// An older home's answered override for this exact ref once admitted a deferred item; now it grants nothing.
-	const es = await store.raise({
+	const ref = "br --db '/project/.beads/beads.db' show cp-1 --json";
+	const closedBeads = async () => ({ status: "found", kind: "br", state: "closed", title: "already done", url: ref }) as const;
+	await assert.rejects(
+		runJobAction(
+			{ action: "create", title: "redo it", project: "demo", delivery: "pr", external_ref: ref },
+			{ ...p, verifyRef: closedBeads },
+		),
+		/closed.*already done/is,
+	);
+	assert.deepEqual((await runJobAction({ action: "list", all: true }, p)).details.jobs, []);
+});
+
+test("picp-t4n: an answered legacy override admits only its deferred bead and records the es", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const ref = "br --db '/project/.beads/beads.db' show picp-80q --json";
+	const input = { action: "create", title: "parent-context plan", project: "demo", delivery: "local", kind: "research", external_ref: ref } as const;
+	let state = "deferred";
+	const verifyRef = (url: string) => verifyExternalRef(url, { exec: async (command, args) => {
+		assert.equal(command, "br");
+		assert.deepEqual(args, ["--db", "/project/.beads/beads.db", "--no-auto-flush", "--no-auto-import", "show", "picp-80q", "--json"]);
+		return JSON.stringify([{ status: state, title: "Parent context" }]);
+	} });
+	const overrides = p.escalations();
+	const es = await overrides.raise({
 		job_ids: ["verify-demo"], kind: "conflicting_acceptance",
-		question: `external_ref check failed — ${ref}: ${ref} is deferred, not open: "Item"`,
-		options: [{ id: "override", label: "override", consequence: "admit", cost: "operator accepts deferral" }], recommended: "override",
+		question: `external_ref check failed — ${ref}: ${ref} is deferred, not open: "Parent context"`,
+		options: [{ id: "override", label: "override", consequence: "admit this bead", cost: "operator accepts deferral" }], recommended: "override",
 	});
-	await store.answer(es.id, { answer: "override", by: "operator-quote" });
-	const verifyRef = (url: string) => verifyExternalRef(url, { exec: async () => assert.fail("an external_ref is never executed") });
-	const created = await runJobAction({ action: "create", title: "opaque", project: "demo", delivery: "pr", external_ref: ref }, { ...p, verifyRef });
-	const job = created.details.job as { external_ref: string; notes?: string; tracker?: unknown };
-	assert.equal(job.external_ref, ref, "stored exactly as given");
-	assert.match(job.notes ?? "", /not a GitHub url or file path/);
-	assert.doesNotMatch(job.notes ?? "", /override/);
+	await overrides.answer(es.id, { answer: "override", by: "operator-quote", basis: { operator_quote: `${es.id}: override.` } });
+	const answered = overrides.get(es.id);
+	// A deferred approval cannot authorize the same bead after it closes.
+	state = "closed";
+	await assert.rejects(runJobAction(input, { ...p, verifyRef }), /closed, not open/);
+	state = "deferred";
+	const result = await runJobAction(input, { ...p, verifyRef });
+	const job = result.details.job as { id: string; status: string; external_ref: string; notes: string; tracker?: unknown };
+	assert.equal(job.status, "open");
+	assert.equal(job.external_ref, ref);
 	assert.equal(job.tracker, undefined);
-	assert.doesNotMatch(created.text, /tracker/);
+	assert.match(job.notes, /verified: br deferred/);
+	assert.ok(job.notes.includes(`deferred-bead admission override: ${es.id}`));
+	assert.deepEqual(overrides.get(es.id), answered, "admission never rewrites the answered escalation");
+	assert.equal(state, "deferred", "the tracker is read only");
+	assert.equal((await runJobAction(input, { ...p, verifyRef })).details.existing, true);
+});
+
+test("picp-t4n: aggregated overrides bind exact pinned deferred refs, never another bead, DB, project or mismatch", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	const db = "/project/beads.db";
+	p.ledger = new Ledger({ home: scratch.path, knownProjects: ["demo"], beadsDbFor: () => db });
+	const refs = ["br show picp-80q --json", "br show picp-other --json"];
+	const input = { action: "create", title: "plan", project: "demo", delivery: "local", kind: "research" } as const;
+	const verifyRef = async (url: string) => ({ status: "found", kind: "br", state: "deferred", title: "Deferred bead", url }) as const;
+	const create = (external_ref: string) => runJobAction({ ...input, title: external_ref, external_ref }, { ...p, verifyRef });
+	for (const ref of [...refs, refs[0]!]) await assert.rejects(create(ref), /deferred, not open/);
+	const store = p.escalations();
+	const es = store.open()[0]!;
+	assert.equal(store.open().length, 1);
+	assert.deepEqual(es.deferred_refs, refs.map((ref) => p.ledger.normalizeRef(ref, "demo")));
+	await store.answer(es.id, { answer: "override", by: "operator-quote", basis: { operator_quote: `${es.id}: override.` } });
+	for (const external_ref of ["br show picp-80q-extra --json", "br --db '/other/beads.db' show picp-80q --json"]) {
+		await assert.rejects(create(external_ref), /deferred, not open/);
+	}
+	await assert.rejects(runJobAction({ ...input, project: "other", external_ref: refs[0] }, { ...p, verifyRef }), /deferred, not open/);
+	for (const verification of [
+		{ status: "found", kind: "br", state: "closed", title: "Closed bead", url: refs[0]! },
+		{ status: "found", kind: "pr", state: "merged", title: "Landed", url: "https://github.com/o/r/issues/12" },
+		{ status: "not_found", url: "/missing.md" },
+	] as const) {
+		await assert.rejects(runJobAction({ ...input, external_ref: verification.url }, { ...p, verifyRef: async () => verification }), /cp_job create refused/);
+	}
+	// An override grants no delivery, schedule, script, label or archived-project exception.
+	for (const change of [{ delivery: "pipeline" }, { delivery: "answer" }, { labels: ["schedule:sch-abc123"] }, { script_path: "../bad.sh" }, { labels: ["bad,label"] }]) {
+		await assert.rejects(runJobAction({ ...input, external_ref: refs[0], ...change } as JobActionInput, { ...p, verifyRef }), /pipeline|answer|schedule|script|label/);
+	}
+	const archived = new Ledger({ home: scratch.path, knownProjects: ["demo"], archivedProjects: ["demo"], beadsDbFor: () => db });
+	await assert.rejects(runJobAction({ ...input, external_ref: refs[0] }, { ...p, ledger: archived, verifyRef }), /archived/);
+	assert.equal(scratch.document().jobs.length, 0, "all gates refuse before creating any job");
+	for (const ref of refs) {
+		const result = await create(ref);
+		const job = result.details.job as { external_ref: string; notes: string };
+		assert.equal(job.external_ref, p.ledger.normalizeRef(ref, "demo"));
+		assert.ok(job.notes.includes(`deferred-bead admission override: ${es.id}`));
+	}
+	assert.equal(scratch.document().jobs.length, 2);
+});
+
+test("picp-t4n: a capped question cannot authorize an undisclosed deferred ref", async (t) => {
+	const { ports: p, scratch } = ports(t);
+	let title = "x".repeat(450);
+	const verifyRef = async (url: string) => ({ status: "found", kind: "br", state: "deferred", title, url }) as const;
+	const create = (id: string) => runJobAction({ action: "create", title: id, project: "demo", delivery: "local", external_ref: `br --db '/project/beads.db' show ${id} --json` }, { ...p, verifyRef });
+	for (const id of ["picp-one", "picp-two"]) await assert.rejects(create(id), /deferred, not open/);
+	const store = p.escalations();
+	const open = store.open();
+	assert.equal(open.length, 2, "each complete refusal gets a question when aggregation would truncate it");
+	for (const es of open) {
+		assert.equal(es.deferred_refs?.length, 1);
+		assert.ok(es.question.endsWith(`"${title}"`));
+		await store.answer(es.id, { answer: "override", by: "operator-quote" });
+	}
+	await create("picp-one");
+	await create("picp-two");
+	title = "x".repeat(1100);
+	await assert.rejects(create("picp-long"), /deferred, not open/);
+	const capped = store.open()[0]!;
+	assert.equal(capped.question.length, 1000);
+	assert.equal(capped.deferred_refs, undefined, "an incomplete refusal records no authority-bearing ref");
+	await store.answer(capped.id, { answer: "override", by: "operator-quote" });
+	await assert.rejects(create("picp-long"), /deferred, not open/);
+	assert.equal(scratch.document().jobs.length, 2);
+});
+
+test("picp-t4n: only an answered override on this admission escalation counts", async (t) => {
+	for (const disposition of ["open", "relay", "withdrawn", "superseded", "wrong-kind", "wrong-anchor", "legacy-substring", "legacy-unpinned"]) {
+		await t.test(disposition, async (t) => {
+			const { ports: p, scratch } = ports(t);
+			const ref = disposition === "legacy-unpinned" ? "br show picp-80q --json" : "br --db '/project/beads.db' show picp-80q --json";
+			if (disposition === "legacy-unpinned") p.ledger = new Ledger({ home: scratch.path, beadsDbFor: () => "/new-project/beads.db" });
+			const mismatch = `${ref} is deferred, not open: "Bead"`;
+			const store = p.escalations();
+			const es = await store.raise({
+				job_ids: [disposition === "wrong-anchor" ? "verify-other" : "verify-demo"],
+				kind: disposition === "wrong-kind" ? "plan_approval" : "conflicting_acceptance",
+				question: disposition === "legacy-substring" ? `different question; external_ref check failed — ${ref}: ${mismatch}` : `external_ref check failed — ${ref}: ${mismatch}`,
+				...(disposition.startsWith("legacy-") ? {} : { deferred_refs: [ref] }),
+				options: [{ id: "relay", label: "relay", consequence: "refuse", cost: "none" }, { id: "override", label: "override", consequence: "admit", cost: "operator accepts deferral" }], recommended: "relay",
+			});
+			if (disposition === "withdrawn") await store.withdraw(es.id);
+			else if (disposition === "superseded") store.supersede(() => "replaced");
+			else if (disposition !== "open") await store.answer(es.id, { answer: disposition === "relay" ? "relay" : "override", by: "operator-quote" });
+			await assert.rejects(runJobAction({ action: "create", title: "plan", project: "demo", delivery: "local", external_ref: ref }, {
+				...p, verifyRef: async (url) => ({ status: "found", kind: "br", state: "deferred", title: "Bead", url }),
+			}), /deferred, not open/);
+			assert.equal(scratch.document().jobs.length, 0);
+		});
+	}
 });

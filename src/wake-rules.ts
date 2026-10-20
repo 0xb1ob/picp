@@ -66,12 +66,12 @@ export function fleetGeneration(fleet: Pick<FleetStore, "get">, jobId: string | 
 	}
 }
 
-export type NextPost = Pick<CommandPost, "packageRoot" | "ledger" | "fleet" | "mandates" | "escalations" | "pipelines" | "dispatchQueue">;
+export type NextPost = Pick<CommandPost, "packageRoot" | "ledger" | "registry" | "fleet" | "mandates" | "escalations" | "pipelines" | "dispatchQueue">;
 
 /** One in-process `cpNext` over the command post's own ports. */
 export async function nextFor(post: NextPost, override?: typeof cpNext): Promise<NextResult> {
 	return (override ?? cpNext)({
-		packageRoot: post.packageRoot, ledger: post.ledger(),
+		packageRoot: post.packageRoot, ledger: post.ledger(), registry: post.registry,
 		fleet: post.fleet, mandates: post.mandates, escalations: post.escalations, pipelines: post.pipelines,
 		queued: () => post.dispatchQueue.ids(),
 	});

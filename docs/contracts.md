@@ -548,7 +548,11 @@ A missing or malformed value is a **load failure**: a worker that cannot say
 which job it is must not run. Briefs never carry secrets, and the worker's
 environment is the only channel for identity.
 
-The worker environment carries no tracker database: dispatch injects none.
+The worker environment builder strips an inherited `BEADS_DIR`/`BEADS_DB` and never
+selects the home's `.beads`. Dispatch sets `BEADS_DIR` explicitly from the project's
+tracker (`projectBeadsDb`: its active connection's endpoint, else an existing
+`<clone>/.beads/beads.db`, else none) so `br show <id>` resolves from leased worktrees too. Reference use is
+read-only by instruction, not a filesystem restriction; no database is created.
 
 `self_assessment` is ported from the command-post research envelope
 (`confidence`, `scope`, `blocking_unknowns`, `destructive_scope`,
@@ -1064,7 +1068,7 @@ br issue, tears nothing down, writes no merge receipt and **declares no
 Awaiting-you row** — a background timer must never mint decisions. The watcher
 still merges nothing and decides nothing. On red there is no merge question at
 all (merging red is already forbidden). On `pr_merged` the follow-on is the
-existing contract: `cp_merged <job-id>`, close the job, `cp_teardown`.
+existing contract: `cp_merged <job-id>`, close the br issue, `cp_teardown`.
 
 **The wake-up is the read, so the parent does not re-take it (cp-3zbp).** The
 notice is derived from two REST queries against the remote for the branch's
@@ -1158,7 +1162,7 @@ review-window `HELD PR WAITING` notices (`isQuietWakeup`, N9) and relay-only
 `HELD PR STOPPED (next: resolve)` stops (§Rule-handled wakes) use
 `triggerTurn: false` even when idle and never increment the unseen-notice count.
 On the operator side a relay message whose every relay is `informational` (a
-bridge-relayed `HELD PR LANDED` or relay-only resolve stop) is appended with
+bridge-relayed `HELD PR LANDED` or relay-only resolve stop, an idle-beads notice) is appended with
 `triggerTurn: false` and acked on hand-off, since a quiet append fires no
 message hook; any other relay in the same message makes it triggering.
 `agent_settled` clears busy before anything else runs.
@@ -2494,15 +2498,23 @@ Scoring coverage against that `Goal` is scoring the plan against itself.
 So the parent freezes the task and hands it to the reviewer as a second file:
 
 At dispatch, `src/task-references.ts` appends the same **Referenced material**
-section to the worker brief and frozen task: absolute file paths outside the leased
-worktree and the home's `state/` (checked through symlinks), with their text, plus a
-foreign PR job's CI line. Nothing is executed and an external reference is never
-looked up. There are at most 10 unique references, 4 KiB per entry and 24 KiB total,
-with explicit truncation notes. Missing/unreadable references become named notes,
-not dispatch failures, and share the same count and byte caps.
+section to the worker brief and frozen task: a `br show` external reference
+(including its pinned database), beads named in the task using the ledger's
+configured prefix (seeded from `CP_LEDGER_PREFIX`, with the stored prefix taking
+precedence), and absolute file paths outside the leased
+worktree and the home's `state/` (checked through symlinks). Bead snapshots carry
+id, title, status and description verbatim; files carry their text. Lookups run
+against the canonical clone, without a shell, with a five-second command timeout.
+There are at most 10 unique references, 4 KiB per entry and 24 KiB total, with
+explicit truncation notes. Missing/unreadable references and unavailable `br`
+become named notes, not dispatch failures. Prefix matching never depends on `br`
+availability: only IDs with the configured prefix become task-text candidates,
+so ordinary hyphenated prose produces no lookup notes. Named lookup failures
+share the same reference count and byte caps.
 Credential-shaped referenced content is withheld with the existing safety guard's
-explicit diagnostic rather than leaked into a brief. With no references there is no
-section.
+explicit diagnostic rather than leaked into a brief. When the home has a beads
+database, the section also names its path and `BEADS_DIR`, with a read-only usage
+note. With neither references nor a home database there is no section.
 The `taskFile` itself remains a pointer in the brief; references are
 discovered from its body, which is still frozen in full. Both reviewer paths copy
 this enriched frozen task, so they see the same reference snapshot as the worker.
@@ -4793,10 +4805,15 @@ partitioned by selection. Every other grant's result rides along in `others`; on
 renders in full, and the rest is one line each (`<id>: <status> <live>/<parallelism>, jobs <used>/<cap> —
 <kind>: <reason>`), so the answer does not grow with the number of waiting grants.
 
-`cp_next` reads only the native ledger: it discovers no external ready items and
-sends no idle wake. Its persisted snapshot carries `schema_version: 2` with job rows
-only; the viewer reads that version alone, so an older or unversioned cache shows as
-unavailable (never "nothing queued") until the next `cp_next` rewrites it.
+`cp_next` also reads each registered project's `br ready --json` once per call
+(10-second command timeout, 4 MiB output bound), using the canonical clone's
+explicit bead database. It skips epics, `deferred` labels, and beads already
+referenced by a job, including closed jobs. With spare mandate slots or no
+active grant, it names the count and up to five IDs per project; a failed read
+is explicitly unavailable, never an empty queue. These are intake suggestions,
+not dispatch candidates or authority. A working-to-idle fleet transition reads
+the same evidence and sends one `cp-bridge` wake per idle period. Starting work
+again invalidates an outstanding idle read; repeated `cp_next` calls do not wake.
 
 The recommendation is derived from labels (`project:`, `kind:`) and the
 ledger's own dependency graph, never from prose: a blocked job enters `ready`
@@ -8718,21 +8735,35 @@ run history as audit. Disable restored schedules until the operator deliberately
 settings added after the snapshot must be re-added. Never downgrade below P2b with open run members:
 older authority code cannot safely judge them. Preserve the backups/manifest through rollback.
 
-**Retired tracker integration (inert native metadata).** No external tracker
-adapter, tool, importer, sync timer or ready-item discovery ships. Old homes keep
-working without migration: a job's optional `tracker` link (`LegacyTrackerLinkSchema`
-in `src/contracts/jobs.ts`; `connection_id`, `item_id`, `linked_at`, optional
-`mandate_id`, `task_sha256`) still validates, stays unique across open and closed
-history, and is preserved through native writes, but nothing reads or acts on it.
-Old `data/trackers.json`, `state/tracker-sync.json` and `state/tracker-tasks/` files
-are never parsed, written or deleted, so a malformed one cannot break startup;
-doctor names their presence once as `storage.retired_integration` (existence only).
-A job left `deferred` by an old import stays deferred: `Ledger.claim` refuses it
-with `<id> is deferred; review its task and authority, then use cp_job update
-status=open when authorized`, and nothing re-enrolls it. Worker environments carry
-no tracker database, and no landing notice or `cp_integrate` result carries
-tracker advice. Restart the parent after deploying this so an old in-memory sync
-timer cannot keep running.
+**Trackers (B2).** Each registered project has at most one active tracker
+connection in `data/trackers.json` (`TrackerConnectionSchema`,
+`validateTrackersFile`, `src/trackers/config.ts`); no tool writes it any more, and
+it is read only for ready-bead discovery and a project's beads database below. A
+job's optional `tracker: { connection_id, item_id, linked_at }` link is inert legacy
+metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique across open
+and closed history, preserved by every native write, and never acted on.
+A project's beads database resolves in one place (`projectTracker`): its active
+beads connection's endpoint, else `<clone>/.beads/beads.db` when that file
+exists, else none. The home's `.beads` is **never** inherited — not in ready-bead
+discovery or the idle notice, not when a bare `br show` ref is pinned or
+verified, not in dispatch-time reference snapshots, and not in a worker's
+`BEADS_DIR` (set only by dispatch from that database; a parent
+`BEADS_DIR`/`BEADS_DB` is stripped). An active github connection shows a visible
+ready-beads error row. An active beads connection with `intake_enabled` off has no
+ready beads at all (N15): `cp_next` lists none and the idle notice never names
+them (a clone-local database has no connection, so it is still read). The idle
+notice fires only when nothing is `launching`, `waiting`, `held` or
+`awaiting_merge` — a held or parked PR is work in flight — and an unchanged
+bead-id set (in any order) is announced once.
+
+**Retired: tracker import, link and write-back (B4/B5/laf).** `cp_tracker`, its 60 s
+write-back tick, `/cp-jobs import-beads` and auto-linking on `cp_job create` and
+`cp_dispatch` are gone; `cp_integrate` and the `HELD PR LANDED` notice carry no
+tracker line. Existing `state/tracker-sync.json` and `state/tracker-tasks/` stay on
+disk unread and untouched. A `deferred` job is never claimed (`Ledger.claim`:
+`<id> is deferred; review its task and authority, then use cp_job update status=open
+when authorized`); reopening it is an explicit native update. The parent restarts
+after this lands so a running sync timer stops.
 
 **Conversation intake (autonomy-programme-cur.4.3).** Work arrives as prose.
 The parent records each item once with `cp_job create`. That call is
@@ -8754,22 +8785,36 @@ operator named, and nothing had read the ref before trusting it.
 `cp_job create` (so `cp_pipeline start` and `cp_ask` are covered the same way
 the moment either ever passes one through `Ledger.create`): a GitHub
 `issues|pull` url calls `gh api repos/<o>/<r>/issues/<n>` (the issues endpoint
-returns PRs too, with a `pull_request` key); a bare file path is an
-`existsSync`; anything else — a command-shaped string included — is opaque and
-never executed: `unverifiable`, not an error. A **mismatch** —
+returns PRs too, with a `pull_request` key); a `--db`-pinned `br show` ref runs
+the exact command the ledger already stores and reads `status` (a bare `br show`
+ref whose project has no beads database is not run at all — it is noted as
+unverified, never read against the home's or the cwd's `.beads`); a bare file path is an
+`existsSync`; anything else is `unverifiable`, not an error. A **mismatch** —
 the kind an issue/pull url implies does not match what came back, the state is
 not `open`, or a 404/missing path — refuses the `cp_job create` call before
 anything is written and raises one `conflicting_acceptance` escalation per
 project (`raiseConflictingRef`/`EscalationStore.appendToOpenQuestion`, so two
 bad refs named in the same mission read as one open question, not two).
-`unverifiable` and a `gh` transport failure are **not** mismatches —
+`unverifiable` and a `gh`/`br` transport failure are **not** mismatches —
 ignorance is not a finding — and the job is created normally with the fact (or
 the failure) recorded on `notes`, which `cp_job show` then prints.
 
-A stored `external_ref` is kept exactly as given: no pinning, rewriting or
-lookup, and dedupe compares exact strings. Escalation records may still carry a
-legacy `deferred_refs` array; it validates and is ignored, and no answered
-override admits a reference.
+**Deferred-bead overrides (picp-t4n).** On retry, a verified `br` bead still in
+`deferred` may pass this state check when its project's `verify-<project>`
+`conflicting_acceptance` escalation has an answered `override`. New refusal
+records carry optional `deferred_refs`: exact references after the same project
+DB pin used for verification and storage. Aggregated questions retain each
+explicitly checked deferred reference once; a reference that would be truncated
+out of the question gets its own escalation. A single refusal too long to show
+completely records no override reference. A legacy record without `deferred_refs`
+counts only when its complete single-reference question matches the current
+refusal and explicitly pins the DB; bare legacy refs cannot identify a database.
+Substrings, aggregated or truncated legacy questions grant no exception.
+The created job's notes retain the verified deferred state and the exact `es-`
+id used. No bead or answered escalation is mutated. Other refs, databases,
+projects, closed/missing/wrong-kind refs and every other intake or dispatch gate
+still follow their existing checks. This is admission for that reference, not
+dispatch authority.
 
 
 Every job carries labels, and they are the dispatchability contract:

@@ -494,7 +494,7 @@ test("ledger.file: a missing document is an error naming the scaffold; a sound o
 	for (const check of ["ledger.ids", "ledger.deps", "ledger.prefix", "ledger.size"]) {
 		assert.equal(report.findings.find((f) => f.check === check)?.severity, "ok", check);
 	}
-	assert.ok(!report.findings.some((f) => f.check === "storage.retired_integration"), "no retired state, no finding");
+	assert.ok(!report.findings.some((f) => f.check === "ledger.beads_archive"), "no .beads/, no archive finding");
 });
 
 test("ledger.file: not JSON or the wrong shape is an error with the parser's words", async (t) => {
@@ -554,20 +554,48 @@ test("ledger.prefix warns when the environment disagrees with the document; ledg
 	assert.match(size?.what ?? "", new RegExp(`${JOBS_SIZE_WARNING + 1} jobs`));
 });
 
-test("storage.retired_integration: existence only, exact generic text, malformed files included, never parsed", async (t) => {
+test("ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete", async (t) => {
 	const fx = fixture(t, { ledger: false });
+	mkdirSync(join(fx.home.path, ".beads"), { recursive: true });
 	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [JOB_ROW] });
-	assert.ok(!(await fx.doctor()).findings.some((f) => f.check === "storage.retired_integration"), "a fresh home has no finding");
-	mkdirSync(join(fx.home.path, LAYOUT.data), { recursive: true });
-	mkdirSync(join(fx.home.path, LAYOUT.state), { recursive: true });
+	const finding = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	assert.equal(finding?.severity, "warn");
+	assert.match(finding?.fix ?? "", /safe to delete/);
+
+	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [] });
+	const empty = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	assert.equal(empty?.severity, "ok");
+	assert.match(empty?.what ?? "", /not imported yet/);
+	assert.match(empty?.fix ?? "", /\/cp-jobs import-beads/);
+});
+
+test("ledger.beads_archive: a .beads/ that an active tracker connection uses is ok and never advised for deletion", async (t) => {
+	const fx = fixture(t, { ledger: false });
+	const beads = join(fx.home.path, ".beads");
+	mkdirSync(beads, { recursive: true });
+	writeFileSync(join(beads, "beads.db"), "");
+	writeJobs(fx.home.path, { schema_version: SCHEMA_VERSION, prefix: "cp", jobs: [JOB_ROW] });
+	const connection = { id: "demo-beads", project: "demo", adapter: "beads", endpoint: realpathSync(join(beads, "beads.db")), intake_enabled: false, write_enabled: true, status: "active", connected_at: "2026-09-01T00:00:00Z" };
+	const trackers = (connections: object[]) => {
+		mkdirSync(join(fx.home.path, LAYOUT.data), { recursive: true });
+		writeFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, connections }));
+	};
+
+	trackers([connection]);
+	const live = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	assert.equal(live?.severity, "ok", JSON.stringify(live));
+	assert.match(live?.what ?? "", /live endpoint of tracker demo-beads/);
+	assert.doesNotMatch(`${live?.what} ${live?.fix}`, /safe to delete/);
+
+	trackers([{ ...connection, status: "disconnected", disconnected_at: "2026-09-02T00:00:00Z" }]);
+	const archive = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	assert.equal(archive?.severity, "warn");
+	assert.match(archive?.fix ?? "", /safe to delete/);
+
 	writeFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), "{nope");
-	writeFileSync(join(fx.home.path, LAYOUT.state, "tracker-sync.json"), "not json either");
-	const findings = (await fx.doctor()).findings.filter((f) => f.check === "storage.retired_integration");
-	assert.equal(findings.length, 1);
-	assert.equal(findings[0]?.severity, "warn");
-	assert.equal(findings[0]?.what, "Retired integration state is present and ignored. Native jobs and history remain available; automatic intake and write-back are disabled.");
-	assert.equal(findings[0]?.fix, "Keep these files for your records. Ask the operator to configure any external workflow explicitly in home standing orders.");
-	assert.equal(readFileSync(join(fx.home.path, LAYOUT.data, "trackers.json"), "utf8"), "{nope", "never rewritten");
+	const unreadable = (await fx.doctor()).findings.find((f) => f.check === "ledger.beads_archive");
+	assert.equal(unreadable?.severity, "warn");
+	assert.match(unreadable?.fix ?? "", /do not delete/);
 });
 
 test("state.job_id_migration: a pre-rename fleet file is an error until the sweep runs", async (t) => {

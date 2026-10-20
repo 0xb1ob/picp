@@ -1,6 +1,6 @@
 /**
- * Retired tracker integration on the mock provider: an existing home's inert job links, opaque command-shaped
- * refs and malformed retired state survive startup, a native dispatch→report→teardown→close, cp_next and viewer.
+ * Retired tracker sync, link and import on the mock provider: an existing home's inert job links, command-shaped
+ * refs and malformed retired sync state survive startup and a native dispatch→report→teardown→close.
  */
 
 import assert from "node:assert/strict";
@@ -10,10 +10,7 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { Doctor } from "../../src/doctor.ts";
 import type { IntakeResult } from "../../src/intake.ts";
-import { cpNext, writeNextSnapshot } from "../../src/next.ts";
-import { overview } from "../../src/viewer/overview-view.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -59,7 +56,6 @@ test("retired integration: an existing home keeps its data and runs the native l
 	process.env.PATH = `${bin}${delimiter}${savedPath ?? ""}`;
 
 	const retired: Record<string, string> = {
-		[join(LAYOUT.data, "trackers.json")]: "{ malformed retired config",
 		[join(LAYOUT.state, "tracker-sync.json")]: "[ malformed retired intents",
 		[join(LAYOUT.state, "tracker-tasks", `${OPEN}.md`)]: "frozen task snapshot\n",
 	};
@@ -72,11 +68,6 @@ test("retired integration: an existing home keeps its data and runs the native l
 		legacyJob(DEFERRED, "deferred", { external_ref: PINNED, tracker: { ...LINK, item_id: "item-2" } }),
 		legacyJob(CLOSED, "closed", { external_ref: "external-tool show item-3 --json", tracker: { ...LINK, item_id: "item-3" }, closed_at: AT, close_reason: "done" }),
 	] }));
-	// An unversioned cache from before the removal: never rendered, never read as "nothing queued".
-	writeFileSync(join(home.path, LAYOUT.state, "next-snapshot.json"), JSON.stringify({
-		at: AT, items: [{ kind: "external", id: "item-9", project: "demo", verdict: "ready", reason: "external ready" }],
-		unavailable: [{ project: "demo", error: "external CLI missing" }],
-	}));
 
 	const reported: IntakeResult[] = [];
 	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, onReported: (result) => reported.push(result) });
@@ -91,11 +82,6 @@ test("retired integration: an existing home keeps its data and runs the native l
 		pool.cleanup(); agentDir.cleanup(); repo.cleanup(); home.cleanup();
 		await provider.stop();
 	});
-	const state = { home: home.path, stateDir: join(home.path, LAYOUT.state) };
-	const stale = overview(state).lined_up;
-	assert.equal(stale.availability, "unavailable");
-	assert.deepEqual(stale.items, []);
-	assert.doesNotMatch(JSON.stringify(stale), /external/);
 
 	// Native reads keep every legacy field; the deferred job stays deferred until an explicit native update.
 	const ledger = post.ledger();
@@ -128,16 +114,6 @@ test("retired integration: an existing home keeps its data and runs the native l
 	const reopened = await ledger.update(DEFERRED, { status: "open" });
 	assert.deepEqual([reopened.status, reopened.tracker?.item_id, reopened.external_ref], ["open", "item-2", PINNED]);
 
-	const next = await cpNext({ packageRoot: REPO_ROOT, ledger, fleet: post.fleet, mandates: post.mandates, escalations: post.escalations });
-	writeNextSnapshot(home.path, next, new Date().toISOString());
-	const fresh = overview(state).lined_up;
-	assert.notEqual(fresh.availability, "unavailable");
-	assert.deepEqual(fresh.items.map((item) => [item.kind, item.id]), [["job", DEFERRED]]);
-
-	const doctor = await new Doctor({ home: home.path, packageRoot: REPO_ROOT, fleet: post.fleet, run: () => ({ status: 1, stdout: "", stderr: "" }), which: () => [], env: {} }).run();
-	const notice = doctor.findings.filter((finding) => finding.check === "storage.retired_integration");
-	assert.equal(notice.length, 1);
-	assert.match(notice[0]!.what, /^Retired integration state is present and ignored\./);
 	for (const [file, body] of Object.entries(retired)) assert.equal(readFileSync(join(home.path, file), "utf8"), body, `${file} untouched`);
 	assert.throws(() => readFileSync(calls, "utf8"), /ENOENT/, "no external_ref was ever executed");
 	assert.equal(provider.remaining("retired-ship"), 0);

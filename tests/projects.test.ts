@@ -596,7 +596,7 @@ test("cp_project add: new projects default to human_handoff, detection may set r
 
 	// Readiness (#329): advisory lines plus a paste-ready paragraph; a refused or failed CI read never fails add
 	// and never reads as "no CI"; gh's output (which may carry a token) is never echoed.
-	assert.match(local, /forge: {3}unknown: .*\n {4}CI: {6}not probed[^\n]*\n {2}tell the user/);
+	assert.match(local, /forge: {3}unknown: .*\n {4}CI: {6}not probed.*\n {4}tracker: none — connect one with cp_tracker connect project=local/);
 	assert.match(local, /tell the user: picp is set up for local\. picp opens a pull request.*it never merges itself\. picp does not probe/);
 	assert.match(solo, /forge: {3}github \(o\/solo\)\n {4}CI: {6}no Actions CI configured for o\/solo/);
 	assert.match(solo, /picp merges a pull request once it is reviewed.*no GitHub Actions workflows/);
@@ -615,8 +615,9 @@ test("cp_project add: new projects default to human_handoff, detection may set r
 	assert.match(await addGithub("team2"), /hands it to you on GitHub to merge/);
 });
 
-test("cp_project add readiness: delivery:local wording and a throwing probe never fails add", async (t) => {
+test("cp_project add readiness: delivery:local wording, a connected tracker, and a throwing probe never fails add", async (t) => {
 	const { registerProjectMemoryTools } = await import("../extensions/command-post/tools-project-memory.ts");
+	const { TrackerStore } = await import("../src/trackers/config.ts");
 	const home = withHome(t), registry = new ProjectRegistry({ home: home.path });
 	const ciRun = () => { throw new Error("gh exploded"); };
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
@@ -631,7 +632,12 @@ test("cp_project add readiness: delivery:local wording and a throwing probe neve
 	assert.match(tell(local), /pushes each job's branch to the remote; it opens no pull or merge request and merges nothing\./);
 	assert.doesNotMatch(tell(local), /opens a pull request|on GitHub/);
 
-	assert.doesNotMatch(local, /tracker/, "readiness names no tracker");
+	const db = join(home.path, "elsewhere", "beads.db");
+	const store = new TrackerStore({ home: home.path, registry, adapters: () => ({ probe: async (endpoint: string) => endpoint }) as never });
+	await store.connect({ project: "local", adapter: "beads", endpoint: db });
+	const tracked = await run({ name: "local", clone_url: remote, delivery: "local" });
+	assert.ok(tracked.includes(`tracker: beads (${db}, from the connection)`), tracked);
+	assert.match(tell(tracked), /Work items come from its beads tracker\./);
 
 	// A GitHub remote whose CI probe throws (#329): add still succeeds and says readiness is unknown, never "no CI".
 	const url = "https://github.com/o/boom.git";

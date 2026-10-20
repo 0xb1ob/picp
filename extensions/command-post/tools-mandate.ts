@@ -282,7 +282,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		promptGuidelines: [
 			"Call cp_next after every cp-envelope, a cp-verdict pass\u2192proceed, cp-ci merged, cp-answered, a bounded-recovery outcome, and at session start; act on its recommendation.",
 			"Reuse a cp_next result you already hold for the decision it answered: call it once after a state-changing batch, not before and after it; a successful cp_send or an unchanged status is not a new event; full:true only after losing context. Its fleet total is informational \u2014 per-grant parallelism and cp_dispatch's spawn queue decide admission, so do not re-read fleet or drain files to override it.",
-			"When cp_next says nothing is ready, say so in one line and stop the turn \u2014 do not poll or re-ask.",
+			"Ready beads with no job are evidence for intake: create jobs only within the active grant's objective, or raise one grant covering them. Discovery is never authorization.",
+			"When cp_next says nothing is ready and names no ready beads without jobs, say so in one line and stop the turn \u2014 do not poll or re-ask.",
 			"A paused mandate's recommendation is 'no dispatch'; in-flight jobs still finish on their own.",
 		],
 		parameters: Type.Object({
@@ -295,6 +296,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				{
 					packageRoot: cmdPost.packageRoot,
 					ledger: cmdPost.ledger(),
+					registry: cmdPost.registry,
 					fleet: cmdPost.fleet,
 					mandates: cmdPost.mandates,
 					escalations: cmdPost.escalations,

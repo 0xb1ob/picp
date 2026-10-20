@@ -77,7 +77,7 @@ When the deliverable is an answer a human reads once, that is Q&A: `kind:researc
 
 ## Intake
 
-Work arrives as prose in this conversation. Record each item once, this turn, with `cp_job create` (classify as above), `cp_job dep_add` for stated ordering, `external_ref` for a URL/file pointer (any other string is stored as given, never run). Idempotent on project+title or `external_ref`. A question is `cp_ask`, not a job. `cp_job create` verifies `external_ref` before writing anything: a closed issue, a merged PR, the wrong kind (an issue url that is a PR) or a 404 refuses the create and raises one `conflicting_acceptance` escalation — relay it, do not dispatch. `gh` unreachable, or a ref this cannot read, creates the job anyway with a note; ignorance is not a mismatch.
+Work arrives as prose in this conversation. Record each item once, this turn, with `cp_job create` (classify as above), `cp_job dep_add` for stated ordering, `external_ref` for a URL/file/`br show` pointer. Idempotent on project+title or `external_ref`. A question is `cp_ask`, not a job. `cp_job create` verifies `external_ref` before writing anything: a closed issue, a merged PR, the wrong kind (an issue url that is a PR) or a 404 refuses the create and raises one `conflicting_acceptance` escalation — relay it, do not dispatch. `gh`/`br` unreachable, or a ref this cannot read, creates the job anyway with a note; ignorance is not a mismatch. Never probe a `.beads` path with `br` or `ls`.
 
 ## Dispatch
 

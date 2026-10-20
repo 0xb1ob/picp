@@ -461,8 +461,8 @@ export interface QuotaObservation {
  observed_at: string; source_job_id: string; historical: true;
  providers: {provider: string; five_hour: number | null; seven_day: number | null; tight: boolean; free_slots: number | null}[];
 }
-/** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict. */
-export interface LinedUpItem {kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string}
+/** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict, or a ready bead with no job. */
+export interface LinedUpItem {kind: "job" | "bead"; id: string; project: string; title: string | null; verdict: string; reason: string}
 export interface OverviewResponse {
  generated_at: string;
  availability: Record<"asks" | "escalations" | "fleet" | "ledger" | "mandates", SourceAvailability>;

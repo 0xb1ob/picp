@@ -1146,7 +1146,7 @@ test("operator bridge writes a hold without a running parent; parent status sees
 	assert.equal(b.calls.filter((call) => call.startsWith("gh pr merge")).length, 1);
 });
 
-test("cp_integrate's done result carries no tracker advice for a legacy-linked job beside retired config", async (t) => {
+test("cp_integrate's done result carries no tracker advice for a legacy-linked job beside a malformed tracker config", async (t) => {
 	const b = await benchOf(t);
 	const file = join(b.home, LAYOUT.data, "trackers.json");
 	mkdirSync(join(file, ".."), { recursive: true });

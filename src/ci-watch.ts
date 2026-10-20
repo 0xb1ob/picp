@@ -896,7 +896,7 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 		);
 	}
 	if (observations.some((observation) => observation.event === "pr_merged")) {
-		lines.push("A merged PR's follow-on is already contract: cp_merged <job-id>, close the job with a reason, cp_teardown.");
+		lines.push("A merged PR's follow-on is already contract: cp_merged <job-id>, close the br issue with a reason, cp_teardown.");
 	}
 	if (observations.some((observation) => observation.event === "pr_closed")) {
 		lines.push("A PR closed unmerged is not a delivery: relay it. Never tear down a job whose branch never landed.");

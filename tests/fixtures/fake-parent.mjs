@@ -249,6 +249,9 @@ rl.on("line", (line) => {
 		if (compacted) compactedTurn = true;
 		// Real pi echoes the injected user message on the stream too (cur.5.4
 		// repro): never assistant text, must never become the reply.
+		if (text.includes("IDLEBEADS")) {
+			write({ type: "message_end", message: { role: "custom", customType: "cp-idle-beads", content: "fleet idle with 2 ready beads\n[demo] 2 ready beads have no job: b-one, b-two" } });
+		}
 		write(userEcho);
 		if (text.includes("MISSIONEND")) {
 			write({ type: "tool_execution_end", toolCallId: "call-next", toolName: "cp_next", isError: false, result: { details: { action: { kind: "mission_end" }, mandate: { id: "md-test" } } } });

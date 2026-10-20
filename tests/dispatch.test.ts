@@ -3,7 +3,7 @@
  * orphan lease or branch when anything fails.
  *
  * The worker is a real `pi --mode rpc` child on the mock provider; the ledger
- * is a scratch jobs.json ledger; the lease is a real treehouse lease.
+ * is a real scratch beads workspace; the lease is a real treehouse lease.
  */
 
 import assert from "node:assert/strict";
@@ -72,7 +72,7 @@ import {
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
 const BRIEFS_DIR = join(REPO_ROOT, "prompts/briefs");
 const READY = treehouseAvailable();
-const SKIP = READY ? false : "treehouse is required for dispatch tests";
+const SKIP = READY ? false : "br and treehouse are required for dispatch tests";
 
 interface Bench {
 	home: string;
@@ -328,19 +328,27 @@ test("4B1-T7: at the cap dispatch releases the one idle held author into a reser
 	assert.equal(readRunEvents(b.home, "cp-aaa1").filter((event) => event.type === "held_released").length, 2);
 });
 
-test("dispatch snapshots referenced files for the worker and reviewers; item ids are never looked up", { skip: SKIP, timeout: 180_000 }, async (t) => {
+test("dispatch snapshots referenced beads for the worker and reviewers, including missing refs", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const job = await b.ledger.create({ title: "reference snapshot", project: "demo", kind: "ship", delivery: "pr" });
-	const spec = join(b.home, "outside spec.md");
-	writeFileSync(spec, "Preserve this acceptance criterion verbatim.");
-	const task = `Implement cp-abc as a read-only follow-up; see \`${spec}\`.`;
-	const result = await b.dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false });
+	const task = "Implement cp-abc and cp-missing as a read-only follow-up.";
+	// The project's own DB (as its tracker connection resolves it) reaches the snapshot and the worker env.
+	const db = join(b.home, "tracker db", "beads.db");
+	const ledger = new Ledger({ home: b.ledger.home, knownProjects: ["demo"], beadsDbFor: (project) => project === "demo" ? db : undefined });
+	const dispatcher = b.makeDispatcher({ ledger, referenceExec: async (_command, args) => {
+		assert.equal(args[1], db);
+		if (args.includes("cp-missing")) throw new Error("not found");
+		return JSON.stringify([{ id: "cp-abc", title: "Requirement", status: "open", description: "Preserve this acceptance criterion verbatim." }]);
+	} });
+	const result = await dispatcher.dispatch({ jobId: job.id, task, model: b.model, fetch: false });
 	assert.equal(result.receipt, "accepted");
 	const frozen = readFileSync(join(b.home, paths.originalTaskFile(job.id)), "utf8");
 	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 	assert.ok(frozen.startsWith(task));
 	assert.match(frozen, /Preserve this acceptance criterion verbatim\./);
-	assert.doesNotMatch(frozen, /### (cp-abc|read-only|follow-up)|BEADS_DIR/);
+	assert.match(frozen, /cp-missing: br unavailable: Error: not found/);
+	assert.doesNotMatch(frozen, /### (read-only|follow-up)/);
+	assert.ok(frozen.includes(`BEADS_DIR points to \`${join(b.home, "tracker db")}\``));
 	assert.ok(brief.includes(frozen), "worker and reviewers see the identical snapshot");
 });
 
@@ -1218,9 +1226,9 @@ test("a leftover job branch is refused before the lease", { skip: SKIP, timeout:
 test("a refused ledger claim leaves no leftover fleet record (pi-command-post-aap)", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const job = await b.ledger.create({ title: "stuck", project: "demo", delivery: "local", kind: "ship", slug: "stuck" });
-	// Force the job into the one state `ledger.claim` refuses: deferred (an
-	// older home's unenrolled import). The dispatch reaches the fleet write and the
-	// ledger claim before failing, which is exactly the order this regression covers.
+	// Force the job into the one state `ledger.claim` refuses: deferred. The
+	// dispatch reaches the fleet write and the ledger claim before failing,
+	// which is exactly the order this regression covers.
 	await b.ledger.update(job.id, { status: "deferred" });
 
 	await assert.rejects(

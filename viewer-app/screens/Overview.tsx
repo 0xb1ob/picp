@@ -6,7 +6,7 @@ import { Icon } from "../components/icons.tsx";
 import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
-import { jobHref } from "../routes.ts";
+import { composerHref, jobHref } from "../routes.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { GlossaryLink } from "../components/GlossaryLink.tsx";
 function Chip({href,tone,label,value,title,wide}: {href?:string;tone:string;label:string;value:string;title?:string | undefined;wide?:boolean}) {
@@ -121,9 +121,9 @@ function LinedUp({data}: {data:OverviewResponse}) {
  const body = l.availability === "unavailable" ? <p class="overview-error">Lined up unavailable: the cp_next snapshot is unreadable</p>
   : !l.at ? <p class="overview-meta">No cp_next snapshot yet</p>
   : !l.items.length && !l.unavailable.length ? <p class="overview-meta">Nothing queued since {time(l.empty_since ?? l.at)}</p>
-  : <>{l.unavailable.map(u => <p key={u.project} class="overview-meta" title={u.error}>{u.project}: {u.error.startsWith("not read") ? "not read" : "unreadable"}</p>)}
-   {l.items.map(i => <a key={`${i.kind}:${i.id}`} href={jobHref(i.id)} class="overview-line">
-    <code>{i.id}</code><span class="overview-line-text" title={i.title ?? undefined}>{i.title ?? "untitled"}</span><span class="overview-meta" title={i.reason}>{many && `${i.project} · `}{i.verdict} · {i.reason}</span></a>)}</>;
+  : <>{l.unavailable.map(u => <p key={u.project} class="overview-meta" title={u.error}>{u.project}: {u.error.startsWith("not read") ? "not read" : "beads unreadable"}</p>)}
+   {l.items.map(i => <a key={`${i.kind}:${i.id}`} href={i.kind === "job" ? jobHref(i.id) : composerHref(`Create a picp job for ready bead ${i.id} in ${i.project}.`)} class="overview-line">
+    <code>{i.id}</code><span class="overview-line-text" title={i.title ?? undefined}>{i.title ?? "ready bead, no job"}</span><span class="overview-meta" title={i.reason}>{many && `${i.project} · `}{i.verdict} · {i.reason}</span></a>)}</>;
  return <Block id="lined-up" title={<>Lined up &middot; {l.at && l.availability !== "unavailable" ? l.items.length : "-"}{age}</>}>{body}</Block>;
 }
 const LANDED_ROWS = 5;

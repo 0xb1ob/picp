@@ -90,7 +90,7 @@ export const JobSchema = Type.Object(
 		status: JobStatusSchema,
 		labels: Type.Array(Type.String({ minLength: 1, maxLength: 120 })),
 		assignee: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-		/** Where the issue lives: a url, a file path, or any opaque pointer (never run). One line, never a body. */
+		/** Where the issue lives: a tracker url, a file path, or the command that shows it. One line; a pointer, never a body. */
 		external_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\r\\n]+$" })),
 		script: Type.Optional(ScriptDeclarationSchema),
 		/** Legacy link, inert: nothing reads it to act; still unique across open and closed jobs. */

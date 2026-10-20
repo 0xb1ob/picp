@@ -51,13 +51,28 @@ test("gh unreachable: note-worthy, never a mismatch", async () => {
 	assert.match(describeRefVerification(verification), /could not be verified/);
 });
 
-test("a command-shaped ref is opaque: never executed, unverifiable, never a mismatch", async () => {
-	for (const ref of ["external-tool show item --json", "external-tool --db '/abs/item.db' show item --json"]) {
-		const verification = await verifyExternalRef(ref, { exec: async () => assert.fail("an external_ref is never executed") });
-		assert.deepEqual(verification, { status: "unverifiable" });
-		assert.equal(describeRefMismatch(ref, verification), undefined);
-		assert.match(describeRefVerification(verification), /not a GitHub url or file path — not verified/);
-	}
+test("br show ref: closed status is a mismatch; open is not", async () => {
+	const closed = await verifyExternalRef("br show cp-abcd --json", {
+		exec: async () => JSON.stringify({ status: "closed", title: "ship it" }),
+	});
+	assert.equal(closed.status, "found");
+	assert.match(describeRefMismatch("br show cp-abcd --json", closed) ?? "", /closed/);
+
+	const open = await verifyExternalRef("br show cp-abcd --json", {
+		exec: async () => JSON.stringify({ status: "open", title: "ship it" }),
+	});
+	assert.equal(describeRefMismatch("br show cp-abcd --json", open), undefined);
+});
+
+test("br --db pinned ref: the db path is unquoted and passed through as one arg", async () => {
+	let seenArgs: readonly string[] = [];
+	await verifyExternalRef(`br --db '/abs/path with space/.beads/beads.db' show cp-abcd --json`, {
+		exec: async (_command, args) => {
+			seenArgs = args;
+			return JSON.stringify({ status: "open", title: "t" });
+		},
+	});
+	assert.deepEqual(seenArgs, ["--db", "/abs/path with space/.beads/beads.db", "--no-auto-flush", "--no-auto-import", "show", "cp-abcd", "--json"]);
 });
 
 test("bare file path: missing is a mismatch, existing is not", async (t) => {
@@ -79,4 +94,18 @@ test("anything else is unverifiable, never a mismatch", async () => {
 	const verification = await verifyExternalRef("https://jira.example.com/BROWSE-1");
 	assert.deepEqual(verification, { status: "unverifiable" });
 	assert.equal(describeRefMismatch("https://jira.example.com/BROWSE-1", verification), undefined);
+});
+
+test("br arrays preserve open and closed states; malformed responses stay diagnostic", async () => {
+	for (const state of ["open", "closed"]) {
+		const ref = "br show cp-array --json";
+		const result = await verifyExternalRef(ref, { exec: async () => JSON.stringify([{ status: state, title: "Array bead" }]) });
+		assert.equal(result.status, "found");
+		assert.equal(Boolean(describeRefMismatch(ref, result)), state === "closed");
+	}
+	for (const raw of ["null", "[]", "[null]", "{}", "not JSON"]) {
+		const result = await verifyExternalRef("br show cp-array --json", { exec: async () => raw });
+		assert.equal(result.status, "unreachable");
+		assert.match(describeRefVerification(result), /br show/);
+	}
 });

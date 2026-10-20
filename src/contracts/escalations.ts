@@ -203,7 +203,7 @@ export const EscalationSchema = Type.Object(
 		mandate_id: Type.String({ minLength: 1, maxLength: 40 }),
 		mandate_clause: Type.String({ minLength: 1, maxLength: 400 }),
 		evidence_paths: Type.Array(Type.String({ minLength: 1, maxLength: 400 }), { maxItems: ESCALATION_MAX_EVIDENCE }),
-		/** Legacy, inert: refs a retired override once admitted. Kept so old journals validate; never read. */
+		/** Exact verified br refs whose deferred status an override may admit (picp-t4n). */
 		deferred_refs: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\r\\n]+$" }))),
 		created_at: IsoTimestampSchema,
 		status: EscalationStatusSchema,

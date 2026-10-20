@@ -11,8 +11,8 @@ Prioritize NEW first. Classify each finding:
 - PARTIALLY COVERED, naming what is missing.
 
 Dedupe against (all read-only): active and paused mandates (`state/mandates/*.json`), open PRs
-(`gh pr list --state open --json number,title,url,headRefName` in the project's canonical clone),
-`data/learnings.md`, and non-closed ledger jobs
+(`gh pr list --state open --json number,title,url,headRefName` in the project's canonical clone), beads
+(`br --db <absolute beads.db> list --json`, never bare `br`), `data/learnings.md`, and non-closed ledger jobs
 (`jobs.json`). Respect the current statuses over any older list. Keep the finding shape, the redaction, the report-only
 and the no-builds rules: no builds, tests, installs, git writes, or writes to live state, any repository, or ~/.pi.
 
