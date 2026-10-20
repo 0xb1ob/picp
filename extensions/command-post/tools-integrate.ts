@@ -14,8 +14,6 @@ import { FORWARDED_RESULTS, type ForwardedResult, recordForwardedCi } from "../.
 import { parsePrUrl } from "../../src/ci-watch.ts";
 import { pendingStackActions, StackFollowups } from "../../src/stack-followups.ts";
 import { formatTeardown } from "../../src/teardown.ts";
-import { TrackerStore } from "../../src/trackers/config.ts";
-import { writeBackLine } from "../../src/trackers/link.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
@@ -239,8 +237,7 @@ export function registerIntegrateTools(pi: ExtensionAPI, deps: ExtensionDeps): v
 				return { content: [{ type: "text", text }], details: result };
 			}
 			return {
-				// laf: a landed job names its tracker write-back; writeBackLine reads local files only and never throws.
-				content: [{ type: "text", text: result.next === "done" ? `${formatIntegration(result)}\n  ${writeBackLine(post.home, () => post.ledger(), () => new TrackerStore({ home: post.home, registry: post.registry }).list(), params.job_id)}` : formatIntegration(result) }],
+				content: [{ type: "text", text: formatIntegration(result) }],
 				details: result,
 			};
 		},

@@ -1226,14 +1226,14 @@ test("a leftover job branch is refused before the lease", { skip: SKIP, timeout:
 test("a refused ledger claim leaves no leftover fleet record (pi-command-post-aap)", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const b = await bench(t);
 	const job = await b.ledger.create({ title: "stuck", project: "demo", delivery: "local", kind: "ship", slug: "stuck" });
-	// Force the job into the one state `ledger.claim` refuses: deferred (an
-	// unenrolled tracker import). The dispatch reaches the fleet write and the
-	// ledger claim before failing, which is exactly the order this regression covers.
+	// Force the job into the one state `ledger.claim` refuses: deferred. The
+	// dispatch reaches the fleet write and the ledger claim before failing,
+	// which is exactly the order this regression covers.
 	await b.ledger.update(job.id, { status: "deferred" });
 
 	await assert.rejects(
 		() => b.dispatcher.dispatch({ jobId: job.id, task: "do it", model: b.model, fetch: false }),
-		/is deferred: run cp_tracker import again to finish enrollment/,
+		/is deferred; review its task and authority, then use cp_job update status=open when authorized/,
 	);
 	assert.deepEqual(b.fleet.read().jobs, [], "a refused claim leaves no leftover fleet record");
 });

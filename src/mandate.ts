@@ -621,7 +621,7 @@ export class MandateStore {
 	}
 
 	/**
-	 * Named-jobs enrollment (B4 `cp_tracker import`): append `job.jobId` to an active batch grant's `job_ids`, the
+	 * Named-jobs enrollment: append `job.jobId` to an active batch grant's `job_ids`, the
 	 * grant file being the record. Re-checked here against the grant and its caps (`batchRefusal`, `enrollCapacity`;
 	 * `open` holds the ids of non-closed ledger jobs). Idempotent for a job already listed.
 	 */

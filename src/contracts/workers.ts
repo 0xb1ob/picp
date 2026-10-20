@@ -134,8 +134,6 @@ export const WORKER_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
 	 * `cp_dispatch`, for the same reason.
 	 */
 	"cp_ask",
-	/** Tracker connections and imports are parent bookkeeping; a worker could feed itself work. */
-	"cp_tracker",
 ]);
 
 /**

@@ -8737,34 +8737,11 @@ older authority code cannot safely judge them. Preserve the backups/manifest thr
 
 **Trackers (B2).** Each registered project has at most one active tracker
 connection in `data/trackers.json` (`TrackerConnectionSchema`,
-`validateTrackersFile`, `src/trackers/config.ts`), managed only by `cp_tracker
-connect|disconnect|list` — never hand-edited. `connect project=<p> adapter=beads
-endpoint=<abs path to beads.db or its .beads dir>` stores the realpath of the
-database with `intake_enabled` and `write_enabled` both off unless passed. The
-database must exist before `br` runs (`br --db <missing>` silently creates one)
-and a read-only `br list --json --limit 1` probe must return `{issues:[...]}`.
-Refused, writing nothing: an unregistered project, a second active connection
-for the project (switching is `cp_tracker disconnect <project>`, then connect),
-a connection id (default `<project>-<adapter>`) already bound to another
-endpoint or project (pass a new `connection_id`), an endpoint another active
-connection holds, and `adapter=github`, which the contract admits but refuses as
-`github: adapter not implemented (B6)` until B6. `disconnect` keeps the record as
-a `disconnected` tombstone; jobs keep `job.tracker.connection_id`. A job's
-optional `tracker: { connection_id, item_id, linked_at }` link is unique across
-open and closed history: `Ledger.createTracked` returns the existing job for a
-known key and refuses to link an open unlinked job carrying the same ref.
-Any other job links through `Ledger.link` (laf, `src/trackers/link.ts`): it is
-idempotent for the same item and refuses another item, or an item another job
-links, naming that job. `cp_job create` and `cp_dispatch` link automatically
-when the job's pinned `br --db <db> show <id> --json` ref names a database whose
-path or realpath equals its project's **active** beads connection endpoint; any
-other ref, db or project stays unlinked with `not linked to a tracker bead:
-<reason>` in the result, and linking never fails a create or a dispatch. No `br`
-runs at link time. `cp_tracker link job_id=<id> [item_id=<bead>]` links one job
-(open or closed) explicitly or from its ref; with no `job_id` it backfills every
-non-closed unlinked job whose ref resolves, printing each link and each skip with
-its reason. The write-back tick runs the same backfill first. Closed jobs link
-only explicitly, so history is never retro-closed by a backfill.
+`validateTrackersFile`, `src/trackers/config.ts`); no tool writes it any more, and
+it is read only for ready-bead discovery and a project's beads database below. A
+job's optional `tracker: { connection_id, item_id, linked_at }` link is inert legacy
+metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique across open
+and closed history, preserved by every native write, and never acted on.
 A project's beads database resolves in one place (`projectTracker`): its active
 beads connection's endpoint, else `<clone>/.beads/beads.db` when that file
 exists, else none. The home's `.beads` is **never** inherited — not in ready-bead
@@ -8779,64 +8756,14 @@ notice fires only when nothing is `launching`, `waiting`, `held` or
 `awaiting_merge` — a held or parked PR is work in flight — and an unchanged
 bead-id set (in any order) is announced once.
 
-**Tracker import (B4).** `cp_tracker import project=<p> mandate_id=<md-…>
-kind=<ship|research> delivery=<pr|local> [ids] [limit]` (`src/trackers/import.ts`)
-turns ready beads into ordinary jobs. It needs the project's active beads
-connection with `intake_enabled`, and a **named-jobs (batch) mandate**: active,
-covering the project and kind, under its spend and token caps, and naming
-`job_ids` — a project-wide grant is refused. Only beads related to that
-mandate's work qualify: the ids the call names, and the ready direct children
-(`br ready --parent <id>`) of every epic the mandate's objective records as
-`epic: <id>`. With neither, the call is refused; a named id that `br ready` does
-not list is refused by id. There is no label or selector matching (B3). Each
-created job is capped by `enrollCapacity` (job cap less dispatched jobs and
-listed jobs still waiting, at most 64 `job_ids`); a label `kind:`/`delivery:`
-that contradicts the call, an item already linked, or a ref another job already
-tracks is skipped with its reason. A job is born `deferred` (out of `ready()`,
-so `cp_next` never offers it) with `tracker.mandate_id` and `task_sha256`, gets a
-frozen `state/tracker-tasks/<job>.md`, is enrolled into the mandate's `job_ids`
-by `MandateStore.enroll` (which re-checks the grant and caps), and only then opens
-with `notes: task_file: <path>`. A crash anywhere in that sequence leaves a
-deferred job no grant was asked to cover, which `Ledger.claim` (the claim
-`cp_dispatch` makes) refuses with `<id> is deferred: run cp_tracker import again
-to finish enrollment`; the same import resumes it — an already-enrolled job takes
-no new slot, even at the job cap — rewriting a missing task file only when the
-source still hashes to `task_sha256`.
-Nothing is dispatched: the parent runs the printed
-`cp_dispatch <job> task_file=<path>` through `cp_next` as usual.
-
-**Tracker write-back (B5).** It replaces the operator's manual `br close`
-(`src/trackers/sync.ts`, `src/trackers/sync-store.ts`). While this session holds
-the parent lock, `cp_tracker` ticks every 60 s (plus one catch-up at start).
-Each tick derives intents from facts — the ledger and `readMergeReceipt` — for
-jobs whose `tracker` link names an **active, `write_enabled`** connection; write
-off, a disconnected connection or an unlinked job derives nothing. A tracker-linked
-`kind:ship` `delivery:pr` job whose receipt matches (`job_id` and
-`head_branch` equal the job id, or the receipt is `bound`), and which was not dropped, closes its bead once
-with `CP <job> merged: <full pr_url> merge <merge_commit_sha> head <head_sha>`.
-Every other closed, undropped job — research, local, board, answer, pipeline — closes its bead once
-with `CP <job> done: <close_reason>`; a dropped job, or a `kind:ship` `delivery:pr` job with no
-matching receipt, gets one comment and its bead stays open. An intent key is the sha256 of
-connection, item, job, op and evidence; its first 12 hex digits are a
-`[cp:<key>]` marker in the text. Intents live in `state/tracker-sync.json` and
-are never deleted; deleting the file only re-derives the same keys. The beads
-adapter never passes `--force` or `--bypass-policy`, never runs `br` against a
-database that does not exist, trusts a close only when a `br show` read-back says
-`closed` (already closed upstream records the evidence as a comment instead), and
-lists comments before adding one. A marker already listed counts as done. An add
-that was acknowledged but whose marker is not listed is held `ambiguous`, never
-appended again. A missing bead is held `refused`. Any other failure, including
-github's `adapter not implemented (B6)`, retries after 60, 120, 240 … s, capped
-at 900 s. `cp_tracker list` shows every write-back that is not done yet. Nothing in
-`src/integrate.ts`, `src/merges.ts` or `src/teardown.ts` imports tracker code, so a
-tracker outage delays a write-back but never gates a merge. `cp_integrate`
-returning `next: done` and the held continuation's `HELD PR LANDED` notice each
-carry one `tracker write-back:` line, computed from local files only (ledger,
-`data/trackers.json`, the merge receipt, `state/tracker-sync.json`) by the
-extension and `command-post.ts`, never by the merge path: which bead closes with
-which PR URL on the next tick, the stored intent's status, or exactly why nothing
-is written (unlinked, unknown or disconnected connection, write off, no matching
-receipt). A failure to compute it becomes an `unknown` line, never a throw.
+**Retired: tracker import, link and write-back (B4/B5/laf).** `cp_tracker`, its 60 s
+write-back tick, `/cp-jobs import-beads` and auto-linking on `cp_job create` and
+`cp_dispatch` are gone; `cp_integrate` and the `HELD PR LANDED` notice carry no
+tracker line. Existing `state/tracker-sync.json` and `state/tracker-tasks/` stay on
+disk unread and untouched. A `deferred` job is never claimed (`Ledger.claim`:
+`<id> is deferred; review its task and authority, then use cp_job update status=open
+when authorized`); reopening it is an explicit native update. The parent restarts
+after this lands so a running sync timer stops.
 
 **Conversation intake (autonomy-programme-cur.4.3).** Work arrives as prose.
 The parent records each item once with `cp_job create`. That call is
@@ -10567,8 +10494,8 @@ merging `origin/<base>` (never rebase), push fast-forward only, never drop commi
 `origin/<branch> kept`). Intake resolves a bound job's PR by number (`gh pr view`,
 whose `headRefName` must equal the job's branch), never by `gh pr list --head`, and
 refuses a `pr_url` naming another PR. Every gate is unchanged: exact reviewed head,
-green CI, review pass, merge policy; teardown, the merge receipt (`bound: true`) and
-tracker write-back key on the job id. `dry_run` ignores `pr`.
+green CI, review pass, merge policy; teardown and the merge receipt (`bound: true`)
+key on the job id. `dry_run` ignores `pr`.
 
 ### Job id (renamed from br id)
 

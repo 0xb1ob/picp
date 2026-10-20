@@ -922,7 +922,7 @@ function heldRecord(jobId: string, overrides: Partial<FleetRecord> = {}): FleetR
 	} as unknown as FleetRecord;
 }
 
-function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; writeBack?: (jobId: string) => string; draining?: () => boolean; onLanded?: (jobId: string) => void } & Partial<Pick<HeldContinuationDeps, "reviewWindow" | "now" | "schedule" | "review" | "hold">> = {}): ContinuationBench {
+function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean; draining?: () => boolean; onLanded?: (jobId: string) => void } & Partial<Pick<HeldContinuationDeps, "reviewWindow" | "now" | "schedule" | "review" | "hold">> = {}): ContinuationBench {
 	const records = options.records ?? [heldRecord("cp-4wz")];
 	const bench: Omit<ContinuationBench, "continuation"> = {
 		records,
@@ -977,7 +977,6 @@ function continuationBench(options: { records?: FleetRecord[]; enabled?: boolean
 		head: (jobId) => bench.heads.get(jobId) ?? HEAD,
 		notify: (notice) => { bench.notices.push(notice); bench.wakes.push(notice); },
 		relay: (notice) => { bench.notices.push(notice); bench.relays.push(notice); },
-		...(options.writeBack ? { writeBack: options.writeBack } : {}),
 		...(options.draining ? { draining: options.draining } : {}),
 		...(options.onLanded ? { onLanded: options.onLanded } : {}),
 		...(options.hold ? { hold: options.hold } : {}),
@@ -1201,26 +1200,12 @@ test("a landed continuation relays once without waking the parent; actionable st
 	}
 });
 
-test("laf: a HELD PR LANDED notice names the tracker write-back; a stop, or no writeBack dep, adds nothing", async () => {
-	const line = "tracker write-back: demo-beads/b-1 closes with https://github.com/o/r/pull/7 on the next write-back tick";
-	const asked: string[] = [];
-	const b = continuationBench({ writeBack: (jobId) => (asked.push(jobId), line) });
-	b.script.set("cp-4wz", ["done"]);
-	await b.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 });
-	assert.equal(b.notices.length, 1);
-	assert.match(b.notices[0]?.content ?? "", /HELD PR LANDED — cp-4wz/);
-	assert.ok(b.notices[0]?.content.includes(`\n  ${line}\n`), b.notices[0]?.content);
-	assert.deepEqual(asked, ["cp-4wz"]);
-	const stop = continuationBench({ writeBack: () => line });
-	stop.script.set("cp-4wz", ["surface"]);
-	await stop.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 });
-	assert.match(stop.notices[0]?.content ?? "", /HELD PR STOPPED/);
-	assert.doesNotMatch(stop.notices[0]?.content ?? "", /tracker write-back/);
+test("a HELD PR LANDED notice carries no tracker advice", async () => {
 	const plain = continuationBench();
 	plain.script.set("cp-4wz", ["done"]);
 	await plain.continuation.trigger({ jobId: "cp-4wz", event: "envelope", generation: 1 });
 	assert.match(plain.notices[0]?.content ?? "", /HELD PR LANDED/);
-	assert.doesNotMatch(plain.notices[0]?.content ?? "", /tracker write-back/);
+	assert.doesNotMatch(plain.notices[0]?.content ?? "", /tracker|write-back/);
 });
 
 test("jje.2 revise: a revise verdict continues nothing — the fix belongs to the job's own implementer", async () => {
