@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore } from "../../src/awaiting.ts";
@@ -17,9 +17,13 @@ import {
 	paths,
 	SCHEMA_VERSION,
 	validate,
+	validatePendingReview,
 	type DiffVerdict,
 	type FleetRecord,
 } from "../../src/contracts.ts";
+import { formatContinuationNotice } from "../../src/held-continuation.ts";
+import { listPendingReviews } from "../../src/review-runs.ts";
+import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { createMergeAskProbe } from "../../src/merge-ask.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
@@ -29,6 +33,7 @@ import {
 	createScratchHome,
 	createScratchRepo,
 	MockProvider,
+	readRunEvents,
 	REPO_ROOT,
 	startPiChild,
 	startRpc,
@@ -58,15 +63,17 @@ function writeReviewPass(home: string, headSha: string): void {
 	writeFileSync(file, `${JSON.stringify(verdict)}\n`);
 }
 
-function writeFakeGh(bin: string, headSha: string, stateFile: string): void {
+/** `prView` answers `gh pr view` (open, clean) so the continuation reaches its review step; every call is logged. */
+function writeFakeGh(bin: string, headFile: string, stateFile: string, logFile: string, prView: boolean): void {
 	mkdirSync(bin, { recursive: true });
 	const gh = join(bin, "gh");
 	writeFileSync(
 		gh,
 		`#!/usr/bin/env node
-const { readFileSync } = require("fs");
-const head = ${JSON.stringify(headSha)};
+const { appendFileSync, readFileSync } = require("fs");
+const head = readFileSync(${JSON.stringify(headFile)}, "utf8").trim();
 const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(logFile)}, args.join(" ") + "\\n");
 if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
   const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
   const run = state === "green"
@@ -77,6 +84,13 @@ if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
 }
 if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
   process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
+  process.exit(0);
+}
+if (${prView} && args[0] === "pr" && args[1] === "view") {
+  process.stdout.write(JSON.stringify({
+    number: 58, url: ${JSON.stringify(PR)}, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
+    headRefName: "cp-held", headRefOid: head, baseRefName: "main", isDraft: false, autoMergeRequest: null,
+  }));
   process.exit(0);
 }
 if (args[0] === "api") {
@@ -96,7 +110,28 @@ process.exit(1);
 	chmodSync(gh, 0o755);
 }
 
-async function seedHeldHome(options: { ciState: "green" | "in_progress" }) {
+/** An in-flight attempt-1 review of `headSha` whose reviewer (this test process) is alive, so no sweep reaps it. */
+function writeReviewPending(home: string, headSha: string): void {
+	const pending = {
+		schema_version: SCHEMA_VERSION,
+		job_id: JOB,
+		surface: "review",
+		attempt: 1,
+		model: "mock/mock-model",
+		pid: process.pid,
+		started_at: isoTimestamp(),
+		deadline: isoTimestamp(new Date(Date.now() + 3_600_000)),
+		handed_back: true,
+		subject: { head_sha: headSha, branch: JOB, files: 1, truncated: false },
+	};
+	const checked = validatePendingReview(pending);
+	assert.ok(checked.ok, checked.ok ? "" : checked.errors.join("; "));
+	const file = join(home, paths.pendingReviewFile(JOB, "review", 1));
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, `${JSON.stringify(pending)}\n`);
+}
+
+async function seedHeldHome(options: { ciState: "green" | "in_progress"; review?: "pass" | "pending" }) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
 	repo.git("checkout", "-b", "cp-held");
@@ -134,7 +169,13 @@ async function seedHeldHome(options: { ciState: "green" | "in_progress" }) {
 		receipts: [{ kind: "pr", status: "open", title: "PR for cp-held", url: PR }],
 	};
 	await fleet.add(record);
-	writeReviewPass(home.path, headSha);
+	if (options.review === "pending") {
+		writeReviewPending(home.path, headSha);
+		// The seeded worker is an unreachable orphan to the child; its restart notice was already relayed.
+		const outbox = new DurableWakeupOutbox({ home: home.path });
+		outbox.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "RESTART RECOVERY — relayed by the previous parent", keys: [JOB] });
+		outbox.confirmDelivered([`recovery:${JOB}`]);
+	} else writeReviewPass(home.path, headSha);
 
 	const store = new AwaitingStore({
 		home: home.path,
@@ -157,10 +198,14 @@ async function seedHeldHome(options: { ciState: "green" | "in_progress" }) {
 
 	const bin = join(home.path, "bin");
 	const stateFile = join(home.path, "gh-state");
+	const headFile = join(home.path, "gh-head");
+	const ghLog = join(home.path, "gh-calls.log");
 	writeFileSync(stateFile, `${options.ciState}\n`);
-	writeFakeGh(bin, headSha, stateFile);
+	writeFileSync(headFile, `${headSha}\n`);
+	writeFileSync(ghLog, "");
+	writeFakeGh(bin, headFile, stateFile, ghLog, options.review === "pending");
 
-	return { home, repo, headSha, declared, bin, stateFile };
+	return { home, repo, headSha, declared, bin, stateFile, headFile, ghLog };
 }
 
 test("/doctor under rpc names the mode and running timers", { timeout: 60_000 }, async (t) => {
@@ -301,4 +346,159 @@ test("rpc: a wake-up arriving mid-turn is delivered after the turn", { timeout: 
 		child.eventsOfType("agent_settled").length >= settledAfterFirst,
 		"wake-up must not drop the in-flight turn",
 	);
+});
+
+type Held = Awaited<ReturnType<typeof seedHeldHome>>;
+
+/** One headless parent on `held`'s home; `turns()` counts its model requests, i.e. parent turns. */
+async function startParent(t: { after(fn: () => unknown): void }, held: Held, script: string) {
+	const provider = await MockProvider.start();
+	const model = provider.addScript(script, [{ kind: "text", text: "acknowledged" }], { onExhausted: "repeat" });
+	const agentDir = createAgentDir({ provider });
+	const child = startPiChild({
+		cwd: held.home.path,
+		model,
+		env: { ...agentDir.env, CP_HOME: held.home.path, PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" },
+		extensions: [COMMAND_POST_EXTENSION],
+	});
+	let closed: Promise<void> | undefined;
+	const close = () => (closed ??= (async () => {
+		await child.close();
+		agentDir.cleanup();
+		await provider.stop();
+	})());
+	t.after(close);
+	return { child, close, turns: () => provider.requests(script).length, requestText: () => JSON.stringify(provider.requests(script).map((r) => r.body.messages)) };
+}
+
+function wakeRuleEvents(home: string, rule: "ci_green" | "held_stop_resolve"): Record<string, unknown>[] {
+	let events;
+	try {
+		events = readRunEvents(home, JOB);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+	return events.map((event) => event.payload as Record<string, unknown>).filter((payload) => payload?.wake_rule === rule);
+}
+
+const ghCalls = (held: Held, needle: string): number => readFileSync(held.ghLog, "utf8").split("\n").filter((line) => line.includes(needle)).length;
+
+/** A quiet window that ends on watch evidence, not a clock: `n` more CI queries ran after this call. */
+async function ciTicks(held: Held, n: number): Promise<void> {
+	const before = ghCalls(held, "/actions/runs?");
+	await waitFor(() => ghCalls(held, "/actions/runs?"), (calls) => calls >= before + n, { timeoutMs: 60_000, what: `${n} more CI watch ticks` });
+}
+
+function notified(child: Awaited<ReturnType<typeof startParent>>["child"], pattern: RegExp) {
+	return child.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && typeof r.message === "string" && pattern.test(r.message), 90_000);
+}
+
+/**
+ * E2E A, ci_green: the watch's real onObserved -> continuation sees the attempt already in flight
+ * (review_pending), so the green fact is relayed with no parent turn, journaled once, and repeated ticks, a
+ * restart on the persisted home and a moved head repeat no review, merge or wake (36d0c03, 05f1581, 534cd14).
+ */
+test("rpc: one CI-green key whose review is in flight is relayed without a parent turn; ticks, restart and a moved head repeat nothing", { timeout: 300_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "green", review: "pending" });
+	t.after(() => {
+		held.home.cleanup();
+		held.repo.cleanup();
+	});
+	const first = await startParent(t, held, "headless-green");
+	const relay = await notified(first.child, /CI GREEN — .* handled in code, no parent turn\./);
+	assert.match(String(relay.message), /cp-held/);
+	assert.match(String(relay.message), /pull\/58/);
+	await waitFor(() => wakeRuleEvents(held.home.path, "ci_green"), (events) => events.length > 0, { timeoutMs: 30_000, what: "the ci_green journal line" });
+	await ciTicks(held, 3);
+	const journal = wakeRuleEvents(held.home.path, "ci_green");
+	assert.deepEqual(journal.map((e) => [e.decision, e.action, e.next_kind]), [["suppressed", "review_pending", "no_mandate"]], "one key, one ruling");
+	assert.equal(first.turns(), 0, `no parent turn for a fact code already handled: ${first.requestText().slice(-2000)}`);
+	assert.deepEqual(listPendingReviews(held.home.path, JOB).map((p) => p.attempt), [1], "the in-flight review is awaited, never a second one");
+	assert.equal(ghCalls(held, "pr merge"), 0);
+	await first.close();
+
+	// Restart on the persisted home, with the head moved and CI not yet green on it.
+	held.repo.write("held.txt", "moved\n");
+	const moved = held.repo.commitAll("moved head");
+	held.repo.git("push", "--quiet", "origin", "cp-held");
+	writeFileSync(held.headFile, `${moved}\n`);
+	writeFileSync(held.stateFile, "in_progress\n");
+	const second = await startParent(t, held, "headless-green-restart");
+	await ciTicks(held, 3);
+	assert.equal(second.turns(), 0, "the confirmed green key for the old head never wakes the restarted parent");
+	assert.equal(wakeRuleEvents(held.home.path, "ci_green").length, 1);
+	assert.deepEqual(listPendingReviews(held.home.path, JOB).map((p) => p.attempt), [1]);
+	assert.equal(ghCalls(held, "pr merge"), 0, "no merge on the old head's green");
+	assert.equal(new FleetStore({ home: held.home.path }).list().length, 1);
+});
+
+test("rpc: with the wake-rules switch off, the same CI-green fact wakes the parent and journals why", { timeout: 180_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "green", review: "pending" });
+	t.after(() => {
+		held.home.cleanup();
+		held.repo.cleanup();
+	});
+	mkdirSync(join(held.home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
+	const parent = await startParent(t, held, "headless-green-off");
+	await notified(parent.child, /CI\/PR OBSERVED/);
+	await waitFor(() => parent.turns(), (n) => n >= 1, { timeoutMs: 60_000, what: "the parent turn the switch restores" });
+	assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green").map((e) => [e.decision, e.reason]), [["woke", "kill switch"]]);
+});
+
+/** The durable notice HeldContinuation writes for a stop, carried across a restart (a real resolve needs a live worker). */
+function carryStop(held: Held, next: "resolve" | "surface"): string {
+	const id = `continuation:${JOB}:1:${held.headSha.slice(0, 12)}:ci:${next}`;
+	const queued = new DurableWakeupOutbox({ home: held.home.path }).enqueue({
+		id,
+		kind: "recovery",
+		job_id: JOB,
+		keys: [JOB],
+		content: formatContinuationNotice(JOB, next, `${JOB}: CI failed on ${held.headSha.slice(0, 12)}; implementer promoted (receipt delivered)`, PR),
+	});
+	assert.equal(queued, true);
+	return id;
+}
+
+/**
+ * E2E A, held_stop_resolve: a carried `next: resolve` stop is relayed once with no parent turn and the repair
+ * stays on the same job; a `surface` stop, or the switch off, still wakes the parent (e83a1a8).
+ */
+test("rpc: a carried resolve stop is relayed once without a parent turn; the repair stays the same job", { timeout: 180_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+	t.after(() => {
+		held.home.cleanup();
+		held.repo.cleanup();
+	});
+	const id = carryStop(held, "resolve");
+	const parent = await startParent(t, held, "headless-resolve");
+	await notified(parent.child, /HELD PR STOPPED — cp-held \(continuation, next: resolve\)/);
+	await waitFor(() => wakeRuleEvents(held.home.path, "held_stop_resolve"), (events) => events.length > 0, { timeoutMs: 30_000, what: "the resolve journal line" });
+	await ciTicks(held, 3);
+	assert.deepEqual(wakeRuleEvents(held.home.path, "held_stop_resolve").map((e) => [e.decision, e.next_kind]), [["relayed", "no_mandate"]]);
+	assert.equal(parent.turns(), 0, `a stop code already acted on is not a parent turn: ${parent.requestText().slice(-2000)}`);
+	assert.equal(new DurableWakeupOutbox({ home: held.home.path }).pending().some((entry) => entry.id === id), false, "delivered, so never replayed");
+	const fleet = new FleetStore({ home: held.home.path }).list();
+	assert.deepEqual(fleet.map((record) => [record.job_id, record.supersessions ?? 0]), [[JOB, 0]], "no second job, no supersession");
+});
+
+test("rpc: a surface stop, and a resolve stop with the switch off, still wake the parent", { timeout: 240_000 }, async (t) => {
+	for (const [next, switchOff] of [["surface", false], ["resolve", true]] as const) {
+		const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+		t.after(() => {
+			held.home.cleanup();
+			held.repo.cleanup();
+		});
+		if (switchOff) {
+			mkdirSync(join(held.home.path, LAYOUT.data), { recursive: true });
+			writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
+		}
+		carryStop(held, next);
+		const parent = await startParent(t, held, `headless-${next}-${switchOff ? "off" : "on"}`);
+		await waitFor(() => parent.turns(), (n) => n >= 1, { timeoutMs: 60_000, what: `the parent turn for a ${next} stop` });
+		assert.match(parent.requestText(), new RegExp(`next: ${next}`));
+		assert.deepEqual(wakeRuleEvents(held.home.path, "held_stop_resolve"), [], "no relay was decided");
+		await parent.close();
+	}
 });
