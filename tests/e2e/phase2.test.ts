@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
+import { assertNotDraining, drainFile, readDrain } from "../../src/drain.ts";
 import { type Failure, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { classifyRun, decideRecovery } from "../../src/failures.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
@@ -56,6 +57,8 @@ interface Fleet {
 	failures: Array<[string, Failure]>;
 	intake(title: string, options: { delivery: "pr" | "local"; slug: string }): Promise<string>;
 	script(name: string, steps: ScriptStep[]): string;
+	/** Shut the newest parent down and start a fresh one on the same home (a parent restart). */
+	restart(): Promise<{ post: CommandPost; reported: IntakeResult[] }>;
 	cleanup(): Promise<void>;
 }
 
@@ -65,7 +68,7 @@ interface Fleet {
  */
 async function fleet(
 	t: { after(fn: () => void | Promise<void>): void },
-	options: { budgets?: { per_job_tokens: number; per_job_cost_usd: number } } = {},
+	options: { budgets?: { per_job_tokens: number; per_job_cost_usd: number }; ownsHome?: boolean } = {},
 ): Promise<Fleet> {
 	const home = createScratchHome();
 	const repo = createScratchRepo({
@@ -94,13 +97,20 @@ async function fleet(
 
 	const reported: IntakeResult[] = [];
 	const failures: Array<[string, Failure]> = [];
-	const post = new CommandPost({
-		home: home.path,
-		packageRoot: REPO_ROOT,
-		parentEnv: { ...process.env, ...agentDir.env },
-		onReported: (result) => reported.push(result),
-		onFailure: (jobId, failure) => failures.push([jobId, failure]),
-	});
+	const posts: CommandPost[] = [];
+	const makePost = (into: IntakeResult[]): CommandPost => {
+		const next = new CommandPost({
+			home: home.path,
+			packageRoot: REPO_ROOT,
+			parentEnv: { ...process.env, ...agentDir.env },
+			onReported: (result) => into.push(result),
+			onFailure: (jobId, failure) => failures.push([jobId, failure]),
+			...(options.ownsHome ? { holdsParentLock: () => true } : {}),
+		});
+		posts.push(next);
+		return next;
+	};
+	const post = makePost(reported);
 
 	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
 	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
@@ -108,7 +118,7 @@ async function fleet(
 	const pool = enableTreehouse(clone, { maxTrees: 3 });
 
 	const cleanup = async () => {
-		await post.shutdown();
+		for (const each of posts) await each.shutdown();
 		try {
 			treehouse(clone, "prune");
 		} catch {
@@ -138,6 +148,11 @@ async function fleet(
 			const model = provider.addScript(name, steps);
 			agentDir.writeModels(provider);
 			return model;
+		},
+		async restart() {
+			await posts.at(-1)!.shutdown();
+			const into: IntakeResult[] = [];
+			return { post: makePost(into), reported: into };
 		},
 		cleanup,
 	};
@@ -524,6 +539,59 @@ test("m2: a forced teardown racing an automatic revive never claims a lease it d
 	assert.equal(readFleet(f.home).jobs[0]?.phase, "done");
 	assert.ok(!/leased/.test(treehouse(f.clone, "status")), "the pool has its worktree back");
 	assert.equal(f.post.manager.get(jobId), undefined, "no worker survives the teardown");
+});
+
+/**
+ * E2E B: drain, restart the parent on the persisted home, then an explicit cp_revive finishes the same job on its
+ * lease with one report. A later restart whose startup journal throws still clears the stale drain (fca1077).
+ */
+test("m2: a drained restart then an explicit revive completes the same job once, on the same lease", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t, { ownsHome: true });
+	const jobId = await f.intake("survive a drained restart", { delivery: "local", slug: "drained" });
+	const [commit, report] = shipSteps(f.home, jobId, { push: false });
+	// Commit, then settle unreported twice (the turn and its one report nudge); the report waits for the revive.
+	const model = f.script("m2-drain", [commit!, { kind: "text", text: "paused for the restart" }, { kind: "text", text: "still paused" }, report!]);
+	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
+	await waitFor(() => f.post.manager.get(jobId)?.worker.settledCount ?? 0, (count) => count >= 2, { timeoutMs: 60_000, what: "the worker and its report nudge to settle" });
+	const before = readFleet(f.home).jobs[0];
+	assert.ok(before?.lease_id);
+
+	assert.equal(f.post.drain.start(60).state, "drained", "an idle worker is no blocker");
+	assert.throws(() => assertNotDraining(f.home, "dispatch"), /draining for a restart/);
+	assert.deepEqual(readDrain(f.home)?.jobs.map((job) => job.job_id), [jobId]);
+
+	const { post, reported } = await f.restart();
+	await post.reconcile();
+	assert.equal(existsSync(drainFile(f.home)), false, "the fresh parent's startup clears the drain");
+	assertNotDraining(f.home, "dispatch");
+	const restart = post.durableWakeups.pending().filter((entry) => entry.content.startsWith("RESTART AFTER DRAIN"));
+	assert.equal(restart.length, 1);
+	assert.match(restart[0]!.content, new RegExp(`${jobId} `));
+
+	const plan = await post.revivePlan(jobId);
+	assert.ok(plan.ok, JSON.stringify(plan));
+	await post.revive(jobId);
+	const sent = await post.send({ jobId, message: "The parent restarted: report your work now." });
+	assert.equal(sent.receipt, "delivered", JSON.stringify(sent));
+	const held = await waitFor(() => readFleet(f.home).jobs[0], (record) => record?.phase === "held", { timeoutMs: 60_000, what: "the revived worker to report" });
+	assert.equal(held?.lease_id, before.lease_id, "a revive keeps the lease");
+	assert.equal(held?.worktree, before.worktree);
+	assert.equal(readFleet(f.home).jobs.length, 1, "one job, one record");
+	assert.deepEqual(reported.map((result) => [result.job_id, result.next]), [[jobId, "teardown"]], "one completion");
+	assert.equal(f.reported.length, 0, "the drained parent never saw a report");
+	assert.equal(readEventLog(f.home, jobId).filter((event) => event.type === "worker_revived").length, 1);
+	assert.equal(f.provider.remaining("m2-drain"), 0, "the whole script ran: no hidden turns");
+
+	// A later drained restart whose startup journal throws still leaves no stale drain behind.
+	await waitFor(() => readRunStatus(f.home, jobId), (status) => status.phase === "idle", { timeoutMs: 60_000, what: "the reporting turn to settle" });
+	assert.equal(post.drain.start(60).state, "drained");
+	const third = await f.restart();
+	third.post.durableWakeups.enqueue = () => {
+		throw new Error("disk full");
+	};
+	await third.post.reconcile();
+	assert.equal(existsSync(drainFile(f.home)), false, "cleared despite the journal failure");
+	assertNotDraining(f.home, "dispatch");
 });
 
 // ---------------------------------------------------------------------------
