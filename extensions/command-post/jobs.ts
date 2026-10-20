@@ -451,7 +451,7 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 		promptGuidelines: [
 			"Every job needs project (a registered name) and delivery (pr|local); add kind ship|research when it helps routing.",
 			"Pass risk on cp_job create only when the operator or the spec states it (never invent it): a recorded low turns a keyword-only risk:high into a warning, a recorded high always gates.",
-			"When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it); for a br tracker, pin the project's beads DB with --db and its absolute path (`br --db /abs/path/.beads/beads.db show <id> --json`) so it still works from a leased worktree — the ledger points at issues, it does not copy them.",
+			"When the operator names an issue, store where it lives as external_ref: one opaque line (url, path, or the command that shows it), stored verbatim and never run — the ledger points at issues, it does not copy them.",
 			"cp_job create is idempotent: the same project + title, or the same external_ref, returns the existing open job. Echo each id. A repeated list creates nothing new.",
 			"cp_job ready is the queue; cp_next says which of it the active mandate covers and what to do next.",
 			"cp_job close/drop is for dropping work (`dropped: …`). Finished research and Q&A close on cp_teardown; ship jobs close on cp_integrate. A live worker is torn down first.",

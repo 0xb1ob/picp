@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
@@ -38,6 +39,10 @@ const OPAQUE = "external-tool show item --json";
 const PINNED = "external-tool --db '/legacy/item.db' show item-2 --json";
 const BR_REF = "br --db '/legacy/.beads/beads.db' show item-4 --json";
 const RETIRED_HINT = /cp_tracker|import-beads/;
+const TOOL_ADVICE = /\bbr\b|--db|BEADS|cp_tracker|import-beads/;
+const OLD_JOB_GUIDELINE = "When the operator names an issue, store where it lives as external_ref (url, path, or the command that shows it); " +
+	"for a br tracker, pin the project's beads DB with --db and its absolute path (`br --db /abs/path/.beads/beads.db show <id> --json`) " +
+	"so it still works from a leased worktree — the ledger points at issues, it does not copy them.";
 
 function legacyJob(id: string, status: string, extra: Record<string, unknown>): Record<string, unknown> {
 	return {
@@ -58,25 +63,27 @@ function shippedSurface(): string[] {
 }
 
 test("retired integration: an existing home keeps its data and runs the native lifecycle with no external call", { skip: SKIP, timeout: 300_000 }, async (t) => {
-	// Cleanup is registered before any setup that can throw, so PATH and scratch dirs never leak.
+	// Cleanup is registered before any setup that can throw: PATH and scratch dirs never leak, and the
+	// old order holds (shutdown before pool cleanup; a prune error is logged, never fails a passing test).
 	const savedPath = process.env.PATH;
-	const cleanups: Array<() => unknown> = [];
+	const own: Partial<{
+		home: ReturnType<typeof createScratchHome>; repo: ReturnType<typeof createScratchRepo>;
+		provider: Awaited<ReturnType<typeof MockProvider.start>>; agentDir: ReturnType<typeof createAgentDir>;
+		post: CommandPost; clone: string; pool: ReturnType<typeof enableTreehouse>;
+	}> = {};
 	t.after(async () => {
 		process.env.PATH = savedPath;
-		const errors: unknown[] = [];
-		for (const cleanup of cleanups.reverse()) {
-			try { await cleanup(); } catch (error) { errors.push(error); }
+		await own.post?.shutdown();
+		if (own.clone) {
+			try { treehouse(own.clone, "prune"); } catch (error) { t.diagnostic(`treehouse prune failed (ignored): ${String(error)}`); }
 		}
-		if (errors.length) throw new AggregateError(errors, "retired-integration cleanup failed");
+		own.pool?.cleanup(); own.agentDir?.cleanup(); own.repo?.cleanup(); own.home?.cleanup();
+		await own.provider?.stop();
 	});
-	const home = createScratchHome();
-	cleanups.push(() => home.cleanup());
-	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/app.ts": "export const x = 1;\n" } });
-	cleanups.push(() => repo.cleanup());
-	const provider = await MockProvider.start();
-	cleanups.push(() => provider.stop());
-	const agentDir = createAgentDir({ provider });
-	cleanups.push(() => agentDir.cleanup());
+	const home = (own.home = createScratchHome());
+	const repo = (own.repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/app.ts": "export const x = 1;\n" } }));
+	const provider = (own.provider = await MockProvider.start());
+	const agentDir = (own.agentDir = createAgentDir({ provider }));
 
 	// A command-shaped ref must never run: fakes on PATH record any invocation.
 	const bin = join(home.path, "fake-bin");
@@ -109,14 +116,12 @@ test("retired integration: an existing home keeps its data and runs the native l
 	const reported: IntakeResult[] = [];
 	// A parent that still exports a retired database must not hand it to the worker.
 	const dbEnv = { BEADS_DIR: join(home.path, ".beads"), BEADS_DB: join(home.path, ".beads", "beads.db") };
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env, ...dbEnv }, onReported: (result) => reported.push(result) });
-	cleanups.push(() => post.shutdown());
+	const post = (own.post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env, ...dbEnv }, onReported: (result) => reported.push(result) }));
 	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
 	const clone = post.registry.pathOf("demo");
 	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
-	const pool = enableTreehouse(clone, { maxTrees: 2 });
-	cleanups.push(() => pool.cleanup());
-	cleanups.push(() => treehouse(clone, "prune"));
+	own.clone = clone;
+	own.pool = enableTreehouse(clone, { maxTrees: 2 });
 
 	// Native reads keep every legacy field; the deferred job stays deferred until an explicit native update.
 	const ledger = post.ledger();
@@ -158,8 +163,32 @@ test("retired integration: an existing home keeps its data and runs the native l
 	assert.equal(existsSync(calls), false, "no external_ref was ever executed and br never ran");
 	assert.equal(existsSync(leak), false, "the worker saw no retired database environment");
 	assert.equal(provider.remaining("retired-ship"), 0);
-	for (const file of shippedSurface()) assert.doesNotMatch(readFileSync(join(REPO_ROOT, file), "utf8"), RETIRED_HINT, `${file} names a retired surface`);
 });
+
+test("retired integration: no shipped hint, tool description or guideline advises a retired tracker", async () => {
+	for (const file of shippedSurface()) assert.doesNotMatch(readFileSync(join(REPO_ROOT, file), "utf8"), RETIRED_HINT, `${file} names a retired surface`);
+	// Negative control: the guideline cp_job shipped before PR1b review 1 must trip the guard.
+	assert.match(OLD_JOB_GUIDELINE, TOOL_ADVICE);
+	const surface = await registeredSurface();
+	assert.ok(surface.some((entry) => entry.name === "cp_job"), "the parent's tools were registered");
+	for (const { name, text } of surface) assert.doesNotMatch(text, TOOL_ADVICE, `${name} advises a retired tracker`);
+});
+
+/** Every tool and command the parent's extensions register, read through a recording ExtensionAPI stub. */
+async function registeredSurface(): Promise<Array<{ name: string; text: string }>> {
+	const seen: Array<{ name: string; text: string }> = [];
+	const pi: unknown = new Proxy({}, {
+		get: (_target, key) => key === "registerTool"
+			? (tool: Record<string, unknown>) => seen.push({ name: String(tool.name), text: JSON.stringify([tool.description, tool.promptSnippet, tool.promptGuidelines, tool.parameters]) })
+			: key === "registerCommand" ? (name: string, command: { description?: string }) => seen.push({ name: `/${name}`, text: command.description ?? "" })
+			: key === "events" ? pi : () => undefined,
+	});
+	for (const extension of ["command-post", "cp-bridge"]) {
+		const module = await import(pathToFileURL(join(REPO_ROOT, "extensions", extension, "index.ts")).href) as { default: (api: unknown) => void };
+		module.default(pi);
+	}
+	return seen;
+}
 
 /** HEAD of the job's own worktree, read when the report step is served. */
 function treehouseHead(home: string, jobId: string): string {

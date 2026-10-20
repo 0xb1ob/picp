@@ -31,7 +31,7 @@ export function registerProjectMemoryTools(
 		name: "cp_project",
 		label: "Projects",
 		description:
-			"Register a project (and clone it on demand), or list what is registered. A `project:<name>` br label " +
+			"Register a project (and clone it on demand), or list what is registered. A `project:<name>` job label " +
 			"must name a registered project; `projects/<name>` is a clone-on-demand cache, never a place to keep work.",
 		promptSnippet: "Register or list command post projects (cp_project)",
 		promptGuidelines: [

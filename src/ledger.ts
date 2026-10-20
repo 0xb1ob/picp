@@ -322,7 +322,10 @@ export interface IntakeInput {
 	/** Recorded as a `risk:<low|high>` label; the risk:high gate reads it, a low never routes (riskkw-f10). */
 	risk?: Risk;
 	description?: string;
-	/** Where the issue lives: a url, a file path, or a command that shows it. One opaque line, stored verbatim and never run. */
+	/**
+	 * Where the issue lives: a url, a file path, or a command that shows it.
+	 * One opaque line, stored verbatim and never run.
+	 */
 	externalRef?: string;
 	/** Checked-in POSIX repository-relative script; only ship/local jobs. */
 	scriptPath?: string;

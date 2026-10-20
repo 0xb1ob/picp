@@ -8730,7 +8730,8 @@ one cannot break startup. A job's optional `tracker: { connection_id, item_id, l
 link is inert legacy metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique
 across open and closed history, preserved by every native write, and never acted on.
 `cp_next` and its `state/next-snapshot.json` (`schema_version: 2`) list native jobs only;
-the viewer treats any other snapshot version as unavailable, never as nothing queued.
+the viewer reads an older version as not yet written ("Refreshes on next scheduling pass"), an unknown one
+as unavailable, never either as nothing queued.
 There is no idle notice. Dispatch injects no tracker database: a worker's inherited
 `BEADS_DIR`/`BEADS_DB` is stripped and none is set.
 

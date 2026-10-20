@@ -72,7 +72,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		description:
 			"Run the research -> gate -> checkpoint -> implement pipeline. " +
 			"classify: recommend single vs pipeline vs qa for a task, with reasons (qa means it is a question: use cp_ask). " +
-			"start: create the two br issues (dep-linked) and dispatch the planner. " +
+			"start: create the two jobs (dep-linked) and dispatch the planner. " +
 			"advance: take the next step from what is on disk (gate, close, authorization, implementer dispatch). " +
 			"recover: re-dispatch a failed implementer from the same task file. " +
 			"reanchor: point a pipeline at a replacement research job (a superseded plan can never reach an implementer; " +

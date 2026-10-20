@@ -641,7 +641,8 @@ export class CpBridge {
 		if (event.type === "message_end") {
 			// Only assistant messages count as replies; custom fleet notices relay directly.
 			const message = event.message as { role?: unknown; customType?: unknown } | undefined;
-			// The one drain outcome wake (durable id `drain:<started>:<outcome>`, kept as `drainId` for the delivery recheck) and a `killed-unreported:` notice (issue #2) reach the operator directly.
+			// The one drain outcome wake (durable id `drain:<started>:<outcome>`, kept as `drainId` for the delivery
+			// recheck) and a `killed-unreported:` notice (issue #2) reach the operator directly.
 			const durableIds = durableIdsFromMessage(message), drainId = durableIds.find((id) => id.startsWith("drain:"));
 			const directWake = drainId !== undefined || durableIds.some((id) => id.startsWith(KILLED_UNREPORTED_WAKEUP_PREFIX));
 			if (message?.role === "custom" && (durableIds.some(isLandedContinuation) || relayOnlyMessage(message))) this.#relayLanding(textOf(message));

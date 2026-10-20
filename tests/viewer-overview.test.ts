@@ -289,7 +289,7 @@ test("#323 Lined up: the cp_next snapshot as written, its age, and nothing queue
  const result = await build({stdin:{contents:'import {h} from "preact"; import render from "preact-render-to-string"; import {Overview} from "./viewer-app/screens/Overview.tsx"; export const screen=(data)=>render(h(Overview,{data}));',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
  const {screen} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
  assert.deepEqual(overview(state, now).lined_up, {availability:"missing", at:null, project:null, empty_since:null, items:[], unavailable:[]});
- assert.match(screen(overview(state, now)), /Lined up · -.*No cp_next snapshot yet/s);
+ assert.match(screen(overview(state, now)), /Lined up · -.*Refreshes on next scheduling pass/s);
  const job = {id:"cp-q1", title:"Queued <b>title</b>", labels:["project:demo"]} as unknown as Job;
  const ready = {ready:[job], action:{kind:"wait" as const, reason:"md-a dispatch-parallelism 1 is full"}, lined_up:{jobs:[job], queued:[]}};
  writeNextSnapshot(state.home, ready, "2026-09-26T11:30:00Z", "demo");
@@ -311,5 +311,7 @@ test("#323 Lined up: the cp_next snapshot as written, its age, and nothing queue
  assert.equal(overview(state, now).lined_up.availability, "unavailable", "an unsafe job id makes the snapshot unreadable");
  assert.match(screen(overview(state, now)), /Lined up unavailable/);
  put(join(LAYOUT.state, "next-snapshot.json"), {schema_version:1, at:"2026-09-26T11:00:00Z", items:[{kind:"bead", id:"bd-7", project:"demo", verdict:"no job", reason:""}], unavailable:[]});
- assert.equal(overview(state, now).lined_up.availability, "unavailable", "an older snapshot version is unavailable, not empty");
+ assert.equal(overview(state, now).lined_up.availability, "missing", "an older snapshot version is not yet written, not an error");
+ assert.match(screen(overview(state, now)), /Lined up · -.*Refreshes on next scheduling pass/s);
+ assert.doesNotMatch(screen(overview(state, now)), /unavailable|unreadable|Nothing queued/);
 });

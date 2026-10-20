@@ -119,7 +119,7 @@ function LinedUp({data}: {data:OverviewResponse}) {
  const age = l.at ? <span class="overview-held-hint">snapshot from {time(l.at)}, {ago(l.at, data.generated_at)}{scope}</span> : null;
  const many = new Set(l.items.map(i => i.project)).size > 1;
  const body = l.availability === "unavailable" ? <p class="overview-error">Lined up unavailable: the cp_next snapshot is unreadable</p>
-  : !l.at ? <p class="overview-meta">No cp_next snapshot yet</p>
+  : !l.at ? <p class="overview-meta">Refreshes on next scheduling pass</p>
   : !l.items.length && !l.unavailable.length ? <p class="overview-meta">Nothing queued since {time(l.empty_since ?? l.at)}</p>
   : <>{l.unavailable.map(u => <p key={u.project} class="overview-meta" title={u.error}>{u.project}: not read</p>)}
    {l.items.map(i => <a key={i.id} href={jobHref(i.id)} class="overview-line">
