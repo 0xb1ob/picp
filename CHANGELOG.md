@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Viewer Sessions: a PR chip in a bridge-notice row renders as the same pill as in a turn card (cp-notice-pr-chip-fix-017a): the chip rule now covers every transcript row, not only Markdown bubbles, so the notice chip no longer reads "#381draftCI greenreview pass" with a stray bar; chip segments carry a space so copied text stays separated. Migration: none. Rollback: revert.
+
 - Viewer job reports render as web pages (cp-report-markdown-renderer-ka6w): `#report/<id>` shows `state/artifacts/<id>/report.md` as a document (headings, lists, tables that scroll sideways on phones, code, quotes, links in a new tab, images from the job's own artifact dir), in dark and, on a light-scheme browser, light. New read routes `GET /api/report/<id>` and `GET /api/report/<id>/files/<path>` (png/jpeg/gif/webp only, contained after symlinks). The job page links "Report · report.md" beside any published board; Reports gains a Job reports section. Raw HTML in a report stays text. Migration: none. Rollback: revert.
 
 - Viewer Jobs page (and Job detail, Reports, Schedules) uses the shell's full-width phone gutter like Overview (cp-jobs-mobile-fullwidth-k6se): the 358px centred column cap is gone, so on phones wider than 390px the content lines up with the top bar and long titles get the extra width. Desktop (>=900px) unchanged. Migration: none. Rollback: revert.

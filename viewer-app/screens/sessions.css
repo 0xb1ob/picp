@@ -211,9 +211,9 @@
 .md li > ul, .md li > ol { margin-top: 2px; }
 .md li { white-space: pre-wrap; }
 .md a { color: var(--blue); overflow-wrap: anywhere; }
-.md a.pr-chip, .session-rollup-head a.pr-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; max-width: 100%; min-height: 22px; padding: 0 8px; vertical-align: middle;
+.session-body a.pr-chip, .session-rollup-head a.pr-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; max-width: 100%; min-height: 22px; padding: 0 8px; vertical-align: middle;
  border: 1px solid var(--border); border-radius: 999px; color: var(--secondary); font-size: 12px; line-height: 20px; text-decoration: none; overflow-wrap: anywhere; }
-.md a.pr-chip:hover, .session-rollup-head a.pr-chip:hover { border-color: var(--dim); }
+.session-body a.pr-chip:hover, .session-rollup-head a.pr-chip:hover { border-color: var(--dim); }
 .pr-chip-num { color: var(--text); font-weight: 600; }
 .pr-chip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .pr-chip-open .pr-chip-dot { background: var(--green); }
