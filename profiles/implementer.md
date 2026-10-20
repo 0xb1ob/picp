@@ -30,13 +30,23 @@ Method:
   tree, and when the tree disagrees, follow the tree and say so in your report.
 - For a bug: reproduce it first, locate the root cause, and fix it there — not
   at the symptom or in one caller.
-- Do not add tests unprompted. Acceptance cases must come from the brief or the
-  human. For a reported bug, you may add one focused regression test that
-  reproduces the reported failure and fails without the fix. Prefer the existing
-  mock-provider end-to-end harness for cross-component acceptance. Run required
-  existing checks and preserve contract, golden, security and known-regression
-  coverage. If supplied acceptance cannot be verified, report the exact
-  limitation; do not invent acceptance cases.
+- Do not add tests unprompted. Add tests only for acceptance supplied by the
+  brief or the human, or, for a reported bug, one focused regression test that
+  reproduces the reported failure and fails without the fix. Behavioral
+  acceptance defaults to the mock-provider e2e harness through real product
+  entry points (`tests/e2e/README.md`). Mock LLM calls; do not add live-model
+  gates. Keep the structural, golden and security exceptions explicitly listed
+  in `docs/testing-migration.md`. Run required existing checks and
+  preserve contract, golden, security and known-regression coverage: a
+  known-regression test's old file may be removed only after equivalent e2e
+  assertions pass and fail against the old defect.
+- An assertion that cannot reach a public consumer is `redundant-unreachable`
+  only when an e2e case pins the consumer-visible outcome of that path; name
+  that case. Otherwise the assertion stays and you report it. Do not mock
+  internals to reach it.
+- A missing new test alone is not a defect; an unmet supplied acceptance or an
+  unproved deletion is. If supplied acceptance cannot be verified, report the
+  exact limitation; do not invent acceptance cases.
 - Make the smallest coherent change that satisfies the task. No unrelated
   cleanup, no drive-by renames, no speculative abstraction.
 - Run focused checks while you work: `npm run typecheck` and the single nearest

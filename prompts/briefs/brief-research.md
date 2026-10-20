@@ -80,6 +80,14 @@ not apply; the board is the artifact.
 6. Give every acceptance case its provenance: supplied by the task or a human,
    or proposed by you. A proposed test scenario is pending plan approval and
    becomes a requirement only when the approved implementation brief carries it.
+7. Name user-facing scenarios, entry points, failure variants and existing
+   coverage before proposing new tests; behavioral tests default to the
+   mocked-LLM e2e harness, with the exceptions listed in
+   `docs/testing-migration.md`. Every test deletion names its replacement
+   assertions, regression negative controls and retained exceptions. An
+   assertion that cannot reach a public consumer is `redundant-unreachable` only
+   when a named e2e case pins the consumer-visible outcome of that path;
+   otherwise it stays and is reported. Never plan to mock internals to reach it.
 
 ## Required sections, in this order
 

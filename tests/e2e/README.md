@@ -20,6 +20,17 @@ m1 always runs. m2, m3 and the `tests/pipeline.test.ts` lease tests self-skip
 unless `treehouse` is on `PATH`; CI installs it, and `tests/ci-host-tools.test.ts`
 fails the run if the install did not land on `PATH`.
 
+## E2E is the default for behavioral acceptance
+
+New behavioral acceptance (from the brief or a human, or a reproducing regression for a reported bug) lands here, through
+real product entry points: CommandPost tools, bridge RPC or viewer HTTP/UI, with real worker and reporter processes,
+scratch git and fake external services. Mock LLM calls; do not add live-model gates. A new non-e2e test needs an explicit
+exception from the list in [docs/testing-migration.md](../../docs/testing-migration.md) (structural, golden and security
+checks). A unit file is deleted only when that manifest maps each of its assertions to a named case here and records a
+negative control: the old defect patched back fails the e2e case, the fix passes it. An assertion that cannot reach a
+public consumer is `redundant-unreachable` only when a named case pins the consumer-visible outcome of that path;
+otherwise it stays and the worker reports it. Do not mock internals to reach it.
+
 ## The live suite (T29) — operator-run
 
 `tests/e2e/live.test.ts` is the release suite: five scenarios against a **real
