@@ -26,6 +26,7 @@ identifier, counted on the TypeScript AST). Static declarations are not executed
 | `retained` | Kept on purpose; not deletable yet | the reason and a link |
 | `exception` | Structural, golden, contract or security check kept by policy | the policy link |
 | `deleted` | Removed; every assertion mapped or redundant-unreachable, and a negative control recorded | assertion map + regression row |
+| `deleted-with-feature` | Removed with the production feature it tested; nothing is left to patch back | owner names the removing PR/job; evidence cites the removed source modules |
 
 ## Method
 
@@ -33,6 +34,14 @@ An assertion that cannot reach a public consumer is `redundant-unreachable` when
 consumer-visible outcome of that path; otherwise it stays and the worker reports it. Do not mock internals to
 reach it. This is the standing rule for P1–P24. The checker accepts `redundant-unreachable` only with a named,
 existing scenario, and refuses to delete a file that still holds an `unreachable` assertion.
+
+A test file whose production feature is removed is `deleted-with-feature`, not `deleted`: no consumer remains, so it
+needs no assertion map and no negative control. Its owner must name the removing PR (`#123`) or job (`cp-…`), and its
+evidence must cite the removed `src/` or `extensions/` modules it tested; the checker confirms each cited path is gone.
+A kept file that loses declarations with a removed feature gets one `feature-removed` row per lost declaration in the
+Feature-removed section: its baseline title (still absent from the tree) and the removing PR/job. The checker accepts a
+net loss in a kept file only when that many rows cover it. Decided by the main session as programme owner under
+ask-0088e0332d00, 2026-10-21.
 
 ## PR ledger
 
@@ -179,7 +188,45 @@ Test files added after the baseline, with the PR that owns them.
 |---|---|---|
 | `tests/e2e/ci-evidence.test.ts` | P0 | behavior 01, scenarios 01-1 and 01-2 |
 | `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
+| `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | accept and reject paths of `deleted-with-feature` and `feature-removed` |
 <!-- /manifest:incoming -->
+
+## Feature-removed
+
+Declarations a kept baseline file lost with a removed production feature (see Method). One row per lost title.
+
+<!-- manifest:feature-removed -->
+| Unit file | Declaration | Removed by | Note |
+|---|---|---|---|
+| `tests/doctor.test.ts` | ledger.beads_archive: a leftover .beads/ beside a populated document is a warning that says it is safe to delete | cp-remove-beads-pr1-0f3z (#379) | archive check replaced by storage.retired_integration |
+| `tests/doctor.test.ts` | ledger.beads_archive: a .beads/ that an active tracker connection uses is ok and never advised for deletion | cp-remove-beads-pr1-0f3z (#379) | tracker connections removed |
+| `tests/jobs-tool.test.ts` | parseJobsArgs: ready by default, list flags, show needs an id, import-beads | cp-remove-beads-pr1-0f3z (#379) | importer subcommand removed; the rest is kept under a new title |
+| `tests/jobs-tool.test.ts` | create verifies the selected project's pinned database before recording array beads | cp-remove-beads-pr1-0f3z (#379) | ref verification by command removed |
+| `tests/jobs-tool.test.ts` | a bare ref is not pinned to or verified against the home database, while explicit pins win | cp-remove-beads-pr1-0f3z (#379) | ref pinning removed |
+| `tests/jobs-tool.test.ts` | cp_job create: a br show ref with status closed refuses | cp-remove-beads-pr1-0f3z (#379) | ref verification by command removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: an answered legacy override admits only its deferred bead and records the es | cp-remove-beads-pr1-0f3z (#379) | deferred-ref admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: aggregated overrides bind exact pinned deferred refs, never another bead, DB, project or mismatch | cp-remove-beads-pr1-0f3z (#379) | deferred-ref admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: a capped question cannot authorize an undisclosed deferred ref | cp-remove-beads-pr1-0f3z (#379) | deferred-ref admission override removed |
+| `tests/jobs-tool.test.ts` | picp-t4n: only an answered override on this admission escalation counts | cp-remove-beads-pr1-0f3z (#379) | deferred-ref admission override removed |
+| `tests/jobs-tool.test.ts` | cp_job create auto-links a job whose br ref names a bead on the active connection, and says why otherwise (laf) | cp-remove-beads-pr1-0f3z (#379) | tracker auto-link removed |
+| `tests/ledger.test.ts` | normalizeExternalRef pins a bare `br show <id> --json`, shell-quoted; every other shape passes through unchanged | cp-remove-beads-pr1-0f3z (#379) | ref pinning removed |
+| `tests/ledger.test.ts` | create pins a bare br show ref to the project's beads DB when the caller wires one | cp-remove-beads-pr1-0f3z (#379) | ref pinning removed |
+| `tests/ledger.test.ts` | an older job stored with a bare br show ref reads pinned through every query path, with no write and no updated_at bump | cp-remove-beads-pr1-0f3z (#379) | read-time ref projection removed |
+| `tests/ledger.test.ts` | a closed job with a bare br show ref is projected pinned through history() and blocked() | cp-remove-beads-pr1-0f3z (#379) | read-time ref projection removed |
+| `tests/ledger.test.ts` | the pinned form runs from a fresh leased worktree with no .beads/; the bare form does not (root cause, not just the string) | cp-remove-beads-pr1-0f3z (#379) | ref execution removed |
+| `tests/ledger.test.ts` | the stored ref is one valid shell word even when the project's checkout path has a space in it | cp-remove-beads-pr1-0f3z (#379) | ref pinning removed |
+| `tests/task-references.test.ts` | resolves own-prefix beads and pinned external refs once, preserving text | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | missing beads and unavailable br are explicit nonfatal material | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | unavailable br names a custom-prefix bead even without another reference | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | br down never turns read-only or follow-up prose into references | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | reads real br show JSON using the configured prefix | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | no references leaves the task unchanged | cp-remove-beads-pr1-0f3z (#379) | rewritten for file-only references |
+| `tests/task-references.test.ts` | bead responses accept legacy objects and diagnose malformed output | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/task-references.test.ts` | bare references use only the resolved project database, never the home's | cp-remove-beads-pr1-0f3z (#379) | item lookup in briefs removed |
+| `tests/verify-external-ref.test.ts` | br show ref: closed status is a mismatch; open is not | cp-remove-beads-pr1-0f3z (#379) | command refs are opaque now |
+| `tests/verify-external-ref.test.ts` | br --db pinned ref: the db path is unquoted and passed through as one arg | cp-remove-beads-pr1-0f3z (#379) | command refs are opaque now |
+| `tests/verify-external-ref.test.ts` | br arrays preserve open and closed states; malformed responses stay diagnostic | cp-remove-beads-pr1-0f3z (#379) | command refs are opaque now |
+<!-- /manifest:feature-removed -->
 
 ## Baseline
 
@@ -314,7 +361,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/layout-capture.test.ts` | pending | P1 | |
 | `tests/layout-flat.test.ts` | pending | P1 | |
 | `tests/leases.test.ts` | pending | P1 | |
-| `tests/ledger-import.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/ledger-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/ledger-import.ts` |
 | `tests/ledger.test.ts` | pending | P1 | |
 | `tests/live-harness.test.ts` | pending | P1 | |
 | `tests/main-ci.test.ts` | pending | P1 | |
@@ -384,7 +431,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/quality.test.ts` | pending | P1 | |
 | `tests/questions.test.ts` | pending | P1 | |
 | `tests/quota.test.ts` | pending | P1 | |
-| `tests/ready-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/ready-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/ready-beads.ts`, `src/trackers/config.ts` |
 | `tests/recovery.test.ts` | pending | P1 | |
 | `tests/relay-preflight.test.ts` | pending | P1 | |
 | `tests/relay-scope.test.ts` | pending | P1 | |
@@ -464,13 +511,13 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/test-runner-bounds.test.ts` | pending | P1 | |
 | `tests/timeout-floor.test.ts` | pending | P1 | |
 | `tests/tool-manifest.test.ts` | pending | P1 | |
-| `tests/trackers-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-config.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-import.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-ledger.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-link.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-sync.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
-| `tests/trackers-tool.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/beads.ts`, `src/trackers/adapter.ts` |
+| `tests/trackers-config.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/config.ts`, `src/trackers/adapter.ts` |
+| `tests/trackers-import.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/import.ts`, `src/trackers/config.ts` |
+| `tests/trackers-ledger.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested the tracked-job ledger API over `src/contracts/trackers.ts` |
+| `tests/trackers-link.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/link.ts`, `src/trackers/sync.ts` |
+| `tests/trackers-sync.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `src/trackers/sync.ts`, `src/trackers/sync-store.ts` |
+| `tests/trackers-tool.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested `extensions/command-post/tools-tracker.ts`, `src/trackers/sync-store.ts` |
 | `tests/tunnel-cli.test.ts` | pending | P1 | |
 | `tests/tunnel-cloudflared.test.ts` | pending | P1 | |
 | `tests/tunnel-qr.test.ts` | pending | P1 | |
@@ -571,7 +618,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/web-egress.test.ts` | pending | P1 | |
 | `tests/wedged.test.ts` | pending | P1 | |
 | `tests/widget.test.ts` | pending | P1 | |
-| `tests/worker-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/worker-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1-0f3z (#379) | tested the worker database env and item lookup over `src/beads.ts` |
 | `tests/worker-compaction.test.ts` | pending | P1 | |
 | `tests/worker-credential-guard.test.ts` | pending | P1 | |
 | `tests/worker-history-guard.test.ts` | pending | P1 | |
