@@ -25,6 +25,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSy
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
+import { BlockedDispatchError } from "../../src/dispatch.ts";
 import { LAYOUT, MINIMAL_PLAN_SUMMARY, SCHEMA_VERSION, paths } from "../../src/contracts.ts";
 import { cpNext } from "../../src/next.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
@@ -443,3 +444,133 @@ test(
 		void sent;
 	},
 );
+
+/**
+ * E2E A: a dependant armed on a held PR fires through the real landing (continuation -> cp_review -> merge ->
+ * onLanded), never a direct release or manual dispatch. Replaying the landing spawns nothing more, and a
+ * dependant with another blocker still open stays armed. Regresses the 2026-10-19 idle-dependant incident.
+ */
+test("armed dependant: the blocker's own landing dispatches it once; a replay and an open second blocker spawn nothing", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "config.txt": "timeout=10\n" } });
+	const provider = await MockProvider.start();
+	const agentDir = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+
+	const reviewerSteps: ScriptStep[] = [];
+	const reviewer = provider.addScript("armed-review", reviewerSteps);
+	const pushAndReport = (jobId: () => string, extra: Record<string, unknown>): ScriptStep[] => [
+		{
+			kind: "tool_calls",
+			calls: [{ name: "bash", args: () => ({ command: `printf '%s\\n' ${jobId()} > ${jobId()}.txt && git add -A && git commit -q -m ${jobId()} && git push -q -u origin ${jobId()}` }) }],
+		},
+		{
+			kind: "tool_calls",
+			calls: [
+				{
+					name: "report_result",
+					args: () => ({
+						job_id: jobId(),
+						kind: "ship",
+						status: "done",
+						summary: `Landed ${jobId()}.`,
+						branch: jobId(),
+						head_sha: execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${jobId()}`], { encoding: "utf8" }).split("\t")[0]?.trim(),
+						...extra,
+					}),
+				},
+			],
+		},
+		{ kind: "text", text: "standing by" },
+	];
+	const ids = { base: "", child: "" };
+	const baseModel = provider.addScript("armed-base", pushAndReport(() => ids.base, { pr_url: PR_URL }), { onExhausted: "repeat" });
+	const childModel = provider.addScript("armed-child", pushAndReport(() => ids.child, {}), { onExhausted: "repeat" });
+	agentDir.writeModels(provider);
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(
+		join(home.path, LAYOUT.data, "routing.json"),
+		JSON.stringify({
+			schema_version: SCHEMA_VERSION,
+			allow: ["mock/*"],
+			rubric: [
+				{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer },
+				{ id: "implementer", role: "implementer", model: baseModel },
+			],
+		}),
+	);
+
+	const sent: ReviewWakeup[] = [];
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, continuation: true, holdsParentLock: () => true });
+	post.reviewRuns.wakeupPort = (wakeup) => (sent.push(wakeup), true);
+	const originalPath = process.env.PATH;
+	t.after(async () => {
+		process.env.PATH = originalPath;
+		await post.shutdown();
+		await provider.stop();
+		agentDir.cleanup();
+		repo.cleanup();
+		home.cleanup();
+	});
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	const clone = post.registry.pathOf("demo");
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
+	const pool = enableTreehouse(clone, { maxTrees: 4 });
+	t.after(() => pool.cleanup());
+
+	const ledger = post.ledger();
+	const base = await ledger.create({ title: "the blocker", project: "demo", delivery: "pr", kind: "ship" });
+	const child = await ledger.create({ title: "the armed dependant", project: "demo", delivery: "local", kind: "ship" });
+	const other = await ledger.create({ title: "a blocker that stays open", project: "demo", delivery: "local", kind: "ship" });
+	const stuck = await ledger.create({ title: "blocked twice", project: "demo", delivery: "local", kind: "ship" });
+	ids.base = base.id;
+	ids.child = child.id;
+	await ledger.addDep(child.id, base.id);
+	await ledger.addDep(stuck.id, base.id);
+	await ledger.addDep(stuck.id, other.id);
+	// What cp_dispatch does with a blocked refusal (tools-dispatch.ts): arm the parent's own request.
+	for (const [job, request] of [[child.id, { task: "Write the child file.", model: childModel }], [stuck.id, { task: "Never yet.", model: childModel }]] as const) {
+		const refusal = await post.dispatch({ jobId: job, ...request }).then(
+			() => assert.fail(`${job} dispatched while blocked`),
+			(error: unknown) => error,
+		);
+		assert.ok(refusal instanceof BlockedDispatchError, String(refusal));
+		post.armedDispatches.arm(job, request, refusal.blockers);
+	}
+	assert.deepEqual(post.armedDispatches.ids(), [child.id, stuck.id]);
+
+	const bin = join(home.path, "bin");
+	writeFakeGh(bin, base.id, PR_URL, join(home.path, "gh-state"));
+	process.env.PATH = `${bin}:${originalPath ?? ""}`;
+	reviewerSteps.push(verdict(base.id, { reasons: ["the diff does what the brief asked"] }));
+	const dispatched = await post.dispatch({ jobId: base.id, task: "Write the base file.", model: baseModel, fetch: false });
+	assert.equal(dispatched.receipt, "accepted");
+
+	// No call from here releases or dispatches: the envelope starts the continuation, which lands the PR.
+	await waitFor(() => post.integrator.get(base.id)?.step, (step) => step === "done", { timeoutMs: 300_000, what: "the blocker to land by itself" });
+	assert.equal((await ledger.show(base.id)).status, "closed");
+	const childRecord = await waitFor(
+		() => readFleet(home.path).jobs.find((job) => job.job_id === child.id),
+		(job) => job?.reported_at !== undefined,
+		{ timeoutMs: 120_000, what: "the armed dependant's envelope, after the landing" },
+	);
+	const started = () => post.durableWakeups.pending().filter((entry) => entry.content.startsWith(`ARMED DISPATCH STARTED — ${child.id}`));
+	assert.equal(started().length, 1, "one started notice for the dependant");
+	assert.deepEqual(post.armedDispatches.ids(), [stuck.id], "the other blocker is open: still armed");
+	assert.equal(readFleet(home.path).jobs.some((job) => job.job_id === stuck.id), false, "no spawn while a blocker is open");
+
+	// Replay the landing: the continuation's own replay is stale, and repeated releases find nothing new.
+	const replay = await post.continuation.trigger({ jobId: base.id, event: "pr_merged" });
+	assert.equal(replay.action, "stale", replay.reason);
+	await Promise.all([post.armedDispatches.release(), post.armedDispatches.release()]);
+	const childJobs = readFleet(home.path).jobs.filter((job) => job.job_id === child.id);
+	assert.equal(childJobs.length, 1);
+	assert.equal(childJobs[0]?.dispatched_at, childRecord?.dispatched_at, "the same worker, never a second spawn");
+	assert.equal(childJobs[0]?.supersessions ?? 0, 0);
+	assert.equal(started().length, 1);
+	assert.deepEqual(post.armedDispatches.ids(), [stuck.id]);
+	assert.ok(sent.some((wakeup) => wakeup.jobId === base.id && wakeup.surface === "review"));
+
+	const torn = await post.tearDown(child.id);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
+});
