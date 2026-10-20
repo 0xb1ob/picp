@@ -178,6 +178,7 @@ Test files added after the baseline, with the PR that owns them.
 | File | PR | Note |
 |---|---|---|
 | `tests/e2e/ci-evidence.test.ts` | P0 | behavior 01, scenarios 01-1 and 01-2 |
+| `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
 <!-- /manifest:incoming -->
 
 ## Baseline
@@ -313,7 +314,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/layout-capture.test.ts` | pending | P1 | |
 | `tests/layout-flat.test.ts` | pending | P1 | |
 | `tests/leases.test.ts` | pending | P1 | |
-| `tests/ledger-import.test.ts` | pending | P1 | |
+| `tests/ledger-import.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
 | `tests/ledger.test.ts` | pending | P1 | |
 | `tests/live-harness.test.ts` | pending | P1 | |
 | `tests/main-ci.test.ts` | pending | P1 | |
@@ -383,7 +384,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/quality.test.ts` | pending | P1 | |
 | `tests/questions.test.ts` | pending | P1 | |
 | `tests/quota.test.ts` | pending | P1 | |
-| `tests/ready-beads.test.ts` | pending | P1 | |
+| `tests/ready-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
 | `tests/recovery.test.ts` | pending | P1 | |
 | `tests/relay-preflight.test.ts` | pending | P1 | |
 | `tests/relay-scope.test.ts` | pending | P1 | |
@@ -463,13 +464,13 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/test-runner-bounds.test.ts` | pending | P1 | |
 | `tests/timeout-floor.test.ts` | pending | P1 | |
 | `tests/tool-manifest.test.ts` | pending | P1 | |
-| `tests/trackers-beads.test.ts` | pending | P1 | |
-| `tests/trackers-config.test.ts` | pending | P1 | |
-| `tests/trackers-import.test.ts` | pending | P1 | |
-| `tests/trackers-ledger.test.ts` | pending | P1 | |
-| `tests/trackers-link.test.ts` | pending | P1 | |
-| `tests/trackers-sync.test.ts` | pending | P1 | |
-| `tests/trackers-tool.test.ts` | pending | P1 | |
+| `tests/trackers-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-config.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-import.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-ledger.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-link.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-sync.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
+| `tests/trackers-tool.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
 | `tests/tunnel-cli.test.ts` | pending | P1 | |
 | `tests/tunnel-cloudflared.test.ts` | pending | P1 | |
 | `tests/tunnel-qr.test.ts` | pending | P1 | |
@@ -570,7 +571,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/web-egress.test.ts` | pending | P1 | |
 | `tests/wedged.test.ts` | pending | P1 | |
 | `tests/widget.test.ts` | pending | P1 | |
-| `tests/worker-beads.test.ts` | pending | P1 | |
+| `tests/worker-beads.test.ts` | deleted | cp-remove-beads-pr1-0f3z | deleted with feature: retired tracker integration, no consumer remains |
 | `tests/worker-compaction.test.ts` | pending | P1 | |
 | `tests/worker-credential-guard.test.ts` | pending | P1 | |
 | `tests/worker-history-guard.test.ts` | pending | P1 | |
