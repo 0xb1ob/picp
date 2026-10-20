@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore } from "../../src/awaiting.ts";
@@ -21,14 +21,19 @@ import {
 	type DiffVerdict,
 	type FleetRecord,
 } from "../../src/contracts.ts";
+import { CiWatchStore } from "../../src/ci-watch.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
 import { listPendingReviews } from "../../src/review-runs.ts";
+import { controlRequest } from "../../src/viewer/control-api.ts";
+import { controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
+import { readPendingSends } from "../../src/viewer/control-pending.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { createMergeAskProbe } from "../../src/merge-ask.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import {
 	COMMAND_POST_EXTENSION,
+	CP_BRIDGE_EXTENSION,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -433,6 +438,39 @@ test("rpc: one CI-green key whose review is in flight is relayed without a paren
 	assert.equal(new FleetStore({ home: held.home.path }).list().length, 1);
 });
 
+/**
+ * E2E B, amendment 1: the parent restarts on the persisted home with the SAME head and CI still green. The
+ * confirmed key is replayed by no tick: no second review, wake, relay or merge, and one ci_green journal line.
+ */
+test("rpc: a restart on the same green head replays nothing for the confirmed ci_green key", { timeout: 300_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "green", review: "pending" });
+	t.after(() => {
+		held.home.cleanup();
+		held.repo.cleanup();
+	});
+	const first = await startParent(t, held, "headless-same-head");
+	await notified(first.child, /CI GREEN — .* handled in code, no parent turn\./);
+	await waitFor(() => wakeRuleEvents(held.home.path, "ci_green"), (events) => events.length > 0, { timeoutMs: 30_000, what: "the ci_green journal line" });
+	const confirmed = await waitFor(() => [...new CiWatchStore({ home: held.home.path }).announced(JOB)], (keys) => keys.length > 0, { timeoutMs: 30_000, what: "the green key to be confirmed" });
+	await first.close();
+
+	const observed = () => readRunEvents(held.home.path, JOB).filter((event) => event.type === "ci_observed").length;
+	assert.equal(observed(), 1);
+	const reads = ghCalls(held, "pulls/58");
+	const second = await startParent(t, held, "headless-same-head-restart");
+	// Two PR reads by the restarted watch: its first pass over the persisted green head has finished.
+	await waitFor(() => ghCalls(held, "pulls/58"), (n) => n >= reads + 2, { timeoutMs: 90_000, what: "two watch passes after the restart" });
+	await ciTicks(held, 1);
+	assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green").map((e) => [e.decision, e.action]), [["suppressed", "review_pending"]], "exactly one ci_green entry");
+	assert.equal(observed(), 1, "the confirmed key is never re-observed");
+	const ciNotices = second.child.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && /CI GREEN|CI\/PR OBSERVED/.test(String(r.message)));
+	assert.deepEqual(ciNotices, [], "the replayed green fact is neither relayed nor announced");
+	assert.equal(second.turns(), 0, `no parent turn for the confirmed key: ${second.requestText().slice(-2000)}`);
+	assert.deepEqual(listPendingReviews(held.home.path, JOB).map((p) => p.attempt), [1], "no second review");
+	assert.equal(ghCalls(held, "pr merge"), 0);
+	assert.deepEqual([...new CiWatchStore({ home: held.home.path }).announced(JOB)], confirmed, "the same key, still confirmed");
+});
+
 test("rpc: with the wake-rules switch off, the same CI-green fact wakes the parent and journals why", { timeout: 180_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "green", review: "pending" });
 	t.after(() => {
@@ -501,4 +539,122 @@ test("rpc: a surface stop, and a resolve stop with the switch off, still wake th
 		assert.deepEqual(wakeRuleEvents(held.home.path, "held_stop_resolve"), [], "no relay was decided");
 		await parent.close();
 	}
+});
+
+/** Test-only extension: drops the first N dashboard handoffs at pi's input stage, as a refused prompt is lost. */
+const DASHBOARD_DROP = `import { appendFileSync } from "node:fs";
+export default function (pi) {
+	let left = Number(process.env.CP_TEST_DASHBOARD_DROPS ?? "0");
+	pi.on("input", (event) => {
+		if (event.source !== "extension" || !event.text.includes("[cp-dashboard ") || left <= 0) return { action: "continue" };
+		left -= 1;
+		appendFileSync(process.env.CP_TEST_DASHBOARD_DROP_LOG, "dropped\\n");
+		return { action: "handled" };
+	});
+}
+`;
+const COMPACT_INSTRUCTIONS =
+	"Operator delegated cp-b7m6 under the standing mandate. The draft PR awaits review on its pushed head; no merge is authorized yet. " +
+	"Preserve the open decision, held work and next review step. Latest handoff: /home/ubuntu/reports/handoffs/operator.md.";
+
+/**
+ * A real bridge under rpc self-compacts while a dashboard message is queued during the turn before it. The
+ * message is held through the compaction and handed after it; `drops` of those handoffs are lost at pi's input.
+ */
+async function queuedThroughCompaction(t: { after(fn: () => unknown): void }, script: string, drops: number) {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const settings = join(home.path, LAYOUT.data, "operator.json");
+	mkdirSync(dirname(settings), { recursive: true });
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 1 }));
+	const dropper = join(home.path, "dashboard-drop.ts");
+	const dropLog = join(home.path, "dashboard-drops.log");
+	writeFileSync(dropper, DASHBOARD_DROP);
+	writeFileSync(dropLog, "");
+	const provider = await MockProvider.start();
+	const model = provider.addScript(script, [
+		{ kind: "tool_calls", calls: [{ name: "self_compact", args: { instructions: COMPACT_INSTRUCTIONS } }] },
+		{ kind: "hang", ms: 3000 }, // the tool-result reply: the turn the dashboard message is queued behind
+		{ kind: "text", text: "acknowledged" },
+	], { onExhausted: "repeat" });
+	const agentDir = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 } } });
+	const rpc = startRpc({
+		cwd: home.path,
+		env: { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi", CP_TEST_DASHBOARD_DROPS: String(drops), CP_TEST_DASHBOARD_DROP_LOG: dropLog },
+		args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "-e", dropper, "--no-session", "--no-context-files", "--model", model],
+	});
+	t.after(async () => {
+		await rpc.close();
+		agentDir.cleanup();
+		await provider.stop();
+	});
+	const stateDir = join(home.path, LAYOUT.state);
+	const record = await waitFor(() => readControlRecord(stateDir), (r) => r.state === "ok", { timeoutMs: 30_000, what: "dashboard control to listen" });
+	const control = (record as { record: Parameters<typeof controlRequest>[0] }).record;
+
+	rpc.send({ type: "prompt", id: "run", message: "Queue compaction, then finish your reply." });
+	await waitFor(() => provider.requests(script).length, (n) => n >= 2, { timeoutMs: 30_000, what: "the reply turn to be in flight" });
+	const sent = await controlRequest(control, "send", { kind: "message", text: "list the validator owner wallets" });
+	assert.ok(sent.ok && (sent.result as { state: string }).state === "queued", JSON.stringify(sent));
+	const id = (sent.result as { id: string }).id;
+	await rpc.waitFor((r) => r.type === "extension_ui_request" && r.message === "self_compact completed", 60_000);
+	// Over the 1-token trigger every later settle would ask for another compaction: one is the scenario.
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
+
+	const journal = () => {
+		const file = controlJournalFile(stateDir);
+		const lines = existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>) : [];
+		return lines.filter((line) => line.id === id && line.type !== "edited");
+	};
+	const states = () => journal().map((line) => (line.type === "outcome" ? line.state : line.type));
+	const dropped = () => readFileSync(dropLog, "utf8").split("\n").filter(Boolean).length;
+	const marker = `[cp-dashboard ${id} `;
+	const consumed = () => rpc.records().filter((r) => r.type === "message_end" && (r.message as { role?: string })?.role === "user" && JSON.stringify(r.message).includes(marker));
+	let nudges = 0;
+	/** One ordinary turn: its settle is where the bridge looks for a handoff pi never showed. */
+	const nudge = async () => {
+		const request = `nudge-${++nudges}`;
+		rpc.send({ type: "prompt", id: request, message: `turn ${nudges}` });
+		await rpc.waitFor((r) => r.type === "response" && r.id === request, 30_000);
+		await waitFor(() => rpc.records().filter((r) => r.type === "agent_settled").length, (n) => n >= settledBefore + nudges, { timeoutMs: 30_000, what: `turn ${nudges} to settle` });
+	};
+	const settledBefore = rpc.records().filter((r) => r.type === "agent_settled").length;
+	return { rpc, states, dropped, consumed, nudge, pending: () => readPendingSends(stateDir).sends.find((send) => send.id === id)?.state, journal };
+}
+
+/**
+ * E2E B, compaction queue (7ff5861): the message queued during the turn before a self-compaction is handed only after
+ * the compaction ends; that first handoff is dropped, the next settle re-hands it once, and pi consumes it once.
+ */
+test("rpc bridge: a message queued before a self-compaction is held through it and consumed once after one dropped handoff", { timeout: 180_000 }, async (t) => {
+	const run = await queuedThroughCompaction(t, "dashboard-compact-once", 1);
+	await waitFor(() => run.dropped(), (n) => n === 1, { timeoutMs: 30_000, what: "the first handoff after the compaction to be dropped" });
+	assert.deepEqual(run.states(), ["request", "queued", "injected"]);
+	assert.equal(run.consumed().length, 0);
+	await run.nudge();
+	await waitFor(() => run.states(), (s) => s.at(-1) === "delivered", { timeoutMs: 60_000, what: `delivery after the re-hand: ${JSON.stringify(run.states())}` });
+	assert.deepEqual(run.states(), ["request", "queued", "injected", "injected", "delivered"]);
+	assert.equal(run.journal()[3]?.reason, "re-handed: not seen in the session when the turn settled");
+	const consumed = run.consumed();
+	assert.equal(consumed.length, 1, "pi consumed the message once");
+	const records = run.rpc.records();
+	assert.ok(records.findIndex((r) => r.type === "compaction_end") < records.indexOf(consumed[0]!), "held through the compaction");
+	assert.equal(run.pending(), "delivered", "acknowledged to the dashboard");
+	assert.equal(run.dropped(), 1);
+});
+
+test("rpc bridge: a queued message whose handoff is dropped twice ends failed, never re-injected again", { timeout: 180_000 }, async (t) => {
+	const run = await queuedThroughCompaction(t, "dashboard-compact-twice", 2);
+	await waitFor(() => run.dropped(), (n) => n === 1, { timeoutMs: 30_000, what: "the first handoff to be dropped" });
+	await run.nudge();
+	await waitFor(() => run.dropped(), (n) => n === 2, { timeoutMs: 30_000, what: "the re-handed message to be dropped" });
+	assert.deepEqual(run.states(), ["request", "queued", "injected", "injected"]);
+	await run.nudge();
+	await waitFor(() => run.states(), (s) => s.at(-1) === "failed", { timeoutMs: 30_000, what: `the second loss to fail: ${JSON.stringify(run.states())}` });
+	assert.equal(run.journal().at(-1)?.reason, "handed to the session twice, never seen in its transcript");
+	assert.equal(run.pending(), "failed");
+	await run.nudge();
+	assert.deepEqual(run.states(), ["request", "queued", "injected", "injected", "failed"], "no third handoff");
+	assert.equal(run.dropped(), 2);
+	assert.equal(run.consumed().length, 0);
 });
