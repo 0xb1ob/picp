@@ -4,7 +4,10 @@ const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 /** The image types a report may embed from its own artifact dir; SVG is excluded (it can carry script). */
 export const REPORT_IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
-/** A relative path inside the artifact dir as its segments, or null: no scheme, root, `..`, `.`, backslash or empty segment. */
+/**
+ * A relative path inside the artifact dir as its segments, or null: no scheme, root, `..`, `.`, backslash or empty
+ * segment.
+ */
 export function artifactSegments(path: string): string[] | null {
  const rel = path.replace(/^(?:\.\/)+/, "");
  if (!rel || /^[A-Za-z][A-Za-z0-9+.-]*:|^\/|\\|[?#\0]/.test(rel)) return null;

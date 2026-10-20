@@ -4,10 +4,11 @@
  * from the job detail, and opened on a fresh load of `#report/<id>`.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { build } from "esbuild";
 import { parseHTML } from "linkedom";
 import { createViewer, type ViewerOptions } from "../src/viewer/server.ts";
@@ -124,6 +125,29 @@ test("(c) /api/report serves report.md and contained images only; jobs and Repor
 	assert.deepEqual(reportsView(options).job_reports?.map((r) => [r.job_id, r.title, r.href]), [["cp-rep", "Delta report", "#report/cp-rep"]]);
 	assert.deepEqual(route(reportHref("cp-rep")), { screen: "report", jobId: "cp-rep", section: null });
 	assert.equal(route("#report/../x").screen, "overview");
+});
+
+test("the job detail resolves only its own report, not every artifact dir, and still links it", async (t) => {
+	const options = fixture(t);
+	for (let i = 0; i < 300; i++) {
+		mkdirSync(join(options.stateDir, "artifacts", `cp-bulk-${i}`), { recursive: true });
+		writeFileSync(join(options.stateDir, "artifacts", `cp-bulk-${i}`, "report.md"), `# Bulk ${i}`);
+	}
+	const url = await serve(t, options);
+	// Counts realpath/stat by artifact dir; before the fix jobView ran jobReports, touching all 300 dirs per request.
+	const touched = new Set<string>();
+	const artifacts = join(options.stateDir, "artifacts") + "/";
+	const spy = (path: unknown) => { const rel = String(path).split(artifacts)[1]; if (rel) touched.add(rel.split("/")[0]!); };
+	for (const name of ["realpathSync", "statSync", "lstatSync", "readdirSync", "openSync"] as const) {
+		const original = fs[name] as (...args: unknown[]) => unknown;
+		mock.method(fs, name, (...args: unknown[]) => { spy(args[0]); return original(...args); });
+	}
+	syncBuiltinESMExports();
+	t.after(() => { mock.restoreAll(); syncBuiltinESMExports(); });
+	const res = await fetch(`${url}/api/job/cp-rep`);
+	assert.equal(res.status, 200);
+	assert.equal(((await res.json()) as { report_href: string | null }).report_href, "#report/cp-rep");
+	assert.deepEqual([...touched], ["cp-rep"]);
 });
 
 test("(d)(e) a fresh load of #report/<id> renders the report, and the job detail links to it", async (t) => {
