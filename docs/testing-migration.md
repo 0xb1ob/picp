@@ -57,6 +57,7 @@ ask-0088e0332d00, 2026-10-21.
 | P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
 | P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
 | P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
+| P2b (cp-e2e-migration-p2b-3e1w) | behavior 02, second slice: held-job cap counting and ops jobs (02-5, 02-6) in `tests/e2e/authority.test.ts`. The other 11 behavior-02 files move to P2c (job to be created by the main session). | 1 (`tests/ops-jobs.test.ts`) | 398 → 397 | 4,467 → 4,465 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -80,6 +81,14 @@ revoked grant is *silent* for dispatch (`GRANT_MATRIX`, `src/mandate-permission.
 such a dispatch runs under no grant. A replacing `issue` supersedes the old grant's open ask by itself, so 02-3 pins
 the superseded record and an empty later `supersede_stale` sweep. Held-job cap counting belongs to P2b.
 
+P2b (cp-e2e-migration-p2b-3e1w) adds two cases to `tests/e2e/authority.test.ts`. 02-5 closes the gap left in 02-4: a
+held PR job counts toward the job cap and the spend cap but never holds a dispatch slot (NC-05, NC-06). 02-6 replaces
+`tests/ops-jobs.test.ts` (4 declarations): 17 of its 18 assertions are mapped (NC-07 to NC-09), and one is
+`redundant-unreachable` under standing rule 3. P2b does not convert the other 11 behavior-02 files.
+`tests/mandate.test.ts` alone is 98 KB across 61 cases, and those 11 files hold about 140 cases, which is more than
+one reviewable slice. They move to P2c, a job the main session creates. NC-05 and NC-06 name `tests/mandate.test.ts`,
+which pins the same rule at unit level and stays until P2c.
+
 ## Conversion PRs
 
 One row per later PR. Its candidate deletion set is every baseline row whose owner is that PR. The checker prints
@@ -92,7 +101,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
 | P2 | 02 | `tests/e2e/authority.test.ts` | 4 |
-| P2b | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-4 |
+| P2b | 02 | `tests/e2e/authority.test.ts` | adds 02-5 and 02-6 |
+| P2c | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-6 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
@@ -197,6 +207,8 @@ moves first.
 | 02-2 | `tests/e2e/authority.test.ts` | authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work |
 | 02-3 | `tests/e2e/authority.test.ts` | authority: a risk:high answer authorizes only the job it names; a replacing grant supersedes the open ask |
 | 02-4 | `tests/e2e/authority.test.ts` | authority: token raises stay inside the ceiling, the USD cap never moves, and budgets.json is re-read live |
+| 02-5 | `tests/e2e/authority.test.ts` | authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot |
+| 02-6 | `tests/e2e/authority.test.ts` | authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -233,6 +245,24 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 | `tests/budgets.test.ts` | spawn_cap is not stale independently of the rest of the budget config | 02-4 | mapped | spawn_cap 11, written after start, admits `overflow` that the default 10 refused; negative control NC-04 |
 | `tests/budgets.test.ts` | CommandPost.budgets() sees the raise without reconstruction | 02-4 | mapped | dispatch reads the budget through budgets(); `overflow`'s record shows the raise |
 | `tests/budgets.test.ts` | a second raise on the same live CommandPost also takes effect | 02-4 | mapped | the second write (2,000 tokens, spawn_cap 12) dispatches `next` with 2,000 as an eleventh live worker |
+| `tests/ops-jobs.test.ts` | opsClass is undefined for a job with no ops: label | 02-6 | mapped | `plain research` previews with its own planner profile; an unlabelled job with profile ops is refused |
+| `tests/ops-jobs.test.ts` | opsClass reads one known ops:<class> label | 02-6 | mapped | ops:deploy, ops:process and ops:pull each preview with profile ops |
+| `tests/ops-jobs.test.ts` | opsClass refuses two ops: labels | 02-6 | mapped | ops:pull + ops:deploy: "exactly one ops:<pull\|deploy\|process> label" from the dispatch preview |
+| `tests/ops-jobs.test.ts` | opsClass refuses an unknown class | 02-6 | mapped | ops:reboot: "found ops:reboot" from the dispatch preview |
+| `tests/ops-jobs.test.ts` | opsRequest: a deploy is high and runs the ops profile whatever risk the caller names | 02-6 | mapped | preview with risk low gives [ops, high]; negative control NC-08 |
+| `tests/ops-jobs.test.ts` | opsRequest: a process job is always high | 02-6 | mapped | preview routing risk high |
+| `tests/ops-jobs.test.ts` | opsRequest: a pull defaults low | 02-6 | mapped | preview routing risk low |
+| `tests/ops-jobs.test.ts` | opsRequest: a recorded risk:high still wins on a pull | 02-6 | mapped | `risky pull` (ledger risk high) previews high |
+| `tests/ops-jobs.test.ts` | opsRequest returns a non-ops request untouched | 02-6 | mapped | profile planner kept on `plain research` |
+| `tests/ops-jobs.test.ts` | opsRequest refuses the ops profile without an ops: label | 02-6 | mapped | "the ops profile needs an ops:<pull\|deploy\|process> label" |
+| `tests/ops-jobs.test.ts` | opsRequest refuses another profile on an ops job | 02-6 | mapped | "an ops:pull job runs the ops profile, not planner" |
+| `tests/ops-jobs.test.ts` | opsRequest refuses an ops job that is not kind:research delivery:local | 02-6 | mapped | ship/pr job with ops:pull: "an ops job is kind:research delivery:local" |
+| `tests/ops-jobs.test.ts` | riskGateExempt exempts read-only research | 02-6 | mapped | risk:high read-only planner job under ask_on risk:high: no mandate_gate in the preview |
+| `tests/ops-jobs.test.ts` | riskGateExempt never exempts an ops job, even with a read-only profile | 02-6 | mapped | `risky pull` (ops profile, readOnly) previews "would ask: risk:high"; negative control NC-07 |
+| `tests/ops-jobs.test.ts` | a resource:<name> label is leased while its holder is live | 02-6 | mapped | `wanting` refused "resource:tg-session is leased by live job <holder>" with no fleet record or model request; negative control NC-09 |
+| `tests/ops-jobs.test.ts` | the resource is free once its holder is torn down (phase done) | 02-6 | mapped | after the holder's forced teardown `wanting` dispatches |
+| `tests/ops-jobs.test.ts` | a job's own failed record is not a resource conflict | 02-6 | redundant-unreachable | preflight refuses a failed job's re-dispatch on its own leftover branch (`branch_exists`) before assertResourcesFree runs, and the operator path tears the record down (phase done) first; 02-6 pins a killed, failed `wanting` re-dispatch refused by branch_exists, never "leased by live job"; standing rule 3 (ask-0088e0332d00) |
+| `tests/ops-jobs.test.ts` | a different resource label is free while another is leased | 02-6 | mapped | `other` (resource:mt5-2) dispatches while the holder of resource:tg-session is live |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -253,6 +283,11 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
 | NC-03 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-2 | NC-03-host | 0bb48b55ddc16d72b68109e136da58d310bb118ebbe641f411e9ba7980ef6ac0 | the enterprise ci fact links ghe.example.com/…/actions/runs/16 | pass |
 | NC-04 | `tests/budgets.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-4 | NC-04-budgets | b8262869069a8a4a19ff794bf37b176539f3574d54373523f6e0b03804229851 | spawn_cap 11 written after start does not admit `overflow` (spawn cap reached (10/10 workers)) | pass |
+| NC-05 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-05-held-slot | 8727a7604f0ea2e0dfd10cdb6ba3cc800ea166fac472807ab43590eb6423fec3 | `second` refused "dispatch-parallelism 1 is full" while the only other job is held | pass |
+| NC-06 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-06-held-spend | 6443d0c2c2740f69963160711b17d5578e859d4476d0900a5133f5426bbd8720 | the grant never pauses on token_cap: held + second spend is not counted | pass |
+| NC-07 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-07-ops-gate | d6f1dd6c5c61ba81bbd501bd8a93a96226fef5f00a69e5780ac3e21444ac8ff7 | `risky pull` previews no mandate_gate, expected "would ask: risk:high" | pass |
+| NC-08 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-08-ops-risk | 46a5538a435ffea34d00a22229d29079c987fbe4c764f0f1970ff7dd8092baa7 | a deploy previewed with risk low routes [ops, low], expected [ops, high] | pass |
+| NC-09 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-09-ops-lease | 693734ac1563a6fca17c1fe9be919aabf92cbe8719238a7ba2de1c4651df0e62 | `wanting` dispatches beside a live holder of resource:tg-session (missing expected rejection) | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -348,6 +383,114 @@ separate fix commit in this repository's history; the bug commit column names th
 ℹ fail 1
 ```
 
+NC-05 to NC-09 were run the same way on `tests/e2e/authority.test.ts`: each patch applied to `src/`, the file run, the
+patch reversed, and the file run again: 6 pass, 0 fail. NC-05 and NC-06 name the release that carries the held-job
+rule, because it has no separate fix commit. NC-07 to NC-09 name #284, which added ops jobs.
+
+NC-05 lets a held job hold a dispatch slot:
+
+<!-- patch:NC-05-held-slot -->
+```diff
+--- a/src/mandate-accounting.ts
++++ b/src/mandate-accounting.ts
+@@ -138,3 +138,3 @@ export function mandateSpend(
+ 		// delivery (a promote moves it back to `waiting`). Held jobs still count toward spend and jobs.
+-		if (job.phase === "waiting" || job.phase === "launching") inFlight += 1;
++		if (job.phase === "waiting" || job.phase === "launching" || job.phase === "held") inFlight += 1;
+ 	}
+```
+
+```
+✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
+  Error: cp-g1so: mandate md-68b4c8 dispatch-parallelism 1 is full
+ℹ pass 5
+ℹ fail 1
+```
+
+NC-06 stops counting a held job toward the grant's spend and job count:
+
+<!-- patch:NC-06-held-spend -->
+```diff
+--- a/src/mandate-accounting.ts
++++ b/src/mandate-accounting.ts
+@@ -121,3 +121,3 @@ export function mandateSpend(
+ ): { usd: number; tokens: number; jobs: number; inFlight: number } {
+-	const matched = matchingJobs(mandate, jobs);
++	const matched = matchingJobs(mandate, jobs).filter((job) => job.phase !== "held");
+ 	const baseline = new Map((mandate.usage_baseline ?? []).map((entry) => [entry.job_id, entry]));
+```
+
+```
+✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
+  Error: timed out after 60000ms waiting for held + second spend to reach the token cap; last = error: undefined
+ℹ pass 5
+ℹ fail 1
+```
+
+NC-07 lets a read-only ops profile exempt its job from the risk:high gate:
+
+<!-- patch:NC-07-ops-gate -->
+```diff
+--- a/src/dispatch-authority.ts
++++ b/src/dispatch-authority.ts
+@@ -19,3 +19,3 @@ export interface DispatchAuthorityJob {
+ export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script" | "ops">): boolean =>
+-	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script && !job.ops;
++	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script;
+ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
+```
+
+```
+✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+    actual: undefined,
+    expected: 'would ask: risk:high',
+ℹ pass 5
+ℹ fail 1
+```
+
+NC-08 lets the caller's risk override a deploy's fixed high:
+
+<!-- patch:NC-08-ops-risk -->
+```diff
+--- a/src/ops-jobs.ts
++++ b/src/ops-jobs.ts
+@@ -37,3 +37,3 @@ export function opsRequest<R extends { profile?: string; risk?: Risk }>(request:
+ 	if (request.profile !== undefined && request.profile !== OPS_PROFILE_NAME) throw new DispatchError(`${job.id}: an ops:${cls} job runs the ops profile, not ${request.profile} — drop profile`);
+-	return { ...request, profile: OPS_PROFILE_NAME, risk: cls === "pull" ? (request.risk ?? parseJobLabels(job.labels).risk ?? "low") : "high" };
++	return { ...request, profile: OPS_PROFILE_NAME, risk: cls === "pull" ? (request.risk ?? parseJobLabels(job.labels).risk ?? "low") : (request.risk ?? "high") };
+ }
+```
+
+```
+✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
+  AssertionError [ERR_ASSERTION]: a deploy is high whatever the caller says
+    actual: [ 'ops', 'low' ],
+    expected: [ 'ops', 'high' ],
+ℹ pass 5
+ℹ fail 1
+```
+
+NC-09 leases a resource only to a reported (held) holder, not a working one:
+
+<!-- patch:NC-09-ops-lease -->
+```diff
+--- a/src/ops-jobs.ts
++++ b/src/ops-jobs.ts
+@@ -44,3 +44,3 @@ export function assertResourcesFree(job: Pick<Job, "id" | "labels">, fleet: read
+ 	if (wanted.length === 0) return;
+-	const live = new Set(fleet.filter((record) => record.job_id !== job.id && record.phase !== "done").map((record) => record.job_id));
++	const live = new Set(fleet.filter((record) => record.job_id !== job.id && record.phase === "held").map((record) => record.job_id));
+ 	for (const other of jobs) {
+```
+
+```
+✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+ℹ pass 5
+ℹ fail 1
+```
+
 ## Incoming
 
 Test files added after the baseline, with the PR that owns them.
@@ -356,7 +499,7 @@ Test files added after the baseline, with the PR that owns them.
 | File | PR | Note |
 |---|---|---|
 | `tests/e2e/ci-evidence.test.ts` | P0 | behavior 01, scenarios 01-1 and 01-2 |
-| `tests/e2e/authority.test.ts` | P2 | behavior 02, scenarios 02-1 to 02-4 |
+| `tests/e2e/authority.test.ts` | P2 | behavior 02, scenarios 02-1 to 02-4; P2b adds 02-5 and 02-6 |
 | `tests/viewer-job-report.test.ts` | #380 | unit test landed on main after the baseline (viewer job report pages); recorded by P2 so the check stays at 0 findings, disposition left to its behavior's PR |
 | `tests/e2e/retired-integration.test.ts` | cp-remove-beads-pr1-0f3z | existing-home compatibility after the tracker removal |
 | `tests/test-migration-check.test.ts` | cp-remove-beads-pr1-0f3z | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
@@ -434,7 +577,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/bounds.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
-| `tests/capacity.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/capacity.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/ci-access.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/ci-configured.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
@@ -541,11 +684,11 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/mandate-defaults.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/mandate-selection.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/mandate-supplement.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/mandate-usage.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/mandate.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/mandate-defaults.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/mandate-selection.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/mandate-supplement.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/mandate-usage.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/mandate.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
 | `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
@@ -570,7 +713,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-threads-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-threads-journal.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-tool-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ops-jobs.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/ops-jobs.test.ts` | deleted | P2b | behavior 02: every assertion mapped to 02-6 or redundant-unreachable (Assertion map); negative controls NC-07 to NC-09 |
 | `tests/output.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-compact-hold.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/parent-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
@@ -606,7 +749,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/push-webpush.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
 | `tests/quality.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/questions.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
-| `tests/quota.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/quota.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
 | `tests/ready-beads.test.ts` | deleted-with-feature | cp-remove-beads-pr1b-t68e | tested `src/ready-beads.ts`, `src/trackers/config.ts` |
 | `tests/recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/relay-preflight.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
@@ -620,10 +763,10 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/risk-batch.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/risk-negation.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/risk-preapproval.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
-| `tests/risk-warning.test.ts` | convert | P2b | behavior 02 (Mandate, budgets and authority); left by the P2 first slice to P2b (cp-e2e-migration-p2b-3e1w) |
+| `tests/risk-batch.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/risk-negation.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/risk-preapproval.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
+| `tests/risk-warning.test.ts` | convert | P2c | behavior 02 (Mandate, budgets and authority); left by P2b (cp-e2e-migration-p2b-3e1w) to P2c |
 | `tests/routing-integration.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/routing.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/run-artifacts.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
