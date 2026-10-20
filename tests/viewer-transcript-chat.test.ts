@@ -33,7 +33,7 @@ test("markdown blocks: paragraphs keep their line breaks; lists, code, tables, q
 	assert.deepEqual(blocks("- a\n  - a1\n  - a2\n- b\n  1. b1"), [{ kind: "list", ordered: false, items: ["a", "b"], sub: { 0: { kind: "list", ordered: false, items: ["a1", "a2"] }, 1: { kind: "list", ordered: true, items: ["b1"] } } }], "indented items nest under the item above");
 	assert.deepEqual(blocks("```ts\nconst x = 1;\n  indented\n```\nafter"), [{ kind: "code", text: "const x = 1;\n  indented" }, { kind: "p", text: "after" }]);
 	assert.deepEqual(blocks("| a | b |\n| --- | :-: |\n| 1 | `2` |"), [{ kind: "table", head: ["a", "b"], rows: [["1", "`2`"]] }]);
-	assert.deepEqual(blocks("## Title\n> quoted\n> twice"), [{ kind: "heading", text: "Title" }, { kind: "quote", text: "quoted\ntwice" }]);
+	assert.deepEqual(blocks("## Title\n> quoted\n> twice"), [{ kind: "heading", text: "Title", level: 2 }, { kind: "quote", text: "quoted\ntwice" }]);
 	assert.deepEqual(blocks("| not a table |\nplain"), [{ kind: "p", text: "| not a table |\nplain" }], "a pipe line without a rule under it stays text");
 	assert.deepEqual(blocks("```\nunclosed"), [{ kind: "code", text: "unclosed" }], "an unclosed fence runs to the end");
 });
@@ -206,9 +206,9 @@ test("layout: phone pills reach 84% and cards the column; desktop is one centred
 	assert.match(readFileSync(join(REPO_ROOT, "viewer-app/components/control.css"), "utf8"), /\.operator-composer \{[^}]*flex-shrink: 0; \}/, "the composer keeps its height at the bottom of the panel");
 });
 
-test("light scheme: the measured light palette is set on .shell-sessions in tokens.css, rail included; no other screen or stylesheet remaps it", () => {
+test("light scheme: the measured light palette is set on .shell-sessions (and the Report page) in tokens.css, rail included; no other screen or stylesheet remaps it", () => {
 	const tokens = readFileSync(join(REPO_ROOT, "viewer-app/styles/tokens.css"), "utf8");
-	const light = /@media \(prefers-color-scheme: light\) \{\s*\.shell-sessions \{([^}]*)\}\s*\}/.exec(tokens)?.[1] ?? "";
+	const light = /@media \(prefers-color-scheme: light\) \{\s*\.shell-sessions, \.shell-report \{([^}]*)\}\s*\}/.exec(tokens)?.[1] ?? "";
 	assert.match(light, /color-scheme: light; color: var\(--text\);/, "native controls, scrollbars and inherited text follow");
 	for (const pair of ["--background: #f4f2ed;", "--nav: #ebe8e1;", "--raised: #ffffff;", "--text: #1d1c1a;", "--dim: #6b675f;", "--session-you: #2d5aa8;", "--session-code-mix: 5%;"]) assert.ok(light.includes(pair), `measured light token: ${pair}`);
 	assert.equal(tokens.match(/prefers-color-scheme/g)?.length, 1, "one light block");

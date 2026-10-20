@@ -194,6 +194,8 @@ export interface JobResponse {
  generated_at: string; awaiting_count: number | null; job: ViewerJob;
  timeline: {at:string;label:string;meta:string;tone:string}[]; timeline_truncated: boolean;
  files_href: string | null; artifact_href: string | null; artifact_name: string | null; run_href: string | null;
+ /** `#report/<id>` when the job has a report.md; absent or null otherwise. */
+ report_href?: string | null;
  /** Published reports, newest revision per job set, matching this job. */
  reports: ReportItem[];
  asks: Ask[]; questions: Question[]; warnings: {section:string;message:string}[];
@@ -265,7 +267,13 @@ export interface ReportItem {
 export interface ReportsResponse {
 	generated_at: string;
 	reports: ReportItem[];
+	/** Job reports (`state/artifacts/<id>/report.md`), newest first, capped at 50. */
+	job_reports?: JobReportItem[];
 }
+/** One job report as the Reports page lists it: `href` is its `#report/<id>` page. */
+export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string }
+/** `GET /api/report/<id>`: the job's report.md text, capped; the app renders it (never as raw HTML). */
+export interface JobReportResponse { generated_at: string; job_id: string; title: string; text: string; bytes: number; truncated: boolean; modified_at: string }
 /** One run of a schedule: an anchor job (a fire or Run now) plus the jobs it fanned out to. */
 export interface ScheduleRunView {
 	run_id: string; anchor_id: string; via: "slot" | "dashboard" | "cp_schedule"; at: string; missed: boolean;

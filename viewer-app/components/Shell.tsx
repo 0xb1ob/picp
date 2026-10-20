@@ -2,7 +2,7 @@ import { type ComponentChildren, createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { FlightJob, OverviewResponse, ShippedJob } from "../../src/viewer/api-types.ts";
 import { SearchDialog } from "./SearchDialog.tsx";
-import type { Route } from "../routes.ts";
+import { jobHref, type Route } from "../routes.ts";
 import { Icon } from "./icons.tsx";
 import { Navigation } from "./Navigation.tsx";
 import { stamp, time } from "../format.ts";
@@ -65,12 +65,12 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const openSearch = (event: {currentTarget:HTMLButtonElement}) => { event.currentTarget.focus(); setSearchOpen(true); };
  // The phone header (hidden on desktop) backs out of a More view to More; Board and Map are Jobs views with the plain header (audit P4).
  const subpage=["files","schedules","reports","settings","stats"].includes(current.screen);
- const plain = !subpage && current.screen !== "job";
+ const plain = !subpage && current.screen !== "job" && current.screen !== "report";
  const when = updatedAt ? <time class="shell-clock" dateTime={updatedAt}>{stamp(updatedAt)}</time> : null;
  const clockNow = updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={stamp(updatedAt,true)}>{time(updatedAt)}</time> : null;
  const live = <span class={`shell-live shell-live-${status}`} role="status"><span/>{status === "live" ? clockNow ?? status : <>{status}{clockNow && <> · {clockNow}</>}</>}</span>;
- return <div class={`shell${current.screen === "sessions" ? " shell-sessions" : ""}`}><header class={`shell-header${current.screen === "files" ? " shell-files-header" : subpage ? " shell-header-subpage" : ""}`}>
-  {subpage ? <><a href="#more" aria-label="Back to More" class="shell-back"><Icon name="back"/></a><Brand/></> : current.screen === "job" ? <><a class="shell-back" href="#jobs" aria-label="Back to jobs"><Icon name="back"/></a><code class="shell-detail-title">{current.jobId ?? "command-post"}</code></> : <Brand/>}
+ return <div class={`shell${current.screen === "sessions" ? " shell-sessions" : current.screen === "report" ? " shell-report" : ""}`}><header class={`shell-header${current.screen === "files" ? " shell-files-header" : subpage ? " shell-header-subpage" : ""}`}>
+  {subpage ? <><a href="#more" aria-label="Back to More" class="shell-back"><Icon name="back"/></a><Brand/></> : current.screen === "job" || current.screen === "report" ? <><a class="shell-back" href={current.screen === "report" && current.jobId ? jobHref(current.jobId) : "#jobs"} aria-label={current.screen === "report" ? "Back to the job" : "Back to jobs"}><Icon name="back"/></a><code class="shell-detail-title">{current.jobId ?? "command-post"}</code></> : <Brand/>}
   <div class="shell-header-right">{plain ? live : when}<button type="button" aria-label="Search navigation and in-flight jobs" aria-haspopup="dialog" title="Search" onClick={openSearch} class="shell-search"><Icon name="search"/></button><MoreMenu control={control} version={version} updatedAt={updatedAt}/></div>
  </header>
   <aside class="shell-sidebar"><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/><div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div></aside>

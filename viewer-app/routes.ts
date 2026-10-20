@@ -24,10 +24,11 @@ export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["ov
 /** The top-level item a screen belongs to: Board and Map are Jobs views, Schedules and Files (and Reports on phone) are More. */
 export function navOwner(screen: Route["screen"], desktop: boolean): NavId {
  if (screen === "job" || screen === "board" || screen === "map") return "jobs";
+ if (screen === "report") return desktop ? "reports" : "more";
  if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop) || (screen === "stats" && !desktop)) return "more";
  return screen;
 }
-export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}
+export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "report" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}
 export function route(hash: string): Route {
  const fallback: Route = {screen:"overview",section:null};
  let value: string; try { value = decodeURIComponent(hash.replace(/^#/,"")); } catch { return fallback; }
@@ -46,6 +47,8 @@ export function route(hash: string): Route {
  const job=/^job\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(\?tab=transcript)?$/.exec(value);
  if (job) return {...fallback,screen:"job",jobId:job[1]!,...(job[2] ? {query:"tab=transcript"} : {})};
  if (value.startsWith("job/")) return fallback;
+ const report=/^report\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/.exec(value);
+ if (report) return {...fallback,screen:"report",jobId:report[1]!};
  if (value === "more" || value === "decisions" || value === "map" || value === "settings") return {...fallback,screen:value};
  // Awaiting and Decided are one Decisions page (audit P4 #24): their old hashes scroll to its sections.
  if (value === "awaiting" || value === "decided" || value === "answers") return {...fallback,screen:"decisions",section:value};
@@ -84,3 +87,5 @@ const JOB_ID=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 export const jobHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeURIComponent(id)}` : "#jobs";
 /** Job detail opened on its Transcript tab, phone included (ordinary jobHref keeps the per-width default). */
 export const jobTranscriptHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeURIComponent(id)}?tab=transcript` : "#jobs";
+/** A job's report.md as a readable page: a stable, shareable link that opens on a fresh load. */
+export const reportHref = (id: string): string => JOB_ID.test(id) ? `#report/${encodeURIComponent(id)}` : "#reports";

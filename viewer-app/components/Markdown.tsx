@@ -25,7 +25,7 @@ const blockTexts = (b: Block): string[] => b.kind === "code" ? [] : b.kind === "
 export const chipHrefs = (text: string, links?: Links): string[] => blocks(text).flatMap(blockTexts)
  .flatMap(t => t.split(INLINE).filter((_,i) => i % 2 === 0)).flatMap(t => linkify(t,links).flatMap(s => s.href ? [s.href.replace(/\/+$/,"")] : []));
 
-export type Block = {kind:"p"|"quote"|"heading"|"code";text:string} | {kind:"list";ordered:boolean;items:string[];sub?:Record<number,Extract<Block,{kind:"list"}>>} | {kind:"table";head:string[];rows:string[][]};
+export type Block = {kind:"p"|"quote"|"code";text:string} | {kind:"heading";text:string;level:number} | {kind:"list";ordered:boolean;items:string[];sub?:Record<number,Extract<Block,{kind:"list"}>>} | {kind:"table";head:string[];rows:string[][]};
 const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
 const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const HEADING = /^#{1,6}\s+/;
@@ -80,7 +80,7 @@ export function blocks(text: string): Block[] {
    }
    out.push(buildList(raw)); continue;
   }
-  if (HEADING.test(line)) { out.push({kind:"heading",text:line.replace(HEADING,"")}); i++; continue; }
+  if (HEADING.test(line)) { out.push({kind:"heading",text:line.replace(HEADING,""),level:/^#+/.exec(line)![0].length}); i++; continue; }
   if (line.startsWith(">")) {
    const body: string[] = [];
    for (; i < lines.length && lines[i]!.startsWith(">"); i++) body.push(lines[i]!.replace(/^>\s?/,""));

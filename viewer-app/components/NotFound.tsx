@@ -27,6 +27,13 @@ export function notFoundFor(route: Route, code: number | undefined, workers?: Fl
   back: {href: "#jobs", label: "Back to Jobs"},
   searchLabel: "Search jobs",
  };
+ if (route.screen === "report" && route.jobId) return {
+  kind: "job", id: route.jobId,
+  title: `No report for ${route.jobId}`,
+  body: "This job has no report.md in this home's artifacts. It may not have reported yet, or the id is mistyped.",
+  back: {href: "#reports", label: "Back to Reports"},
+  searchLabel: "Search jobs",
+ };
  if (route.screen === "sessions") {
   const params = new URLSearchParams(route.query);
   const id = params.get("id");
