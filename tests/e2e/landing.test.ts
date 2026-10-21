@@ -1450,6 +1450,27 @@ test("landing S03: a stopped red fact replays no repair while a new attempt is a
 	await s.post.ciTick();
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.equal(s.ghCalls().filter((call) => call.startsWith("pr view")).length, reads + 2, "a reopened generation is a new continuation identity");
+	const stops = () => s.post.durableWakeups.pending().filter((entry) => entry.content.startsWith("HELD PR STOPPED"));
+	const handed = stops().length;
+	writeFileSync(join(live.worktree, "change-request.txt"), "address the operator's change request\n");
+	execFileSync("git", ["add", "change-request.txt"], { cwd: live.worktree });
+	execFileSync("git", ["commit", "--quiet", "-m", "new handed-off head"], { cwd: live.worktree });
+	execFileSync("git", ["push", "--quiet", "origin", "HEAD"], { cwd: live.worktree });
+	const newHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: live.worktree, encoding: "utf8" }).trim();
+	s.setGh({ runs: [run(309, newHead, "completed", "failure")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(stops().length, handed + 1, "a changed handed-off head gets one more durable stop");
+	assert.ok(stops().every((entry) => entry.keys?.[0] === live.jobId), "actionable stops go stale when the job closes");
+	execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/main"], { cwd: live.worktree });
+	s.setGh({ routes: [
+		{ match: "pulls/309", replies: [json({ number: 309, html_url: live.prUrl, state: "closed", merged: true, merge_commit_sha: newHead, merged_at: isoTimestamp(), head: { sha: newHead, ref: live.jobId } })] },
+		{ match: `pr view ${live.prUrl}`, replies: [json({ number: 309, url: live.prUrl, state: "MERGED", headRefOid: newHead, headRefName: live.jobId, baseRefName: "main", mergedAt: isoTimestamp(), mergeCommit: { oid: newHead } })] },
+	] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "done", "a human's merge lands even after an actionable handoff");
+	assert.equal(s.post.durableWakeups.pending().filter((entry) => entry.content.startsWith("HELD PR LANDED")).length, 1, "the human's merge is relayed once");
 });
 
 test("landing S03: lost watch memory coalesces in-flight facts and rearms a settled wait", { skip: SKIP, timeout: 600_000 }, async (t) => {

@@ -49,6 +49,7 @@ Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/land
 | S03-resume | src/held-continuation.ts: resume returns [] immediately | landing S03: a restarted parent resumes | startup did not arm the durable window (assert.fail after a bounded 10-second wait) |
 | S03-landed-turn | extensions/command-post/wakeup-surfaces.ts: always send triggerTurn true | landing S03: a restarted parent resumes | landing is relayed without waking the parent model: 2 versus 1 |
 | S03-tracker | src/held-continuation.ts: append tracker sync pending to NEXT_HINT.done | landing S03: a restarted parent resumes | landed notice doesNotMatch tracker sync / tracker update / receipt note fails; final assertion also rejects every tracker or write-back suffix |
+| S03-stop-head | src/held-continuation.ts: stop notice id uses next instead of the head-bearing tag | landing S03: a stopped red | a changed handed-off head gets one more durable stop: 2 versus 3 |
 
 Removing only the landed branch of isQuietWakeup, and then also removing its isRelayOnlyNotice text classification, did not break the parent case. Neither attempt is counted as evidence. Forcing triggerTurn at the actual sendMessage boundary did break the model-turn assertion; the final test allows the queued follow-up 500 ms and takes a fresh RPC state snapshot before counting requests.
 
@@ -57,3 +58,15 @@ Removing only the landed branch of isQuietWakeup, and then also removing its isR
 The initial full landing run passed 23 cases. The expanded checkpoint passed 61 cases with zero failures/skips in 717 seconds, but overlapped other control experiments and is not the final retirement gate. A subsequent restored deadline/busy-fence run passed all 11 cases in 308 seconds. The headless outcome case passed separately in 19 seconds. Typecheck, migration checker, contract eval (22/22 scored, 28 skipped), and the regenerated contracts export golden passed; generated artifacts had no diff. Declaration-specific controls, final non-overlapping checks and retirement bookkeeping remain to be completed.
 
 The existing harness creates an isolated throwaway agent directory through createAgentDir, configures only the mock provider, and removes it in t.after. No operator credentials or installed agent configuration are used.
+
+## Product blocker: declaration 64
+
+A real parent parks a reviewed green PR under human_handoff, then starts a new model turn whose final input is HELD PR PARKED. The focused reproducer isolates that turn from an unrelated RESTART RECOVERY turn and fails parking is relayed without waking the parent model (actual 1, expected 0). The original declaration explicitly requires no parent wake. The migration brief prohibits product changes, so this blocks retirement rather than authorizing a routing fix.
+
+The reproducible fragment is in the job artifact directory as parked-reproducer.ts. Insert it before the busy-fence case in tests/e2e/landing.test.ts and run npm run test:one -- --test-name-pattern='landing S03: a real parent relays a newly parked' tests/e2e/landing.test.ts. The unmodified product failed this assertion twice, including the isolated check in 6.09 seconds. It uses the real parent, real held worker/session, real park/lease release, scratch git, and mock forge/model boundaries.
+
+Routing explains the result: HeldContinuation.#parked uses relay; CommandPost wires relay and notify to the same recovery journal. isQuietWakeup covers landed/window ids, and isRelayOnlyNotice covers landed/resolve/handled-green text; neither recognizes parked notices. The real wakeup surface therefore sends the parked recovery notice with triggerTurn true. A separate product fix and a green reproducer are needed before continuing declaration 64.
+
+Current accounting is 26/40 S03 declarations mapped, plus S02's 36/40: 62/80 total. Still pending in S03: 45, 54–56, 58, 60, 64–68, 70–71, 78. S02's 6, 8, 32, 33 still require their retained-file disposition. Declaration 54's fresh-parent deadline path is covered, but its expired-pass/retry clauses are not all proved, so its earlier mapped row was removed. No unit file was deleted or moved, no retained file was invented, and no product mutation remains. Final retirement controls remain outstanding.
+
+An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.

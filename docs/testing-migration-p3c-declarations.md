@@ -9,7 +9,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; 62 mapped: S02's 36 plus S03 declarations 41–44, 46–54, 57, 59, 61–62, 69, 72–77 and 79–80; 18 pending; original file stays intact until the final map, retained exceptions and controls are complete |
+| tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; 62 mapped: S02's 36 plus S03 declarations 41–44, 46–53, 57, 59, 61–63, 69, 72–77 and 79–80; 18 pending; S03 blocked by declaration 64's real parked notice waking the parent model; original file stays intact until the final map, retained exceptions and controls are complete |
 | tests/main-ci.test.ts | 39 | convert, owner P3c-rest; 39 pending, including inherited P3/P3b assertions |
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
@@ -25,6 +25,12 @@ The remaining five files continue under P3c-rest; other behavior-05 files remain
 S07 subsequently maps three more declarations and deletes `tests/integrate-held-ci.test.ts`: cumulative
 16/143 mapped, 2 retained, 125 pending, 11 declarations removed and 3/7 files deleted. It adds one e2e
 declaration and extends 05-13; no other slice's ownership changes. The counts above describe P3c's original delivery.
+
+After S02, S06 and this blocked S03 delivery, the current snapshot is **83/143 mapped, 3 retained,
+57 pending**. Of those mappings, 21 declarations have been removed; three original files are fully
+deleted, while foreign-ci-watch is converted with one retained declaration. CI-watch's 62 mapped
+declarations remain in its original file. S03 cannot retire that file until the parked-notice product
+blocker and the 18 pending declarations above are resolved.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The timer file is a 100%
 rename, not retired coverage. Its two assertion rows remain `retained`; the baseline-file table's `deleted`
