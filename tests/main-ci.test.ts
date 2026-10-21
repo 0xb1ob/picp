@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { Mandate } from "../src/contracts.ts";
 import {
@@ -20,8 +20,9 @@ import {
 	resolveMainCiScope,
 	runMainCiTick,
 } from "../src/main-ci.ts";
-import type { CommandRunner } from "../src/merge-ask.ts";
-import { CiRerunStore } from "../src/ci-infra-rerun.ts";
+import type { CiRun, CommandRunner } from "../src/merge-ask.ts";
+import { CiRerunStore, classifyInfraFailure, maybeRerunInfra } from "../src/ci-infra-rerun.ts";
+import { drainFile } from "../src/drain.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { answerActions } from "./harness/actions-api.ts";
 
@@ -575,4 +576,79 @@ test("PR1: a refused gh run rerun latches, names the refusal and keeps its claim
 	assert.equal(ctx.store.entry("demo")?.red_since_sha, T1);
 	assert.equal(new CiRerunStore(ctx.home).read().entries.length, 1, "a gh fault never earns a second try");
 	assert.equal(b.reruns().length, 1);
+});
+
+// Retained by P3 (docs/testing-migration.md): moved verbatim from tests/ci-infra-rerun.test.ts.
+const HEAD = "d48a81d1f4d3aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+type Job = Parameters<typeof classifyInfraFailure>[0][number];
+
+/** The repo's own workflow (.github/workflows/ci.yml) with one failed step, as Actions attempt jobs. */
+function view(failed: string, conclusion = "failure"): Job[] {
+	const names = ["Set up job", "Checkout", "Set up Node", "Install dependencies", "Install treehouse", "Run suite (typecheck + tests)", "Eval contract check"];
+	const at = names.indexOf(failed);
+	const steps = names.map((name, index) => ({ name, status: "completed", conclusion: index < at ? "success" : index === at ? "failure" : "skipped" }));
+	return [{ name: "suite", conclusion, steps }];
+}
+
+/** `view` as the REST attempt-jobs page `gh api …/attempts/<n>/jobs` returns. */
+function jobsPage(jobs: Job[]): string {
+	return JSON.stringify({ total_count: jobs.length, jobs: jobs.map((job, index) => ({ id: index + 1, run_id: 41, status: "completed", ...job })) });
+}
+
+test("classifyInfraFailure: setup steps are infra; the suite and a cancel are not", () => {
+	for (const step of ["Set up job", "Checkout", "Set up Node", "Install dependencies", "Install treehouse"]) {
+		const verdict = classifyInfraFailure(view(step));
+		assert.equal(verdict.infra, true, step);
+		assert.equal(verdict.step, step);
+	}
+	assert.equal(classifyInfraFailure(view("Run suite (typecheck + tests)")).infra, false);
+	assert.equal(classifyInfraFailure(view("Eval contract check")).infra, false);
+	assert.equal(classifyInfraFailure(view("Install treehouse", "cancelled")).infra, false, "a cancelled job is never infra");
+	assert.equal(classifyInfraFailure(view("Install treehouse", "timed_out")).infra, false, "a timed-out job is never infra");
+	const build = [{ name: "a", conclusion: "failure", steps: [{ name: "Install build tools", status: "completed", conclusion: "failure" }] }];
+	assert.equal(classifyInfraFailure(build).infra, false, "a setup-looking step naming a build is not infra");
+	const mixed = [view("Install treehouse")[0]!, { ...view("Run suite (typecheck + tests)")[0]!, name: "other" }];
+	assert.equal(classifyInfraFailure(mixed).infra, false, "every failed job must be infra");
+	assert.equal(classifyInfraFailure([{ name: "a", conclusion: "failure", steps: [] }]).infra, false, "a failed job with no failed step is not proven infra");
+});
+
+function bench(t: { after(fn: () => void): void }, options: { view?: string; viewStatus?: number; rerunStatus?: number } = {}) {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new CiRerunStore(home.path);
+	const calls: string[] = [];
+	const claimsAtRerun: number[] = [];
+	const run = async (_cwd: string, _bin: string, args: readonly string[]) => {
+		calls.push(args[0] === "api" ? `api ${String(args[1]).replace(/\?.*$/, "")}` : args.join(" "));
+		if (args[1] === "rerun") {
+			claimsAtRerun.push(store.read().entries.length);
+			return { status: options.rerunStatus ?? 0, stdout: "", stderr: options.rerunStatus ? "HTTP 403: forbidden" : "" };
+		}
+		return { status: options.viewStatus ?? 0, stdout: options.view ?? jobsPage(view("Install treehouse")), stderr: options.viewStatus ? "gh: Resource not accessible by integration (HTTP 403)" : "" };
+	};
+	const failed = (overrides: Partial<CiRun> = {}): CiRun => ({ status: "completed", conclusion: "failure", headSha: HEAD, databaseId: 41, attempt: 1, workflowName: "CI", ...overrides });
+	const go = (runs: CiRun[]) => maybeRerunInfra({ jobId: "cp-r1", head: HEAD, runs, cwd: home.path, run, home: home.path, store, now: () => new Date("2026-10-04T15:00:00Z") });
+	return { home: home.path, store, calls, claimsAtRerun, failed, go };
+}
+
+test("attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent", async (t) => {
+	const b = bench(t);
+	assert.equal(await b.go([b.failed({ conclusion: "success" })]), undefined, "nothing failed: nothing to say");
+	assert.match((await b.go([b.failed({ attempt: 2 })]))?.fact ?? "", /attempt 2: a second failure is the parent's/);
+	assert.match((await b.go([b.failed({ conclusion: "cancelled" })]))?.fact ?? "", /concluded cancelled/);
+	assert.match((await b.go([b.failed({ conclusion: "timed_out" })]))?.fact ?? "", /concluded timed_out/);
+	const { databaseId: _id, ...noId } = b.failed();
+	assert.match((await b.go([noId]))?.fact ?? "", /no id or attempt/);
+	assert.deepEqual(b.calls, [], "none of those asked gh anything");
+	mkdirSync(dirname(drainFile(b.home)), { recursive: true });
+	writeFileSync(drainFile(b.home), JSON.stringify({ state: "draining", started_at: "2026-10-04T15:00:00Z", deadline: "x", timeout_s: 1, jobs: [] }));
+	assert.match((await b.go([b.failed()]))?.fact ?? "", /draining/);
+	assert.deepEqual(b.calls, []);
+
+	const tests = bench(t, { view: jobsPage(view("Run suite (typecheck + tests)")) });
+	const outcome = await tests.go([tests.failed()]);
+	assert.equal(outcome?.rerun, false);
+	assert.deepEqual(tests.calls, ["api repos/{owner}/{repo}/actions/runs/41/attempts/1/jobs"], "classified, never rerun");
+	assert.deepEqual(tests.store.read().entries, [], "no claim for a test failure");
 });

@@ -19,6 +19,7 @@ import {
 	awaitingRowsNotSupplied,
 	mergeAwaiting,
 } from "../src/awaiting.ts";
+import { ghCiConfigured } from "../src/ci-configured.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { gitlabCiUnsupported } from "../src/forge-runtime.ts";
 import {
@@ -1691,4 +1692,32 @@ test("cp-1som: a merge/ship ask with no job_id is refused, never stored as a def
 	} finally {
 		home.cleanup();
 	}
+});
+
+// Retained by P3 (docs/testing-migration.md): moved verbatim from tests/ci-configured.test.ts.
+const EMPTY = JSON.stringify({ total_count: 0, workflows: [] });
+
+test("ghCiConfigured maps a throwing runner onto the same rule, 403 included", async () => {
+	const ok = await ghCiConfigured({ cwd: "/tmp", timeoutMs: 1, exec: async () => EMPTY })();
+	assert.equal(ok.state, "none");
+
+	const forbidden = await ghCiConfigured({
+		cwd: "/tmp",
+		timeoutMs: 1,
+		exec: async () => {
+			throw new Error("gh api repos/{owner}/{repo}/actions/workflows failed: HTTP 403 (Resource not accessible)");
+		},
+	})();
+	assert.equal(forbidden.state, "unreadable");
+	assert.equal(forbidden.cause, "unauthorized");
+
+	const dead = await ghCiConfigured({
+		cwd: "/tmp",
+		timeoutMs: 1,
+		exec: async () => {
+			throw new Error("spawn gh ENOENT");
+		},
+	})();
+	assert.equal(dead.state, "unreadable");
+	assert.equal(dead.cause, "command_failed");
 });
