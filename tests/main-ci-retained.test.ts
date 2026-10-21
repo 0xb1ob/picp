@@ -1,4 +1,4 @@
-/** Internal-only main-CI contracts retained by the declaration map in docs/testing-migration-main-ci-declarations.md. */
+/** Private main-CI contracts; see docs/testing-migration-main-ci-declarations.md. */
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
