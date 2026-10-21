@@ -409,6 +409,34 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 }
 
 
+test("landing: legacy unregistered projects retain GitHub observation and refuse a GitLab reference", { skip: SKIP }, async (t) => {
+	const s = await startStack(t);
+	const github = await s.seed("legacy GitHub delivery");
+	const gitlab = await s.seed("legacy GitLab delivery", { prUrl: "https://gitlab.com/g/r/-/merge_requests/5" });
+	await s.post.registry.remove("demo");
+	s.setGh({ routes: [{ match: "pr view", replies: [json({ number: 5, url: github.prUrl, state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: "b".repeat(40) }, headRefName: github.branch, headRefOid: "a".repeat(40), baseRefName: "main" })] }] });
+	const result = await s.post.recordMerge({ jobId: github.jobId });
+	assert.equal(result.receipt.recorded_by, "gh pr view");
+	assert.equal(result.receipt.base_branch, "main");
+	const before = s.ghCalls().length;
+	await assert.rejects(s.post.recordMerge({ jobId: gitlab.jobId }), /unsupported/);
+	assert.equal(s.ghCalls().length, before, "an unregistered GitLab MR never falls back to gh");
+	assert.equal(readMergeReceipt(s.home, gitlab.jobId), undefined);
+});
+
+test("landing: teardown proves landing on the project's configured trunk instead of main", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const before = git(s.remote, "rev-parse", "main");
+	const live = await s.held("configured base proof", 0, { delivery: "local" });
+	squashMergeAndDeleteHead(s.repo, live.jobId);
+	const landed = advanceBase(s.repo, "docs/trunk.md", "# trunk only\n");
+	git(s.remote, "branch", "trunk", landed);
+	git(s.remote, "update-ref", "refs/heads/main", before);
+	await s.post.registry.update("demo", { base_branch: "trunk" });
+	const result = await s.post.tearDown(live.jobId);
+	assert.deepEqual([result.torn_down, result.reason, result.landing?.base_branch], [true, "landed_by_git", "trunk"]);
+});
+
 test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });

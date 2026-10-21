@@ -65,7 +65,7 @@ ask-0088e0332d00, 2026-10-21.
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 | P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
-| S06 (cp-e2e-slice-s06-15yh) | behavior 05 slice S06; foreign-ci-watch complete (10 mapped, 1 static retained); forge observers/runtime and held release pending. Two new consumer cases in landing. | 1 | 379 → 379 | 4,287 → 4,279 |
+| S06 (cp-e2e-slice-s06-15yh) | behavior 05 slice S06; foreign-ci-watch and forge-runtime complete (12 mapped, 4 retained); forge observers and held release pending. Four new consumer cases in landing. | 2 | 379 → 379 | 4,287 → 4,279 |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -77,6 +77,13 @@ prove source-mapped coverage of that formatter. S06-1 instead pins its actual op
 PR URL, green head, and evidence-only disclaimer. The retained test covers static import/port inspection.
 S06-timeout and S06-moved are semantic mutations run against the real entry-point scenarios; both fail their
 named assertions and the fixed 15-case file passes without skips before and after deleting the source file.
+
+S06 forge-runtime proof: original blob `042537e3e52c67ad40c2feaa63f0a5f1c4ebcdac`; the three retained
+regression bodies are unchanged. E2e-only V8 captures before/after retirement each include nine product
+processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained lines (SHA-256
+`f7025eb885c798fb40b3f815ba62583213ca8209585f10d236ea9b4a53030017`). The fixed landing file passes
+17/17 without skips; the retained file passes 3/3. Legacy-fallback and configured-trunk controls fail the
+actual merge recording and teardown outcome, respectively. Patch blocks use zero context (`git apply --unidiff-zero`).
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -171,7 +178,7 @@ after-merge deploy job it creates, and what cp_teardown accepts as git evidence 
 GitLab REST API and the repository (`git http-backend`) from one local https server with a throwaway certificate, so the
 project's real GitLab observer, its token and git's fast-forward check all run. 05-7 tears down held local jobs whose
 branches were merged, squashed, rebased or never landed on the scratch remote. Six units are `retained`, moved
-verbatim: the landing proof's injected-failure, timeout and recheck units to `tests/forge-runtime.test.ts`, and the
+verbatim: the landing proof's injected-failure, timeout and recheck units to `tests/forge-runtime-retained.test.ts` (relocated by S06), and the
 total receipt reader, the throwing after-merge port and the ledger refusal to `tests/forge-observers.test.ts`; both
 files stay `convert` for P3c. The P2e review's three findings were already folded in by P3. P3b folds in the P3
 review's two lows: the seven units P3 retained in the P1 exception `tests/actions-ci-policy.test.ts` move verbatim
@@ -335,6 +342,8 @@ moves first.
 | S06-1 | `tests/e2e/landing.test.ts` | landing: foreign CI selection, failed reads, corrupt memory and reviewer timeout remain visible at dispatch |
 | S06-2 | `tests/e2e/landing.test.ts` | landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged |
 
+| S06-3 | `tests/e2e/landing.test.ts` | landing: legacy unregistered projects retain GitHub observation and refuse a GitLab reference |
+| S06-4 | `tests/e2e/landing.test.ts` | landing: teardown proves landing on the project's configured trunk instead of main |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -577,13 +586,13 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/after-merge.test.ts` | base mismatch, missing base and a pre-opt-in merge write skipped and create nothing; no opt-in is silent | 05-5 | mapped | gh answers base develop, no base and a 2020 `mergedAt`: each asserts its reason line, a `skipped` record and no deploy job (NC-31: dropping the opt-in date rule fails `before opt-in`); the project with no opt-in asserts no `after_merge` and no record file. Creating on a mismatch fails `["skipped", 0]` |
 | `tests/after-merge.test.ts` | coverage: a named grant listing the merged job enrolls the deploy; at its cap it is refused; project-wide covers | 05-5 | mapped | real grants via the mandate store: the named grant asserts "enrolled in", its `job_ids` and `coverage: enrolled`; the capped grant "job cap 1 reached" and `none`; project-wide "covered by project-wide" and `project_wide`; the research exclusion `none`. Enrolling past the cap fails the capped `job_ids` |
 | `tests/after-merge.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): no entry point makes the real ledger refuse a deploy job for a registered, opted-in project. 05-5 pins the retry path: a removed record resumes onto the same job |
-| `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime.test.ts` |
+| `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime-retained.test.ts` |
 | `tests/landing-proof.test.ts` | landed: path names with spaces, newlines and pathspec magic are compared literally | 05-7 | mapped | NC-30: without `:(literal)` the glob `star*[ab].txt` also compares origin's own `starXa.txt`, and the odd-paths job fails `landed_by_git` as `unpushed` |
 | `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | six labelled path near misses assert unpushed. The added post-squash extra commit remains unlanded assertion compares [false,unpushed]; control L1 derives paths through HEAD^ (ignoring the final commit) and fails it with [true,undefined], reason landed_by_git. Exact patch and command below; fixed case passes |
 | `tests/landing-proof.test.ts` | not proven: a stale tracking ref that held the squash is not the base origin advertises | 05-7 | mapped | the worktree's `origin/main` holds the squash while origin's main was reset past it: teardown asserts `unpushed` with "survives here only as a stale remote-tracking ref". A proof based on the tracking ref finds the squash and passes it |
-| `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
-| `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): a git that hangs past its timeout needs an injected alias no entry point runs |
-| `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
+| `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
+| `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): a git that hangs past its timeout needs an injected alias no entry point runs |
+| `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
 | `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | P3c control M1 flips head_branch_deleted: the receipt tuple at landing.test.ts:760 fails, actual false versus expected true. Reproduce with the M1 patch and command in P3b review controls below; fixed case passes |
 | `tests/merges.test.ts` | picp-d0p: a bound job's receipt names the PR head branch and is marked bound | 05-5 | mapped | a seeded fleet record with `bound_pr` and branch `cp-b55w` asserts `head_branch` `cp-b55w` and `bound: true` in the result and on disk. Comparing the job id instead of the bound branch fails it as "not this job's delivery" |
 | `tests/merges.test.ts` | nothing is recorded for a PR gh does not call merged | 05-5 | mapped | NC-28: an open PR is not refused, and its "as open, not MERGED" match fails. The no-merge-commit and other-branch answers assert their refusals, no receipt and the PR receipt still `open` |
@@ -623,6 +632,11 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/foreign-ci-watch.test.ts` | the reviewer gate waits for CI, then carries its state into the brief; past the timeout it goes ahead with CI unknown | S06-1 | mapped | real worker request contains timed-out CI unknown; disabling timeout fails accepted dispatch (S06 timeout control). Armed real worker gets green; gh ENOENT yields watch-off text; non-reviewers reach ordinary preflight. |
 | `tests/foreign-ci-watch.test.ts` | binding (c) holds for the head the reviewer reads: a success recorded for an old head never releases once the PR moved | S06-1 | mapped | 05-10 rejects moved-head dispatch; S06-1 rejects unreadable current head and carries that reason after timeout. |
 | `tests/foreign-ci-watch.test.ts` | CommandPost.dispatch arms a waiting reviewer; the armed release (no blockers) re-runs the gate every pass and starts it only once CI completed | S06-1 | mapped | real cp_dispatch writes armed state without fleet or provider request; real scheduler release starts one worker after green and its actual request carries the head's CI. |
+| `tests/forge-runtime.test.ts` | an unregistered project keeps gh for GitHub refs and names its GitLab MR failure | S06-3 | mapped | legacy GitHub receipt is recorded_by gh pr view with observed main; unsupported GitLab records nothing and runs no gh. 05-5 covers bare PR numbers. Runtime legacy mutation removes fallback and fails recording. |
+| `tests/forge-runtime.test.ts` | a registered GitLab project gets the GitLab observer and its base branch | S06-4 | mapped | 05-6 records the registered GitLab MR through its own API without gh; S06-4's real teardown lands on configured trunk while main lacks the change. Removing projectBaseBranch fails teardown. |
+| `tests/forge-runtime.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. Custom limits, injected clock, hung runner and command stdout bends are not accepted by cp_teardown. 05-7 pins normal git landing and near misses, but does not expose these runner budgets. |
+| `tests/forge-runtime.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. Product teardown uses fixed production timeouts; it cannot supply alias.hang or a 100ms timeout through its entry point. Keep runner timeout regression. |
+| `tests/forge-runtime.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. No public barrier between proof generation and the immediate synchronous release recheck; keep dirty/moved proof assertions without mocking internal git. |
 <!-- /manifest:assertions -->
 
 P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
@@ -1006,6 +1020,26 @@ diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
 +		if (false) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
 ```
 
+<!-- patch:S06-legacy -->
+```diff
+diff --git a/src/forge-runtime.ts b/src/forge-runtime.ts
+--- a/src/forge-runtime.ts
++++ b/src/forge-runtime.ts
+@@ -60 +60 @@
+-	if (parseChangeRequestUrl(ref)?.kind !== "gitlab") return githubObserver(ports.run, ports.cwd);
++	if (false) return githubObserver(ports.run, ports.cwd);
+```
+
+<!-- patch:S06-trunk -->
+```diff
+diff --git a/src/forge-runtime.ts b/src/forge-runtime.ts
+--- a/src/forge-runtime.ts
++++ b/src/forge-runtime.ts
+@@ -30 +30 @@
+-	return registryEntry(home, project)?.entry.base_branch;
++	return undefined;
+```
+
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1066,6 +1100,8 @@ diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
 | NC-55 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-55 | b982458f1edafa0ef99eb6f9a6e601c82067dbbdffe56318cd15ebc5303b5b13 | a failing head backs off instead of re-reading every sweep: actual 12 expected 6; exit 1 | pass |
 | S06-moved | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-10 | S06-moved | 56e133c0e8de4fce2a1efba54419ec2b83ee25d9051291cb54f50420abb87f15 | head_moved observation is empty instead of one moved-head fact | pass |
 | S06-timeout | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-1 | S06-timeout | 1869d77ee9e6ea51f37ebd3cff7afbbd562b01a4a7b30e6e81f0afb850d92503 | timed-out reviewer dispatch rejects instead of returning receipt accepted | pass |
+| S06-legacy | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-3 | S06-legacy | b8d4b63cfb4605d74cd3b15b213e7f7e4df925c3ebb8a2a537ec02997a38b309 | legacy GitHub recordMerge rejects unsupported instead of recording a receipt | pass |
+| S06-trunk | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-4 | S06-trunk | 786335f44ee49a7b6f0394a0f69f7c497a146c81b7ca221fcd18dcfed9e424b1 | configured trunk teardown refuses rather than landed_by_git on trunk | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1793,6 +1829,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
 | `tests/e2e/diff-review.test.ts` | S04 (cp-e2e-slice-s04-vep1), behavior 05 public review conversion |
 | `tests/foreign-ci-watch-retained.test.ts` | S06 | one retained static source/port inspection; no runtime entry point exposes implementation imports or injected dependency key enumeration |
+| `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -1954,7 +1991,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/foreign-ci-watch.test.ts` | deleted | S06 | 11 declarations: 10 mapped (05-10, S06-1), 1 static inspection retained in tests/foreign-ci-watch-retained.test.ts; S06-moved and S06-timeout controls |
 | `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/forge-runtime.test.ts` | deleted | S06 | 5 declarations: two mapped to 05-5/05-6/S06-3/S06-4, three retained verbatim in tests/forge-runtime-retained.test.ts; runtime negative controls |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/gate-replacement.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/gate.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
@@ -1973,7 +2010,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/json-store.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
-| `tests/landing-proof.test.ts` | deleted | P3b | 7 declarations: scenario 05-7 (Assertion map); three units retained in `tests/forge-runtime.test.ts`; NC-30 |
+| `tests/landing-proof.test.ts` | deleted | P3b | 7 declarations: scenario 05-7 (Assertion map); three units retained in `tests/forge-runtime-retained.test.ts` (relocated S06); NC-30 |
 | `tests/layout-capture.test.ts` | exception | P1 | contract: assembled layout; operator ask-0088e0332d00 (Exceptions) |
 | `tests/layout-flat.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/leases.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
