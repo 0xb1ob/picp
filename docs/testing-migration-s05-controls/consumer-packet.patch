@@ -1,0 +1,28 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..5808f8e 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -172 +172 @@ export async function materializeDiff(request: MaterializeDiffRequest): Promise<
+-	const range = request.from ? `${request.from}..origin/${request.branch}` : `origin/${base}...origin/${request.branch}`;
++	const range = request.from ? `${request.from}..origin/${request.branch}` : `origin/${base}..origin/${request.branch}`;
+@@ -536 +536 @@ export class DiffReview {
+-				`${jobId} already has a diff review in flight on ${inFlight.subject?.head_sha ?? "unknown head"} (attempt ${inFlight.attempt}, started ${inFlight.started_at}) — ` +
++				`${jobId} already has a diff review in flight (attempt ${inFlight.attempt}, started ${inFlight.started_at}) — ` +
+@@ -561 +561 @@ export class DiffReview {
+-			.findLast((decision) => isCompletePass(decision) && decision.patch_id === currentPatchId);
++			.findLast((decision) => decision.verdict === "pass" && decision.patch_id === currentPatchId);
+@@ -1055,0 +1056 @@ export class DiffReview {
++		result.revise_error = undefined;
+diff --git a/src/gate.ts b/src/gate.ts
+index 8cafd9b..72f98fc 100644
+--- a/src/gate.ts
++++ b/src/gate.ts
+@@ -668 +668 @@ export function copyOriginalTask(options: {
+-	const cap = options.maxBytes ?? REVIEW_ORIGINAL_TASK_MAX_BYTES;
++	const cap = Infinity;
+diff --git a/src/review-context.ts b/src/review-context.ts
+index cdc362d..703c930 100644
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -155 +154,0 @@ async function collect(request: ReviewContextRequest, result: ReviewContextResul
+-	for (const path of REVIEW_CONTEXT_INVARIANTS) if (trees.head.has(path)) add(path, "head", "invariant");
