@@ -583,7 +583,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | the scenario asserts `an arrived attempt is not announced again`; the same case rejects attempt-insensitive keys through its distinct-attempt assertion |
 | `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-8 | mapped | `confirmCi` returns the key once and then `[]` (`arrival is idempotent`); the same scenario fails on the attempt-identity mutation |
 | `tests/ci-evidence.test.ts` | tool rejects a superseded forwarded head and a fabricated quote; current-head evidence is display-only | 05-9 | mapped | NC-33 fails /superseded head/ because bbbbbbbbbbbb is accepted; the complete original declaration, including unknown-head assertions, remains in `tests/ci-evidence-retained.test.ts` |
-| `tests/foreign-ci-watch.test.ts` | a moved head gives head_moved once, then CI is re-derived for the new head | 05-10 | mapped | the watch emits `head_moved`, then `ci_failed` for the new head; disabling fresh-head comparison fails the dispatch assertion `/PR head is now/` (P3c control 05-10) |
+| `tests/foreign-ci-watch.test.ts` | a moved head gives head_moved once, then CI is re-derived for the new head | 05-10 | mapped | NC-34 suppresses moved-head observations: the tick assertion fails with actual [], expected [head_moved]. `npm run test:one -- --test-name-pattern='foreign CI stays' tests/e2e/landing.test.ts` exits 1; restored case passes |
 | `tests/main-ci.test.ts` | stale green on an old sha never clears the latch | 05-11 | mapped | the scenario asserts byte-identical latch on stale green; NC-35 fails own current-tip green clears latch; complete original assertions remain in `tests/main-ci-retained.test.ts` |
 | `tests/main-ci.test.ts` | a dynamic red never blocks an own current-tip green clear | 05-11 | mapped | NC-35 removes actor/event filtering and times out waiting for own current-tip green clears latch; complete original assertions remain in `tests/main-ci-retained.test.ts` |
 | `tests/parked-ci.test.ts` | timer stores A green, moved B pending, then B red without worker revival | 05-12 | mapped | NC-36 fails waiting for parked green through extension timer; exact reread and journal counts remain verbatim in `tests/parked-ci-retained.test.ts` |
@@ -622,9 +622,9 @@ diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
 diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
 --- a/src/foreign-ci-watch.ts
 +++ b/src/foreign-ci-watch.ts
-@@ -329,1 +329,1 @@
--			if (current.head === entry.head_sha) return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch; the PR's current head at dispatch).` };
-+			if (true) return { line: `${target.url}: CI ${entry.last_ci}${on} (foreign CI watch; the PR's current head at dispatch).` };
+@@ -282,1 +282,1 @@
+-		if (head && entry.head_sha && entry.head_sha !== head) {
++		if (false && head && entry.head_sha && entry.head_sha !== head) {
 ```
 <!-- patch:NC-35 -->
 ```diff
@@ -724,7 +724,7 @@ The fixed file passed all 13 cases without skips before these controls. No produ
 |---|---|---|---|
 | 05-8 | CI watch persists arrival | `src/ci-watch.ts`: completed-run identity uses `${run.databaseId}.1` instead of the actual attempt | `a new attempt is a new failure even on the same head`: actual `undefined`, expected truthy |
 | 05-9 | operator-forwarded CI | `src/ci-evidence.ts`: disable the current-head mismatch guard | `/superseded head/` fails: tool records forwarded success on `bbbbbbbbbbbb` instead |
-| 05-10 | foreign CI stays | `src/foreign-ci-watch.ts`: release any completed entry without comparing the freshly read PR head | `/PR head is now/` fails: dispatch gets past the foreign-CI gate and reaches model selection (`no usable model for planner`) |
+| 05-10 | foreign CI stays | `src/foreign-ci-watch.ts`: suppress the moved-head notification guard (NC-34) | tick observation assertion: actual `[]`, expected `['head_moved']`; supersedes the earlier downstream model-selection failure |
 | 05-11 | real parent's timer | `src/main-ci.ts`: count all runs without actor or dynamic-event filtering | `own current-tip green clears latch` times out with the red row still present |
 | 05-12 | parked PR timer | `src/awaiting-merge.ts`: remove the parked watch's `observeCi` wiring | `parked green through extension timer` times out with no CI row |
 | 05-13 | held CI repairs | `src/integrate.ts`: set cumulative prior repair count to zero | `a second red result exhausts the repair allowance`: actual `resolve`, expected `surface` |
@@ -779,7 +779,7 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-31 | `tests/after-merge.test.ts` | 8532dda3b36d59141ef007d6996595ff2f825cbc | 05-5 | NC-31-pre-opt-in | bbd4b95f011b7fc8b6d9eea04c66a1ce7c3d169f9a7cd34abe807a103d40aa12 | a merge from before the opt-in creates a deploy job: "before opt-in" fails | pass |
 | NC-32 | `tests/ci-watch.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-8 | NC-32-attempt-identity | 31b8070cb5bf5755fe50f02b99ec4d0c69af3829ff01b31d1ab3dc1df4807bd8 | `a new attempt is a new failure even on the same head`: actual undefined, expected truthy | pass |
 | NC-33 | `tests/ci-evidence.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-9 | NC-33 | f3376f3e6c9824b272c272b574d5dba2f16bf53e3c8bf1536134ef052b5ee267 | expected /superseded head/, instead forwarded success recorded on bbbbbbbbbbbb | pass |
-| NC-34 | `tests/foreign-ci-watch.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-10 | NC-34 | de7604d19aec91444aa1877bc97082aa267c18feb02d0619f3762c82e3b01259 | expected /PR head is now/, instead no usable model for planner after passing the gate | pass |
+| NC-34 | `tests/foreign-ci-watch.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-10 | NC-34 | 6404b4e7cc8ee8fd7bb6d253758e0727c482bcc8001b938351d9fe9c525e3cca | tick observations: actual [], expected [head_moved] | pass |
 | NC-35 | `tests/main-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-11 | NC-35 | f1a2e028adf4e9dcc42aa3f5fb68a4bce417edf303edcd23c081bc12d39f4b0e | timed out waiting for own current-tip green clears latch | pass |
 | NC-36 | `tests/parked-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer | pass |
 | NC-37 | `tests/integrate-held-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | a second red result exhausts the repair allowance: actual resolve, expected surface | pass |
