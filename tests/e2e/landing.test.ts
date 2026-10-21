@@ -22,6 +22,8 @@ import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { MainCiStore } from "../../src/main-ci.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
+import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
+import { Scheduler } from "../../src/scheduler.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
@@ -117,6 +119,8 @@ function mergeAndDeleteHead(repo: ScratchRepo, branch: string): string {
 interface GitlabReply {
 	status?: number;
 	body: unknown;
+	raw?: string;
+	headers?: Record<string, string>;
 }
 /**
  * A local https GitLab: `/api/v4/.../merge_requests/<iid>` answers `mrs[iid]` and logs its PRIVATE-TOKEN; every other
@@ -133,8 +137,8 @@ async function startFakeGitlab(t: TestContext, remote: string) {
 		if (url.pathname.startsWith("/api/")) {
 			asked.push({ path: url.pathname, ...(req.headers["private-token"] ? { token: String(req.headers["private-token"]) } : {}) });
 			const reply = iid ? mrs[Number(iid)] : undefined;
-			res.writeHead(reply?.status ?? (reply ? 200 : 404), { "content-type": "application/json" });
-			res.end(JSON.stringify(reply?.body ?? { message: "404 Not found" }));
+			res.writeHead(reply?.status ?? (reply ? 200 : 404), { "content-type": "application/json", ...reply?.headers });
+			res.end(reply?.raw ?? JSON.stringify(reply?.body ?? { message: "404 Not found" }));
 			return;
 		}
 		const cgi = spawn("git", ["http-backend"], {
@@ -418,7 +422,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
 	let parentSeq = 0;
-	const parent = async (prompt: string, steps: ScriptStep[], settled?: () => Promise<void>) => {
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[], stderr: () => string) => Promise<void>) => {
 		const script = `landing-parent-${++parentSeq}`;
 		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
 		// Recovery notices can request a turn before the operator's quote arrives.
@@ -437,7 +441,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
 			await child.waitForSettled(90_000);
 			assert.equal(provider.remaining(script), 0);
-			await settled?.();
+			await settled?.(child.eventsOfType("tool_execution_end"), () => `${child.stderr()}\n${JSON.stringify(child.records())}`);
 			return child.eventsOfType("tool_execution_end");
 		} finally {
 			await child.close();
@@ -446,6 +450,187 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	return { home: home.path, remote: repo.remote as string, repo, post, provider, agentDir, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
 }
 
+
+test("landing: legacy unregistered projects retain GitHub observation and refuse a GitLab reference", { skip: SKIP }, async (t) => {
+	const s = await startStack(t);
+	const github = await s.seed("legacy GitHub delivery");
+	const gitlab = await s.seed("legacy GitLab delivery", { prUrl: "https://gitlab.com/g/r/-/merge_requests/5" });
+	await s.post.registry.remove("demo");
+	s.setGh({ routes: [{ match: "pr view", replies: [json({ number: 5, url: github.prUrl, state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: "b".repeat(40) }, headRefName: github.branch, headRefOid: "a".repeat(40), baseRefName: "main" })] }] });
+	const result = await s.post.recordMerge({ jobId: github.jobId });
+	assert.equal(result.receipt.recorded_by, "gh pr view");
+	assert.equal(result.receipt.base_branch, "main");
+	const before = s.ghCalls().length;
+	await assert.rejects(s.post.recordMerge({ jobId: gitlab.jobId }), /unsupported/);
+	assert.equal(s.ghCalls().length, before, "an unregistered GitLab MR never falls back to gh");
+	assert.equal(readMergeReceipt(s.home, gitlab.jobId), undefined);
+	await s.project("unknown", { cloneUrl: "https://git.example.com/o/lab.git" });
+	const unknown = await s.seed("unsupported forge", { project: "unknown", prUrl: "https://git.example.com/o/lab/-/merge_requests/7" });
+	await assert.rejects(s.post.recordMerge({ jobId: unknown.jobId }), /unsupported/);
+	assert.equal(s.ghCalls().length, before, "an unsupported registered forge sends no gh request");
+});
+
+test("landing: teardown proves landing on the project's configured trunk instead of main", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const before = git(s.remote, "rev-parse", "main");
+	const live = await s.held("configured base proof", 0, { delivery: "local" });
+	squashMergeAndDeleteHead(s.repo, live.jobId);
+	const landed = advanceBase(s.repo, "docs/trunk.md", "# trunk only\n");
+	git(s.remote, "branch", "trunk", landed);
+	git(s.remote, "update-ref", "refs/heads/main", before);
+	await s.post.registry.update("demo", { base_branch: "trunk" });
+	const result = await s.post.tearDown(live.jobId);
+	assert.deepEqual([result.torn_down, result.reason, result.landing?.base_branch], [true, "landed_by_git", "trunk"]);
+});
+
+test("landing: forge observation failures refuse merge receipts without leaking external replies", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const token = "glpat-s06-canary";
+	const s = await startStack(t, { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: token } });
+	const gh = await s.seed("GitHub observation failures");
+	const missing = json({ state: "OPEN" });
+	for (const [reply, cause] of [
+		[{ code: 1, stderr: "gh: not logged in\nprivate second line" }, /unavailable: .*not logged in/],
+		[{ stdout: `<html>${token}</html>` }, /invalid:/],
+		[missing, /invalid:/],
+		[json({ number: 7, url: gh.prUrl, state: "OPEN" }), /as open, not MERGED/],
+	] as Array<[Reply, RegExp]>) {
+		s.setGh({ routes: [{ match: "pr view", replies: [reply] }] });
+		await assert.rejects(s.post.recordMerge({ jobId: gh.jobId, pr: reply === missing ? gh.prUrl!.split("/").pop() : undefined }), (error: Error) => {
+			assert.match(error.message, cause);
+			assert.doesNotMatch(error.message, /private second line|glpat-s06-canary|<html>/);
+			return true;
+		});
+		assert.equal(readMergeReceipt(s.home, gh.jobId), undefined);
+	}
+	const lab = await startFakeGitlab(t, s.remote);
+	await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
+	const url = `${lab.web}/o/lab/-/merge_requests/7`;
+	const gl = await s.seed("GitLab observation failures", { project: "lab", prUrl: url });
+	const head = "a".repeat(40);
+	const body = { id: 9001, iid: 7, source_project_id: 42, target_project_id: 42, state: "merged", source_branch: gl.branch, target_branch: "main", sha: head, diff_refs: { head_sha: head }, merge_commit_sha: "b".repeat(40), merged_at: isoTimestamp(), web_url: url };
+	const refused = async (reply: GitlabReply, cause: RegExp) => {
+		lab.mrs[7] = reply;
+		const before = lab.asked.length;
+		await assert.rejects(s.post.recordMerge({ jobId: gl.jobId }), (error: Error) => {
+			assert.match(error.message, cause);
+			assert.doesNotMatch(error.message, /glpat-s06-canary|login|rejected|redirect-destination/);
+			return true;
+		});
+		assert.equal(lab.asked.length, before + 1, "one bounded GET; a refused answer is never retried or redirected");
+		assert.equal(readMergeReceipt(s.home, gl.jobId), undefined);
+	};
+	for (const over of [
+		{ diff_refs: { head_sha: "e".repeat(40) } }, { merge_commit_sha: "not-a-sha" }, { sha: null, diff_refs: null },
+		{ source_branch: "" }, { target_branch: undefined }, { merged_at: "yesterday" },
+	]) await refused({ body: { ...body, ...over } }, /invalid:/);
+	await refused({ body: [body] }, /invalid:/);
+	for (const over of [
+		{ iid: 8 }, { iid: "7" }, { web_url: `${lab.web}/o/other/-/merge_requests/7` },
+		{ web_url: "https://evil.example.com/o/lab/-/merge_requests/7" }, { web_url: null },
+	]) await refused({ body: { ...body, ...over } }, /mismatch:/);
+	for (const over of [{ source_project_id: 43 }, { source_project_id: undefined, target_project_id: undefined }]) {
+		await refused({ body: { ...body, ...over } }, /unsupported:/);
+	}
+	await refused({ body: null, raw: `<html>login ${token}</html>` }, /invalid:/);
+	for (const status of [401, 403, 404, 429, 500]) await refused({ status, body: { message: `token ${token} rejected` } }, new RegExp(`unavailable: .*HTTP ${status}`));
+	await refused({ status: 302, body: null, headers: { location: `${lab.web}/api/v4/projects/redirect-destination/merge_requests/99` } }, /HTTP 302 redirect refused/);
+	for (const [state, expected] of [["opened", "open"], ["closed", "closed"], ["locked", "unknown"], ["weird", "unknown"]]) {
+		await refused({ body: { ...body, state, merged_at: null, merge_commit_sha: null } }, new RegExp(`as ${expected}, not MERGED`));
+	}
+	for (const ref of ["https://evil.example.com/o/lab/-/merge_requests/7", `${lab.web}/o/other/-/merge_requests/7`, "https://github.com/o/lab/pull/7", "0", "7; rm -rf /"]) {
+		const before = lab.asked.length;
+		await assert.rejects(s.post.recordMerge({ jobId: gl.jobId, pr: ref }));
+		assert.equal(lab.asked.length, before, "a foreign or malformed reference sends no token or request");
+	}
+	for (const flags of [{ sha: null }, { should_remove_source_branch: true, force_remove_source_branch: true }]) {
+		const job = await s.seed("GitLab fallback head and deleted source", { project: "lab", prUrl: url });
+		lab.mrs[7] = { body: { ...body, source_branch: job.branch, ...flags } };
+		const receipt = (await s.post.recordMerge({ jobId: job.jobId })).receipt;
+		assert.deepEqual([receipt.head_sha, receipt.head_branch], [head, job.branch]);
+	}
+	await assert.rejects(s.post.recordMerge({ jobId: "../escape" }), /no fleet record/);
+	assert.ok(lab.asked.every((request) => request.token === token));
+	await s.post.registry.update("lab", { forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_S06_UNSET_TOKEN" } });
+	lab.mrs[7] = { status: 401, body: { message: `rejected ${token}` } };
+	await assert.rejects(s.post.recordMerge({ jobId: gl.jobId }), (error: Error) => {
+		assert.match(error.message, /CP_S06_UNSET_TOKEN is unset/);
+		assert.doesNotMatch(error.message, /glpat-s06-canary|rejected/);
+		return true;
+	});
+	assert.equal(lab.asked.at(-1)?.token, undefined);
+	await s.project("prefixed", { cloneUrl: `${lab.web}/gitlab/o/lab.git`, forge: { kind: "gitlab", web_base_url: `${lab.web}/gitlab`, token_env: "CP_E2E_GITLAB_TOKEN" } });
+	const prefixed = await s.seed("prefix guard", { project: "prefixed", prUrl: `${lab.web}/gitlab/o/lab/-/merge_requests/7` });
+	const beforePrefix = lab.asked.length;
+	await assert.rejects(s.post.recordMerge({ jobId: prefixed.jobId, pr: `${lab.web}/o/lab/-/merge_requests/7` }), /mismatch/);
+	assert.equal(lab.asked.length, beforePrefix, "an MR outside the configured web prefix sends no credential");
+});
+
+test("landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	writeFileSync(join(s.home, LAYOUT.budgetsFile), JSON.stringify({ ...s.post.budgets(), spawn_cap: 2 }));
+	const older = await s.held("oldest idle author", 301);
+	const newer = await s.held("newer idle author", 302);
+	const releases = (id: string) => readRunEvents(s.home, id).filter((event) => event.type === "held_released");
+	assert.equal(releases(older.jobId).length + releases(newer.jobId).length, 0, "below cap no author is stopped");
+	const original = s.post.fleet.get(older.jobId)!;
+	const job = await s.post.ledger().create({ title: "fresh work under spawn pressure", project: "demo", kind: "ship", delivery: "local" });
+	const model = s.provider.addScript("spawn-pressure", [{ kind: "text", text: "Fresh worker running." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	const eventsFile = join(s.home, paths.runDir(older.jobId), "events.jsonl");
+	const journal = readFileSync(eventsFile, "utf8");
+	rmSync(eventsFile);
+	mkdirSync(eventsFile);
+	try {
+		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false }), /EISDIR/);
+		assert.equal(s.provider.requests("spawn-pressure").length, 0, "journal failure never starts the caller");
+		assert.equal(s.post.fleet.get(older.jobId)?.worker.pid, original.worker.pid);
+	} finally {
+		rmSync(eventsFile, { recursive: true });
+		writeFileSync(eventsFile, journal);
+	}
+	s.post.dispatchQueue.enqueue(job.id, { task: "Do the fresh work.", model });
+	await s.post.dispatchQueue.drain();
+	assert.ok(s.post.fleet.get(job.id), "queue capacity counts a releasable author as free after journal recovery");
+	await waitFor(() => s.provider.requests("spawn-pressure"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "fresh worker actually runs" });
+	assert.deepEqual(releases(older.jobId).map((event) => event.payload), [{ for_job: job.id, reason: "spawn cap" }]);
+	assert.equal(releases(newer.jobId).length, 0, "the newer author is not the victim");
+	assert.deepEqual([s.post.fleet.get(older.jobId)?.phase, s.post.fleet.get(older.jobId)?.worktree, s.post.fleet.get(older.jobId)?.branch], ["held", original.worktree, original.branch]);
+	assert.equal((await s.post.send({ jobId: older.jobId, message: "Continue the held job.", mode: "prompt" })).receipt, "delivered");
+	await waitFor(() => readRunEvents(s.home, older.jobId), (events) => events.some((event) => event.type === "worker_revived"), { timeoutMs: 60_000, what: "released author resumes its session" });
+	const resumedPid = s.post.fleet.get(older.jobId)!.worker.pid;
+	await s.post.send({ jobId: older.jobId, message: "Continue once more.", mode: "prompt" });
+	assert.equal(s.post.fleet.get(older.jobId)!.worker.pid, resumedPid, "a revived worker is sent to without another restoration");
+	const blocked = await s.post.ledger().create({ title: "no idle held author", project: "demo", kind: "ship", delivery: "local" });
+	s.post.dispatchQueue.enqueue(blocked.id, { task: "Wait for capacity.", model });
+	await s.post.dispatchQueue.drain();
+	assert.equal(s.post.fleet.get(blocked.id), undefined, "at cap with no releasable author, dispatch stays queued");
+	assert.ok(s.post.dispatchQueue.ids().includes(blocked.id));
+});
+
+test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });
+	const job = await s.seed("merge with unavailable ledger");
+	s.setGh({ routes: [{ match: "pr view", replies: [json({ number: Number(job.prUrl!.split("/").pop()), url: job.prUrl, state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: "b".repeat(40) }, headRefName: job.branch, headRefOid: "a".repeat(40), baseRefName: "main" })] }] });
+	const ledgerFile = join(s.home, LAYOUT.jobsFile);
+	const original = readFileSync(ledgerFile, "utf8");
+	writeFileSync(ledgerFile, "{ corrupt ledger");
+	try {
+		const result = await s.post.recordMerge({ jobId: job.jobId });
+		assert.equal(result.recorded, true);
+		assert.ok(readMergeReceipt(s.home, job.jobId), "a deploy failure must preserve the observed merge");
+		assert.match(result.after_merge ?? "", /after-merge deploy NOT created: .*cp_merged .* retries/);
+		assert.match(formatMerge(result), /can now pass without force\. after-merge deploy NOT created:/);
+		assert.equal(existsSync(join(s.home, paths.afterMergeFile(job.jobId))), false, "the failed deploy must remain retryable");
+	} finally {
+		writeFileSync(ledgerFile, original);
+	}
+	const retry = await s.post.recordMerge({ jobId: job.jobId });
+	assert.equal(retry.recorded, false);
+	assert.match(retry.after_merge ?? "", /after-merge deploy .* created/);
+	assert.equal(s.post.ledger().read().jobs.filter((row) => row.labels.includes(`after-merge:${job.jobId}`)).length, 1);
+	assert.equal("after_merge" in await s.post.recordMerge({ jobId: job.jobId }), false);
+});
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
 
 test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 180_000 }, async (t) => {
@@ -1525,6 +1710,140 @@ test("landing: foreign CI stays read-only, follows the base repo's current head 
 	assert.ok(s.ghCalls().some((call) => call.includes(`repos/example/demo/actions/runs?head_sha=${next}`)), "CI is read from the base repository by head");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	assert.equal(s.post.fleet.get(job.id), undefined, "waiting reviewer never spawned");
+});
+
+test("landing: foreign CI selection, failed reads, corrupt memory and reviewer timeout remain visible at dispatch", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.update("demo", { clone_url: "https://github.com/example/demo" });
+	const create = (title: string, ref: string, labels = ["schedule:sch-e2e"]) => s.post.ledger().create({ title, project: "demo", delivery: "local", kind: "research", externalRef: ref, labels });
+	const url = "https://github.com/example/demo/pull/204";
+	const head = "a".repeat(40);
+	const job = await create("foreign reviewer", url);
+	const closed = await create("closed foreign", "https://github.com/example/demo/pull/205");
+	await s.post.ledger().close(closed.id, "dropped: fixture closed");
+	await create("other repo", "https://github.com/example/other/pull/206");
+	await create("issue", "https://github.com/example/demo/issues/207");
+	const own = await s.seed("own PR", { prUrl: "https://github.com/example/demo/pull/208" });
+	await create("own PR reference", own.prUrl!);
+	const file = join(s.home, LAYOUT.foreignCiWatchFile);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, "{ not json");
+	const state = (reply: Reply, rows: RunRow[] = []) => s.setGh({ runs: rows, routes: [{ match: "pulls/204", replies: [reply] }] });
+	const pr = (sha = head) => json({ number: 204, html_url: url, state: "open", merged: false, head: { sha, ref: "foreign" } });
+	const due = () => {
+		const memory = JSON.parse(readFileSync(file, "utf8"));
+		for (const row of memory.jobs) delete row.next_due_at;
+		writeFileSync(file, JSON.stringify(memory));
+	};
+	state(pr(), [run(204, head, "in_progress", null)]);
+	const selected = await s.post.foreignCiTick().catch((error: Error) => assert.fail(`corrupt memory must recover: ${error.message}`));
+	assert.deepEqual(selected.checked, [job.id], "only the open foreign PR in this project's repo is selected");
+	assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).jobs.map((row: { job_id: string }) => row.job_id), [job.id], "corrupt memory is replaced with valid selected jobs");
+	await s.post.ledger().update(job.id, { status: "deferred" });
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [job.id], "deferred foreign jobs remain selected");
+	await s.post.ledger().update(job.id, { status: "open" });
+	const bypassModel = s.provider.addScript("foreign-bypass", [{ kind: "text", text: "Unused." }]);
+	s.agentDir.writeModels(s.provider);
+	for (const bypass of [
+		await create("ordinary research", url, []),
+		await s.post.ledger().create({ title: "ship is not a foreign reviewer", project: "demo", kind: "ship", delivery: "pr", externalRef: url, labels: ["schedule:sch-e2e"] }),
+		await create("review another repo", "https://github.com/example/other/pull/299"),
+	]) {
+		await assert.rejects(s.post.dispatch({ jobId: bypass.id, task: "review", model: bypassModel, fetch: false }), /origin_mismatch/, "non-reviewers pass the foreign gate and reach normal preflight");
+		await s.post.ledger().close(bypass.id, "dropped: gate bypass fixture complete");
+	}
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /in_progress on aaaaaaaaaaaa/);
+	state(pr("HEAD;rm"));
+	due();
+	assert.ok((await s.post.foreignCiTick()).errors.some((error) => /malformed head sha/.test(error.message)), "malformed forge head is refused at the Actions boundary");
+	s.setGh({ routes: [{ match: "pulls/204", replies: [pr()] }, { match: "actions/runs?head_sha=", replies: [{ code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" }] }] });
+	due();
+	assert.ok((await s.post.foreignCiTick()).errors.some((error) => /Actions CI read denied/.test(error.message)), "unreadable Actions is never an empty run list");
+	state({ code: 1, stderr: "gh api failed: HTTP 502" });
+	due();
+	const failed = await s.post.foreignCiTick();
+	assert.equal(failed.errors.length, 1);
+	assert.match(failed.errors[0]!.message, /HTTP 502/);
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "a failed read backs off");
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).errors, [], "a repeated cause is announced once");
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).jobs[0].failures, 4);
+	state(pr(), [run(204, head, "completed", "success")]);
+	due();
+	const green = await s.post.foreignCiTick();
+	assert.deepEqual(green.observations.map((fact) => fact.event), ["ci_green"]);
+	assert.match(green.observations[0]!.key, /^foreign\|.*\|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\|ci_green\|[0-9a-f]{12}$/);
+	state({ code: 1, stderr: "gh api failed: HTTP 502" });
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /PR head is now unknown/);
+	const ledgerFile = join(s.home, LAYOUT.jobsFile);
+	const ledger = JSON.parse(readFileSync(ledgerFile, "utf8"));
+	ledger.jobs.find((row: { id: string }) => row.id === job.id).created_at = "2020-01-01T00:00:00Z";
+	writeFileSync(ledgerFile, JSON.stringify(ledger));
+	const model = s.provider.addScript("foreign-timeout", [{ kind: "text", text: "Review received." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	const clone = s.post.registry.pathOf("demo");
+	git(clone, "remote", "set-url", "origin", "https://github.com/example/demo");
+	const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const gitShim = join(s.home, "bin", "git");
+	writeFileSync(gitShim, `#!/usr/bin/env node\nconst { spawnSync } = require("child_process");\nconst args = process.argv.slice(2);\nconst raw = args.includes("get-url");\nconst result = spawnSync(${JSON.stringify(realGit)}, [...(raw ? [] : ["-c", ${JSON.stringify(`url.${s.remote}.insteadOf=https://github.com/example/demo`)}]), ...args], { stdio: "inherit" });\nprocess.exit(result.status ?? 1);\n`);
+	chmodSync(gitShim, 0o755);
+	assert.equal((await s.post.dispatch({ jobId: job.id, task: "review", model, fetch: false })).receipt, "accepted");
+	await waitFor(() => s.provider.requests("foreign-timeout"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees timed-out foreign CI" });
+	assert.match(JSON.stringify(s.provider.requests("foreign-timeout")[0]!.body), /CI unknown — not completed within 60 min/);
+	assert.match(JSON.stringify(s.provider.requests("foreign-timeout")[0]!.body), /PR head is now unknown/);
+	state({ code: 1, stderr: "gh: Not Found (HTTP 404)" });
+	due();
+	assert.equal((await s.post.foreignCiTick()).stopped.length, 1);
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "an unreadable PR is dropped permanently");
+	const armed = await create("armed foreign reviewer", "https://github.com/example/demo/pull/209");
+	const defaults = loadMandateDefaults(s.home);
+	const scheduler = new Scheduler({ home: s.home, ledger: () => s.post.ledger(), mandates: s.post.mandates, runs: s.post.mandates.scheduleRuns, usageJobs: () => [], cloneOf: () => clone, mintContext: () => ({ defaults, ceiling: defaults.token_ceiling! }) });
+	const schedule = await scheduler.add({ name: "foreign reviewer", project: "demo", manual: true, title: "Review", kind: "research", delivery: "answer", native: { limits: { parallelism: 1 }, action: { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "foreign-fixture", quote_sha: "abcdef123456" } } } });
+	await s.post.ledger().update(armed.id, { removeLabels: ["schedule:sch-e2e"], addLabels: [`schedule:${schedule.id}`] });
+	const legacyJobs = JSON.parse(readFileSync(ledgerFile, "utf8"));
+	legacyJobs.jobs.find((row: { id: string }) => row.id === armed.id).created_at = isoTimestamp(new Date(Date.now() - 60_000));
+	writeFileSync(ledgerFile, JSON.stringify(legacyJobs));
+	const armedModel = s.provider.addScript("foreign-armed", [{ kind: "text", text: "Reviewing current head." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "foreign-reviewer", role: "planner", model: armedModel }] }));
+	const armState = (conclusion: string | null) => s.setGh({ runs: [run(209, head, conclusion ? "completed" : "in_progress", conclusion)], routes: [{ match: "pulls/209", replies: [json({ number: 209, html_url: armed.external_ref, state: "open", merged: false, head: { sha: head, ref: "foreign" } })] }] });
+	armState(null);
+	await s.parent("Dispatch the foreign reviewer when its CI completes.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: armed.id, task: "Review the foreign PR.", model: armedModel } }] },
+		{ kind: "text", text: "Waiting for foreign CI." },
+	], async (events, stderr) => {
+		assert.ok(existsSync(join(s.home, LAYOUT.armedDispatchFile)), JSON.stringify({ events, job: await s.post.ledger().show(armed.id) }));
+		assert.deepEqual(JSON.parse(readFileSync(join(s.home, LAYOUT.armedDispatchFile), "utf8")).entries.map((entry: { job_id: string }) => entry.job_id), [armed.id]);
+		assert.equal(s.post.fleet.get(armed.id), undefined, "the public dispatch tool arms without spawning while CI runs");
+		assert.equal(s.provider.requests("foreign-armed").length, 0);
+		armState("success");
+		await waitFor(() => ({ requests: s.provider.requests("foreign-armed"), job: s.post.ledger().read().jobs.find((row) => row.id === armed.id)! }), (value) => value.requests.length === 1 || value.job.status === "closed", { timeoutMs: 60_000, what: "armed reviewer released by real CI timer" });
+		assert.equal((await s.post.ledger().show(armed.id)).status, "in_progress", JSON.stringify(await s.post.ledger().show(armed.id)));
+		assert.match(JSON.stringify(s.provider.requests("foreign-armed")[0]!.body), /CI green on aaaaaaaaaaaa/);
+		assert.equal(readRunEvents(s.home, armed.id).filter((event) => event.type === "spawned").length, 1, "one armed dispatch starts once");
+		await waitFor(stderr, (text) => text.includes(`foreign PR ${armed.external_ref} CI green on aaaaaaaaaaaa`), { timeoutMs: 10_000, what: "foreign CI notice reaches operator stderr" });
+		assert.match(stderr(), /nothing was merged, commented, re-run or woken/);
+	});
+	await s.post.ledger().close(armed.id, "dropped: armed reviewer fixture complete");
+	const batch = [];
+	for (let i = 0; i < 21; i++) batch.push(await create(`capped foreign ${i}`, `https://github.com/example/demo/pull/${300 + i}`));
+	s.setGh({ runs: [run(300, head, "in_progress", null)], routes: batch.map((row, i) => ({ match: `pulls/${300 + i}`, replies: [json({ number: 300 + i, html_url: row.external_ref, state: "open", merged: false, head: { sha: head, ref: "foreign" } })] })) });
+	const capped = await s.post.foreignCiTick();
+	assert.deepEqual(capped.checked, batch.slice(0, 20).map((row) => row.id));
+	assert.deepEqual(capped.deferred, [batch[20]!.id], "the real default per-tick cap defers the twenty-first PR");
+	const offJob = await create("foreign reviewer while gh is unavailable", "https://github.com/example/demo/pull/399");
+	s.setGh({ routes: [{ match: "pulls/208", replies: [{ code: 1, stderr: "spawn gh ENOENT" }] }] });
+	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true });
+	const disabled = await s.post.ciTick();
+	assert.match(s.post.ciWatch.disabled ?? "", /gh is not available/, JSON.stringify(disabled));
+	const offModel = s.provider.addScript("foreign-off", [{ kind: "text", text: "Reviewing without CI." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	assert.equal((await s.post.dispatch({ jobId: offJob.id, task: "review", model: offModel, fetch: false })).receipt, "accepted");
+	await waitFor(() => s.provider.requests("foreign-off"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees disabled watch" });
+	assert.match(JSON.stringify(s.provider.requests("foreign-off")[0]!.body), /CI unknown — the CI watch is off/);
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 });
 
 
