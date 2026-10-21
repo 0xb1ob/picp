@@ -1,0 +1,20 @@
+diff --git a/src/contracts/reviews.ts b/src/contracts/reviews.ts
+index 8cd0e3d..810544a 100644
+--- a/src/contracts/reviews.ts
++++ b/src/contracts/reviews.ts
+@@ -254 +254 @@ export const DiffReviewConfigSchema = Type.Object(
+-	{ additionalProperties: false },
++	{ additionalProperties: true },
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..29b3eef 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -500 +500 @@ export class DiffReview {
+-					`from its fleet record; dispatch the job first (cp_dispatch), then review the branch it pushed.`,
++					`from its fleet record; dispatch the job first, then review the branch it pushed.`,
+@@ -506 +506 @@ export class DiffReview {
+-					`Only a ship job pushes a branch; gate a research artifact with cp_gate instead.`,
++					`Only a ship job pushes a branch; gate a research artifact instead.`,
+@@ -525 +525 @@ export class DiffReview {
+-					`Push the branch from the worktree (git push -u origin ${branch}) — the leased worktree is recycled at ` +
++					`Push the branch from the worktree — the leased worktree is recycled at ` +

@@ -1,0 +1,16 @@
+diff --git a/src/final-fix.ts b/src/final-fix.ts
+index b7f5a91..d5437d0 100644
+--- a/src/final-fix.ts
++++ b/src/final-fix.ts
+@@ -125,11 +124,0 @@ export function requestFinalFix(
+-	if (
+-		!prUrl ||
+-		verdict.attempt !== REVIEW_MAX_ATTEMPTS ||
+-		review?.verdict !== "revise" ||
+-		verdict.verdict !== "escalate" ||
+-		verdict.cause !== "policy" ||
+-		!verdict.model ||
+-		verdict.diff_stat.truncated
+-	) {
+-		return undefined;
+-	}

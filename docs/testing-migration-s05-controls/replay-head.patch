@@ -1,0 +1,14 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..be2dedb 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -573 +573 @@ export class DiffReview {
+-		if (last?.head_sha === headSha && last.cause === "policy" && last.diff_stat.truncated && !last.model) {
++		if (false && last?.head_sha === headSha && last.cause === "policy" && last.diff_stat.truncated && !last.model) {
+@@ -643 +643 @@ export class DiffReview {
+-		const addenda = taskAddendaBlock({ home, jobId, scratch });
++		const addenda = "";
+@@ -819,0 +820 @@ export class DiffReview {
++			...(input.attempt === 3 && decided.verdict === "pass" ? { verdict: "escalate" as const, cause: "policy" as const } : {}),
+@@ -914,0 +916 @@ export class DiffReview {
++		return undefined;

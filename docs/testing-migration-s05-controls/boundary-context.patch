@@ -1,0 +1,16 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..e00ea25 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -186 +186 @@ export async function materializeDiff(request: MaterializeDiffRequest): Promise<
+-	if (files.length > maxStatFiles) {
++	if (false && files.length > maxStatFiles) {
+@@ -916 +916 @@ export class DiffReview {
+-		if (!record || record.kind !== "ship") return undefined;
++		if (!record) return undefined;
+diff --git a/src/review-context.ts b/src/review-context.ts
+index cdc362d..06b7bda 100644
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -146,0 +147 @@ async function collect(request: ReviewContextRequest, result: ReviewContextResul
++		if (path === "README.md") return;

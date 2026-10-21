@@ -1,0 +1,17 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..d050ae3 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -369 +369 @@ export function diffOriginalTaskBlock(taskPath: string | undefined): string {
+-		"**Original task (the source of truth for what was asked):**",
++		"**Original task:**",
+@@ -612 +612 @@ export class DiffReview {
+-		if (!materialized.ok || materialized.truncated) {
++		if (!materialized.ok) {
+diff --git a/src/routing.ts b/src/routing.ts
+index 2c1fd1d..364bddf 100644
+--- a/src/routing.ts
++++ b/src/routing.ts
+@@ -571 +571 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
+-		const candidates = [rule.model, ...(rule.fallbacks ?? [])];
++		const candidates = [rule.model];
