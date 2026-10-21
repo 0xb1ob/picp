@@ -311,7 +311,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
 	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean } = {}) => {
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean; before?: string[] } = {}) => {
 		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
 		const prUrl = `https://github.com/example/demo/pull/${number}`;
 		const pr = over.delivery ? {} : { pr_url: prUrl };
@@ -323,6 +323,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		const command = over.command?.(job.id) ?? `printf 'v1\\n' > change.txt && ${push}`;
 		// A red head promotes the implementer once; it re-reports the same head, so the job is held again.
 		const steps: ScriptStep[] = [
+			...(over.before ?? []).map((command): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] })),
 			{ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] },
 			report,
 			{ kind: "text", text: "standing by" },
@@ -403,7 +404,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent, provider };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -1053,6 +1054,13 @@ test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, 
 	s.setGh({ runs: [run(201, live.head, "completed", "success")] });
 	const tick = await s.tick(live.jobId);
 	assert.equal(tick.observations[0]?.event, "ci_green", "the eligible delivery is queried");
+	await s.post.registry.setMergePolicy("demo", "human_handoff");
+	const parked = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
+	assert.equal(parked.parked, true);
+	const before = s.ghCalls().length;
+	assert.deepEqual((await s.post.ciTick()).checked, [], "parked jobs are never ticked by the held watch");
+	assert.equal(s.post.ciWatch.head(live.jobId), live.head, "parked rows survive held-watch pruning");
+	assert.equal(s.ghCalls().length, before);
 });
 
 test("landing S02: aggregate CI and terminal PR facts preserve the current head", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -1111,7 +1119,7 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 1, "resends never duplicate the journal");
 	s.post.confirmCi(first.observations.map((fact) => fact.key));
 	const observed = s.post.ciWatch.observedAt(live.jobId);
-	for (let failure = 1; failure <= 5; failure++) {
+	for (let failure = 1; failure <= 12; failure++) {
 		s.setGh({ routes: [{ match: "repos/example/demo/pulls/203", replies: [{ code: 1, stderr: "network unreachable" }] }] });
 		advance(900_000);
 		const tick = await s.post.ciTick();
@@ -1120,16 +1128,28 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 		assert.equal(s.post.ciWatch.observedAt(live.jobId), observed, "failed queries never refresh an unread head");
 		assert.equal(row().head_sha, live.head);
 		assert.equal(row().consecutive_failures, failure);
-		assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), 1_000 * 2 ** (failure - 1), "errors back off exponentially");
+		assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), Math.min(900_000, 1_000 * 2 ** (failure - 1)), "errors back off exponentially and cap");
 	}
+	const legacy = await s.seed("watch legacy missing head", { prUrl: live.prUrl, branch: "cp-missing-branch" });
+	const watchFile = join(s.home, LAYOUT.ciWatchFile);
+	const memory = JSON.parse(readFileSync(watchFile, "utf8"));
+	memory.jobs.push({ ...row(), job_id: legacy.jobId });
+	writeFileSync(watchFile, JSON.stringify(memory));
+	s.setGh({ routes: [{ match: "repos/example/demo/pulls/203", replies: [json({ state: "open", merged: false })] }] });
+	advance(900_000);
+	await s.post.ciTick();
+	assert.equal(s.post.ciWatch.observedAt(legacy.jobId), observed, "an unresolved head never refreshes the old observation");
+	await s.post.fleet.patch(legacy.jobId, { phase: "done" });
 	s.setGh({ routes: [{ match: "actions/runs?", replies: [{ code: 1, stderr: "Resource not accessible by personal access token (HTTP 403)" }] }] });
 	advance(900_000);
 	await s.post.ciTick();
 	assert.equal(row().last_ci, "unreadable");
 	s.setGh({ runs: [run(203, live.head, "in_progress", null)], routes: [] });
 	advance(900_000);
+	const beforeOverlap = s.ghCalls().filter((call) => call.includes("/pulls/203")).length;
 	const [a, b] = await Promise.all([s.post.ciTick(), s.post.ciTick()]);
 	assert.deepEqual(a, b, "overlapping callers share the result");
+	assert.equal(s.ghCalls().filter((call) => call.includes("/pulls/203")).length - beforeOverlap, 1, "overlapping ticks query once");
 	assert.equal(row().consecutive_failures, 0, "success resets failures");
 	assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), 1_000, "unfinished heads use base cadence");
 	s.setGh({ runs: [run(203, live.head, "completed", "success")], routes: [] });
@@ -1138,7 +1158,87 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 	const restarted = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
 	t.after(() => restarted.shutdown());
 	assert.deepEqual((await restarted.ciTick()).observations, [], "confirmed arrival survives reconstruction");
+	s.setGh({ runs: [run(206, live.head, "completed", "failure")], routes: [] });
+	advance(900_000);
+	const redArrival = await restarted.ciTick();
+	assert.equal(redArrival.observations[0]?.event, "ci_failed");
+	restarted.confirmCi(redArrival.observations.map((fact) => fact.key));
+	await restarted.shutdown();
+	const redRestart = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	try {
+		advance(900_000);
+		assert.deepEqual((await redRestart.ciTick()).observations, [], "confirmed red attempt survives reconstruction");
+	} finally {
+		await redRestart.shutdown();
+	}
+	s.setGh({ runs: [run(203, live.head, "in_progress", null)], routes: [] });
+	for (const value of [undefined, "", "nope", "0", "-5", "120"]) {
+		if (value === undefined) delete process.env.CP_CI_WATCH_SECONDS;
+		else process.env.CP_CI_WATCH_SECONDS = value;
+		advance(900_000);
+		const configured = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+		try {
+			await configured.ciTick();
+			const state = configured.ciWatch.store.job(live.jobId)!;
+			assert.equal(Date.parse(state.next_due_at!) - Date.parse(state.last_checked_at!), value === "120" ? 120_000 : 60_000, `watch interval ${JSON.stringify(value)}`);
+		} finally {
+			await configured.shutdown();
+		}
+	}
 	t.mock.timers.reset();
+});
+
+test("landing S02: unavailable gh disables GitHub queries while GitLab remains observable", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t, { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1" } });
+	const live = await s.held("watch without gh", 204);
+	const lab = await startFakeGitlab(t, s.remote);
+	await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web } });
+	const mrUrl = `${lab.web}/o/lab/-/merge_requests/7`;
+	const seeded = await s.seed("watch GitLab", { project: "lab", prUrl: mrUrl });
+	const mr = (state: string) => ({ iid: 7, source_project_id: 42, target_project_id: 42, state, source_branch: seeded.branch, target_branch: "main", sha: live.head, web_url: mrUrl, merge_commit_sha: "b".repeat(40), merged_at: "2026-08-31T18:30:00Z" });
+	lab.mrs[7] = { body: mr("opened") };
+	s.setGh({ routes: [{ match: "repos/example/demo/pulls/204", replies: [{ code: 1, stderr: "spawn gh ENOENT" }] }] });
+	t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+	const first = await s.post.ciTick();
+	assert.match(first.disabled ?? "", /gh is not available/);
+	assert.deepEqual(first.checked, [live.jobId, seeded.jobId]);
+	assert.deepEqual(first.observations, [], "open GitLab with no CI is not green");
+	const calls = s.ghCalls().length;
+	lab.mrs[7] = { status: 503, body: { message: "unavailable" } };
+	t.mock.timers.tick(900_000);
+	const failure = await s.post.ciTick();
+	assert.equal(failure.errors[0]?.job_id, seeded.jobId, "GitLab failures stay scoped to their job");
+	lab.mrs[7] = { body: mr("closed") };
+	t.mock.timers.tick(900_000);
+	const closed = await s.post.ciTick();
+	assert.equal(closed.observations[0]?.event, "pr_closed");
+	lab.mrs[7] = { body: mr("merged") };
+	t.mock.timers.tick(900_000);
+	const merged = await s.post.ciTick();
+	assert.deepEqual(merged.checked, [seeded.jobId]);
+	assert.equal(merged.observations[0]?.event, "pr_merged");
+	assert.equal(merged.observations[0]?.merge_commit_sha, "b".repeat(40));
+	assert.equal(merged.observations[0]?.pr_url, mrUrl);
+	s.post.confirmCi(merged.observations.map((fact) => fact.key));
+	t.mock.timers.tick(900_000);
+	assert.deepEqual((await s.post.ciTick()).observations, [], "GitLab merge arrival wakes once");
+	assert.equal(s.ghCalls().length, calls, "disabled GitHub is never queried again, including for GitLab");
+	t.mock.timers.reset();
+});
+
+test("landing S02: watcher queries stay nonblocking while workers refuse CI waits", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch nonblocking policy", 205, { before: ["gh run watch 12345 --exit-status", "sleep 60; gh run list --branch example --limit 3"] });
+	const messages = JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((request) => request.body.messages));
+	assert.match(messages, /A worker never waits for CI/);
+	assert.match(messages, /sleep_then_poll/);
+	assert.match(messages, /blocking_watch/);
+	s.setGh({ runs: [run(205, live.head, "in_progress", null)] });
+	await s.tick(live.jobId);
+	assert.ok(s.ghCalls().some((command) => command.includes("/pulls/205")));
+	assert.ok(s.ghCalls().some((command) => command.includes("/actions/runs?head_sha=")));
+	assert.ok(s.ghCalls().some((command) => command.includes("/attempts/1/jobs?")));
+	for (const command of s.ghCalls()) assert.doesNotMatch(command, /sleep|--watch|run watch|statusCheckRollup/);
 });
 
 test("landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -1170,6 +1270,9 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	assert.ok(passed, "a green rerun follows a failed attempt");
 	s.post.confirmCi([passed.key]);
 	assert.deepEqual((await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })])).observations, [], "an arrived green attempt is not announced again");
+	const greenAgain = await observe([run(101, live.head, "completed", "success", { run_attempt: 4 })]);
+	assert.equal(greenAgain.observations[0]?.event, "ci_green", "a new attempt of an already green head is news");
+	s.post.confirmCi(greenAgain.observations.map((fact) => fact.key));
 	execFileSync("git", ["-C", live.worktree, "commit", "--quiet", "--allow-empty", "-m", "new head"]);
 	execFileSync("git", ["-C", live.worktree, "push", "--quiet", "origin", live.jobId]);
 	const head = git(live.worktree, "rev-parse", "HEAD");
@@ -1184,6 +1287,7 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "green");
 	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "observing CI does not merge");
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed" && JSON.stringify(event).includes("ci_failed")).length, 2, "new green preserves both historical failures without repeating them");
 	await s.post.fleet.patch(live.jobId, { phase: "done" });
 	await s.post.ciTick();
 	assert.equal(s.post.ciWatch.store.job(live.jobId), undefined, "finished deliveries leave the watch");
