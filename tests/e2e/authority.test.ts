@@ -41,6 +41,7 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 	const steps = [{ kind: "text" as const, text: "standing by", usage: { prompt_tokens: promptTokens, completion_tokens: 20 } }];
 	const model = provider.addScript(script, steps, { onExhausted: "repeat" });
 	const parentModel = parentSteps ? provider.addScript(`${name}-parent`, parentSteps) : undefined;
+	let parents = 0;
 	agentDir.writeModels(provider);
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	const rubric = [{ id: "implementer", role: "implementer", model }];
@@ -68,13 +69,18 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 		post,
 		record,
 		/** One prompt to a real pi parent: its scripted `cp_*` calls run, and their tool results come back. */
-		parent: async (prompt: string) => {
-			assert.ok(parentModel, "stack() was given no parentSteps");
+		parent: async (prompt: string, steps?: ScriptStep[]) => {
+			// The harness rule: one script per child; a shared cursor lets a later child replay an earlier one's steps.
+			const script = steps ? `${name}-parent-${(parents += 1)}` : `${name}-parent`;
+			const model = steps ? provider.addScript(script, steps) : parentModel;
+			if (steps) agentDir.writeModels(provider);
+			assert.ok(model, "stack() was given no parentSteps");
 			const env = { ...agentDir.env, CP_HOME: home.path };
-			const child = startPiChild({ cwd: home.path, model: parentModel, env, extensions: [COMMAND_POST_EXTENSION] });
+			const child = startPiChild({ cwd: home.path, model, env, extensions: [COMMAND_POST_EXTENSION] });
 			try {
 				await child.prompt(prompt);
 				await child.waitForSettled(90_000);
+				if (steps) assert.equal(provider.remaining(script), 0, `${script}: the parent left scripted steps unused`);
 				return child.eventsOfType("tool_execution_end");
 			} finally {
 				await child.close();
@@ -497,36 +503,18 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	const grant = (objective: string) => grants().find((mandate) => mandate.objective === objective);
 	const raise = (id: string, spend_tokens: number) => call(id, () => ({ action: "raise_tokens", mandate_id: grant(first)?.id, spend_tokens, reason: "ceiling probe" }));
 	const issue = (id: string, objective: string, projects = ["demo"], over: Args = {}) => call(id, { action: "issue", projects, objective, ...over });
-	const s = await stack(t, "auth-defaults", 100, [
-		step(call("show0", { action: "defaults_show" }), issue("issue0", first)),
-		step(call("view0", () => ({ action: "show", mandate_id: grant(first)?.id }))),
-		done,
-		step(call("show1", { action: "defaults_show" })),
-		step(call("cap", set("job_cap", "9"))),
-		step(call("ask", set("ask_on", "merge, risk:high"))),
-		step(call("bogus", set("bogus", "1")), call("nan", set("job_cap", "not-a-number"))),
-		step(call("ceiling", set("token_ceiling", "50000000"))),
-		step(raise("over", 60_000_000)),
-		step(issue("issue1", "after the edits")),
-		done,
-		step(issue("agree", "agreeing overrides", ["demo", "other"], { spend_usd: 99 })),
-		done,
-		step(issue("disagree", "disagreeing overrides", ["demo", "other"])),
-		step(issue("dated", "dated", ["demo"], { expiry: "2030-01-01T00:00:00Z" })),
-		done,
-		step(call("invalid", { action: "defaults_show" })),
-		done,
-		step(raise("unreadable", 20_000_000)),
-		done,
-	]);
+	const s = await stack(t, "auth-defaults");
 	grants = () => s.post.mandates.list();
 	const other = createScratchRepo({ name: "other", files: { "README.md": "# other\n" } });
 	t.after(() => other.cleanup());
 	await s.post.registry.register({ name: "other", clone_url: other.remote as string, delivery: "pr" });
 	const file = join(s.home, LAYOUT.mandateDefaultsFile);
 	const ends = new Map<string, Awaited<ReturnType<typeof s.parent>>[number]>();
-	const prompt = async (text: string) => {
-		for (const end of await s.parent(text)) ends.set(String(end.toolCallId), end);
+	// Each prompt runs its own script, and every call it scripts must end in that prompt, after the files it reads.
+	const prompt = async (text: string, steps: ReturnType<typeof step>[]) => {
+		ends.clear();
+		for (const end of await s.parent(text, [...steps, done])) ends.set(String(end.toolCallId), end);
+		assert.deepEqual([...ends.keys()].sort(), steps.flatMap((each) => each.calls.map((c) => c.id)).sort(), text);
 	};
 	const said = (id: string) => JSON.stringify(ends.get(id)?.result);
 	const ok = (id: string) => assert.notEqual(ends.get(id)?.isError, true, `${id}: ${said(id)}`);
@@ -534,7 +522,10 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 
 	// A fresh home: the first session scaffolds the scope's conservative defaults, and a bare issue resolves from them.
 	assert.equal(existsSync(file), false);
-	await prompt("Show the mandate defaults, then fix the README under a grant.");
+	await prompt("Show the mandate defaults, then fix the README under a grant.", [
+		step(call("show0", { action: "defaults_show" }), issue("issue0", first)),
+		step(call("view0", () => ({ action: "show", mandate_id: grant(first)?.id }))),
+	]);
 	const written = JSON.parse(readFileSync(file, "utf8"));
 	assert.deepEqual(
 		[written.expiry_hours, written.spend_usd, written.spend_tokens, written.token_ceiling, written.job_cap, written.dispatch_parallelism],
@@ -554,7 +545,15 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 
 	// An operator edit survives the next session's scaffold; defaults_set writes, refuses junk; a lowered ceiling binds.
 	writeFileSync(file, JSON.stringify({ ...written, spend_usd: 42, dispatch_parallelism: 1 }));
-	await prompt("Tune the mandate defaults.");
+	await prompt("Tune the mandate defaults.", [
+		step(call("show1", { action: "defaults_show" })),
+		step(call("cap", set("job_cap", "9"))),
+		step(call("ask", set("ask_on", "merge, risk:high"))),
+		step(call("bogus", set("bogus", "1")), call("nan", set("job_cap", "not-a-number"))),
+		step(call("ceiling", set("token_ceiling", "50000000"))),
+		step(raise("over", 60_000_000)),
+		step(issue("issue1", "after the edits")),
+	]);
 	assert.match(said("show1"), /spend_usd: 42/);
 	assert.match(said("show1"), /dispatch_parallelism: 1/);
 	ok("cap");
@@ -579,7 +578,7 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	};
 	const demo = { spend_usd: 25, job_cap: 5, allowed_actions: ["implement", "review"], expiry_hours: 1 };
 	overrides(demo, { expiry_hours: 1, allowed_actions: ["implement", "review"], job_cap: 5, spend_usd: 25 });
-	await prompt("Issue a grant over both projects.");
+	await prompt("Issue a grant over both projects.", [step(issue("agree", "agreeing overrides", ["demo", "other"], { spend_usd: 99 }))]);
 	ok("agree");
 	const agreed = grant("agreeing overrides");
 	assert.deepEqual([agreed?.spend_cap, agreed?.job_cap, agreed?.allowed_actions], [{ usd: 99, tokens: 10_000_000 }, 5, ["implement", "review"]]);
@@ -588,7 +587,10 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 		["explicit", "project", "home", "project"],
 	);
 	overrides(demo, { ...demo, job_cap: 6 });
-	await prompt("Issue a grant over both projects, then a dated one.");
+	await prompt("Issue a grant over both projects, then a dated one.", [
+		step(issue("disagree", "disagreeing overrides", ["demo", "other"])),
+		step(issue("dated", "dated", ["demo"], { expiry: "2030-01-01T00:00:00Z" })),
+	]);
 	ok("disagree");
 	ok("dated");
 	const split = grant("disagreeing overrides");
@@ -598,9 +600,9 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 
 	// An invalid defaults file is refused, never guessed; an unreadable one leaves nothing parent-raisable.
 	writeFileSync(file, JSON.stringify({ ...edited, job_cap: 0 }));
-	await prompt("Show the mandate defaults.");
+	await prompt("Show the mandate defaults.", [step(call("invalid", { action: "defaults_show" }))]);
 	failed("invalid", /job_cap/);
 	writeFileSync(file, "{ not json");
-	await prompt("Raise the grant's token cap.");
+	await prompt("Raise the grant's token cap.", [step(raise("unreadable", 20_000_000))]);
 	failed("unreadable", /token_ceiling 0\b/);
 });
