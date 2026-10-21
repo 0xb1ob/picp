@@ -5,14 +5,14 @@
  */
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 
-export const SCENARIOS = ["fresh", "prerequisites", "rerun"] as const;
+export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 export const IMAGE = "picp-install-sandbox:local";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -75,7 +75,9 @@ export function runScenario(scenario: Scenario, timeoutMs = 900_000): SandboxRun
 	const inner = `mkdir -p /tmp/src && tar -x -C /tmp/src && exec node /tmp/src/tests/harness/install-sandbox.ts --inside --scenario ${scenario}`;
 	let run: SpawnSyncReturns<string>;
 	try {
-		run = spawnSync("docker", ["run", "-i", "--rm", "--init", "--network", "none", "--name", name, "-e", "npm_config_prefer_offline=true", IMAGE, "sh", "-c", inner], { input: files(), encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 << 20 });
+		// uid 0 is the container's own root (never host sudo), with root's own HOME.
+		const user = scenario === "root" ? ["--user", "0", "-e", "HOME=/root"] : [];
+		run = spawnSync("docker", ["run", "-i", "--rm", "--init", "--network", "none", "--name", name, "-e", "npm_config_prefer_offline=true", ...user, IMAGE, "sh", "-c", inner], { input: files(), encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 << 20 });
 	} finally {
 		spawnSync("docker", ["rm", "-f", name], { encoding: "utf8", timeout: 60_000 });
 	}
@@ -108,6 +110,9 @@ const CP_HOME = join(HOME, ".pi-command-post");
 const APP = join(CP_HOME, "app");
 const MODEL_SCRIPT = "parent";
 const VIEWER = "http://127.0.0.1:8766/healthz";
+const RAW_BOOTSTRAP = "https://raw.githubusercontent.com/0xb1ob/picp/main/bin/cp-bootstrap";
+/** PATH without the image's npm prefix: pi is absent. */
+const NO_PI_PATH = "/home/node/.local/bin:/usr/local/bin:/usr/bin:/bin";
 
 interface Ctx { result: ScenarioResult; remote: string; seed: string; model: string }
 
@@ -121,10 +126,19 @@ function exec(command: string, args: readonly string[], options: { input?: strin
  * `curl … | sh -s -- FLAGS`, as the README's one-liner runs it, against the sandbox's local remote. Each output
  * line is timed, so the phase records its slowest waits: where a fresh user's minutes go.
  */
-async function bootstrap(ctx: Ctx, phase: string, extra: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<{ status: number | null; out: string }> {
+function bootstrap(ctx: Ctx, phase: string, extra: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<{ status: number | null; out: string }> {
 	const flags = ["--home", CP_HOME, "--app", APP, "--yes", "--parent-model", ctx.model, "--viewer-host", "127.0.0.1", "--no-update", ...extra];
+	return timed(ctx, phase, ["-s", "--", ...flags], env, readFileSync(join(SRC, "bin/cp-bootstrap"), "utf8"));
+}
+
+/** A command line an install printed for the user to rerun, run as they would paste it. */
+function rerun(ctx: Ctx, phase: string, line: string, env: NodeJS.ProcessEnv = process.env): Promise<{ status: number | null; out: string }> {
+	return timed(ctx, phase, ["-c", line.replace(`curl -fsSL ${RAW_BOOTSTRAP}`, `cat ${join(SRC, "bin/cp-bootstrap")}`)], env, "");
+}
+
+async function timed(ctx: Ctx, phase: string, shArgs: readonly string[], env: NodeJS.ProcessEnv, stdin: string): Promise<{ status: number | null; out: string }> {
 	const start = performance.now();
-	const child = spawn("sh", ["-s", "--", ...flags], { env: { ...env, CP_REPO_URL: ctx.remote }, stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawn("sh", [...shArgs], { env: { ...env, CP_REPO_URL: env.CP_REPO_URL ?? ctx.remote }, stdio: ["pipe", "pipe", "pipe"] });
 	const lines: Array<{ at: number; text: string }> = [];
 	let partial = "";
 	const take = (chunk: Buffer): void => {
@@ -134,7 +148,7 @@ async function bootstrap(ctx: Ctx, phase: string, extra: readonly string[], env:
 	};
 	child.stdout.on("data", take);
 	child.stderr.on("data", take);
-	child.stdin.end(readFileSync(join(SRC, "bin/cp-bootstrap"), "utf8"));
+	child.stdin.end(stdin);
 	const timer = setTimeout(() => child.kill("SIGKILL"), PHASE_TIMEOUT_MS);
 	const status = await new Promise<number | null>((done) => child.on("close", (code) => done(code)));
 	clearTimeout(timer);
@@ -157,7 +171,11 @@ const git = (args: readonly string[], cwd: string) => exec("git", ["-c", "user.n
 
 /** A full install that must reach a ready daemon, a serving viewer and a clean parent doctor. */
 async function install(ctx: Ctx, phase: string, extra: readonly string[] = []): Promise<string> {
-	const run = await bootstrap(ctx, phase, extra);
+	return verify(ctx, phase, await bootstrap(ctx, phase, extra));
+}
+
+/** The checks of a full install, whichever command ran it. */
+async function verify(ctx: Ctx, phase: string, run: { status: number | null; out: string }): Promise<string> {
 	ctx.result.observed = observed(run.out);
 	check(ctx, run.status === 0, `${phase}: bootstrap exited ${run.status}`);
 	check(ctx, /^ok: doctor: /m.test(run.out), `${phase}: no "ok: doctor" line (the parent's doctor did not pass)`);
@@ -186,15 +204,14 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 			check(ctx, run.status === 1 && run.out.includes(says), `bootstrap, ${name}: expected exit 1 saying "${says}", got exit ${run.status}`);
 			check(ctx, !existsSync(APP), `bootstrap, ${name}: cloned ${APP} before refusing`);
 		}
-		// bin/cp-install has no early node check yet (PR2): pinned here as observed, only "nothing started".
-		for (const { name, path } of cases) {
+		// #375 P4: bin/cp-install refuses before cloning too, naming node rather than npm.
+		for (const { name, path, says } of cases) {
 			const run = exec("sh", [join(SRC, "bin/cp-install"), "--home", CP_HOME, "--app", APP, "--yes"], { env: { ...process.env, PATH: path, CP_REPO_URL: ctx.remote } });
 			ctx.result.phases.push({ phase: `cp-install, ${name}`, seconds: run.seconds, exit: run.status });
 			process.stdout.write(`--- cp-install, ${name} (exit ${run.status})\n${run.out}\n`);
-			check(ctx, run.status !== 0, `cp-install, ${name}: exited 0`);
+			check(ctx, run.status === 1 && run.out.includes(says) && !/npm/.test(run.out), `cp-install, ${name}: expected exit 1 saying "${says}" (not npm), got exit ${run.status}`);
+			check(ctx, !existsSync(APP), `cp-install, ${name}: cloned ${APP} before refusing`);
 			check(ctx, !existsSync(daemonPaths(CP_HOME).config), `cp-install, ${name}: wrote data/daemon.json`);
-			ctx.result.observed.push(`cp-install, ${name}: exit ${run.status}${existsSync(APP) ? `, ${APP} cloned before refusing` : ""}: ${run.out.trim().split("\n").at(-1)}`);
-			exec("rm", ["-rf", APP]);
 		}
 	},
 	async rerun(ctx) {
@@ -217,7 +234,72 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		await install(ctx, "edited wrapper, --force", ["--force"]);
 		check(ctx, !readFileSync(wrapper, "utf8").includes("# a local edit"), "--force did not replace the edited wrapper");
 	},
+	async login(ctx) {
+		// #375 P1: without a usable provider nothing is written or started, and exactly one line says how to go on.
+		const models = join(HOME, ".pi/agent/models.json");
+		const saved = readFileSync(models, "utf8");
+		rmSync(models);
+		const none = await bootstrap(ctx, "no login", []);
+		const lines = none.out.split("\n").filter((line) => line.includes("/login"));
+		check(ctx, none.status === 4, `no login: expected exit 4, got ${none.status}`);
+		check(ctx, lines.length === 1 && /^fail: login: .*run `pi`, then \/login, then re-run: /.test(lines[0] ?? ""), `no login: expected one continuation line, got ${JSON.stringify(lines)}`);
+		check(ctx, daemons() === 0, `no login: ${daemons()} cp-daemon processes left running`);
+		check(ctx, !existsSync(daemonPaths(CP_HOME).config), "no login: wrote data/daemon.json");
+		check(ctx, !/: doctor: /.test(none.out), "no login: a doctor ran");
+		writeFileSync(models, saved);
+		const phase = "the printed re-run, logged in";
+		await verify(ctx, phase, await rerun(ctx, phase, lines[0]?.split("then re-run: ")[1] ?? "false"));
+	},
+	async recovery(ctx) {
+		const offline = `${ctx.remote}.offline`;
+		renameSync(ctx.remote, offline);
+		const clone = await bootstrap(ctx, "clone, remote unreachable", []);
+		renameSync(offline, ctx.remote);
+		const cloneRetry = retryOf(clone.out, "fail: bootstrap: git clone ");
+		check(ctx, clone.status === 1 && cloneRetry !== undefined, `clone: expected a named git clone failure with its rerun, got exit ${clone.status}`);
+		check(ctx, !existsSync(APP), `clone: left ${APP} behind`);
+		// npm ci with an empty offline cache fails after the clone: a partial install, resumed by the printed reruns.
+		const cache = mkdtempSync(join(tmpdir(), "empty-npm-cache-"));
+		const npm = await rerun(ctx, "printed rerun, npm offline", cloneRetry ?? "false", { ...process.env, npm_config_cache: cache, npm_config_offline: "true" });
+		const npmRetry = retryOf(npm.out, "fail: bootstrap: npm ci failed");
+		check(ctx, npm.status === 1 && npmRetry !== undefined && existsSync(APP), `npm ci: expected a named npm ci failure after the clone, got exit ${npm.status}`);
+		// pi absent and npm's prefix root-owned: install-tools refuses (never sudo) and the install names its rerun.
+		const refusal = await rerun(ctx, "printed rerun, pi absent, /usr/local prefix", npmRetry ?? "false", { ...process.env, PATH: NO_PI_PATH, NPM_CONFIG_PREFIX: "/usr/local" });
+		const installRetry = retryOf(refusal.out, "fix the above, then rerun the install: ");
+		check(ctx, refusal.status === 1 && /^changed: bootstrap: npm ci in /m.test(refusal.out), `npm retry: expected npm ci to land, then a refusal; got exit ${refusal.status}`);
+		check(ctx, refusal.out.includes("✗ pi: missing, and npm's global prefix /usr/local is not writable") && installRetry !== undefined, "unwritable prefix: no actionable pi refusal naming the install's rerun");
+		check(ctx, !existsSync(daemonPaths(CP_HOME).config), "unwritable prefix: wrote data/daemon.json");
+		// pi absent, a writable per-user prefix: install-tools installs it (from npm's cache: --network none).
+		const prefix = mkdtempSync(join(tmpdir(), "npm-prefix-"));
+		const tools = await timed(ctx, "install-tools, pi absent", ["-c", `"${process.execPath}" ${join(APP, "scripts/install-tools.ts")} pi`], { ...process.env, PATH: `${prefix}/bin:${NO_PI_PATH}`, NPM_CONFIG_PREFIX: prefix }, "");
+		check(ctx, tools.status === 0 && tools.out.includes(`-> ${prefix}/bin/pi`), `pi absent: install-tools exited ${tools.status} without installing pi into ${prefix}`);
+		await verify(ctx, "printed install rerun", await rerun(ctx, "printed install rerun", installRetry ?? "false"));
+		// An existing checkout that is dirty, ahead or from another origin is refused or left as is, never overwritten.
+		const cpInstall = `sh ${join(APP, "bin/cp-install")} --home ${CP_HOME} --app ${APP} --dry-run`;
+		writeFileSync(join(APP, "sandbox-dirty"), "x\n");
+		const dirty = await bootstrap(ctx, "dirty checkout", ["--dry-run"]);
+		check(ctx, dirty.status === 1 && dirty.out.includes("has uncommitted changes"), `dirty: bootstrap exited ${dirty.status} without refusing`);
+		const dirtyInstall = await timed(ctx, "cp-install --dry-run, dirty checkout", ["-c", cpInstall], process.env, "");
+		check(ctx, dirtyInstall.out.includes("has uncommitted changes; left as is") && existsSync(join(APP, "sandbox-dirty")), "dirty: cp-install did not leave the checkout as is");
+		rmSync(join(APP, "sandbox-dirty"));
+		git(["commit", "-q", "--allow-empty", "-m", "local"], APP);
+		const ahead = await bootstrap(ctx, "checkout ahead of origin/main", ["--dry-run"]);
+		check(ctx, ahead.status === 1 && ahead.out.includes("has commits not on origin/main"), `ahead: bootstrap exited ${ahead.status} without refusing`);
+		git(["reset", "-q", "--hard", "origin/main"], APP);
+		const origin = await timed(ctx, "cp-install, another origin", ["-c", cpInstall], { ...process.env, CP_REPO_URL: "/elsewhere/picp.git" }, "");
+		check(ctx, origin.status === 1 && origin.out.includes("has origin"), `origin: cp-install exited ${origin.status} without refusing`);
+	},
+	async root(ctx) {
+		// uid 0 inside the container (never host sudo): every target stays per-user, under root's own HOME.
+		check(ctx, process.getuid?.() === 0, "root: the scenario is not running as uid 0");
+		const out = await install(ctx, "fresh install as root");
+		const system = out.split("\n").filter((line) => line.startsWith("changed: ") && /\s\/(etc|usr|opt|var)\//.test(line));
+		check(ctx, system.length === 0, `root: changed system paths: ${system.join(" | ")}`);
+	},
 };
+
+/** The rerun command a failure line printed (`… rerun: CMD` or `… rerun the install: CMD`). */
+const retryOf = (out: string, marker: string): string | undefined => out.split("\n").find((line) => line.includes(marker))?.match(/rerun(?: the install)?: (.+)$/)?.[1];
 
 /**
  * Stands in for a provider login: every model the routing defaults and profiles name, served by the mock.
