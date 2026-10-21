@@ -86,4 +86,20 @@ Removing `|| id.startsWith("continuation:parked:")` from `isLandedContinuation` 
 The mutation was restored immediately. This executes the production producer path and resolves the #429 review unknown.
 Other pending declarations and final retirement controls remain unfinished; ci-watch.test.ts stays whole.
 
+## S03b continuation: declaration 71 product failure
+
+On `512d3395db0bf78902ef9e0685a1edfd92d86338`, a real parent crashes when the fleet becomes malformed
+while it is watching a held PR. The new conversion attempt failed twice before receiving any durable watch-failure
+notice. The second run captured the child stack: `FleetStore.read` → `FleetStore.get` →
+`HeldContinuation.#notice` (held-continuation.ts:457) → the trigger error handler (line 227).
+`#notice` computes generation using `fleet.get` before its try block, so an error while handling the first fleet
+read failure escapes the continuation promise and terminates Node. This is a product issue, outside this migration.
+
+The exact real-process reproducer is preserved at
+`/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts`.
+Insert it in landing.test.ts and run the case pattern `landing S03: the real parent journals`.
+Expected: one durable CI/PR WATCH TICK FAILED entry for the malformed fleet, parent remains alive.
+Observed: no entries after 15 seconds and child FleetError crash. The intentionally failing fragment was removed
+from the pushed suite. Declaration 71 stays pending; the original unit file remains whole.
+
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.
