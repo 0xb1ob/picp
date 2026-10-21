@@ -279,7 +279,8 @@ test("S04: configured reviewer denials never fall back, while an unconfigured ro
 		blocked = mode === "availability" ? chosen : "";
 		effort = mode === "effort";
 		save({ ...config, ...(mode === "allowlist" ? { allow: [spare] } : {}), ...(mode === "role" ? { deny_by_role: { "gate-reviewer": [chosen] } } : {}) });
-		await assert.rejects(() => s.post.diffReview({ jobId: job }), mode);
+		const refusal = { allowlist: /allowlist refuses/, availability: /no available model.*is not usable/, effort: /thinking=high.*cannot serve/, role: /not allowed for role gate-reviewer/ };
+		await assert.rejects(() => s.post.diffReview({ jobId: job }), refusal[mode]);
 		if (mode === "role") await assert.rejects(() => s.post.diffReview({ jobId: job, model: chosen }), /not allowed for role/);
 		assert.equal(s.provider.requests("chosen").length, 0, mode);
 		assert.equal(s.provider.requests("spare").length, 0, mode);
@@ -399,4 +400,23 @@ test("S04: complete deltas remain reviewable when supplemental branch history ex
 	assert.match(readFileSync(join(result.scratch, "diff.md"), "utf8"), /src\/fix\.ts/);
 	assert.match(readFileSync(join(result.scratch, "full-diff.md"), "utf8"), /## Omitted/);
 	assert.ok(existsSync(join(result.scratch, "prior-verdict.json")));
+});
+
+
+test("S05: unknown and malformed legacy review heads never become delta baselines", { timeout: 180_000 }, async (t) => {
+	const s = await stack(t);
+	for (const head of ["0".repeat(40), "--not-a-sha"]) {
+		const job = await s.seed({ "src/app.ts": "export const original = 1;\n" });
+		const first = await s.review(job);
+		writeFileSync(join(s.home, paths.reviewFile(job, 1)), JSON.stringify({ ...first.verdict, head_sha: head }));
+		s.repo.git("checkout", "--quiet", job);
+		s.repo.write("src/fix.ts", "export const fix = 1;\n");
+		s.repo.commitAll("fix");
+		s.repo.git("push", "--quiet", "origin", job);
+		s.repo.git("checkout", "--quiet", s.repo.branch);
+		const result = await s.review(job);
+		assert.equal(result.verdict.delta_from, undefined);
+		assert.equal(result.verdict.verdict, "pass");
+		assert.match(readFileSync(join(result.scratch, "diff.md"), "utf8"), /src\/app\.ts/);
+	}
 });
