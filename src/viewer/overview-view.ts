@@ -8,7 +8,7 @@ import { decisions } from "./overview-decisions.ts";
 import { delivery } from "./overview-delivery.ts";
 import { blocked, ciUnreadable, closedToday, failedJobs, flights, shipped, withTeam } from "./overview-jobs.ts";
 import { health, quota } from "./overview-health.ts";
-import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp } from "./overview-read.ts";
+import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, readJson, source, strings, text, timestamp } from "./overview-read.ts";
 import { operatorSession, readInbox } from "./control-inbox.ts";
 
 export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: number) => boolean): OverviewResponse {
@@ -16,7 +16,7 @@ export function overview(state: ViewerState, now = Date.now(), isAlive?: (pid: n
  const fleet = objectList(join(state.stateDir,"fleet.json"),"jobs", j => typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project) && ["waiting","held","awaiting_merge","done","failed","launching"].includes(String(j.phase)));
  const ledger = objectList(join(runtimeRoot(state.home),"jobs.json"),"jobs", j => typeof j.id === "string" && isSafeId(j.id) && LEDGER_STATUSES.includes(String(j.status)) && (j.blocked_by === undefined || (Array.isArray(j.blocked_by) && j.blocked_by.every(id => typeof id === "string" && isSafeId(id)))));
  const grants = source<Json[]>(() => readdirSync(join(state.stateDir,"mandates")).filter(n => /^md-[A-Za-z0-9_-]+\.json$/.test(n)).map(name => {
-  const grant = parseObject(readBounded(join(state.stateDir,"mandates",name)));
+  const grant = readJson(join(state.stateDir,"mandates",name));
   if (!grant || !text(grant.id) || !["active","paused","revoked","expired"].includes(String(grant.status)) || !timestamp(grant.expiry) || !timestamp(grant.issued_at) || !Array.isArray(grant.projects) || !grant.projects.every(text) || !obj(grant.spend_cap)) throw new Error("invalid mandate");
   return grant;
  }).sort((a,b) => String(a.issued_at).localeCompare(String(b.issued_at))), []);

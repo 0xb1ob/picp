@@ -86,6 +86,8 @@ function scan(file: string): SessionScan {
 	let thinking: string | null = null, anyAssistantModel: string | null = null;
 	let tokens: number | null = null, model: string | null = null, compactAt: string | null = null, compactedSince = false;
 	for (const line of readLines(file, start.offset, SCAN_BYTES).lines) {
+		// Only these records count, so every other line (tool output, user turns) skips the parse: most of a cold scan.
+		if (!/"(?:compaction|model_change|thinking_level_change|assistant)"/.test(line.text)) continue;
 		const record = parseObject(line.text);
 		if (!record) continue;
 		if (record.type === "compaction") { compactAt = timestamp(record.timestamp) ? record.timestamp : compactAt; compactedSince = true; continue; }

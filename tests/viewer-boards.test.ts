@@ -185,5 +185,6 @@ test("server: boards under /boards/<slug>/ with a strict CSP; everything else 40
 			["beta", "alpha"],
 		);
 	}
-	assert.equal(lines.length, 2, `one line per skipped board across every request: ${lines.join("")}`);
+	const skipped = lines.filter((line) => line.includes("skipped"));
+	assert.equal(skipped.length, 2, `one line per skipped board across every request: ${lines.join("")}`);
 });

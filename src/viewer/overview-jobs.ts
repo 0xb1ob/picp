@@ -5,18 +5,23 @@ import type { JobRow } from "./fleet-view.ts";
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 import { SHA } from "./git-read.ts";
 import { isSafeId, obj, readObject, readStatus, str, type Json, type ViewerState } from "./sessions.ts";
-import { nonnegative, parseObject, strings, timestamp, today } from "./overview-read.ts";
+import { firstById, nonnegative, parseObject, strings, timestamp, today } from "./overview-read.ts";
 import { routingText } from "./overview-health.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { compareActiveGrants } from "../grant-order.ts";
 import { fileCache } from "./file-cache.ts";
 import { readLines, startOffset } from "./tail.ts";
+const runFiles = fileCache((dir: string) => readdirSync(dir), names => names.length * 64);
+/** Whether `runs/<id>/<name>` is listed: a cached listing spares the failed stat of a file most jobs never write. */
+const runHas = (state: ViewerState, id: string, name: string): boolean => {
+ try { return runFiles(join(state.stateDir,"runs",id)).includes(name); } catch { return false; }
+};
 /** The job's recorded reviews: attempt count, and the latest untruncated verdict for `head` (or a patch-equivalent pass). */
 export function recordedReview(state: ViewerState, id: string, head: string | null): {review: Json | undefined; attempts: string[]} {
- let names: string[] = []; try { names = readdirSync(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
+ let names: string[] = []; try { names = runFiles(join(state.stateDir,"runs",id)); } catch { /* No recorded reviews. */ }
  const attempts = names.filter(n => /^review-[1-9]\d*\.json$/.test(n));
  const reviews = attempts.map(name => readObject(join(state.stateDir,"runs",id,name))).filter((v): v is Json => !!v);
- if (head) { const equivalent = readObject(join(state.stateDir,"runs",id,`review-equivalent-${head}.json`)); if (equivalent) reviews.push(equivalent); }
+ if (head && names.includes(`review-equivalent-${head}.json`)) { const equivalent = readObject(join(state.stateDir,"runs",id,`review-equivalent-${head}.json`)); if (equivalent) reviews.push(equivalent); }
  const review = reviews.filter(r => head && r.head_sha === head && obj(r.diff_stat)?.truncated === false).sort((a,b) => (str(a.decided_at) ?? "").localeCompare(str(b.decided_at) ?? "")).at(-1);
  return {review, attempts};
 }
@@ -27,9 +32,9 @@ export const jobCi = (row: Json | undefined, head: string | null | undefined): s
  row?.last_ci === CI_UNREADABLE ? CI_UNREADABLE : head && row?.head_sha === head ? str(row.last_ci) ?? null : null;
 const CI_EVENTS_BYTES = 256 * 1024;
 const ciEvents = fileCache((path: string) => readLines(path, startOffset(path, undefined, CI_EVENTS_BYTES).offset, CI_EVENTS_BYTES).lines
- .map(l => parseObject(l.text)).filter((e): e is Json => e?.source === "cp" && e.type === "ci_observed")
+ .filter(l => l.text.includes('"ci_observed"')).map(l => parseObject(l.text)).filter((e): e is Json => e?.source === "cp" && e.type === "ci_observed")
  .flatMap(e => { const p = obj(e.payload); const ci = p?.event === "ci_green" ? "green" : p?.event === "ci_failed" ? "failed" : null; const head = str(p?.head_sha);
-  return ci && head ? [{ci, head}] : []; }));
+  return ci && head ? [{ci, head}] : []; }), events => events.length * 64);
 /** CI for `head`: the current ci-watch row (its `unknown` is the answer), else the last `ci_observed` event for it. */
 export function headCi(state: ViewerState, id: string, row: Json | undefined, head: string | null): string | null {
  const watched = jobCi(row,head);
@@ -50,7 +55,7 @@ const FORWARDED_VIEW: Record<string, string> = {success:"green", failure:"failed
  * display-only, null when none.
  */
 export function forwardedCi(state: ViewerState, id: string, head: string | null | undefined): ForwardedCi | null {
- const list = isSafeId(id) && head ? readObject(join(state.stateDir,"runs",id,"ci-evidence.json"))?.observations : undefined;
+ const list = isSafeId(id) && head && runHas(state,id,"ci-evidence.json") ? readObject(join(state.stateDir,"runs",id,"ci-evidence.json"))?.observations : undefined;
  const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
   .sort((a,b) => String(a.observed_at).localeCompare(String(b.observed_at))).at(-1);
  const url = str(latest?.url);
@@ -119,7 +124,7 @@ export function withTeam(state: ViewerState, jobs: Json[], now: number, rows: re
 export const quiescent = (job: Json): boolean => job.phase === "awaiting_merge" && obj(job.awaiting_merge) !== undefined && obj(job.awaiting_merge)?.pending === undefined;
 /** The job's merge receipt, only when it names this job, a PR url and a full merge sha. */
 export function mergeReceipt(state: ViewerState, id: string): Json | undefined {
- const receipt = readObject(join(state.stateDir,"runs",id,"merge.json"));
+ const receipt = runHas(state,id,"merge.json") ? readObject(join(state.stateDir,"runs",id,"merge.json")) : undefined;
  return receipt?.job_id === id && timestamp(receipt.merged_at) && isSafeChangeRequestUrl(str(receipt.pr_url) ?? "") && /^[a-f0-9]{40}$/i.test(str(receipt.merge_commit_sha) ?? "") ? receipt : undefined;
 }
 /** Merged today, newest first; `cost_usd` is the Jobs list's (the same `rows`, every finished one included), null when no row (audit P3 #20). */
@@ -146,16 +151,33 @@ export function failedJobs(state: ViewerState, jobs: Json[], ledger: Json[]): Fa
  */
 export function closedToday(state: ViewerState, jobs: Json[], ledger: Json[], now: number): number {
  const ids = [...new Set([...ledger.map(j => String(j.id)),...jobs.map(j => String(j.job_id))])];
+ const fleetById = firstById(jobs,"job_id"), ledgerById = firstById(ledger,"id");
  return ids.filter(id => {
-  const entry = jobs.find(j => j.job_id === id); const job = ledger.find(j => j.id === id);
+  const entry = fleetById.get(id); const job = ledgerById.get(id);
   if (entry ? entry.phase !== "done" : job?.status !== "closed") return false;
   const at = [entry?.closed_at].find(timestamp) ?? [readStatus(state,id)?.exited_at,job?.closed_at].find(timestamp);
   return today(at,now) && !mergeReceipt(state,id);
  }).length;
 }
+const grantIndexes = new WeakMap<Json[], Map<string, {broad: number[]; named: Map<string, number[]>}>>();
+/** The grants naming `project` that are broad or name `id`, in `grants` order: a superset of every caller's filter. */
+export function grantCandidates(grants: Json[], project: string, id: string): Json[] {
+ let index = grantIndexes.get(grants);
+ if (!index) {
+  index = new Map();
+  for (const [i, m] of grants.entries()) for (const p of new Set(strings(m.projects))) {
+   const slot = index.get(p) ?? {broad: [], named: new Map<string, number[]>()}; index.set(p, slot);
+   const ids = new Set(strings(m.job_ids));
+   if (!ids.size) slot.broad.push(i); else for (const j of ids) slot.named.set(j, [...slot.named.get(j) ?? [], i]);
+  }
+  grantIndexes.set(grants, index);
+ }
+ const slot = index.get(project);
+ return slot ? [...slot.broad, ...slot.named.get(id) ?? []].sort((a, b) => a - b).map(i => grants[i]!) : [];
+}
 export function grantFor(job: Json, grants: Json[], now: number): Json | undefined {
  const labels = strings(job.labels); const project = labels.find(l => l.startsWith("project:"))?.slice(8) ?? ""; const kind = labels.find(l => l.startsWith("kind:"))?.slice(5);
- const matching = grants.filter(m => strings(m.projects).includes(project) && (!strings(m.job_ids).length || strings(m.job_ids).includes(String(job.id))) && (!kind || !strings(obj(m.exclusions)?.job_kinds).includes(kind)));
+ const matching = grantCandidates(grants, project, String(job.id)).filter(m => strings(m.projects).includes(project) && (!strings(m.job_ids).length || strings(m.job_ids).includes(String(job.id))) && (!kind || !strings(obj(m.exclusions)?.job_kinds).includes(kind)));
  const order = (m: Json) => ({id:String(m.id), issued_at:String(m.issued_at ?? ""), job_ids:strings(m.job_ids)});
  return matching.filter(m => m.status === "active" && Date.parse(String(m.expiry)) > now).sort((a,b) => compareActiveGrants(order(a),order(b)))[0] ?? matching.at(-1);
 }
