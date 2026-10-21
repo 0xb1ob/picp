@@ -71,7 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 5 mapped, 1 retained, 31 pending across five whole files; two real-host/operator scenarios added | 2 originals retired, retained replacement earns no deletion credit | -2 originals, +1 retained, +1 e2e = unchanged files | -6 original, +1 retained, +2 e2e = -3 net; conversion in progress |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 11 mapped, 3 retained, 23 pending across five whole files; four static e2e declarations including six review variants | 3 originals retired, retained replacements earn no deletion credit | -3 originals, +2 retained, +2 e2e files = +1 net file | -10 original, +3 retained, +4 static e2e = -3 net; conversion in progress |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -410,6 +410,8 @@ moves first.
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
 | S19-1 | `tests/e2e/wake-delivery.test.ts` | wake S19: a real operator reconnects read-only and delivers a gap escalation once |
 | S19-2 | `tests/e2e/wake-delivery.test.ts` | wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures |
+| S19-3 | `tests/e2e/wake-reattach.test.ts` | wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts |
+| S19-4 | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -828,6 +830,14 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/escalation-relay-watch.test.ts` | a store, ledger or outbox read failure propagates (the host logs it; never a silent skip) | S19-2 | mapped | NC S19-5 fails visible read failure; three real corrupt files are repaired and pending delivery recovers. |
 | `tests/escalation-relay-watch.test.ts` | directRelay: project-tagged, escalation kind, id and question in the text | S19-2 | mapped | NC S19-4 fails project-tagged decision text regex; actual host outbox relay also pins kind, escalationId and jobId. |
 | `tests/cp-bridge-reattach.test.ts` | a killed and restarted host is re-attached read-only: relays resume with no cp_parent call, the gap escalation once | S19-1 | mapped | S19-NC-1 fails replacement-host reattachment; real parent sends settle both before operator attach and live, real host stops/restarts, pre-gap and gap escalations reach actual operator model once, generation stays unchanged during absence and advances only once when explicitly started. No fake parent or fake operator extension context. |
+| `tests/bridge-reattach.test.ts` | the loop retries with doubling delay up to the cap, one loop at a time, until an attempt succeeds | S19-3 | mapped | NC S19-6 fails the measured cap assertion at 64009 ms; real forwarding transport records attempts, no overlap, success quiescence and fresh reconnect after a later loss. |
+| `tests/bridge-reattach.test.ts` | cancel stops the loop, including an attempt already in flight | S19-3 | retained | tests/bridge-reattach-retained.test.ts preserves the declaration: cp-bridge session_shutdown is the only public cancel caller; the operator process then exits, so a callback resuming after cancel cannot be observed through a continuing public session. |
+| `tests/bridge-reattach.test.ts` | a close during the attempt that just succeeded schedules one more attempt | S19-3 | retained | tests/bridge-reattach-retained.test.ts preserves the declaration: cp-bridge reattachOnce has no await after track(attached), so its public socket-close callback cannot call schedule synchronously inside the successful attempt as this injected callback does. |
+| `tests/bridge-reattach.test.ts` | probeHost: an answering current host is live; a silent, failing or superseded one is not | S19-3 | mapped | NC S19-7 fails waiting for silent established host detachment; real hello forwarding, withheld replies, close during hello, superseded PID and unreadable generation directory cover the branches. |
+| `tests/deferred-recheck.test.ts` | a 'green but unreviewed' row is opened by the real passing verdict, and only once | S19-4 | mapped | ready mode drives cp_review through a real reviewer process; stale pass leaves current head deferred; NC S19-8 leaves the decision deferred at verdict delivery. |
+| `tests/deferred-recheck.test.ts` | ReviewRuns awaits the recheck before it sends the wake-up | S19-4 | mapped | ready mode snapshots disk at the first parent request carrying the actual passing review; NC S19-8 fails its open-state assertion. |
+| `tests/deferred-recheck.test.ts` | CommandPost plumbs beforeWakeup into the reviewer delivery path | S19-4 | mapped | real command-post extension, cp_review and report_verdict process path; NC S19-8 removes review-triggered release and fails the consumer snapshot. |
+| `tests/deferred-recheck.test.ts` | a re-gate that finishes inside the bound never takes the late path | S19-4 | mapped | ready mode receives the open decision in the original review wake rather than waiting for a late announcement; NC S19-8 fails open-state delivery. |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1455,6 +1465,58 @@ index 2dcc135..008c3bd 100644
 @@ -410 +410 @@
 -			reattach.schedule();
 +			// S19 negative control: skip reconnect after host closure.
+```
+| S19-6 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-6 | 144b1e6d4522172d680a1093af116c565ff6dce64257af08f3ff11e6fdde97b1 | retry delay must cap at 30 seconds: 64009 | pass |
+| S19-7 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-7 | dc7f844a16a4c94e976114e44dec581e28cdaafd4e90a992ec296acf9c0f9fe6 | timeout waiting for silent established host is probed and detached | pass |
+| S19-8 | `tests/deferred-recheck.test.ts` | 534cd14d952af040f2385fd92f3ee968a810ee62 | S19-4 | S19-NC-8 | 6560446f04e528f94725566c2e0a40f2f36c64a0b4e88481ccc51050387437fc | decision must already be open when verdict reaches parent | pass |
+
+<!-- patch:S19-NC-6 -->
+```diff
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..de45ec3 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -31,7 +31,7 @@ export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FI
+ 						running = false;
+ 						if (again) { again = false; schedule(); }
+ 					},
+-					() => { if (mine === epoch) step(Math.min(delay * 2, maxMs)); },
++					() => { if (mine === epoch) step(delay * 2); },
+ 				);
+ 			}, delay);
+ 			timer.unref();
+```
+<!-- patch:S19-NC-7 -->
+```diff
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..e1a68ae 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -64,7 +64,7 @@ export async function probeHost(client: { request(op: string): Promise<unknown>;
+ 	const expired = new Promise<false>((done) => { timer = setTimeout(() => done(false), timeoutMs); });
+ 	try {
+ 		const answered = await Promise.race([client.request("hello").then(() => true, () => false), expired]);
+-		if (!answered) return false;
++		if (!answered) return true;
+ 		try {
+ 			return currentPid() === client.hostPid;
+ 		} catch {
+```
+<!-- patch:S19-NC-8 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..25fa177 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -111,7 +111,7 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 
+ /** Does this event change a fact a deferred merge ask is waiting on? */
+ export function releasesDeferredAsks(trigger: DeferredRecheckTrigger): boolean {
+-	return trigger.kind === "ci" ? true : isPassingDiffReview(trigger.wakeup);
++	return trigger.kind === "ci";
+ }
+ 
+ /**
 ```
 <!-- /manifest:regressions -->
 
@@ -2609,6 +2671,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
 | `tests/e2e/wake-delivery.test.ts` | S19 | two real-host/operator consumer scenarios, conversion evidence |
 | `tests/escalation-relay-watch-retained.test.ts` | S19 | retained, convert-owned S19; answered input cannot reach dueDirect from parent-host's EscalationStore.open() even with legacy disk data |
+| `tests/e2e/wake-reattach.test.ts` | S19 | real bridge transport faults, default backoff cap and established-host probe behavior |
+| `tests/bridge-reattach-retained.test.ts` | S19 | retained, convert-owned S19; shutdown-only cancellation and an injected synchronous in-attempt schedule have no continuing public operator entry point |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2688,7 +2752,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-ui.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/awaiting.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/bounds.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/bridge-reattach.test.ts` | deleted | S19 | S19-3; two declarations mapped under S19-NC-6/7, two verbatim declarations retained in tests/bridge-reattach-retained.test.ts |
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
 | `tests/capacity.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-14 or redundant-unreachable (Assertion map); negative control NC-19 |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
