@@ -7,11 +7,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromEscalations, type ResolvedAwaitingItem } from "../src/awaiting.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import { type DecisionBasis, type DelegationProvenance, type Mandate, WORKER_FORBIDDEN_TOOLS, isoTimestamp, LAYOUT } from "../src/contracts.ts";
+import { type DecisionBasis, type DelegationProvenance, type Mandate, WORKER_FORBIDDEN_TOOLS, isoTimestamp, LAYOUT, paths } from "../src/contracts.ts";
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
 import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
-import { MandateStore } from "../src/mandate.ts";
+import { capReached, GRANT_USES, grantStanding, isInFlight, MandateStore } from "../src/mandate.ts";
+import { assertReviewAllowed } from "../src/mandate-usage.ts";
+import { RunRecorder } from "../src/run-artifacts.ts";
 import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
 import { checkpointAuthority } from "../src/schedule-authority.ts";
 import { frameBatch, ParentSendOutbox, sendMarker } from "../src/parent-outbox.ts";
@@ -223,29 +225,127 @@ test("tv8: mandate basis must name the selected grant and cannot bypass its deni
 	assert.equal(mandates.require(broad.id).decisions.length, 0);
 });
 
-// Kept by P2d from tests/mandate-supplement.test.ts: only a pipeline's auto-decide hands a checkpoint the plan text, so
-// no e2e reaches a path or subsystem exclusion yet. The selected (earliest named) grant's exclusion refuses; the later
-// grant naming the same job never decides instead. Regression: a denial falls through to a weaker grant.
-test("a selected grant's path or subsystem exclusion refuses an auto-decided plan; a later weaker grant never decides it", async (t) => {
-	const home = createScratchHome(); t.after(() => home.cleanup());
-	const { ship, mandates } = deps(home.path);
-	const base = { projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 3, ask_on: [], job_ids: ["cp-ship1"] };
-	const selected = mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
-	mandates.issue(base);
-	const pending = ship.request({ jobId: "cp-ship1", question: "Approve the plan?" });
-	const subject = (text: string) => ({ kind: "ship" as const, jobId: "cp-ship1", project: "demo", jobKind: "ship" as const, text, pathHints: [text] });
-	const cases: Array<[Mandate["exclusions"], string, string]> = [
-		[{ paths: ["src/secret"] }, "Edit src/secret.ts.", "path Edit src/secret.ts. is excluded"],
-		[{ subsystems: ["auth"] }, "Rework the auth flow.", "subsystem auth is excluded"],
+// Kept by P2e from tests/mandate.test.ts (retained): an exhaustive permission table and accounting edges no e2e
+// drives cell by cell. 02-2 and 02-17 pin representative cells through dispatch, cp_send and cp_decide.
+const earlier = (ms = 86_400_000) => isoTimestamp(new Date(Date.now() - ms));
+function issueGrant(
+	store: MandateStore,
+	over: Parameters<MandateStore["issue"]>[0] extends infer T ? Partial<T> : never = {},
+	jobs: Parameters<MandateStore["issue"]>[1] = [],
+) {
+	return store.issue({ projects: ["demo"], objective: "ship the bump", expiry: later(), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ...over }, jobs);
+}
+
+test("a shrinking reading on one baselined job never funds another job's growth", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const grant = issueGrant(store, { spend_cap: { usd: 100, tokens: 3_000_000 } }, [{ job_id: "cp-a", project: "demo", phase: "done", usage: { cost_usd: 1, total_tokens: 1_000_000 } }]);
+	const after = [
+		{ job_id: "cp-a", project: "demo", phase: "waiting", usage: { cost_usd: 0, total_tokens: 0 } },
+		{ job_id: "cp-b", project: "demo", phase: "waiting", usage: { cost_usd: 1, total_tokens: 3_000_000 } },
 	];
-	for (const [exclusions, text, reason] of cases) {
-		mandates.save({ ...selected, exclusions });
-		const verdict = checkpointAuthority(mandates.runContext(), subject(text), mandates.list());
-		assert.equal(verdict.permitted ? "permitted" : verdict.reason, `${selected.id}: ${reason}`);
-		assert.equal(autoDecideCheckpoint(ship, pending, subject(text), mandates).decision, "pending", text);
+	assert.equal(capReached(store.require(grant.id), after), "token");
+});
+
+test("worker accrual is never masked by a reviewer baseline", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const reviewer = (dir: string, tokens: number, usd: number, cacheRead: number) => {
+		const recorder = RunRecorder.open({ home: home.path, jobId: "cp-rev", dir: join(home.path, dir) });
+		recorder.pi({ type: "message_end", message: { role: "assistant", usage: { input: tokens, output: 0, cacheRead, totalTokens: tokens + cacheRead, cost: { total: usd } } } } as never);
+		recorder.close();
+	};
+	reviewer(paths.reviewRunDir("cp-rev", 1), 5_000, 1, 0);
+	const jobs = [{ job_id: "cp-rev", project: "demo", phase: "held", usage: { cost_usd: 0.5, total_tokens: 1_000 } }];
+	const grant = issueGrant(store, { job_ids: ["cp-rev"], spend_cap: { usd: 10, tokens: 10_000 } }, jobs);
+	assert.deepEqual(grant.usage_baseline, [{ job_id: "cp-rev", usd: 0.5, tokens: 1_000, reviewer_usd: 1, reviewer_tokens: 5_000 }]);
+	// Raw jobs, no reviewer runs read: a combined baseline (6,000) would read 5,000 here and miss the cap.
+	assert.equal(capReached(grant, [{ ...jobs[0]!, usage: { cost_usd: 0.5, total_tokens: 11_000 } }]), "token");
+	reviewer(paths.reviewRunDir("cp-rev", 2), 2_000, 0.5, 0);
+	assert.match(store.show(grant.id, jobs), /; 2000 \/ 10000 non-cached tokens/);
+});
+
+// The one permission rule (src/mandate-permission.ts), cell by cell: status x use x in-flight. Letters follow
+// GRANT_USES order — dispatch, promote, implement, review, repair, merge — P permit, R refuse, S silent. Columns:
+// the job's own same-kind fleet record is working/held, that record's worker failed, no such record.
+test("grantStanding: the complete status x use x in-flight matrix", () => {
+	const now = isoTimestamp();
+	// SAFETY: a literal carrying every required Mandate field; grantStanding is pure and reads no disk shape beyond these.
+	const base = {
+		schema_version: 1, id: "md-000000", issued_by: { channel: "operator_chat" }, issued_at: earlier(), expiry: later(), projects: ["demo"],
+		objective: "o", allowed_actions: ["plan", "implement", "review", "repair", "merge"], spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10,
+		ask_on: [], status: "active", decisions: [], escalations: [],
+	} as unknown as Mandate;
+	const past = { expiry: earlier(1_000) };
+	const rows: Array<[string, Partial<Mandate>, string, string, string]> = [
+		["active", {}, "PPPPPP", "PPPPPP", "PPPPPP"],
+		["operator-paused", { status: "paused", pause_reason: "operator" }, "SSRRSR", "SSRRSR", "SSRRSR"],
+		["cap-paused (spend)", { status: "paused", pause_reason: "spend_cap" }, "RRRRRR", "RRRRRR", "RRRRRR"],
+		["cap-paused (token)", { status: "paused", pause_reason: "token_cap" }, "RRRRRR", "RRRRRR", "RRRRRR"],
+		["revoked", { status: "revoked" }, "SSRRRR", "SSRRRR", "SSRRRR"],
+		["expired (stored)", { status: "expired", ...past }, "RPRPPP", "PPRPPP", "RRRRRR"],
+		["expired (active, unswept crossing)", past, "RPRPPP", "PPRPPP", "RRRRRR"],
+		["operator-paused past expiry", { status: "paused", pause_reason: "operator", ...past }, "RSRRSR", "SSRRSR", "RRRRRR"],
+		["cap-paused past expiry", { status: "paused", pause_reason: "spend_cap", ...past }, "RRRRRR", "RRRRRR", "RRRRRR"],
+		["revoked past expiry", { status: "revoked", ...past }, "SSRRRR", "SSRRRR", "SSRRRR"],
+		["expired, only implement allowed", { status: "expired", ...past, allowed_actions: ["implement"] }, "RRRRRR", "PRRRRR", "RRRRRR"],
+		["expired, only repair allowed", { status: "expired", ...past, allowed_actions: ["repair"] }, "RPRRPR", "RPRRPR", "RRRRRR"],
+	];
+	const letter = { permit: "P", refuse: "R", silent: "S", none: "-" } as const;
+	for (const [label, over, held, failed, fresh] of rows) {
+		const grant = { ...base, ...over } as Mandate;
+		for (const [state, flight, expected] of [["held", { inFlight: true }, held], ["failed", { inFlight: true, failed: true }, failed], ["no record", { inFlight: false }, fresh]] as const) {
+			const got = GRANT_USES.map((use) => letter[grantStanding(grant, use, { jobId: "cp-a", project: "demo", jobKind: "ship", ...flight }, now).standing]).join("");
+			assert.equal(got, expected, `${label}, ${state}`);
+		}
 	}
-	mandates.save(selected);
-	assert.equal(autoDecideCheckpoint(ship, pending, subject("Edit src/secret.ts."), mandates).decided_by, `mandate:${selected.id}`);
+	for (const out of [{ project: "other" }, { jobKind: "research" as const }]) {
+		const grant = { ...base, exclusions: { job_kinds: ["research"] } } as Mandate;
+		assert.equal(grantStanding(grant, "review", { jobId: "cp-a", project: "demo", jobKind: "ship", inFlight: true, ...out }, now).standing, "none", "not covered: no standing");
+	}
+	// In flight means the job's own record: same id, same project, same kind.
+	const fleet = [{ job_id: "cp-a", project: "demo", kind: "research" as const, phase: "held" }];
+	assert.equal(isInFlight({ jobId: "cp-a", project: "demo", jobKind: "research" }, fleet), true);
+	assert.equal(isInFlight({ jobId: "cp-a", project: "demo", jobKind: "ship" }, fleet), false, "research to ship is a kind change");
+	assert.equal(isInFlight({ jobId: "cp-a", project: "other", jobKind: "research" }, fleet), false);
+});
+
+test("a reviewer start keeps its pre-rule path under an expired grant: no fleet record, review not allowed, cap reached all pass; paused and revoked still refuse", (t) => {
+	const job = { jobId: "cp-old", project: "demo", kind: "ship" as const };
+	const held = [{ job_id: "cp-old", project: "demo", kind: "ship" as const, phase: "held" }];
+	// label, grant overrides, then-status, fleet, reviewer start refused?, repair (the expiry policy, unchanged) refused?
+	type Row = [string, Parameters<typeof issueGrant>[1], "paused" | "revoked" | undefined, Parameters<MandateStore["assertPermitted"]>[2], RegExp | undefined, RegExp | undefined];
+	const cases: Row[] = [
+		["expired, no fleet record", {}, undefined, [], undefined, /no fleet record of that kind/],
+		["expired, review not an allowed action", { allowed_actions: ["implement", "repair"] }, undefined, held, undefined, undefined],
+		["expired, spend cap reached", { spend_cap: { usd: 5, tokens: 100_000 } }, undefined, [{ ...held[0]!, usage: { cost_usd: 6, total_tokens: 10 } }], undefined, /spend cap reached/],
+		["expired, token cap reached", { spend_cap: { usd: 5, tokens: 100 } }, undefined, [{ ...held[0]!, usage: { cost_usd: 0, total_tokens: 500 } }], undefined, /token cap reached/],
+		["paused (operator)", {}, "paused", held, /is paused .*no new reviewer spend/, undefined],
+		["revoked", {}, "revoked", held, /is revoked .*no new reviewer spend/, /is revoked .*no repair/],
+	];
+	for (const [label, over, status, jobs, refused, repairRefused] of cases) {
+		const home = createScratchHome();
+		t.after(() => home.cleanup());
+		const store = new MandateStore(home.path);
+		const grant = issueGrant(store, { expiry: status ? later() : earlier(1_000), at: earlier(), ...over });
+		if (status === "paused") store.pause(grant.id);
+		if (status === "revoked") store.revoke(grant.id);
+		if (refused) assert.throws(() => assertReviewAllowed(store, job, jobs), refused, label);
+		else {
+			assert.doesNotThrow(() => assertReviewAllowed(store, job, jobs), label);
+			assert.deepEqual(store.assertPermitted("review", job, jobs), {}, `${label}: the expired grant does not speak`);
+		}
+		if (repairRefused) assert.throws(() => store.assertPermitted("repair", job, jobs), repairRefused, `${label}: repair keeps its policy`);
+		else assert.doesNotThrow(() => store.assertPermitted("repair", job, jobs), `${label}: repair keeps its policy`);
+	}
+	// Fresh dispatch keeps the expiry policy too.
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	issueGrant(store, { expiry: earlier(1_000), at: earlier() });
+	assert.throws(() => store.assertPermitted("dispatch", { ...job, jobId: "cp-new" }, held), /expired at .* fresh start/);
 });
 
 test("without a mandate the same call is refused naming the project", async (t) => {

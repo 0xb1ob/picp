@@ -10,11 +10,14 @@ import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import type { DispatchRequest } from "../../src/dispatch.ts";
-import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, isoTimestamp, LAYOUT, type Mandate, MINIMAL_PLAN_SUMMARY, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { MANDATE_JOBS_THIS_TURN } from "../../src/mandate.ts";
+import { SCAFFOLD_MANDATE_DEFAULTS } from "../../src/mandate-defaults.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { liveUsageJobs } from "../../src/mandate-usage.ts";
 import type { NextResult } from "../../src/next.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
+import { ReviewRuns } from "../../src/review-runs.ts";
 import { quoteSha } from "../../src/risk-preapproval.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
 import {
@@ -26,6 +29,7 @@ import {
 	MockProvider,
 	readFleet,
 	REPO_ROOT,
+	type RecordedRequest,
 	type ScriptStep,
 	startPiChild,
 	treehouseAvailable,
@@ -186,7 +190,8 @@ test("authority: a risk:high answer authorizes only the job it names; a replacin
 	const s = await stack(t, "auth-risk");
 	const approved = await s.job("approved risky job", "high");
 	const other = await s.job("other risky job", "high");
-	const grant = s.issue([approved, other], { ask_on: ["risk:high"] });
+	const dropped = await s.job("dropped risky job", "high");
+	const grant = s.issue([approved, other, dropped], { ask_on: ["risk:high"] });
 	const ask = /risk:high under ask_on — refused before dispatch; (es-\S+) raised/;
 
 	const first = ask.exec(await s.refused(approved, ask))?.[1] as string;
@@ -197,6 +202,10 @@ test("authority: a risk:high answer authorizes only the job it names; a replacin
 	assert.equal((await s.accepted(approved))?.mandate_id, grant.id, "the answered job dispatches");
 	await s.refused(other, ask);
 	assert.equal(s.post.escalations.get(second)?.status, "open", "an answer for one job is never consent for another");
+	const third = ask.exec(await s.refused(dropped, ask))?.[1] as string;
+	await s.post.escalations.answer(third, { answer: "drop", by: "operator-quote", basis: { operator_quote: `Drop ${third}.` } });
+	await s.refused(dropped, ask);
+	assert.equal(s.post.escalations.get(third)?.answer, "drop", "drop is an answer, never an authorization");
 
 	s.post.mandates.pause(grant.id);
 	// issued_at has whole-second resolution and a replacement must be issued later than the grant it replaces.
@@ -1337,4 +1346,323 @@ test("authority: the gateway's admin capacity and quota windows steer and annota
 	assert.equal(unkeyed.capacity, undefined, "no key: no capacity scores, rubric order stands");
 	assert.equal(unkeyed.model, "mock/a");
 	assert.equal(calls.length, before, "no key, no request");
+});
+
+// A planner's brief names its artifact path, and so its job id: the canned envelope reads both back.
+const artifactPathOf = (request: RecordedRequest) => /(\/[^"'\s\\]*\/state\/artifacts\/[A-Za-z0-9_-]+\/report\.md)/.exec(JSON.stringify(request.body.messages ?? []))?.[1] as string;
+const plannerJobOf = (request: RecordedRequest) => /\/state\/artifacts\/([A-Za-z0-9_-]+)\/report\.md/.exec(artifactPathOf(request))?.[1] as string;
+
+test("authority: a pipeline's plan checkpoint is mandate-decided and journaled; task-text exclusions, gate flags, an unnamed high and a denied project leave it pending", { skip: SKIP, timeout: 900_000 }, async (t) => {
+	const s = await stack(t, "auth-pipe");
+	s.post.reviewRuns.wakeupPort = () => true;
+	const tiny = { prompt_tokens: 1, completion_tokens: 0 };
+	const flags = new Map<string, Record<string, boolean>>();
+	const none = { destructive_scope: false, scope_growth: false, blocking_unknowns: false };
+	// One gate reviewer for every pipeline; its verdict names whichever research job its brief carries.
+	const gate = s.provider.addScript("auth-pipe-gate", [{ kind: "tool_calls", usage: { prompt_tokens: 123_000, completion_tokens: 0 }, calls: [{ name: "report_verdict", args: (request: RecordedRequest) => {
+		const job = [...flags.keys()].find((id) => JSON.stringify(request.body.messages ?? []).includes(id)) as string;
+		return { job_id: job, verdict: "pass", flags: { ...none, ...flags.get(job) }, reasons: ["the plan names the file it edits"] };
+	} }] }], { onExhausted: "repeat" });
+	const routing = join(s.home, LAYOUT.data, "routing.json");
+	const config = JSON.parse(readFileSync(routing, "utf8"));
+	writeFileSync(routing, JSON.stringify({ ...config, rubric: [...config.rubric, { id: "gate-reviewer", role: "gate-reviewer", model: gate }] }));
+	let n = 0;
+	const pipeline = async (task: string, flagged: Record<string, boolean> = {}, risk?: "high") => {
+		const model = s.provider.addScript(`auth-pipe-plan-${(n += 1)}`, [
+			{ kind: "tool_calls", usage: tiny, calls: [{ name: "bash", args: { command: `printf '# Plan\\nDo exactly what the task says.\\n' > "$CP_ARTIFACT_PATH"` } }] },
+			{ kind: "tool_calls", usage: tiny, calls: [{ name: "report_result", args: (request: RecordedRequest) => ({ job_id: plannerJobOf(request), kind: "research", status: "done", summary: "Plan written.",
+				artifact_path: artifactPathOf(request), plan_summary: MINIMAL_PLAN_SUMMARY, self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false } }) }] },
+			{ kind: "text", text: "standing by", usage: tiny },
+		], { onExhausted: "repeat" });
+		s.agentDir.writeModels(s.provider);
+		const started = await s.post.startPipeline({ title: `pipe ${n}`, project: "demo", task, fetch: false, model, ...(risk ? { risk } : {}) });
+		flags.set(started.research_id, flagged);
+		await waitFor(() => s.record(started.research_id)?.reported_at, (at) => at !== undefined, { timeoutMs: 60_000, what: `${started.research_id}'s plan` });
+		return { research: started.research_id, ship: started.ship_id };
+	};
+	const advance = async (research: string) => {
+		let result = await s.post.advancePipeline(research);
+		for (let guard = 0; result.pending && guard < 10; guard += 1) {
+			const key = ReviewRuns.key(research, result.pending.surface, result.pending.attempt);
+			s.post.reviewRuns.handBack(key);
+			await s.post.reviewRuns.settled(key);
+			result = await s.post.advancePipeline(research);
+		}
+		return result.state;
+	};
+	const named = (jobs: string[], over: Partial<Parameters<typeof s.post.mandates.issue>[0]> = {}) =>
+		s.post.mandates.issue({ projects: ["demo"], objective: `cover ${jobs.join(" ")}`, expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [], job_ids: jobs, ...over });
+	const exclusions = { paths: ["src/legacy", ...SCAFFOLD_MANDATE_DEFAULTS.exclude_paths], subsystems: ["billing"] };
+	const decisions = (id: string) => s.post.mandates.require(id).decisions.map((row) => row.job_id);
+
+	// A denied project leaves the checkpoint pending and journals nothing; with the key gone the grant decides it.
+	const clean = await pipeline("Rename src/environment.ts to src/env-config.ts.");
+	const grant = named([clean.research, clean.ship], { exclusions });
+	writeFileSync(join(s.home, LAYOUT.mandateDefaultsFile), JSON.stringify({ deny_projects: ["demo"] }));
+	assert.equal(await advance(clean.research), "awaiting_authorization");
+	assert.deepEqual([s.post.checkpoints.get(clean.ship)?.decision, decisions(grant.id), s.post.mandates.require(grant.id).status], ["pending", [], "active"]);
+	// The gate reviewer's spend (123,000 prompt tokens) counts toward the grant that covers its job.
+	assert.match(s.post.mandates.show(grant.id, liveUsageJobs(s.post.fleet, s.post.runs)), /; 1230\d\d \/ 10000000 non-cached tokens/);
+	rmSync(join(s.home, LAYOUT.mandateDefaultsFile));
+	assert.equal(await advance(clean.research), "implementing");
+	const approved = s.post.checkpoints.get(clean.ship);
+	assert.deepEqual([approved?.decision, approved?.decided_by], ["approved", `mandate:${grant.id}`]);
+	assert.match(String(approved?.note), /allowed_actions includes implement for project demo/);
+	assert.deepEqual(decisions(grant.id), [clean.ship]);
+	assert.match(s.post.mandates.show(grant.id), new RegExp(`${clean.ship}.*allowed_actions includes implement`));
+
+	// The selected grant's exclusion matches the frozen task text, and a later, weaker grant over the job lends nothing.
+	for (const task of ["Tidy src/legacy/notes.ts and nothing else.", "Rewrite the billing ledger.", "Point services/api/.env at the new host."]) {
+		const job = await pipeline(task);
+		const strict = named([job.research, job.ship], { exclusions, at: "2020-01-01T00:00:00Z" });
+		const weak = named([job.research, job.ship], { at: "2020-01-01T01:00:00Z" });
+		assert.equal(await advance(job.research), "awaiting_authorization", task);
+		assert.deepEqual([s.post.checkpoints.get(job.ship)?.decision, decisions(strict.id), decisions(weak.id)], ["pending", [], []], task);
+	}
+
+	// A raised gate flag is never mandate-decided, blocking_unknowns included, though it vetoes no gate.
+	for (const raised of [{ destructive_scope: true }, { blocking_unknowns: true }] as Record<string, boolean>[]) {
+		const job = await pipeline("Add a line to README.md.", raised);
+		const covering = named([job.research, job.ship]);
+		assert.equal(await advance(job.research), "awaiting_authorization", JSON.stringify(raised));
+		assert.deepEqual([s.post.checkpoints.get(job.ship)?.decision, decisions(covering.id)], ["pending", []], JSON.stringify(raised));
+	}
+
+	// risk:high is decided only when ask_on omits it and the objective names the job.
+	const risky = await pipeline("Add a line to README.md.", {}, "high");
+	const highGrant = named([risky.research, risky.ship], { objective: "the risky work", ask_on: ["merge"] });
+	assert.equal(await advance(risky.research), "awaiting_authorization");
+	assert.equal(s.post.checkpoints.get(risky.ship)?.decision, "pending");
+	s.post.mandates.save({ ...s.post.mandates.require(highGrant.id), objective: `do ${risky.ship} even if high risk` });
+	assert.equal(await advance(risky.research), "implementing");
+	assert.equal(s.post.checkpoints.get(risky.ship)?.decided_by, `mandate:${highGrant.id}`);
+	assert.match(String(s.post.checkpoints.get(risky.ship)?.note), /risk high named in objective/);
+});
+
+test("authority: cp_mandate through a real parent sets the reviewer model, names this turn's jobs, filters show, refuses every bad issue before writing, and a revoke or expiry closes its asks", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const s = await stack(t, "auth-tool");
+	await s.post.registry.register({ name: "infra", clone_url: "https://github.com/o/infra.git", delivery: "pr" });
+	await s.post.registry.register({ name: "attic", clone_url: "https://github.com/o/attic.git", delivery: "pr" });
+	await s.post.registry.setArchived("attic", true);
+	// A scripted gh on the parent's PATH logs each call: #18 is an open PR, #19 a merged one, any other an open issue.
+	const bin = mkdtempSync(join(tmpdir(), "auth-gh-"));
+	const log = join(bin, "calls");
+	writeFileSync(join(bin, "gh"), `#!/usr/bin/env node\nconst arg = process.argv.slice(2).join(" ");\n` +
+		`require("node:fs").appendFileSync(${JSON.stringify(log)}, arg + "\\n");\n` +
+		`const pr = arg.endsWith("/18") ? {} : arg.endsWith("/19") ? { merged_at: "2026-01-01T00:00:00Z" } : undefined;\n` +
+		`process.stdout.write(JSON.stringify(pr ? { title: "a PR", state: pr.merged_at ? "closed" : "open", pull_request: pr } : { title: "real bug", state: "open" }));\n`, { mode: 0o755 });
+	const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line.startsWith("api repos/o/")) : []);
+	const path = process.env.PATH;
+	process.env.PATH = `${bin}:${path}`;
+	t.after(() => { process.env.PATH = path; rmSync(bin, { recursive: true, force: true }); });
+	const mandates = () => s.post.mandates.list();
+	const issue = (id: string, over: ToolArgs = {}) => tool(id, "cp_mandate", { action: "issue", projects: ["demo"], objective: "the backlog", ...over });
+	const failed = (ends: Map<string, End>, id: string, pattern: RegExp) => {
+		assert.equal(ends.get(id)?.isError, true, `${id}: ${said(ends.get(id))}`);
+		assert.match(said(ends.get(id)), pattern, id);
+	};
+	const short = s.issue([], { expiry: new Date(Date.now() + 3_000).toISOString().replace(/\.\d{3}Z$/, "Z") });
+	const lapsing = await s.post.escalations.raise({ job_ids: ["cp-a"], kind: "mission_end", question: "end?", options: [{ id: "close", label: "close", consequence: "c", cost: "none" }], recommended: "close", mandate_id: short.id });
+	s.post.mandates.revoke(short.id);
+	const before = mandates().length;
+
+	// Issue: this turn's jobs expand into job_ids; a refusal writes no grant; an issue ref mints a job, never pins it.
+	let ends = await prompted(s, "Create two jobs and cover them.",
+		[tool("a", "cp_job", { action: "create", title: "alpha", project: "demo", delivery: "local", kind: "ship" }), tool("b", "cp_job", { action: "create", title: "beta", project: "demo", delivery: "local", kind: "ship" })],
+		[issue("turn", { job_ids: [MANDATE_JOBS_THIS_TURN], reviewer_model: "mock/a" }), issue("mixed", { job_ids: [MANDATE_JOBS_THIS_TURN, "cp-x"] }),
+			issue("nullrev", { reviewer_model: null }), issue("attic", { projects: ["attic"] }), issue("zero", { spend_usd: 0 }),
+			issue("ceiling", { spend_tokens: 200_000_000 }), issue("pr", { projects: ["infra"], objective: "fix issue #18" })],
+		[issue("wide", { projects: ["infra"], objective: "fix issue #17", job_cap: 3 })],
+	);
+	const created = (await s.post.ledger().list({ all: true })).filter((job) => ["alpha", "beta"].includes(job.title)).map((job) => job.id).sort();
+	const turn = mandates().find((grant) => grant.objective === "the backlog");
+	assert.deepEqual([...(turn?.job_ids ?? [])].sort(), created);
+	assert.equal(turn?.reviewer_model, "mock/a");
+	assert.match(String(turn?.issued_at), /T\d\d:\d\d:\d\dZ$/, "every instant is written at second precision");
+	failed(ends, "mixed", /cannot mix with job ids/);
+	failed(ends, "nullrev", /null only clears an existing grant/);
+	failed(ends, "attic", /archived project\(s\) attic/);
+	failed(ends, "zero", /the usd cap leaves nothing to spend/);
+	failed(ends, "ceiling", /over the home's token_ceiling 100000000 .*cp_mandate defaults_set token_ceiling 200000000/);
+	failed(ends, "pr", /cp_mandate issue refused: .* is a pr, open/);
+	assert.deepEqual(s.post.escalations.open().filter((item) => item.kind === "conflicting_acceptance").length, 1);
+	assert.match(said(ends.get("wide")), /warning: md-\S+ is project-wide, so its job cap 3 counts every job/);
+	assert.doesNotMatch(said(ends.get("turn")), /is project-wide/, "a named grant is never warned");
+	const wide = mandates().find((grant) => grant.objective === "fix issue #17");
+	assert.equal(wide?.job_ids, undefined, "the objective's issue never pins the grant");
+	const minted = (await s.post.ledger().list({ all: true })).find((job) => job.external_ref === "https://github.com/o/infra/issues/17");
+	assert.match(String(minted?.notes), /issue open "real bug"/);
+	assert.equal(mandates().length, before + 2, "only the two good issues wrote a grant");
+
+	// Objective refs: PR prose and incidental numbers never call gh; explicit issue words verify; a merged PR asks once.
+	const prose = ["replace PR #7 with same two-file patch", "pr #7", "pull request #7", "Pull  Request #7 again", "PRs #7", "PR: #7", "pull requests: #7",
+		"after #220 merged, tidy the docs", "ship the follow-up to #220", "land it as in PR #7 and #9", "cp-jxqp #3 of 5", "fix APR#4", "close APR #4"];
+	const explicit = ["Fixes #30", "closes: #31", "resolve #32", "#33", "issue #34", "after #220 merged, fix #35", "fix #36 despite PR #7", "despite PR #7, fix #37", "fix #17 again"];
+	const jobs = async () => (await s.post.ledger().list({ all: true })).length;
+	const [callsBefore, jobsBefore, asksBefore] = [calls().length, await jobs(), s.post.escalations.open().length];
+	ends = await prompted(s, "Issue the prose grants.", prose.map((objective, i) => issue(`p${i}`, { projects: ["infra"], objective })),
+		[issue("two", { projects: ["infra", "demo"], objective: "fix #17" }), issue("local", { objective: "fix #17" })]);
+	for (const id of [...prose.map((_, i) => `p${i}`), "two", "local"]) assert.notEqual(ends.get(id)?.isError, true, `${id}: ${said(ends.get(id))}`);
+	assert.deepEqual([calls().length, await jobs(), s.post.escalations.open().length], [callsBefore, jobsBefore, asksBefore], "prose verifies, creates and raises nothing");
+	ends = await prompted(s, "Issue the explicit grants.", [...explicit.map((objective, i) => issue(`e${i}`, { projects: ["infra"], objective })),
+		issue("qualified", { projects: ["infra"], objective: "see o/infra#21" })], [issue("merged", { projects: ["infra"], objective: "fix #19" })],
+		[issue("again", { projects: ["infra"], objective: "fix #19" }), tool("ceiling-up", "cp_mandate", { action: "defaults_set", key: "token_ceiling", value: "200000000" })],
+		[issue("raised", { spend_tokens: 200_000_000 })]);
+	// Each explicit form verifies its own number once (never #7 or #220); #17's existing job is reused unverified.
+	const issueUrls = [17, 21, ...[30, 31, 32, 33, 34, 35, 36, 37]].map((n) => `issues/${n}`);
+	const verified = calls().slice(callsBefore);
+	assert.deepEqual(verified.slice(0, -2).sort(), issueUrls.slice(1).map((url) => `api repos/o/infra/${url}`).sort());
+	assert.deepEqual(verified.slice(-2), ["api repos/o/infra/issues/19", "api repos/o/infra/issues/19"], "a merged PR verifies on each issue");
+	assert.deepEqual((await s.post.ledger().list({ all: true })).filter((job) => job.external_ref?.startsWith("https://github.com/o/infra/issues/")).map((job) => job.external_ref).sort(),
+		issueUrls.map((url) => `https://github.com/o/infra/${url}`).sort(), "one job per issue");
+	for (const id of ["merged", "again"]) failed(ends, id, /cp_mandate issue refused: .* is a pr, merged/);
+	const conflicts = s.post.escalations.open().filter((item) => item.kind === "conflicting_acceptance");
+	assert.equal(conflicts.length, 1, "bad refs for one project extend one escalation, never a second");
+	assert.match(JSON.stringify(conflicts[0]), /issues\/19/);
+	assert.equal(mandates().find((grant) => grant.spend_cap.tokens === 200_000_000)?.status, "active", "the raised ceiling admits the grant");
+
+	// The reviewer model is set, cleared, and refused without a value; an expired grant takes it too.
+	const id = turn?.id as string;
+	ends = await prompted(s, "Change the reviewer.", [tool("set", "cp_mandate", { action: "reviewer_model", mandate_id: id, reviewer_model: "mock/b" })],
+		[tool("clear", "cp_mandate", { action: "reviewer_model", mandate_id: id, reviewer_model: null }), tool("bare", "cp_mandate", { action: "reviewer_model", mandate_id: id })]);
+	assert.match(said(ends.get("set")), /reviewer model: mock\/b/);
+	assert.match(said(ends.get("clear")), /reviewer model: unset/);
+	failed(ends, "bare", /needs mandate_id and reviewer_model/);
+	assert.equal(s.post.mandates.require(id).reviewer_model, undefined);
+
+	// Show lists active and paused only; statuses name the closed ones; an id shows any status.
+	s.post.mandates.pause(wide?.id as string);
+	ends = await prompted(s, "Show the grants.", [tool("live", "cp_mandate", { action: "show" }), tool("closed", "cp_mandate", { action: "show", statuses: ["revoked"] }),
+		tool("one", "cp_mandate", { action: "show", mandate_id: short.id, statuses: ["active"] })]);
+	assert.match(said(ends.get("live")), new RegExp(`${id}[\\s\\S]*${wide?.id}|${wide?.id}[\\s\\S]*${id}`));
+	assert.doesNotMatch(said(ends.get("live")), new RegExp(short.id));
+	assert.match(said(ends.get("closed")), new RegExp(short.id));
+	assert.doesNotMatch(said(ends.get("closed")), new RegExp(id));
+	assert.match(said(ends.get("one")), new RegExp(`${short.id}: revoked`));
+	assert.equal(s.post.escalations.get(lapsing.id)?.superseded_reason, `${short.id} was revoked`);
+
+	// Home policy refuses a new grant naming the file; an existing grant keeps its standing.
+	const file = join(s.home, LAYOUT.mandateDefaultsFile);
+	const defaults = readFileSync(file, "utf8");
+	for (const [over, pattern] of [[{ deny_projects: ["demo"] }, /project demo is denied .*grant issue refused/], [{ scope_policy: "named_jobs_only" }, /named_jobs_only requires explicit job_ids/], ["{ not json", /not valid JSON/]] as const) {
+		writeFileSync(file, typeof over === "string" ? over : JSON.stringify({ ...JSON.parse(defaults), ...over }));
+		failed(await prompted(s, "Issue a project grant.", [issue("policy")]), "policy", pattern);
+		assert.equal(s.post.mandates.require(id).status, "active");
+	}
+	writeFileSync(file, defaults);
+
+	// cp_escalate trims a long consequence; revoke and supersede_stale close asks unanswered; cp_awaiting drops them.
+	const expiring = s.issue([], { expiry: new Date(Date.now() + 2_000).toISOString().replace(/\.\d{3}Z$/, "Z") });
+	const expiringAsk = await s.post.escalations.raise({ job_ids: ["cp-b"], kind: "mission_end", question: "end?", options: [{ id: "close", label: "close", consequence: "c", cost: "none" }], recommended: "close", mandate_id: expiring.id });
+	await new Promise((resolve) => setTimeout(resolve, 2_500));
+	const options = (consequence: string) => [{ id: "pause", label: "pause", consequence, cost: "delay" }];
+	ends = await prompted(s, "Escalate, revoke, and tidy.",
+		[tool("own", "cp_escalate", { job_ids: ["cp-own"], kind: "budget_exhausted", question: `${id} spend cap reached`, options: options("wait"), recommended: "pause", mandate_id: id }),
+			tool("long", "cp_escalate", { job_ids: ["cp-long"], kind: "product_ambiguity", question: "Choose?", options: options("x".repeat(300)), recommended: "pause" })],
+		[tool("listed", "cp_awaiting", { action: "list" }), tool("expired", "cp_mandate", { action: "reviewer_model", mandate_id: expiring.id, reviewer_model: "mock/b" })],
+		[tool("revoke", "cp_mandate", { action: "revoke", mandate_id: id })],
+		[tool("legacy", "cp_escalate", { job_ids: ["cp-c"], kind: "budget_exhausted", question: `${short.id} job cap reached (3)`, options: options("wait"), recommended: "pause" }),
+			tool("again", "cp_escalate", { job_ids: ["cp-own"], kind: "budget_exhausted", question: `${wide?.id} spend cap reached`, options: options("wait"), recommended: "pause", mandate_id: wide?.id })],
+		[tool("stale", "cp_mandate", { action: "supersede_stale" })],
+		[tool("sweep", "cp_mandate", { action: "show" }), tool("after", "cp_awaiting", { action: "list" })],
+	);
+	assert.deepEqual([s.post.mandates.require(expiring.id).status, s.post.mandates.require(expiring.id).reviewer_model], ["expired", "mock/b"]);
+	const own = s.post.escalations.list({ jobId: "cp-own" })[0];
+	assert.match(said(ends.get("listed")), new RegExp(String(own?.id)));
+	assert.deepEqual([own?.status, own?.superseded_reason, own?.answer], ["superseded", `${id} was revoked`, undefined]);
+	assert.match(said(ends.get("stale")), new RegExp(`superseded: ${short.id}`));
+	assert.equal(s.post.escalations.list({ jobId: "cp-c" })[0]?.status, "superseded");
+	assert.equal(s.post.escalations.get(expiringAsk.id)?.superseded_reason, `${expiring.id} expired`);
+	assert.doesNotMatch(said(ends.get("after")), new RegExp(String(own?.id)));
+	const long = s.post.escalations.list({ jobId: "cp-long" })[0];
+	assert.deepEqual([long?.options[0]?.consequence.length, long?.options[0]?.consequence.endsWith("…"), long?.original_text?.options?.[0]?.consequence], [200, true, "x".repeat(300)]);
+	assert.match(said(ends.get("long")), /trimmed fields: options\[0\]\.consequence/);
+	const later = s.post.escalations.list({ jobId: "cp-own" }).find((item) => item.id !== own?.id);
+	assert.deepEqual([later?.status, later?.question], ["open", `${wide?.id} spend cap reached`], "a new question files its own record");
+});
+
+test("authority: an expired, revoked, serial or job-capped grant stops fresh starts while its own in-flight workers keep promotion and repair", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const s = await stack(t, "auth-flight");
+	const soon = (ms: number) => new Date(Date.now() + ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const repair = async (jobId: string) => {
+		for (let attempt = 0; attempt < 200; attempt += 1) {
+			const sent = await s.post.send({ jobId, message: "Repair the stale rows.", purpose: "repair", mode: "prompt" }).catch((error: Error) => {
+				if (!/busy worker/.test(error.message)) throw error;
+				return undefined;
+			});
+			if (sent) return sent;
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		throw new Error(`${jobId}: the worker stayed busy`);
+	};
+	const [old, fresh, risky, before, after, capped, extra, first, second, shadow] = [await s.job("old"), await s.job("fresh"), await s.job("risky fresh", "high"),
+		await s.job("before"), await s.job("after"), await s.job("capped"), await s.job("extra"), await s.job("first"), await s.job("second"), await s.job("shadow")];
+
+	// Expired: no fresh start and no risk ask for one; the in-flight job's promotion and repair continue under it.
+	const lapsing = s.issue([old, fresh], { expiry: soon(8_000) });
+	s.issue([risky], { expiry: soon(8_000), ask_on: ["risk:high"] });
+	assert.equal((await s.accepted(old)).mandate_id, lapsing.id);
+	await waitFor(() => Date.now(), (now) => now > Date.parse(lapsing.expiry) + 1_000, { timeoutMs: 20_000, what: "the grant to expire" });
+	await s.refused(fresh, /expired at .* no fleet record of that kind, so it is a fresh start or a kind change/);
+	await s.refused(risky, /expired at .* fresh start/);
+	assert.deepEqual(s.post.escalations.list().filter((item) => item.job_ids.includes(risky)), [], "a refused start raises no risk ask");
+	await promote(s, old);
+	assert.equal((await repair(old)).receipt !== undefined, true);
+	// A newer active grant speaks for the fresh job.
+	const next = s.issue([fresh]);
+	assert.equal((await s.accepted(fresh)).mandate_id, next.id);
+
+	// Revoked: a revocation that predates the dispatch never speaks; one after it refuses the repair.
+	const early = s.issue([before]);
+	s.post.mandates.revoke(early.id);
+	assert.equal((await s.accepted(before)).mandate_id, undefined);
+	await repair(before);
+	const late = s.issue([after]);
+	assert.equal((await s.accepted(after)).mandate_id, late.id);
+	s.post.mandates.revoke(late.id);
+	await assert.rejects(s.post.send({ jobId: after, message: "Repair.", purpose: "repair", mode: "prompt" }), new RegExp(`${late.id} is revoked .*no repair`));
+
+	// Job cap: the next job is refused without a code, the grant stays active, and its job keeps promotion and repair.
+	const cap = s.issue([capped, extra], { job_cap: 1 });
+	assert.equal((await s.accepted(capped)).mandate_id, cap.id);
+	await assert.rejects(s.post.dispatch({ jobId: extra, task: "Add a line to README.md.", fetch: false }),
+		(error: Error & { code?: string }) => /job cap 1 reached — no new dispatch/.test(error.message) && error.code === undefined);
+	assert.equal(s.post.mandates.require(cap.id).status, "active");
+	await promote(s, capped);
+	await repair(capped);
+
+	// Serial: a working job fills the slot (code parallelism_full); its own promotion never takes it.
+	const serial = s.issue([first, second], { dispatch_parallelism: 1 });
+	assert.equal((await s.accepted(first)).mandate_id, serial.id);
+	await assert.rejects(s.post.dispatch({ jobId: second, task: "Add a line to README.md.", fetch: false }),
+		(error: Error & { code?: string }) => error.code === "parallelism_full" && new RegExp(`mandate ${serial.id} dispatch-parallelism 1 is full`).test(error.message));
+	await promote(s, first);
+
+	// A cap-paused grant that was then revoked never refuses; the active grant naming the job decides.
+	const spent = s.issue([shadow], { usd: 1 });
+	s.post.mandates.save({ ...s.post.mandates.require(spent.id), status: "paused", pause_reason: "spend_cap", paused_at: isoTimestamp() });
+	s.post.mandates.revoke(spent.id);
+	assert.equal(s.post.mandates.require(spent.id).pause_reason, "spend_cap");
+	const named = s.issue([shadow]);
+	assert.equal((await s.accepted(shadow)).mandate_id, named.id);
+
+	// cp_decide: the expired grant decides old's diff, never its first ship; a revoked grant decides nothing;
+	// a full job cap never stalls its own job's review.
+	const basis = (mandate: string) => ({ mandate, clause: "the grant" });
+	for (const jobId of [old, after, capped]) s.post.diffCheckpoints.request({ jobId, question: `Review ${jobId}?` });
+	s.post.checkpoints.request({ jobId: old, question: `Ship ${old}?` });
+	const ends = await prompted(s, "Decide the reviews.", [
+		tool("diff", "cp_decide", { target: old, kind: "diff", decision: "approve", basis: basis(lapsing.id) }),
+		tool("ship", "cp_decide", { target: old, kind: "ship", decision: "approve", basis: basis(lapsing.id) }),
+		tool("revoked", "cp_decide", { target: after, kind: "diff", decision: "approve", basis: basis(late.id) }),
+		tool("capped", "cp_decide", { target: capped, kind: "diff", decision: "approve", basis: basis(cap.id) }),
+	]);
+	const diff = s.post.diffCheckpoints.get(old);
+	assert.deepEqual([diff?.decision, diff?.decided_by], ["approved", `mandate:${lapsing.id}`], said(ends.get("diff")));
+	assert.match(String(diff?.note), new RegExp(`expired grant continues in-flight ${old}`));
+	assert.equal(ends.get("ship")?.isError, true);
+	assert.match(said(ends.get("ship")), new RegExp(`${lapsing.id} has expired`));
+	assert.equal(ends.get("revoked")?.isError, true);
+	assert.match(said(ends.get("revoked")), new RegExp(`no active mandate covers project demo \\(job ${after}\\)`));
+	assert.equal(s.post.diffCheckpoints.get(capped)?.decided_by, `mandate:${cap.id}`, said(ends.get("capped")));
 });
