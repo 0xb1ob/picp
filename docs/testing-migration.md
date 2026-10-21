@@ -199,7 +199,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
 | P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
-| P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
+| cp-e2e-slice-main-ci-41d3 (#416) | 05 | `tests/e2e/landing.test.ts` | main-CI: 39 source declarations, 27 mapped with executed controls, 12 retained verbatim, 0 pending; 05-11/05-4 extended and 3 scenarios added; docs/testing-migration-main-ci-declarations.md |
+| P3c-rest | 05 | `tests/e2e/landing.test.ts` | remaining follow-on slices and two retained timer cases; main-CI's 39 declarations are fully accounted separately in #416; other slice ownership is unchanged |
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
