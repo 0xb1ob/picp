@@ -14,13 +14,17 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 | tests/foreign-ci-watch.test.ts | 11 | convert, owner P3c-rest; eleven pending, including dispatch release and legacy state |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
-| tests/integrate-held-ci.test.ts | 3 | convert, owner P3c-rest; three pending, including restart and permission paths |
+| tests/integrate-held-ci.test.ts | 3 | S07: all three mapped to 05-13 and 05-S07 and deleted; NC-37 and S07-NC-1; restart reason distinguishes spent allowance from missing worker |
 | tests/awaiting-merge-tick.test.ts | 2 | Retained verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); missing lifecycle entry points below; no deletion credit |
 
 Delivered counts: **13/143 declarations mapped (9.09%), 2 retained (1.40%), 128 pending; 8 declarations
 removed and 2/7 files deleted**. Five CI-watch mappings remain in their original file until follow-on conversion.
 This completes only the operator-approved partial slice; it does not satisfy the original 60%/three-file target.
 The remaining five files continue under P3c-rest; other behavior-05 files remain outside this slice.
+
+S07 subsequently maps three more declarations and deletes `tests/integrate-held-ci.test.ts`: cumulative
+16/143 mapped, 2 retained, 125 pending, 11 declarations removed and 3/7 files deleted. It adds one e2e
+declaration and extends 05-13; no other slice's ownership changes. The counts above describe P3c's original delivery.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The timer file is a 100%
 rename, not retired coverage. Its two assertion rows remain `retained`; the baseline-file table's `deleted`

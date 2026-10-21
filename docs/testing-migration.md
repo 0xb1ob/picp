@@ -65,6 +65,7 @@ ask-0088e0332d00, 2026-10-21.
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 | P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 | S02 (cp-e2e-slice-s02-l7ph) | behavior 05; `tests/ci-watch.test.ts` declarations 1–40: 36 mapped, 4 mixed/unreachable and kept in place; five added e2e declarations, 05-8 extended. S03 owns 41–80 and whole-file retirement. | 0 (split-file bookkeeping: all units stay) | 378 → 378 | 4,274 → 4,279 |
+| S07 (cp-e2e-slice-s07-eaux) | P3c-rest behavior 05: only integrate-held-ci; 3 mapped, 0 retained, 1 deleted file; extends 05-13 and adds 05-S07; all other slices retain their ownership | 1 (`tests/integrate-held-ci.test.ts`) | 378 → 377 | 4,274 → 4,272 (3 removed, 1 added) |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
@@ -335,6 +336,7 @@ moves first.
 | 05-S02-3 | `tests/e2e/landing.test.ts` | landing S02: watch delivery, restart and query cadence survive real forge failures |
 | 05-S02-4 | `tests/e2e/landing.test.ts` | landing S02: unavailable gh disables GitHub queries while GitLab remains observable |
 | 05-S02-5 | `tests/e2e/landing.test.ts` | landing S02: watcher queries stay nonblocking while workers refuse CI waits |
+| 05-S07 | `tests/e2e/landing.test.ts` | landing: held CI repair checks Sender authority before restoring a worker |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -353,6 +355,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 <!-- manifest:assertions -->
 | Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
+| `tests/integrate-held-ci.test.ts` | CI observation repairs without parent notice delivery; duplicates and manual integration share the project lane | 05-13 | mapped | S07: watch-driven repair overlaps manual cp_integrate and a second real job at a forge barrier; S07-NC-2 fails queued-peer assertion. One supersession, same worker/branch/worktree, correct run and hold in model request, archived first envelope and accepted replacement; green holds with no merge ask/checkpoint, release requires review; NC-37 fails spent-allowance outcome |
+| `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | S07: real parent restart reads green hold and spent allowance; failing head in fresh parent says already asked once, never a missing-worker fallback; NC-37 fails the already-asked reason assertion |
+| `tests/integrate-held-ci.test.ts` | held repair uses real Sender permission before delivery or revival, including eligible expired grants | 05-S07 | mapped | S07: revoked/capped refuse before missing-worker lookup, expired permits one repair, missing/dead worker refuses; hold and original envelope survive refusal, PID unchanged; S07-NC-1 fails revoked error match |
 | `tests/ci-run-ref.test.ts` | failedRunOn picks the completed failure on HEAD over another head's failure | 01-1 | mapped | wrong-head failure (older sha) never named; run 6 on the pushed head is |
 | `tests/ci-run-ref.test.ts` | failedRunOn skips skipped, neutral and success runs | 01-1 | mapped | runs 2-4 precede run 6; negative control NC-01 |
 | `tests/ci-run-ref.test.ts` | failedRunOn skips an in_progress run | 01-1 | redundant-unreachable | consumers call ciRunRef only on a failed verdict, and `evaluateMergeAskCi` (`src/merge-ask.ts`) answers in_progress, never failed, while any run on the head is unfinished. 01-1 pins only that outcome: run 5 in_progress on the pushed head, no failure beside it, gives `ci: in_progress`, `next: wait`, no run reference and no watch observation. No case puts an in_progress run beside a completed failure; approved by main session under ask-0088e0332d00, 2026-10-20 |
@@ -911,6 +916,24 @@ diff --git a/src/awaiting-merge.ts b/src/awaiting-merge.ts
 @@ -98,1 +98,0 @@
 -			observeCi: parkedCiObserver({ home: host.home, fleet: host.fleet, runs: host.runs, read: (record, sha) => readParkedActionsCi(host, record, sha) }),
 ```
+<!-- patch:S07-NC-2 -->
+```diff
+diff --git a/src/held-continuation.ts b/src/held-continuation.ts
+--- a/src/held-continuation.ts
++++ b/src/held-continuation.ts
+@@ -175,1 +175,1 @@
+-		const lane = this.#deps.fleet.get(jobId)?.project ?? jobId;
++		const lane = jobId;
+```
+<!-- patch:S07-NC-1 -->
+```diff
+diff --git a/src/send.ts b/src/send.ts
+--- a/src/send.ts
++++ b/src/send.ts
+@@ -245,1 +245,1 @@
+-				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
++				// S07 negative control: omit repair authority check.
+```
 <!-- patch:NC-37 -->
 ```diff
 diff --git a/src/integrate.ts b/src/integrate.ts
@@ -1051,6 +1074,9 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-35 | `tests/main-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-11 | NC-35 | f1a2e028adf4e9dcc42aa3f5fb68a4bce417edf303edcd23c081bc12d39f4b0e | timed out waiting for own current-tip green clears latch | pass |
 | NC-36 | `tests/parked-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer | pass |
 | NC-37 | `tests/integrate-held-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | a second red result exhausts the repair allowance: actual resolve, expected surface | pass |
+| S07-NC-1 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S07 | S07-NC-1 | 514a60abe4fb0adfa420e8b12651e3e1641c36ee4446eed0e1bf4e7900347d18 | revoked error expected /is revoked/, actual no live worker; authority must precede worker lookup | pass |
+| S07-NC-2 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-13 | S07-NC-2 | 7b765ed1addb1bcc787c7fa4ee3995fc74dbb63856ed7a8be661842a55f0e911 | another job in the project waits behind the CI repair: actual advanced, expected queued | pass |
+| S07-NC-3 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | restarted parent reads spent allowance: expected /already asked once/, actual no live worker | pass |
 | NC-38 | `tests/awaiting-merge-tick.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | RENAME BOOKKEEPING ONLY: NC-36 fails the parked observer-wiring assertion; this is no control for either retained timer unit and earns no retirement credit | pass |
 | NC-39 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-39 | 3b171a4343a649cf97b5484d8436b270652f31a73e48043823d6d88cac71728b | a green rerun follows a failed attempt: actual undefined, expected true; exit 1 | pass |
 | NC-40 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-40 | 89140ecdb7e179ded4475bbae1fdd8503bc7d6e1c498391bc5373e5cff3175a6 | an arrived attempt is not announced again: actual ci_failed observation, expected []; exit 1 | pass |
@@ -2414,7 +2440,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/install-tools.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/intake-settle-atomicity.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/intake.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/integrate-held-ci.test.ts` | convert | P3c-rest | behavior 05 follow-on; three repair declarations pending conversion |
+| `tests/integrate-held-ci.test.ts` | deleted | P3c-rest | S07: three declarations mapped to 05-13 and 05-S07; NC-37 and S07-NC-1; original blob 367d199760c7c5927e5cc1fe268aa97d862bc4e5 |
 | `tests/integrate.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
