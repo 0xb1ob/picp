@@ -10,9 +10,18 @@ import { createScratchHome } from "../harness/index.ts";
 
 const RUNS = 1000;
 const REVOKED = 600;
-/** The operator's target per warm request; a contended runner may instead stay under half the uncached cost. */
+const SCHEDULES = 12;
+/** The operator's target per warm request. */
 const BUDGET_MS = 300;
-const BUDGET_RATIO = 0.5;
+
+const scheduleId = (n: number) => `sch-${(0xa00000 + n).toString(16)}`;
+/** A saved schedule: cron, watch and manual triggers in turn, every run of each one landing in the 1000-run ledger. */
+function schedule(n: number, at: (minutesAgo: number) => string) {
+	const trigger = [{ type: "cron", cron: "*/15 * * * *", tz: "UTC" }, { type: "watch", script_path: "scripts/watch.sh", on: "changed", every_seconds: 300 },
+		{ type: "manual" }][n % 3];
+	return { id: scheduleId(n), name: `schedule ${n} ${"long name ".repeat(6)}`.slice(0, 80), project: "demo", trigger, enabled: n % 4 !== 0, created_at: at(9000),
+		job: { title: `scheduled run ${n}`, kind: "ship", delivery: "pr" }, last_fire: { at: at(n), slot: at(n), job_id: `cp-run-${n}`, missed: false } };
+}
 
 /** A home shaped like the slow one: 1000 runs with events and session tails, 600 revoked grants and one live grant. */
 function seed(home: ReturnType<typeof createScratchHome>, now: number) {
@@ -26,7 +35,7 @@ function seed(home: ReturnType<typeof createScratchHome>, now: number) {
 	const ids = Array.from({ length: RUNS }, (_, i) => `cp-run-${i}`);
 	const open = (i: number) => i % 10 === 0;
 	put(LAYOUT.jobsFile, { jobs: ids.map((id, i) => ({ id, title: `${id} ${"long title ".repeat(8)}`, status: open(i) ? "in_progress" : "closed",
-		labels: ["project:demo", "kind:ship", "delivery:pr"], created_at: at(i + 30), ...(open(i) ? {} : { closed_at: at(i) }) })) });
+		labels: ["project:demo", "kind:ship", "delivery:pr", `schedule:${scheduleId(i % SCHEDULES)}`], created_at: at(i + 30), ...(open(i) ? {} : { closed_at: at(i) }) })) });
 	put(LAYOUT.fleetFile, { jobs: ids.map((id, i) => ({ job_id: id, project: "demo", kind: "ship", delivery: "pr", phase: open(i) ? "held" : "done",
 		dispatched_at: at(i + 20), ...(open(i) ? {} : { closed_at: at(i) }), worker: { role: "implementer", model: "mock/worker" } })) });
 	for (const [i, id] of ids.entries()) {
@@ -53,7 +62,7 @@ function seed(home: ReturnType<typeof createScratchHome>, now: number) {
 		spend_cap: { usd: 1000 }, objective: `old ${i}` });
 	put(join(LAYOUT.mandates, "md-live.json"), { id: "md-live", status: "active", projects: ["demo"], issued_at: at(3000), expiry: "2099-01-01T00:00:00Z",
 		spend_cap: { usd: 5000 }, objective: "the live grant" });
-	put(join(LAYOUT.state, "schedules.json"), { schema_version: 1, schedules: [] });
+	put(join(LAYOUT.state, "schedules.json"), { schema_version: 2, schedules: Array.from({ length: SCHEDULES }, (_, n) => schedule(n, at)) });
 	return { ids, put, at };
 }
 
@@ -92,20 +101,22 @@ test("viewer endpoints stay fast when warm on a 1000-run home, and still see edi
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const now = Date.now();
 	const { ids, put, at } = seed(home, now);
-	const { get } = await serve(t, home);
+	const { get, warm: warmed } = await serve(t, home);
+	await warmed;
 	for (const path of ["/api/stats", "/api/jobs", "/api/map", "/api/schedules", "/api/overview"]) {
-		const cold = await get(path);
 		const warm = [await get(path), await get(path), await get(path)];
 		const best = Math.min(...warm.map((w) => w.ms));
-		t.diagnostic(`${path}: cold ${cold.ms.toFixed(0)} ms, warm ${best.toFixed(0)} ms (best of 3), ${cold.body.length} B`);
-		assert.ok(best < BUDGET_MS || best < cold.ms * BUDGET_RATIO, `${path} warm ${best.toFixed(0)} ms (budget ${BUDGET_MS} ms or half of cold ${cold.ms.toFixed(0)} ms)`);
+		t.diagnostic(`${path}: warm ${best.toFixed(0)} ms (best of 3 after the warm line), ${warm[0]!.body.length} B`);
+		assert.ok(best < BUDGET_MS, `${path} warm ${best.toFixed(0)} ms, budget ${BUDGET_MS} ms`);
 	}
 	const jobs = JSON.parse((await get("/api/jobs")).body) as JobsResponse;
 	assert.equal(jobs.jobs.length, RUNS);
 	const map = JSON.parse((await get("/api/map")).body) as MapResponse;
 	assert.equal(map.revoked_count, REVOKED);
 	assert.equal(map.nodes.length, RUNS);
-	assert.equal((JSON.parse((await get("/api/schedules")).body) as SchedulesResponse).error, null);
+	const schedules = JSON.parse((await get("/api/schedules")).body) as SchedulesResponse;
+	assert.equal(schedules.error, null);
+	assert.equal(schedules.schedules.length, SCHEDULES, "the seeded schedules are served");
 	const stats = JSON.parse((await get("/api/stats")).body) as StatsResponse;
 	assert.ok((stats.kpis.tokens ?? 0) > 0, "seeded usage reaches the stats");
 
@@ -123,7 +134,7 @@ test("viewer endpoints stay fast when warm on a 1000-run home, and still see edi
 /**
  * The viewer restarts on every self-update, so its first Jobs request was the cold one (3.3 s on the slow home).
  * After listen it builds the caches in the background and logs `caches warm`; the first /api/jobs after that line
- * is warm-fast. The budget's fallback compares with the build itself, which paid the cold reads.
+ * is warm-fast.
  */
 test("a restarted viewer warms its caches after listen; the first /api/jobs after the warm line is fast", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
@@ -133,7 +144,7 @@ test("a restarted viewer warms its caches after listen; the first /api/jobs afte
 	const first = await get("/api/jobs");
 	t.diagnostic(`warm build ${built.ms} ms; first /api/jobs ${first.ms.toFixed(0)} ms`);
 	assert.equal((JSON.parse(first.body) as JobsResponse).jobs.length, RUNS);
-	assert.ok(first.ms < BUDGET_MS || first.ms < built.ms * BUDGET_RATIO, `first /api/jobs ${first.ms.toFixed(0)} ms after a ${built.ms} ms warm build`);
+	assert.ok(first.ms < BUDGET_MS, `first /api/jobs ${first.ms.toFixed(0)} ms after a ${built.ms} ms warm build`);
 });
 
 /**
@@ -151,4 +162,16 @@ test("during the start-up warm, other requests are served and a slow view shares
 	assert.ok(schedules.end < jobsWarm, "a cheap screen is not held behind the build");
 	assert.ok(jobs.end >= jobsWarm, "a Jobs request mid-warm answers from the build's jobs stage");
 	assert.equal((JSON.parse(jobs.body) as JobsResponse).jobs.length, RUNS);
+});
+
+/** A view that throws while a warm is pending (here: a home that is not a string) answers 500 JSON; it never hangs. */
+test("a throwing slow view answers 500 instead of hanging the request", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const log = () => {};
+	const server = createViewer({ home: undefined as unknown as string, stateDir: join(home.path, LAYOUT.state), host: "127.0.0.1", port: 0, log });
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	t.after(() => server.close());
+	const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/jobs`, { signal: AbortSignal.timeout(10_000) });
+	assert.equal(res.status, 500);
+	assert.deepEqual(await res.json(), { error: "internal error" });
 });
