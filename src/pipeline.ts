@@ -5,7 +5,7 @@
  * that were prose ("the parent must remember to…") turned into a small state
  * machine over facts on disk:
  *
- *   two br issues + a dep link            (the ledger is the operator's view)
+ *   two jobs + a dep link                 (the ledger is the operator's view)
  *   state/pipelines/<research-id>.json    (the machine link between them)
  *   the planner's envelope, or its artifact alone (hung-planner recovery)
  *   state/runs/<research-id>/gate-<n>.json           (T20 decides)
@@ -242,7 +242,7 @@ const PIPELINE_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.free
 export const RISK_SIGNALS: ReadonlyArray<{ re: RegExp; why: string }> = Object.freeze([
 	{ re: /\b(migrat\w*|backfill|drop (the )?(table|column|index)|delet(e[sd]?|ing)|destroy(s|ed|ing)?|truncat(e[sd]?|ing)|purg(e[sd]?|ing))\b/i, why: "the task is destructive or irreversible" },
 	{ re: /\b(force[- ]?push(es|ed|ing)?|rewrit(e|es|ing) ((the|shared|git|branch|public) )*history|rebase (the )?(main|master|trunk))\b/i, why: "the task rewrites shared history" },
-	// Access work only: `authority`/`author` are ordinary prose, never credentials (bead b-qbi.2); bare `auth` is a prefix
+	// Access work only: `authority`/`author` are ordinary prose, never credentials (b-qbi.2); bare `auth` is a prefix
 	// (`auth headers`, `auth/models-store` in a redaction rule), not access work — only authn/authz/authentication/authorization count.
 	{ re: /\b(secrets?|credentials?|tokens?|password|auth([nz]|entication|enticat(e[sd]?|ing)|ori[sz]ation|ori[sz](e[sd]?|ing))|permissions?|access control)\b/i, why: "the task touches credentials or access" },
 	{ re: /\b(payment|billing|invoice|charge|refund)\b/i, why: "the task touches money" },
@@ -821,8 +821,8 @@ export class PipelineRunner {
 	}
 
 	/**
-	 * Two br issues, dep-linked, and the planner dispatched. The ship issue
-	 * is created **blocked**: `br ready` must never offer it before the research
+	 * Two jobs, dep-linked, and the planner dispatched. The ship job
+	 * is created **blocked**: `cp_job ready` must never offer it before the research
 	 * closes, and that is the ledger's job, not a convention.
 	 */
 	async start(request: StartRequest): Promise<StartResult> {
@@ -1352,7 +1352,7 @@ export class PipelineRunner {
 		return { ...(started ? { report: started } : {}), fresh: started !== undefined };
 	}
 
-	/** The task the artifact was written for: the br description, verbatim. */
+	/** The task the artifact was written for: the job description, verbatim. */
 	async #task(researchId: string): Promise<string> {
 		const issue = await this.#options.ledger.show(researchId).catch(() => undefined);
 		const description = typeof issue?.description === "string" ? issue.description.trim() : "";
@@ -1854,7 +1854,7 @@ export class PipelineRunner {
 	 *     job was dispatched with, never from the planner's rewritten `Goal`.
 	 *
 	 * `undefined` means **nothing was recorded**, which leaves the axis to
-	 * dispatch's own inference over the ship job's br title and description (which
+	 * dispatch's own inference over the ship job's title and description (which
 	 * are the original task). That is a different thing from a read that failed: an
 	 * `original-task.md` that exists and cannot be read throws, because "we could
 	 * not look" must never be rendered as "there is no risk".

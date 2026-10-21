@@ -3,7 +3,7 @@
  * hand-typed by the model. This pins the merge (disk snapshot + caller
  * judgment) and the rendering rules the issue's screenshot-derived comment
  * demanded: one line per empty section, a shared width, a bounded label, and
- * a fallback to the br title when the caller supplies none.
+ * a fallback to the job title when the caller supplies none.
  */
 
 import assert from "node:assert/strict";

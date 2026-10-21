@@ -67,7 +67,7 @@ test(
 			await fixture.cleanup();
 		});
 
-		// A br workspace, a registered project, a canonical clone, and a pool that
+		// A jobs ledger, a registered project, a canonical clone, and a pool that
 		// points at a temp dir (the house rule that keeps ~/.treehouse clean).
 		assert.ok(existsSync(join(fixture.home.path, ".pi-command-post/jobs.json")), "the ledger was not created");
 		assert.deepEqual(fixture.post.registry.names(), ["fixture"]);

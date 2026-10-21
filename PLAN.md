@@ -2,7 +2,7 @@
 
 This file is not the plan. Do not treat it as a task list.
 
-- **Roadmap** — beads issues in `.beads/` (gitignored, machine-local).
+- **Roadmap** — native jobs in the home's job ledger (`cp_job ready`; machine-local).
 - **Binding contract** — [`src/contracts.ts`](src/contracts.ts) and
   [`docs/contracts.md`](docs/contracts.md). Code wins on disagreement.
 - **History** — [`docs/build-history.md`](docs/build-history.md) (the rebuild)

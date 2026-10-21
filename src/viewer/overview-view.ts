@@ -65,7 +65,7 @@ function linedUp(state: ViewerState): OverviewResponse["lined_up"] {
  let older = false;
  const read = source<Omit<OverviewResponse["lined_up"],"availability">>(() => {
   const s = parseObject(readBounded(join(state.stateDir,"next-snapshot.json")));
-  // A pre-v2 snapshot (bead rows) is rewritten by the next cp_next: not yet written, never an error.
+  // A pre-v2 snapshot (external rows) is rewritten by the next cp_next: not yet written, never an error.
   if (typeof s?.schema_version === "number" && s.schema_version < 2) { older = true; return none; }
   const items = Array.isArray(s?.items) ? s.items.map(obj) : [undefined];
   const unavailable = Array.isArray(s?.unavailable) ? s.unavailable.map(obj) : [undefined];

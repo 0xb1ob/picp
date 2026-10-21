@@ -2,7 +2,7 @@
  * cp-f9jh: a declared Awaiting-you row does not outlive the job it asks about.
  *
  * The observed shape, twice on 2026-09-04: the operator was asked at 18:52
- * whether to merge PR #111 — merged at 18:45, br cp-gb3w closed — and answered
+ * whether to merge PR #111 — merged at 18:45, job cp-gb3w closed — and answered
  * "this is obsolete". Unasked wake-ups are staleness-checked and derived rows
  * clear with their source; declared rows had no such rule.
  */

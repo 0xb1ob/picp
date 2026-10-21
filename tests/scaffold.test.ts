@@ -228,7 +228,7 @@ test("the ledger step can be turned off for a home that will never dispatch", (t
 });
 
 // ---------------------------------------------------------------------------
-// cp-epy2 §4.2: a per-home br prefix (CP_LEDGER_PREFIX)
+// cp-epy2 §4.2: a per-home id prefix (CP_LEDGER_PREFIX)
 //
 // The prefix is the first component of every job id, and a job id **is** the
 // git branch a worker pushes. Two homes both minting `cp-…` against one remote

@@ -234,7 +234,7 @@ test("one canonical clone per name and per remote", async (t) => {
 	assert.deepEqual(registry.names(), ["muxa"]);
 });
 
-test("project names must survive as directories and as br labels", async (t) => {
+test("project names must survive as directories and as job labels", async (t) => {
 	const home = withHome(t);
 	const registry = new ProjectRegistry({ home: home.path });
 	for (const bad of ["../escape", "with space", "dotted.name", "", "UPPER/lower"]) {

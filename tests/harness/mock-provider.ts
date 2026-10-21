@@ -32,7 +32,7 @@ export interface MockToolCall {
 	 *
 	 * A **function** is called with the request that triggered this step and
 	 * must return the args. That is the only way to script a tool call whose
-	 * arguments contain an id minted at runtime (a job id from `br create`, say):
+	 * arguments contain an id minted at runtime (a job id from `cp_job create`, say):
 	 * the brief is in the request, so the test can read the id back out of it.
 	 * Everything else stays canned.
 	 */

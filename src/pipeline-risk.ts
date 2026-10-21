@@ -66,7 +66,7 @@ export interface ComposedRouting {
  *    the planner can report lowers it.
  *  - **`risk: "low"` is never emitted here at all.** Silence leaves the axis to
  *    `resolveRoutingInputs` at dispatch, which re-reads the ship job's own words
- *    (its br title and description are the original task) and defaults to `low`
+ *    (its job title and description are the original task) and defaults to `low`
  *    only when it finds nothing. A confident planner therefore cannot suppress
  *    the task's own evidence, and a genuinely low-impact task still routes low.
  *  - **Scope may shrink.** The planner measured the implementation; a plan that

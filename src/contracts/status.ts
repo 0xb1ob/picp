@@ -95,7 +95,7 @@ export function validateShippedSeenFile(value: unknown): ValidationResult<Shippe
 /**
  * Where a job's age is measured from. Ported from `cmdp status`
  * (`resolveTimestamp`): a dispatched job is aged from its dispatch, and a job
- * only the ledger knows about is aged from br's own `updated_at`.
+ * only the ledger knows about is aged from the ledger's own `updated_at`.
  */
 export const STATUS_TIME_SOURCES = ["dispatched_at", "br_updated_at"] as const;
 export type StatusTimeSource = (typeof STATUS_TIME_SOURCES)[number];
@@ -123,7 +123,7 @@ export const StatusJobSchema = Type.Object(
 		delivery: DeliverySchema,
 		origin: OriginSchema,
 		phase: JobPhaseSchema,
-		/** From the ledger join; null when br is unavailable or does not know the id. */
+		/** From the ledger join; null when the ledger is unavailable or does not know the id. */
 		title: Type.Union([Type.String(), Type.Null()]),
 		br_status: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
 		profile: Type.Optional(Type.String({ minLength: 1 })),
@@ -281,7 +281,7 @@ export type StatusJob = Replace<
 
 /**
  * A job the ledger calls `in_progress` that the fleet has no record of. Ported
- * from the `orphaned` nodes `cmdp status` synthesized from br — but it is NOT
+ * from the `orphaned` nodes `cmdp status` synthesized from its ledger — but it is NOT
  * given a job phase: the four phases describe records this home owns, and
  * inventing a fifth for something we cannot observe is the guessing the RPC
  * rebuild exists to end.
@@ -303,7 +303,7 @@ export type StatusUnclaimed = Narrow<Static<typeof StatusUnclaimedSchema>, "time
 /**
  * `/status --json`. The ledger join is allowed to be **degraded** (ported: the
  * "BROKER degraded — nodes below may be stale" banner): a read-only view of the
- * fleet must still render when br is missing, so the failure is reported in the
+ * fleet must still render when the ledger is unreadable, so the failure is reported in the
  * payload instead of refusing to answer.
  */
 export const StatusLedgerSchema = Type.Object(

@@ -3,7 +3,7 @@
  * orphan lease or branch when anything fails.
  *
  * The worker is a real `pi --mode rpc` child on the mock provider; the ledger
- * is a real scratch beads workspace; the lease is a real treehouse lease.
+ * is a real scratch jobs document; the lease is a real treehouse lease.
  */
 
 import assert from "node:assert/strict";
@@ -72,7 +72,7 @@ import {
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
 const BRIEFS_DIR = join(REPO_ROOT, "prompts/briefs");
 const READY = treehouseAvailable();
-const SKIP = READY ? false : "br and treehouse are required for dispatch tests";
+const SKIP = READY ? false : "treehouse is required for dispatch tests";
 
 interface Bench {
 	home: string;
@@ -464,7 +464,7 @@ test("dispatch: a non-main base reaches the ship brief, with no origin/main resi
 // artifact legitimately quoted credential-shaped text, because the whole
 // body was inlined into the brief the guard scans — and the parent has no
 // sanctioned way to read the artifact and resolve that itself. These three
-// tests are the acceptance criteria from the br issue, one each.
+// tests are the acceptance criteria from the job, one each.
 
 test(
 	"cp-n7w: an artifact with credential-shaped text reaches an implementer through taskFile without tripping the guard",

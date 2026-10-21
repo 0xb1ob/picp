@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { type NetworkInterfaceInfo, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { install, type InstallFlags, type InstallPorts, parseInstallArgs, type RunResult, workerPackageSpecs } from "../src/service/install.ts";
+import { install, type InstallFlags, type InstallPorts, parseInstallArgs, RETIRED_INSTALL_FLAGS, type RunResult, workerPackageSpecs } from "../src/service/install.ts";
 import { DAEMON_UNIT, HEALTH_TIMER, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, PARENT_UNIT, renderUnits, UPDATE_TIMER, VIEW_UNIT } from "../src/service/units.ts";
 import { daemonPaths } from "../src/service/daemon-files.ts";
 import { PI_LENS_TOOLS, REQUIRED_TOOLS } from "../src/tool-manifest.ts";
@@ -334,6 +334,10 @@ test("parseInstallArgs takes the documented flags and refuses others", () => {
 	assert.deepEqual({ ...parseInstallArgs(["--home", "/h", "--force", "--no-start", "--crontab", "--parent-model", "m/x", "--viewer-host", "100.70.1.2"]) }, { home: "/h", force: true, "no-start": true, crontab: true, "parent-model": "m/x", "viewer-host": "100.70.1.2" });
 	assert.deepEqual({ ...parseInstallArgs(["--operator-model", "o/m", "--gateway-url", "https://gw", "--gateway-key-file", "/k"]) }, { "operator-model": "o/m", "gateway-url": "https://gw", "gateway-key-file": "/k" });
 	assert.throws(() => parseInstallArgs(["--sudo"]));
+	const warned: string[] = [];
+	const retired = parseInstallArgs([...RETIRED_INSTALL_FLAGS.map((name) => `--${name}`), "--yes"], (line) => warned.push(line));
+	assert.deepEqual({ ...retired }, { yes: true }, "the removed tracker flags parse and are dropped");
+	assert.deepEqual(warned, RETIRED_INSTALL_FLAGS.map((name) => `--${name} is deprecated and ignored: the optional tracker step was removed`));
 });
 
 const iface = (address: string): NetworkInterfaceInfo => ({ address, netmask: "", family: address.includes(":") ? "IPv6" : "IPv4", mac: "", internal: false, cidr: null }) as NetworkInterfaceInfo;

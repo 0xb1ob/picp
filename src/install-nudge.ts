@@ -39,7 +39,7 @@ export function computeInstallNudge(options: InstallNudgeOptions): string | unde
 	// Deliberately not prefixed with the package name: `/cp-version` and the
 	// scaffold notify both use it, and a caller distinguishing "the version/home
 	// line" from "something else" by that substring (tests/e2e/packaging.test.ts
-	// does exactly this on a fresh home, where br/treehouse are genuinely
+	// does exactly this on a fresh home, where treehouse is genuinely
 	// missing) must not see this notify instead of the one it is waiting for.
 	return [
 		`install: missing from PATH: ${missing.join(", ")}`,

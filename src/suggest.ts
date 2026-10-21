@@ -11,7 +11,7 @@
  * The permitted input is a closed type (`SuggestionInput`): a whitelisted
  * projection of an awaiting item plus cheap job metadata already carried on
  * `ResolvedAwaitingItem` (`title`/`project`/`kind`/`delivery`, populated from
- * the status snapshot's own `StatusJob` — no extra br call, no artifact read,
+ * the status snapshot's own `StatusJob` — no extra ledger call, no artifact read,
  * no file body, ever, because there is no field in this type to put one in
  * (Constraints §C2). `buildSuggestionPrompt` accepts only `SuggestionInput`,
  * never a string blob, so no caller can smuggle a body past it.

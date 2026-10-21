@@ -191,12 +191,12 @@ test("(e) three relays raised during the operator's turn go out as one coalesced
 	assert.deepEqual(c.sent[0]?.details.relay_ids, ids);
 });
 
-// N9 (cp-c1ur): every relay triggered an operator turn, so landings and idle-beads notices cost no-op turns.
+// N9 (cp-c1ur): every relay triggered an operator turn, so landings and informational notices cost no-op turns.
 test("N9: a message of informational relays only is quiet; one actionable relay makes it triggering", () => {
 	const h = home();
 	const c = consumer(h);
 	h.outbox.enqueue(relay({ text: "HELD PR LANDED — cp-a", informational: true }), "h");
-	h.outbox.enqueue(relay({ text: "idle beads", informational: true }), "h");
+	h.outbox.enqueue(relay({ text: "idle notice", informational: true }), "h");
 	c.instance.poke();
 	assert.equal(c.sent[0]?.quiet, true);
 	h.outbox.enqueue(relay({ text: "HELD PR LANDED — cp-b", informational: true }), "h");

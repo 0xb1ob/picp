@@ -55,7 +55,7 @@ AwaitingDeclaredTypeSchema	value	23d550656cf58e23	883abdaaaf466dbc
 AwaitingFile	type	f2854410f34ae97c	-
 AwaitingFileSchema	value	f685a7c81d30dfb0	0f9da54c7f316e9a
 AwaitingItem	type	0c4057860a400cef	-
-AwaitingItemSchema	value	b0fb6c42aa887b66	ef1b243f44e9e3fb
+AwaitingItemSchema	value	46f0202eb97fabf2	ef1b243f44e9e3fb
 AwaitingMerge	type	d1848d6feea9e23c	-
 AwaitingMergeSchema	value	2491fc3deb7ba862	6c3c7bba0176fafa
 AwaitingMergeWatchFile	type	ba3e155340377b05	-
@@ -226,7 +226,7 @@ EscalationStatus	type	a7c0c341e7582574	-
 EscalationStatusSchema	value	bd1293e1b774ad5b	e3317a5f179af8d4
 FAILURE_CLASSES	value	8ef3b7a86454b6df	a793e5c61b256770
 FAILURE_RECOVERABLE	value	dd1aad215d6416ba	3f6fa772b49c5629
-FLEET_MUTATING_TOOLS	value	c5788a3b2d6cb437	2a9b04e913a39dd3
+FLEET_MUTATING_TOOLS	value	2960f5b60eb87284	2a9b04e913a39dd3
 FOREIGN_CI_EVENTS	value	c7769d8dc4748ec9	f267efcad78d058e
 FOREIGN_CI_GATE_TIMEOUT_MS	value	50ba15296b763f05	c48664a448d8a63d
 FOREIGN_CI_KEEP_ANNOUNCED	value	4d33238c0594d553	a68b412c4282555f
@@ -271,7 +271,7 @@ GateVerdictValueSchema	value	6648286d7eec85a3	aebcc3b1d2b23263
 GrantScopePolicy	type	974527ac8ac2b662	-
 INTEGRATE_MAX_RESOLVE	value	bdc87c3025204441	6b86b273ff34fce1
 INTEGRATION_NEXT	value	76acfaafa365cf85	a5da09bd007cd5ff
-INTEGRATION_STEPS	value	e66c7fc997894dca	2174cf26134b9f08
+INTEGRATION_STEPS	value	45f89c7393e26297	2174cf26134b9f08
 ISO_TIMESTAMP_PATTERN	value	8c061109664b4597	8d318fa346b2a5c3
 IntegrationNext	type	b07262c06f504aad	-
 IntegrationNextSchema	value	ba67a33baa0175e2	5a2c7798f62ef226
@@ -596,7 +596,7 @@ StateWakeupAnnouncement	type	c704adb295124277	-
 StatusInclude	type	89e7e1814053bada	-
 StatusIncludeSchema	value	c0a096e462b8f96f	8bcedc5af99c0f3e
 StatusJob	type	27dc5fafe2a575a5	-
-StatusJobSchema	value	9c0cd1dd07c60875	53b018783cb99fa4
+StatusJobSchema	value	6a35b8d777de08ba	53b018783cb99fa4
 StatusLedger	type	8178eaece4cd2f0f	-
 StatusLedgerSchema	value	faacec4c6359ddee	34826a0f3ad2cbc3
 StatusSnapshot	type	5be3a3ca721911b9	-
@@ -635,7 +635,7 @@ VerdictRecordSchema	value	584a05b7a4517422	a00bcd51ce5e75a2
 WAKEUP_LATE_SECONDS	value	6b43256455ebad65	39fa9ec190eee7b6
 WEDGED_TOOL_CALL_SECONDS	value	5b21ad3e6f6e7720	e49ec846db7527df
 WORKER_FORBIDDEN_FLAGS	value	4ec1af8a0260c77a	c280ce9a9ccaf4d1
-WORKER_FORBIDDEN_TOOLS	value	343804eaf4fff958	93bf5e87690cacd9
+WORKER_FORBIDDEN_TOOLS	value	ab4304a81b56572c	93bf5e87690cacd9
 WORKER_REQUIRED_FLAGS	value	e45c2236cccc20e3	3e11a790ba9bfaf5
 WorkerHandle	type	84f268dcab8d84fc	-
 WorkerHandleSchema	value	21c1ae898916fe2b	aabf17b75ce303de

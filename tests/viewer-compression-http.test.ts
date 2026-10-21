@@ -11,7 +11,10 @@ import { createScratchHome } from "./harness/index.ts";
 import { call, remoteRig } from "./harness/remote.ts";
 import { createRemoteViewer } from "../src/viewer/remote-server.ts";
 
-test("bodies of at least 1 KiB are gzip/br-encoded when accepted; streams, small and HEAD replies stay identity", async (t) => {
+/** The HTTP content-coding token for Brotli. */
+const BROTLI = "br";
+
+test("bodies of at least 1 KiB are gzip/Brotli-encoded when accepted; streams, small and HEAD replies stay identity", async (t) => {
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const stateDir = join(home.path, LAYOUT.state);
 	mkdirSync(join(stateDir, "operator"), { recursive: true });
@@ -46,17 +49,17 @@ test("bodies of at least 1 KiB are gzip/br-encoded when accepted; streams, small
 	assert.ok(gz.body.length < plain.body.length);
 	assert.deepEqual(strip(gunzipSync(gz.body)), strip(plain.body));
 
-	const br = await get("/api/decisions", { "accept-encoding": "gzip, br" });
-	assert.equal(br.headers["content-encoding"], "br");
-	assert.deepEqual(strip(brotliDecompressSync(br.body)), strip(plain.body));
-	assert.equal((await get("/api/decisions", { "accept-encoding": "br;q=0, gzip" })).headers["content-encoding"], "gzip", "q=0 refuses a coding");
+	const brotli = await get("/api/decisions", { "accept-encoding": `gzip, ${BROTLI}` });
+	assert.equal(brotli.headers["content-encoding"], BROTLI);
+	assert.deepEqual(strip(brotliDecompressSync(brotli.body)), strip(plain.body));
+	assert.equal((await get("/api/decisions", { "accept-encoding": `${BROTLI};q=0, gzip` })).headers["content-encoding"], "gzip", "q=0 refuses a coding");
 
-	const health = await get("/healthz", { "accept-encoding": "gzip, br" });
+	const health = await get("/healthz", { "accept-encoding": `gzip, ${BROTLI}` });
 	assert.equal(health.status, 200);
 	assert.equal(health.headers["content-encoding"], undefined, "a 3-byte body is not worth encoding");
 	assert.equal((await get("/api/decisions", { "accept-encoding": "gzip" }, "HEAD")).headers["content-encoding"], undefined);
 
-	const stream = await get("/api/stream?view=overview", { "accept-encoding": "gzip, br" }, "HEAD");
+	const stream = await get("/api/stream?view=overview", { "accept-encoding": `gzip, ${BROTLI}` }, "HEAD");
 	assert.match(String(stream.headers["content-type"]), /^text\/event-stream/);
 	assert.equal(stream.headers["content-encoding"], undefined, "the refresh stream is never compressed");
 

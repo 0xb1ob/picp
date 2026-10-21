@@ -117,10 +117,20 @@ export interface InstallFlags {
 	"no-self-package"?: boolean;
 }
 
-export function parseInstallArgs(argv: readonly string[]): InstallFlags {
+/** Flags of the removed optional tracker step: still parsed so old install scripts run, then ignored. */
+export const RETIRED_INSTALL_FLAGS = ["with-br", "no-br"] as const;
+
+export function parseInstallArgs(argv: readonly string[], warn: (line: string) => void = (line) => process.stderr.write(`${line}\n`)): InstallFlags {
 	const text = { type: "string" } as const;
 	const flag = { type: "boolean" } as const;
-	return parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "no-pi-packages": flag, "no-self-package": flag } }).values;
+	const retired = Object.fromEntries(RETIRED_INSTALL_FLAGS.map((name) => [name, flag])) as Record<(typeof RETIRED_INSTALL_FLAGS)[number], typeof flag>;
+	const values: InstallFlags & Partial<Record<(typeof RETIRED_INSTALL_FLAGS)[number], boolean>> = parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "no-pi-packages": flag, "no-self-package": flag, ...retired } }).values;
+	for (const name of RETIRED_INSTALL_FLAGS) {
+		if (values[name] === undefined) continue;
+		warn(`--${name} is deprecated and ignored: the optional tracker step was removed`);
+		delete values[name];
+	}
+	return values;
 }
 
 
