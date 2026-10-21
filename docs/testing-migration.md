@@ -503,7 +503,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/viewer-job-report.test.ts` | #380 | unit test landed on main after the baseline (viewer job report pages); recorded by P2 so the check stays at 0 findings, disposition left to its behavior's PR |
 | `tests/e2e/retired-integration.test.ts` | #379 | existing-home compatibility after the tracker removal |
 | `tests/test-migration-check.test.ts` | #379 | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
-| `tests/retired-integration-guard.test.ts` | #389 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/check-retired-integration.ts` itself, a CI guard no product entry point reaches, so it has no e2e consumer path; covers the clean tree and every rejection path |
+| `tests/retired-integration-guard.test.ts` | #392 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/check-retired-integration.ts` itself, a CI guard no product entry point reaches, so it has no e2e consumer path; covers the clean tree and every rejection path |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -945,7 +945,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/web-egress.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/wedged.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/widget.test.ts` | exception | P1 | golden: widget TUI; operator ask-0088e0332d00 (Exceptions) |
-| `tests/worker-beads.test.ts` | deleted-with-feature | #389 | tested the retired database variables in a worker's environment; their source `src/trackers/beads.ts` went with #384 and the environment strip went with #389 |
+| `tests/worker-beads.test.ts` | deleted-with-feature | #392 | tested the retired database variables in a worker's environment; their source `src/trackers/beads.ts` went with #384 and the environment strip went with #392 |
 | `tests/worker-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/worker-credential-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/worker-history-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |

@@ -351,7 +351,7 @@
 	},
 	{
 		"path": "docs/testing-migration.md",
-		"sha256": "4c8a3b68c4dc910820f85e31bf5b6348e2da5b3400c9e9dfdc965b6b5a762f39",
+		"sha256": "3a2db80e21b15a0faa804ab6f1213192475da0315ec5b76ea06f4db22f2fafd9",
 		"count": 1,
 		"category": "deleted-feature-record",
 		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
