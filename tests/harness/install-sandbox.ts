@@ -19,6 +19,15 @@ export type Scenario = (typeof SCENARIOS)[number];
 export const IMAGE = "picp-install-sandbox:local";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const PI_COMPAT = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { piCompat: { min: string; testedMax: string } }).piCompat;
+/** The stub versions around package.json piCompat (#405): never a literal, so a moved range moves the scenarios. */
+function piVersions(): { min: string; max: string; major: number; nextMajor: string; newerSame: string; older: string } {
+	const { min, testedMax: max } = PI_COMPAT;
+	const [major = 0, , pat = 0] = max.split(".").map(Number);
+	const [minMaj = 0, minMin = 0, minPat = 0] = min.split(".").map(Number);
+	const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : `${minMaj - 1}.99.0`;
+	return { min, max, major, nextMajor: `${major + 1}.0.0`, newerSame: max.replace(/\d+$/, String(pat + 1)), older };
+}
+const esc = (text: string): string => text.replace(/\./g, "\\.");
 const RESULT_MARK = "INSTALL_SANDBOX_RESULT ";
 const PHASE_TIMEOUT_MS = 300_000;
 
@@ -378,14 +387,7 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 			return { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` };
 		};
 		makePiStub();
-		const { min, testedMax: max } = PI_COMPAT;
-		const [maj = 0, , pat = 0] = max.split(".").map(Number);
-		const [minMaj = 0, minMin = 0, minPat = 0] = min.split(".").map(Number);
-		const major = maj;
-		const nextMajor = `${maj + 1}.0.0`;
-		const newerSame = max.replace(/\d+$/, String(pat + 1));
-		const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : `${minMaj - 1}.99.0`;
-		const esc = (text: string): string => text.replace(/\./g, "\\.");
+		const { min, max, major, nextMajor, newerSame, older } = piVersions();
 		const updates = (): string => (existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "");
 		const range = `pi >= ${min}, tested up to ${max}, major ${major}`;
 		const refusals = [
@@ -423,16 +425,17 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 	async prompt(ctx) {
 		// #375 PR4: through a terminal with complete flags and no --yes, the one prompt is the below-min pi update.
 		const restore = makePiStub();
-		writeFileSync(join(PI_STUB, "version"), "0.99.0\n");
-		writeFileSync(join(PI_STUB, "update-to"), "1.0.4\n");
+		const { min, max, major, older } = piVersions();
+		writeFileSync(join(PI_STUB, "version"), `${older}\n`);
+		writeFileSync(join(PI_STUB, "update-to"), `${max}\n`);
 		const env = { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` };
 		const flags = ["--home", CP_HOME, "--app", APP, "--parent-model", ctx.model, "--viewer-host", "127.0.0.1", "--no-update"];
 		const ask = "update --self now? [y/N] ";
 		const run = await verify(ctx, "curl | sh with a terminal, pi below min", await bootstrapTty(ctx, "curl | sh with a terminal, pi below min", flags, env, [{ after: ask, type: "y\n" }]));
 		const updates = existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "";
 		restore();
-		check(ctx, run.includes(`pi 0.99.0 is older than 1.0.1 (pi >= 1.0.1, tested up to 1.0.4, major 1). Run "${PI_STUB}/pi" ${ask.trim()}`), "prompt: the below-min question did not render on the terminal");
-		check(ctx, updates === "update --self" && /^ok: pi: updated 0\.99\.0 -> 1\.0\.4 /m.test(run), `prompt: the typed y did not run one \`pi update --self\` (got "${updates}")`);
+		check(ctx, run.includes(`pi ${older} is older than ${min} (pi >= ${min}, tested up to ${max}, major ${major}). Run "${PI_STUB}/pi" ${ask.trim()}`), "prompt: the below-min question did not render on the terminal");
+		check(ctx, updates === "update --self" && new RegExp(`^ok: pi: updated ${esc(older)} -> ${esc(max)} `, "m").test(run), `prompt: the typed y did not run one \`pi update --self\` (got "${updates}")`);
 		check(ctx, run.split("\n").filter((line) => line.includes("[y/N]") || /\(empty .*\): $/.test(line)).length === 1, "prompt: complete flags asked more than the one pi question");
 	},
 	async "node-floor"(ctx) {
