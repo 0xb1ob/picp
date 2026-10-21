@@ -193,7 +193,7 @@ test("clean machine: a fresh clone loads, scaffolds its home and is dispatchable
 		assert.deepEqual(
 			errors.map((finding) => finding.check),
 			[],
-			`a clean machine with the host tools installed should be dispatchable: ${errors.map((f) => `${f.check}: ${f.what}`).join("; ")}`,
+			`a clean machine with the host tools installed should be dispatchable: ${errors.map((f) => `${f.check}: ${f.what}${f.detail ? ` (${f.detail})` : ""}`).join("; ")}`,
 		);
 	} else {
 		console.log(

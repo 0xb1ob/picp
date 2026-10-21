@@ -486,16 +486,26 @@ export class Doctor {
 
 	/** #375: the installer's classification of the pi on PATH (package.json piCompat), read-only. */
 	async #piCompat(pi: string, probe: (pi: string) => PiProbe | Promise<PiProbe>): Promise<DoctorFinding[]> {
+		let compat: ReturnType<typeof readPiCompat>;
 		try {
-			const compat = readPiCompat(this.#options.packageRoot);
-			const result = classifyPi(compat, await probe(pi));
-			const finding = piCompatFinding(result, pi);
-			if (result.state !== "newer" || !result.version) return [finding];
+			compat = readPiCompat(this.#options.packageRoot);
+		} catch (error) {
+			return [{ check: PI_COMPAT_CHECK, severity: "error", what: "package.json piCompat is unreadable", detail: (error as Error).message, fix: "restore piCompat {min, testedMax} in the package's package.json" }];
+		}
+		let result: ReturnType<typeof classifyPi>;
+		try {
+			result = classifyPi(compat, await probe(pi));
+		} catch (error) {
+			result = { ...classifyPi(compat, { extension: { ok: false, detail: "" } }), detail: `probe failed: ${(error as Error).message}` };
+		}
+		const finding = piCompatFinding(result, pi);
+		if (result.state !== "newer" || !result.version) return [finding];
+		try {
 			const sh = (command: string, args: string[]) => this.#run(command, args, this.#options.packageRoot);
 			const drift = piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, sh), this.#now());
 			return drift ? [finding, drift] : [finding];
-		} catch (error) {
-			return [{ check: PI_COMPAT_CHECK, severity: "error", what: "package.json piCompat is unreadable", detail: (error as Error).message, fix: "restore piCompat {min, testedMax} in the package's package.json" }];
+		} catch {
+			return [finding]; // drift is advisory: a failed read drops only its own finding
 		}
 	}
 
