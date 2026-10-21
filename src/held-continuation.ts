@@ -182,7 +182,7 @@ export class HeldContinuation {
 
 	/** Run `fn` after every earlier step on the same project's lane. */
 	serialize<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
-		const lane = this.#deps.fleet.get(jobId)?.project ?? jobId;
+		const lane = this.#readRecord(jobId)?.project ?? jobId;
 		const run = (this.#lanes.get(lane) ?? Promise.resolve()).then(fn);
 		const tail = run.then(
 			() => undefined,
@@ -195,13 +195,22 @@ export class HeldContinuation {
 		return run;
 	}
 
+	/** A fleet read before the step's try must not reject the trigger; `#drive` re-reads inside its catch. */
+	#readRecord(jobId: string): ReturnType<FleetStore["get"]> {
+		try {
+			return this.#deps.fleet.get(jobId);
+		} catch {
+			return undefined;
+		}
+	}
+
 	/**
 	 * Every trigger is snapshotted when observed: the generation, and the head its owning
 	 * source holds (unless the event carries its own). Both are its identity and are
 	 * required to still match before each step.
 	 */
 	async trigger(observed: ContinuationTrigger): Promise<ContinuationOutcome> {
-		const record = this.#deps.fleet.get(observed.jobId);
+		const record = this.#readRecord(observed.jobId);
 		const generation = observed.generation ?? (record ? (record.supersessions ?? 0) + 1 : undefined);
 		const head = observed.head ?? this.#deps.head(observed.jobId, headOwner(observed.event));
 		const trigger: ContinuationTrigger = { ...observed, ...(generation !== undefined ? { generation } : {}), ...(head ? { head } : {}) };
