@@ -112,34 +112,6 @@
 		"reason": "released changelog history, frozen; new entries say retired external integration"
 	},
 	{
-		"path": "docs/superpowers/plans/2026-09-05-handoff-async-reviewers.md",
-		"sha256": "ba6141737873b558a1315f10f6c601ee34adbb13a536b3bee61beaa2b3e45e2a",
-		"count": 1,
-		"category": "retired-doc-pointer",
-		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
-	},
-	{
-		"path": "docs/superpowers/plans/2026-09-05-handoff-async-reviewers.md",
-		"sha256": "6721e0a10af16abebbc8f30ed175b09f1ca420c4f4e8916ac9986fb623e715d4",
-		"count": 1,
-		"category": "retired-doc-pointer",
-		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
-	},
-	{
-		"path": "docs/superpowers/specs/2026-09-04-package-audit.md",
-		"sha256": "fb483737459585b400dbecb2d5771b209977a8fa9066d6a55761fbface6c7fb0",
-		"count": 1,
-		"category": "retired-doc-pointer",
-		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
-	},
-	{
-		"path": "docs/superpowers/specs/2026-09-04-package-audit.md",
-		"sha256": "c62b5c155800ae6e3702804af4328e052ab87cae48b7ad8a314afe64ba4e9713",
-		"count": 1,
-		"category": "retired-doc-pointer",
-		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
-	},
-	{
 		"path": "docs/testing-migration.md",
 		"sha256": "5c2e88459188b43f9b1a8d8eae53b0b7c87bcf09087d537df6fe994ff313d0b1",
 		"count": 1,

@@ -5,7 +5,7 @@ Paste the prompt below into a fresh Claude Code session opened at the root of
 `spec/async-reviewers`; merge it into `main` first, or start from it.
 
 This plan comes **after** the three-item sequence in the handoff plan
-(retired with beads removal): PR 1 (the `job_id` rename) and PR 2 (in-house
+(retired doc): PR 1 (the `job_id` rename) and PR 2 (in-house
 ledger) must be merged before this starts. PR 3 (single-project mode) may
 land before or after; the plan goes through `paths.*` everywhere and needs
 nothing from it.
@@ -18,7 +18,7 @@ Implement the asynchronous-reviewers change to pi-command-post as one PR. It is 
 Read first, in this order:
 1. docs/superpowers/specs/2026-09-05-async-reviewers-design.md — decisions D1–D11 are settled. cp_gate, cp_review and the quality panel return `wait` at spawn and finish in the background; a sixth wake-up, cp-verdict, carries the verdict; cp_pipeline advance returns `wait` while a reviewer runs.
 2. docs/superpowers/plans/2026-09-05-async-reviewers.md — ten tasks, each with tests and code, ending in an operator step and the PR.
-3. The ledger design spec (retired with beads removal) — context only: this plan assumes both of its PRs have landed.
+3. The ledger design spec (retired doc) — context only: this plan assumes both of its PRs have landed.
 
 Precondition, check before anything else: `src/ledger.ts` must be the in-house JSON ledger and every id must be a `job_id`. If either check fails, stop and report; do not start.
 

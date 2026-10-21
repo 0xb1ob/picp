@@ -18,7 +18,6 @@ export const CATEGORY_PATHS: Readonly<Record<string, readonly string[]>> = {
 	"self-pattern": ["scripts/check-retired-integration.ts"],
 	"deleted-feature-record": ["docs/testing-migration.md"],
 	"legacy-compat": [".gitignore", "src/service/install.ts"],
-	"retired-doc-pointer": ["docs/superpowers/plans/2026-09-05-handoff-async-reviewers.md", "docs/superpowers/specs/2026-09-04-package-audit.md"],
 };
 
 export interface Match { path: string; line: string }
