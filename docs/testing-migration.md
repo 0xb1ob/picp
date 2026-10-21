@@ -67,6 +67,7 @@ ask-0088e0332d00, 2026-10-21.
 | S02 (cp-e2e-slice-s02-l7ph) | behavior 05; `tests/ci-watch.test.ts` declarations 1–40: 36 mapped, 4 mixed/unreachable and kept in place; five added e2e declarations, 05-8 extended. S03 owns 41–80 and whole-file retirement. | 0 (split-file bookkeeping: all units stay) | 378 → 378 | 4,274 → 4,279 |
 | S07 (cp-e2e-slice-s07-eaux) | P3c-rest behavior 05: only integrate-held-ci; 3 mapped, 0 retained, 1 deleted file; extends 05-13 and adds 05-S07; all other slices retain their ownership | 1 (`tests/integrate-held-ci.test.ts`) | 378 → 377 | 4,274 → 4,272 (3 removed, 1 added) |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
+| S05 (cp-e2e-slice-s05-mzpm) | behavior 05; declarations 41–55 and final retirement of `tests/diff-review.test.ts`. [S05 accounting and controls](testing-migration-s05-declarations.md): 15 mapped; whole file 53 mapped, 2 retained declarations plus the split unknown-job guard. | 1 original file retired; retained replacement is not deletion credit | +1 retained file (convert-owned P3c-rest), 3 tests; +7 e2e scenarios | -55 original declarations, +3 retained, +7 e2e = -45 net declarations |
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. `tests/ci-watch.test.ts` remains 80 static declarations / 89 executed cases. No checker or contract
@@ -337,6 +338,26 @@ moves first.
 | 05-S02-4 | `tests/e2e/landing.test.ts` | landing S02: unavailable gh disables GitHub queries while GitLab remains observable |
 | 05-S02-5 | `tests/e2e/landing.test.ts` | landing S02: watcher queries stay nonblocking while workers refuse CI waits |
 | 05-S07 | `tests/e2e/landing.test.ts` | landing: held CI repair checks Sender authority before restoring a worker |
+| DR-01 | `tests/e2e/diff-review.test.ts` | S04: cp_review gives the reviewer a complete three-dot subject from the canonical clone |
+| DR-02 | `tests/e2e/diff-review.test.ts` | S04: cp_review stops wide, oversized and unparseable subjects before a model sees them |
+| DR-03 | `tests/e2e/diff-review.test.ts` | S04: review packets preserve frozen scope and context while persisted verdicts exclude gate-only fields |
+| DR-04 | `tests/e2e/diff-review.test.ts` | S04: cp_review refuses absent, research and unpushed subjects with their recovery action |
+| DR-05 | `tests/e2e/diff-review.test.ts` | S04: moved heads use complete deltas and patch-equivalent rebases reuse only complete passes |
+| DR-06 | `tests/e2e/diff-review.test.ts` | S04: review flags remain reported while blocking findings surface when the implementer is gone |
+| DR-07 | `tests/e2e/diff-review.test.ts` | S04: a paused or revoked mandate refuses reviewer spend and replacement authority restores it |
+| DR-08 | `tests/e2e/diff-review.test.ts` | S04: legacy stranded verdicts settle once and oversized frozen tasks state their boundary |
+| DR-09 | `tests/e2e/diff-review.test.ts` | S04: reviewer preferences reread project and mandate settings while preserving the ship route |
+| DR-10 | `tests/e2e/diff-review.test.ts` | S04: configured reviewer denials never fall back, while an unconfigured route uses its authenticated fallback |
+| DR-11 | `tests/e2e/diff-review.test.ts` | S04: pipeline advance holds unresolved and moved heads until a review of the current commit exists |
+| DR-12 | `tests/e2e/diff-review.test.ts` | S04: blocking review promotes the real implementer on the same branch with the remaining review budget |
+| DR-13 | `tests/e2e/diff-review.test.ts` | S04: complete deltas remain reviewable when supplemental branch history exceeds the byte cap |
+| DR-14 | `tests/e2e/diff-review.test.ts` | S05: unknown and malformed legacy review heads never become delta baselines |
+| DR-15 | `tests/e2e/diff-review.test.ts` | S05: integrating an advanced base resets the delta while an unmerged advance preserves it |
+| DR-16 | `tests/e2e/diff-review.test.ts` | S05: a settled reviewer without a verdict retries once with the full subject then surfaces |
+| DR-17 | `tests/e2e/diff-review.test.ts` | S05: pending reviews fence duplicate starts and carry the reviewed head in one wake |
+| DR-18 | `tests/e2e/diff-review.test.ts` | S05: the fifth complete review surfaces findings and binds one final-fix checkpoint; a sixth never starts |
+| DR-19 | `tests/e2e/diff-review.test.ts` | S05: a pass at review three ends the loop and wide subjects finish synchronously without a wake |
+| DR-20 | `tests/e2e/diff-review.test.ts` | S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -653,6 +674,62 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/parked-ci.test.ts` | parked CI: a held job reads nothing | 05-12 | redundant-unreachable | The direct held-with-handoff helper input cannot reach the observer: watch candidates must be awaiting_merge, and the fleet schema refuses legacy held parking records before observation. 05-12 pins both boundaries with `a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`; this is not a claimed failing phase-guard control. |
 | `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
 | `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
+| `tests/diff-review.test.ts` | 01 configuration schema | DR-11 | mapped | nc-config: missing expected pipeline contract rejection |
+| `tests/diff-review.test.ts` | 02 parallel verdict schema | DR-03 | mapped | nc-summary: real pass must persist without gate-only fields |
+| `tests/diff-review.test.ts` | 03 checkpoint paths | DR-11 | mapped | nc-checkpoint-path: review question must differ from ship decision |
+| `tests/diff-review.test.ts` | 04 review paths | DR-03 | mapped | nc-review-path: assert.doesNotReject fails when a diff verdict overwrites gate-1.json |
+| `tests/diff-review.test.ts` | 05 subject-independent policy | DR-06 | mapped | nc-flags: flagged pass must remain pass |
+| `tests/diff-review.test.ts` | 06 prior attempt isolation | DR-03 | mapped | nc-prior-isolation: assert.doesNotReject fails on consuming plan-gate history as a diff verdict |
+| `tests/diff-review.test.ts` | 07 complete small subject | DR-01 | mapped | nc-three-dot: branch file count must be three |
+| `tests/diff-review.test.ts` | 08 quoted paths | DR-02 | mapped | nc-quoted: quoted input must stop as policy |
+| `tests/diff-review.test.ts` | 09 stat cap | DR-02 | mapped | nc-stat: wide input must stop as policy |
+| `tests/diff-review.test.ts` | 10 byte cap | DR-02 | mapped | nc-incomplete: byte input must stop as policy |
+| `tests/diff-review.test.ts` | 11 three-dot range | DR-01 | mapped | nc-three-dot: excludes base-only file |
+| `tests/diff-review.test.ts` | 12 import and schema identity | DR-18 | retained | `tests/diff-review-retained.test.ts`: cp_review cannot expose source import identity; runtime budget is mapped by DR-18 |
+| `tests/diff-review.test.ts` | 13 configured preferences | DR-09 | mapped | nc-preference: selected project model must receive the request |
+| `tests/diff-review.test.ts` | 14 configured refusals | DR-10 | mapped | nc-preference: configured allowlist must reject without fallback |
+| `tests/diff-review.test.ts` | 15 role denial | DR-10 | mapped | nc-role-deny: ignoring deniedFor must miss the expected role rejection |
+| `tests/diff-review.test.ts` | 16 inherited impact axes | DR-10 | mapped | nc-inherited-route: large-risky model must be selected |
+| `tests/diff-review.test.ts` | 17 authenticated fallback | DR-10 | mapped | nc-fallback: usable spare review must not reject |
+| `tests/diff-review.test.ts` | 18 absent dispatch | DR-04 | mapped | nc-refusal: error must name cp_dispatch |
+| `tests/diff-review.test.ts` | 19 research refusal | DR-04 | mapped | nc-recovery-actions: error must name cp_gate |
+| `tests/diff-review.test.ts` | 20 unpushed refusal | DR-04 | mapped | nc-recovery-actions: error must name git push |
+| `tests/diff-review.test.ts` | 21 canonical current and non-ship heads | DR-11 | mapped | nc-head: ship reaches done; nc-research-head: research must hold |
+| `tests/diff-review.test.ts` | 21 unknown-job headSha sub-probe | DR-11 | retained | `tests/diff-review-retained.test.ts`: PipelineRunner.advance checks fleet.get(ship_id) before the sole headSha caller |
+| `tests/diff-review.test.ts` | 22 persisted pass and privacy | DR-03 | mapped | nc-summary: pass persistence must succeed |
+| `tests/diff-review.test.ts` | 23 gate-only decision summary | DR-03 | mapped | nc-summary: summary-bearing pass must persist |
+| `tests/diff-review.test.ts` | 24 stranded summary replay | DR-08 | mapped | nc-summary: stranded review must settle as pass |
+| `tests/diff-review.test.ts` | 25 synthetic throwing shutdown | DR-16 | retained | `tests/diff-review-retained.test.ts`: cp_review has no entry point that replaces manager.shutdown with a one-shot throwing function |
+| `tests/diff-review.test.ts` | 26 equivalent patch reuse | DR-05 | mapped | nc-equivalence: same patch must reuse prior attempt |
+| `tests/diff-review.test.ts` | 27 reviewer mandate | DR-07 | mapped | nc-mandate: paused authority must reject spend |
+| `tests/diff-review.test.ts` | 28 changed head delta | DR-05 | mapped | nc-no-delta: delta_from must match prior head |
+| `tests/diff-review.test.ts` | 29 frozen task packet | DR-03 | mapped | nc-task-copy: copied task must equal original |
+| `tests/diff-review.test.ts` | 30 unchanged head context | DR-03 | mapped | nc-context: README manifest entry must be included |
+| `tests/diff-review.test.ts` | 31 authorized addenda | DR-03 | mapped | nc-addenda: brief must name task-addenda.md |
+| `tests/diff-review.test.ts` | 32 task boundary | DR-03 | mapped | nc-task-boundary: brief must name source of truth |
+| `tests/diff-review.test.ts` | 33 bounded oversized task | DR-08 | mapped | nc-task-cap: copied task must be bounded |
+| `tests/diff-review.test.ts` | 34 same-branch promotion | DR-12 | mapped | nc-promotion: actual implementer request needs same-branch guidance |
+| `tests/diff-review.test.ts` | 35 missing implementer surfaces | DR-06 | mapped | nc-delivery-error: wake must name no live worker |
+| `tests/diff-review.test.ts` | 36 flags do not veto | DR-06 | mapped | nc-flags: pass must stay pass |
+| `tests/diff-review.test.ts` | 37 stat overflow no reviewer | DR-02 | mapped | nc-stat: wide input must stop before model |
+| `tests/diff-review.test.ts` | 38 omitted code stops | DR-02 | mapped | nc-incomplete: hidden-code subtest must stop as policy |
+| `tests/diff-review.test.ts` | 39 partial pass not reused | DR-05 | mapped | nc-partial-pass: inherited review must be absent |
+| `tests/diff-review.test.ts` | 40 bounded supplemental history | DR-13 | mapped | nc-no-delta: small complete delta must pass |
+| `tests/diff-review.test.ts` | 41 incomplete stop replay | DR-02 | mapped | nc-policy-replay: replay must retain attempt one |
+| `tests/diff-review.test.ts` | 42 rebased upstream | DR-15 | mapped | nc-delta: rebase subtest must pass |
+| `tests/diff-review.test.ts` | 43 merged upstream | DR-15 | mapped | nc-delta: merge subtest must pass |
+| `tests/diff-review.test.ts` | 44 unmerged upstream | DR-15 | mapped | nc-no-delta: none subtest must keep delta_from |
+| `tests/diff-review.test.ts` | 45 unknown and malformed prior heads | DR-14 | mapped | nc-delta: both subtests must not reject |
+| `tests/diff-review.test.ts` | 46 operational ladder | DR-16 | mapped | nc-operational: second cause must be persistent |
+| `tests/diff-review.test.ts` | 47 recycled worktree | DR-01 | mapped | nc-canonical: canonical review must not reject |
+| `tests/diff-review.test.ts` | 48 reviews-per-branch cap | DR-18 | mapped | nc-cap: fifth verdict must escalate |
+| `tests/diff-review.test.ts` | 49 third revise | DR-12 | mapped | nc-promotion: review-three implementer request needs branch guidance |
+| `tests/diff-review.test.ts` | 50 third pass | DR-19 | mapped | nc-third-pass: third verdict must pass |
+| `tests/diff-review.test.ts` | 51 fifth review and sixth refusal | DR-18 | mapped | nc-cap: fifth verdict must escalate |
+| `tests/diff-review.test.ts` | 52 final fix eligibility and findings | DR-18 | mapped | nc-final-fix-eligibility in DR-20: no forbidden checkpoint; nc-max-findings in DR-18: all twenty findings must survive |
+| `tests/diff-review.test.ts` | 53 async reviewed head | DR-17 | mapped | nc-start-head: returned head must match pushed head |
+| `tests/diff-review.test.ts` | 54 pending fence | DR-17 | mapped | nc-pending-head: refusal must name reviewed head |
+| `tests/diff-review.test.ts` | 55 synchronous stat stop | DR-19 | mapped | nc-stat: wide subject must synchronously stop as policy |
 <!-- /manifest:assertions -->
 
 P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
@@ -1119,6 +1196,18 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-S02-history | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-history | 0d48c887d1af2446f53577b1f9f6eda249166df3551a841f89b67113726f1214 | one journal event per completed attempt: actual 0, expected 1; exit 1 | pass |
 | NC-S02-prune | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-prune | befd614a3c744cb5d70cf0d5506088c7b91e9ec800fa072e9d3e0180f0d4ee92 | finished deliveries leave the watch: actual row, expected undefined; exit 1 | pass |
 | NC-S02-parked | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-1 | NC-S02-parked | 880cf412abeebff72c830b94956bde9fbcea6d2df6625ec90c2de8a93f7134f9 | parked rows survive held-watch pruning: actual undefined, expected head; exit 1 | pass |
+| NC-S05-SUMMARY | `tests/diff-review.test.ts` | `0b2e4d774bfc00b3c07e8669370e568f816ea141` | DR-03 | NC-S05-SUMMARY | 30e455a860495861e80131b51fc0fc3fde089e30f79c58c080831925e60a9695 | real summary-bearing review must persist as pass; restored gate-only field fails schema validation | pass |
+
+<!-- patch:NC-S05-SUMMARY -->
+```diff
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..008c3bd 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -806 +806 @@ export class DiffReview {
+-		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
++		const { raw, rubric: _rubric, ...decided } = decideGate({
+```
 <!-- /manifest:regressions -->
 
 S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.
@@ -2264,7 +2353,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 | `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
 | `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
-| `tests/e2e/diff-review.test.ts` | S04 (cp-e2e-slice-s04-vep1), behavior 05 public review conversion |
+| `tests/e2e/diff-review.test.ts` | S04 + S05, behavior 05 public review conversion; 20 scenarios and executed declaration controls |
+| `tests/diff-review-retained.test.ts` | retained, convert-owned P3c-rest: structural declaration 12, synthetic shutdown regression 25, unknown-job sub-probe 21; no deletion credit |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2385,7 +2475,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/dependency-dispatch.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/device-notifications.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/device-notify.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
-| `tests/diff-review.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/diff-review.test.ts` | deleted | P3 | S04 + S05: all 55 declarations accounted in DR-01–DR-20; 53 mapped, 2 retained plus split guard in tests/diff-review-retained.test.ts; retained replacement has no deletion credit |
 | `tests/dispatch-preview-tool.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/dispatch-queue-tool.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/dispatch-queue-wiring.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |

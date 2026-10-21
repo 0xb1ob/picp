@@ -43,7 +43,8 @@ async function stack(t: TestContext, registry?: PiModelRegistryLike) {
 		agent.writeModels(provider);
 		if (source === "project") await post.registry.setReviewerModel("demo", model);
 		if (source === "mandate") post.mandates.issue({ projects: ["demo"], job_ids: [jobId], objective: "review", reviewer_model: model, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 20, tokens: 1_000_000 }, job_cap: 10 });
-		const started = await post.diffReview({ jobId, ...(source === "explicit" ? { model } : {}) });
+		let started!: Awaited<ReturnType<typeof post.diffReview>>;
+		await assert.doesNotReject(async () => { started = await post.diffReview({ jobId, ...(source === "explicit" ? { model } : {}) }); });
 		if (isDiffReviewWait(started)) {
 			post.reviewRuns.handBack(started.key);
 			await post.reviewRuns.settled(started.key);
@@ -61,7 +62,8 @@ test("S04: cp_review gives the reviewer a complete three-dot subject from the ca
 	s.repo.write("base-only.txt", "base moved\n");
 	s.repo.commitAll("base advances");
 	s.repo.git("push", "--quiet", "origin", s.repo.branch);
-	const result = await s.review(job);
+	let result!: Awaited<ReturnType<typeof s.review>>;
+	await assert.doesNotReject(async () => { result = await s.review(job); });
 	assert.equal(result.verdict.verdict, "pass");
 	assert.deepEqual(result.verdict.diff_stat, { files: 3, truncated: false });
 	assert.ok(result.requests.length > 0);
@@ -78,6 +80,7 @@ test("S04: cp_review stops wide, oversized and unparseable subjects before a mod
 		["quoted", { "ä.ts": "export const a = 1;\n", 'we"ird.ts': "export const w = 1;\n" }, /omitted/],
 		["hidden-code", { "data/results.csv": "row,123456789\n".repeat(19_000), "src/app.ts": "export const hidden = true;\n".repeat(3_000) }, /src\/app\.ts/],
 	] as const) {
+		await t.test(label, async () => {
 		const job = await s.seed(files);
 		const result = await s.review(job);
 		assert.deepEqual([result.verdict.verdict, result.verdict.cause], ["escalate", "policy"], label);
@@ -96,6 +99,7 @@ test("S04: cp_review stops wide, oversized and unparseable subjects before a mod
 			if (label === "bytes") assert.match(diff, /tiny/);
 			if (label === "quoted") assert.match(diff, /export const a = 1/);
 		}
+		});
 	}
 });
 
@@ -137,13 +141,19 @@ test("S04: review packets preserve frozen scope and context while persisted verd
 
 test("S04: cp_review refuses absent, research and unpushed subjects with their recovery action", { timeout: 120_000 }, async (t) => {
 	const s = await stack(t);
-	await assert.rejects(() => s.post.diffReview({ jobId: "cp-absent" }), /no dispatch record.*cp_dispatch/);
-	const research = await s.seed({ "research.txt": "note\n" });
-	await s.post.fleet.patch(research, { kind: "research" });
-	await assert.rejects(() => s.post.diffReview({ jobId: research }), /kind:research.*cp_gate/);
-	const unpushed = await s.seed({ "unpushed.txt": "note\n" });
-	await s.post.fleet.patch(unpushed, { branch: "cp-never-pushed" });
-	await assert.rejects(() => s.post.diffReview({ jobId: unpushed }), /branch not pushed.*git push/);
+	await t.test("absent", async () => {
+		await assert.rejects(() => s.post.diffReview({ jobId: "cp-absent" }), /no dispatch record.*cp_dispatch/);
+	});
+	await t.test("research", async () => {
+		const research = await s.seed({ "research.txt": "note\n" });
+		await s.post.fleet.patch(research, { kind: "research" });
+		await assert.rejects(() => s.post.diffReview({ jobId: research }), /kind:research.*cp_gate/);
+	});
+	await t.test("unpushed", async () => {
+		const unpushed = await s.seed({ "unpushed.txt": "note\n" });
+		await s.post.fleet.patch(unpushed, { branch: "cp-never-pushed" });
+		await assert.rejects(() => s.post.diffReview({ jobId: unpushed }), /branch not pushed.*git push/);
+	});
 });
 
 
@@ -291,7 +301,8 @@ test("S04: configured reviewer denials never fall back, while an unconfigured ro
 	blocked = chosen;
 	save(config);
 	await s.post.registry.setReviewerModel("demo", null);
-	const started = await s.post.diffReview({ jobId: job });
+	let started!: Awaited<ReturnType<typeof s.post.diffReview>>;
+	await assert.doesNotReject(async () => { started = await s.post.diffReview({ jobId: job }); });
 	assert.ok(isDiffReviewWait(started));
 	s.post.reviewRuns.handBack(started.key);
 	await s.post.reviewRuns.settled(started.key);
@@ -323,6 +334,9 @@ test("S04: pipeline advance holds unresolved and moved heads until a review of t
 	const now = isoTimestamp();
 	s.post.pipelines.write({ schema_version: 1, research_id: "cp-s04-plan", ship_id: job, project: "demo", delivery: "pr", state: "implementing", created_at: now, updated_at: now, review: { enabled: true } });
 	assert.equal((await s.post.advancePipeline("cp-s04-plan")).state, "done");
+	await s.post.fleet.patch(job, { kind: "research" });
+	assert.notEqual((await s.post.advancePipeline("cp-s04-plan")).state, "done");
+	await s.post.fleet.patch(job, { kind: "ship" });
 	s.repo.git("checkout", "--quiet", job);
 	s.repo.write("fix.ts", "export const fix = 1;\n");
 	s.repo.commitAll("move reported head");
@@ -352,6 +366,7 @@ test("S04: pipeline advance holds unresolved and moved heads until a review of t
 	assert.notEqual((await s.post.advancePipeline("cp-s04-plan")).state, "done");
 	assert.equal(readFileSync(join(s.home, paths.checkpointFile(job)), "utf8"), shipCheckpoint);
 	assert.equal(JSON.parse(readFileSync(join(s.home, paths.checkpointFile(job, "diff")), "utf8")).decision, "pending");
+	assert.notEqual(JSON.parse(readFileSync(join(s.home, paths.checkpointFile(job, "diff")), "utf8")).question, "original ship decision");
 });
 
 
@@ -371,6 +386,7 @@ test("S04: blocking review promotes the real implementer on the same branch with
 	assert.equal((await s.post.dispatch({ jobId: job.id, task: "Write app.ts, push and report the PR.", model, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.post.fleet.get(job.id), (record) => record?.phase === "held" && !!record.reported_at, { timeoutMs: 90_000, what: "implementer held" });
 	for (let attempt = 1; attempt <= 3; attempt++) {
+		await t.test(`review ${attempt}`, async () => {
 		const result = await s.review(job.id, { verdict: "revise", reasons: ["[severity: high] [confidence: high] missing test"], revisions: [`S04 add coverage ${attempt}`] });
 		assert.equal(result.verdict.attempt, attempt);
 		assert.equal(result.verdict.verdict, "revise");
@@ -380,6 +396,7 @@ test("S04: blocking review promotes the real implementer on the same branch with
 		assert.match(received, /never a second PR/);
 		assert.ok(received.includes(`review ${attempt} of 5`));
 		assert.ok(received.includes(`${5 - attempt} reviews remain`));
+		});
 	}
 });
 
@@ -408,6 +425,7 @@ test("S04: complete deltas remain reviewable when supplemental branch history ex
 test("S05: unknown and malformed legacy review heads never become delta baselines", { timeout: 180_000 }, async (t) => {
 	const s = await stack(t);
 	for (const head of ["0".repeat(40), "--not-a-sha"]) {
+		await t.test(head, async () => {
 		const job = await s.seed({ "src/app.ts": "export const original = 1;\n" });
 		const first = await s.review(job);
 		writeFileSync(join(s.home, paths.reviewFile(job, 1)), JSON.stringify({ ...first.verdict, head_sha: head }));
@@ -416,16 +434,19 @@ test("S05: unknown and malformed legacy review heads never become delta baseline
 		s.repo.commitAll("fix");
 		s.repo.git("push", "--quiet", "origin", job);
 		s.repo.git("checkout", "--quiet", s.repo.branch);
-		const result = await s.review(job);
+		let result!: Awaited<ReturnType<typeof s.review>>;
+		await assert.doesNotReject(async () => { result = await s.review(job); });
 		assert.equal(result.verdict.delta_from, undefined);
 		assert.equal(result.verdict.verdict, "pass");
 		assert.match(readFileSync(join(result.scratch, "diff.md"), "utf8"), /src\/app\.ts/);
+		});
 	}
 });
 
 
 test("S05: integrating an advanced base resets the delta while an unmerged advance preserves it", { timeout: 180_000 }, async (t) => {
 	for (const integration of ["none", "merge", "rebase"] as const) {
+		await t.test(integration, async () => {
 		const s = await stack(t);
 		const job = await s.seed({ "src/app.ts": "export const x = 1;\n" });
 		const first = await s.review(job);
@@ -446,6 +467,7 @@ test("S05: integrating an advanced base resets the delta while an unmerged advan
 		const diff = readFileSync(join(result.scratch, "diff.md"), "utf8");
 		assert.match(diff, /src\/fix\.ts/);
 		assert.doesNotMatch(diff, /upstream\/big\.csv/);
+		});
 	}
 });
 
@@ -505,18 +527,19 @@ test("S05: the fifth complete review surfaces findings and binds one final-fix c
 	await s.post.fleet.patch(job, { receipts: [{ kind: "pr", status: "open", title: "PR", url: pr }] });
 	const first = await s.review(job);
 	for (let n = 1; n <= 4; n++) writeFileSync(join(s.home, paths.reviewFile(job, n)), JSON.stringify({ ...first.verdict, attempt: n, verdict: "revise", revisions: ["earlier finding"] }));
-	const result = await s.review(job, { verdict: "revise", reasons: ["[severity: high] [confidence: high] missing test"], revisions: ["add the test"] });
+	const reasons = Array.from({ length: 10 }, (_, n) => `[severity: high] [confidence: high] finding ${n} `.padEnd(400, "x"));
+	const revisions = Array.from({ length: 10 }, (_, n) => `revision ${n} `.padEnd(400, "x"));
+	const result = await s.review(job, { verdict: "revise", reasons, revisions });
 	assert.equal(result.verdict.attempt, 5);
 	assert.equal(result.verdict.verdict, "escalate");
 	assert.equal(result.verdict.cause, "policy");
-	assert.match(result.verdict.reasons.join(" "), /review cap/);
+	assert.match(result.verdict.reasons.join(" "), /further item\(s\) dropped/);
 	assert.equal(result.verdict.revisions, undefined);
 	const checkpoint = new CheckpointStore(s.home, { kind: "final_fix" }).get(job, { scope: s.repo.head(job).slice(0, 12) });
 	assert.equal(checkpoint?.decision, "pending");
 	assert.equal(checkpoint?.pr_url, pr);
 	assert.match(checkpoint?.question ?? "", /Operator text only/);
-	assert.ok(checkpoint?.evidence?.includes("add the test"));
-	assert.ok(checkpoint?.evidence?.includes("[severity: high] [confidence: high] missing test"));
+	assert.deepEqual(checkpoint?.evidence, [...revisions, ...reasons]);
 	await assert.rejects(() => s.post.diffReview({ jobId: job }), /already had 5 diff reviews/);
 	assert.equal(existsSync(join(s.home, paths.reviewFile(job, 6))), false);
 	assert.equal(existsSync(join(s.home, paths.reviewScratchDir(job, 6), "diff.md")), false);
@@ -545,4 +568,22 @@ test("S05: a pass at review three ends the loop and wide subjects finish synchro
 	assert.ok(!isDiffReviewWait(again));
 	assert.equal(again.verdict.attempt, stop.verdict.attempt);
 	assert.equal(existsSync(join(s.home, paths.reviewFile(wide, 2))), false);
+});
+
+
+test("S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision", { timeout: 180_000 }, async (t) => {
+	for (const mode of ["earlier", "truncated", "escalate", "pass", "no-pr"] as const) {
+		await t.test(mode, async () => {
+			const s = await stack(t);
+			const files = mode === "truncated" ? Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`file-${n}.txt`, "x\n"])) : { "app.ts": "export const app = 1;\n" };
+			const job = await s.seed(files);
+			if (mode !== "no-pr") await s.post.fleet.patch(job, { receipts: [{ kind: "pr", status: "open", title: "PR", url: "https://github.com/example/demo/pull/5" }] });
+			const first = await s.review(job);
+			for (let n = 1; n <= (mode === "earlier" ? 3 : 4); n++) writeFileSync(join(s.home, paths.reviewFile(job, n)), JSON.stringify({ ...first.verdict, attempt: n, verdict: "revise", cause: null, diff_stat: { files: 1, truncated: false }, revisions: ["earlier finding"] }));
+			const verdict = mode === "escalate" || mode === "pass" ? mode : "revise";
+			const result = await s.review(job, { verdict, reasons: ["[severity: high] [confidence: high] finding"], ...(verdict === "revise" ? { revisions: ["fix the finding"] } : {}) });
+			assert.equal(result.verdict.attempt, mode === "earlier" ? 4 : 5);
+			assert.equal(new CheckpointStore(s.home, { kind: "final_fix" }).get(job, { scope: s.repo.head(job).slice(0, 12) }), undefined);
+		});
+	}
 });
