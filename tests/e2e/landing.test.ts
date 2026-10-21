@@ -2888,7 +2888,7 @@ test("landing: held CI repair checks Sender authority before restoring a worker"
 
 test("landing: unreadable worktree status preserves uncommitted content", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const faults = [
-		{ cmd: "status", code: 128, out: "", detail: /git status exited 128/ },
+		{ cmd: "status", code: 128, out: "", detail: /git status\) \(exit 128/ },
 		{ cmd: "ls-remote", code: 2, out: `process.stdout.write("${"a".repeat(40)}\\trefs/heads/x\\n");`, detail: /teardown refused: dirty/ },
 	];
 	for (const fault of faults) await t.test(fault.cmd, async (t) => {
