@@ -1484,8 +1484,13 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 			await observe(runs);
 			assert.deepEqual(rows(), [], "green, pending, absent and wrong-head runs never latch");
 		}
-		await observe([own(tip, "failure"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		await observe([own(tip, "failure")], { routes: [...routes, { match: "actions/runs/106/attempts/1/jobs", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+		assert.deepEqual(rows(), [], "unreadable main attempt jobs never create a latch");
+		await observe([own(tip, "failure"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })], { jobs: { 106: [setupJob("Run suite (typecheck + tests)")] } });
 		assert.deepEqual(rows().map((row) => [row.project, row.red_since_sha, row.login, row.workflow, row.failing]), [["demo", tip, "e2e", "ci", "main regression"]]);
+		const earlyClaims = join(s.home, LAYOUT.ciRerunsFile);
+		assert.deepEqual(existsSync(earlyClaims) ? JSON.parse(readFileSync(earlyClaims, "utf8")).entries : [], [], "suite failure claims no infra rerun");
+		assert.ok(!s.ghCalls().some((call) => call.startsWith("run rerun")), "suite failure never reruns");
 		const latched = readFileSync(file, "utf8");
 		await observe([own(tip, "failure")]);
 		assert.equal(readFileSync(file, "utf8"), latched, "repeat red preserves the original latch bytes");
@@ -1505,6 +1510,7 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.equal(readFileSync(file, "utf8"), latched, "pending current-tip workflow prevents clearing");
 		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ stdout: "not json" }] }] });
 		assert.equal(readFileSync(file, "utf8"), latched, "malformed CI never clears the latch");
+		await waitFor(s.parentMessages, (body) => body.includes("main CI (demo)") && body.includes("malformed"), { timeoutMs: 30_000, what: "malformed main CI read names project and cause" });
 		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
 		assert.equal(readFileSync(file, "utf8"), latched, "denied CI never clears the latch");
 		await observe([own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")]);
@@ -1546,6 +1552,9 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.equal(rows().find((row) => row.project === "demo")?.red_since_sha, tip, "second infra failure latches main");
 		assert.equal(s.ghCalls().filter((call) => call === "run rerun 106 --failed").length, 1, "attempt two never reruns again");
 		assert.ok(s.ghCalls().includes("api repos/{owner}/{repo}/actions/runs/106/attempts/2/jobs?per_page=100&page=1"));
+		const claimAtRerun = s.ghCalls().find((call) => call.startsWith("claims-at-rerun")) ?? "";
+		assert.ok(claimAtRerun.includes("main-demo") && claimAtRerun.includes(tip), "main claim is durable before gh reruns");
+		await waitFor(s.parentMessages, (body) => body.includes("MAIN CI RERUN") && body.includes("attempt 2: a second failure"), { timeoutMs: 30_000, what: "main rerun and second-attempt notice reach parent" });
 		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
 		assert.deepEqual(JSON.parse(readFileSync(claimsFile, "utf8")).entries.map((entry: { job_id: string; head_sha: string; run_id: number; step: string }) => [entry.job_id, entry.head_sha, entry.run_id, entry.step]), [["main-demo", tip, 106, "Install treehouse"]]);
 		await observe([own(tip, "success")]);
@@ -1609,6 +1618,47 @@ test("landing: main-red integration holds stale heads and permits only a current
 	const corrupt = await s.integrate(live.jobId);
 	assert.match(corrupt.text, /main-ci.json unreadable.*not blocking/);
 	assert.equal(readFileSync(file, "utf8"), "{not json");
+	latch("e2e");
+	const mandates = join(s.home, LAYOUT.mandates);
+	rmSync(mandates, { recursive: true, force: true });
+	writeFileSync(mandates, "legacy directory replaced by a file");
+	try {
+		const unreadable = await s.integrate(live.jobId);
+		assert.match(unreadable.text, /not enforced.*ENOTDIR.*not blocking/);
+	} finally {
+		rmSync(mandates);
+		mkdirSync(mandates, { recursive: true });
+		writeFileSync(s.post.mandates.file(grant.id), JSON.stringify(grant));
+	}
+});
+
+
+test("landing: main latch writes refuse corruption introduced during an Actions read", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const tip = git(s.remote, "rev-parse", "main");
+	s.post.mandates.issue({ projects: ["demo"], objective: "main CI corruption race", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const journal = join(s.home, LAYOUT.state, "wakeups.json");
+	const routes: Route[] = [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }];
+	s.setGh({ routes, runs: [] });
+	await s.parent("Observe main latch corruption races.", [{ kind: "text", text: "Observing." }], async () => {
+		for (const clear of [false, true]) {
+			const valid = JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), projects: clear ? [{ project: "demo", red_since_sha: tip, red_since_at: isoTimestamp(), login: "e2e" }] : [] });
+			writeFileSync(file, valid);
+			const release = join(s.home, `release-main-${clear}`);
+			const before = s.ghCalls().filter((call) => call.includes("actions/runs?head_sha=")).length;
+			const prior = existsSync(journal) ? readFileSync(journal, "utf8") : "";
+			s.setGh({ routes: [...routes, { match: "actions/runs?head_sha=", replies: [{ pass: true, untilFile: release }, { pass: true }] }], runs: [run(124, tip, "completed", clear ? "success" : "failure", { event: "push", triggering_actor: { login: "e2e" } })] });
+			await waitFor(() => s.ghCalls().filter((call) => call.includes("actions/runs?head_sha=")).length, (count) => count > before, { timeoutMs: 30_000, what: "main read reaches external barrier" });
+			const corrupt = clear ? "not json" : "{";
+			writeFileSync(file, corrupt);
+			writeFileSync(release, "continue");
+			await waitFor(() => ({ body: existsSync(journal) ? readFileSync(journal, "utf8") : "", bytes: readFileSync(file, "utf8") }), ({ body, bytes }) => bytes !== corrupt || (body !== prior && body.includes("not overwritten")), { timeoutMs: 30_000, what: `${clear ? "clear" : "set"} completes its in-flight mutation` });
+			assert.equal(readFileSync(file, "utf8"), corrupt, "in-flight latch mutation preserves corrupt bytes");
+			s.setGh({ routes, runs: [] });
+			writeFileSync(file, valid);
+		}
+	}, true);
 });
 
 
@@ -1653,6 +1703,13 @@ test("landing: main CI scope skips inactive grants and login faults preserve lat
 	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ stdout: "dependabot[bot]" }] }], runs: [run(123, tip, "completed", "success", { event: "push", triggering_actor: { login: "dependabot[bot]" } })] });
 	await s.parent("Observe authenticated bot login.", [{ kind: "text", text: "Observing bot." }], async () => {
 		await waitFor(() => JSON.parse(readFileSync(file, "utf8")).projects.length, (count) => count === 0, { timeoutMs: 30_000, what: "bot login is valid when it owns the run" });
+		rmSync(s.post.registry.pathOf("demo"), { recursive: true, force: true });
+		const beforeMissing = s.ghCalls().length;
+		const started = Date.now();
+		await waitFor(() => Date.now() - started, (elapsed) => elapsed >= 2_200, { timeoutMs: 10_000, what: "missing clone through real timer" });
+		assert.ok(!s.ghCalls().slice(beforeMissing).some((call) => call.includes("actions/runs")), "missing clone reads no CI");
+		const journal = join(s.home, LAYOUT.state, "wakeups.json");
+		assert.ok(!readFileSync(journal, "utf8").includes("main CI (demo)"), "missing clone creates no project error");
 	}, true);
 });
 
