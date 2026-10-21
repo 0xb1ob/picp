@@ -70,3 +70,28 @@ jobs:
       - name: Eval contract check
         run: npm run eval:check
         timeout-minutes: 5
+
+  # Real installs (bootstrap → cp-install → cp-daemon → parent doctor) in a disposable --network none
+  # Docker sandbox with the mock provider (#375; tests/e2e/README.md "Installer sandbox"). npm test
+  # collects tests/e2e/installer.test.ts and skips it; this job opts in, and fails when Docker is missing.
+  install-sandbox:
+    name: install sandbox
+    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Installer sandbox (Docker)
+        run: npm run test:one -- tests/e2e/installer.test.ts
+        env:
+          CP_INSTALL_E2E: "1"

@@ -38,7 +38,8 @@
 		"e2e:phase2": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase2.test.ts",
 		"smoke:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live-smoke.test.ts",
 		"e2e:phase3": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase3.test.ts",
-		"e2e:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live.test.ts"
+		"e2e:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live.test.ts",
+		"e2e:install": "node tests/harness/install-sandbox.ts"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-agent-core": "*",
