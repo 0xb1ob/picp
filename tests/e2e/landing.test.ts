@@ -512,6 +512,39 @@ test("landing: forge observation failures refuse merge receipts without leaking 
 	assert.ok(lab.asked.every((request) => request.token === token));
 });
 
+test("landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	writeFileSync(join(s.home, LAYOUT.budgetsFile), JSON.stringify({ ...s.post.budgets(), spawn_cap: 2 }));
+	const older = await s.held("oldest idle author", 301);
+	const newer = await s.held("newer idle author", 302);
+	const releases = (id: string) => readRunEvents(s.home, id).filter((event) => event.type === "held_released");
+	assert.equal(releases(older.jobId).length + releases(newer.jobId).length, 0, "below cap no author is stopped");
+	const original = s.post.fleet.get(older.jobId)!;
+	const job = await s.post.ledger().create({ title: "fresh work under spawn pressure", project: "demo", kind: "ship", delivery: "local" });
+	const model = s.provider.addScript("spawn-pressure", [{ kind: "text", text: "Fresh worker running." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	const eventsFile = join(s.home, paths.runDir(older.jobId), "events.jsonl");
+	const journal = readFileSync(eventsFile, "utf8");
+	rmSync(eventsFile);
+	mkdirSync(eventsFile);
+	try {
+		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false }), /EISDIR/);
+		assert.equal(s.provider.requests("spawn-pressure").length, 0, "journal failure never starts the caller");
+		assert.equal(s.post.fleet.get(older.jobId)?.worker.pid, original.worker.pid);
+	} finally {
+		rmSync(eventsFile, { recursive: true });
+		writeFileSync(eventsFile, journal);
+	}
+	const result = await s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false });
+	assert.equal(result.receipt, "accepted", "the failed reservation does not block retry");
+	await waitFor(() => s.provider.requests("spawn-pressure"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "fresh worker actually runs" });
+	assert.deepEqual(releases(older.jobId).map((event) => event.payload), [{ for_job: job.id, reason: "spawn cap" }]);
+	assert.equal(releases(newer.jobId).length, 0, "the newer author is not the victim");
+	assert.deepEqual([s.post.fleet.get(older.jobId)?.phase, s.post.fleet.get(older.jobId)?.worktree, s.post.fleet.get(older.jobId)?.branch], ["held", original.worktree, original.branch]);
+	assert.equal((await s.post.send({ jobId: older.jobId, message: "Continue the held job.", mode: "prompt" })).receipt, "delivered");
+	await waitFor(() => readRunEvents(s.home, older.jobId), (events) => events.some((event) => event.type === "worker_revived"), { timeoutMs: 60_000, what: "released author resumes its session" });
+});
+
 test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });

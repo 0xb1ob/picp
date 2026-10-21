@@ -118,15 +118,6 @@ test("github observer runs the same gh pr view command and normalizes its answer
 	});
 });
 
-test("github observer names gh failures, non-JSON and missing fields", async () => {
-	const answer = (status: number, stdout: string, stderr = ""): CommandRunner => async () => ({ status, stdout, stderr });
-	assert.equal(failure(await githubObserver(answer(1, "", "gh: not logged in\nmore"), "/w").readChangeRequest("1")).reason, "unavailable");
-	assert.match(failure(await githubObserver(answer(1, "", "gh: not logged in\nmore"), "/w").readChangeRequest("1")).detail, /not logged in\)$/);
-	assert.equal(failure(await githubObserver(answer(0, "<html>"), "/w").readChangeRequest("1")).reason, "invalid");
-	assert.equal(failure(await githubObserver(answer(0, JSON.stringify({ state: "OPEN" })), "/w").readChangeRequest("1")).reason, "invalid");
-	const open = await githubObserver(answer(0, JSON.stringify({ number: 3, url: "https://github.com/o/r/pull/3", state: "OPEN" })), "/w").readChangeRequest("3");
-	assert.ok(open.ok && open.observation.state === "open");
-});
 
 // ---------------------------------------------------------------------------
 // GitLab: one bounded GET, strict mapping
@@ -158,51 +149,6 @@ test("gitlab observer sends one GET with the token only in PRIVATE-TOKEN, nested
 	});
 });
 
-test("gitlab states and landing shas: merge, squash, fast-forward, open, closed, locked", async () => {
-	const squash = (await observe("7", json(mr({ merge_commit_sha: null, squash_commit_sha: SQUASH, squash: true })))).outcome;
-	assert.ok(squash.ok && squash.observation.squash_commit_sha === SQUASH && squash.observation.merge_commit_sha === undefined);
-	const both = (await observe("7", json(mr({ squash_commit_sha: SQUASH })))).outcome;
-	assert.ok(both.ok && both.observation.merge_commit_sha === MERGE && both.observation.squash_commit_sha === SQUASH);
-	const fastForward = (await observe("7", json(mr({ merge_commit_sha: null, squash_commit_sha: null })))).outcome;
-	assert.ok(fastForward.ok && fastForward.observation.state === "merged");
-	assert.equal(fastForward.ok && fastForward.observation.merge_commit_sha, undefined, "a missing landing sha is never filled in");
-	for (const [state, expected] of [["opened", "open"], ["closed", "closed"], ["locked", "unknown"], ["weird", "unknown"]] as const) {
-		const outcome = (await observe("7", json(mr({ state, merged_at: null, merge_commit_sha: null })))).outcome;
-		assert.ok(outcome.ok && outcome.observation.state === expected, state);
-		assert.equal(outcome.ok && outcome.observation.merged_at, undefined);
-	}
-	const fallback = (await observe("7", json(mr({ sha: null })))).outcome;
-	assert.ok(fallback.ok && fallback.observation.head_sha === HEAD, "diff_refs.head_sha is the fallback head");
-	const deleted = (await observe("7", json(mr({ should_remove_source_branch: true, force_remove_source_branch: true })))).outcome;
-	assert.ok(deleted.ok && deleted.observation.source_branch === "cp-job-1", "a deleted source branch is still the observed source");
-});
-
-test("gitlab malformed or conflicting answers are named, never an empty success", async () => {
-	const cases: Array<[string, Record<string, unknown> | unknown, string]> = [
-		["conflicting heads", mr({ diff_refs: { head_sha: "e".repeat(40) } }), "invalid"],
-		["malformed sha", mr({ merge_commit_sha: "not-a-sha" }), "invalid"],
-		["merged without head", mr({ sha: null, diff_refs: null }), "invalid"],
-		["no source branch", mr({ source_branch: "" }), "invalid"],
-		["no target branch", mr({ target_branch: undefined }), "invalid"],
-		["bad merged_at", mr({ merged_at: "yesterday" }), "invalid"],
-		["array body", [mr()], "invalid"],
-		["another iid", mr({ iid: 8 }), "mismatch"],
-		["string iid", mr({ iid: "7" }), "mismatch"],
-		["another project web_url", mr({ web_url: "https://code.example.com/gitlab/team/other/-/merge_requests/7" }), "mismatch"],
-		["another host web_url", mr({ web_url: "https://evil.example.com/gitlab/team/sub/app/-/merge_requests/7" }), "mismatch"],
-		["no web_url", mr({ web_url: null }), "mismatch"],
-		["fork", mr({ source_project_id: 43 }), "unsupported"],
-		["no project ids", mr({ source_project_id: undefined, target_project_id: undefined }), "unsupported"],
-	];
-	for (const [label, body, reason] of cases) {
-		const { reason: actual, detail } = failure((await observe("7", json(body))).outcome);
-		assert.equal(actual, reason, label);
-		assert.match(detail, /^gitlab code\.example\.com: /, label);
-	}
-	const notJson = failure((await observe("7", () => new Response("<html>login</html>", { status: 200 }))).outcome);
-	assert.equal(notJson.reason, "invalid");
-	assert.doesNotMatch(notJson.detail, /login/, "a response body is never relayed");
-});
 
 test("gitlab HTTP failures: 401/403/404/429/500 are unavailable with status and static cause only", async () => {
 	for (const status of [401, 403, 404, 429, 500]) {
@@ -214,15 +160,6 @@ test("gitlab HTTP failures: 401/403/404/429/500 are unavailable with status and 
 	}
 	const unauthenticated = await gitlabObserver(repo(), { fetch: fakeFetch(json({}, 401)).fetch, env: {} }).readChangeRequest("7");
 	assert.match(failure(unauthenticated).detail, /EXAMPLE_GL_TOKEN is unset/, "the variable NAME is named, never a value");
-});
-
-test("gitlab redirects are refused, not followed, and the token is not forwarded", async () => {
-	const { outcome, calls } = await observe("7", () => new Response(null, { status: 302, headers: { location: "https://elsewhere.example.com/x" } }));
-	const { reason, detail } = failure(outcome);
-	assert.equal(reason, "unavailable");
-	assert.match(detail, /HTTP 302 redirect refused/);
-	assert.doesNotMatch(detail, /elsewhere/);
-	assert.equal(calls.length, 1, "exactly one request: the redirect target is never asked");
 });
 
 test("gitlab network errors, timeouts and oversize bodies fail closed without echoing the exception", async () => {
@@ -268,10 +205,7 @@ test("a foreign or malformed MR reference makes zero requests", async () => {
 		"https://evil.example.com/gitlab/team/sub/app/-/merge_requests/7",
 		"https://code.example.com/gitlab/team/other/-/merge_requests/7",
 		"https://code.example.com/team/sub/app/-/merge_requests/7",
-		"https://github.com/team/app/pull/7",
-		"0",
-		"7; rm -rf /",
-		"",
+		"https://github.com/team/app/pull/7", "0", "7; rm -rf /", "",
 	]) {
 		const { outcome, calls } = await observe(ref);
 		assert.equal(failure(outcome).reason, "mismatch", ref);
@@ -390,64 +324,3 @@ test("an unreadable receipt is no receipt, never an exception out of a gate", as
 	assert.equal(readMergeReceipt(b.home, "../escape"), undefined, "an unsafe id is not a path");
 });
 
-test("#326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure", async (t) => {
-	const b = benchOf(t);
-	await b.addJob("cp-m1", [PR_RECEIPT]);
-	const pr: GhPr = { number: 54, url: PR_RECEIPT.url, state: "MERGED", mergeCommit: { oid: "b".repeat(40) }, headRefName: "cp-m1", headRefOid: "a".repeat(40), baseRefName: "main" };
-	const seen: string[] = [];
-	const store = (afterRecorded: (receipt: import("../src/contracts.ts").MergeReceipt) => Promise<string | undefined>) =>
-		new MergeStore({ home: b.home, fleet: b.fleet, runs: b.runs, run: runner(pr), afterRecorded });
-	const failing = await store(async () => { throw new Error("ledger refused\nsecond line"); }).record({ jobId: "cp-m1" });
-	assert.equal(failing.recorded, true);
-	assert.ok(readMergeReceipt(b.home, "cp-m1"), "the receipt is written whatever the port does");
-	assert.equal(failing.after_merge, "after-merge deploy NOT created: ledger refused — cp_merged cp-m1 retries");
-	assert.match(formatMerge(failing), /can now pass without force\. after-merge deploy NOT created/);
-	const again = await store(async (receipt) => (seen.push(receipt.base_branch ?? ""), "after-merge deploy cp-d1 created")).record({ jobId: "cp-m1" });
-	assert.equal(again.recorded, false);
-	assert.equal(again.after_merge, "after-merge deploy cp-d1 created");
-	assert.deepEqual(seen, ["main"]);
-	const quiet = await store(async () => undefined).record({ jobId: "cp-m1" });
-	assert.equal("after_merge" in quiet, false);
-	assert.equal("after_merge" in (await b.store(pr).record({ jobId: "cp-m1" })), false, "no port: today's result");
-});
-
-// Retained by P3b (docs/testing-migration.md): moved verbatim from tests/after-merge.test.ts.
-const SHA = "b59fc3a1b59fc3a1b59fc3a1b59fc3a1b59fc3a1";
-
-async function bench(t: import("node:test").TestContext, options: { optIn?: boolean } = {}) {
-	const home = createScratchHome();
-	const runs = new RunRegistry(home.path);
-	t.after(() => (runs.closeAll(), home.cleanup()));
-	const registry = new ProjectRegistry({ home: home.path, now: () => new Date("2026-09-01T10:00:00Z") });
-	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git", base_branch: "main" });
-	if (options.optIn !== false) await registry.setAfterMergeDeploy("demo", { task: "copy dist to host-a and restart", resources: ["host-a", "db"] });
-	const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
-	const fleet = new FleetStore({ home: home.path });
-	const mandates = new MandateStore(home.path);
-	const merged = await ledger.create({ title: "ship the thing", project: "demo", delivery: "pr", kind: "ship" });
-	await fleet.add({
-		job_id: merged.id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held", reported_at: isoTimestamp(),
-		worker: { pid: process.pid, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/model", started_at: isoTimestamp() },
-		worktree: join(home.path, "worktrees", merged.id), branch: merged.id, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
-	});
-	const receipt = (extra: Partial<MergeReceipt> = {}): MergeReceipt => ({
-		schema_version: 1, job_id: merged.id, pr_url: "https://github.com/o/demo/pull/7", merge_commit_sha: SHA, head_sha: SHA,
-		head_branch: merged.id, base_branch: "main", merged_at: "2026-09-02T00:00:00Z", recorded_at: "2026-09-02T00:01:00Z", recorded_by: "gh pr view", ...extra,
-	});
-	const ports = { home: home.path, registry, ledger: () => ledger, mandates, fleet, runs, now: () => new Date("2026-09-02T00:02:00Z") };
-	const issue = (extra: { job_ids?: string[]; job_cap?: number } = {}) => mandates.issue({
-		projects: ["demo"], objective: "ship and deploy", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: extra.job_cap ?? 10,
-		...(extra.job_ids ? { job_ids: extra.job_ids } : {}),
-	});
-	const record = () => JSON.parse(readFileSync(join(home.path, paths.afterMergeFile(merged.id)), "utf8"));
-	const deployJobs = () => ledger.read().jobs.filter((job) => job.labels.includes(`after-merge:${merged.id}`));
-	return { home: home.path, ledger, mandates, merged, receipt, ports, issue, record, deployJobs };
-}
-
-test("a ledger refusal throws and writes no record, so the merge store names it and a retry can still create", async (t) => {
-	const b = await bench(t);
-	const failing = { ...b.ports, ledger: () => { throw new Error("ledger refused: archived project"); } };
-	await assert.rejects(afterMergeDeploy(failing, b.receipt()), /ledger refused/);
-	assert.equal(existsSync(join(b.home, paths.afterMergeFile(b.merged.id))), false);
-	assert.match((await afterMergeDeploy(b.ports, b.receipt())) ?? "", /created/);
-});

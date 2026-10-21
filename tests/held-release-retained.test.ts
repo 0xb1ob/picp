@@ -166,27 +166,6 @@ test("4B1-T2: makeRoom — reviewer, below the cap, and nothing releasable all d
 	assert.ok(b.workers.manager.get("cp-h"), "nothing shut down");
 });
 
-test("4B1-T2: makeRoom at the cap releases the oldest author, journals it, and reserves the slot", async (t) => {
-	const b = await bench(t, 2, [held("cp-h")]);
-	const victim = b.workers.spawn("cp-h");
-	b.workers.spawn("cp-b", fakeWorker({ busy: true }));
-	const release = await b.release.makeRoom("cp-x", "implementer");
-	assert.equal(typeof release, "function");
-	assert.equal(b.workers.manager.reserved, 1);
-	assert.equal(victim.shutdownCalls, 1);
-	assert.equal(b.workers.manager.get("cp-h"), undefined);
-	const [event] = releasedEvents(b.home, "cp-h");
-	assert.deepEqual(event?.payload, { for_job: "cp-x", reason: "spawn cap" });
-	assert.equal(b.release.wasReleased("cp-h"), true);
-	const record = b.fleet.get("cp-h");
-	assert.equal(record?.phase, "held", "phase unchanged");
-	assert.equal(record?.worktree, "/wt/cp-h", "lease unchanged");
-	// 4B1-T3(d): the slot stays reserved until the caller spawns or releases.
-	b.workers.spawn("cp-x");
-	assert.equal(b.workers.manager.reserved, 0);
-	release?.();
-	assert.equal(b.workers.manager.reserved, 0);
-});
 
 test("4B1-T2: two concurrent makeRoom calls with one releasable author — exactly one wins", async (t) => {
 	const b = await bench(t, 2, [held("cp-h")]);
@@ -198,16 +177,6 @@ test("4B1-T2: two concurrent makeRoom calls with one releasable author — exact
 	assert.equal(b.workers.manager.reserved, 1);
 });
 
-test("4B1-T3(a): a journal failure rejects before any shutdown and leaks no reservation", async (t) => {
-	const b = await bench(t, 2, [held("cp-h")]);
-	const victim = b.workers.spawn("cp-h");
-	b.workers.spawn("cp-b", fakeWorker({ busy: true }));
-	b.journalThrows.on = true;
-	await assert.rejects(b.release.makeRoom("cp-x", "implementer"), /journal unwritable/);
-	assert.equal(victim.shutdownCalls, 0);
-	assert.equal(b.workers.manager.reserved, 0);
-	assert.equal(b.notified(), 1);
-});
 
 test("4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping", async (t) => {
 	const b = await bench(t, 2, [held("cp-h")]);
