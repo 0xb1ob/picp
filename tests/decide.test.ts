@@ -11,11 +11,9 @@ import { type DecisionBasis, type DelegationProvenance, type Mandate, WORKER_FOR
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
 import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
-import { capReached, GRANT_USES, grantStanding, isInFlight, MandateStore } from "../src/mandate.ts";
+import { capReached, evaluateAuthority, GRANT_USES, grantStanding, isInFlight, MandateError, type MandateSubject, MandateStore } from "../src/mandate.ts";
 import { assertReviewAllowed } from "../src/mandate-usage.ts";
 import { RunRecorder } from "../src/run-artifacts.ts";
-import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
-import { checkpointAuthority } from "../src/schedule-authority.ts";
 import { frameBatch, ParentSendOutbox, sendMarker } from "../src/parent-outbox.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -225,8 +223,8 @@ test("tv8: mandate basis must name the selected grant and cannot bypass its deni
 	assert.equal(mandates.require(broad.id).decisions.length, 0);
 });
 
-// Kept by P2e from tests/mandate.test.ts (retained): an exhaustive permission table and accounting edges no e2e
-// drives cell by cell. 02-2 and 02-17 pin representative cells through dispatch, cp_send and cp_decide.
+// Kept by P2e from tests/mandate.test.ts (retained): permission tables, accounting edges, reviewer spend, instants and
+// legacy grant shapes no e2e drives. 02-2, 02-13, 02-15 and 02-17 pin the reachable outcomes beside them.
 const earlier = (ms = 86_400_000) => isoTimestamp(new Date(Date.now() - ms));
 function issueGrant(
 	store: MandateStore,
@@ -267,9 +265,73 @@ test("worker accrual is never masked by a reviewer baseline", (t) => {
 	assert.match(store.show(grant.id, jobs), /; 2000 \/ 10000 non-cached tokens/);
 });
 
-// The one permission rule (src/mandate-permission.ts), cell by cell: status x use x in-flight. Letters follow
-// GRANT_USES order — dispatch, promote, implement, review, repair, merge — P permit, R refuse, S silent. Columns:
-// the job's own same-kind fleet record is working/held, that record's worker failed, no such record.
+test("gate, diff-review and quality-panel reviewer spend counts toward the covering grant's USD and token caps, non-cached", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const grant = issueGrant(store, { job_ids: ["cp-rev"], spend_cap: { usd: 3, tokens: 10_000 } });
+	const jobs = [{ job_id: "cp-rev", project: "demo", phase: "held", usage: { cost_usd: 1, total_tokens: 1_000, cache_read: 0 } }];
+	const reviewer = (dir: string, tokens: number, usd: number, cacheRead: number) => {
+		const recorder = RunRecorder.open({ home: home.path, jobId: "cp-rev", dir: join(home.path, dir) });
+		recorder.pi({ type: "message_end", message: { role: "assistant", usage: { input: tokens, output: 0, cacheRead, totalTokens: tokens + cacheRead, cost: { total: usd } } } } as never);
+		recorder.close();
+	};
+	reviewer(paths.gateRunDir("cp-rev", 1), 2_000, 0.5, 90_000);
+	reviewer(paths.reviewRunDir("cp-rev", 1), 3_000, 0.5, 90_000);
+	reviewer(paths.qualityRunDir("cp-rev", "verify"), 1_000, 0.25, 0);
+	assert.match(store.show(grant.id, jobs), /\$2\.25 \/ \$3\.00; 7000 \/ 10000 non-cached tokens/, "cache reads never count");
+	assert.equal(store.require(grant.id).status, "active");
+
+	reviewer(paths.reviewRunDir("cp-rev", 2), 1_000, 1, 0);
+	const paused = store.sweep(undefined, jobs)[0];
+	assert.deepEqual([paused?.status, paused?.pause_reason], ["paused", "spend_cap"], "reviewer spend alone crossed the USD cap");
+	const subject: MandateSubject = { kind: "diff", jobId: "cp-rev", project: "demo", jobKind: "ship", usageJobs: store.withReviewerSpend(jobs) };
+	assert.equal(evaluateAuthority(subject, [{ ...paused!, status: "active" }]).permitted, false);
+});
+
+test("MandateStore writes every instant it is handed at second precision (2026-10-06T00:05Z)", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path, { now: () => new Date("2026-07-01T07:00:20.789Z") });
+	const issued = issueGrant(store, { at: "2026-07-01T00:00:20.999Z", expiry: "2026-07-01T07:00:00Z" });
+	assert.equal(issued.issued_at, "2026-07-01T00:00:20Z");
+	const expired = store.sweep("2026-07-01T07:00:20.123Z").find((mandate) => mandate.id === issued.id);
+	assert.deepEqual([expired?.status, expired?.escalations[0]?.at], ["expired", "2026-07-01T07:00:20Z"]);
+	// The cap pause (paused_at and its escalation) from a sweep handed a millisecond instant.
+	const held = [{ job_id: "cp-held", project: "demo", phase: "held", usage: { total_tokens: 100, cost_usd: 0.1 } }];
+	const capped = issueGrant(store, { at: "2026-07-01T00:00:00Z", expiry: "2026-12-31T00:00:00Z", spend_cap: { usd: 20, tokens: 1_000 } }, held);
+	const grown = [{ ...held[0]!, usage: { total_tokens: 5_000, cost_usd: 0.1 } }];
+	const paused = store.sweep("2026-07-01T07:00:20.456Z", grown).find((mandate) => mandate.id === capped.id);
+	assert.deepEqual([paused?.status, paused?.paused_at, paused?.escalations[0]?.at], ["paused", "2026-07-01T07:00:20Z", "2026-07-01T07:00:20Z"]);
+	// pause(id, reason) takes no instant: it stamps from the store clock, so this pins the clock path only.
+	const operator = issueGrant(store, { at: "2026-07-01T00:00:00Z", expiry: "2026-12-31T00:00:00Z" });
+	assert.equal(store.pause(operator.id).paused_at, "2026-07-01T07:00:20Z");
+	assert.throws(() => store.sweep("garbage"), (error: Error) => error instanceof MandateError && /invalid timestamp/.test(error.message));
+});
+
+test("a grant with no usage_baseline keeps the lifetime rule", (t) => {
+	// Every grant written before usage_baseline existed; no entry point writes one now.
+	const held = [{ job_id: "cp-held", project: "demo", phase: "held", usage: { total_tokens: 17_550_034, cost_usd: 0.1 } }];
+	const legacyHome = createScratchHome();
+	t.after(() => legacyHome.cleanup());
+	const legacyStore = new MandateStore(legacyHome.path);
+	const legacy = issueGrant(legacyStore, { spend_cap: { usd: 20, tokens: 3_000_000 } });
+	assert.equal(legacy.usage_baseline, undefined);
+	const lifetime = legacyStore.sweep(undefined, held)[0];
+	assert.deepEqual([lifetime?.status, lifetime?.pause_reason], ["paused", "token_cap"]);
+});
+
+test("a grant paused on job_cap before this rule resumes on the next save", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const grant = issueGrant(store, { job_cap: 3, ask_on: ["risk:high"], allowed_actions: ["implement", "review", "repair", "merge"] });
+	const legacy = store.save({ ...store.require(grant.id), status: "paused", paused_at: isoTimestamp(), pause_reason: "job_cap" });
+	assert.deepEqual([legacy.status, legacy.pause_reason], ["active", undefined]);
+});
+
+// The one permission rule (src/mandate-permission.ts), cell by cell, letters in GRANT_USES order: P permit, R refuse,
+// S silent. Columns: the job's own same-kind record is working/held, its worker failed, no such record.
 test("grantStanding: the complete status x use x in-flight matrix", () => {
 	const now = isoTimestamp();
 	// SAFETY: a literal carrying every required Mandate field; grantStanding is pure and reads no disk shape beyond these.
