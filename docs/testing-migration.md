@@ -71,6 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S05 (cp-e2e-slice-s05-mzpm) | behavior 05; declarations 41–55 and final retirement of `tests/diff-review.test.ts`. [S05 accounting and controls](testing-migration-s05-declarations.md): 15 mapped; whole file 53 mapped, 2 retained declarations plus the split unknown-job guard. | 1 original file retired; retained replacement is not deletion credit | +1 retained file (convert-owned P3c-rest), 3 tests; +7 e2e scenarios | -55 original declarations, +3 retained, +7 e2e = -45 net declarations |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
+| S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
@@ -432,6 +433,12 @@ moves first.
 | DR-20 | `tests/e2e/diff-review.test.ts` | S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision |
 | S06-5 | `tests/e2e/landing.test.ts` | landing: forge observation failures refuse merge receipts without leaking external replies |
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
+| 05-S14-bind | `tests/e2e/landing.test.ts` | landing S14: binding an existing PR checks forge facts and preserves checkout history |
+| 05-S14-unsafe | `tests/e2e/landing.test.ts` | landing S14: unsafe existing PRs refuse before leasing or contacting a worker |
+| 05-S14-resolution | `tests/e2e/landing.test.ts` | landing S14: worker PR reports resolve against the registered origin and drive the CI watch |
+| 05-S14-permission | `tests/e2e/landing.test.ts` | landing S14: repository permission reports the allowlist and each blocked cause |
+| 05-S14-gitlab | `tests/e2e/landing.test.ts` | landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals |
+| 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -882,6 +889,39 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
+| `tests/pr-bind.test.ts` | an open same-repo PR on the default base binds, by number or url | 05-S14-bind | mapped | S14-NC7: dropping draft from forge facts fails the actual worker prompt's bound identity, draft, head and base assertion; real bound reports resolve by number, including case-insensitive URL and #number |
+| `tests/pr-bind.test.ts` | every unsafe PR is refused with a DispatchError naming the cause | 05-S14-unsafe | mapped | S14-NC6: making refuse return undefined produces Missing expected rejection in all eight unsafe forge/ref cases; fixed dispatch writes no fleet record and sends no model request |
+| `tests/pr-bind.test.ts` | assertBranchFree refuses a held or failed holder and allows a done one | 05-S14-bind | mapped | S14-NC9: inverted holder eligibility accepts held/failed peers and rejects done/self failed rows; legacy fleet seeding reaches all four through dispatch |
+| `tests/pr-bind.test.ts` | the bound note forbids history rewrite: merge the base, fast-forward push only | 05-S14-bind | mapped | S14-NC8: permitting history rewrite fails the model request assertion never rewrite or drop existing commits; full bound note clauses asserted |
+| `tests/pr-bind.test.ts` | absent local branch: created tracking origin, HEAD at the PR head | 05-S14-bind | mapped | S14-NC4: bypassed checkout fails leased HEAD=c2; fixed also asserts branch feat and upstream origin/feat |
+| `tests/pr-bind.test.ts` | local branch behind origin: fast-forwarded | 05-S14-bind | mapped | S14-NC4: bypassed checkout fails leased HEAD=c2 |
+| `tests/pr-bind.test.ts` | diverged local branch: kept on a salvage ref, then reset to origin | 05-S14-bind | mapped | S14-NC5: removing update-ref fails salvage object-id equality with local commit; fixed also checks c2 checkout |
+| `tests/pr-bind.test.ts` | a branch checked out in another worktree is refused | 05-S14-bind | mapped | S14-NC4: bypassed checkout produces Missing expected rejection; fixed creates no model request |
+| `tests/pr-bind.test.ts` | HEAD not at the PR's headRefOid is refused | 05-S14-bind | mapped | S14-NC4: bypassed checkout produces Missing expected rejection; fixed creates no model request |
+| `tests/merge-permission.test.ts` | 1 CLEAN and HAS_HOOKS | 05-S14-permission | mapped | S14-NC1: both actual merge cases fail permission permitted |
+| `tests/merge-permission.test.ts` | 2 BLOCKED required review | 05-S14-permission | mapped | S14-NC1: counted approving review assertion fails |
+| `tests/merge-permission.test.ts` | 3 CHANGES_REQUESTED | 05-S14-permission | mapped | S14-NC1: pending reviews assertion fails |
+| `tests/merge-permission.test.ts` | 4 required checks | 05-S14-permission | mapped | S14-NC1: pending checks/test assertion fails |
+| `tests/merge-permission.test.ts` | 5 unreadable rules | 05-S14-permission | mapped | S14-NC1: unknown_block assertion fails |
+| `tests/merge-permission.test.ts` | 6 BEHIND DIRTY DRAFT and isDraft | 05-S14-permission | mapped | S14-NC17: four pending cause assertions fail |
+| `tests/merge-permission.test.ts` | 7 UNSTABLE | 05-S14-permission | mapped | S14-NC1: pending unstable and 403 assertion fails |
+| `tests/merge-permission.test.ts` | 8 UNKNOWN status or mergeability | 05-S14-permission | mapped | S14-NC1/NC2: retry assertions fail; unknown mergeability actually merges |
+| `tests/merge-permission.test.ts` | 9 absent empty or novel status | 05-S14-permission | mapped | S14-NC2: all three unreadable assertions fail |
+| `tests/merge-permission.test.ts` | 10 tolerant rules parser | 05-S14-permission | mapped | S14-NC15: counted review assertions fail; fixed payload/empty/nonJSON/403 variants pass |
+| `tests/merge-permission.test.ts` | 11 strict rule proof | 05-S14-permission | mapped | S14-NC14: all seven stale-base strict/false/string/missing/wrong-type/empty/unreadable variants fail |
+| `tests/merge-permission.test.ts` | 12 endpoint args | 05-S14-permission | mapped | S14-NC16: external endpoint equality fails twice |
+| `tests/merge-permission.test.ts` | 13 blocking CI wait shape | 05-S14-permission | retained | tests/merge-permission-retained.test.ts; cp_integrate executes builder output directly; worker guard receives worker commands, so no public entry composes this builder with detectCiWait |
+| `tests/pr-resolve.test.ts` | 1 typo owner corrected and named | 05-S14-resolution | mapped | S14-NC3: stored receipt URL equality fails |
+| `tests/pr-resolve.test.ts` | 2 missing PR refusal | 05-S14-resolution | mapped | S14-NC3: expected no-PR reason is empty |
+| `tests/pr-resolve.test.ts` | 3 unavailable gh owner mismatch | 05-S14-resolution | mapped | S14-NC3: expected mismatch reason is empty |
+| `tests/pr-resolve.test.ts` | 4 matching owner unverified | 05-S14-resolution | mapped | S14-NC3: unverified event count 0 instead of 1 |
+| `tests/pr-resolve.test.ts` | 5 CI watch corrected URL | 05-S14-resolution | mapped | S14-NC18: actual watch REST repository read assertion fails while corrected intake receipt remains valid |
+| `tests/pr-resolve.test.ts` | 6 bound PR by number never list | 05-S14-bind | mapped | S14-NC10: waiting instead of held; fixed actual view 169 --repo and no-list assertions |
+| `tests/pr-resolve.test.ts` | 7 wrong PR or moved branch refused | 05-S14-bind | mapped | S14-NC11: both expected correction reasons are empty, reports wrongly held |
+| `tests/pr-resolve.test.ts` | 8 bound report accepted held | 05-S14-bind | mapped | S14-NC10: waiting instead of held |
+| `tests/pr-resolve.test.ts` | 9 GitLab mixed verified refused unverified | 05-S14-gitlab | retained | tests/pr-resolve-retained.test.ts; validateEnvelope rejects missing pr_url before intake resolver, including no-given bound MR fallback; all reachable variants additionally exercised through real reporter |
+| `tests/pr-resolve.test.ts` | 10 GitLab intake hold and refusal | 05-S14-gitlab | mapped | S14-NC12: wrong branch wrongly held and expected correction reason empty |
+| `tests/review-approval.test.ts` | 1 approval rounds hash identity missing file | 05-S14-approval | retained | tests/review-approval-retained.test.ts; pipeline artifacts.info fails before missing-file matches; only production write uses seq 1; no public entry for seq 2/3 overwrite. S14-NC13 independently proves reachable edited-plan checkpoint stays pending |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1338,6 +1378,50 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 +			if (false) release();
 ```
 
+<!-- patch:S14-NC11 -->
+```diff
+diff --git a/src/pr-resolve.ts b/src/pr-resolve.ts
+--- a/src/pr-resolve.ts
++++ b/src/pr-resolve.ts
+@@ -218 +218 @@
+-	if (target && (target.number !== bound.number || `${target.owner}/${target.repo}`.toLowerCase() !== ownerRepo.toLowerCase())) {
++	if (false) {
+@@ -239 +239 @@
+-	if (row.headRefName !== input.branch) {
++	if (false) {
+```
+<!-- /patch:S14-NC11 -->
+
+<!-- patch:S14-NC13 -->
+```diff
+diff --git a/src/review-approval.ts b/src/review-approval.ts
+--- a/src/review-approval.ts
++++ b/src/review-approval.ts
+@@ -68 +68 @@
+-		return sha256File(artifactPath) === approval.artifact_sha256;
++		return true;
+```
+<!-- /patch:S14-NC13 -->
+
+<!-- patch:S14-NC15 -->
+```diff
+diff --git a/src/merge-permission.ts b/src/merge-permission.ts
+--- a/src/merge-permission.ts
++++ b/src/merge-permission.ts
+@@ -267 +267 @@
+-	return rules;
++	return [];
+```
+<!-- /patch:S14-NC15 -->
+
+<!-- patch:S14-NC5 -->
+```diff
+diff --git a/src/pr-bind.ts b/src/pr-bind.ts
+--- a/src/pr-bind.ts
++++ b/src/pr-bind.ts
+@@ -136,1 +136,0 @@
+-		await run(["update-ref", salvaged, local.stdout.trim()], `keeping the diverged local ${head} at ${salvaged}`);
+```
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1431,6 +1515,10 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 | S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
 | S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
 | S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
+| S14-NC5 | `tests/pr-bind.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC5 | 9528dbecb15617a52ca1f3a3a8469bcbdf44786705fff13c9f076e8ca262188e | diverged: salvage object id actual empty, expected preserved local commit | pass |
+| S14-NC11 | `tests/pr-resolve.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC11 | 9c6e119c7d7f1806e2ad1e6ce98caa7ba9dcea6385d189c95a8b203056263d8b | wrong-url/moved-report: correction reason empty instead of expected refusal, real reports wrongly held | pass |
+| S14-NC13 | `tests/review-approval.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-approval | S14-NC13 | 0f326239caf9365c6450c310b5f5e6aa5f31e9ef6daea45ad71a8b92070027d1 | edited artifact checkpoint actual approved instead of pending | pass |
+| S14-NC15 | `tests/merge-permission.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-permission | S14-NC15 | 4f86665bf2f5e9ea272ed26fa77a2a6b5729d9e9435ab856518a8b4a8aeeca67 | one/two approving-review counts absent from actual integration output | pass |
 
 <!-- patch:NC-S05-SUMMARY -->
 ```diff
@@ -2593,6 +2681,9 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
 | `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
+| `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
+| `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
+| `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2789,7 +2880,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/merge-permission.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/merge-permission.test.ts` | deleted | S14 | 12 mapped to 05-S14-permission; S14-NC1/2/14–17; 1 retained verbatim in tests/merge-permission-retained.test.ts, compositional safety has no public entry; [ledger](testing-migration-s14.md) |
 | `tests/merges.test.ts` | deleted | P3b | 12 declarations: 05-5, 05-6 and S06-2; one receipt guard retained in tests/forge-observers-retained.test.ts; NC-28, NC-29, S06-deploy |
 | `tests/mode.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/model-call-failure-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); also listed under 14, owned here only |
@@ -2832,8 +2923,8 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/plan-view.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/plan-viewer.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/planner-artifact.test.ts` | exception | P1 | contract: planner artifact; operator ask-0088e0332d00 (Exceptions) |
-| `tests/pr-bind.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/pr-resolve.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/pr-bind.test.ts` | deleted | S14 | behavior 05; all 9 declarations mapped to 05-S14-bind/unsafe; S14-NC4–NC9 executed; [declaration ledger](testing-migration-s14.md) |
+| `tests/pr-resolve.test.ts` | deleted | S14 | 9 mapped to 05-S14-bind/resolution/gitlab; S14-NC3/10–12/18; 1 retained verbatim in tests/pr-resolve-retained.test.ts, envelope validation excludes missing-URL inputs; [ledger](testing-migration-s14.md) |
 | `tests/preflight.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/profiles.test.ts` | exception | P1 | contract: role profiles and briefs; operator ask-0088e0332d00 (Exceptions) |
 | `tests/project-report.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
@@ -2853,7 +2944,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/relay-scope.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/repo-map.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/restart-intake.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
-| `tests/review-approval.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-approval.test.ts` | deleted | S14 | moved verbatim to tests/review-approval-retained.test.ts; mixed unreachable matches(missing) and seq-2/3 write inputs; reachable hash authorization covered by 05-S14-approval and S14-NC13 |
 | `tests/review-context.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-merge-window.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
