@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, DIFF_REVIEW_MAX_BYTES, DIFF_REVIEW_MAX_STAT_FILES, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, type DiffVerdict } from "../../src/contracts.ts";
+import { DiffVerdictSchema, validate } from "../../src/contracts.ts";
 import { isDiffReviewWait } from "../../src/diff-review.ts";
-import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { enableTreehouse, waitFor } from "../harness/index.ts";
@@ -491,5 +492,96 @@ test("S15: a git object read failure is named in reviewer context without fabric
 			assert.equal(existsSync(join(result.scratch, "context.md")), false);
 			assert.match(readFileSync(join(result.run, "brief.md"), "utf8"), /Repository context unavailable: .*S15 object read failed\. Judge from the diff and task only, and report the limit\./);
 		}
+	}
+});
+
+
+test("S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "src/run.ts": "export const run = 1;\n" });
+	const model = s.provider.addScript("s15-barrier", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 reviewed"] } }] }]);
+	s.agent.writeModels(s.provider);
+	const started = await s.post.diffReview({ jobId: job, model });
+	assert.ok(isDiffReviewWait(started));
+	assert.deepEqual([started.next, started.surface, started.attempt, started.model], ["wait", "review", 1, model]);
+	const pendingFile = join(s.home, paths.pendingReviewFile(job, "review", 1));
+	const pending = JSON.parse(readFileSync(pendingFile, "utf8"));
+	assert.equal(pending.schema_version, 1);
+	assert.equal(pending.handed_back, false);
+	assert.ok(pending.pid > 0);
+	await assert.rejects(() => s.post.diffReview({ jobId: job, model }), /already has a diff review in flight/);
+	await waitFor(() => existsSync(join(s.home, paths.reviewFile(job, 1))), Boolean, { timeoutMs: 30_000, what: "durable review decision" });
+	assert.equal(existsSync(pendingFile), false);
+	assert.equal(s.wakes.length, 0);
+	s.post.reviewRuns.handBack(started.key);
+	await s.post.reviewRuns.settled(started.key);
+	assert.equal(s.wakes.length, 1);
+	assert.match(s.wakes[0] ?? "", /S15 reviewed/);
+	assert.equal(s.post.reviewRuns.pending(job, "review"), undefined);
+	s.post.reviewRuns.handBack(started.key);
+	assert.equal(s.wakes.length, 1);
+	const ordinary = await s.seed({ "src/ordinary.ts": "export const ordinary = 1;\n" });
+	await s.review(ordinary);
+	assert.equal(s.wakes.length, 2);
+	const events = readFileSync(join(s.home, paths.eventsFile(job)), "utf8");
+	assert.match(events, /review_started/);
+	assert.match(events, /verdict_wakeup_sent/);
+});
+
+
+test("S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "src/payload.ts": "export const S15_PRIVATE_DIFF = 1;\n" });
+	const medium = "[severity: medium] [confidence: high] src/payload.ts:1 — retry can stay stale; clear it";
+	await s.review(job, { reasons: [medium] });
+	const wide = await s.seed(Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`wide-${n}.ts`, "x\n"])));
+	const large = await s.seed({ "large.ts": "export const S15_PRIVATE_DIFF = 1;\n".repeat(12_000) });
+	const parent = s.provider.addScript("s15-tool-parent", [
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: "cp-s15-unknown" } }] },
+		{ kind: "text", text: "refused" },
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: job } }] },
+		{ kind: "text", text: "reviewed" },
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: wide } }] },
+		{ kind: "text", text: "wide refused" },
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: large } }] },
+		{ kind: "text", text: "large refused" },
+	], { onExhausted: "repeat" });
+	s.agent.writeModels(s.provider);
+	const child = startPiChild({ cwd: s.home, model: parent, env: { ...s.agent.env, CP_HOME: s.home }, extensions: [COMMAND_POST_EXTENSION] });
+	t.after(() => child.close());
+	await child.prompt("Review the unknown job.");
+	await child.waitForSettled(60_000);
+	const offered = JSON.stringify(s.provider.requests("s15-tool-parent")[0]?.body.tools);
+	assert.match(offered, /cp_review/);
+	assert.match(offered, /cp_gate/);
+	assert.match(offered, /no blocking high\/high/);
+	const ends = () => child.eventsOfType("tool_execution_end").filter((event) => event.toolName === "cp_review") as Array<{ isError?: boolean; result?: { details?: Record<string, unknown>; content?: unknown } }>;
+	assert.equal(ends()[0]?.isError, true);
+	assert.match(JSON.stringify(ends()[0]?.result), /no dispatch record.*cp_dispatch/);
+	assert.doesNotMatch(JSON.stringify(ends()[0]?.result), /pipeline/i);
+	await child.prompt("Review the pushed job now.");
+	await child.waitForSettled(60_000);
+	await waitFor(() => ends().length, (count) => count === 2, { timeoutMs: 60_000, what: "cached RPC verdict" });
+	const payload = ends().at(-1)?.result;
+	assert.ok(payload?.details);
+	assert.equal(payload.details.next, "proceed", JSON.stringify(payload));
+	assert.equal(validate(DiffVerdictSchema, payload.details.verdict).ok, true);
+	assert.equal((payload.details.verdict as DiffVerdict).head_sha, s.repo.head(job));
+	assert.equal((payload.details.verdict as DiffVerdict).verdict, "pass");
+	assert.match(JSON.stringify(payload.content), /retry can stay stale/);
+	assert.equal(payload.details.review, undefined);
+	assert.doesNotMatch(JSON.stringify(payload), /S15_PRIVATE_DIFF|diff\.md|@@/);
+	assert.match(String(payload.details.review_file), /review-(?:1|equivalent-[0-9a-f]{40})\.json$/);
+	assert.deepEqual(JSON.parse(readFileSync(String(payload.details.review_file), "utf8")), payload.details.verdict);
+	for (const [count, label] of [[3, "wide"], [4, "large"]] as const) {
+		await child.prompt(`Review the ${label} branch.`);
+		await waitFor(() => ends().length, (n) => n === count, { timeoutMs: 60_000, what: `${label} policy payload` });
+		const policy = ends().at(-1)?.result;
+		assert.equal(policy?.details?.next, "surface");
+		assert.equal((policy?.details?.verdict as DiffVerdict).cause, "policy");
+		assert.equal(policy?.details?.model, undefined);
+		assert.match(JSON.stringify(policy?.content), /no reviewer/);
+		assert.doesNotMatch(JSON.stringify(policy), /S15_PRIVATE_DIFF|diff\.md|@@/);
+		if (label === "wide") assert.equal(policy?.details?.subject, undefined);
 	}
 });

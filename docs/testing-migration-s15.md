@@ -35,3 +35,11 @@ The original file remains pending complete whole-file retirement bookkeeping and
 ## Remaining files
 
 review-merge-window (2), review-runs (19), review-tool (7) still need declaration accounting and conversion. No retained disposition is claimed at this stage.
+
+## Second checkpoint
+
+Added `S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback` through CommandPost.diffReview with real reviewer processes. Executed three individual src/review-runs.ts mutations, restoring each: initialize handed_back=true (fails initial false flag assertion); remove the wakeup handback await (fails zero pre-handback wakes); remove #send (fails one post-handback wake). These support declarations 1, 3 and 4; the duplicate preflight assertion is also exercised, but the separate registry-slot case still requires accounting.
+
+Added `S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies`: a real pi RPC parent runs unknown-job, cached pass, wide-subject and oversized-subject cp_review calls. It checks medium reasons, persisted verdict equality, policy/model-free results and absence of raw diff bodies and paths. Production controls for this scenario remain pending; no migration credit is claimed for it yet.
+
+Executed helper payload controls: replacing details.verdict with {} fails DiffVerdictSchema validation in the real RPC scenario; stripping formatted reasons fails the medium reason text assertion. A separate exploratory diff_path: result.diff?.path mutation PASSED this scenario: current cached and policy tool results carry no materialized diff. It was restored and earns no control credit. The original direct-helper raw diff/path injection assertion must therefore stay until a reachable consumer case is established or its unreachable input is traced and retained explicitly.
