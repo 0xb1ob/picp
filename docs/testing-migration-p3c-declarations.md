@@ -15,11 +15,24 @@ P3d owns only the other sixteen behavior-05 files. This document supersedes the 
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
 | tests/integrate-held-ci.test.ts | 3 | Pending V2 gap closure under P3c, including restart and permission paths |
-| tests/awaiting-merge-tick.test.ts | 2 | Pending V2 gap closure under P3c, including lock transitions and shutdown |
+| tests/awaiting-merge-tick.test.ts | 2 | Retained verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c); specifically missing lifecycle entry points below; no deletion credit |
 
-Current counts: 13/143 declarations mapped (9.09%), 0 retained, 130 pending; 8 declarations removed, 2/7 original
+Current counts: 13/143 declarations mapped (9.09%), 2 retained (1.40%), 128 pending; 8 declarations removed, 2/7 original
 files fully deleted. The five existing CI-watch mappings remain until that file's conversion. Work continues until
 the V2 acceptance is met; these intermediate counts are not a completion claim.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The manifest ledger and PR body
 carry the measured counts after each completed file migration.
+
+The timer file is a 100% rename, not retired coverage. Its two declaration rows remain `retained` in the assertion
+ledger; the baseline-file table's `deleted` means only that its old path is gone. The replacement is convert-owned
+by P3c, and the rename adds zero to the fully deleted-file/declaration counts.
+
+| Retained declaration | Specifically missing entry point and evidence |
+|---|---|
+| a lock taken after session_start still sweeps on the next interval | No public API transfers ownership to an already-started parent. `extensions/command-post/index.ts` registers session hooks before the timer; `session-hooks.ts` acquires only at session_start and releases only at session_shutdown. Reinstating the old startup lock guard still passes real 05-12 (`v2-tick-startup-probe.log`, exit 0), so it is not counted as a failing consumer control. |
+| session_shutdown clears the startup catch-up and the interval | No public API observes dormant timer callbacks after shutdown while ownership remains held, or shuts down before the first startup timer in that state. Shutdown releases the lock; the real process then exits. Removing both clears still passes real 05-12 (`v2-tick-shutdown-probe.log`, exit 0), while the retained regression fails (`v2-tick-shutdown-unit-probe.log`, exit 1). The exact timer assertions stay. |
+
+Both mutations were restored. Neither passing consumer probe is recorded as a negative control. No P1 exception is
+introduced. A future ownership-transfer API or observable post-shutdown lifecycle is the entry point needed to map
+these retained declarations.
