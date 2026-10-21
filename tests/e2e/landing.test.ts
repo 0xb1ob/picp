@@ -10,6 +10,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
@@ -17,12 +18,15 @@ import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { CheckpointStore } from "../../src/checkpoint.ts";
+import { MainCiStore } from "../../src/main-ci.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
 import {
 	COMMAND_POST_EXTENSION,
+	CP_BRIDGE_EXTENSION,
 	startPiChild,
 	advanceBase,
 	createAgentDir,
@@ -77,6 +81,9 @@ interface GhState {
 	/** Page 2 onward starts this many rows early: a boundary shift that repeats the previous page's last run. */
 	overlap?: number;
 	routes?: Route[];
+	integration?: boolean;
+	permission?: string | null;
+	merged?: Record<string, { head: string; commit: string }>;
 }
 
 function run(id: number, head: string, status: string | null, conclusion: string | null, over: Partial<RunRow> = {}): RunRow {
@@ -206,6 +213,7 @@ for (const [index, route] of (state.routes || []).entries()) {
   counts[index] = n + 1;
   writeFileSync(${JSON.stringify(countsFile)}, JSON.stringify(counts));
   const answer = route.replies[Math.min(n, route.replies.length - 1)];
+  while (answer.untilFile && !existsSync(answer.untilFile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   if (answer.pass) break;
   reply(answer);
 }
@@ -225,8 +233,37 @@ const branchOf = Object.fromEntries(Object.entries(state.prs).map(([branch, pr])
 const all = state.runs || [];
 if (args[0] === "pr" && args[1] === "view") {
   const branch = branchOf[args[2]] || (state.prs[args[2]] ? args[2] : undefined);
-  if (branch) out({ number: state.prs[branch].number, url: state.prs[branch].url, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
+  if (branch && state.merged && state.merged[branch]) {
+    const merged = state.merged[branch];
+    out({ number: state.prs[branch].number, url: state.prs[branch].url, state: "MERGED", headRefName: branch, headRefOid: merged.head, baseRefName: "main", mergedAt: new Date().toISOString(), mergeCommit: { oid: merged.commit } });
+  }
+  if (branch) out({ number: state.prs[branch].number, url: state.prs[branch].url, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: state.permission === null ? undefined : state.permission || "CLEAN",
     headRefName: branch, headRefOid: heads()[branch], baseRefName: "main", isDraft: false, autoMergeRequest: null });
+}
+if (state.integration && args[0] === "api" && path.includes("/rules/branches/")) out([]);
+if (state.integration && args[0] === "pr" && args[1] === "update-branch") {
+  const branch = branchOf[args[args.length - 1]];
+  execFileSync("git", ["fetch", "--quiet", "origin", "main", branch]);
+  execFileSync("git", ["checkout", "--quiet", "--detach", "origin/" + branch]);
+  execFileSync("git", ["merge", "--no-edit", "--quiet", "origin/main"]);
+  execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/" + branch]);
+  execFileSync("git", ["checkout", "--quiet", "main"]);
+  reply({});
+}
+if (state.integration && args[0] === "pr" && args[1] === "merge") {
+  const branch = branchOf[args[2]];
+  const head = heads()[branch];
+  const bound = args[args.indexOf("--match-head-commit") + 1];
+  if (args.includes("--match-head-commit") && bound !== head) reply({ code: 1, stderr: "Head branch was modified" });
+  execFileSync("git", ["fetch", "--quiet", "origin", "main", branch]);
+  execFileSync("git", ["checkout", "--quiet", "main"]);
+  execFileSync("git", ["merge", "--ff-only", "--quiet", "origin/main"]);
+  execFileSync("git", ["merge", "--squash", "--quiet", "origin/" + branch]);
+  execFileSync("git", ["commit", "--quiet", "-m", "forge squash"]);
+  execFileSync("git", ["push", "--quiet", "origin", "main"]);
+  state.merged = { ...(state.merged || {}), [branch]: { head, commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() } };
+  writeFileSync(${JSON.stringify(stateFile)}, JSON.stringify(state));
+  reply({});
 }
 if (args[0] === "api" && /\\/pulls\\/\\d+$/.test(path)) {
   const number = Number(path.split("/pulls/")[1]);
@@ -403,7 +440,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent, provider, agentDir };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -1365,6 +1402,9 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.deepEqual([repaired?.worker.pid, repaired?.worker.session_id, repaired?.branch, repaired?.worktree], [identity.worker.pid, identity.worker.session_id, identity.branch, identity.worktree]);
 	assert.equal(holds.get(live.jobId)?.reason, "QA in progress");
+	const repairContext = JSON.stringify(s.provider.requests(`landing-${live.jobId}`));
+	assert.ok(repairContext.includes("https://github.com/example/demo/actions/runs/111"));
+	assert.match(repairContext, /integration hold remains active/);
 	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
 	const head = git(live.worktree, "rev-parse", "HEAD");
 	assert.notEqual(head, live.head, "the repaired report carries a newly pushed head");
@@ -1379,4 +1419,536 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.equal(s.post.integrator.get(live.jobId)?.next, "surface", "a second red result exhausts the repair allowance");
 	assert.equal(s.post.fleet.require(live.jobId).supersessions, 1, "no second promotion");
+});
+
+
+test("landing: held repair rejects invalid PR identity, CI, holds, drains and worktree hazards", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("held repair boundary matrix", 121);
+	const holds = new IntegrationHolds(s.home);
+	const view = { number: 121, url: live.prUrl, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main" };
+	const original = s.post.fleet.require(live.jobId);
+	const check = async (label: string, expected: string) => {
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, expected, `${label}: ${result.text}`);
+		assert.equal(result.record.record.resolve_attempts, 0, label);
+		assert.equal(s.post.fleet.require(live.jobId).supersessions, original.supersessions, label);
+		assert.deepEqual(mergedCalls(result.calls), [], label);
+		assert.ok(existsSync(holds.file(live.jobId)), label);
+		return result;
+	};
+	holds.hold(live.jobId, "boundary QA");
+	for (const patch of [{ state: "CLOSED" }, { state: "MERGED" }, { headRefName: "foreign" }, { headRefName: undefined }, { headRefOid: "invalid" }, { headRefOid: undefined }]) {
+		s.setGh({ runs: [run(121, live.head, "completed", "failure")], routes: [{ match: "pr view", replies: [json({ ...view, ...patch })] }] });
+		await check(JSON.stringify(patch), "wait");
+	}
+	for (const rows of [[], [run(121, live.head, "in_progress", null)], [run(121, live.head, "completed", "success")], [run(121, "b".repeat(40), "completed", "failure")]]) {
+		s.setGh({ runs: rows, routes: [] });
+		const result = await check(JSON.stringify(rows), "wait");
+		if (rows[0]?.conclusion === "success") {
+			assert.match(result.text, /CI green/);
+			assert.equal(result.record.head_sha, live.head);
+			assert.equal(result.record.pr_url, live.prUrl);
+		}
+	}
+	for (const stdout of ["{", "null", "{}", '[{"conclusion":"failure"}]']) {
+		s.setGh({ routes: [{ match: "actions/runs?head_sha=", replies: [{ stdout }] }] });
+		await check(`malformed CI ${stdout}`, "wait");
+	}
+	for (const match of ["pr view", "actions/runs?head_sha="]) {
+		s.setGh({ routes: [{ match, replies: [{ code: 1, stderr: "HTTP 403" }] }] });
+		await check(`denied ${match}`, "wait");
+	}
+	s.setGh({ routes: [] });
+	for (const body of ["{", "{}", JSON.stringify({ job_id: "foreign", reason: "QA", held_at: isoTimestamp() })]) {
+		writeFileSync(holds.file(live.jobId), body);
+		const result = await check(body, "wait");
+		assert.deepEqual(result.calls, [], "invalid hold starts no process");
+	}
+	holds.release(live.jobId);
+	holds.hold(live.jobId, "boundary QA");
+	for (const body of ["{", JSON.stringify({ started_at: isoTimestamp(), jobs: [] })]) {
+		writeFileSync(drainFile(s.home), body);
+		const result = await check(body, "wait");
+		assert.deepEqual(result.calls, [], "drain starts no process");
+		assert.ok(result.record.facts.some((fact) => fact.startsWith("ci: not read — ")));
+		rmSync(drainFile(s.home));
+	}
+	s.setGh({ runs: [run(121, live.head, "completed", "failure")], routes: [] });
+	for (const phase of ["waiting", "launching", "failed", "done", "unreported", "held"]) {
+		const file = join(s.home, LAYOUT.fleetFile);
+		const before = readFileSync(file, "utf8");
+		const legacy = JSON.parse(before);
+		const row = legacy.jobs.find((entry: { job_id: string }) => entry.job_id === live.jobId);
+		row.phase = phase;
+		if (phase === "held") delete row.reported_at;
+		writeFileSync(file, JSON.stringify(legacy));
+		try {
+			if (["launching", "failed", "unreported", "held"].includes(phase)) {
+				await assert.rejects(() => s.integrate(live.jobId), /violates the fleet contract/, phase);
+			} else {
+				const result = await s.integrate(live.jobId);
+				assert.equal(result.record.next, "wait", `${phase}: ${result.text}`);
+				assert.deepEqual(mergedCalls(result.calls), [], phase);
+			}
+		} finally { writeFileSync(file, before); }
+	}
+	const gitDir = git(live.worktree, "rev-parse", "--absolute-git-dir");
+	for (const hazard of ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"]) {
+		const file = join(gitDir, hazard);
+		writeFileSync(file, "unfinished");
+		try { await check(hazard, "surface"); }
+		finally { rmSync(file, { force: true }); }
+	}
+	const defaultsFile = join(s.home, LAYOUT.mandateDefaultsFile);
+	const defaultsBefore = existsSync(defaultsFile) ? readFileSync(defaultsFile, "utf8") : undefined;
+	writeFileSync(defaultsFile, JSON.stringify({ deny_projects: ["demo"] }));
+	try {
+		const refused = await s.integrate(live.jobId);
+		assert.equal(refused.record.next, "surface", refused.text);
+		assert.match(refused.record.resolve_error ?? "", /project demo is denied/);
+		assert.equal(refused.record.record.resolve_attempts, 0);
+		assert.equal(holds.get(live.jobId)?.reason, "boundary QA");
+	} finally {
+		if (defaultsBefore === undefined) rmSync(defaultsFile);
+		else writeFileSync(defaultsFile, defaultsBefore);
+	}
+});
+
+
+test("landing: held CI revalidates local state after each external read", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("held CI read races", 122);
+	const holds = new IntegrationHolds(s.home);
+	const view = { number: 122, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main" };
+	const envelopeFile = join(s.home, paths.envelopeFile(live.jobId));
+	const fleetFile = join(s.home, LAYOUT.fleetFile);
+	for (const at of ["ci", "confirm"]) {
+		for (const change of ["drain", "invalid-drain", "invalid-hold", "release", "blocked", "unreadable-report", "waiting", "generation", "hazard", "closed", "branch", "head", "unreadable-pr"]) {
+			holds.hold(live.jobId, "race QA");
+			const fleetBefore = readFileSync(fleetFile, "utf8");
+			const envelopeBefore = readFileSync(envelopeFile, "utf8");
+			const barrier = join(s.home, `release-${at}-${change}`);
+			const gitHazard = join(git(live.worktree, "rev-parse", "--absolute-git-dir"), "MERGE_HEAD");
+			const changedView = { ...view, ...(change === "closed" ? { state: "CLOSED" } : change === "branch" ? { headRefName: "foreign" } : change === "head" ? { headRefOid: "b".repeat(40) } : {}) };
+			const changedReply: Reply = change === "unreadable-pr" ? { code: 1, stderr: "HTTP 403" } : json(changedView);
+			const routes: Route[] = at === "ci"
+				? [{ match: "actions/runs?head_sha=", replies: [{ ...runsBody([run(122, live.head, "completed", "failure")]), untilFile: barrier }] }]
+				: [{ match: "pr view", replies: [json(view), { ...changedReply, untilFile: barrier }] }];
+			s.setGh({ runs: [run(122, live.head, "completed", "failure")], routes });
+			const before = s.ghCalls().length;
+			const advancing = s.integrate(live.jobId);
+			try {
+				await waitFor(() => s.ghCalls().slice(before), (calls) => at === "ci" ? calls.some((call) => call.includes("actions/runs?head_sha=")) : calls.filter((call) => call.startsWith("pr view")).length >= 2, { timeoutMs: 30_000, what: `${at}/${change} reaches external barrier` });
+				if (change === "drain" || change === "invalid-drain") writeFileSync(drainFile(s.home), change === "drain" ? JSON.stringify({ started_at: isoTimestamp(), jobs: [] }) : "{");
+				if (change === "invalid-hold") writeFileSync(holds.file(live.jobId), "{");
+				if (change === "release") holds.release(live.jobId);
+				if (change === "unreadable-report") writeFileSync(envelopeFile, "{");
+				if (change === "blocked") {
+					const report = JSON.parse(envelopeBefore);
+					report.envelope.status = "blocked";
+					report.envelope.blockers = ["QA blocker"];
+					writeFileSync(envelopeFile, JSON.stringify(report));
+				}
+				if (change === "waiting" || change === "generation") {
+					const fleet = JSON.parse(fleetBefore);
+					const row = fleet.jobs.find((entry: { job_id: string }) => entry.job_id === live.jobId);
+					if (change === "waiting") row.phase = "waiting";
+					else row.supersessions = (row.supersessions ?? 0) + 1;
+					writeFileSync(fleetFile, JSON.stringify(fleet));
+				}
+				if (change === "hazard") writeFileSync(gitHazard, live.head);
+				if (["closed", "branch", "head", "unreadable-pr"].includes(change)) {
+					s.setGh({ routes: [{ match: "pr view", replies: [changedReply] }] });
+				}
+			} finally { writeFileSync(barrier, "release"); }
+			try {
+				const result = await advancing;
+				assert.equal(result.record.next, ["blocked", "unreadable-report", "hazard"].includes(change) ? "surface" : "wait", `${at}/${change}: ${result.text}`);
+				assert.equal(result.record.record.resolve_attempts, 0, `${at}/${change}`);
+				assert.deepEqual(mergedCalls(result.calls), []);
+			} finally {
+				writeFileSync(fleetFile, fleetBefore);
+				writeFileSync(envelopeFile, envelopeBefore);
+				rmSync(drainFile(s.home), { force: true });
+				rmSync(gitHazard, { force: true });
+				holds.release(live.jobId);
+			}
+		}
+	}
+	for (const at of ["ci", "confirm"]) {
+		const repair = await s.held(`changed hold reason ${at}`, at === "ci" ? 133 : 134);
+		holds.hold(repair.jobId, "old QA reason");
+		const barrier = join(s.home, `reason-${at}`);
+		const repairView = { ...view, url: repair.prUrl, headRefName: repair.jobId, headRefOid: repair.head };
+		const routes: Route[] = at === "ci"
+			? [{ match: "actions/runs?head_sha=", replies: [{ ...runsBody([run(133, repair.head, "completed", "failure")]), untilFile: barrier }] }]
+			: [{ match: "pr view", replies: [json(repairView), { ...json(repairView), untilFile: barrier }] }];
+		s.setGh({ runs: [run(133, repair.head, "completed", "failure")], routes });
+		const before = s.ghCalls().length;
+		const advancing = s.integrate(repair.jobId);
+		try {
+			await waitFor(() => s.ghCalls().slice(before), (calls) => at === "ci" ? calls.some((call) => call.includes("actions/runs?head_sha=")) : calls.filter((call) => call.startsWith("pr view")).length >= 2, { timeoutMs: 30_000, what: "changed reason reaches external barrier" });
+			holds.hold(repair.jobId, "updated QA reason");
+		} finally { writeFileSync(barrier, "release"); }
+		const result = await advancing;
+		assert.equal(result.record.next, "resolve", result.text);
+		assert.match(result.text, /updated QA reason/);
+		assert.equal(holds.get(repair.jobId)?.reason, "updated QA reason");
+	}
+});
+
+
+test("landing: a reviewed green head merges once, records, tears down and closes from forge facts", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const bound of [false, true]) await t.test(bound ? "bound branch" : "job branch", async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("integrate entire landing", 123);
+	if (bound) await s.post.fleet.patch(live.jobId, { bound_pr: { number: 123, url: live.prUrl, base: "main" } });
+	if (bound) await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy this merge", resources: ["host-a"] });
+	const jobsFile = join(s.home, LAYOUT.jobsFile);
+	const legacyJobs = JSON.parse(readFileSync(jobsFile, "utf8"));
+	legacyJobs.jobs.find((job: { id: string }) => job.id === live.jobId).tracker = { connection_id: "retired", item_id: "x-9", linked_at: isoTimestamp() };
+	writeFileSync(jobsFile, JSON.stringify(legacyJobs));
+	const trackerFile = join(s.home, LAYOUT.data, "trackers.json");
+	writeFileSync(trackerFile, "{ retired, malformed");
+	writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+	s.setGh({ integration: true, runs: [run(123, live.head, "completed", "success")] });
+	const merged = await s.integrate(live.jobId);
+	assert.equal(merged.record.next, "advance", merged.text);
+	assert.equal(merged.record.record.merge_authority?.kind, "repo_derived");
+	assert.equal(mergedCalls(merged.calls).length, 1);
+	assert.ok(merged.calls.some((call) => call.includes(`--match-head-commit ${live.head}`)));
+	assert.ok(merged.calls.every((call) => !["--admin", "--auto", "--delete-branch"].some((flag) => call.includes(flag))));
+	assert.equal(s.post.fleet.require(live.jobId).phase, "held", "the branch survives until teardown");
+	assert.notEqual(git(s.post.registry.pathOf("demo"), "ls-remote", "--heads", "origin", live.jobId), "");
+	await s.post.shutdown();
+	const restarted = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...s.agentDir.env }, holdsParentLock: () => true });
+	t.after(() => restarted.shutdown());
+	const resumed = await restarted.integrate({ jobId: live.jobId });
+	const done = { record: resumed, text: [...resumed.facts, resumed.reason].join("\n") };
+	assert.equal(done.record.next, "done", done.text);
+	assert.equal(done.record.end_state?.fleet_done, true);
+	assert.equal(done.record.end_state?.merge_receipt, true);
+	assert.equal(done.record.end_state?.br_closed, true);
+	assert.equal(s.post.fleet.require(live.jobId).closed_reason, "gated");
+	const afterMergeFacts = done.record.facts.filter((fact) => fact.startsWith("after-merge"));
+	assert.equal(afterMergeFacts.length, bound ? 1 : 0);
+	if (bound) assert.equal(deployJobs(restarted, live.jobId).length, 1);
+	const remoteBranch = git(s.post.registry.pathOf("demo"), "ls-remote", "--heads", "origin", live.jobId);
+	assert.equal(remoteBranch.length > 0, bound, "only a job-owned branch is deleted");
+	if (bound) assert.match(done.text, /head kept \(bound PR\)/);
+	const again = await s.integrate(live.jobId);
+	assert.equal(again.record.next, "done", again.text);
+	assert.equal(mergedCalls(s.ghCalls()).length, 1);
+	assert.equal(again.record.merge?.recorded, false);
+	const events = await s.parent("Read the completed integration result.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { job_id: live.jobId } }] },
+		{ kind: "text", text: "Integration is complete." },
+	]);
+	assert.doesNotMatch(JSON.stringify(events), /tracker|write-back/);
+	assert.equal(readFileSync(trackerFile, "utf8"), "{ retired, malformed");
+	});
+});
+
+
+test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 900_000 }, async (t) => {
+	for (const fallback of [false, true]) {
+		for (const change of ["hold", "unreadable-hold", "head", "ci", "permission", "none"]) await t.test(`${fallback ? "fallback" : "repository"}/${change}`, async (t) => {
+			const s = await startStack(t, { continuation: true });
+			const live = await s.held("review deadline gates", 124);
+			await s.post.continuation.serialize(live.jobId, async () => {});
+			const reviewedAt = new Date().toISOString();
+			writeWindowPass(s.home, live.jobId, live.head, reviewedAt);
+			if (fallback) {
+				const store = new CheckpointStore(s.home, { kind: "merge" });
+				const scope = live.head.slice(0, 12);
+				store.request({ jobId: live.jobId, scope, question: "Merge this head?" });
+				store.decide(live.jobId, true, { by: "operator command", scope });
+			}
+			s.setGh({ integration: true, permission: fallback ? null : "CLEAN", runs: [run(124, live.head, "completed", "success")] });
+			await s.tick(live.jobId);
+			await s.post.continuation.serialize(live.jobId, async () => {});
+			assert.equal(s.post.integrator.get(live.jobId)?.next, "wait");
+			assert.deepEqual(mergedCalls(s.ghCalls()), []);
+			const holds = new IntegrationHolds(s.home);
+			if (change === "hold" || change === "unreadable-hold") {
+				holds.hold(live.jobId, "hold during review window");
+				if (change === "unreadable-hold") writeFileSync(holds.file(live.jobId), "{");
+			}
+			if (change === "head") {
+				git(live.worktree, "commit", "--quiet", "--allow-empty", "-m", "push during review window");
+				git(live.worktree, "push", "--quiet", "origin", live.jobId);
+			}
+			if (change === "ci") s.setGh({ runs: [run(124, live.head, "in_progress", null)] });
+			if (change === "permission") s.setGh({ permission: "BLOCKED" });
+			await waitFor(() => Date.now(), (now) => now >= Date.parse(reviewedAt) + 31_000, { timeoutMs: 40_000, what: "real review deadline elapses" });
+			await s.post.continuation.serialize(live.jobId, async () => {});
+			assert.equal(mergedCalls(s.ghCalls()).length, change === "none" ? 1 : 0, `${fallback}/${change}`);
+			if (change === "hold" || change === "unreadable-hold") {
+				holds.release(live.jobId);
+				const result = await s.integrate(live.jobId);
+				assert.equal(result.record.next, "advance", result.text);
+				assert.equal(result.record.record.merge_authority?.kind, fallback ? "human_checkpoint" : "repo_derived");
+			}
+		});
+	}
+});
+
+
+test("landing: main red gates only the mandated login and permits a green fix-forward", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("main red integration", 125);
+	const base = advanceBase(s.repo, "unrelated.txt", "new base\n");
+	const store = new MainCiStore({ home: s.home });
+	const routes = [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }];
+	const grant = s.post.mandates.issue({ projects: ["demo"], objective: "main red integration", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+	store.setRed("demo", base, { login: "e2e" });
+	s.setGh({ runs: [run(125, live.head, "completed", "success")], routes: [{ match: "api user --jq .login", replies: [{ code: 1, stderr: "login unavailable" }] }] });
+	assert.equal((await s.integrate(live.jobId)).record.next, "review", "an unreadable login does not enforce a latch");
+	s.setGh({ routes, runs: [run(125, live.head, "completed", "success")] });
+	store.setRed("demo", base, { failing: "structure", login: "e2e" });
+	for (const rows of [[run(125, live.head, "completed", "success")], [run(125, live.head, "completed", "failure")], []]) {
+		s.setGh({ runs: rows });
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, "wait", result.text);
+		assert.match(result.record.reason, /main is red/);
+		assert.deepEqual(mergedCalls(result.calls), []);
+	}
+	s.setGh({ runs: [run(125, live.head, "completed", "success")] });
+	store.clear("demo");
+	store.setRed("elsewhere", base, { login: "e2e" });
+	assert.equal((await s.integrate(live.jobId)).record.next, "review", "another project's latch cannot block");
+	store.setRed("demo", base, { login: "foreign" });
+	assert.equal((await s.integrate(live.jobId)).record.next, "review", "a foreign login cannot block");
+	store.setRed("demo", base, { login: "e2e" });
+	s.post.mandates.revoke(grant.id);
+	assert.equal((await s.integrate(live.jobId)).record.next, "review", "without a mandate main red is not enforced");
+	s.post.mandates.issue({ projects: ["demo"], objective: "fix forward", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+	s.setGh({ routes });
+	writeFileSync(store.file, "{broken");
+	const corrupt = await s.integrate(live.jobId);
+	assert.equal(corrupt.record.next, "review");
+	assert.match(corrupt.text, /main-ci.json unreadable/);
+	rmSync(store.file);
+	store.setRed("demo", live.head, { login: "e2e" });
+	store.setRed("demo", base, { login: "e2e" });
+	assert.ok((await s.integrate(live.jobId)).record.reason.includes(`main is red since ${live.head.slice(0, 12)}`), "setting the same login twice preserves its first red head");
+	git(live.worktree, "fetch", "origin", "main");
+	git(live.worktree, "merge", "--no-edit", "origin/main");
+	git(live.worktree, "push", "origin", live.jobId);
+	const fixedHead = git(live.worktree, "rev-parse", "HEAD");
+	s.setGh({ runs: [run(126, fixedHead, "completed", "success")] });
+	const fixed = await s.integrate(live.jobId);
+	assert.equal(fixed.record.next, "review", fixed.text);
+	assert.match(fixed.text, /fix-forward/);
+	store.clear("demo");
+	assert.equal((await s.integrate(live.jobId)).record.next, "review");
+});
+
+
+test("landing: repository and fallback merges bind the approved head at the forge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const fallback of [false, true]) await t.test(fallback ? "fallback" : "repository", async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("atomic merge binding", 127);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const view = { number: 127, url: live.prUrl, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: fallback ? undefined : "CLEAN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main" };
+		const routes: Route[] = [{ match: "pr view", replies: [json(view)] }];
+		s.setGh({ integration: true, runs: [run(127, live.head, "completed", "success")], routes });
+		const checkpoints = new CheckpointStore(s.home, { kind: "merge" });
+		const scope = live.head.slice(0, 12);
+		if (fallback) {
+			const missing = await s.integrate(live.jobId);
+			assert.equal(missing.record.next, "surface");
+			assert.match(missing.text, /evidence is not authorization/);
+			assert.equal(checkpoints.get(live.jobId, { scope })?.decision, "pending");
+			const pending = await s.integrate(live.jobId);
+			assert.match(pending.text, /awaiting a human/);
+			const checkpointFile = join(s.home, paths.checkpointFile(live.jobId, "merge", scope));
+			const pendingBytes = readFileSync(checkpointFile, "utf8");
+			checkpoints.decide(live.jobId, false, { by: "operator command", scope });
+			assert.match((await s.integrate(live.jobId)).text, /declined/);
+			writeFileSync(checkpointFile, pendingBytes);
+			checkpoints.decide(live.jobId, true, { by: "operator command", scope });
+		}
+		const barrier = join(s.home, "merge-release");
+		s.setGh({ routes: [...routes, { match: "pr merge", replies: [{ pass: true, untilFile: barrier }] }] });
+		const before = s.ghCalls().length;
+		const advancing = s.integrate(live.jobId);
+		try {
+			await waitFor(() => s.ghCalls().slice(before).some((call) => call.startsWith("pr merge")), Boolean, { timeoutMs: 30_000, what: "merge reaches forge barrier" });
+			git(live.worktree, "commit", "--quiet", "--allow-empty", "-m", "concurrent push");
+			git(live.worktree, "push", "--quiet", "origin", live.jobId);
+		} finally { writeFileSync(barrier, "release"); }
+		const refused = await advancing;
+		assert.equal(refused.record.next, "retry", refused.text);
+		assert.match(refused.text, /Head branch was modified/);
+		assert.equal(refused.record.record.merge_authority, undefined);
+		assert.equal(existsSync(join(s.home, paths.mergeFile(live.jobId))), false);
+		assert.equal(s.post.fleet.require(live.jobId).phase, "held");
+		const call = mergedCalls(refused.calls)[0]!;
+		assert.ok(call.includes(`--match-head-commit ${live.head}`));
+		assert.ok(!call.includes("--delete-branch") && !call.includes("--admin") && !call.includes("--auto"));
+		const moved = git(live.worktree, "rev-parse", "HEAD");
+		s.setGh({ runs: [run(128, moved, "completed", "success")], routes: [{ match: "pr view", replies: [json({ ...view, headRefOid: moved })] }] });
+		assert.equal((await s.integrate(live.jobId)).record.next, "review", "old review never covers a pushed head");
+		writeWindowPass(s.home, live.jobId, moved, "2026-01-01T00:00:00Z");
+		if (fallback) {
+			const unapproved = await s.integrate(live.jobId);
+			assert.equal(unapproved.record.step, "authorize");
+			assert.equal(unapproved.record.next, "surface");
+			assert.equal(checkpoints.get(live.jobId, { scope: moved.slice(0, 12) })?.decision, "pending");
+			assert.equal(checkpoints.get(live.jobId, { scope })?.decision, "approved");
+		}
+	});
+});
+
+
+test("landing: stale bases update only for BEHIND or an authoritative strict rule", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["clean", "blocked", "denied-rules", "unknown", "behind", "strict", "current", "unreadable-ancestry", "red", "conflict", "moved", "superseded"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`base policy ${mode}`, 129);
+		if (mode !== "current") advanceBase(s.repo, "base-policy.txt", "base changed\n");
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const strict = ["strict", "current", "unreadable-ancestry"].includes(mode);
+		const status = ["clean", "red", "moved", "superseded"].includes(mode) ? "CLEAN" : mode === "unknown" ? "UNKNOWN" : mode === "behind" ? "BEHIND" : mode === "conflict" ? "DIRTY" : "BLOCKED";
+		const view = { number: 129, url: live.prUrl, state: "OPEN", mergeable: mode === "conflict" ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: status, headRefName: live.jobId, headRefOid: live.head, baseRefName: "main" };
+		const routes: Route[] = [{ match: "pr view", replies: [json(view)] }, { match: "/rules/branches/", replies: [mode === "denied-rules" ? { code: 1, stderr: "HTTP 403" } : json(strict ? [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: "ci" }] } }] : [])] }];
+		if (mode === "unreadable-ancestry") {
+			const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+			const wrapper = join(s.home, "bin", "git");
+			writeFileSync(wrapper, `#!/usr/bin/env node\nconst { spawnSync } = require("child_process");\nconst args = process.argv.slice(2);\nif (args[0] === "merge-base" && args.includes("--is-ancestor")) process.exit(128);\nconst result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });\nprocess.exit(result.status ?? 1);\n`);
+			chmodSync(wrapper, 0o755);
+		}
+		if (mode === "moved") routes[0]!.replies.push(json({ ...view, headRefOid: "b".repeat(40) }));
+		const rows = [run(129, mode === "superseded" ? "b".repeat(40) : live.head, "completed", mode === "red" ? "failure" : "success")];
+		if (mode === "superseded") routes.push({ match: "actions/runs?branch=", replies: [runsBody(rows)] });
+		s.setGh({ integration: true, routes, runs: rows });
+		const result = await s.integrate(live.jobId);
+		const updates = result.calls.filter((call) => call.startsWith("pr update-branch"));
+		if (mode === "behind" || mode === "strict") {
+			assert.equal(result.record.step, "fresh", result.text);
+			assert.equal(result.record.next, "advance", result.text);
+			assert.equal(result.record.head_sha, undefined);
+			assert.equal(updates.length, 1);
+			assert.deepEqual(mergedCalls(result.calls), []);
+			const head = git(s.remote, "rev-parse", live.jobId);
+			assert.notEqual(head, live.head);
+			s.setGh({ routes: [{ match: "actions/runs?branch=", replies: [runsBody([run(129, live.head, "completed", "success")])] }] });
+			const stale = await s.integrate(live.jobId);
+			assert.equal(stale.record.next, "wait", stale.text);
+			s.setGh({ runs: [run(130, head, "completed", "success")] });
+			const unreviewed = await s.integrate(live.jobId);
+			assert.equal(unreviewed.record.next, "review", unreviewed.text);
+			assert.equal(s.ghCalls().filter((call) => call.startsWith("pr update-branch")).length, 1);
+		} else if (mode === "clean") {
+			assert.equal(result.record.next, "advance", result.text);
+			assert.equal(mergedCalls(result.calls).length, 1);
+			assert.ok(mergedCalls(result.calls)[0]!.includes(`--match-head-commit ${live.head}`));
+			assert.equal(updates.length, 0);
+		} else {
+			const expected = mode === "unknown" ? "retry" : ["red", "conflict"].includes(mode) ? "resolve" : ["moved", "superseded"].includes(mode) ? "wait" : "surface";
+			assert.equal(result.record.next, expected, result.text);
+			assert.equal(updates.length, 0);
+			assert.deepEqual(mergedCalls(result.calls), []);
+		}
+	});
+});
+
+
+test("landing: the operator bridge persists a hold without a parent and a restarted parent reads and releases it", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const operatorHome = mkdtempSync(join(tmpdir(), "cp-s08-operator-"));
+	t.after(() => rmSync(operatorHome, { recursive: true, force: true }));
+	const s = await startStack(t, { env: { PI_HOME: operatorHome } });
+	const live = await s.held("operator bridge hold", 131);
+	saveOperatorTarget({ home: s.home, mode: "multi", hostPid: 0, parentPid: 0 });
+	const model = s.provider.addScript("s08-bridge", [
+		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "integration_hold", job_id: live.jobId, reason: "operator QA" } }] },
+		{ kind: "text", text: "Hold written." },
+		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "integration_release", job_id: live.jobId } }] },
+		{ kind: "text", text: "Hold released." },
+	]);
+	s.agentDir.writeModels(s.provider);
+	const child = startPiChild({ cwd: s.home, model, env: { ...s.agentDir.env, CP_HOME: s.home, PI_HOME: operatorHome }, extensions: [CP_BRIDGE_EXTENSION] });
+	t.after(() => child.close());
+	await child.prompt("Pause integration for operator QA.");
+	await child.waitForSettled(90_000);
+	assert.equal(new IntegrationHolds(s.home).get(live.jobId)?.reason, "operator QA");
+	s.setGh({ runs: [run(131, live.head, "completed", "success")] });
+	const held = await s.integrate(live.jobId);
+	assert.equal(held.record.next, "wait", held.text);
+	assert.match(held.text, /CI green/);
+	const local = await s.seed("local hold validation");
+	await s.post.fleet.patch(local.jobId, { delivery: "local" });
+	const invalid = [
+		{ action: "hold", job_id: local.jobId, reason: "QA" },
+		{ action: "release", job_id: local.jobId },
+		{ action: "hold", job_id: "missing", reason: "QA" },
+		{ action: "release", job_id: "missing" },
+		{ action: "hold", job_id: "../escape", reason: "QA" },
+		{ action: "hold", job_id: live.jobId, reason: " " },
+		{ action: "hold", job_id: live.jobId, reason: "x".repeat(2001) },
+	];
+	const events = await s.parent("Read the durable integration hold, and validate rejected hold requests.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { action: "status", job_id: live.jobId } }] },
+		...invalid.map((args): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args }] })),
+		{ kind: "text", text: "Validated." },
+	]);
+	assert.match(JSON.stringify(events[0]), /operator QA/);
+	assert.match(JSON.stringify(events[0]), /ci: green/);
+	for (const event of events.slice(1)) assert.equal((event as { isError?: boolean }).isError, true, JSON.stringify(event));
+	await child.prompt("Release the integration hold.");
+	await waitFor(() => s.provider.remaining("s08-bridge"), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "bridge release script consumed" });
+	await child.waitForSettled(90_000);
+	assert.equal(new IntegrationHolds(s.home).get(live.jobId), undefined);
+	assert.equal((await s.integrate(live.jobId)).record.next, "review", "release still requires a review");
+	const pendingFile = join(s.home, paths.pendingReviewFile(live.jobId, "review", 2));
+	const reviews = await s.parent("Check integration while review is already pending.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { job_id: live.jobId } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: () => {
+			mkdirSync(dirname(pendingFile), { recursive: true });
+			writeFileSync(pendingFile, JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: live.jobId, surface: "review", attempt: 2, model: "mock/reviewer", pid: process.pid, started_at: isoTimestamp(), deadline: "2099-01-01T00:00:00Z", handed_back: true, subject: { head_sha: live.head, branch: live.jobId, files: 1, truncated: false } }));
+			return { job_id: live.jobId };
+		} }] },
+		{ kind: "text", text: "Review is pending." },
+	]);
+	assert.ok(!JSON.stringify(reviews[0]).includes("already in flight"));
+	assert.match(JSON.stringify(reviews[1]), /review already in flight/);
+	assert.match(JSON.stringify(reviews[1]), /attempt 2/);
+	rmSync(pendingFile);
+	assert.equal(s.provider.remaining("s08-bridge"), 0);
+});
+
+
+test("landing: a hold arriving during green CI stops both merge authority paths", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const fallback of [false, true]) await t.test(fallback ? "fallback" : "repository", async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("hold across CI", 132);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		if (fallback) {
+			const store = new CheckpointStore(s.home, { kind: "merge" });
+			const scope = live.head.slice(0, 12);
+			store.request({ jobId: live.jobId, scope, question: "Merge this head?" });
+			store.decide(live.jobId, true, { by: "operator command", scope });
+		}
+		const barrier = join(s.home, "green-ci-release");
+		s.setGh({ integration: true, permission: fallback ? null : "CLEAN", runs: [run(132, live.head, "completed", "success")], routes: [{ match: "actions/runs?head_sha=", replies: [{ ...runsBody([run(132, live.head, "completed", "success")]), untilFile: barrier }] }] });
+		const advancing = s.integrate(live.jobId);
+		const holds = new IntegrationHolds(s.home);
+		try {
+			await waitFor(() => s.ghCalls().some((call) => call.includes("actions/runs?head_sha=")), Boolean, { timeoutMs: 30_000, what: "green CI reaches external barrier" });
+			holds.hold(live.jobId, "QA requested during CI read");
+		} finally { writeFileSync(barrier, "release"); }
+		const stopped = await advancing;
+		assert.equal(stopped.record.next, "wait", stopped.text);
+		assert.match(stopped.text, /QA requested during CI read/);
+		assert.ok(stopped.record.facts.some((fact) => fact.startsWith("ci: green — ")));
+		assert.equal(stopped.record.head_sha, live.head);
+		assert.equal(stopped.record.pr_url, live.prUrl);
+		assert.deepEqual(mergedCalls(s.ghCalls()), []);
+		holds.release(live.jobId);
+		s.setGh({ routes: [] });
+		const resumed = await s.integrate(live.jobId);
+		assert.equal(resumed.record.next, "advance", resumed.text);
+		assert.equal(resumed.record.record.merge_authority?.kind, fallback ? "human_checkpoint" : "repo_derived");
+	});
 });
