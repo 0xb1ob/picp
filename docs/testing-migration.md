@@ -65,6 +65,7 @@ ask-0088e0332d00, 2026-10-21.
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 | P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 | S02 (cp-e2e-slice-s02-l7ph) | behavior 05; `tests/ci-watch.test.ts` declarations 1–40: 36 mapped, 4 mixed/unreachable and kept in place; five added e2e declarations, 05-8 extended. S03 owns 41–80 and whole-file retirement. | 0 (split-file bookkeeping: all units stay) | 378 → 378 | 4,274 → 4,279 |
+| S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. `tests/ci-watch.test.ts` remains 80 static declarations / 89 executed cases. No checker or contract
@@ -73,8 +74,8 @@ changes are required. Of the owned 40, 36 map to the five S02 scenarios and exte
 on disk; Actions parsing rejects id-less runs; CommandPost supplies no onDisabled callback to observe its call count.
 Those helper inputs need preservation by the final range owner. Their reachable outcomes have consumer assertions.
 There are no new redundant-unreachable claims or deleted-file credits.
-S02 adds eight recorded controls; its table names which assertion would fail per declaration, and executed control
-results are distinguished in the regression table. No original coverage is removed, so there is no source-coverage loss.
+S02 records 24 controls (eight initial plus sixteen review controls); every mapped declaration cites an executed
+control in the regression table. All source mutations were restored. No original unit coverage is removed.
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -595,46 +596,46 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | P3c control M5 skips repairing an existing receipt: actual [false,false,open,1], expected [false,true,merged,1]. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | P3c control M6 drops the GitLab web_url repository check: /could not read PR .*\(mismatch: / fails, actual merged but names no merge commit. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): the throwing port needs a ledger that refuses (see the after-merge ledger refusal). 05-5 pins the port on new and existing receipts and the quiet result with no opt-in |
-| `tests/ci-watch.test.ts` | a held delivery:pr job with an open PR receipt is watched | 05-S02-1 | mapped | S02 declaration 1; eligible delivery emits ci_green; bypassing eligibility fails NC-S02-eligibility; suppressing all watching fails this positive assertion. |
+| `tests/ci-watch.test.ts` | a held delivery:pr job with an open PR receipt is watched | 05-S02-1 | mapped | S02 declaration 1; eligible delivery emits ci_green; NC-S02-eligibility bypasses the shared predicate and fails checked exclusion. |
 | `tests/ci-watch.test.ts` | waiting, done and failed jobs are not watched | 05-S02-1 | mapped | S02 declaration 2; each phase makes no forge request; NC-S02-eligibility fails checked excludes waiting. |
-| `tests/ci-watch.test.ts` | delivery local and pipeline are not watched | 05-S02-1 | mapped | S02 declaration 3; each delivery makes no forge request; removing its guard fails checked excludes delivery. |
-| `tests/ci-watch.test.ts` | a held job with no PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 4; empty and artifact-only receipts make no query; removing receipt guard fails checked excludes record. |
-| `tests/ci-watch.test.ts` | the set drains itself: a merged or landed PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 5; all four receipt status spellings make no query; removing landed-status exclusion fails checked assertion. |
+| `tests/ci-watch.test.ts` | delivery local and pipeline are not watched | 05-S02-1 | mapped | S02 declaration 3; NC-S02-eligibility bypasses the shared eligibility predicate and fails checked exclusion. |
+| `tests/ci-watch.test.ts` | a held job with no PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 4; NC-S02-eligibility bypasses the shared eligibility predicate and fails checked exclusion. |
+| `tests/ci-watch.test.ts` | the set drains itself: a merged or landed PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 5; NC-S02-eligibility bypasses the shared eligibility predicate and fails checked exclusion. |
 | `tests/ci-watch.test.ts` | a job whose envelope slot was reopened by a promote is not watched | 05-S02-1 | unreachable | S02 declaration 6 stays verbatim here: FleetStore rejects held without reported_at before ciTick reaches isWatched, including legacy disk seeding. A promotion changes phase to waiting; that reachable outcome is pinned by 05-S02-1. Last range owner must preserve this unit on whole-file retirement. |
 | `tests/ci-watch.test.ts` | all runs completed green on the current head derives exactly one ci_green | 05-S02-2 | mapped | S02 declaration 7; success plus skipped emits one current-head green; NC-39 suppressing green fails the green event assertion. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: the derived key carries the attempt, and stays historical without a run id | 05-8 | unreachable | S02 declaration 8 stays verbatim here: attempts are pinned by NC-32 and 05-8, but Actions parsing rejects id-less runs before the legacy-key helper input reaches a consumer. Last range owner must preserve this mixed unit. |
-| `tests/ci-watch.test.ts` | one unfinished run on the head emits nothing — the aggregate rule | 05-S02-2 | mapped | S02 declaration 9; success plus unfinished emits []; accepting unfinished as terminal fails one unfinished workflow defers the aggregate. |
-| `tests/ci-watch.test.ts` | a green run on a superseded sha with none on the current head emits nothing | 05-S02-2 | mapped | S02 declaration 10; superseded green emits []; 05-8 also pushes a real new head; blessing old green fails old green does not bless a pushed head. |
-| `tests/ci-watch.test.ts` | a completed non-green run on the current head derives ci_failed, never ci_green | 05-S02-2 | mapped | S02 declaration 11; exactly one red names workflow ci and failure; suppressing or relabelling red fails event equality. |
-| `tests/ci-watch.test.ts` | a merged PR derives pr_merged carrying the merge commit, and no CI event | 05-S02-2 | mapped | S02 declaration 12; exact merge sha and time, one terminal fact; NC-S02-terminal fails pr_merged equality with actual pr_closed. |
-| `tests/ci-watch.test.ts` | a closed unmerged PR derives pr_closed | 05-S02-2 | mapped | S02 declaration 13; exact closed_at and one pr_closed; disabling the closed branch fails closed length 0 versus 1 (executed). |
-| `tests/ci-watch.test.ts` | zero runs for the branch emits nothing and is not an error | 05-S02-2 | mapped | S02 declaration 14; empty Actions list emits []; fabricating green fails no runs is no verdict. |
+| `tests/ci-watch.test.ts` | one unfinished run on the head emits nothing — the aggregate rule | 05-S02-2 | mapped | S02 declaration 9; NC-S02-aggregate fails one unfinished workflow defers the aggregate. |
+| `tests/ci-watch.test.ts` | a green run on a superseded sha with none on the current head emits nothing | 05-S02-2 | mapped | S02 declaration 10; NC-S02-superseded relabels a stale raw Actions response and fails a superseded green is no verdict. |
+| `tests/ci-watch.test.ts` | a completed non-green run on the current head derives ci_failed, never ci_green | 05-S02-2 | mapped | S02 declaration 11; NC-S02-red suppresses red and fails its observation count, actual 0 versus expected 1. |
+| `tests/ci-watch.test.ts` | a merged PR derives pr_merged carrying the merge commit, and no CI event | 05-S02-2 | mapped | S02 declaration 12; NC-S02-terminal fails pr_merged equality with actual pr_closed. |
+| `tests/ci-watch.test.ts` | a closed unmerged PR derives pr_closed | 05-S02-2 | mapped | S02 declaration 13; NC-S02-closed fails closed fact count, actual 0 versus expected 1. |
+| `tests/ci-watch.test.ts` | zero runs for the branch emits nothing and is not an error | 05-S02-2 | mapped | S02 declaration 14; NC-S02-empty fabricates green and fails no runs is no verdict. |
 | `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | S02 declaration 15; confirmed green is absent on repeat; NC-41 fails an arrived green attempt is not announced again. |
 | `tests/ci-watch.test.ts` | sent is not delivered: an unconfirmed fact is sent again after the retry window | 05-S02-3 | mapped | S02 declaration 16; first send, retry-window suppression, same-key resend and one journal event; NC-S02-retry fails one resend preserves identity. |
 | `tests/ci-watch.test.ts` | pi-command-post-jua: an unconfirmed fact gets one resend, never a third send | 05-S02-3 | mapped | S02 declaration 17; NC-S02-resend removes resent guard and fails never a third send. |
-| `tests/ci-watch.test.ts` | a restart over the same state file does not re-announce a confirmed fact | 05-S02-3 | mapped | S02 declaration 18; shut down CommandPost and reconstruct against the same home; confirmed arrival survives reconstruction fails if announced memory is discarded. |
+| `tests/ci-watch.test.ts` | a restart over the same state file does not re-announce a confirmed fact | 05-S02-3 | mapped | S02 declaration 18; NC-S02-restart fails confirmed arrival survives reconstruction. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | S02 declaration 19; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | S02 declaration 20; NC-39 suppresses green and fails a green rerun follows a failed attempt. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run of an already-announced green head is a new fact | 05-8 | mapped | S02 declaration 21; added success attempt 4 after confirmed success attempt 3; forcing attempt 1 identity fails a new attempt of an already green head is news. |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run of an already-announced green head is a new fact | 05-8 | mapped | S02 declaration 21; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head; the same scenario also checks green attempt 4 after confirmed attempt 3. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | S02 declaration 22; NC-40 removes red arrival deduplication and fails an arrived attempt is not announced again. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a restart over the same run identity does not re-announce | 05-S02-3 | mapped | S02 declaration 23; confirmed run identity remains absent after reconstruction; discarding announced memory fails confirmed arrival survives reconstruction. |
-| `tests/ci-watch.test.ts` | a force-push makes the new head a new key, and does not retract the old one | 05-8 | mapped | S02 declaration 24; actual second pushed commit has its own green key and stored head; removing head identity fails current key differs from prior. |
-| `tests/ci-watch.test.ts` | ci_failed, then a force-push, then green: the failure is neither repeated nor retracted | 05-8 | mapped | S02 declaration 25; failed attempts precede actual pushed new green; new observation is current green only, earlier failed facts stay journaled. |
-| `tests/ci-watch.test.ts` | a job that leaves the watch set is pruned from the state file | 05-8 | mapped | S02 declaration 26; finished delivery row becomes undefined; disabling prune fails finished deliveries leave the watch. |
-| `tests/ci-watch.test.ts` | a parked job's row survives the prune but is never ticked; isWatched still excludes it; done rows still prune | 05-S02-1 | mapped | S02 declaration 27; real human_handoff park preserves observed head, makes no query; removing parked prune exemption fails parked rows survive held-watch pruning; 05-8 pins done pruning. |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a restart over the same run identity does not re-announce | 05-S02-3 | mapped | S02 declaration 23; NC-S02-restart fails confirmed arrival survives reconstruction. |
+| `tests/ci-watch.test.ts` | a force-push makes the new head a new key, and does not retract the old one | 05-8 | mapped | S02 declaration 24; NC-S02-key fails pushed-head key includes its current head; NC-S02-history pins historical red facts. |
+| `tests/ci-watch.test.ts` | ci_failed, then a force-push, then green: the failure is neither repeated nor retracted | 05-8 | mapped | S02 declaration 25; NC-S02-history fails one journal event per completed attempt before reaching the pushed-green historical count; NC-S02-key pins current-head identity. |
+| `tests/ci-watch.test.ts` | a job that leaves the watch set is pruned from the state file | 05-8 | mapped | S02 declaration 26; NC-S02-prune fails finished deliveries leave the watch. |
+| `tests/ci-watch.test.ts` | a parked job's row survives the prune but is never ticked; isWatched still excludes it; done rows still prune | 05-S02-1 | mapped | S02 declaration 27; NC-S02-parked fails parked rows survive held-watch pruning; NC-S02-prune pins done pruning and NC-S02-eligibility pins shared exclusion. |
 | `tests/ci-watch.test.ts` | every command the watcher builds passes detectCiWait | 05-S02-5 | mapped | S02 declaration 28; actual gh calls contain pulls, runs, attempt jobs and no waits; actual worker bash waits are refused; NC-S02-policy fails blocking_watch refusal in model request. |
 | `tests/ci-watch.test.ts` | a query error backs off exponentially and a success resets it | 05-S02-3 | mapped | S02 declaration 29; twelve real failed reads, exact exponential delays through cap, then success resets count; NC-S02-cap fails errors back off exponentially and cap. |
-| `tests/ci-watch.test.ts` | a CI read refused for permission records last_ci unreadable until a read succeeds; a network error is unknown | 05-S02-3 | mapped | S02 declaration 30; network replaces green with unknown, 403 with unreadable, successful pending clears errors; removing permission classification fails last_ci equality. |
+| `tests/ci-watch.test.ts` | a CI read refused for permission records last_ci unreadable until a read succeeds; a network error is unknown | 05-S02-3 | mapped | S02 declaration 30; NC-S02-permission fails last_ci equality, actual unknown versus expected unreadable. |
 | `tests/ci-watch.test.ts` | a query that learned nothing does not age the head it did not read (pi-command-post-8ok) | 05-S02-3 | mapped | S02 declaration 31; twelve failed reads keep old observedAt, legacy unresolved head keeps it too; NC-S02-age advances failed-query age and fails failed queries never refresh an unread head. |
 | `tests/ci-watch.test.ts` | a missing gh disables the watch, says so once, and emits nothing | 05-S02-4 | unreachable | S02 declaration 32 stays verbatim here: ENOENT disabling and stopped queries are pinned by 05-S02-4, but CommandPost constructs CiWatch without onDisabled, and no public entry point installs that callback. Its exactly-once callback assertion cannot reach a consumer. Last range owner must preserve this mixed unit. |
 | `tests/ci-watch.test.ts` | forge PR 3: missing gh stops only the GitHub job; a GitLab MR is still observed, claims no CI while open and wakes once on merge | 05-S02-4 | unreachable | S02 declaration 33 stays verbatim here: local https GitLab checks open, failed, closed and merged states while GitHub stops (NC-S02-gitlab), but this mixed unit also asserts onDisabled callback count. CommandPost supplies no callback, so that sub-assertion has no public entry point. Last range owner must preserve it. |
-| `tests/ci-watch.test.ts` | forge PR 3: a GitLab MR maps onto the watch's terminal shape, a failed read is that job's error, and GitHub urls never reach the observer | 05-S02-4 | mapped | S02 declaration 34; local GitLab 503 is scoped, closed maps pr_closed, merge has exact sha and URL; provider misrouting fails GitHub disabled or GitLab event assertions. |
-| `tests/ci-watch.test.ts` | an announced verdict on an open PR is re-checked at the idle multiplier | 05-S02-3 | mapped | S02 declaration 35; settled next_due minus last_checked is 5000ms for configured 1s interval; ignoring idle multiplier fails settled heads use idle cadence. |
-| `tests/ci-watch.test.ts` | a job with no verdict yet is re-checked at the base interval | 05-S02-3 | mapped | S02 declaration 36; successful pending read schedules 1000ms; idle scheduling pending fails unfinished heads use base cadence. |
-| `tests/ci-watch.test.ts` | a tick that is not due yet is skipped, not queried | 05-S02-3 | mapped | S02 declaration 37; immediate tick skipped and gh call count unchanged; bypassing due guard fails skipped includes job. |
-| `tests/ci-watch.test.ts` | an overlapping tick returns the first one's promise: no double query | 05-S02-3 | mapped | S02 declaration 38; concurrent public ciTicks have equal results and exactly one pulls read; removing single-flight fails overlapping ticks query once. |
-| `tests/ci-watch.test.ts` | nextDueMs: base, idle multiplier, exponential backoff, capped | 05-S02-3 | mapped | S02 declaration 39; real timer bookkeeping covers all regimes and twelve failures hit cap; NC-S02-cap fails cap delay equality. |
-| `tests/ci-watch.test.ts` | a malformed CP_CI_WATCH_SECONDS falls back to the default, never to off | 05-S02-3 | mapped | S02 declaration 40; six CommandPost constructions produce 60000ms fallback or 120000ms explicit pending cadence; using malformed values directly fails watch interval equality. |
+| `tests/ci-watch.test.ts` | forge PR 3: a GitLab MR maps onto the watch's terminal shape, a failed read is that job's error, and GitHub urls never reach the observer | 05-S02-4 | mapped | S02 declaration 34; NC-S02-gitlab fails the checked list after gh disablement; the scenario also asserts scoped 503 and exact closed/merge payloads. |
+| `tests/ci-watch.test.ts` | an announced verdict on an open PR is re-checked at the idle multiplier | 05-S02-3 | mapped | S02 declaration 35; NC-S02-idle fails settled heads use idle cadence. |
+| `tests/ci-watch.test.ts` | a job with no verdict yet is re-checked at the base interval | 05-S02-3 | mapped | S02 declaration 36; NC-S02-base fails unfinished heads use base cadence. |
+| `tests/ci-watch.test.ts` | a tick that is not due yet is skipped, not queried | 05-S02-3 | mapped | S02 declaration 37; NC-S02-due fails skipped includes job. |
+| `tests/ci-watch.test.ts` | an overlapping tick returns the first one's promise: no double query | 05-S02-3 | mapped | S02 declaration 38; NC-S02-overlap fails overlapping ticks query once. |
+| `tests/ci-watch.test.ts` | nextDueMs: base, idle multiplier, exponential backoff, capped | 05-S02-3 | mapped | S02 declaration 39; NC-S02-base, NC-S02-idle and NC-S02-cap fail the corresponding public scheduling assertions. |
+| `tests/ci-watch.test.ts` | a malformed CP_CI_WATCH_SECONDS falls back to the default, never to off | 05-S02-3 | mapped | S02 declaration 40; NC-S02-env fails watch interval "nope", actual 0 versus expected 60000. |
 | `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-8 | mapped | NC-42 disables confirmation deduplication; command below exits 1 at `arrival is idempotent`, actual repeated key, expected [] |
 | `tests/ci-evidence.test.ts` | recordForwardedCi: stores source forwarded with its quote; an identical repeat appends nothing | 05-9 | mapped | tool writes verify head, repo, source, quote, ISO timestamp, URL, duplicate suppression and changed-result append; NC-43 fails `an identical forwarded result is stored once`, actual 2 expected 1 |
 | `tests/ci-evidence.test.ts` | recordForwardedCi: refuses a short or moved head, a credential-shaped quote or url, and another repo | 05-9 | mapped | real cp_integrate rejects short/stale heads, secret quote, credential/query URLs and mismatched persisted repo, with no refused writes; NC-33, NC-44 and NC-46 fail the superseded-head, invalid-input and repository-binding assertions |
@@ -643,7 +644,8 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | real parent verifies absent head, fabricated quote, superseded head, stored source/quote/repo and native gate; NC-45 fails `forwarded evidence rejects invalid input through the tool`, expected /no known current head/, actual recorded success |
 | `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | real parent timer asserts A green, completed idle sweep without another Actions read, B pending then red, and exact head-tagged journal; NC-36 and NC-49 fail green arrival and idle-read assertions |
 | `tests/parked-ci.test.ts` | parked CI: a permission denial is loud even after a green; a transient fault is unknown; both back off | 05-12 | mapped | same-head denial replaces green with unreadable/1, moved-head transport fault stores unknown/2; completed sweeps exceed the base interval without re-reading, and faults journal nothing; NC-50–NC-52 and NC-55 fail counter, classification and backoff assertions |
-| `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed or a held job reads nothing | 05-12 | mapped | external forge barriers hold real reads across public resume and re-park; no old-cycle row or journal survives; valid held jobs issue no parked read, a seeded held-with-handoff legacy record is refused by the public sweep, and CLOSED/MERGED snapshots issue no CI read; NC-53 and NC-54 fail stale-observation and terminal-read assertions |
+| `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed snapshots read nothing | 05-12 | mapped | NC-53 and NC-54 fail stale-observation and terminal-read assertions; external forge barriers span public resume/re-park, and CLOSED/MERGED snapshots issue no native CI read. |
+| `tests/parked-ci.test.ts` | parked CI: a held job reads nothing | 05-12 | redundant-unreachable | The direct held-with-handoff helper input cannot reach the observer: watch candidates must be awaiting_merge, and the fleet schema refuses legacy held parking records before observation. 05-12 pins both boundaries with `a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`; this is not a claimed failing phase-guard control. |
 | `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
 | `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
 <!-- /manifest:assertions -->
@@ -1075,6 +1077,22 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-S02-cap | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-3 | NC-S02-cap | 26a3f8333daafd2ae8b0f0ebdb46b86714e5133453a2803f04de74af53898f8d | errors back off exponentially and cap: actual 1024000, expected 900000; exit 1 | pass |
 | NC-S02-gitlab | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-4 | NC-S02-gitlab | 243b8e9764b768dd710c258168e7a3a8d6162b54d8b167698710b985446f67cb | first checked list omits GitLab; exit 1 | pass |
 | NC-S02-policy | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-5 | NC-S02-policy | 8007cb6e4ee2f41fcc853e37340d0573097ea3e87fdba165f0d2b3911c2c8551 | model request lacks blocking_watch refusal; exit 1 | pass |
+| NC-S02-restart | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-restart | 2f627246d2e68af424584bd914671e0720e8accd775c1bd0440e0360593d548e | confirmed arrival survives reconstruction: actual repeated green, expected []; exit 1 | pass |
+| NC-S02-permission | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-permission | c72f4c390f8cb285b3c27ca4cb05c4bee2201579432d6fa946dafc0caa117a43 | last_ci: actual unknown, expected unreadable; exit 1 | pass |
+| NC-S02-idle | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-idle | 62c2effa84c81f6dde53a4139a73d3909a8f1d69b9e942233fcee6287888d395 | settled heads use idle cadence: actual 1000, expected 5000; exit 1 | pass |
+| NC-S02-base | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-base | dd476f83e0321681ccb7755264c4ae5054a969deacd15cbb16a6bd623212a959 | unfinished heads use base cadence: actual 5000, expected 1000; exit 1 | pass |
+| NC-S02-due | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-due | cde265ae1b61d50448fa8fe1c8f0c9db4bc0307ff96c40f99f7c1a90e34f4779 | assert.ok(skipped.skipped.includes(live.jobId)): actual false; exit 1 | pass |
+| NC-S02-overlap | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-overlap | 69fab3003604be320366327f74f921c001279a0b71adece13adaa0b69e480d2b | overlapping ticks query once: actual 2, expected 1; exit 1 | pass |
+| NC-S02-env | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-env | 860f168bf79282b1ff9a0286e6856f91742e5db80668b1386f1df9765752ede5 | watch interval nope: actual 0, expected 60000; exit 1 | pass |
+| NC-S02-aggregate | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-aggregate | 24c30b1dd9ea6b8326382a9b1941dd7b93b385aaa7b5f7fc549d42ce9efc5d99 | one unfinished workflow defers the aggregate: actual green, expected []; exit 1 | pass |
+| NC-S02-superseded | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-superseded | 572fd908ccfd5b8634c69451c2d52332dd88652e7940170c8491992060ad1259 | a superseded green is no verdict: actual green, expected []; exit 1 | pass |
+| NC-S02-empty | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-empty | f9ec1ce89ac3a46ce69c5fc60d0fb5a724546d44772172f1d0f76f5653c38a8c | no runs is no verdict: actual green, expected []; exit 1 | pass |
+| NC-S02-red | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-red | 5b475ee8fadb9041e50bc177d463b3b18877050d18fd2e7911e9c0292747601b | red observation count: actual 0, expected 1; exit 1 | pass |
+| NC-S02-closed | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-closed | 0de66d27f209c0dc36244274c69324d6860e6955d36ceb921197be982a47197e | closed fact count: actual 0, expected 1; exit 1 | pass |
+| NC-S02-key | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-key | 0b06ee0819dc98ec73d55c1ae42ff477a48d5520b6fcd4bbad8ce38c1cd6a51d | pushed-head key includes its current head: actual false; exit 1 | pass |
+| NC-S02-history | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-history | 0d48c887d1af2446f53577b1f9f6eda249166df3551a841f89b67113726f1214 | one journal event per completed attempt: actual 0, expected 1; exit 1 | pass |
+| NC-S02-prune | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-prune | befd614a3c744cb5d70cf0d5506088c7b91e9ec800fa072e9d3e0180f0d4ee92 | finished deliveries leave the watch: actual row, expected undefined; exit 1 | pass |
+| NC-S02-parked | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-1 | NC-S02-parked | 880cf412abeebff72c830b94956bde9fbcea6d2df6625ec90c2de8a93f7134f9 | parked rows survive held-watch pruning: actual undefined, expected head; exit 1 | pass |
 <!-- /manifest:regressions -->
 
 S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.
@@ -1219,6 +1237,282 @@ index 1cb3d19..d4b1e1c 100644
  		return {
  			shape: "blocking_watch",
  			matched: bound(watch),
+```
+
+Review-1 controls below were each applied alone to source revision b744b908413b97d7fb9a39ae6056179ec3f8ae07,
+run with `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='landing S02: watch delivery' tests/e2e/landing.test.ts`,
+then restored. For aggregate/empty/red/closed/superseded use `landing S02: aggregate`; for key/history/prune use
+`landing: CI watch persists`; for parked use `landing S02: only reported`. Each command exited 1 at the regression
+assertion recorded above. The superseded case returns raw Actions rows so fake gh cannot filter away the stale input.
+All sixteen logs and patches are also retained in the S02 worker artifact directory.
+
+<!-- patch:NC-S02-restart -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b68731d 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -415,7 +415,7 @@ export class CiWatchStore {
+ 	}
+ 
+ 	announced(jobId: string): Set<string> {
+-		return new Set(this.job(jobId)?.announced ?? []);
++		return new Set();
+ 	}
+ 
+ 	#mutate(mutator: (file: CiWatchFile) => CiWatchFile): CiWatchFile {
+```
+
+<!-- patch:NC-S02-permission -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..da6a089 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -782,7 +782,7 @@ export class CiWatch {
+ 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
+ 			consecutive_failures: failures,
+ 			last_error: message.slice(0, 300),
+-			last_ci: ciReadDenied(message) ? CI_UNREADABLE : "unknown", // loud when refused; never a stale green either way
++			last_ci: "unknown",
+ 		});
+ 	}
+ 
+```
+
+<!-- patch:NC-S02-idle -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..a91929f 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -366,7 +366,7 @@ export function nextDueMs(cadence: CiWatchCadence, state: { failures: number; se
+ 		const grown = cadence.intervalMs * 2 ** Math.max(0, state.failures - 1);
+ 		return Math.min(grown, cadence.maxBackoffMs);
+ 	}
+-	return state.settled ? cadence.intervalMs * cadence.idleMultiplier : cadence.intervalMs;
++	return cadence.intervalMs;
+ }
+ 
+ // ---------------------------------------------------------------------------
+```
+
+<!-- patch:NC-S02-base -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..0d57078 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -366,7 +366,7 @@ export function nextDueMs(cadence: CiWatchCadence, state: { failures: number; se
+ 		const grown = cadence.intervalMs * 2 ** Math.max(0, state.failures - 1);
+ 		return Math.min(grown, cadence.maxBackoffMs);
+ 	}
+-	return state.settled ? cadence.intervalMs * cadence.idleMultiplier : cadence.intervalMs;
++	return cadence.intervalMs * cadence.idleMultiplier;
+ }
+ 
+ // ---------------------------------------------------------------------------
+```
+
+<!-- patch:NC-S02-due -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..455899a 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -675,7 +675,7 @@ export class CiWatch {
+ 		for (const record of watched) {
+ 			const gitlab = parseChangeRequestUrl(prReceiptOf(record)?.url ?? "")?.kind === "gitlab";
+ 			if (this.#disabled && !gitlab) continue;
+-			if (!this.#due(record.job_id, now)) {
++			if (false) {
+ 				result.skipped.push(record.job_id);
+ 				continue;
+ 			}
+```
+
+<!-- patch:NC-S02-overlap -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..fcfe197 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -647,7 +647,6 @@ export class CiWatch {
+ 	 * so a slow `gh` cannot stack queries on the next timer beat.
+ 	 */
+ 	async tick(): Promise<CiWatchTick> {
+-		if (this.#tick) return this.#tick;
+ 		const promise = this.#run().finally(() => {
+ 			this.#tick = undefined;
+ 		});
+```
+
+<!-- patch:NC-S02-env -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b7a1b8d 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -352,7 +352,7 @@ export function ciWatchIntervalMs(env: NodeJS.ProcessEnv = process.env): number
+ 	const raw = env.CP_CI_WATCH_SECONDS;
+ 	if (raw === undefined || raw.trim() === "") return CI_WATCH_INTERVAL_MS;
+ 	const parsed = Number(raw);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return CI_WATCH_INTERVAL_MS;
++	if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+ 	return Math.floor(parsed * 1000);
+ }
+ 
+```
+
+<!-- patch:NC-S02-aggregate -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b1cc303 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -284,7 +284,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	// cp-gmy's evaluator, unforked: a completed run counts only when its headSha
+ 	// is the branch's current pushed head, and one unfinished run on that head
+ 	// defers the whole aggregate.
+-	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs });
++	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs.filter((r) => r.status === "completed") });
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+ 	}
+```
+
+<!-- patch:NC-S02-superseded -->
+```diff
+diff --git a/src/actions-ci.ts b/src/actions-ci.ts
+index 06e38d4..a1b4fe6 100644
+--- a/src/actions-ci.ts
++++ b/src/actions-ci.ts
+@@ -149,7 +149,7 @@ type RunRow = Omit<ActionsRun, "jobs">;
+ export function parseRunsPage(stdout: string, sha: string | undefined, endpoint = "actions/runs"): Page<RunRow> {
+ 	const page = pageOf(stdout, endpoint, "workflow_runs");
+ 	const items = page.items.map((row): RunRow => {
+-		const { id, run_attempt: attempt, head_sha: headSha } = row;
++		const { id, run_attempt: attempt, head_sha: headSha } = { ...row, head_sha: sha ?? row.head_sha };
+ 		const status = nullableString(row.status);
+ 		const conclusion = nullableString(row.conclusion);
+ 		if (typeof id !== "number" || !positive(id) || typeof attempt !== "number" || !positive(attempt)) {
+```
+
+<!-- patch:NC-S02-empty -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..66ac2e9 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -284,6 +284,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	// cp-gmy's evaluator, unforked: a completed run counts only when its headSha
+ 	// is the branch's current pushed head, and one unfinished run on that head
+ 	// defers the whole aggregate.
++	if (facts.runs.length === 0) return [at("ci_green", { reason: "no runs", conclusion: "success" }, identity)];
+ 	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs });
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+```
+
+<!-- patch:NC-S02-red -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..ebbb99a 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -288,7 +288,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+ 	}
+-	if (verdict.ci === "failed") {
++	if (false) {
+ 		const failing = failedRunOn(facts.runs, head);
+ 		return [
+ 			at("ci_failed", {
+```
+
+<!-- patch:NC-S02-closed -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..bd5b0f2 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -271,7 +271,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 			}),
+ 		];
+ 	}
+-	if (facts.pr && (facts.pr.state ?? "").trim().toLowerCase() === "closed") {
++	if (false) {
+ 		return [
+ 			at("pr_closed", {
+ 				reason: `PR closed without merging${facts.pr.closed_at ? ` at ${facts.pr.closed_at}` : ""}`,
+```
+
+<!-- patch:NC-S02-key -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..d0beeb6 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -212,7 +212,7 @@ export interface CiObservation {
+  * same head, so a re-run wakes once (pi-command-post-rerunwake-12z).
+  */
+ export function ciEventKey(jobId: string, headSha: string, event: CiWatchEvent, runIdentity?: string): string {
+-	const key = `${jobId}|${headSha}|${event}`;
++	const key = `${jobId}|unknown|${event}`;
+ 	return runIdentity && runIdentity.length > 0 ? `${key}|${runIdentity}` : key;
+ }
+ 
+```
+
+<!-- patch:NC-S02-history -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..386e1be 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -729,7 +729,7 @@ export class CiWatch {
+ 			due.push(observation);
+ 			if (!isResend) {
+ 				try {
+-					this.#deps.onObserved?.(record.job_id, observation);
++					if (observation.event !== "ci_failed") this.#deps.onObserved?.(record.job_id, observation);
+ 				} catch {
+ 					// A run log that cannot be written must never swallow a wake-up.
+ 				}
+```
+
+<!-- patch:NC-S02-prune -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..8a38105 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -667,7 +667,6 @@ export class CiWatch {
+ 			return result;
+ 		}
+ 		try {
+-			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
+ 		} catch {
+ 			// Pruning is housekeeping; a failure here must not skip the tick.
+ 		}
+```
+
+<!-- patch:NC-S02-parked -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..5a07606 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -667,7 +667,7 @@ export class CiWatch {
+ 			return result;
+ 		}
+ 		try {
+-			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
++			this.store.prune(new Set(watched.map((r) => r.job_id)));
+ 		} catch {
+ 			// Pruning is housekeeping; a failure here must not skip the tick.
+ 		}
 ```
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1944,6 +2238,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 | `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
 | `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
+| `tests/e2e/diff-review.test.ts` | S04 (cp-e2e-slice-s04-vep1), behavior 05 public review conversion |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2013,7 +2308,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-merge-lifecycle.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-park.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-resume.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs); also listed under 23, owned here only |
-| `tests/awaiting-merge-tick.test.ts` | deleted | P3c-rest | original path renamed only to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); both declarations retained, zero removed-declaration and deleted-file credit; follow-on needs ownership-transfer and post-shutdown observation entry points |
+| `tests/awaiting-merge-tick.test.ts` | deleted | P3c-rest | RENAME ONLY, not retired coverage: tests/awaiting-merge-tick-retained.test.ts keeps both declarations (convert, owner P3c-rest). The checker requires `deleted` for an absent baseline path; it rejects `retained` unless that original path exists. Both assertion dispositions remain retained, with zero removed-declaration or deleted-file credit. |
 | `tests/awaiting-merge-viewer.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-watch.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |

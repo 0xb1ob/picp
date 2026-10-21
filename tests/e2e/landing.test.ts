@@ -1048,6 +1048,7 @@ test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, 
 		const before = s.ghCalls().length;
 		const tick = await s.post.ciTick();
 		assert.ok(!tick.checked.includes(live.jobId), JSON.stringify(patch));
+		assert.ok(!tick.skipped.includes(live.jobId), JSON.stringify(patch));
 		assert.equal(s.ghCalls().length, before, "excluded deliveries make no forge request");
 	}
 	await s.post.fleet.patch(live.jobId, original);
@@ -1067,7 +1068,10 @@ test("landing S02: aggregate CI and terminal PR facts preserve the current head"
 	const s = await startStack(t);
 	const live = await s.held("watch aggregate and terminal facts", 202);
 	const observe = async (rows: RunRow[], pr?: Record<string, unknown>) => {
-		s.setGh({ runs: rows, routes: pr ? [{ match: "repos/example/demo/pulls/202", replies: [json({ number: 202, html_url: live.prUrl, head: { sha: live.head, ref: live.jobId }, ...pr })] }] : [] });
+		s.setGh({ runs: rows, routes: [
+			{ match: "actions/runs?", replies: [runsBody(rows)] },
+			...(pr ? [{ match: "repos/example/demo/pulls/202", replies: [json({ number: 202, html_url: live.prUrl, head: { sha: live.head, ref: live.jobId }, ...pr })] }] : []),
+		] });
 		return s.tick(live.jobId);
 	};
 	assert.deepEqual((await observe([])).observations, [], "no runs is no verdict");
@@ -1172,18 +1176,24 @@ test("landing S02: watch delivery, restart and query cadence survive real forge 
 		await redRestart.shutdown();
 	}
 	s.setGh({ runs: [run(203, live.head, "in_progress", null)], routes: [] });
-	for (const value of [undefined, "", "nope", "0", "-5", "120"]) {
-		if (value === undefined) delete process.env.CP_CI_WATCH_SECONDS;
-		else process.env.CP_CI_WATCH_SECONDS = value;
-		advance(900_000);
-		const configured = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
-		try {
-			await configured.ciTick();
-			const state = configured.ciWatch.store.job(live.jobId)!;
-			assert.equal(Date.parse(state.next_due_at!) - Date.parse(state.last_checked_at!), value === "120" ? 120_000 : 60_000, `watch interval ${JSON.stringify(value)}`);
-		} finally {
-			await configured.shutdown();
+	const savedInterval = process.env.CP_CI_WATCH_SECONDS;
+	try {
+		for (const value of [undefined, "", "nope", "0", "-5", "120"]) {
+			if (value === undefined) delete process.env.CP_CI_WATCH_SECONDS;
+			else process.env.CP_CI_WATCH_SECONDS = value;
+			advance(900_000);
+			const configured = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+			try {
+				await configured.ciTick();
+				const state = configured.ciWatch.store.job(live.jobId)!;
+				assert.equal(Date.parse(state.next_due_at!) - Date.parse(state.last_checked_at!), value === "120" ? 120_000 : 60_000, `watch interval ${JSON.stringify(value)}`);
+			} finally {
+				await configured.shutdown();
+			}
 		}
+	} finally {
+		if (savedInterval === undefined) delete process.env.CP_CI_WATCH_SECONDS;
+		else process.env.CP_CI_WATCH_SECONDS = savedInterval;
 	}
 	t.mock.timers.reset();
 });
@@ -1283,6 +1293,7 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	const current = moved.observations.find((fact) => fact.event === "ci_green");
 	assert.ok(current, "the pushed head gets its own verdict");
 	assert.equal(current.head_sha, head);
+	assert.ok(current.key.startsWith(`${live.jobId}|${head}|ci_green|`), "pushed-head key includes its current head");
 	assert.notEqual(current.key, passed.key);
 	assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "green");
 	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
