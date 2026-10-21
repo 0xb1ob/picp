@@ -92,7 +92,14 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
 2. `npm ci` when `node_modules/.package-lock.json` does not match `package-lock.json` (an optional package
    absent for this platform still matches) or with `--force`;
 3. `scripts/install-tools.ts`: the required tools (`REQUIRED_TOOLS`: git, treehouse, pi, gh), no prompt.
-   treehouse is required, not optional — every dispatch leases a treehouse worktree. Then:
+   treehouse is required, not optional — every dispatch leases a treehouse worktree. pi must be in
+   `package.json` `piCompat` (`{min, testedMax}`, read by `src/pi-compat.ts`, the one classifier install-tools,
+   `/doctor`'s `host.pi.compat` and `cp_project add`'s readiness share). Its probe is `pi --version` plus the
+   command-post extension load in a scratch home (about 2 s). Below `min`: asks, then runs `pi update --self`
+   (`--yes` consents; `--no-prompt` declines; `--no-pi-upgrade` and a run inside a pi session refuse, exit 1); never
+   a downgrade. A newer major than `testedMax`, or a failed probe: refused naming the range, unless `--force`
+   (a warning; the final doctor then accepts `host.pi.compat` as its only error). Newer within `testedMax`'s
+   major with the probe passing: a warning only. Then:
    - `gh auth status --active` (only the active account; else `gh api user`); logged out → prints `gh auth login` for you (never run);
    - the pi-lens host tools (`PI_LENS_TOOLS`, shared with `/doctor`) with `npm i -g`; a global
      prefix that needs sudo is a `fail` naming the fix, and nothing is run;
@@ -102,8 +109,9 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
    - `tmux` is reported, never required;
 3a. provider login, before those extras and before anything is written: `pi --no-extensions --list-models` with
    cp-daemon's env. No usable model → exit 4 with one `fail: login:` line ending "run `pi`, then /login, then
-   re-run: <the exact cp-install command>"; nothing is written or started. A dry run, `--no-start` or an
-   unreadable listing reports `~/.pi/agent/auth.json`'s providers instead (credentials never handled).
+   re-run: <the exact cp-install command>"; nothing is written or started. A listing that exits nonzero with no
+   provider in `~/.pi/agent/auth.json` is the same exit 4. A dry run, `--no-start`, an unrecognized listing, or a
+   failed one with an `auth.json` provider reports those providers instead (credentials never handled).
    A failed clone, `npm ci` or tools step likewise names its exact rerun;
 3b. the viewer host (`CP_VIEWER_HOST`, see below);
 3c. the models (`CP_PARENT_MODEL`, `CP_OPERATOR_MODEL`, see below);
@@ -130,7 +138,7 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
 
 Flags: `--home --app --port --parent-model --operator-model --viewer-host --gateway-url --gateway-key-file --push-origin --force --no-start
 --crontab --no-update --uninstall --dry-run --yes --no-prompt
---no-pi-packages --no-self-package` (`--no-self-package` is accepted and has no effect: the self-package step went with single-project mode). Prompts read `/dev/tty`, so `curl | sh`
+--no-pi-packages --no-pi-upgrade --no-self-package` (`--no-self-package` is accepted and has no effect: the self-package step went with single-project mode). Prompts read `/dev/tty`, so `curl | sh`
 still asks; with no terminal, `--yes`, `--no-prompt` or `--dry-run` every prompt
 takes its default. `--dry-run` probes and prints and changes nothing (the code
 step too: it never runs `git fetch`, so an existing checkout prints "would fetch"; it never runs `gh` or `pi`,

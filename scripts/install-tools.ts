@@ -12,19 +12,25 @@
  *   --dry-run, --check   print the plan, touch nothing, exit non-zero if
  *                        anything is missing (usable as a preflight)
  *   git / treehouse / pi   restrict to one or more tools
+ *   --yes / --no-prompt / --no-pi-upgrade / --force   pi's range (package.json piCompat, #375): below min,
+ *                        ask (--yes consents, --no-prompt declines, --no-pi-upgrade refuses) before `pi update
+ *                        --self`; an incompatible pi is refused unless --force (a warning)
  *
  * Exit codes: 0 everything on PATH (or, in dry-run, would already pass);
  * 1 something still needs attention; 2 bad arguments; 3 dry-run: only tools
  * a real run would install are missing (still a failed preflight).
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { whichAll } from "../src/doctor.ts";
-import { formatInstallReport, installExitCode, type InstallerOS, planOrInstall } from "../src/install-tools.ts";
+import { formatInstallReport, installExitCode, type InstallerOS, piCompatGate, planOrInstall } from "../src/install-tools.ts";
+import { readPiCompat } from "../src/pi-compat.ts";
+import { probePiSync } from "../src/pi-compat-probe.ts";
+import { askTty, shellWord } from "../src/service/install.ts";
 import { type InstallStep, REQUIRED_TOOLS, type RequiredTool } from "../src/tool-manifest.ts";
 
 function detectOS(): InstallerOS {
@@ -56,7 +62,7 @@ function realRun(step: InstallStep): void {
 	}
 }
 
-function parseArgs(argv: readonly string[]): { dryRun: boolean; only?: RequiredTool[] } {
+function parseArgs(argv: readonly string[]): { dryRun: boolean; only?: RequiredTool[]; flags: string[] } {
 	const dryRun = argv.includes("--dry-run") || argv.includes("--check");
 	const positionals = argv.filter((arg) => !arg.startsWith("--"));
 	for (const arg of positionals) {
@@ -65,8 +71,12 @@ function parseArgs(argv: readonly string[]): { dryRun: boolean; only?: RequiredT
 			process.exit(2);
 		}
 	}
-	return { dryRun, ...(positionals.length > 0 ? { only: positionals as RequiredTool[] } : {}) };
+	const flags = argv.filter((arg) => PI_FLAGS.includes(arg));
+	return { dryRun, flags, ...(positionals.length > 0 ? { only: positionals as RequiredTool[] } : {}) };
 }
+
+/** pi's compatibility switches (#375), forwarded by cp-install. */
+const PI_FLAGS = ["--yes", "--no-prompt", "--no-pi-upgrade", "--force"];
 
 /** `npm prefix -g`, and whether this user may write where npm installs (lib/node_modules, else its nearest dir). */
 function npmPrefix(): { path: string; writable: boolean } | undefined {
@@ -87,7 +97,7 @@ function npmPrefix(): { path: string; writable: boolean } | undefined {
 }
 
 function main(): number {
-	const { dryRun, only } = parseArgs(process.argv.slice(2));
+	const { dryRun, only, flags } = parseArgs(process.argv.slice(2));
 	const report = planOrInstall({
 		os: detectOS(),
 		dryRun,
@@ -98,9 +108,34 @@ function main(): number {
 		npmPrefix,
 	});
 	console.log(formatInstallReport(report));
-	const code = installExitCode(report);
+	let code = installExitCode(report);
 	const open = report.outcomes.filter((outcome) => outcome.kind !== "ok" && outcome.kind !== "installed").map((outcome) => outcome.tool);
-	if (code === 1 && !dryRun) console.log(`after fixing the above, retry: ${process.execPath} ${fileURLToPath(import.meta.url)} ${open.join(" ")}`);
+	const retry = [process.execPath, fileURLToPath(import.meta.url), ...open, ...flags].map(shellWord).join(" ");
+	if (code === 1 && !dryRun) console.log(`after fixing the above, retry: ${retry}`);
+	// #375: pi's supported range (package.json piCompat), once pi itself is on PATH.
+	const pi = report.outcomes.find((outcome) => outcome.tool === "pi");
+	if (pi && (pi.kind === "ok" || pi.kind === "installed")) {
+		const root = dirname(dirname(fileURLToPath(import.meta.url)));
+		const gate = piCompatGate({
+			compat: readPiCompat(root),
+			dryRun,
+			yes: flags.includes("--yes"),
+			noPrompt: flags.includes("--no-prompt"),
+			noUpgrade: flags.includes("--no-pi-upgrade"),
+			force: flags.includes("--force"),
+			env: process.env,
+			which: whichAll,
+			probe: (path) => probePiSync(path, root),
+			update: (path) => {
+				const ran = spawnSync(path, ["update", "--self"], { encoding: "utf8", timeout: 600_000, stdio: ["ignore", "pipe", "pipe"] });
+				return { status: ran.status, output: `${ran.stdout ?? ""}${ran.stderr ?? ""}${ran.error ? ran.error.message : ""}` };
+			},
+			ask: askTty,
+			log: (line) => console.log(line),
+			retry: [process.execPath, fileURLToPath(import.meta.url), "pi", ...flags].map(shellWord).join(" "),
+		});
+		if (gate !== 0 && code !== 1) code = gate;
+	}
 	return code;
 }
 

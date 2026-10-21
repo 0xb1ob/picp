@@ -16,9 +16,9 @@
  *  - **It warns; it never blocks.** A version skew is a nuisance, not a fault.
  *    This module formats a string and returns it — it throws nothing, refuses
  *    nothing, and cannot become a new way for the command post to fail to start.
- *  - **It names the fix, not just the fault.** Both versions, the file to edit
- *    (`package.json`) and the command to run (`npm install`), so the reader does
- *    not have to rediscover any of the above.
+ *  - **It names the fix, not just the fault.** Both versions, the supported range
+ *    (package.json `piCompat`, #375) and that the devDependency is CI's tested pin,
+ *    moved only with `piCompat.testedMax`: never "pin whatever the host runs".
  *  - **Unknown is not a mismatch.** No resolvable host pi, an unreadable
  *    version, or no installed copy at all: silent. Warning on ignorance is how
  *    a check trains people to ignore it.
@@ -33,6 +33,7 @@
 import { join, sep } from "node:path";
 import { readFileSync } from "node:fs";
 import { execRunner, whichAll } from "./doctor.ts";
+import { parsePiCompat, piRange } from "./pi-compat.ts";
 
 /** The npm-installed copy, relative to the package root. */
 export const PI_PACKAGE_PATH = join("node_modules", "@earendil-works", "pi-coding-agent", "package.json");
@@ -115,10 +116,17 @@ export function computePiVersionNudge(options: PiVersionNudgeOptions): string | 
 		// install nudge is not: `/cp-version` and the scaffold announce are told
 		// apart from unrelated notify traffic by that substring, and a startup
 		// warning must not be mistaken for either of them.
+		// #375: the supported range is package.json piCompat; the devDependency is CI's pin (testedMax), not the host's.
+		let range: string | undefined;
+		try {
+			range = piRange(parsePiCompat(readFile(join(options.packageRoot, "package.json")) ?? ""));
+		} catch {
+			range = undefined; // no readable range: the advice below still holds
+		}
 		return [
 			`pi version mismatch: this package installs pi ${installed}, the pi running it is ${host} (${hostPath})`,
 			"npm puts node_modules/.bin first on PATH, so under `npm run` a worker's pi is the installed one, not yours",
-			`fix: set "@earendil-works/pi-coding-agent" to ^${host} in package.json, then run \`npm install\` (\`npm ci\` after that)`,
+			`fix: the supported pi is package.json piCompat${range ? ` (${range})` : ""}; a host pi below min updates with \`pi update --self\`. "@earendil-works/pi-coding-agent" is CI's tested pin: move it and piCompat.testedMax together, then \`npm install\`, only once CI passes on that pi`,
 		].join("\n");
 	} catch {
 		// A warning that can throw is a new way to fail to start. It cannot.
