@@ -24,7 +24,7 @@
  *   - pipeline impact retention, recovery and reanchor — `tests/pipeline.test.ts`
  *     ("routing T2: …", "pipeline: without a human answer nothing is dispatched");
  *   - reviewer inputs and the effort a reviewer actually spawns —
- *     `tests/gate.test.ts`, `tests/diff-review.test.ts`, `tests/quality.test.ts`
+ *     `tests/gate.test.ts`, `tests/e2e/diff-review.test.ts`, `tests/quality.test.ts`
  *     (all assert `argOf(spawn.args, "--thinking")`);
  *   - the lint, the nudge and doctor's routing findings — `tests/routing.test.ts`,
  *     `tests/doctor.test.ts`.

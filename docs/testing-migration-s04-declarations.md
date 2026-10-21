@@ -46,7 +46,7 @@ The table maps behavior rather than reproducing internal assertions. Each mapped
 | 18 absent dispatch | mapped | refusal | Rejection names cp_dispatch. nc-refusal removes that recovery action and the regex fails. |
 | 19 research dispatch | mapped | refusal | A seeded research job rejects and names cp_gate. Accepting research or naming the wrong recovery action fails the regex. |
 | 20 unpushed branch | mapped | refusal | A seeded unknown branch rejects and names git push. Guessing a head or omitting recovery fails the regex. |
-| 21 canonical head lookup | mapped | pipeline | A current reviewed head reaches done and unresolved origin holds. nc-head returns undefined and done becomes implementing. Direct unknown/non-ship headSha probes are internal guards; real pipeline callers require a reported ship record. |
+| 21 canonical head lookup | mapped + retained guard | pipeline | Canonical/current and unresolved heads remain consumer-visible; a seeded reported research fleet record holds instead of accepting its existing pass (nc-research-head). Only the unknown-job headSha probe stays in `tests/diff-review-retained.test.ts`: `PipelineRunner.advance` checks fleet.get(ship_id) before #reviewStep, the sole headSha caller, so no missing-record input reaches it. |
 | 22 pass persistence and privacy | mapped | packet | Pass has actual head SHA; bodies/tasks are absent from run/job events and brief; the reviewer process is cleaned up. nc-summary prevents the successful persisted pass. |
 | 23 decision_summary projection | mapped | packet | Summary-bearing pass persists without gate-only fields. nc-summary fails persistence. |
 | 24 stranded receipt | mapped | legacy | Seeded receipt is decided once at attempt 1, passes, omits decision_summary, and wakes once. nc-summary changes pass to operational. |
@@ -54,11 +54,11 @@ The table maps behavior rather than reproducing internal assertions. Each mapped
 | 26 equivalent rebase | mapped | delta | Equivalent rebase uses zero model requests and retains attempt 2 with equivalent_to and the new head. Losing equivalence causes another model request/attempt. |
 | 27 mandate standing | mapped | mandate | Paused/revoked grants reject spend; a newer grant permits pass. nc-mandate produces a missing rejection. |
 | 28 delta review | mapped | delta | delta_from equals prior head, fix hunk appears only in delta, and full diff/prior findings remain. nc-delta loses delta_from. |
-| 29 task file packet | mapped | packet | Original task is copied exactly and referenced by path; task/diff body canaries never appear inline. Losing copy/boundary breaks these assertions. |
-| 30 unchanged-file context | mapped | packet | Context manifest includes README from head once, excludes fork copy, and records fork point. Missing context or duplicate side breaks these assertions. |
-| 31 authorized addenda | mapped | packet | Brief points to ordered addenda and packet contains their text; none is inlined. Losing addenda/order breaks these assertions. |
-| 32 pointer/boundary | mapped | packet/legacy | Existing task is a source-of-truth pointer; missing task forbids claiming requirement coverage; no interpolation/body is exposed. Losing boundary breaks brief assertions. |
-| 33 oversized task | mapped | legacy | Copy is smaller than source, omits tail, retains prefix, reports original byte count and bounded packet. An unbounded copy breaks these assertions. |
+| 29 task file packet | mapped | packet | nc-task-copy replaces the copied task with `task copy lost`; exact copied-task equality fails. |
+| 30 unchanged-file context | mapped | packet | nc-context drops README.md from the persisted context manifest; the included head README entry assertion fails. |
+| 31 authorized addenda | mapped | packet | nc-addenda omits the addenda block from the reviewer brief; the task-addenda.md pointer assertion fails. |
+| 32 pointer/boundary | mapped | packet/legacy | nc-task-boundary removes source-of-truth framing; the brief's source-of-truth regex fails. |
+| 33 oversized task | mapped | legacy | nc-task-cap removes the copy byte limit; the bounded-copy length assertion fails. |
 | 34 live revise | mapped | promotion | Real dispatched implementer receives each revision on its original branch with budget and no-second-PR instruction. nc-promotion drops branch guidance and includes assertion fails. |
 | 35 implementer gone | mapped | flags | High finding remains revise with revisions; parent wake names no live worker. Silently dropping delivery failure breaks wake assertion. |
 | 36 non-veto flags | mapped | flags | Destructive flag is reported while pass/cause stay pass/null. nc-flags escalates. |

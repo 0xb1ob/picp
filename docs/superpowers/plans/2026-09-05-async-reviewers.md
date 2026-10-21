@@ -1,5 +1,7 @@
 # Asynchronous reviewers Implementation Plan
 
+Migration note (S05): references below to the retired `tests/diff-review.test.ts` describe the historical implementation. Current async/head/cap evidence is in [the public review scenarios](../../../tests/e2e/diff-review.test.ts); source identity and synthetic shutdown coverage are in [the retained tests](../../../tests/diff-review-retained.test.ts). Use those current files for focused checks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `cp_gate`, `cp_review` and the quality panel return `next: "wait"` the moment their reviewer is spawned, finish in the background, and wake the parent with a stamped `cp-verdict` message; `cp_pipeline advance` returns `wait` while any of them is pending.

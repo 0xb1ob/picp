@@ -96,6 +96,18 @@ Replay the exact scenario command above with each mutation. The deadline control
 
 A trial removing the `alreadyClosed` optimization did not fail: the real ledger close is idempotent. It earns no proof credit. The executed existing-receipt mutation above supplies declaration 27's idempotency evidence instead.
 
+## S09 carry-in: declaration 2 rechecks
+
+S09 separately executed these production mutations against 05-S08-4. Each run exited 1 at the merge-count assertion after the real review deadline; source was restored after each run.
+
+| Recheck | Executed mutation | Failing assertion |
+|---|---|---|
+| Head | In `src/integrate.ts`, obtain `head` from the accepted envelope's `head_sha` instead of the observed PR, and set `permHead = head`. | repository/head: merge command count 1, expected 0 (`false/head`). |
+| CI | In `src/integrate.ts`, replace `if (ci.ci !== "green")` with `if (false)`. | repository/ci: merge command count 1, expected 0 (`false/ci`). |
+| Permission | In `src/merge-permission.ts`, add `BLOCKED` to `PERMITTED_MERGE_STATES`. | repository/permission: merge command count 1, expected 0 (`false/permission`). |
+
+Replay each with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='landing: the review deadline' --test-skip-pattern='^(repository/(hold|unreadable-hold|ci|permission|none)|fallback/.*)$' tests/e2e/landing.test.ts` for head; exchange `head` for the selected recheck in that skip expression for CI/permission. The original duration remains intact. The head mutation models trusting the previously reported head; the fake forge still refuses its stale bound merge, and the assertion detects the forbidden attempt.
+
 The harness's `setGh` uses `Object.assign(gh, patch)` before writing the complete state file (`tests/e2e/landing.test.ts`, startStack). Therefore partial permission/runs updates retain `integration` and other omitted fields. No harness change is required for that review uncertainty.
 
 Measured accounting for the PR ledger: the migration checker reports 378 tree test files and 4,299 static declarations. S08 keeps the file count unchanged and adds exactly nine test declarations to the 4,290-declaration merged base; no unit declaration is removed. The PR body supplies the Scope block, verbatim Ownership, counts, diff size, isolation details and validation evidence.

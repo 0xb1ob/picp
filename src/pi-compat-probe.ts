@@ -16,7 +16,7 @@ export const PROBE_VERSION_MS = 5_000;
 export const PROBE_EXTENSION_MS = 15_000;
 export const PROBE_CLEANUP_MS = 5_000;
 /** /doctor's shorter extension-load budget: the probe measured 1.3-1.8 s (#404). */
-export const DOCTOR_PROBE_MS = 8_000;
+export const DOCTOR_PROBE_MS = 15_000;
 
 /** Probe `pi` (an absolute path) against `packageRoot`'s extension; `loaded` skips the load. Never throws. */
 export async function probePi(pi: string, packageRoot: string, extensionMs = PROBE_EXTENSION_MS, loaded?: Promise<PiProbe["extension"]>): Promise<PiProbe> {
