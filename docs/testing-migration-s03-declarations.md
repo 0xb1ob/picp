@@ -59,6 +59,12 @@ The initial full landing run passed 23 cases. The expanded checkpoint passed 61 
 
 The existing harness creates an isolated throwaway agent directory through createAgentDir, configures only the mock provider, and removes it in t.after. No operator credentials or installed agent configuration are used.
 
+## Follow-up status (2026-10-21)
+
+Declaration 64: **pending-fix**, owned by separate product job cp-parked-notice-no-wake-r2gr. Reproducer: `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03-r5f7/parked-reproducer.ts`; expected result: **0 parent wakes**. Keep this fragment outside the pushed suite. Declaration 64 is no longer a blocker for mapping other declarations; file retirement is deferred until the product fix lands.
+
+The continuation send arrived immediately before this worker's 10,800-second wall-clock cap. Observed process start: 2026-10-21 16:32:07 UTC; observed elapsed 02:59:44 at 19:31:52 UTC (PID 2301445). No remaining declaration has been newly claimed mapped. The remaining non-64 mappings and the final full-file gate still require continuation on this branch; the PR stays draft until those checks finish.
+
 ## Product blocker: declaration 64
 
 A real parent parks a reviewed green PR under human_handoff, then starts a new model turn whose final input is HELD PR PARKED. The focused reproducer isolates that turn from an unrelated RESTART RECOVERY turn and fails parking is relayed without waking the parent model (actual 1, expected 0). The original declaration explicitly requires no parent wake. The migration brief prohibits product changes, so this blocks retirement rather than authorizing a routing fix.
