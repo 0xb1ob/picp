@@ -573,6 +573,8 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	writeFileSync(join(s.home, LAYOUT.budgetsFile), JSON.stringify({ ...s.post.budgets(), spawn_cap: 2 }));
 	const older = await s.held("oldest idle author", 301);
 	const newer = await s.held("newer idle author", 302);
+	const idle = (id: string) => { const m = s.post.manager.get(id); return s.post.fleet.get(id)?.phase === "held" && m?.worker.alive === true && !m.worker.busy; };
+	await waitFor(() => idle(older.jobId) && idle(newer.jobId), Boolean, { timeoutMs: 10_000, what: "both held authors idle and registered" });
 	const releases = (id: string) => readRunEvents(s.home, id).filter((event) => event.type === "held_released");
 	assert.equal(releases(older.jobId).length + releases(newer.jobId).length, 0, "below cap no author is stopped");
 	const original = s.post.fleet.get(older.jobId)!;
@@ -1883,6 +1885,7 @@ test("landing: parked PR timer stores native CI for each observed head without r
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === next && row.last_ci === "in_progress", { timeoutMs: 30_000, what: "moved parked head pending" });
 		state(next, [run(110, next, "completed", "failure")]);
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "failed", { timeoutMs: 30_000, what: "parked red" });
+		await waitFor(observations, (list) => list.length >= 2, { timeoutMs: 10_000, what: "parked red journaled" });
 		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head], ["ci_failed", next]], "parked terminal transitions are journaled once for their own head");
 		assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 		assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
