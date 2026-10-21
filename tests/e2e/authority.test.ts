@@ -13,7 +13,7 @@ import type { DispatchRequest } from "../../src/dispatch.ts";
 import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { liveUsageJobs } from "../../src/mandate-usage.ts";
-import { cpNext } from "../../src/next.ts";
+import type { NextResult } from "../../src/next.ts";
 import { recordRecoveryAttempt } from "../../src/recovery.ts";
 import { quoteSha } from "../../src/risk-preapproval.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
@@ -980,11 +980,12 @@ test("authority: dispatch picks the named, earliest-issued, lowest-id grant that
 	const supplement = grant("md-supp01", [target], "2026-10-09T12:00:00Z");
 	for (const jobId of counted) assert.equal((await s.accepted(jobId)).mandate_id, older.id, "room under the original keeps it");
 	assert.equal(await mandateOf(target), supplement.id);
-	const nextPorts = { ledger: s.post.ledger(), fleet: s.post.fleet, mandates: s.post.mandates, escalations: s.post.escalations, pipelines: s.post.pipelines };
-	const next = await cpNext(nextPorts, "demo");
-	assert.deepEqual([next.action.kind, next.mandate?.id === undefined], ["dispatch", false]);
-	assert.equal(next.mandate?.id, await mandateOf(String(next.action.job_id)), "cp_next partitions the job under the grant dispatch selects");
-	if (next.action.job_id === target) assert.equal(next.mandate?.id, supplement.id, "cp_next partitions the job under the supplement");
+	const nextEnd = (await prompted(s, "What next?", [tool("next", "cp_next", { project: "demo", full: true })])).get("next");
+	const next = (nextEnd?.result as { details?: NextResult } | undefined)?.details;
+	const views = next ? [next, ...(next.others ?? [])] : [];
+	const under = views.find((view) => view.mandate?.id === supplement.id);
+	assert.deepEqual([under?.action.kind, under?.action.job_id], ["dispatch", target], `cp_next partitions the job under the supplement: ${said(nextEnd)}`);
+	assert.ok(!views.some((view) => view.mandate?.id !== supplement.id && view.ready.some((job) => job.id === target)), "and under no other grant");
 	assert.equal((await s.accepted(target)).mandate_id, supplement.id);
 	grant("md-supp02", [firstEligible], "2026-10-09T12:00:00Z");
 	grant("md-supp03", [firstEligible], "2026-10-09T13:00:00Z");
@@ -1129,6 +1130,16 @@ test("authority: live usage crosses each cap line once while the worker runs; ca
 	await waitFor(() => s.post.runs.get(live)?.status.usage?.input ?? 0, (input) => input > 20_101, { timeoutMs: 60_000, what: "the revived worker's message" });
 	assert.deepEqual(ids(grant.id), ["warn-tokens@20000", "token-cap@20000"], "a revived worker repeats no notice");
 	assert.equal(s.post.mandates.require(grant.id).escalations.length, 1, "nor a budget escalation");
+	// With the project-wide grant gone, promoting the idle worker under its token-capped grant is refused with the
+	// parent's own raise hint (a dispatch's is pinned by 02-4).
+	s.post.mandates.revoke(wide.id);
+	let promotion = "";
+	for (let attempt = 0; attempt < 200 && !promotion; attempt += 1) {
+		promotion = await s.post.send({ jobId: live, message: "Next: add another line.", task: "Add another line to README.md.", mode: "prompt" })
+			.then(() => "delivered", (error: Error) => (/busy worker/.test(error.message) ? "" : error.message));
+		if (!promotion) await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	assert.match(promotion, new RegExp(`${grant.id} is paused \\(token_cap\\).*raise it yourself: cp_mandate raise_tokens ${grant.id}`));
 	assert.equal((await s.post.tearDown(live, { force: true })).torn_down, true);
 	assert.equal(ids(grant.id).length, 2, "the notices survive the job's teardown");
 

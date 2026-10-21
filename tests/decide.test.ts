@@ -7,11 +7,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { AwaitingStore, deriveFromEscalations, type ResolvedAwaitingItem } from "../src/awaiting.ts";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import { type DecisionBasis, type DelegationProvenance, WORKER_FORBIDDEN_TOOLS, isoTimestamp, LAYOUT } from "../src/contracts.ts";
+import { type DecisionBasis, type DelegationProvenance, type Mandate, WORKER_FORBIDDEN_TOOLS, isoTimestamp, LAYOUT } from "../src/contracts.ts";
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../src/decide.ts";
 import { preapprovalRecord } from "../src/risk-preapproval.ts";
 import { EscalationStore, raiseMissionEnd, raiseRiskHigh } from "../src/escalation.ts";
 import { MandateStore } from "../src/mandate.ts";
+import { autoDecideCheckpoint } from "../src/mandate-autodecide.ts";
+import { checkpointAuthority } from "../src/schedule-authority.ts";
 import { frameBatch, ParentSendOutbox, sendMarker } from "../src/parent-outbox.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -219,6 +221,31 @@ test("tv8: mandate basis must name the selected grant and cannot bypass its deni
 	const result = await decide({ target: "cp-ship1", decision: "approve", basis: { mandate: selected.id, clause: "x" } }, bundle);
 	assert.equal(result.decided_by, `mandate:${selected.id}`);
 	assert.equal(mandates.require(broad.id).decisions.length, 0);
+});
+
+// Kept by P2d from tests/mandate-supplement.test.ts: only a pipeline's auto-decide hands a checkpoint the plan text, so
+// no e2e reaches a path or subsystem exclusion yet. The selected (earliest named) grant's exclusion refuses; the later
+// grant naming the same job never decides instead. Regression: a denial falls through to a weaker grant.
+test("a selected grant's path or subsystem exclusion refuses an auto-decided plan; a later weaker grant never decides it", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const { ship, mandates } = deps(home.path);
+	const base = { projects: ["demo"], objective: "ship", expiry: later(), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 3, ask_on: [], job_ids: ["cp-ship1"] };
+	const selected = mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
+	mandates.issue(base);
+	const pending = ship.request({ jobId: "cp-ship1", question: "Approve the plan?" });
+	const subject = (text: string) => ({ kind: "ship" as const, jobId: "cp-ship1", project: "demo", jobKind: "ship" as const, text, pathHints: [text] });
+	const cases: Array<[Mandate["exclusions"], string, string]> = [
+		[{ paths: ["src/secret"] }, "Edit src/secret.ts.", "path Edit src/secret.ts. is excluded"],
+		[{ subsystems: ["auth"] }, "Rework the auth flow.", "subsystem auth is excluded"],
+	];
+	for (const [exclusions, text, reason] of cases) {
+		mandates.save({ ...selected, exclusions });
+		const verdict = checkpointAuthority(mandates.runContext(), subject(text), mandates.list());
+		assert.equal(verdict.permitted ? "permitted" : verdict.reason, `${selected.id}: ${reason}`);
+		assert.equal(autoDecideCheckpoint(ship, pending, subject(text), mandates).decision, "pending", text);
+	}
+	mandates.save(selected);
+	assert.equal(autoDecideCheckpoint(ship, pending, subject("Edit src/secret.ts."), mandates).decided_by, `mandate:${selected.id}`);
 });
 
 test("without a mandate the same call is refused naming the project", async (t) => {

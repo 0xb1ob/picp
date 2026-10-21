@@ -18,6 +18,7 @@ import { cpNext, formatNext } from "../src/next.ts";
 import { EMPTY_USAGE } from "../src/contracts.ts";
 import { observeRunUsage, runAuthority, runRiskPreapproval } from "../src/schedule-authority.ts";
 import { decisions } from "../src/viewer/overview-decisions.ts";
+import { inferredRiskGate } from "../src/risk-warning.ts";
 
 const now = isoTimestamp(), at = isoTimestamp(new Date(Date.now()-600_000));
 async function fixture(orgReview = false) {
@@ -304,4 +305,23 @@ test("activated child admission is idempotent, heals a missed admission and refu
  const over = await ledger.create({title:"over cap",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
  await assert.rejects(admitScheduledMember(runs,over),new RegExp(`${run.id}: limits.child_jobs`));
  assert.equal(runs.runOfJob(over.id),undefined);assert.equal(JSON.stringify(mandates.list()),before);
+});
+
+// #321, kept here by P2d (tests/risk-warning.test.ts): only a plain operator-chat grant turns a keyword-only high into
+// a warning. A legacy fire grant and a draining legacy run must still gate it; no entry point has minted either since
+// native schedules, so this pins them on real stores. Regression: a schedule job silently warns past ask_on risk:high.
+test("#321: a legacy schedule fire grant or schedule run still gates a keyword-only high an operator-chat grant warns on",async(t)=>{
+ const {home,mandates} = await fixture();t.after(()=>home.cleanup());
+ const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
+ const gate = (jobId:string)=>inferredRiskGate({mandates,job:{jobId,project:"demo",kind:"ship"},routed:"high",routedFrom:"inferred",text:"Delete it"});
+ const plain = await ledger.create({title:"plain",project:"demo",kind:"ship",delivery:"pr"});
+ assert.equal(gate(plain.id).risk,"low","control: the fixture's operator-chat grant warns instead of gating");
+ assert.equal(mandates.selection("dispatch",{jobId:"cp-member",project:"demo",kind:"ship"}),undefined);
+ assert.deepEqual(gate("cp-member"),{risk:"high",evidence:"risk source: classify (word: delete)"},"schedule run, no selected grant");
+ const fire = mandates.issue({projects:["demo"],objective:"fired",expiry:isoTimestamp(new Date(Date.now()+3_600_000)),spend_cap:{usd:5,tokens:500},job_cap:2,ask_on:["risk:high"],schedule_grant:true,
+  schedule_fire:{schedule_id:"sch-f1e000",seed_mandate_id:"md-123456",fired_at:at,approval:{operator_quote:"Run it",decided_by:"operator-quote",approved_at:at},trigger:{via:"cron",slot:at,missed:false}}});
+ writeFileSync(`${home.path}/${LAYOUT.state}/schedules.json`,JSON.stringify({schema_version:1,schedules:[{id:"sch-f1e000",name:"fired",project:"demo",mandate_id:fire.id,trigger:{type:"manual"},job:{title:"fired",kind:"ship",delivery:"pr"},enabled:true,created_at:at}]}));
+ const fired = await ledger.create({title:"fired",project:"demo",kind:"ship",delivery:"pr",labels:["schedule:sch-f1e000"]});
+ assert.equal(mandates.selection("dispatch",{jobId:fired.id,project:"demo",kind:"ship"})?.grant.id,fire.id);
+ assert.deepEqual(gate(fired.id),{risk:"high",evidence:"risk source: classify (word: delete)"},"schedule fire grant");
 });
