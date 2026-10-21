@@ -649,8 +649,55 @@ test("landing: a deploy ledger failure preserves the merge receipt and retries t
 });
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
 
+test("landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	for (const mode of ["verified", "wrong-branch", "fork", "unavailable", "invalid", "foreign-host", "github"]) await t.test(mode, async (t) => {
+		const s = await startStack(t, { project: false, env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: "s14-fake-token" } });
+		const lab = await startFakeGitlab(t, s.remote);
+		await s.project("demo", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
+		const url = `${lab.web}/o/lab/-/merge_requests/12`;
+		const body = { id: 9001, iid: 12, source_project_id: mode === "fork" ? 99 : 42, target_project_id: 42, state: "opened", get source_branch() { return mode === "wrong-branch" ? "someone-else" : s.post.ledger().read().jobs.at(-1)!.id; }, target_branch: "main", sha: s.repo.head("main"), web_url: url };
+		lab.mrs[12] = mode === "unavailable" ? { status: 503, body: {} } : mode === "invalid" ? { body: "invalid MR" } : { body };
+		const refusal = mode === "wrong-branch" ? /not this job's branch/ : mode === "fork" ? /unsupported:.*fork/ : mode === "foreign-host" ? /mismatch:/ : mode === "github" ? /not a GitLab merge request url/ : undefined;
+		const given = mode === "foreign-host" ? "https://gitlab.attacker.example/o/lab/-/merge_requests/12" : mode === "github" ? "https://github.com/example/demo/pull/12" : url;
+		const live = await s.held(`GitLab report ${mode}`, 12, { reportUrl: given, refusal });
+		const record = s.post.fleet.require(live.jobId);
+		assert.equal(s.ghCalls().length, 0);
+		if (["foreign-host", "github"].includes(mode)) assert.equal(lab.asked.length, 0);
+		else assert.ok(lab.asked.every((request) => request.path.includes("/merge_requests/12") && request.token === "s14-fake-token"));
+		if (refusal) return;
+		assert.equal(record.receipts?.find((receipt) => receipt.kind === "pr")?.url, url);
+		const notes = readRunEvents(s.home, live.jobId).filter((event) => event.type === "pr_url_unverified");
+		assert.equal(notes.length, ["unavailable", "invalid"].includes(mode) ? 1 : 0);
+		if (notes.length) assert.match(JSON.stringify(notes), /GitLab gave no usable answer/);
+	});
+});
+
+test("landing S14: unsafe existing PRs refuse before leasing or contacting a worker", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const cases: Array<{ name: string; patch?: Record<string, unknown>; reply?: Reply; ref?: string; expected: RegExp }> = [
+		{ name: "merged", patch: { state: "MERGED" }, expected: /is MERGED/ },
+		{ name: "closed", patch: { state: "CLOSED" }, expected: /is CLOSED/ },
+		{ name: "fork", patch: { isCrossRepository: true }, expected: /from a fork.*push the fork branch to origin/ },
+		{ name: "stacked", patch: { baseRefName: "release" }, expected: /targets release, not the project's default base main/ },
+		{ name: "other repo", ref: "https://github.com/other/demo/pull/169", expected: /names other\/demo.*origin remote is example\/demo/ },
+		{ name: "gh down", reply: { code: 1, stderr: "gh: command not found" }, expected: /gh could not read example\/demo#169.*gh: command not found/ },
+		{ name: "invalid", reply: { stdout: "not json" }, expected: /not a readable PR/ },
+		{ name: "no github", expected: /no GitHub origin remote/ },
+	];
+	for (const row of cases) await t.test(row.name, async (t) => {
+		const s = await startStack(t, { github: row.name !== "no github" });
+		const job = await s.post.ledger().create({ title: `unsafe bound ${row.name}`, project: "demo", kind: "ship", delivery: "pr" });
+		const view = { number: 169, url: "https://github.com/example/demo/pull/169", state: "OPEN", isDraft: false, isCrossRepository: false, headRefName: "main", headRefOid: s.repo.head("main"), baseRefName: "main", ...row.patch };
+		s.setGh({ routes: [{ match: "pr view 169", replies: [row.reply ?? json(view)] }] });
+		const model = s.provider.addScript("unsafe", [{ kind: "text", text: "This worker must not start." }]);
+		s.agentDir.writeModels(s.provider);
+		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Finish existing PR.", pr: row.ref ?? "169", model, fetch: false }), row.expected);
+		assert.equal(s.post.fleet.get(job.id), undefined);
+		assert.equal(s.provider.requests("unsafe").length, 0);
+	});
+});
+
 test("landing S14: binding an existing PR checks forge facts and preserves checkout history", { skip: SKIP, timeout: 240_000 }, async (t) => {
-	for (const mode of ["absent", "behind", "diverged", "other-worktree", "moved"]) await t.test(mode, async (t) => {
+	for (const mode of ["absent", "behind", "diverged", "other-worktree", "moved", "held-holder", "failed-holder", "done-holder", "own-failed", "wrong-url", "moved-report"]) await t.test(mode, async (t) => {
 		const s = await startStack(t, { github: true });
 		s.repo.git("switch", "-c", "feat");
 		s.repo.write("a.txt", "one\n");
@@ -674,12 +721,28 @@ test("landing S14: binding an existing PR checks forge facts and preserves check
 		if (mode === "other-worktree") git(clone, "worktree", "add", join(s.home, "other"), "feat");
 		const job = await s.post.ledger().create({ title: `bound checkout ${mode}`, project: "demo", kind: "ship", delivery: "pr" });
 		const url = "https://github.com/example/demo/pull/169";
-		const view = { number: 169, url, state: "OPEN", isDraft: false, isCrossRepository: false, headRefName: "feat", headRefOid: mode === "moved" ? c1 : c2, baseRefName: "main" };
-		s.setGh({ routes: [{ match: "pr view 169", replies: [json(view)] }] });
+		const view = { number: 169, url, state: "OPEN", isDraft: mode === "absent", isCrossRepository: false, headRefName: "feat", headRefOid: mode === "moved" ? c1 : c2, baseRefName: "main" };
+		s.setGh({ routes: [{ match: "pr view 169", replies: mode === "moved-report" ? [json(view), json({ ...view, headRefName: "someone-else" })] : [json(view)] }] });
 		const script = `bound-${mode}`;
-		const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: job.id, kind: "ship", status: "done", summary: "Bound PR ready.", branch: "feat", pr_url: url, head_sha: c2 } }] }, { kind: "text", text: "standing by" }], { onExhausted: "repeat" });
+		const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: job.id, kind: "ship", status: "done", summary: "Bound PR ready.", branch: "feat", pr_url: mode === "wrong-url" ? url.replace("169", "170") : url, head_sha: c2 } }] }, { kind: "text", text: "standing by" }], { onExhausted: "repeat" });
 		s.agentDir.writeModels(s.provider);
 		const dispatch = () => s.post.dispatch({ jobId: job.id, task: "Finish the bound PR.", pr: mode === "absent" ? "https://github.com/EXAMPLE/Demo/pull/169" : "#169", model, fetch: false });
+		if (mode === "own-failed") {
+			const old = await s.seed("old own branch", { branch: "feat" });
+			const record = s.post.fleet.require(old.jobId);
+			await s.post.fleet.patch(old.jobId, { phase: "done", branch: "unrelated-legacy" });
+			await s.post.fleet.add({ ...record, job_id: job.id, phase: "failed", failure: { class: "crash", message: "Legacy worker crash.", at: isoTimestamp() } });
+		}
+		if (mode.endsWith("-holder")) {
+			const holder = await s.seed("legacy branch holder", { branch: "feat" });
+			if (mode === "failed-holder") await s.post.fleet.patch(holder.jobId, { phase: "failed", failure: { class: "crash", message: "Legacy worker crash.", at: isoTimestamp() } });
+			if (mode === "done-holder") await s.post.fleet.patch(holder.jobId, { phase: "done" });
+			if (mode !== "done-holder") {
+				await assert.rejects(dispatch(), new RegExp(`job ${holder.jobId}.*holds it.*promote that job`));
+				assert.equal(s.provider.requests(script).length, 0);
+				return;
+			}
+		}
 		if (mode === "other-worktree" || mode === "moved") {
 			await assert.rejects(dispatch(), mode === "moved" ? /not the PR head.*PR moved while dispatching/ : /checked out in another worktree/);
 			assert.equal(s.provider.requests(script).length, 0);
@@ -695,9 +758,19 @@ test("landing S14: binding an existing PR checks forge facts and preserves check
 			const refs = git(record!.worktree, "for-each-ref", "--format=%(objectname)", `refs/cp-salvage/${job.id}/`);
 			assert.equal(refs, local);
 		}
-		record = (await waitFor(() => s.post.fleet.get(job.id), (row) => row?.phase === "held", { timeoutMs: 90_000, what: "bound worker report accepted" }))!;
+		record = (await waitFor(() => s.post.fleet.get(job.id), (row) => row?.phase === "held" || row?.envelope_correction !== undefined, { timeoutMs: 90_000, what: "bound worker report resolved" }))!;
+		if (mode === "wrong-url" || mode === "moved-report") {
+			assert.match(record.envelope_correction?.reason ?? "", mode === "wrong-url" ? /not the bound PR/ : /"someone-else", not this job's branch "feat"/);
+			assert.equal(record.reported_at, undefined);
+			assert.equal(record.phase, "waiting");
+			assert.ok(s.ghCalls().every((call) => !call.startsWith("pr list")));
+			return;
+		}
+		assert.equal(record.phase, "held");
+		assert.equal(readRunEvents(s.home, job.id).filter((event) => ["pr_url_corrected", "pr_url_unverified"].includes(event.type)).length, 0);
 		assert.equal(record.receipts?.find((receipt) => receipt.kind === "pr")?.url, url);
 		const prompt = JSON.stringify(s.provider.requests(script)[0]!.body);
+		assert.ok(prompt.includes(`Bound to ${url} (${mode === "absent" ? "draft" : "open"}), head feat at ${c2.slice(0, 12)}, base main`));
 		for (const text of ["Bound to", "do not open a PR", "merging origin/main into it, never by rebase", "push fast-forward only", "never rewrite or drop existing commits"]) assert.ok(prompt.includes(text), text);
 		assert.ok(s.ghCalls().filter((call) => call.startsWith("pr view")).every((call) => call.startsWith("pr view 169 --repo example/demo")));
 		assert.ok(s.ghCalls().every((call) => !call.startsWith("pr list")));
@@ -737,7 +810,7 @@ test("landing S14: worker PR reports resolve against the registered origin and d
 test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const checks = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }];
 	const reviews = [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }];
-	const rows: Array<{ status?: string; decision?: string; mergeable?: string; rules?: unknown; expected: RegExp }> = [
+	const rows: Array<{ status?: string; draft?: boolean; decision?: string; mergeable?: string; rules?: unknown; rawRules?: string; baseAdvance?: boolean; requiredUpdate?: boolean; expected: RegExp }> = [
 		{ status: "BLOCKED", decision: "REVIEW_REQUIRED", rules: reviews, expected: /permission: pending \(reviews\).*1 approving review/ },
 		{ status: "BLOCKED", decision: "CHANGES_REQUESTED", expected: /permission: pending \(reviews\)/ },
 		{ status: "BLOCKED", rules: checks, expected: /permission: pending \(checks\).*test/ },
@@ -748,18 +821,40 @@ test("landing S14: repository permission reports the allowlist and each blocked 
 		{ expected: /permission: unreadable/ },
 		{ status: "", expected: /permission: unreadable/ },
 		{ status: "SOME_NEW_VALUE_GH_INVENTED", expected: /permission: unreadable/ },
+		{ status: "BLOCKED", decision: "REVIEW_REQUIRED", rules: [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: false } }, { type: "pull_request", parameters: { required_approving_review_count: 2 } }], expected: /permission: pending \(reviews\).*2 approving review/ },
+		{ status: "BLOCKED", rules: [{ type: "required_status_checks" }], expected: /permission: pending \(checks\)/ },
+		{ status: "BLOCKED", rules: [], expected: /permission: pending \(unknown_block\)/ },
+		{ status: "BLOCKED", rules: { message: "forbidden" }, expected: /permission: pending \(unknown_block\)/ },
+		{ status: "BEHIND", expected: /permission: pending \(behind\)/ },
+		{ status: "DIRTY", expected: /permission: pending \(conflict\)/ },
+		{ status: "DRAFT", expected: /permission: pending \(draft\)/ },
+		{ status: "CLEAN", draft: true, expected: /permission: pending \(draft\)/ },
+		{ status: "BLOCKED", rawRules: "not json at all", expected: /permission: pending \(unknown_block\)/ },
+		{ status: "BLOCKED", rawRules: "", expected: /permission: pending \(unknown_block\)/ },
+		...[true, false, "true"].map((strict) => ({ status: "BLOCKED", baseAdvance: true, requiredUpdate: strict === true, rules: [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: strict } }], expected: /permission: pending \(checks\)/ })),
+		{ status: "BLOCKED", baseAdvance: true, rules: [{ type: "required_status_checks" }], expected: /permission: pending \(checks\)/ },
+		{ status: "BLOCKED", baseAdvance: true, rules: [{ type: "pull_request", parameters: { strict_required_status_checks_policy: true } }], expected: /permission: pending \(unknown_block\)/ },
+		{ status: "BLOCKED", baseAdvance: true, rules: [], expected: /permission: pending \(unknown_block\)/ },
+		{ status: "BLOCKED", baseAdvance: true, expected: /permission: pending \(unknown_block\)/ },
 	];
 	for (const row of rows) await t.test(JSON.stringify(row), async (t) => {
 		const s = await startStack(t);
 		const live = await s.held("repository permission matrix", 141);
 		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
-		const view = { number: 141, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main", isDraft: false, mergeable: row.mergeable ?? "MERGEABLE", mergeStateStatus: row.status, reviewDecision: row.decision ?? "" };
+		if (row.baseAdvance) {
+			const clone = s.post.registry.pathOf("demo");
+			writeFileSync(join(clone, "base-advance.txt"), "The base advanced after this PR.\n");
+			for (const args of [["add", "base-advance.txt"], ["commit", "-qm", "advance main"], ["push", "origin", "main"]]) execFileSync("git", args, { cwd: clone, stdio: "pipe" });
+		}
+		const view = { number: 141, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main", isDraft: row.draft ?? false, mergeable: row.mergeable ?? "MERGEABLE", mergeStateStatus: row.status, reviewDecision: row.decision ?? "" };
 		s.setGh({ integration: true, runs: [run(141, live.head, "completed", "success")], routes: [
 			{ match: "pr view", replies: [json(view)] },
-			{ match: "/rules/branches/", replies: row.rules ? [json(row.rules)] : [{ code: 1, stderr: "HTTP 403" }] },
+			{ match: "/rules/branches/", replies: row.rawRules !== undefined ? [{ stdout: row.rawRules }] : row.rules ? [json(row.rules)] : [{ code: 1, stderr: "HTTP 403" }] },
 		] });
 		const result = await s.integrate(live.jobId);
 		assert.match(result.text, row.expected, JSON.stringify(row));
+		if (row.status === "BLOCKED") assert.ok(result.calls.includes("api repos/{owner}/{repo}/rules/branches/main"));
+		if (row.baseAdvance) assert.equal(result.text.includes("rules: main requires up-to-date branches"), row.requiredUpdate === true);
 		assert.deepEqual(mergedCalls(result.calls), [], JSON.stringify(row));
 	});
 	for (const status of ["HAS_HOOKS", "CLEAN"]) await t.test(status, async (t) => {

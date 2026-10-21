@@ -4,6 +4,15 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 S14 owns the whole files merge-permission, pr-bind, pr-resolve and review-approval (33 declarations). Other slices own all other behavior-05 declarations. Original files stay whole until their final disposition is proved.
 
+Final disposition: **30 mapped, 3 retained verbatim, 0 pending**, four source files retired, three retained files added, six E2E declarations added. Batch counts below are historical checkpoints.
+
+| Source file | Mapped | Retained | Final disposition |
+|---|---:|---:|---|
+| tests/merge-permission.test.ts | 12 | 1 | retired; declaration 13 in merge-permission-retained.test.ts |
+| tests/pr-bind.test.ts | 9 | 0 | deleted |
+| tests/pr-resolve.test.ts | 9 | 1 | retired; declaration 9 in pr-resolve-retained.test.ts |
+| tests/review-approval.test.ts | 0 | 1 | moved verbatim to review-approval-retained.test.ts |
+
 ## Batch 1
 
 Scenario 05-S14-permission: `tests/e2e/landing.test.ts`, `landing S14: repository permission reports the allowlist and each blocked cause`. Real CommandPost, real reporter/implementer, isolated mock-provider agent directory, real scratch git, scripted external gh. Each permission row has its own stack and real held report; success rows execute a forge merge.
@@ -62,3 +71,55 @@ Executed controls (same node invocation as above, name pattern respectively `lan
 - S14-NC5, `src/pr-bind.ts`: delete only the salvage `update-ref` command. Diverged fails salvage object-id equality, with four unaffected checkout cases passing. Restored.
 
 Fixed resolution and checkout cases passed before mutations; final fixed rerun follows each checkpoint. No unit removal credit yet.
+
+## Batch 3: first whole-file retirement
+
+All 9 declarations in `tests/pr-bind.test.ts` are now mapped, with no retention. Deleted only after the fixed bound and unsafe scenarios passed (19 executed tests). Source history inspected: 580289b5c0f709bdc9ae28a50bf55dd12c38d04a (#238), including the original pr-bind production diff. Reference search found only migration evidence rows; no live docs/test/script reference needed retargeting.
+
+| Source declaration | Status | Control and failing assertion |
+|---|---|---|
+| pr-bind 1 open/default-base by URL or number | mapped | S14-NC7: draft flag forced false; absent subcase fails actual worker prompt's complete bound identity/draft/head/base assertion |
+| pr-bind 2 unsafe refs/facts | mapped | S14-NC6: all eight unsafe subcases fail Missing expected rejection |
+| pr-bind 3 held/failed peer, done/self allowed | mapped | S14-NC9: held/failed fail Missing expected rejection; done and own-failed dispatch throw an incorrect holder refusal |
+| pr-bind 4 branch history instructions | mapped | S14-NC8: absent/behind/diverged fail prompt assertion never rewrite or drop existing commits |
+
+Exact additional executed production mutations, restored after each run:
+
+- S14-NC6: replace `throw new DispatchError(...)` in readBoundPr's local refuse helper with `return undefined as never;`. All 8 unsafe rows actually dispatch instead of rejecting.
+- S14-NC7: in readBoundPr's returned facts, replace `draft: row.isDraft === true` with `draft: false`. Absent row fails prompt identity; 4 unaffected checkout rows pass.
+- S14-NC8: in boundPrNote replace final `never rewrite or drop existing commits.` with `rewrite existing commits freely.`. Three successful binding rows fail their actual model-request assertion; moved/occupied remain passing refusals.
+- S14-NC9: replace assertBranchFree's finder predicate with `job.branch === head && (job.phase === "done" || job.job_id === jobId)`. All four holder variants fail. Own-failed uses a valid legacy failure record and an unrelated done peer, so the observed erroneous refusal names the job itself, not a different done job.
+
+These controls use the same binding/unsafe focused commands recorded above. Total so far: 22 mapped, 0 retained, 11 pending; 1 deleted file. Remaining: permission 5, PR resolution 5, artifact approval 1. No unreachable behavior has yet required retention.
+
+## Completion: final consumer controls and retained mixed declarations
+
+| Source declaration | Disposition | Executed evidence |
+|---|---|---|
+| permission 6 | mapped | S14-NC17 fails all BEHIND/DIRTY/DRAFT/CLEAN-isDraft consumer permission assertions |
+| permission 10 | mapped | S14-NC15 discards parsed rules; real one/two approving-review counts disappear from integration output |
+| permission 11 | mapped | S14-NC14 inverts rulesRequireUpToDate; all seven independently named stale-base variants fail the requires-up-to-date output assertion |
+| permission 12 | mapped | S14-NC16 targets wrong-base; real gh endpoint call assertion fails twice |
+| permission 13 | retained | no public entry point feeds ghBranchRulesArgs output into detectCiWait: cp_integrate executes it directly, while the worker guard accepts worker-supplied commands; retain this compositional safety assertion verbatim |
+| pr-resolve 6 | mapped | S14-NC10 removes bound dispatch in resolvePr; accepted bound cases become waiting instead of held; fixed run also asserts view 169 --repo and no list |
+| pr-resolve 7 | mapped | S14-NC11 disables wrong-number and moved-branch guards; both real worker reports are wrongly accepted; correction-reason assertions fail with empty actual |
+| pr-resolve 8 | mapped | S14-NC10 produces waiting instead of held; fixed report preserves bound URL receipt |
+| pr-resolve 9 | retained | mixed declaration preserved verbatim: validateEnvelope rejects missing pr_url for delivery:pr before EnvelopeIntake.#resolvePr, so no real report can reach its missing-URL or no-given bound fallback assertions; reachable GitLab variants additionally covered by 05-S14-gitlab |
+| pr-resolve 10 | mapped | S14-NC12 disables GitLab source-branch check; actual wrong-branch worker report is wrongly held and expected refusal is empty |
+| review-approval 1 | retained | mixed declaration preserved verbatim: PipelineRunner.#authorize calls artifacts.info before matches, so missing-artifact matches cannot be reached; its only production write call uses questionSeq 1, never the declaration's sequence-2/3 overwrite; no public consumer accepts those inputs. Reachable authorization additionally covered by 05-S14-approval |
+
+Additional executed production mutations, all restored:
+
+- S14-NC10: delete `if (input.bound) return resolveBound(...)` in src/pr-resolve.ts. Seven binding/report subcases fail, including waiting != held and both correction reasons.
+- S14-NC11: replace both wrong-bound-number and changed-head-branch conditions in resolveBound with false. Two bound report subcases fail /not the bound PR/ and /someone-else/ with empty actual.
+- S14-NC12: replace GitLab source-branch condition with false. GitLab wrong-branch fails its expected correction reason; six unaffected GitLab subcases pass.
+- S14-NC13: replace sha256 comparison in ReviewApprovalStore.matches with return true. Pipeline edited subcase is approved instead of pending; identical and absent pass.
+- S14-NC14: negate the return expression in rulesRequireUpToDate. Seven stale-base subcases all fail requires-up-to-date boolean assertions, including actual false vs expected true for strict true and true vs false for all other variants.
+- S14-NC15: replace parseBranchRules final return rules with return []. Both review-required subcases lose the one/two approving-review detail and fail.
+- S14-NC16: return a fixed wrong-base rules endpoint from ghBranchRulesArgs. Both review-required subcases fail actual external endpoint equality.
+- S14-NC17: force merge status BROKEN and disable isDraft guard. BEHIND, DIRTY, DRAFT and CLEAN/isDraft each fail their pending cause assertion with unreadable permission.
+- S14-NC18: in src/ci-watch.ts ghPrRest, replace the parsed owner in the external REST path with typo. Corrected intake still succeeds and stores the canonical receipt; the actual watch call assertion repos/example/demo/pulls/151 fails. Three other resolution subcases pass. Restored. This independently proves watch consumption after the receipt assertion, rather than crediting an earlier intake assertion failure.
+
+Commands: the node invocation above with name pattern landing S14: binding, landing S14: GitLab or pipeline S14: (phase3.test.ts), respectively. Permission controls use pattern landing S14: repository and test-skip-pattern to select baseAdvance (NC14), REVIEW_REQUIRED (NC15/16), or BEHIND/DIRTY/DRAFT/draft (NC17). These selectors skip subcases only; the real public entry points and production implementations remain intact. Fixed all-S14 landing run passed all 64 executed tests in 243 seconds before final retirements; approval fixed run passed all 4 tests. No production mutation remains.
+
+The three retained declarations are byte-for-byte original bodies, not replacement tests or weakened assertions. They are reported as retained, never as redundant-unreachable or deletion credit. Reachable portions of the two mixed declarations have real consumer coverage despite retaining their whole declarations. See src/contracts/envelope.ts validation, EnvelopeIntake.#resolvePr, PipelineRunner.#authorize/#pinApproval and their caller searches for the exact boundary evidence.
