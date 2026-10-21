@@ -14,13 +14,17 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
-| tests/integrate-held-ci.test.ts | 3 | convert, owner P3c-rest; three pending, including restart and permission paths |
+| tests/integrate-held-ci.test.ts | 3 | S07: all three mapped to 05-13 and 05-S07 and deleted; NC-37 and S07-NC-1; restart reason distinguishes spent allowance from missing worker |
 | tests/awaiting-merge-tick.test.ts | 2 | Retained verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); missing lifecycle entry points below; no deletion credit |
 
 Delivered counts: **13/143 declarations mapped (9.09%), 2 retained (1.40%), 128 pending; 8 declarations
 removed and 2/7 files deleted**. Five CI-watch mappings remain in their original file until follow-on conversion.
 This completes only the operator-approved partial slice; it does not satisfy the original 60%/three-file target.
 The remaining five files continue under P3c-rest; other behavior-05 files remain outside this slice.
+
+S07 subsequently maps three more declarations and deletes `tests/integrate-held-ci.test.ts`: cumulative
+16/143 mapped, 2 retained, 125 pending, 11 declarations removed and 3/7 files deleted. It adds one e2e
+declaration and extends 05-13; no other slice's ownership changes. The counts above describe P3c's original delivery.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The timer file is a 100%
 rename, not retired coverage. Its two assertion rows remain `retained`; the baseline-file table's `deleted`
@@ -35,3 +39,12 @@ the absent baseline path: NC-36 proves parked observation wiring, not either ret
 
 Both mutations were restored. Neither passing consumer probe is a negative control. No P1 exception is
 introduced. A future ownership-transfer API or observable post-shutdown lifecycle is needed to map these cases.
+
+## S02 follow-on (cp-e2e-slice-s02-l7ph)
+
+S02 owns only `tests/ci-watch.test.ts` declarations 1–40. It adds five scenarios and extends 05-8:
+36 declarations are mapped; declarations 6, 8, 32 and 33 have unreachable sub-assertions and remain intact.
+All original declarations stay in place under the operator's split-file amendment; no deletion credit is claimed.
+S03 owns declarations 41–80 and the final file retirement. The assertion map in testing-migration.md names
+the unreachable inputs and requires their preservation at that retirement. The 13/143 summary above records
+P3c's historical partial delivery, before these follow-on mappings.
