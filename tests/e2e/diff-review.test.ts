@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -13,13 +15,13 @@ import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { enableTreehouse, waitFor } from "../harness/index.ts";
 
-async function stack(t: TestContext, registry?: PiModelRegistryLike) {
+async function stack(t: TestContext, registry?: PiModelRegistryLike, transport?: (content: string) => boolean) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo" });
 	const provider = await MockProvider.start();
 	const agent = createAgentDir({ provider });
 	const wakes: string[] = [];
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true, sendWakeup: (wake) => (wakes.push(wake.content), true), ...(registry ? { modelRegistry: () => registry } : {}) });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true, sendWakeup: (wake) => (wakes.push(wake.content), transport ? transport(wake.content) : true), ...(registry ? { modelRegistry: () => registry } : {}) });
 	t.after(async () => { await post.shutdown(); agent.cleanup(); await provider.stop(); repo.cleanup(); home.cleanup(); });
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [] }));
@@ -537,19 +539,18 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	const wide = await s.seed(Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`wide-${n}.ts`, "x\n"])));
 	const large = await s.seed({ "large.ts": "export const S15_PRIVATE_DIFF = 1;\n".repeat(12_000) });
 	const parent = s.provider.addScript("s15-tool-parent", [
-		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: "cp-s15-unknown" } }] },
-		{ kind: "text", text: "refused" },
-		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: job } }] },
+		{ kind: "tool_calls", calls: [
+			{ name: "cp_review", args: { job_id: "cp-s15-unknown" } },
+			{ name: "cp_review", args: { job_id: job } },
+			{ name: "cp_review", args: { job_id: wide } },
+			{ name: "cp_review", args: { job_id: large } },
+		] },
 		{ kind: "text", text: "reviewed" },
-		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: wide } }] },
-		{ kind: "text", text: "wide refused" },
-		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: large } }] },
-		{ kind: "text", text: "large refused" },
 	], { onExhausted: "repeat" });
 	s.agent.writeModels(s.provider);
 	const child = startPiChild({ cwd: s.home, model: parent, env: { ...s.agent.env, CP_HOME: s.home }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(() => child.close());
-	await child.prompt("Review the unknown job.");
+	await child.prompt("Review all four branches.");
 	await child.waitForSettled(60_000);
 	const offered = JSON.stringify(s.provider.requests("s15-tool-parent")[0]?.body.tools);
 	assert.match(offered, /cp_review/);
@@ -559,10 +560,8 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	assert.equal(ends()[0]?.isError, true);
 	assert.match(JSON.stringify(ends()[0]?.result), /no dispatch record.*cp_dispatch/);
 	assert.doesNotMatch(JSON.stringify(ends()[0]?.result), /pipeline/i);
-	await child.prompt("Review the pushed job now.");
-	await child.waitForSettled(60_000);
-	await waitFor(() => ends().length, (count) => count === 2, { timeoutMs: 60_000, what: "cached RPC verdict" });
-	const payload = ends().at(-1)?.result;
+	await waitFor(() => ends().length, (count) => count >= 4, { timeoutMs: 60_000, what: "four RPC results" });
+	const payload = ends().find((end) => (end.result?.details?.verdict as DiffVerdict | undefined)?.job_id === job)?.result;
 	assert.ok(payload?.details);
 	assert.equal(payload.details.next, "proceed", JSON.stringify(payload));
 	assert.equal(validate(DiffVerdictSchema, payload.details.verdict).ok, true);
@@ -573,15 +572,112 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	assert.doesNotMatch(JSON.stringify(payload), /S15_PRIVATE_DIFF|diff\.md|@@/);
 	assert.match(String(payload.details.review_file), /review-(?:1|equivalent-[0-9a-f]{40})\.json$/);
 	assert.deepEqual(JSON.parse(readFileSync(String(payload.details.review_file), "utf8")), payload.details.verdict);
-	for (const [count, label] of [[3, "wide"], [4, "large"]] as const) {
-		await child.prompt(`Review the ${label} branch.`);
-		await waitFor(() => ends().length, (n) => n === count, { timeoutMs: 60_000, what: `${label} policy payload` });
-		const policy = ends().at(-1)?.result;
+	for (const [id, label] of [[wide, "wide"], [large, "large"]] as const) {
+		const policy = ends().find((end) => (end.result?.details?.verdict as DiffVerdict | undefined)?.job_id === id)?.result;
 		assert.equal(policy?.details?.next, "surface");
 		assert.equal((policy?.details?.verdict as DiffVerdict).cause, "policy");
 		assert.equal(policy?.details?.model, undefined);
 		assert.match(JSON.stringify(policy?.content), /no reviewer/);
 		assert.doesNotMatch(JSON.stringify(policy), /S15_PRIVATE_DIFF|diff\.md|@@/);
 		if (label === "wide") assert.equal(policy?.details?.subject, undefined);
+	}
+});
+
+
+test("S15: a failed verdict transport never resurrects a real review's pending slot", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t, undefined, () => { throw new Error("S15 transport unavailable"); });
+	const job = await s.seed({ "src/transport.ts": "export const transport = 1;\n" });
+	const result = await s.review(job);
+	assert.equal(result.verdict.verdict, "pass");
+	assert.equal(existsSync(join(s.home, paths.pendingReviewFile(job, "review", 1))), false);
+	assert.equal(s.post.reviewRuns.pending(job, "review"), undefined);
+	assert.equal(s.wakes.length, 1);
+	assert.equal(JSON.parse(readFileSync(join(s.home, paths.reviewFile(job, 1)), "utf8")).verdict, "pass");
+	assert.equal((await s.post.diffReview({ jobId: job })).next, "proceed");
+});
+
+
+test("S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const jobs: string[] = [];
+	for (const label of ["told", "untold", "alive", "decided", "broken", "invalid", "after"]) jobs.push(await s.seed({ [`${label}.ts`]: `export const ${label} = 1;\n` }));
+	for (const [n, job] of jobs.entries()) {
+		const file = join(s.home, paths.pendingReviewFile(job, "review", 1));
+		mkdirSync(join(file, ".."), { recursive: true });
+		writeFileSync(file, n === 5 ? "{not json" : JSON.stringify({ schema_version: 1, job_id: job, surface: "review", attempt: 1, model: "mock/lost", pid: n === 2 ? process.pid : 2_147_483_647, started_at: "2026-09-05T09:00:00Z", deadline: "2026-09-05T09:15:00Z", handed_back: n !== 1, subject: { head_sha: s.repo.head(job), branch: job, files: 1, truncated: false } }));
+		if (n === 3) writeFileSync(join(s.home, paths.reviewFile(job, 1)), "{}");
+		if (n === 4) {
+			const dir = join(s.home, paths.runDir(job));
+			chmodSync(dir, 0o500);
+		}
+	}
+	let report;
+	try { report = await s.post.sweepOrphanReviews(); }
+	finally { chmodSync(join(s.home, paths.runDir(jobs[4]!)), 0o700); }
+	assert.ok(report.skipped.some((entry) => entry.pending.job_id === jobs[4] && /finish failed/.test(entry.reason)), JSON.stringify(report));
+	assert.ok(report.finished.some((pending) => pending.job_id === jobs[0]));
+	assert.ok(report.finished.some((pending) => pending.job_id === jobs[1]));
+	assert.ok(report.finished.some((pending) => pending.job_id === jobs[6]));
+	assert.equal(existsSync(join(s.home, paths.pendingReviewFile(jobs[4]!, "review", 1))), false);
+	assert.ok(report.skipped.some((entry) => entry.pending.job_id === jobs[2] && entry.reason === "reviewer still alive"));
+	assert.ok(report.skipped.some((entry) => entry.pending.job_id === jobs[3] && entry.reason === "decision already on disk"));
+	assert.equal(s.wakes.filter((wake) => wake.includes(jobs[0]!)).length, 1);
+	assert.equal(s.wakes.some((wake) => wake.includes(jobs[1]!)), false);
+	for (const job of jobs.slice(0, 2)) {
+		assert.equal(existsSync(join(s.home, paths.pendingReviewFile(job, "review", 1))), false);
+		const verdict = JSON.parse(readFileSync(join(s.home, paths.reviewFile(job, 1)), "utf8"));
+		assert.deepEqual([verdict.verdict, verdict.cause], ["escalate", "operational"]);
+	}
+	assert.equal(readFileSync(join(s.home, paths.pendingReviewFile(jobs[5]!, "review", 1)), "utf8"), "{not json");
+	const again = await s.post.sweepOrphanReviews();
+	assert.equal(again.finished.length, 0);
+});
+
+
+test("S15: real review decision writes recover once before persistence and preserve partial decisions", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	for (const mode of ["once", "partial", "always"] as const) {
+		await t.test(mode, async () => {
+		const job = await s.seed({ [`${mode}.ts`]: "export const value = 1;\n" });
+		const model = s.provider.addScript(`s15-write-${mode}`, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 complete"] } }] }]);
+		s.agent.writeModels(s.provider);
+		const target = join(s.home, paths.reviewFile(job, 1));
+		const rename = fs.renameSync;
+		let writes = 0;
+		fs.renameSync = (from, to) => {
+			if (String(to) === target) {
+				writes++;
+				if (mode === "partial") rename(from, to);
+				if (mode !== "once" || writes === 1) throw new Error("S15 filesystem unavailable\nsecond line");
+			}
+			rename(from, to);
+		};
+		syncBuiltinESMExports();
+		const before = s.wakes.length;
+		try {
+			const started = await s.post.diffReview({ jobId: job, model });
+			assert.ok(isDiffReviewWait(started));
+			s.post.reviewRuns.handBack(started.key);
+			await s.post.reviewRuns.settled(started.key);
+		} finally { fs.renameSync = rename; syncBuiltinESMExports(); }
+		assert.equal(s.post.reviewRuns.pending(job, "review"), undefined);
+		assert.equal(existsSync(join(s.home, paths.pendingReviewFile(job, "review", 1))), false);
+		if (mode === "always") {
+			assert.equal(writes, 2);
+			assert.equal(existsSync(target), false);
+			assert.equal(s.wakes.length, before);
+		} else {
+			assert.equal(existsSync(target), true, "a transient filesystem failure must leave an operational decision");
+			const verdict = JSON.parse(readFileSync(target, "utf8"));
+			assert.equal(verdict.verdict, mode === "once" ? "escalate" : "pass");
+			assert.equal(writes, mode === "once" ? 2 : 1);
+			assert.equal(s.wakes.length, before + (mode === "once" ? 1 : 0));
+			if (mode === "once") {
+				assert.equal(verdict.cause, "operational");
+				assert.match(verdict.reasons.join(" "), /S15 filesystem unavailable/);
+				assert.doesNotMatch(verdict.reasons.join(" "), /\n/);
+			}
+		}
+		});
 	}
 });

@@ -43,3 +43,18 @@ Added `S15: real reviewer attempts persist before waiting, reject duplicates and
 Added `S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies`: a real pi RPC parent runs unknown-job, cached pass, wide-subject and oversized-subject cp_review calls. It checks medium reasons, persisted verdict equality, policy/model-free results and absence of raw diff bodies and paths. Production controls for this scenario remain pending; no migration credit is claimed for it yet.
 
 Executed helper payload controls: replacing details.verdict with {} fails DiffVerdictSchema validation in the real RPC scenario; stripping formatted reasons fails the medium reason text assertion. A separate exploratory diff_path: result.diff?.path mutation PASSED this scenario: current cached and policy tool results carry no materialized diff. It was restored and earns no control credit. The original direct-helper raw diff/path injection assertion must therefore stay until a reachable consumer case is established or its unreachable input is traced and retained explicitly.
+
+## Third checkpoint
+
+Additional real-entry scenarios cover failed transport, legacy orphan reconciliation (including an unwritable decision directory), and real review decision writes with filesystem-boundary faults. The write scenario injects one failed atomic rename, a rename that succeeds then reports failure, and persistent rename failures; original fs bindings are restored in finally. No production function is replaced.
+
+Executed and restored controls:
+
+- Remove #clear from the normal reviewer finally: the failed-transport scenario finds pending.json still present.
+- Remove pending.handed_back from the orphan wake condition: the untold legacy attempt unexpectedly wakes.
+- Return from orphan sweep after a failed decision write: the later healthy job is not finished.
+- Bypass orphan live-PID protection: the expected live-reviewer skip is missing.
+- Remove the fallback finish call: the transient fault leaves no operational decision, and the persistent-fault subcase sees one write instead of two. Both subcase assertions failed in the recorded run.
+- Bypass decisionExists after a partial finish: the persisted pass is overwritten by escalate; the partial-write subcase fails.
+
+These add executable evidence for review-runs declarations 5, 8, 9, 10 (filesystem-failure portion), 12, 13, and the live-PID portion of 14. Exact complete declaration dispositions, remaining controls, patch hashes, whole-file retirements and reference repairs remain unfinished. No deletion or retained credit is claimed for those incomplete declarations.
