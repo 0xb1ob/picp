@@ -1,0 +1,7 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..008c3bd 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -806 +806 @@ export class DiffReview {
+-		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
++		const { raw, rubric: _rubric, ...decided } = decideGate({

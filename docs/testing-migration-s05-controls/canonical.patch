@@ -1,0 +1,7 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..afdff70 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -510 +510 @@ export class DiffReview {
+-		const clone = await this.#clone(record.project);
++		const clone = record.worktree!;

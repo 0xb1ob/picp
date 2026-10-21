@@ -1,0 +1,31 @@
+diff --git a/src/contracts/layout.ts b/src/contracts/layout.ts
+index 7b440fa..7eb7389 100644
+--- a/src/contracts/layout.ts
++++ b/src/contracts/layout.ts
+@@ -391 +391 @@ export const paths = Object.freeze({
+-		return `${LAYOUT.checkpoints}/${id}${kind === "diff" ? ".diff" : ""}.json`;
++		return `${LAYOUT.checkpoints}/${id}.json`;
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..92d3686 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -582,3 +582 @@ export class DiffReview {
+-		const deltaFrom = previous && previous.head_sha !== headSha && (await deltaBaselineHolds(git, clone, base, branch, previous.head_sha))
+-			? previous.head_sha
+-			: undefined;
++		const deltaFrom: string | undefined = undefined;
+@@ -642,0 +641 @@ export class DiffReview {
++		if (taskCopy) writeFileSync(taskCopy, "lost task");
+@@ -812 +811 @@ export class DiffReview {
+-			vetoFlags: [],
++			vetoFlags: ["destructive_scope", "scope_growth", "blocking_unknowns"],
+@@ -961,2 +959,0 @@ export class DiffReview {
+-				...(inputs.scope ? { scope: inputs.scope } : {}),
+-				...(inputs.risk ? { risk: inputs.risk } : {}),
+diff --git a/src/final-fix.ts b/src/final-fix.ts
+index b7f5a91..f6d33b3 100644
+--- a/src/final-fix.ts
++++ b/src/final-fix.ts
+@@ -152 +152 @@ export function requestFinalFix(
+-		evidence: findings,
++		evidence: findings.slice(0, 10),
