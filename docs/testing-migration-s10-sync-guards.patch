@@ -1,0 +1,14 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..1a8792c 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1424,6 +1424,9 @@ export class Integrator {
+ 		base: string;
+ 	}): Promise<{ acted: boolean; failed: boolean; detail: string }> {
+ 		const { jobId, worktree, branch, base } = input;
++		const unsafeRemote = (await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch])).stdout.trim().split(/\s+/)[0] ?? "";
++		await this.#run(worktree, "git", ["reset", "--hard", unsafeRemote]);
++		return { acted: true, failed: false, detail: "unchecked synchronization" };
+ 		const fetched = await this.#run(worktree, "git", ["fetch", "origin", branch]);
+ 		if (fetched.status !== 0) {
+ 			return { acted: false, failed: false, detail: `could not fetch origin/${branch} in the worktree` };

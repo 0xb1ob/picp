@@ -1,0 +1,13 @@
+diff --git a/src/ci-wait.ts b/src/ci-wait.ts
+index 1cb3d19..ed283be 100644
+--- a/src/ci-wait.ts
++++ b/src/ci-wait.ts
+@@ -117,7 +117,7 @@ export function detectCiWait(command: string): CiWaitFinding | undefined {
+ 	const watch = firstMatch(command, BLOCKING_WATCH_RES);
+ 	if (watch) {
+ 		return {
+-			shape: "blocking_watch",
++			shape: "sleep_then_poll",
+ 			matched: bound(watch),
+ 			what: "this call blocks until CI finishes",
+ 		};

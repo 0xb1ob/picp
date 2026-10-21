@@ -71,6 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
+| S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -224,6 +225,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | S06 | 05 | `tests/e2e/landing.test.ts` | foreign CI, forge observers/runtime and held release; file-by-file conversion |
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
+| S10 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92), 0 deleted files; six added scenarios and 05-S02-5 extended; [range ledger](testing-migration-s10.md); original unit file kept whole |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -370,6 +372,12 @@ moves first.
 | 05-S08-7 | `tests/e2e/landing.test.ts` | landing: stale bases update only for BEHIND or an authoritative strict rule |
 | 05-S08-8 | `tests/e2e/landing.test.ts` | landing: the operator bridge persists a hold without a parent and a restarted parent reads and releases it |
 | 05-S08-9 | `tests/e2e/landing.test.ts` | landing: a hold arriving during green CI stops both merge authority paths |
+| 05-S10-1 | `tests/e2e/landing.test.ts` | landing S10: synchronization preserves local work and proves origin before resetting |
+| 05-S10-2 | `tests/e2e/landing.test.ts` | landing S10: rescue retention proves reachability and bounds cleanup |
+| 05-S10-3 | `tests/e2e/landing.test.ts` | landing S10: review evidence authorizes only the reviewed complete head |
+| 05-S10-4 | `tests/e2e/landing.test.ts` | landing S10: unreadable forge and Actions evidence names the cause and makes no mutation |
+| 05-S10-5 | `tests/e2e/landing.test.ts` | landing S10: cleanup failures preserve landed effects and resume |
+| 05-S10-6 | `tests/e2e/landing.test.ts` | landing S10: dispatch rejects profiles granting parent integration tools |
 | 05-S09-1 | `tests/e2e/landing.test.ts` | landing S09: exact head and branch evidence distinguish pending, superseded and absent CI |
 | 05-S09-2 | `tests/e2e/landing.test.ts` | landing S09: repository refusals and draft transitions preserve head authority |
 | 05-S09-3 | `tests/e2e/landing.test.ts` | landing S09: external PR facts stop or finish without an automated merge |
@@ -818,7 +826,94 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
+| `tests/integrate.test.ts` | S09 declaration 41: pending head | 05-S09-1 | mapped | NC-2: advance != wait; S09 ledger. |
+| `tests/integrate.test.ts` | S09 declaration 42: workflows present | 05-S09-1 | mapped | NC-2: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 43: older branch run | 05-S09-1 | mapped | NC-1: surface != wait. |
+| `tests/integrate.test.ts` | S09 declaration 44: empty head/branch | 05-S09-1 | mapped | NC-2: present advances and none loses authoritative-empty fact. |
+| `tests/integrate.test.ts` | S09 declaration 45: branch failures | 05-S09-1 | mapped | NC-2: each advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 46: branch-only green | 05-S09-1 | mapped | NC-2: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 47: no workflows | 05-S09-1 | mapped | NC-2: missing authoritative-empty fact. |
+| `tests/integrate.test.ts` | S09 declaration 48: no-CI refusal | 05-S09-2 | mapped | NC-3: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 49: unreadable workflows | 05-S09-1 | mapped | NC-2: each advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 50: red no workflows | 05-S09-5 | mapped | NC-7: wait != resolve. |
+| `tests/integrate.test.ts` | S09 declaration 51: required review | 05-S09-2 | mapped | NC-3: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 52: unreadable rules | 05-S09-2 | mapped | NC-3: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 53: unstable | 05-S09-2 | mapped | NC-3: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 54: unreviewed draft | 05-S09-2 | mapped | NC-11: surface != review. |
+| `tests/integrate.test.ts` | S09 declaration 55: ready once | 05-S09-2 | mapped | NC-4: surface != advance; S10 adds follow-up actual merge assertion. |
+| `tests/integrate.test.ts` | S09 declaration 56: moved/refused ready | 05-S09-2 | mapped | NC-4: surface != wait or missing error cause. |
+| `tests/integrate.test.ts` | S09 declaration 57: approved blocked | 05-S09-2 | mapped | NC-3: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 58: permission head moved | 05-S09-2 | mapped | NC-10: advance != wait. |
+| `tests/integrate.test.ts` | S09 declaration 59: reminder lifecycle | 05-S09-2 | mapped | S10 reminder-dedupe: 2 != 1; reminder-withdraw: open != withdrawn. |
+| `tests/integrate.test.ts` | S09 declaration 60: auto merge | 05-S09-2 | mapped | NC-10: advance != surface. |
+| `tests/integrate.test.ts` | S09 declaration 61: sourced repair | 05-S09-5 | mapped | NC-7: wait != resolve. |
+| `tests/integrate.test.ts` | S09 declaration 62: infra rerun | 05-S09-7 | mapped | NC-7: missing rerun reason or wait != resolve. |
+| `tests/integrate.test.ts` | S09 declaration 63: duplicate repair | 05-S09-5 | mapped | NC-5 active guard; S10 repair-exhaustion: resolve != surface. |
+| `tests/integrate.test.ts` | S09 declaration 64: active phase matrix | 05-S09-6 | unreachable | Retained mixed: validated FleetStore rejects launching model records; see S09 ledger; reachable waiting covered by NC-5. |
+| `tests/integrate.test.ts` | S09 declaration 65: permission promotion | 05-S09-6 | mapped | NC-5: advance != resolve. |
+| `tests/integrate.test.ts` | S09 declaration 66: raw concurrent promotion | 05-S09-6 | unreachable | Retained: CommandPost serializes same-job integration, so two raw advance calls cannot overlap publicly. |
+| `tests/integrate.test.ts` | S09 declaration 67: working before integration | 05-S09-6 | mapped | NC-5: attempt count 1 != 0. |
+| `tests/integrate.test.ts` | S09 declaration 68: raw duplicate pending send | 05-S09-5 | unreachable | Retained: public per-job serialization prevents overlapping raw Integrator advance calls. |
+| `tests/integrate.test.ts` | S09 declaration 69: isolated promoting predicate | 05-S09-5 | unreachable | Retained: CommandPost has no port for an idle fake worker manager plus private pending send; real Sender marks RPC busy. |
+| `tests/integrate.test.ts` | S09 declaration 70: per-head conflict handoff | 05-S09-5 | mapped | NC-8 first step; S10 repair-exhaustion completed surface; conflict-head second handoff surface != resolve. |
+| `tests/integrate.test.ts` | S09 declaration 71: missing implementer | 05-S09-8 | mapped | NC-12: resolve != surface. |
+| `tests/integrate.test.ts` | S09 declaration 72: missing sender | 05-S09-8 | unreachable | Retained: CommandPost always constructs Integrator with Sender; no public option removes it. |
+| `tests/integrate.test.ts` | S09 declaration 73: external merge | 05-S09-3 | mapped | NC-13: review != done. |
+| `tests/integrate.test.ts` | S09 declaration 74: external close | 05-S09-3 | mapped | NC-13: review != surface. |
+| `tests/integrate.test.ts` | S09 declaration 75: GitLab squash | 05-S09-4 | mapped | NC-9: retry != done. |
+| `tests/integrate.test.ts` | S09 declaration 76: GitLab merge commit | 05-S09-4 | mapped | NC-9: retry != done. |
+| `tests/integrate.test.ts` | S09 declaration 77: GitLab refusal matrix | 05-S09-4 | unreachable | Retained mixed: real GitLab adapter rejects missing target before successful observation; S09 ledger maps reachable failures with NC-9. |
+| `tests/integrate.test.ts` | S09 declaration 78: contradictory base/bound | 05-S09-4 | mapped | NC-9: retry instead of initial merged tail, both cases. |
+| `tests/integrate.test.ts` | S09 declaration 79: foreign branch | 05-S09-3 | mapped | NC-13: review != surface. |
+| `tests/integrate.test.ts` | S09 declaration 80: gh denied | 05-S09-3 | mapped | NC-13: wait != retry. |
+| `tests/integrate.test.ts` | S10 declaration 81: rate limit | 05-S10-4 | mapped | ci-refusal: advance != retry. |
+| `tests/integrate.test.ts` | S10 declaration 82: Actions permissions | 05-S10-4 | mapped | ci-refusal: advance != retry; Actions advice pinned. |
+| `tests/integrate.test.ts` | S10 declaration 83: denied partial malformed jobs | 05-S10-4 | mapped | ci-refusal: all three advance != retry. |
+| `tests/integrate.test.ts` | S10 declaration 84: missing gh | 05-S10-4 | mapped | missing-gh: retry != surface. |
+| `tests/integrate.test.ts` | S10 declaration 85: behind sync | 05-S10-1 | mapped | sync-reset: expected observed-SHA reset missing. |
+| `tests/integrate.test.ts` | S10 declaration 86: authoritative SHA | 05-S10-1 | mapped | sync-reset: expected observed-SHA reset missing. |
+| `tests/integrate.test.ts` | S10 declaration 87: stale tracking ref | 05-S10-1 | mapped | sync-reset: expected reset missing with tracking ref removed. |
+| `tests/integrate.test.ts` | S10 declaration 88: branch origin denied | 05-S10-1 | mapped | sync-guards: reset != no reset. |
+| `tests/integrate.test.ts` | S10 declaration 89: branch absent | 05-S10-1 | mapped | sync-guards: reset != no reset. |
+| `tests/integrate.test.ts` | S10 declaration 90: unique unpushed | 05-S10-1 | mapped | sync-guards: reset != no reset. |
+| `tests/integrate.test.ts` | S10 declaration 91: unreadable divergence | 05-S10-1 | mapped | sync-guards: reset != no reset. |
+| `tests/integrate.test.ts` | S10 declaration 93: absorbed content | 05-S10-1 | mapped | sync-reset: missing reset; rescue-target: rescue SHA differs from discarded local SHA. |
+| `tests/integrate.test.ts` | S10 declaration 94: dangerous inverse | 05-S10-1 | mapped | sync-guards: reset != no reset. |
+| `tests/integrate.test.ts` | S10 declaration 95: proof refusal matrix | 05-S10-1 | mapped | sync-guards: each of eight refusal shapes attempts forbidden reset. |
+| `tests/integrate.test.ts` | S10 declaration 96: zero ahead | 05-S10-1 | mapped | proof-skip: forcing proof prevents expected reset. |
+| `tests/integrate.test.ts` | S10 declaration 97: prune reachable keep orphan | 05-S10-2 | mapped | prune: extra reachable ref remains; prune-safety: orphan deleted. |
+| `tests/integrate.test.ts` | S10 declaration 98: origin unreadable prune | 05-S10-2 | mapped | prune-safety: /001 deleted; prune: missing named origin refusal. |
+| `tests/integrate.test.ts` | S10 declaration 99: prune refusal matrix | 05-S10-2 | mapped | prune-safety: missing-tip/ancestry deletes /001; prune: listing/delete causes missing. |
+| `tests/integrate.test.ts` | S10 declaration 100: unfetchable base | 05-S10-2 | mapped | prune-safety: /001 deleted; prune: missing fetch refusal cause. |
+| `tests/integrate.test.ts` | S10 declaration 101: deterministic bound | 05-S10-2 | mapped | prune-safety: /101 deleted; prune: 101 refs remain instead of /101 only. |
+| `tests/integrate.test.ts` | S10 declaration 102: namespace guard | 05-S10-2 | mapped | ref-scope: main no longer resolves, preserve-main assertion fails. |
+| `tests/integrate.test.ts` | S10 declaration 103: empty namespace | 05-S10-2 | mapped | prune: unexpected rescue-ref fact. |
+| `tests/integrate.test.ts` | S10 declaration 104: salvage static contract | 05-S10-2 | unreachable | Retained mixed: no public entry exposes literal helper booleans or accepts bare/space-containing ref names real git rejects; reachable scope/bound covered separately. |
+| `tests/integrate.test.ts` | S10 declaration 105: rebase marker | 05-S10-5 | mapped | rebase: advance != surface. |
+| `tests/integrate.test.ts` | S10 declaration 106: delete refusal | 05-S10-5 | mapped | cleanup-retry: wait != retry. |
+| `tests/integrate.test.ts` | S10 declaration 107: close refusal | 05-S10-5 | mapped | cleanup-retry: wait != retry. |
+| `tests/integrate.test.ts` | S10 declaration 108: honest retry notice | 05-S10-5 | mapped | retry-notice: forbidden nothing-was-mutated in durable notice. |
+| `tests/integrate.test.ts` | S10 declaration 109: forbidden-tool constant | 05-S10-6 | mapped | forbid-integrate/forbid-merged: each corresponding profile is accepted instead of rejected at dispatch. |
+| `tests/integrate.test.ts` | S10 declaration 110: watch design shape | 05-S02-5 | mapped | watch-shape: worker loses blocking_watch refusal token; both watch commands drive worker bash. |
+| `tests/integrate.test.ts` | S10 declaration 111: unreviewed | 05-S10-3 | mapped | review-gate: advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 112: pass | 05-S10-3 | mapped | review-pass: review != advance. |
+| `tests/integrate.test.ts` | S10 declaration 113: equivalent pass | 05-S10-3 | mapped | review-pass: review != advance with equivalence alone. |
+| `tests/integrate.test.ts` | S10 declaration 114: moved pass | 05-S10-3 | mapped | review-gate: advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 115: revise | 05-S10-3 | mapped | review-gate: advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 116: unapproved flag | 05-S10-3 | mapped | review-gate: advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 117: approved flag | 05-S10-3 | mapped | review-pass: review != advance. |
+| `tests/integrate.test.ts` | S10 declaration 118: truncated review | 05-S10-3 | mapped | review-gate: pass and approved-flag truncation each advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 119: moved flag | 05-S10-3 | mapped | review-gate: advance != review. |
+| `tests/integrate.test.ts` | S10 declaration 120: fallback review | 05-S10-3 | mapped | review-gate: advance != review despite merge approval. |
 <!-- /manifest:assertions -->
+
+### Pending-fix declarations (operator-parked; no deletion credit)
+
+| File | Declaration | Status | Evidence and expected outcome |
+|---|---|---|---|
+| `tests/integrate.test.ts` | 92 dirty worktree | pending-fix | [S10 reproducer location](testing-migration-s10.md#pending-fix-declaration-92); unreadable status must preserve original bytes and issue no reset. Original file stays whole. |
+
+The checker does not accept `pending-fix` inside its assertion section. This separate ledger records the operator's parked item without relabelling it retained or changing the checker; the original file and its declaration count remain intact.
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
 an executed production mutation and the failing consumer assertion. Twenty-three controls cover those declarations;
