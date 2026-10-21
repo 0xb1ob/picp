@@ -71,7 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 11 mapped, 3 retained, 23 pending across five whole files; four static e2e declarations including six review variants | 3 originals retired, retained replacements earn no deletion credit | -3 originals, +2 retained, +2 e2e files = +1 net file | -10 original, +3 retained, +4 static e2e = -3 net; conversion in progress |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 16 mapped, 3 retained, 18 pending across five whole files; eight static e2e declarations including six review variants | 4 originals retired, retained replacements earn no deletion credit | -4 originals, +2 retained, +3 e2e files = +1 net test file | -14 original, +3 retained, +8 static e2e = -3 net; conversion in progress |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -412,6 +412,10 @@ moves first.
 | S19-2 | `tests/e2e/wake-delivery.test.ts` | wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures |
 | S19-3 | `tests/e2e/wake-reattach.test.ts` | wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts |
 | S19-4 | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict |
+| S19-5 | `tests/e2e/wake-send-first.test.ts` | wake S19: assistant and custom send markers do not hold ordinary parent wakes |
+| S19-6 | `tests/e2e/wake-send-first.test.ts` | wake S19: user sends hold wakes through tools, answered decisions bypass and clean replies release once |
+| S19-7 | `tests/e2e/wake-send-first.test.ts` | wake S19: an aborted send releases held wakes before another clean answer |
+| S19-8 | `tests/e2e/wake-send-first.test.ts` | wake S19: the oldest held wake reaches pi's queue within 120 seconds while its send still streams |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -837,7 +841,12 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/deferred-recheck.test.ts` | a 'green but unreviewed' row is opened by the real passing verdict, and only once | S19-4 | mapped | ready mode drives cp_review through a real reviewer process; stale pass leaves current head deferred; NC S19-8 leaves the decision deferred at verdict delivery. |
 | `tests/deferred-recheck.test.ts` | ReviewRuns awaits the recheck before it sends the wake-up | S19-4 | mapped | ready mode snapshots disk at the first parent request carrying the actual passing review; NC S19-8 fails its open-state assertion. |
 | `tests/deferred-recheck.test.ts` | CommandPost plumbs beforeWakeup into the reviewer delivery path | S19-4 | mapped | real command-post extension, cp_review and report_verdict process path; NC S19-8 removes review-triggered release and fails the consumer snapshot. |
-| `tests/deferred-recheck.test.ts` | a re-gate that finishes inside the bound never takes the late path | S19-4 | mapped | ready mode receives the open decision in the original review wake rather than waiting for a late announcement; NC S19-8 fails open-state delivery. |
+| `tests/deferred-recheck.test.ts` | a re-gate that finishes inside the bound never takes the late path | S19-4 | mapped | ready mode receives the open row and one bounded notice in the original review wake; NC S19-16 drops the in-bound raised rows and fails one opening produces one operator notice. |
+| `tests/deferred-recheck.test.ts` | the notice is one bounded line naming the decision, never a table | S19-4 | mapped | ready mode checks decision name, cp_decide, one line and at most 300 characters; NC S19-17 removes the name and fails Ship cp-held (PR 58). |
+| `tests/send-first-gate.test.ts` | nothing is held while no operator send is unanswered | S19-5 | mapped | NC S19-9 makes the custom marker hold a wake behind pi's publicly cleared queue: expected 2 model requests, actual 3. Assistant streaming message_start has no completed marker; the actual custom marker exercises the role boundary. |
+| `tests/send-first-gate.test.ts` | a landed send holds every wake but answered until a clean turn_end answers it | S19-6 | mapped | NC S19-10/11 lose ordinary wakes on public clear_queue, so clean reply releases held wakes times out; NC S19-12 wrongly preserves the answered decision; NC S19-15 reverses consumer offer order. Each ordinary marker arrives exactly once. |
+| `tests/send-first-gate.test.ts` | a settled run releases held wakes even without a clean answer | S19-7 | mapped | NC S19-13 preserves the wake behind pi's cleared queue until the resumed reply: expected 2 model requests, actual 3. |
+| `tests/send-first-gate.test.ts` | held wakes go out after SEND_FIRST_HOLD_MS even while the send is still unanswered | S19-8 | mapped | NC S19-14 resets the oldest deadline and leaves S19_EXPIRY_ONE in the model request despite clear_queue before settle. Middle and fresh wakes arrive once in the later model context. |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1517,6 +1526,104 @@ index 3e07e24..25fa177 100644
  }
  
  /**
+```
+| S19-9 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-5 | S19-NC-9 | 829276d0477bbe6c34928c5e7da097c8579e361e3cb8298f3fdf9f34e89967e6 | custom markers must not preserve a wake behind pi's cleared queue: actual 3, expected 2 | pass |
+| S19-10 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-10 | 5a32eeffd70d0d397889d0254c1b06e654f311bd33382bac3f68aae9a4b03111 | clean reply releases held wakes despite earlier queue clear: timeout | pass |
+| S19-11 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-11 | eb08f11877bf5a77b76d299494c69f2e701481ad443ffd9c4107b3a601488d3b | clean reply releases held wakes despite earlier queue clear: timeout | pass |
+| S19-12 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-12 | b5c210bd35c195021bd545f6280258240e190a887ff01e321fdd1a3bd0900233 | answered decision reached pi's queue before clear, while ordinary wakes stayed held | pass |
+| S19-13 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-7 | S19-NC-13 | 1961eebbf922efc7d1e4b8a129942723cc2a4c684457f33f9ff8e18480f6582f | settled hold must be removable from pi's queue before another clean answer: actual 3, expected 2 | pass |
+| S19-14 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-8 | S19-NC-14 | 98b8db08abf361f4c87ac7f3877027874f85c720cc35a4f05eaf6b0f0e9ffab4 | oldest wake was already queued and removable before its send settled | pass |
+| S19-15 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-15 | dacd98bb09cda64b676a8dde47024687a3a9e3d48964df23df8bd7211426deae | held wakes arrive in offer order | pass |
+| S19-16 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-16 | b4c56d9b0819625f79888b5336cc0fc69bb53a59d67129788e1804cc2e0de530 | one opening produces one operator notice: actual 0, expected 1 | pass |
+| S19-17 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-17 | 725c509f2cb0094989e69bd03aee4328095b9f01eb2a30b1f555c3a19f5d16a9 | ready notice must match Ship cp-held (PR 58) | pass |
+
+<!-- patch:S19-NC-9 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..596a1c2 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -34 +33,0 @@ export class SendFirstGate<Wake> {
+-		if (role !== "user") return;
+```
+<!-- patch:S19-NC-10 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..1f1ef4b 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -50 +50 @@ export class SendFirstGate<Wake> {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		return "send";
+```
+<!-- patch:S19-NC-11 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..24e80a8 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -40 +40 @@ export class SendFirstGate<Wake> {
+-		if (cleanSegmentEnd(event)) this.#unanswered.clear();
++		this.#unanswered.clear();
+```
+<!-- patch:S19-NC-12 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..fd03475 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -50 +50 @@ export class SendFirstGate<Wake> {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		if (this.#unanswered.size === 0) return "send";
+```
+<!-- patch:S19-NC-13 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..5e7d39b 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -45 +44,0 @@ export class SendFirstGate<Wake> {
+-		this.#unanswered.clear();
+```
+<!-- patch:S19-NC-14 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..53e294e 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -51 +51 @@ export class SendFirstGate<Wake> {
+-		if (this.#held.length === 0) this.#since = this.#now();
++		this.#since = this.#now();
+```
+<!-- patch:S19-NC-15 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..cf93fd7 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -60 +60 @@ export class SendFirstGate<Wake> {
+-		const released = this.#held;
++		const released = this.#held.reverse();
+```
+<!-- patch:S19-NC-16 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..a39cd2e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -208 +208 @@ export async function recheckDeferredBounded(
+-	return outcome.raised;
++	return [];
+```
+<!-- patch:S19-NC-17 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..f98af0a 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -224 +224 @@ export function formatRaisedNotice(raised: readonly AwaitingItem[]): string {
+-	return `${head}: ${decisions} — answer with cp_decide`.slice(0, 300);
++	return `${head}: S19 unnamed decision — answer with cp_decide`;
 ```
 <!-- /manifest:regressions -->
 
@@ -2672,6 +2779,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/wake-delivery.test.ts` | S19 | two real-host/operator consumer scenarios, conversion evidence |
 | `tests/escalation-relay-watch-retained.test.ts` | S19 | retained, convert-owned S19; answered input cannot reach dueDirect from parent-host's EscalationStore.open() even with legacy disk data |
 | `tests/e2e/wake-reattach.test.ts` | S19 | real bridge transport faults, default backoff cap and established-host probe behavior |
+| `tests/e2e/wake-send-first.test.ts` | S19 | real parent send-first holds, public queue clearing, answered bypass, abort release and oldest deadline |
 | `tests/bridge-reattach-retained.test.ts` | S19 | retained, convert-owned S19; shutdown-only cancellation and an injected synchronous in-attempt schedule have no continuing public operator entry point |
 <!-- /manifest:incoming -->
 
@@ -2968,7 +3076,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/schedule-wake.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/scheduler.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/script-jobs.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); P1 amendment, in no plan row |
-| `tests/send-first-gate.test.ts` | convert | P4 | behavior 06 (Wake delivery); moved from P2: it pins the send-first wake hold, not authority |
+| `tests/send-first-gate.test.ts` | deleted | S19 | S19-5/6/7/8; four declarations mapped under S19-NC-9 through S19-NC-15, real parent RPC queue clearing and model contexts |
 | `tests/send.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/service-alerts.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/service-health.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |

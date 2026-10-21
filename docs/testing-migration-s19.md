@@ -1,8 +1,8 @@
 # S19 declaration conversion evidence (in progress)
 
 Scope: only bridge-reattach, cp-bridge-reattach, deferred-recheck, escalation-relay-watch and send-first-gate.
-Current accounting: 11 mapped, 3 retained, 23 pending; three original files retired with two retained replacements.
-The deferred-recheck and send-first-gate originals remain intact. No pending declaration earns deletion credit.
+Current accounting: 16 mapped, 3 retained, 18 pending; four original files retired with two retained replacements.
+The deferred-recheck original remains intact. No pending declaration earns deletion credit.
 
 Entry points: real `pi --mode rpc` operator with cp-bridge, real parent-host Unix socket and real parent pi;
 all models are served by MockProvider. Agent settings/models use `/tmp/cp-agent-*`, removed in test teardown.
@@ -33,11 +33,34 @@ The other retained declaration synchronously invokes schedule inside the attempt
 await between track/afterAttach and returning, so socket-close I/O cannot enter that synchronous window.
 The real entry point's ordinary later close is exercised by S19-3 instead.
 
-Deferred-recheck declarations 4, 5, 8 and 19 map to S19-4 ready mode under NC-8, but stay in the original
-until all of that file is disposed. At the model request carrying the actual passing review, the disk row
-is already open. A stale pass on a different head leaves it deferred before review. A public status render
-then repeats the gate without another decision or operator notice. The remaining review matrix cases are
-in progress and earn no additional mapping/deletion credit yet.
+Deferred-recheck declarations 4, 5, 8, 19 and 22 map to S19-4 ready mode under NC-8/16/17, but stay in the
+original until all of that file is disposed. At the model request carrying the actual passing review, the disk
+row is already open. A stale pass on a different head leaves it deferred before review. A public status render
+then repeats the gate without another decision or operator notice. NC-16 drops the returned in-bound rows and
+fails the one-notice assertion; NC-17 removes the decision name and fails the consumer notice regex. The full
+six-mode matrix passes, including late and late-failure, but remaining declarations earn no extra credit yet.
+
+Original send-first-gate blob: `a5e4866f76f5e8db5320cac602994bc5b88a52e4` at
+`22a6ead8bfbc9c5087cca4ac02e5873923b324d6`. All four declarations map to S19-5/6/7/8 and the file is retired.
+The real parent receives framed user/custom sends and durable notices. Public RPC `clear_queue` distinguishes
+notices still held by SendFirstGate from notices already passed to pi: held notices survive the clear and later
+reach the model; passed notices are removed. This is necessary because RPC pendingMessageCount counts user
+queue strings, while extension custom messages enter the agent queue directly. No private queue is inspected.
+
+- Declaration 1: NC-9 removes the user-role guard; the custom marker incorrectly preserves a notice behind the
+  cleared queue, creating 3 model requests instead of 2.
+- Declaration 2: NC-10 bypasses holding and NC-11 clears on tool turns; both lose ordinary notices at clear_queue
+  and time out waiting for the model's post-reply request. NC-12 holds answered decisions, so the supposedly
+  cleared answer reaches the model. NC-15 reverses flush order and fails the consumer ordering assertion.
+- Declaration 3: NC-13 removes settle clearing; a resumed reply releases the notice only after queue clearing,
+  creating 3 model requests instead of 2. The positive case waits for the second actual agent_settled event.
+- Declaration 4: NC-14 resets the oldest hold clock. The oldest notice survives clearing before settle and
+  unexpectedly reaches the model. The positive case measures from the first actual emission, within 120 seconds,
+  and receives middle/fresh notices once. Exact private offer return values are not exposed by parent RPC.
+
+The shared held-home fixture is extracted from headless-lifecycle; the complete existing file passes after the
+extraction. All temporary production mutations are restored. Patch files NC-9 through NC-17 and their exact
+hashes, source commit and failing assertions are recorded in the shared manifest regression table.
 ## Executed controls
 
 Control source base: `53d55fb0d144cee0109e0086ad98add0a196e056`.
