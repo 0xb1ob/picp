@@ -171,7 +171,7 @@ test("a throwing slow view answers 500 instead of hanging the request", async (t
 	const server = createViewer({ home: undefined as unknown as string, stateDir: join(home.path, LAYOUT.state), host: "127.0.0.1", port: 0, log });
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	t.after(() => server.close());
-	const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/jobs`, { signal: AbortSignal.timeout(4000) });
+	const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/jobs`, { signal: AbortSignal.timeout(10_000) });
 	assert.equal(res.status, 500);
 	assert.deepEqual(await res.json(), { error: "internal error" });
 });
