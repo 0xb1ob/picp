@@ -63,7 +63,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
-| P3c (cp-e2e-migration-p3c-l5fc) | Operator V2: all seven CI-watch files owned here; P3d owns only the other 16. [Per-file progress](testing-migration-p3c-declarations.md): 13/143 declarations mapped (9.09%), 2 retained (1.40%), 128 pending reachable-gap closure. Completed: ci-evidence and parked-ci; both timer units retained verbatim with specifically missing lifecycle entry points. | 2 files fully retired; 8 declarations removed; 1 rename with 2 retained units, no deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
+| P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -183,7 +183,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
-| P3c | 05 | `tests/e2e/landing.test.ts` | operator V2: close all reachable gaps in the seven CI-watch files; extend 05-8 to 05-13 |
+| P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
+| P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -525,7 +526,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/mandate.test.ts` | schedlater S3: covers matrix — a schedule grant covers only its own schedule's jobs, any other grant no scheduled job | 02-12 | mapped | schedule-only grants leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
 | `tests/mandate.test.ts` | S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither | 02-16 | redundant-unreachable | no caller passes an id or schedule_fire: no fire mints a grant (`tests/schedule-grant.test.ts`, "PR4: no fire mints a grant"), and cp_mandate has no such parameter. 02-16 pins cp_mandate issue minting its own md- id. Standing rule 3 (ask-0088e0332d00) |
 | `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: malformed ids do not reach the validated consumer; 05-1 pins the exact-head path |
-| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | verbatim in `tests/main-ci.test.ts`: 05-11 exercises actor filtering, but full normalization fields still lack individual sensitivity proof |
+| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | verbatim in `tests/main-ci.test.ts`, convert owner P3c-rest. Missing entry point: inspect the full normalized run/job/step records through a public parent tool; 05-11 exposes filtering outcomes rather than these raw records. |
 | `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
 | `tests/actions-ci.test.ts` | readActionsCi: a null run status is unfinished, never success | 05-1 | mapped | a null-status run on the head: `doesNotMatch(/ci: green/)` fails if null reads as success |
 | `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
@@ -552,7 +553,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-configured.test.ts` | ghCiConfigured maps a throwing runner onto the same rule, 403 included | 05-2 | retained | moved verbatim to `tests/merge-ask.test.ts` (P3b): the throwing runner is the merge-ask awaiting row's `ciConfigured`, which no landing case renders. 05-2 pins the same rule, 403 included, through cp_integrate's status runner |
 | `tests/ci-infra-rerun.test.ts` | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | 05-4 | retained | verbatim in `tests/main-ci.test.ts`: Set up job, Set up Node and Install dependencies still lack separate failure evidence |
 | `tests/ci-infra-rerun.test.ts` | an infra-only failure is claimed first, then rerun once; the same job+head never again | 05-4 | mapped | the claim is on disk when `gh run rerun` runs ("the claim was on disk before gh run rerun ran"), then "was spent at" and no second rerun; claiming after the rerun fails the first |
-| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | verbatim in `tests/main-ci.test.ts`: keep the complete guard matrix; 05-4 pins the attempt-2, suite, cancel, timeout and draining outcomes |
+| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | verbatim in `tests/main-ci.test.ts`, convert owner P3c-rest. Missing entry point: send a green head or a run without an id into the infra-rerun policy through cp_integrate; earlier CI evaluation and Actions validation handle these inputs. 05-4 pins the reachable attempt-2, suite, cancel, timeout and drain outcomes. |
 | `tests/ci-infra-rerun.test.ts` | fail closed: an unreadable claim file or jobs listing reruns nothing; a refused rerun keeps its claim | 05-4 | mapped | the corrupt claim file asserts "unparseable"; the denied, short, empty and unparseable listings assert "run 41 jobs unreadable" with no rerun or claim; gh's refusal asserts "claimed … but gh refused" and one claim, then "was spent at" |
 | `tests/after-merge.test.ts` | a merge into the deploy branch creates one blocked ops:deploy job with a frozen task file, never dispatched | 05-5 | mapped | cp_merged on a merged PR asserts exactly one deploy job with every label, `blocked_by` the merged job, `open`, its task file note and facts, the created line, the `created` record, one `after_merge_deploy` event and no fleet record; `previewDispatch` asserts profile `ops` and risk `high`, and the project-wide grant's preview asserts "would ask: risk:high". Dropping the hook fails "exactly one deploy job" |
 | `tests/after-merge.test.ts` | re-recording and a crash before the record write resume onto the same single job | 05-5 | mapped | a second cp_merged asserts no `after_merge` line; with the record removed it asserts "after-merge deploy <same id> created"; after the deploy job is dropped it asserts one deploy job ("a closed deploy job still holds the key"). Creating a second job fails that count |
@@ -591,14 +592,14 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | real parent timer asserts A green, completed idle sweep without another Actions read, B pending then red, and exact head-tagged journal; NC-36 and NC-49 fail green arrival and idle-read assertions |
 | `tests/parked-ci.test.ts` | parked CI: a permission denial is loud even after a green; a transient fault is unknown; both back off | 05-12 | mapped | same-head denial replaces green with unreadable/1, moved-head transport fault stores unknown/2; completed sweeps exceed the base interval without re-reading, and faults journal nothing; NC-50–NC-52 and NC-55 fail counter, classification and backoff assertions |
 | `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed or a held job reads nothing | 05-12 | mapped | external forge barriers hold real reads across public resume and re-park; no old-cycle row or journal survives; valid held jobs issue no parked read, a seeded held-with-handoff legacy record is refused by the public sweep, and CLOSED/MERGED snapshots issue no CI read; NC-53 and NC-54 fail stale-observation and terminal-read assertions |
-| `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | moved verbatim to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c). Missing entry point: transfer ownership to an already-started parent session. The only acquisition is session_start, whose hook precedes timer registration; the only release is session_shutdown. The old startup guard passes real 05-12, so it is not a failing consumer control. |
-| `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | moved verbatim to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c). Missing entry point: observe a live timer callback after shutdown with ownership still held, including shutdown before the startup timer runs. Real shutdown releases the lock and exits; deleting both clears passes 05-12 but fails this retained unit. |
+| `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
+| `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
 <!-- /manifest:assertions -->
 
-P3c's operator V2 brief owns all seven CI-watch files in this slice. Reachable gaps must be added to real-entry
-scenarios and proved before their units are removed; a control may cover a group asserting the same behavior.
-Only behavior with a named missing entry point may remain in a convert-owned retained file. A moved unit is
-`retained`, never `deleted`. The other sixteen behavior-05 files remain reserved for the main session's P3d.
+P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
+two retained and 128 pending. The five unfinished files are convert-owned by P3c-rest. Reachable gaps need
+real-entry assertions and failing controls before retirement; retained cases must name a missing entry point.
+A moved unit is `retained`, never removed coverage. Other behavior-05 files remain outside this partial slice.
 
 V2 forwarded-evidence controls NC-43–NC-48 were each applied alone, then restored. Each command
 `npm run test:one -- --test-name-pattern='operator-forwarded CI' tests/e2e/landing.test.ts` exited 1 at the
@@ -996,7 +997,7 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-35 | `tests/main-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-11 | NC-35 | f1a2e028adf4e9dcc42aa3f5fb68a4bce417edf303edcd23c081bc12d39f4b0e | timed out waiting for own current-tip green clears latch | pass |
 | NC-36 | `tests/parked-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer | pass |
 | NC-37 | `tests/integrate-held-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | a second red result exhausts the repair allowance: actual resolve, expected surface | pass |
-| NC-38 | `tests/awaiting-merge-tick.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer; exact lock/shutdown assertions retained verbatim | pass |
+| NC-38 | `tests/awaiting-merge-tick.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | RENAME BOOKKEEPING ONLY: NC-36 fails the parked observer-wiring assertion; this is no control for either retained timer unit and earns no retirement credit | pass |
 | NC-39 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-39 | 3b171a4343a649cf97b5484d8436b270652f31a73e48043823d6d88cac71728b | a green rerun follows a failed attempt: actual undefined, expected true; exit 1 | pass |
 | NC-40 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-40 | 89140ecdb7e179ded4475bbae1fdd8503bc7d6e1c498391bc5373e5cff3175a6 | an arrived attempt is not announced again: actual ci_failed observation, expected []; exit 1 | pass |
 | NC-41 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-41 | 3247052c5ba325182bb6bc40b10310d9ba19c3efca12adaaaf82021ae65325e8 | an arrived green attempt is not announced again: actual ci_green observation, expected []; exit 1 | pass |
@@ -1738,7 +1739,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/landing.test.ts` | P3 | behavior 05, scenarios 05-1 to 05-4; P3b adds 05-5 to 05-7 |
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 | `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
-| `tests/awaiting-merge-tick-retained.test.ts` | P3c | convert, owner P3c; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
+| `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -1808,7 +1809,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-merge-lifecycle.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-park.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-resume.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs); also listed under 23, owned here only |
-| `tests/awaiting-merge-tick.test.ts` | deleted | P3c | original path renamed only to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c); both units ledgered retained below, zero declarations removed and zero deleted-file credit; missing live post-startup ownership-transfer and post-shutdown timer-observation entry points |
+| `tests/awaiting-merge-tick.test.ts` | deleted | P3c-rest | original path renamed only to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); both declarations retained, zero removed-declaration and deleted-file credit; follow-on needs ownership-transfer and post-shutdown observation entry points |
 | `tests/awaiting-merge-viewer.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-watch.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
@@ -1829,7 +1830,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ci-infra-rerun.test.ts` | deleted | P3 | 4 declarations: scenario 05-4 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-27 |
 | `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
 | `tests/ci-wait.test.ts` | exception | P1 | contract: worker report-and-stop policy and guard; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ci-watch.test.ts` | convert | P3c | behavior 05; operator V2 assigns all 80 declarations to P3c; five already have 05-8 behavior controls |
+| `tests/ci-watch.test.ts` | convert | P3c-rest | behavior 05 follow-on; 80 declarations, five already mapped to 05-8 with controls, 75 pending |
 | `tests/contract-injection.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contract.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contracts-anchors.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
@@ -1898,7 +1899,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
-| `tests/foreign-ci-watch.test.ts` | convert | P3c | behavior 05; operator V2 assigns all eleven declarations to P3c, including dispatch release and legacy state |
+| `tests/foreign-ci-watch.test.ts` | convert | P3c-rest | behavior 05 follow-on; eleven declarations pending conversion |
 | `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
@@ -1914,7 +1915,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/install-tools.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/intake-settle-atomicity.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/intake.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/integrate-held-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all three repair declarations to P3c |
+| `tests/integrate-held-ci.test.ts` | convert | P3c-rest | behavior 05 follow-on; three repair declarations pending conversion |
 | `tests/integrate.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
@@ -1926,7 +1927,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger-import.test.ts` | deleted-with-feature | #379 | tested `src/ledger-import.ts` |
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/main-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all 39 declarations to P3c, including inherited P3/P3b coverage |
+| `tests/main-ci.test.ts` | convert | P3c-rest | behavior 05 follow-on; 39 declarations pending conversion, including inherited P3/P3b coverage |
 | `tests/mandate-defaults.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-8 or redundant-unreachable (Assertion map); negative control NC-12 |
 | `tests/mandate-selection.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-16 |
 | `tests/mandate-supplement.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-17 |
