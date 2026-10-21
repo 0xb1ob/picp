@@ -1685,6 +1685,153 @@ test("landing: held CI repairs the same real worker once while preserving an int
 });
 
 
+test("landing S09: exact head and branch evidence distinguish pending, superseded and absent CI", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["pending", "older", "present", "none", "denied-branch", "malformed-branch", "invalid-branch", "branch-green", "denied-workflows", "network-workflows", "empty-workflows", "malformed-workflows"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("S09 CI boundaries", 301);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const checkpoints = new CheckpointStore(s.home, { kind: "merge" });
+		const scope = live.head.slice(0, 12);
+		const routes: Route[] = [];
+		let rows: RunRow[] = [];
+		if (mode === "pending") rows = [run(301, live.head, "in_progress", null)];
+		if (mode === "older") rows = [run(301, "b".repeat(40), "completed", "success")];
+		if (mode === "older") routes.push({ match: "actions/runs?branch=", replies: [runsBody(rows)] });
+		if (mode.endsWith("branch")) routes.push({ match: "actions/runs?branch=", replies: [mode === "denied-branch" ? { code: 1, stderr: "HTTP 403" } : mode === "malformed-branch" ? { stdout: "<html>502</html>" } : runsBody([run(301, "invalid", "completed", "success")])] });
+		if (mode === "branch-green") routes.push({ match: "actions/runs?branch=", replies: [runsBody([run(301, live.head, "completed", "success")])] });
+		const workflows = mode === "none" || mode.endsWith("branch") ? json({ total_count: 0, workflows: [] }) : mode === "denied-workflows" ? { code: 1, stderr: "HTTP 403" } : mode === "network-workflows" ? { code: 1, stderr: "dial tcp: no such host" } : mode === "empty-workflows" ? { code: 1, stdout: "" } : mode === "malformed-workflows" ? { stdout: "<html>502</html>" } : json({ total_count: 1, workflows: [{ id: 1, name: "ci" }] });
+		routes.push({ match: "actions/workflows", replies: [workflows] });
+		s.setGh({ integration: true, runs: rows, routes });
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, mode === "none" ? "advance" : ["pending", "older"].includes(mode) ? "wait" : "surface", `${mode}: ${result.text}`);
+		assert.equal(mergedCalls(result.calls).length, mode === "none" ? 1 : 0, mode);
+		if (mode === "pending" || mode === "older") {
+			assert.equal(checkpoints.get(live.jobId, { scope }), undefined);
+			assert.ok(!result.calls.some((call) => call.includes("actions/workflows")));
+		} else if (mode === "none") {
+			assert.equal(result.record.record.merge_authority?.kind, "repo_derived");
+			assert.equal(checkpoints.get(live.jobId, { scope }), undefined);
+			assert.ok(result.record.facts.some((fact) => fact.startsWith("ci configuration: none (authoritative_empty)")));
+		} else {
+			assert.equal(checkpoints.get(live.jobId, { scope })?.decision, "pending", mode);
+			assert.ok(!result.record.facts.some((fact) => fact.startsWith("ci: green")), mode);
+			if (mode.endsWith("branch")) assert.ok(result.record.facts.some((fact) => fact.startsWith("ci: branch runs unreadable")), result.text);
+			if (mode === "branch-green") assert.ok(!result.calls.some((call) => call.includes("/attempts/")));
+			if (mode.endsWith("workflows")) assert.ok(result.record.facts.some((fact) => fact.startsWith("ci configuration: unreadable (")), result.text);
+		}
+		if (mode === "present") {
+			checkpoints.decide(live.jobId, true, { by: "operator command", scope });
+			const approved = await s.integrate(live.jobId);
+			assert.equal(approved.record.next, "advance", approved.text);
+			assert.equal(approved.record.record.merge_authority?.kind, "human_checkpoint");
+			assert.ok(approved.calls.some((call) => call.includes(`--match-head-commit ${live.head}`)));
+		}
+	});
+});
+
+test("landing S09: repository refusals and draft transitions preserve head authority", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["blocked", "unreadable-rules", "unstable", "no-ci-blocked", "auto", "moved", "unreviewed-draft", "ready", "ready-unreadable-ci", "ready-moved", "ready-undo-refused", "ready-refused", "reminder"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("S09 permission boundaries", 302);
+		if (mode !== "unreviewed-draft") writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const view = { number: 302, url: live.prUrl, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main", isDraft: false };
+		const changed = { ...view, ...(mode.includes("blocked") || mode === "unreadable-rules" || mode === "reminder" ? { mergeStateStatus: "BLOCKED", reviewDecision: mode === "unreadable-rules" ? "" : "REVIEW_REQUIRED" } : mode === "unstable" ? { mergeStateStatus: "UNSTABLE" } : mode === "auto" ? { autoMergeRequest: {} } : {}), ...(mode.includes("draft") || mode.startsWith("ready") ? { isDraft: true } : {}) };
+		const routes: Route[] = [{ match: "pr view", replies: [json(changed), ...(mode === "moved" ? [json({ ...changed, headRefOid: "b".repeat(40) })] : mode === "ready-moved" || mode === "ready-undo-refused" ? [json(changed), json({ ...changed, isDraft: false, headRefOid: "b".repeat(40) })] : mode === "ready-unreadable-ci" ? [json(view)] : mode.startsWith("ready") ? [json(changed), json(view)] : [])] }];
+		if (mode.startsWith("ready") && mode !== "ready-refused") routes.push({ match: "pr ready", replies: [{ stdout: "" }] });
+		if (mode === "ready-refused") routes.unshift({ match: "pr ready", replies: [{ code: 1, stderr: "GraphQL: forbidden" }] });
+		if (mode === "ready-undo-refused") routes.unshift({ match: "pr ready --undo", replies: [{ code: 1, stderr: "HTTP 502" }] });
+		if (mode === "unreadable-rules") routes.push({ match: "rules/branches", replies: [{ code: 1, stderr: "HTTP 403" }] });
+		if (mode === "no-ci-blocked" || mode === "ready-unreadable-ci") routes.push({ match: "actions/workflows", replies: [mode === "no-ci-blocked" ? json({ total_count: 0, workflows: [] }) : { code: 1, stderr: "HTTP 403" }] });
+		s.setGh({ integration: true, runs: mode === "no-ci-blocked" || mode === "ready-unreadable-ci" ? [] : [run(302, live.head, "completed", "success")], routes });
+		const result = await s.integrate(live.jobId);
+		const expected = mode === "unreviewed-draft" ? "review" : mode === "moved" || mode === "ready-moved" ? "wait" : mode === "ready" || mode === "ready-unreadable-ci" ? "advance" : "surface";
+		assert.equal(result.record.next, expected, `${mode}: ${result.text}`);
+		assert.equal(mergedCalls(result.calls).length, 0, mode);
+		const rows = new AwaitingStore({ home: s.home }).list();
+		if (["blocked", "unreadable-rules", "unstable", "no-ci-blocked", "reminder"].includes(mode)) assert.equal(rows.filter((row) => row.state === "open").length, 1, mode);
+		const store = new CheckpointStore(s.home, { kind: "merge" });
+		assert.equal(store.get(live.jobId, { scope: live.head.slice(0, 12) }), undefined, "repository and draft paths mint no fallback authorization");
+		if (mode === "unreviewed-draft") assert.equal(result.calls.filter((call) => call.startsWith("pr ready")).length, 0);
+		if (mode === "ready") {
+			s.setGh({ routes: [] });
+			const merged = await s.integrate(live.jobId);
+			assert.equal(merged.record.next, "advance", merged.text);
+			assert.equal(s.ghCalls().filter((call) => call.startsWith("pr ready")).length, 1);
+		}
+		if (mode === "ready-moved") assert.match(result.text, /returned to draft/);
+		if (mode === "ready-undo-refused") assert.match(result.text, /undo refused/);
+		if (mode === "ready-refused") assert.match(result.text, /ready refused: GraphQL: forbidden/);
+		if (mode === "reminder") {
+			await s.integrate(live.jobId);
+			assert.equal(new AwaitingStore({ home: s.home }).list().length, 1);
+			s.setGh({ routes: [] });
+			assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+			assert.equal(new AwaitingStore({ home: s.home }).list()[0]?.state, "withdrawn");
+		}
+	});
+});
+
+test("landing S09: external PR facts stop or finish without an automated merge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["closed", "foreign", "denied", "merged"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("S09 observed PR facts", 303);
+		const view = { number: 303, url: live.prUrl, state: mode === "closed" ? "CLOSED" : mode === "merged" ? "MERGED" : "OPEN", headRefName: mode === "foreign" ? "someone-else" : live.jobId, headRefOid: live.head, baseRefName: "main", mergedAt: "2026-10-01T00:00:00Z", mergeCommit: { oid: live.head } };
+		s.setGh({ routes: [{ match: "pr view", replies: [mode === "denied" ? { code: 1, stderr: "HTTP 403: Resource not accessible\nmore" } : json(view)] }] });
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, mode === "merged" ? "done" : mode === "denied" ? "retry" : "surface", result.text);
+		assert.equal(mergedCalls(result.calls).length, 0);
+		if (mode === "merged") {
+			assert.equal(result.record.merge?.recorded, true);
+			assert.equal(s.post.fleet.require(live.jobId).phase, "done");
+			assert.equal(result.record.end_state?.br_closed, true);
+			assert.equal(new CheckpointStore(s.home, { kind: "merge" }).get(live.jobId, { scope: live.head.slice(0, 12) }), undefined);
+		} else {
+			assert.equal(readMergeReceipt(s.home, live.jobId), undefined);
+			assert.equal(s.post.fleet.require(live.jobId).phase, "held");
+			if (mode === "denied") assert.match(result.text, /403/);
+			if (mode === "foreign") assert.match(result.text, /not this job's delivery/);
+		}
+	});
+});
+
+test("landing S09: GitLab integration observes the target and never asks GitHub to merge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["squash", "merge-commit", "open", "closed", "foreign", "no-target", "unavailable", "fork", "held", "contradictory-base", "bound"]) await t.test(mode, async (t) => {
+		const s = await startStack(t, { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: "S09-local-canary" } });
+		const live = await s.held("S09 GitLab facts", 304);
+		const lab = await startFakeGitlab(t, s.remote);
+		await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
+		git(s.remote, "branch", "develop", live.head);
+		const url = `${lab.web}/o/lab/-/merge_requests/7`;
+		await s.post.fleet.patch(live.jobId, { project: "lab", receipts: [{ kind: "pr", status: "open", title: "MR", url }], ...(mode === "bound" ? { bound_pr: { number: 7, url, base: "develop" } } : {}) });
+		lab.mrs[7] = { status: mode === "unavailable" ? 503 : 200, body: { id: 7, iid: 7, project_id: 42, source_project_id: mode === "fork" ? 43 : 42, target_project_id: 42, state: mode === "open" ? "opened" : mode === "closed" ? "closed" : "merged", source_branch: mode === "foreign" ? "another-branch" : live.jobId, target_branch: mode === "no-target" ? undefined : "develop", sha: live.head, merge_commit_sha: mode === "merge-commit" ? live.head : null, squash_commit_sha: mode === "merge-commit" ? null : live.head, merged_at: "2026-10-01T00:00:00Z", web_url: url } };
+		if (mode === "held") new IntegrationHolds(s.home).hold(live.jobId, "operator pause");
+		const before = s.ghCalls().length;
+		const result = await s.post.integrate({ jobId: live.jobId, ...(mode === "merge-commit" ? { strategy: "squash" as const } : {}) });
+		const lands = ["squash", "merge-commit", "contradictory-base", "bound"].includes(mode);
+		assert.equal(result.next, lands ? "done" : mode === "held" ? "wait" : mode === "unavailable" || mode === "no-target" ? "retry" : "surface", result.reason);
+		assert.deepEqual(s.ghCalls().slice(before), [], "GitLab integration runs no gh command");
+		if (lands) {
+			assert.equal(result.merge?.receipt?.base_branch, "develop");
+			assert.equal(result.merge?.receipt?.strategy, mode === "merge-commit" ? "unknown" : "squash");
+			assert.equal(result.merge?.receipt?.merge_commit_sha, live.head);
+			assert.equal(result.end_state?.br_closed, true);
+			const again = await s.post.integrate({ jobId: live.jobId });
+			assert.equal(again.next, "done");
+			assert.equal(again.merge?.recorded, false);
+			if (mode === "bound") assert.notEqual(git(s.remote, "show-ref", `refs/heads/${live.jobId}`), "");
+			if (mode === "contradictory-base") {
+				const wrong = await s.post.integrate({ jobId: live.jobId, base: "main" });
+				assert.equal(wrong.next, "surface");
+				assert.match(wrong.reason, /landed on develop, not main/);
+			}
+		} else {
+			assert.equal(readMergeReceipt(s.home, live.jobId), undefined);
+			assert.equal(s.post.fleet.require(live.jobId).phase, "held");
+			if (mode === "held") assert.equal(lab.asked.length, 0);
+		}
+	});
+});
+
 test("landing: held repair rejects invalid PR identity, CI, holds, drains and worktree hazards", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("held repair boundary matrix", 121);
