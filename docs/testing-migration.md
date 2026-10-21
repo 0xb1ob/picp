@@ -715,7 +715,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/diff-review.test.ts` | 01 configuration schema | DR-11 | mapped | nc-config: missing expected pipeline contract rejection |
 | `tests/diff-review.test.ts` | 02 parallel verdict schema | DR-03 | mapped | nc-summary: real pass must persist without gate-only fields |
 | `tests/diff-review.test.ts` | 03 checkpoint paths | DR-11 | mapped | nc-checkpoint-path: review question must differ from ship decision |
-| `tests/diff-review.test.ts` | 04 review paths | DR-03 | mapped | nc-review-path: assert.doesNotReject fails when a diff verdict overwrites gate-1.json |
+| `tests/diff-review.test.ts` | 04 review paths | DR-03 | mapped | nc-review-path: persisted public review verdict path must exist before the fixture reads it; directing persistence to gate-1.json fails this assertion |
 | `tests/diff-review.test.ts` | 05 subject-independent policy | DR-06 | mapped | nc-flags: flagged pass must remain pass |
 | `tests/diff-review.test.ts` | 06 prior attempt isolation | DR-03 | mapped | nc-prior-isolation: assert.doesNotReject fails on consuming plan-gate history as a diff verdict |
 | `tests/diff-review.test.ts` | 07 complete small subject | DR-01 | mapped | nc-three-dot: branch file count must be three |
@@ -764,8 +764,8 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/diff-review.test.ts` | 49 third revise | DR-12 | mapped | nc-promotion: review-three implementer request needs branch guidance |
 | `tests/diff-review.test.ts` | 50 third pass | DR-19 | mapped | nc-third-pass: third verdict must pass |
 | `tests/diff-review.test.ts` | 51 fifth review and sixth refusal | DR-18 | mapped | nc-cap: fifth verdict must escalate |
-| `tests/diff-review.test.ts` | 52 final fix eligibility and findings | DR-18 | mapped | nc-final-fix-eligibility in DR-20: no forbidden checkpoint; nc-max-findings in DR-18: all twenty findings must survive |
-| `tests/diff-review.test.ts` | 53 async reviewed head | DR-17 | mapped | nc-start-head: returned head must match pushed head |
+| `tests/diff-review.test.ts` | 52 final fix eligibility and findings | DR-12 | mapped | nc-final-fix-eligibility (DR-20) rejects forbidden checkpoints; nc-max-findings (DR-18) pins checkpoint evidence; nc-final-delivery (DR-12) requires all twenty 400-character findings verbatim in the author request after approved public integration |
+| `tests/diff-review.test.ts` | 53 async reviewed head | DR-17 | mapped | nc-start-head pins returned head; nc-wakeup-head removes wake headSha and fails equality to started.head_sha (actual undefined) |
 | `tests/diff-review.test.ts` | 54 pending fence | DR-17 | mapped | nc-pending-head: refusal must name reviewed head |
 | `tests/diff-review.test.ts` | 55 synchronous stat stop | DR-19 | mapped | nc-stat: wide subject must synchronously stop as policy |
 | `tests/foreign-ci-watch.test.ts` | selection: an open job naming a PR in its project's repo, never a closed job, another repo, or a PR this home shipped | S06-1 | mapped | checked is exactly the selected job; deferred remains selected; other repo, issue, closed and own PR are excluded. Removing closed filtering fails checked (S06 selection control). |
@@ -1354,6 +1354,9 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 | NC-S02-prune | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-prune | befd614a3c744cb5d70cf0d5506088c7b91e9ec800fa072e9d3e0180f0d4ee92 | finished deliveries leave the watch: actual row, expected undefined; exit 1 | pass |
 | NC-S02-parked | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-1 | NC-S02-parked | 880cf412abeebff72c830b94956bde9fbcea6d2df6625ec90c2de8a93f7134f9 | parked rows survive held-watch pruning: actual undefined, expected head; exit 1 | pass |
 | NC-S05-SUMMARY | `tests/diff-review.test.ts` | `0b2e4d774bfc00b3c07e8669370e568f816ea141` | DR-03 | NC-S05-SUMMARY | 30e455a860495861e80131b51fc0fc3fde089e30f79c58c080831925e60a9695 | real summary-bearing review must persist as pass; restored gate-only field fails schema validation | pass |
+| S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
+| S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
+| S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
 
 <!-- patch:NC-S05-SUMMARY -->
 ```diff
@@ -1365,9 +1368,6 @@ index 2dcc135..008c3bd 100644
 -		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
 ```
-| S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
-| S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
-| S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
 <!-- /manifest:regressions -->
 
 S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.

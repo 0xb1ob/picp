@@ -1,0 +1,14 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..a2d539f 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -845 +845 @@ export class DiffReview {
+-				headSha: input.subject.head_sha,
++				headSha: undefined,
+diff --git a/src/final-fix.ts b/src/final-fix.ts
+index b7f5a91..7ac7777 100644
+--- a/src/final-fix.ts
++++ b/src/final-fix.ts
+@@ -269 +269 @@ export function finalFixMessage(fix: { capped: DiffVerdict; checkpoint: Checkpoi
+-		...(checkpoint.evidence ?? []).map((finding) => `- ${finding}`),
++		...(checkpoint.evidence ?? []).slice(0, 19).map((finding) => `- ${finding}`),

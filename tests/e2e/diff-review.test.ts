@@ -17,8 +17,8 @@ async function stack(t: TestContext, registry?: PiModelRegistryLike) {
 	const repo = createScratchRepo({ name: "demo" });
 	const provider = await MockProvider.start();
 	const agent = createAgentDir({ provider });
-	const wakes: string[] = [];
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true, sendWakeup: (wake) => (wakes.push(wake.content), true), ...(registry ? { modelRegistry: () => registry } : {}) });
+	const wakes: Array<{ content: string; headSha?: string }> = [];
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true, sendWakeup: (wake) => (wakes.push(wake), true), ...(registry ? { modelRegistry: () => registry } : {}) });
 	t.after(async () => { await post.shutdown(); agent.cleanup(); await provider.stop(); repo.cleanup(); home.cleanup(); });
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [] }));
@@ -50,6 +50,7 @@ async function stack(t: TestContext, registry?: PiModelRegistryLike) {
 			await post.reviewRuns.settled(started.key);
 		}
 		const attempt = isDiffReviewWait(started) ? started.attempt : started.verdict.attempt;
+		if (isDiffReviewWait(started)) assert.ok(existsSync(join(home.path, paths.reviewFile(jobId, attempt))), "review must persist at its public review verdict path");
 		const verdict = isDiffReviewWait(started) ? JSON.parse(readFileSync(join(home.path, paths.reviewFile(jobId, attempt)), "utf8")) as DiffVerdict : started.verdict;
 		return { verdict, requests: provider.requests(name), scratch: join(home.path, paths.reviewScratchDir(jobId, attempt)), run: join(home.path, paths.reviewRunDir(jobId, attempt)) };
 	}
@@ -208,7 +209,7 @@ test("S04: review flags remain reported while blocking findings surface when the
 	assert.equal(revise.verdict.verdict, "revise");
 	assert.deepEqual(revise.verdict.revisions, ["add coverage"]);
 	assert.equal(revise.verdict.flags.blocking_unknowns, true);
-	assert.match(s.wakes.at(-1) ?? "", /no live worker/);
+	assert.match(s.wakes.at(-1)?.content ?? "", /no live worker/);
 });
 
 
@@ -398,6 +399,29 @@ test("S04: blocking review promotes the real implementer on the same branch with
 		assert.ok(received.includes(`${5 - attempt} reviews remain`));
 		});
 	}
+	const reasons = Array.from({ length: 10 }, (_, n) => `[severity: high] [confidence: high] final reason ${n} `.padEnd(400, "x"));
+	const revisions = Array.from({ length: 10 }, (_, n) => `final revision ${n} `.padEnd(400, "x"));
+	await s.review(job.id, { verdict: "revise", reasons: ["[severity: high] [confidence: high] fourth finding"], revisions: ["fourth repair"] });
+	await waitFor(() => s.provider.requests("implementer"), (requests) => JSON.stringify(requests.at(-1)?.body.messages).includes("fourth repair"), { timeoutMs: 30_000, what: "fourth repair delivered" });
+	await waitFor(() => s.post.sender.sending(job.id), (sending) => !sending, { timeoutMs: 30_000, what: "fourth repair settled" });
+	const capped = await s.review(job.id, { verdict: "revise", reasons, revisions });
+	const head = capped.verdict.head_sha;
+	new CheckpointStore(s.home, { kind: "final_fix" }).decide(job.id, true, { by: "operator", scope: head.slice(0, 12), basis: { operator_quote: "Approve one final fix." } });
+	// A legacy held report admits integration after the fourth repair turn, whose mock author only acknowledged it.
+	await s.post.fleet.patch(job.id, { phase: "held", reported_at: isoTimestamp() });
+	const bin = join(s.home, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "gh"), `#!/usr/bin/env node\nconst a = process.argv.slice(2);\nconst pr = ${JSON.stringify({ url: "https://github.com/example/demo/pull/1", number: 1, state: "OPEN", isDraft: true, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", headRefOid: head, headRefName: job.id, baseRefName: "main" })};\nif (a[0] === "pr" && a[1] === "view") console.log(JSON.stringify(pr));\nelse if (a[0] === "api") console.log(JSON.stringify(a[1].includes("/actions/workflows") ? {total_count: 0, workflows: []} : a[1].includes("/actions/runs") ? {total_count: 0, workflow_runs: []} : []));\nelse process.exit(1);\n`, { mode: 0o755 });
+	const previousPath = process.env.PATH;
+	process.env.PATH = `${bin}:${previousPath}`;
+	t.after(() => { process.env.PATH = previousPath; });
+	let integration = await s.post.integrate({ jobId: job.id });
+	for (let n = 0; n < 4 && integration.next === "advance"; n++) integration = await s.post.integrate({ jobId: job.id });
+	assert.equal(integration.next, "resolve", JSON.stringify(integration));
+	assert.match(JSON.stringify(integration), /final fix promoted once/);
+	await waitFor(() => s.provider.requests("implementer"), (requests) => JSON.stringify(requests.at(-1)?.body.messages).includes(revisions[9]!), { timeoutMs: 30_000, what: "final findings delivered" });
+	const finalMessages = JSON.stringify(s.provider.requests("implementer").at(-1)?.body.messages);
+	for (const finding of [...revisions, ...reasons]) assert.ok(finalMessages.includes(finding), finding);
 });
 
 
@@ -483,6 +507,7 @@ test("S05: a settled reviewer without a verdict retries once with the full subje
 		await s.post.reviewRuns.settled(started.key);
 		const verdict = JSON.parse(readFileSync(join(s.home, paths.reviewFile(job, attempt)), "utf8"));
 		assert.equal(verdict.cause, attempt === 1 ? "operational" : "operational_persistent");
+		assert.match(s.wakes.at(-1)?.content ?? "", attempt === 1 ? /-> retry/ : /-> surface/);
 		assert.equal(verdict.delta_from, undefined);
 		assert.match(verdict.reasons.join(" "), /settled without reporting a verdict/);
 		const scratch = join(s.home, paths.reviewScratchDir(job, attempt));
@@ -515,8 +540,9 @@ test("S05: pending reviews fence duplicate starts and carry the reviewed head in
 	assert.equal(readPendingReview(s.home, job, "review", 1), undefined);
 	assert.equal(listPendingReviews(s.home, job).length, 0);
 	assert.equal(s.wakes.length, 1);
-	assert.match(s.wakes[0]!, /review attempt 1: pass/);
-	assert.doesNotMatch(s.wakes[0]!, /S05_PRIVATE_BODY/);
+	assert.equal(s.wakes[0]?.headSha, started.head_sha);
+	assert.match(s.wakes[0]!.content, /review attempt 1: pass/);
+	assert.doesNotMatch(s.wakes[0]!.content, /S05_PRIVATE_BODY/);
 });
 
 
@@ -540,7 +566,11 @@ test("S05: the fifth complete review surfaces findings and binds one final-fix c
 	assert.equal(checkpoint?.pr_url, pr);
 	assert.match(checkpoint?.question ?? "", /Operator text only/);
 	assert.deepEqual(checkpoint?.evidence, [...revisions, ...reasons]);
-	await assert.rejects(() => s.post.diffReview({ jobId: job }), /already had 5 diff reviews/);
+	await assert.rejects(() => s.post.diffReview({ jobId: job }), (error: Error) => {
+		assert.match(error.message, /already had 5 diff reviews.*REVIEW_MAX_ATTEMPTS/);
+		assert.ok(error.message.includes(paths.reviewFile(job, 5)));
+		return true;
+	});
 	assert.equal(existsSync(join(s.home, paths.reviewFile(job, 6))), false);
 	assert.equal(existsSync(join(s.home, paths.reviewScratchDir(job, 6), "diff.md")), false);
 });
@@ -556,9 +586,11 @@ test("S05: a pass at review three ends the loop and wide subjects finish synchro
 	assert.equal(pass.verdict.verdict, "pass");
 	assert.equal(pass.verdict.cause, null);
 	assert.equal(pass.verdict.head_sha, s.repo.head(job));
+	assert.match(s.wakes.at(-1)?.content ?? "", /review 3 of 5/);
 	const wide = await s.seed(Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`wide-${n}.txt`, "x\n"])));
 	const wakes = s.wakes.length;
-	const stop = await s.post.diffReview({ jobId: wide });
+	let stop!: Awaited<ReturnType<typeof s.post.diffReview>>;
+	await assert.doesNotReject(async () => { stop = await s.post.diffReview({ jobId: wide }); });
 	assert.ok(!isDiffReviewWait(stop));
 	assert.equal(stop.model, undefined);
 	assert.equal(stop.verdict.cause, "policy");

@@ -8,6 +8,8 @@ S05: 15 mapped, 0 retained, 0 redundant-unreachable. Whole-file accounting: 53 m
 
 All scenarios are in `tests/e2e/diff-review.test.ts`. Controls below are executed production mutations, restored immediately after each run. Failure logs live beside the job report at `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s05-mzpm/`.
 
+Review-1 replay evidence, exact production patches and failing consumer assertions are committed in [the control index](testing-migration-s05-controls/README.md). Shared patches below are credited only to the independently observed assertions that index names.
+
 | Declaration | Scenario | Executed control and failing assertion |
 |---|---|---|
 | 41 unchanged incomplete subject | S04 limits / S05 third-pass and wide stop | nc-policy-replay disables the unchanged incomplete-subject cache; replay attempt differs from the first attempt, including byte overflow. |
@@ -21,8 +23,8 @@ All scenarios are in `tests/e2e/diff-review.test.ts`. Controls below are execute
 | 49 third revise delivery | S04 real promotion, review 3 subtest | nc-promotion sends raw revisions without diffReviseMessage; actual implementer request lacks same-branch guidance. |
 | 50 third pass proceeds | S05 third-pass and wide stop | nc-third-pass changes a third pass observation to escalate; expected pass fails. |
 | 51 fifth review and sixth refusal | S05 fifth review | nc-cap: fifth verdict is revise instead of escalate. |
-| 52 final-fix eligibility and maximum findings | S05 eligibility + fifth review | nc-final-fix-eligibility removes requestFinalFix's eligibility guard; forbidden checkpoints appear. nc-max-findings truncates findings to ten; checkpoint evidence must equal all twenty 400-character findings. |
-| 53 async head/pending identity | S05 pending review | nc-start-head changes the returned head to zeros; returned head must equal the actual pushed head. |
+| 52 final-fix eligibility and maximum findings | S05 eligibility + fifth review + S04 real promotion | nc-final-fix-eligibility rejects forbidden checkpoints; nc-max-findings pins checkpoint evidence; nc-final-delivery drives approved post.integrate promotion and requires all twenty 400-character findings verbatim in the real author's request. Dropping evidence item 20 fails `assert.ok(finalMessages.includes(finding))` for final reason 9. |
+| 53 async head/pending identity | S05 pending review | nc-start-head pins the returned head; nc-wakeup-head removes the production wakeup headSha and fails `assert.equal(s.wakes[0]?.headSha, started.head_sha)` (actual undefined). The harness preserves the full wake object. |
 | 54 duplicate-start fence | S05 pending review | nc-pending-head drops the head from the in-flight refusal; error must contain the actual reviewed head. |
 | 55 synchronous stat stop | S04 limits / S05 third-pass and wide stop | nc-stat removes the materializer's file cap; the wide subject must stop as policy before any model. |
 
@@ -35,7 +37,7 @@ This index supplements `testing-migration-s04-declarations.md`; a scenario-level
 | 1 | nc-config | extra review property must reject at pipeline advance |
 | 2, 22, 23, 24 | nc-summary | summary-bearing pass must persist and stranded receipt must settle as pass |
 | 3 | nc-checkpoint-path | diff decision must have its own review question, not the original ship question |
-| 4 | nc-review-path | assert.doesNotReject: isolated diff review must persist without making gate-1.json violate the gate verdict contract |
+| 4 | nc-review-path | persisted public review verdict path must exist; directing persistence to gate-1.json fails that assertion before reading the verdict |
 | 5, 36 | nc-flags | destructive flag must remain reported without changing pass to escalation |
 | 6 | nc-prior-isolation | assert.doesNotReject: a review with existing plan-gate history must start; reading it as diff history raises TypeError on diff_stat.truncated |
 | 7, 11 | nc-three-dot | complete subject must count three branch files and exclude the base-only file |
