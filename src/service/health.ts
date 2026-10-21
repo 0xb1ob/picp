@@ -125,7 +125,8 @@ export async function runHealth(options: HealthRunOptions): Promise<HealthRecord
 		if (next) record.checks[name] = next;
 	}
 	// Hourly like the probes, off a persisted stamp (the run cadence is the timer's, not the clock's minute).
-	const due = !prior?.warn_checked_at || Date.parse(at) - Date.parse(prior.warn_checked_at) >= 3_600_000;
+	const age = prior?.warn_checked_at ? Date.parse(at) - Date.parse(prior.warn_checked_at) : NaN;
+	const due = !(age >= 0 && age < 3_600_000); // an unparseable or future stamp is due, like hourly()
 	if (options.warn && due) {
 		record.warn_checked_at = at;
 		const note = options.warn();

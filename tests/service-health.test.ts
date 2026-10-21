@@ -3,7 +3,8 @@
  * against a scratch home; no unit is started, nothing is installed.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
@@ -406,32 +407,53 @@ test("the health run logs a host.pi.drift warning for an unqualified newer pi an
 	const now = new Date("2026-09-28T10:00:00Z");
 	const released = new Date(now.getTime() - 20 * 86_400_000).toISOString();
 	const sh = (prs: { status: number; stdout: string }) => (command: string): { status: number; stdout: string } =>
-		command === "pi" ? { status: 0, stdout: "pi 1.9.9\n" } : command === "npm" ? { status: 0, stdout: JSON.stringify({ "1.9.9": released }) } : prs;
+		command === "pi" ? { status: 0, stdout: "pi 1.9.9\n" }
+			: command === "npm" ? { status: 0, stdout: JSON.stringify({ "1.9.9": released }) } : prs;
 	const warn = (prs: { status: number; stdout: string }) => () => piDriftWarning(process.cwd(), sh(prs), now);
-	const record = await runHealth({ stateDir: b.stateDir, probes: Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => OK])) as unknown as HealthProbes, now: () => now, log: (line) => b.lines.push(line), warn: warn({ status: 0, stdout: "[]" }) });
-	assert.ok(b.lines.some((line) => line.startsWith("warn host.pi.drift: ") && line.includes("qualify pi 1.9.9")), b.lines.join("\n"));
+	const probes = Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => OK])) as unknown as HealthProbes;
+	const record = await runHealth({
+		stateDir: b.stateDir, probes, now: () => now, log: (line) => b.lines.push(line), warn: warn({ status: 0, stdout: "[]" }),
+	});
+	const line = b.lines.find((l) => l.startsWith("warn host.pi.drift: "));
+	assert.ok(line?.includes("qualify pi 1.9.9"), b.lines.join("\n"));
 	assert.ok(Object.values(record.checks).every((check) => check?.status === "ok"));
 	assert.equal(warn({ status: 0, stdout: JSON.stringify([{ title: "qualify pi 1.9.9", url: "u" }]) })(), undefined);
 	assert.equal(warn({ status: 1, stdout: "" })(), undefined);
 });
 
-// The production wiring (hostDriftWarn, as the daemon entry builds it) with a stubbed pi:
+// The real wiring: hostDriftWarn() with PACKAGE_ROOT and spawnRun(process.env) over stub pi/npm/gh on PATH;
 // the line names host.pi.drift, and a second run within the hour does not probe again.
 test("the hourly drift warning is gated by a persisted stamp and logs host.pi.drift", async (t) => {
 	const b = bench(t);
+	const bin = mkdtempSync(join(tmpdir(), "cp-drift-bin-"));
+	const calls = join(bin, "calls");
 	const released = new Date(Date.now() - 20 * 86_400_000).toISOString();
-	let probes = 0;
-	const run = (command: string): { status: number; stdout: string } => {
-		probes++;
-		return command === "pi" ? { status: 0, stdout: "pi 1.9.9\n" } : command === "npm" ? { status: 0, stdout: JSON.stringify({ "1.9.9": released }) } : { status: 0, stdout: "[]" };
+	const stub = (name: string, out: string) =>
+		writeFileSync(join(bin, name), `#!/bin/sh\necho ${name} >> '${calls}'\necho '${out}'\n`, { mode: 0o755 });
+	stub("pi", "pi 1.9.9");
+	stub("npm", JSON.stringify({ "1.9.9": released }));
+	stub("gh", "[]");
+	const path = process.env.PATH;
+	process.env.PATH = `${bin}:${path}`;
+	t.after(() => {
+		process.env.PATH = path;
+		rmSync(bin, { recursive: true, force: true });
+	});
+	const count = () => {
+		const seen = existsSync(calls) ? readFileSync(calls, "utf8").split("\n") : [];
+		return seen.filter((line) => line === "pi").length;
 	};
 	const all = Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => OK])) as unknown as HealthProbes;
-	const go = (at: string) => runHealth({ stateDir: b.stateDir, probes: all, now: () => new Date(at), log: (line) => b.lines.push(line), warn: hostDriftWarn(process.cwd(), run) });
+	const go = (at: string) => runHealth({
+		stateDir: b.stateDir, probes: all, now: () => new Date(at), log: (l) => b.lines.push(l), warn: hostDriftWarn(),
+	});
 	await go("2026-09-28T10:30:00Z");
-	assert.ok(b.lines.some((line) => line.startsWith("warn host.pi.drift: ") && line.includes("1.9.9")), b.lines.join("\n"));
-	const first = probes;
+	const line = b.lines.find((l) => l.startsWith("warn host.pi.drift: "));
+	assert.ok(line?.includes("1.9.9"), b.lines.join("\n"));
+	const first = count();
+	assert.ok(first > 0, "the stub pi ran");
 	await go("2026-09-28T10:50:00Z");
-	assert.equal(probes, first, "within the hour: no second probe");
+	assert.equal(count(), first, "within the hour: no second probe");
 	await go("2026-09-28T11:31:00Z");
-	assert.ok(probes > first, "an hour later: probed again");
+	assert.ok(count() > first, "an hour later: probed again");
 });
