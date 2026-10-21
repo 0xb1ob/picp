@@ -85,8 +85,10 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	const previous = Object.fromEntries(Object.keys(agent.env).map((key) => [key, process.env[key]]));
 	Object.assign(process.env, agent.env);
 	const hosts: ParentHostClient[] = [];
+	let backstopOperator: ReturnType<typeof startPiChild> | undefined;
 	t.after(async () => {
 		chmodSync(parentHostPaths(home.path, "multi").dir, 0o700);
+		await backstopOperator?.close();
 		for (const host of hosts) { await host.request("stop", undefined, 5_000).catch(() => undefined); host.disconnect(); }
 		for (const [key, value] of Object.entries(previous)) {
 			if (value === undefined) delete process.env[key]; else process.env[key] = value;
@@ -158,4 +160,19 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	await new Promise((done) => setTimeout(done, 12_000));
 	assert.equal(frames.length, 1, "failed outbox write must not reframe each tick");
 	chmodSync(dirname(outbox.file), 0o700);
+	await second.request("stop"); await second.closed;
+	const delivered = JSON.parse(readFileSync(outbox.file, "utf8"));
+	delivered.entries = [];
+	writeFileSync(outbox.file, JSON.stringify(delivered));
+	const ancient = await freshStore.raise({ ...freshInput, question: "An undelivered decision still needs the backstop", at: isoTimestamp(new Date(Date.now() - 601_000)) });
+	const backstopModel = provider.addScript("s19-backstop-operator", [{ kind: "text", text: "Backstop received." }]);
+	agent.writeModels(provider);
+	backstopOperator = startPiChild({ cwd: home.path, model: backstopModel,
+		env: { ...agent.env, CP_HOME: home.path, PI_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	await waitFor(() => provider.requests("s19-backstop-operator"), (requests) => requests.length === 1,
+		{ timeoutMs: 30_000, what: "undelivered escalation reaches the real operator backstop" });
+	assert.ok(JSON.stringify(provider.requests("s19-backstop-operator")[0]!.body).includes(ancient.id));
+	assert.ok(JSON.stringify(provider.requests("s19-backstop-operator")[0]!.body).includes("has been open"));
+	await backstopOperator.waitForSettled();
+	assert.equal(provider.remaining("s19-backstop-operator"), 0);
 });

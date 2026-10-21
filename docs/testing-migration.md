@@ -71,7 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 37 declarations across five whole files; conversion in progress, original tests intact; two real-host/operator scenarios added | 0 | +1 e2e file | +2 e2e declarations; no retirement credit yet |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 4 mapped, 1 retained, 32 pending across five whole files; two real-host/operator scenarios added | 1 original retired, retained replacement earns no deletion credit | +1 e2e file; one unit replaced by retained file | -5 original, +1 retained, +2 e2e = -2 net; conversion in progress |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -246,6 +246,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
+| S19 | 06 | `tests/e2e/wake-delivery.test.ts` | whole-file slice of 37 original declarations; conversion in progress |
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
@@ -407,6 +408,8 @@ moves first.
 | DR-20 | `tests/e2e/diff-review.test.ts` | S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision |
 | S06-5 | `tests/e2e/landing.test.ts` | landing: forge observation failures refuse merge receipts without leaking external replies |
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
+| S19-1 | `tests/e2e/wake-delivery.test.ts` | wake S19: a real operator reconnects read-only and delivers a gap escalation once |
+| S19-2 | `tests/e2e/wake-delivery.test.ts` | wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -819,6 +822,11 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
+| `tests/escalation-relay-watch.test.ts` | dueDirect: open past the 10 s grace; each existing relay path suppresses it | S19-2 | retained | tests/escalation-relay-watch-retained.test.ts preserves the declaration verbatim: parent-host's public socket watch always calls EscalationStore.open(), so an answered record cannot reach dueDirect even when legacy disk data is seeded. Reachable grace, asks, ledger and outbox cases also run through S19-2. |
+| `tests/escalation-relay-watch.test.ts` | host watch: a code-raised escalation lands once as esc:<id> in the outbox; restart, ticks and acks add nothing; backstop still fires if undelivered | S19-2 | mapped | NC S19-3 fails restart must not reframe an existing outbox relay; actual subscriber frames, durable ids and a real operator's overdue backstop are checked. |
+| `tests/escalation-relay-watch.test.ts` | a failing outbox write is reported by the caller and is not re-framed by this process each tick | S19-2 | mapped | NC S19-2 fails failed outbox write must not reframe each tick (2 versus 1); real filesystem write refusal, host log and socket frames. |
+| `tests/escalation-relay-watch.test.ts` | a store, ledger or outbox read failure propagates (the host logs it; never a silent skip) | S19-2 | mapped | NC S19-5 fails visible read failure; three real corrupt files are repaired and pending delivery recovers. |
+| `tests/escalation-relay-watch.test.ts` | directRelay: project-tagged, escalation kind, id and question in the text | S19-2 | mapped | NC S19-4 fails project-tagged decision text regex; actual host outbox relay also pins kind, escalationId and jobId. |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1378,6 +1386,64 @@ index 2dcc135..008c3bd 100644
 @@ -806 +806 @@ export class DiffReview {
 -		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
+```
+| S19-2 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-2 | 7c4d57a6682275a28ab9bd00eb9a94346ba4f7c1efb68302d50f61e55d2754ba | failed outbox write must not reframe each tick: actual 2, expected 1 | pass |
+| S19-3 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-3 | 9f4653b93f70f3d463920b80ee4fdd299763b868bcc97db2081a11752d4e494d | restart must not reframe an existing outbox relay: actual true, expected false | pass |
+| S19-4 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-4 | db39261155d548331f55a6ed40fbb26aa610ec643dae1a60a32dc98dee0ff344 | actual host relay text fails project-tagged decision regex | pass |
+| S19-5 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-5 | 8e9fa61a9a799f3cf28781cf192a971c6897e0315b86bd8a138479924cfbb869 | timeout waiting for visible read failure in parent-host log | pass |
+
+<!-- patch:S19-NC-2 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -64 +64 @@
+-		ports.sent.add(escalation.id);
++		// S19 negative control: forget the attempted delivery.
+```
+
+<!-- patch:S19-NC-3 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -36 +36 @@
+-		.filter((item) => !inOutbox(ids, item.id));
++		.filter(() => true);
+```
+
+<!-- patch:S19-NC-4 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -40 +40 @@
+-	return escalationRelay(home, escalation, `${escalation.id} (${escalation.kind}) — ${escalation.question}`);
++	return escalationRelay(home, escalation, "S19 mutation removed the decision text");
+```
+
+<!-- patch:S19-NC-5 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -59,9 +59,11 @@
+-	const due = dueDirect({
+-		open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
+-		...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
+-	}).filter((item) => !ports.sent.has(item.id));
+-	for (const escalation of due) {
+-		ports.sent.add(escalation.id);
+-		ports.publish(directRelay(ports.home, escalation));
+-	}
+-	return due.map((item) => item.id);
++	try {
++		const due = dueDirect({
++			open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
++			...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
++		}).filter((item) => !ports.sent.has(item.id));
++		for (const escalation of due) {
++			ports.sent.add(escalation.id);
++			ports.publish(directRelay(ports.home, escalation));
++		}
++		return due.map((item) => item.id);
++	} catch { return []; }
 ```
 <!-- /manifest:regressions -->
 
@@ -2530,6 +2596,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
 | `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
+| `tests/e2e/wake-delivery.test.ts` | S19 | two real-host/operator consumer scenarios, conversion evidence |
+| `tests/escalation-relay-watch-retained.test.ts` | S19 | retained, convert-owned S19; answered input cannot reach dueDirect from parent-host's EscalationStore.open() even with legacy disk data |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2680,7 +2748,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/e2e/worker-mcp.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/envelope-correction.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/escalation-backstop.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
-| `tests/escalation-relay-watch.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/escalation-relay-watch.test.ts` | deleted | S19 | S19-2; four mapped declarations under S19-2/3/4/5 controls, one verbatim retained in tests/escalation-relay-watch-retained.test.ts |
 | `tests/escalation.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/evals.test.ts` | exception | P1 | contract: offline assembled prompt corpus; operator ask-0088e0332d00 (Exceptions) |
 | `tests/extension-deps.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |

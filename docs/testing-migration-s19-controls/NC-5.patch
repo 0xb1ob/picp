@@ -1,0 +1,23 @@
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -59,9 +59,11 @@
+-	const due = dueDirect({
+-		open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
+-		...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
+-	}).filter((item) => !ports.sent.has(item.id));
+-	for (const escalation of due) {
+-		ports.sent.add(escalation.id);
+-		ports.publish(directRelay(ports.home, escalation));
+-	}
+-	return due.map((item) => item.id);
++	try {
++		const due = dueDirect({
++			open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
++			...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
++		}).filter((item) => !ports.sent.has(item.id));
++		for (const escalation of due) {
++			ports.sent.add(escalation.id);
++			ports.publish(directRelay(ports.home, escalation));
++		}
++		return due.map((item) => item.id);
++	} catch { return []; }
