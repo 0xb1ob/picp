@@ -560,22 +560,22 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/after-merge.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): no entry point makes the real ledger refuse a deploy job for a registered, opted-in project. 05-5 pins the retry path: a removed record resumes onto the same job |
 | `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime.test.ts` |
 | `tests/landing-proof.test.ts` | landed: path names with spaces, newlines and pathspec magic are compared literally | 05-7 | mapped | NC-30: without `:(literal)` the glob `star*[ab].txt` also compares origin's own `starXa.txt`, and the odd-paths job fails `landed_by_git` as `unpushed` |
-| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | one held job (an edit, a binary file, a 755 script, a symlink, a delete and a rename) against six origin commits that each miss one path (whitespace, a binary byte, the mode, a symlink as a file, the delete, half the rename): each asserts `unpushed`, and only the exact landing asserts `path_tree` with 6 paths. Ignoring any one difference passes its near miss and fails its labelled assertion. The extra-commit case is a near miss of one path |
+| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | six labelled path near misses assert unpushed. The added post-squash extra commit remains unlanded assertion compares [false,unpushed]; control L1 derives paths through HEAD^ (ignoring the final commit) and fails it with [true,undefined], reason landed_by_git. Exact patch and command below; fixed case passes |
 | `tests/landing-proof.test.ts` | not proven: a stale tracking ref that held the squash is not the base origin advertises | 05-7 | mapped | the worktree's `origin/main` holds the squash while origin's main was reset past it: teardown asserts `unpushed` with "survives here only as a stale remote-tracking ref". A proof based on the tracking ref finds the squash and passes it |
 | `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
 | `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): a git that hangs past its timeout needs an injected alias no entry point runs |
 | `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
-| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | the receipt's merge commit, head, `head_branch_deleted` (the branch is deleted on origin), strategy, no `bound`, the "can now pass without force" line, `pr_url` on disk, the PR receipt `merged` once, one `merge_recorded` event, and a second call's `recorded: false` with the same commit; teardown then passes as `merged` |
+| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | P3c control M1 flips head_branch_deleted: the receipt tuple at landing.test.ts:760 fails, actual false versus expected true. Reproduce with the M1 patch and command in P3b review controls below; fixed case passes |
 | `tests/merges.test.ts` | picp-d0p: a bound job's receipt names the PR head branch and is marked bound | 05-5 | mapped | a seeded fleet record with `bound_pr` and branch `cp-b55w` asserts `head_branch` `cp-b55w` and `bound: true` in the result and on disk. Comparing the job id instead of the bound branch fails it as "not this job's delivery" |
 | `tests/merges.test.ts` | nothing is recorded for a PR gh does not call merged | 05-5 | mapped | NC-28: an open PR is not refused, and its "as open, not MERGED" match fails. The no-merge-commit and other-branch answers assert their refusals, no receipt and the PR receipt still `open` |
-| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | a failing `gh pr view` asserts "could not read PR", `cp_teardown <job> force`, git evidence named before force, and no receipt |
-| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | a seeded record with no PR receipt asserts "carries no PR receipt", then records with `pr: "77"` and adds a `merged` receipt; `cp-unknown` asserts "no fleet record" |
+| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | P3c control M2 removes force fallback advice: assertion force stays the exit for the unprovable case fails, expected /cp_teardown <job> force/. Exact patch and command below; fixed case passes |
+| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | P3c control M3 defaults a missing PR to 77: /carries no PR receipt/ fails, actual could not read PR 77. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | an unreadable receipt is no receipt, never an exception out of a gate | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): `readMergeReceipt` on a missing or `../escape` id; job ids reach it only after fleet validation, so no entry point feeds it an unsafe id |
-| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | the fake GitLab's MR 7 asserts the squash commit, `squash`, `pr_number` 7, the normalised `merged_at`, `gitlab api`, the forge block, one `merge_recorded` event with provider `gitlab`, one GET with the token in PRIVATE-TOKEN, and no `gh pr view` |
+| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | P3c control M4 drops squash strategy inference: MR 7 receipt tuple fails, actual unknown versus expected squash. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | forge PR 3: a GitLab normal merge records its merge commit, never infers a strategy, and asks git nothing about reachability | 05-6 | mapped | MR 10 (merge and squash commits) asserts the merge commit, the source head, base `main` and `squash`; MR 11 (merge commit only) asserts strategy `unknown`. Both merge commits are absent from origin, so asking git for reachability would refuse them |
 | `tests/merges.test.ts` | forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target | 05-6 | mapped | NC-29: MR 9's head is not on origin and must be refused ("names no merge commit"); once origin's main is that head it records it with strategy `unknown` and the PR receipt `merged` |
-| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | the PR receipt patched back to `open` asserts `recorded: false`, `receipt_status_updated: true`, `merged` and one event; the branch patched to `cp-other` asserts "discharges nothing here" |
-| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | MR 8 answering another project's `web_url` asserts "(mismatch: " and no receipt, without the token in the message; 05-5 rewrites its receipt without the forge block and asserts it still reads its head |
+| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | P3c control M5 skips repairing an existing receipt: actual [false,false,open,1], expected [false,true,merged,1]. Exact patch and command below; fixed case passes |
+| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | P3c control M6 drops the GitLab web_url repository check: /could not read PR .*\(mismatch: / fails, actual merged but names no merge commit. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): the throwing port needs a ledger that refuses (see the after-merge ledger refusal). 05-5 pins the port on new and existing receipts and the quiet result with no opt-in |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | the second attempt must emit `ci_failed` under a different key; replacing actual attempts with `.1` fails `a new attempt is a new failure even on the same head` (P3c control 05-8) |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | the third attempt emits `ci_green` after confirmed red; the scenario's attempt-identity control fails before that transition if attempt changes are deduplicated |
@@ -651,6 +651,67 @@ diff --git a/src/integrate.ts b/src/integrate.ts
 @@ -1302,1 +1302,1 @@
 -		const prior = input.step === "conflict" && !!input.headSha && priorRec?.head_sha !== input.headSha ? 0 : (priorRec?.resolve_attempts ?? 0);
 +		const prior = 0;
+```
+
+### P3b review controls reproduced by P3c
+
+Each control was applied alone and restored immediately after its failing run. M1–M3 use
+`npm run test:one -- --test-name-pattern='cp_merged records only' tests/e2e/landing.test.ts`;
+M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' tests/e2e/landing.test.ts`;
+L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing.test.ts`.
+Every run exited 1 with one failing case and no skips; failures below are observed output, not predictions.
+
+| Control | Observed failure |
+|---|---|
+| M1 | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
+| M2 | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
+| M3 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
+| M4 | MR 7 receipt tuple: actual `unknown`, expected `squash` |
+| M5 | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
+| M6 | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
+| L1 | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
+
+M1 (`src/merges.ts`):
+```diff
+@@ -279,1 +279,1 @@
+-			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
++			...(onRemote === undefined ? {} : { head_branch_deleted: onRemote }),
+```
+M2 (`src/merges.ts`):
+```diff
+@@ -208,1 +208,1 @@
+-					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
++					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history.`,
+```
+M3 (`src/merges.ts`):
+```diff
+@@ -193,1 +193,1 @@
+-		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts);
++		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || "77";
+```
+M4 (`src/merges.ts`):
+```diff
+@@ -268,1 +268,1 @@
+-		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
++		const strategy = request.strategy ?? (view.provider === "gitlab" ? "unknown" : undefined);
+```
+M5 (`src/merges.ts`):
+```diff
+@@ -190,1 +190,1 @@
+-			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
++			return { receipt: existing, recorded: false, receipt_status_updated: false };
+```
+M6 (`src/forges/gitlab.ts`):
+```diff
+@@ -148,1 +148,1 @@
+-	if (!web || web.number !== iid || !changeRequestBelongsTo(web, repository)) return refuse("mismatch", "response web_url is not this project's merge request");
++	if (false && (!web || web.number !== iid || !changeRequestBelongsTo(web, repository))) return refuse("mismatch", "response web_url is not this project's merge request");
+```
+L1 (`src/landing-proof.ts`):
+```diff
+@@ -147,1 +147,1 @@
+-		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, head])).stdout.split("\0").filter(Boolean);
++		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, `${head}^`])).stdout.split("\0").filter(Boolean);
 ```
 
 ### P3c CI-watch negative controls

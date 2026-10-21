@@ -936,10 +936,22 @@ test(
 			return down.landing as NonNullable<typeof down.landing>;
 		};
 
+		const unpushed = async (jobId: string, label: string) => {
+			const down = await s.post.tearDown(jobId);
+			assert.deepEqual([down.torn_down, down.failure?.code], [false, "unpushed"], `${label}: ${JSON.stringify(down)}`);
+			assert.match(down.failure?.message ?? "", /survives here only as a stale remote-tracking ref .* and origin\/main does not contain its content/, label);
+		};
+
 		// An ordinary merge commit keeps the head an ancestor of the base.
 		const merged = await local("merge commit", (b) => push(b, "printf 'm1\\n' > src/merge.ts"));
 		mergeAndDeleteHead(s.repo, merged.jobId);
 		await landed(merged.jobId, "ancestry");
+
+		const extra = await local("post-squash extra commit", (b) => push(b,
+			"printf 'first\\n' > src/post-squash.ts && git add -A && git commit -q -m first && printf 'extra\\n' > src/post-squash-extra.ts"));
+		landOnOrigin(s.repo, "printf 'first\\n' > src/post-squash.ts", "only the earlier commit landed");
+		git(s.remote, "branch", "-D", extra.jobId);
+		await unpushed(extra.jobId, "post-squash extra commit remains unlanded");
 
 		// Two commits squashed into one new sha between unrelated base commits, then a later edit of a touched file:
 		// an older base commit at or after the squash is the witness, every changed path (a deletion too) is compared.
@@ -977,11 +989,6 @@ test(
 		assert.equal(git(stale.worktree, "rev-parse", "refs/remotes/origin/main"), staleSquash, "the worktree's tracking ref holds the squash");
 		git(s.remote, "update-ref", "refs/heads/main", `${staleSquash}^`);
 		advanceBase(s.repo, "docs/elsewhere.md", "# moved elsewhere\n");
-		const unpushed = async (jobId: string, label: string) => {
-			const down = await s.post.tearDown(jobId);
-			assert.deepEqual([down.torn_down, down.failure?.code], [false, "unpushed"], `${label}: ${JSON.stringify(down)}`);
-			assert.match(down.failure?.message ?? "", /survives here only as a stale remote-tracking ref .* and origin\/main does not contain its content/, label);
-		};
 		await unpushed(stale.jobId, "stale tracking ref");
 
 		// One near miss at a time on origin (whitespace, a binary byte, the mode, a symlink, an unlanded delete, half
