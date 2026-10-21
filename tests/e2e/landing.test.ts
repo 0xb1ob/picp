@@ -18,6 +18,8 @@ import type { ForgeConfig } from "../../src/forge-url.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
+import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
+import { Scheduler } from "../../src/scheduler.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
@@ -378,7 +380,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
 	let parentSeq = 0;
-	const parent = async (prompt: string, steps: ScriptStep[], settled?: () => Promise<void>) => {
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[]) => Promise<void>) => {
 		const script = `landing-parent-${++parentSeq}`;
 		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
 		// Recovery notices can request a turn before the operator's quote arrives.
@@ -397,15 +399,40 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
 			await child.waitForSettled(90_000);
 			assert.equal(provider.remaining(script), 0);
-			await settled?.();
+			await settled?.(child.eventsOfType("tool_execution_end"));
 			return child.eventsOfType("tool_execution_end");
 		} finally {
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent, provider, agentDir };
 }
 
+
+test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });
+	const job = await s.seed("merge with unavailable ledger");
+	s.setGh({ routes: [{ match: "pr view", replies: [json({ number: Number(job.prUrl!.split("/").pop()), url: job.prUrl, state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: "b".repeat(40) }, headRefName: job.branch, headRefOid: "a".repeat(40), baseRefName: "main" })] }] });
+	const ledgerFile = join(s.home, LAYOUT.jobsFile);
+	const original = readFileSync(ledgerFile, "utf8");
+	writeFileSync(ledgerFile, "{ corrupt ledger");
+	try {
+		const result = await s.post.recordMerge({ jobId: job.jobId });
+		assert.equal(result.recorded, true);
+		assert.ok(readMergeReceipt(s.home, job.jobId), "a deploy failure must preserve the observed merge");
+		assert.match(result.after_merge ?? "", /after-merge deploy NOT created: .*cp_merged .* retries/);
+		assert.match(formatMerge(result), /can now pass without force/);
+		assert.equal(existsSync(join(s.home, paths.afterMergeFile(job.jobId))), false, "the failed deploy must remain retryable");
+	} finally {
+		writeFileSync(ledgerFile, original);
+	}
+	const retry = await s.post.recordMerge({ jobId: job.jobId });
+	assert.equal(retry.recorded, false);
+	assert.match(retry.after_merge ?? "", /after-merge deploy .* created/);
+	assert.equal(s.post.ledger().read().jobs.filter((row) => row.labels.includes(`after-merge:${job.jobId}`)).length, 1);
+	assert.equal("after_merge" in await s.post.recordMerge({ jobId: job.jobId }), false);
+});
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
 
 test(
@@ -1218,6 +1245,106 @@ test("landing: foreign CI stays read-only, follows the base repo's current head 
 	assert.ok(s.ghCalls().some((call) => call.includes(`repos/example/demo/actions/runs?head_sha=${next}`)), "CI is read from the base repository by head");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	assert.equal(s.post.fleet.get(job.id), undefined, "waiting reviewer never spawned");
+});
+
+test("landing: foreign CI selection, failed reads, corrupt memory and reviewer timeout remain visible at dispatch", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.update("demo", { clone_url: "https://github.com/example/demo" });
+	const create = (title: string, ref: string, labels = ["schedule:sch-e2e"]) => s.post.ledger().create({ title, project: "demo", delivery: "local", kind: "research", externalRef: ref, labels });
+	const url = "https://github.com/example/demo/pull/204";
+	const head = "a".repeat(40);
+	const job = await create("foreign reviewer", url);
+	const closed = await create("closed foreign", "https://github.com/example/demo/pull/205");
+	await s.post.ledger().close(closed.id, "dropped: fixture closed");
+	await create("other repo", "https://github.com/example/other/pull/206");
+	await create("issue", "https://github.com/example/demo/issues/207");
+	const own = await s.seed("own PR", { prUrl: "https://github.com/example/demo/pull/208" });
+	await create("own PR reference", own.prUrl!);
+	const file = join(s.home, LAYOUT.foreignCiWatchFile);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, "{ not json");
+	const state = (reply: Reply, rows: RunRow[] = []) => s.setGh({ runs: rows, routes: [{ match: "pulls/204", replies: [reply] }] });
+	const pr = (sha = head) => json({ number: 204, html_url: url, state: "open", merged: false, head: { sha, ref: "foreign" } });
+	const due = () => {
+		const memory = JSON.parse(readFileSync(file, "utf8"));
+		for (const row of memory.jobs) delete row.next_due_at;
+		writeFileSync(file, JSON.stringify(memory));
+	};
+	state(pr(), [run(204, head, "in_progress", null)]);
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [job.id], "only the open foreign PR in this project's repo is selected");
+	assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).jobs.map((row: { job_id: string }) => row.job_id), [job.id], "corrupt memory is replaced with valid selected jobs");
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /in_progress on aaaaaaaaaaaa/);
+	state({ code: 1, stderr: "gh api failed: HTTP 502" });
+	due();
+	const failed = await s.post.foreignCiTick();
+	assert.equal(failed.errors.length, 1);
+	assert.match(failed.errors[0]!.message, /HTTP 502/);
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "a failed read backs off");
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).errors, [], "a repeated cause is announced once");
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).jobs[0].failures, 2);
+	state(pr(), [run(204, head, "completed", "success")]);
+	due();
+	const green = await s.post.foreignCiTick();
+	assert.deepEqual(green.observations.map((fact) => fact.event), ["ci_green"]);
+	assert.match(green.observations[0]!.key, /^foreign\|.*\|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\|ci_green\|[0-9a-f]{12}$/);
+	state({ code: 1, stderr: "gh api failed: HTTP 502" });
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /PR head is now unknown/);
+	const ledgerFile = join(s.home, LAYOUT.jobsFile);
+	const ledger = JSON.parse(readFileSync(ledgerFile, "utf8"));
+	ledger.jobs.find((row: { id: string }) => row.id === job.id).created_at = "2020-01-01T00:00:00Z";
+	writeFileSync(ledgerFile, JSON.stringify(ledger));
+	const model = s.provider.addScript("foreign-timeout", [{ kind: "text", text: "Review received." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	const clone = s.post.registry.pathOf("demo");
+	git(clone, "remote", "set-url", "origin", "https://github.com/example/demo");
+	const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const gitShim = join(s.home, "bin", "git");
+	writeFileSync(gitShim, `#!/usr/bin/env node\nconst { spawnSync } = require("child_process");\nconst args = process.argv.slice(2);\nconst raw = args.includes("get-url");\nconst result = spawnSync(${JSON.stringify(realGit)}, [...(raw ? [] : ["-c", ${JSON.stringify(`url.${s.remote}.insteadOf=https://github.com/example/demo`)}]), ...args], { stdio: "inherit" });\nprocess.exit(result.status ?? 1);\n`);
+	chmodSync(gitShim, 0o755);
+	assert.equal((await s.post.dispatch({ jobId: job.id, task: "review", model, fetch: false })).receipt, "accepted");
+	await waitFor(() => s.provider.requests("foreign-timeout"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees timed-out foreign CI" });
+	assert.match(JSON.stringify(s.provider.requests("foreign-timeout")[0]!.body), /CI unknown — not completed within 60 min/);
+	assert.match(JSON.stringify(s.provider.requests("foreign-timeout")[0]!.body), /PR head is now unknown/);
+	state({ code: 1, stderr: "gh: Not Found (HTTP 404)" });
+	due();
+	assert.equal((await s.post.foreignCiTick()).stopped.length, 1);
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "an unreadable PR is dropped permanently");
+	const armed = await create("armed foreign reviewer", "https://github.com/example/demo/pull/209");
+	const defaults = loadMandateDefaults(s.home);
+	const scheduler = new Scheduler({ home: s.home, ledger: () => s.post.ledger(), mandates: s.post.mandates, runs: s.post.mandates.scheduleRuns, usageJobs: () => [], cloneOf: () => clone, mintContext: () => ({ defaults, ceiling: defaults.token_ceiling! }) });
+	const schedule = await scheduler.add({ name: "foreign reviewer", project: "demo", manual: true, title: "Review", kind: "research", delivery: "answer", native: { limits: { parallelism: 1 }, action: { saved_by: "operator-quote", provenance: { channel: "cp_schedule", tool_call_id: "foreign-fixture", quote_sha: "abcdef123456" } } } });
+	await s.post.ledger().update(armed.id, { removeLabels: ["schedule:sch-e2e"], addLabels: [`schedule:${schedule.id}`] });
+	const legacyJobs = JSON.parse(readFileSync(ledgerFile, "utf8"));
+	legacyJobs.jobs.find((row: { id: string }) => row.id === armed.id).created_at = isoTimestamp(new Date(Date.now() - 60_000));
+	writeFileSync(ledgerFile, JSON.stringify(legacyJobs));
+	const armedModel = s.provider.addScript("foreign-armed", [{ kind: "text", text: "Reviewing current head." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "foreign-reviewer", role: "planner", model: armedModel }] }));
+	const armState = (conclusion: string | null) => s.setGh({ runs: [run(209, head, conclusion ? "completed" : "in_progress", conclusion)], routes: [{ match: "pulls/209", replies: [json({ number: 209, html_url: armed.external_ref, state: "open", merged: false, head: { sha: head, ref: "foreign" } })] }] });
+	armState(null);
+	await s.parent("Dispatch the foreign reviewer when its CI completes.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: armed.id, task: "Review the foreign PR.", model: armedModel } }] },
+		{ kind: "text", text: "Waiting for foreign CI." },
+	], async (events) => {
+		assert.ok(existsSync(join(s.home, LAYOUT.armedDispatchFile)), JSON.stringify({ events, job: await s.post.ledger().show(armed.id) }));
+		assert.equal(s.post.fleet.get(armed.id), undefined, "the public dispatch tool arms without spawning while CI runs");
+		assert.equal(s.provider.requests("foreign-armed").length, 0);
+		armState("success");
+		await waitFor(() => ({ requests: s.provider.requests("foreign-armed"), job: s.post.ledger().read().jobs.find((row) => row.id === armed.id)! }), (value) => value.requests.length === 1 || value.job.status === "closed", { timeoutMs: 60_000, what: "armed reviewer released by real CI timer" });
+		assert.equal((await s.post.ledger().show(armed.id)).status, "in_progress", JSON.stringify(await s.post.ledger().show(armed.id)));
+		assert.match(JSON.stringify(s.provider.requests("foreign-armed")[0]!.body), /CI green on aaaaaaaaaaaa/);
+		assert.equal(readRunEvents(s.home, armed.id).filter((event) => event.type === "spawned").length, 1, "one armed dispatch starts once");
+	});
+	await s.post.ledger().close(armed.id, "dropped: armed reviewer fixture complete");
+	const batch = [];
+	for (let i = 0; i < 21; i++) batch.push(await create(`capped foreign ${i}`, `https://github.com/example/demo/pull/${300 + i}`));
+	s.setGh({ runs: [run(300, head, "in_progress", null)], routes: batch.map((row, i) => ({ match: `pulls/${300 + i}`, replies: [json({ number: 300 + i, html_url: row.external_ref, state: "open", merged: false, head: { sha: head, ref: "foreign" } })] })) });
+	const capped = await s.post.foreignCiTick();
+	assert.deepEqual(capped.checked, batch.slice(0, 20).map((row) => row.id));
+	assert.deepEqual(capped.deferred, [batch[20]!.id], "the real default per-tick cap defers the twenty-first PR");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 });
 
 
