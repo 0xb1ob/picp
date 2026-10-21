@@ -11,7 +11,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
-import { isEntry } from "../../src/entry.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat", "onboarding", "prompt", "node-floor"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
@@ -496,7 +497,8 @@ async function inside(scenario: Scenario): Promise<number> {
 
 // ---- CLI: npm run e2e:install -- [--scenario fresh|prerequisites|rerun|all] [--verbose] ----------------------
 
-if (isEntry(import.meta.url)) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const { values } = parseArgs({ options: { scenario: { type: "string", default: "all" }, inside: { type: "boolean" }, verbose: { type: "boolean" } } });
 	const wanted = values.scenario === "all" ? [...SCENARIOS] : [values.scenario];
 	const unknown = wanted.filter((name) => !(SCENARIOS as readonly string[]).includes(name ?? ""));

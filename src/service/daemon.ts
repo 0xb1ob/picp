@@ -40,7 +40,8 @@ import {
 	sameProcess,
 } from "./daemon-files.ts";
 import { type OuterPorts, runOuter } from "./daemon-outer.ts";
-import { isEntry } from "../entry.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const START_WAIT_MS = 30_000;
 export const STOP_WAIT_MS = 30_000;
@@ -267,7 +268,8 @@ function status(paths: DaemonPaths, config: DaemonConfig | undefined, ports: Cli
 	return 0;
 }
 
-if (isEntry(import.meta.url)) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const ports: CliPorts = {
 		env: process.env,
 		out: (line) => void process.stdout.write(`${line}\n`),

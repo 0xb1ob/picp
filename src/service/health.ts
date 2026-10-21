@@ -34,7 +34,8 @@ import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
 import { OperatorAsks } from "../operator-asks.ts";
-import { isEntry } from "../entry.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
@@ -295,7 +296,8 @@ function readJson(file: string): Record<string, unknown> | undefined {
 	}
 }
 
-if (isEntry(import.meta.url)) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);

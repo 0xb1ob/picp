@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PiProbe } from "./pi-compat.ts";
-import { isEntry } from "./entry.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const PROBE_VERSION_MS = 5_000;
 export const PROBE_EXTENSION_MS = 15_000;
@@ -111,7 +112,8 @@ export function probePiSync(pi: string, packageRoot: string): PiProbe {
 	}
 }
 
-if (isEntry(import.meta.url)) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	process.stdout.write(`${JSON.stringify(await probePi(process.argv[2] ?? "pi", process.argv[3] ?? process.cwd()))}\n`);
 	process.exit(0);
 }

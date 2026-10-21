@@ -67,7 +67,8 @@ import { sameLock } from "../worktree-deps.ts";
 import { gatewayKeyFile } from "../gateway-key.ts";
 import { bindHostRefusal, type HostCandidate, type LocalAddress, localAddresses, parseTailscaleIp, sameAddress, viewerHostCandidates } from "../viewer/bind-host.ts";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
-import { isEntry } from "../entry.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export type StepStatus = "ok" | "changed" | "skip" | "fail";
 export interface RunResult { status: number; stdout: string; stderr: string }
@@ -661,7 +662,8 @@ export function productionPorts(): InstallPorts {
 	};
 }
 
-if (isEntry(import.meta.url)) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const code = await install(parseInstallArgs(process.argv.slice(2)), productionPorts());
 	process.exit(code);
 }
