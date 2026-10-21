@@ -98,7 +98,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "The delivery path owns the rigor; never merge red" | ported | AGENTS.md §Fan out (restored) + PLAN out-of-scope rationale | `tests/contract.test.ts` |
 | Worker envelope: `jobs reported` first, then relay, then teardown | mechanised | intake stamps `reported_at` once and returns `next: hold\|teardown` | `tests/intake.test.ts` |
 | `delivery:pr` hold until CI/review settles | ported | `held` phase + `next: "hold"`; AGENTS.md §Teardown (restored: not at first envelope) | `tests/intake.test.ts`, `tests/contract.test.ts` |
-| CI arrival/attempt identity, forwarded evidence, foreign/main/parked CI and bounded held repair | ported | real CommandPost and parent/worker processes; native current-head evidence gates delivery | `tests/e2e/landing.test.ts` (05-8–05-13); exact timing, legacy and race assertions remain in the seven P3c `*-retained.test.ts` files listed in `docs/testing-migration.md` |
+| CI arrival/attempt identity, forwarded evidence, foreign/main/parked CI and bounded held repair | ported | real CommandPost and parent/worker processes; native current-head evidence gates delivery | `tests/e2e/landing.test.ts` (05-8–05-13); seven original unit files stay convert under P3c2; per-declaration reasons in `docs/testing-migration-p3c-declarations.md` |
 | `stalled` phase | deleted | structurally impossible: a worker is working, idle or observed-dead | `tests/status.test.ts` ("never invents a phase") |
 | `held` phase | ported | requires `reported_at`, validated | `tests/contracts.test.ts` |
 | Teardown gates (ship clean+pushed; research clean+no local commits) | ported | `cp_teardown`, fail-closed keeps everything | `tests/teardown.test.ts` |

@@ -1041,6 +1041,7 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	const passed = green.observations.find((fact) => fact.event === "ci_green");
 	assert.ok(passed, "a green rerun follows a failed attempt");
 	s.post.confirmCi([passed.key]);
+	assert.deepEqual((await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })])).observations, [], "an arrived green attempt is not announced again");
 	execFileSync("git", ["-C", live.worktree, "commit", "--quiet", "--allow-empty", "-m", "new head"]);
 	execFileSync("git", ["-C", live.worktree, "push", "--quiet", "origin", live.jobId]);
 	const head = git(live.worktree, "rev-parse", "HEAD");
