@@ -25,6 +25,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -409,6 +410,36 @@ function markRevised(path: string): void {
 // ---------------------------------------------------------------------------
 // the whole path
 // ---------------------------------------------------------------------------
+
+test("pipeline S14: only a pin for the current artifact bypasses the operator checkpoint", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["absent", "identical", "edited"]) await t.test(mode, async (t) => {
+		const f = await pipeline(t);
+		f.answer = undefined;
+		const { research_id: researchId, ship_id: shipId } = await f.start();
+		const artifact = await f.artifact(researchId);
+		await waitFor(() => f.post.fleet.get(researchId)?.phase, (phase) => phase === "held", { timeoutMs: 60_000, what: "planner envelope" });
+		if (mode !== "absent") {
+			// A legacy console approval is input; the real gate and pipeline consume it.
+			const pin = join(f.home, paths.reviewApproval(researchId));
+			mkdirSync(join(pin, ".."), { recursive: true });
+			writeFileSync(pin, JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: researchId, question_seq: 2, artifact_sha256: createHash("sha256").update(readFileSync(artifact)).digest("hex"), approved_at: "2026-01-01T00:00:00Z", by: "legacy console" }));
+		}
+		if (mode === "edited") markRevised(artifact);
+		f.reviewer.push(verdict(researchId, {}));
+		const result = await f.advanceThrough(researchId);
+		const checkpoint = f.post.checkpoints.get(shipId);
+		assert.equal(checkpoint?.decision, mode === "identical" ? "approved" : "pending");
+		if (mode === "identical") {
+			assert.equal(checkpoint?.decided_by, "legacy console");
+			assert.equal(result.dispatch?.receipt, "accepted");
+			assert.deepEqual(f.asked, []);
+		} else {
+			assert.deepEqual(f.asked, [shipId]);
+			assert.equal(result.dispatch, undefined);
+			assert.equal(f.post.fleet.get(shipId), undefined);
+		}
+	});
+});
 
 test("m3: research → gate (revise, then pass) → checkpoint → implement", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const f = await pipeline(t);
