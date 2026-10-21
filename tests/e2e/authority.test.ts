@@ -1149,7 +1149,12 @@ test("authority: live usage crosses each cap line once while the worker runs; ca
 		if (!promotion) await new Promise((resolve) => setTimeout(resolve, 100));
 	}
 	assert.match(promotion, new RegExp(`${grant.id} is paused \\(token_cap\\).*raise it yourself: cp_mandate raise_tokens ${grant.id}`));
-	assert.equal((await s.post.tearDown(live, { force: true })).torn_down, true);
+	// The revived worker may still wait in its gated bash; a live child in the worktree makes the lease return fail.
+	const idle = () => readEventLog(s.home, live).filter((event) => event.type === "agent_start" || event.type === "agent_settled").at(-1)?.type === "agent_settled";
+	open("tok", 4);
+	await waitFor(idle, (settled) => settled, { timeoutMs: 60_000, what: "the revived worker to settle" });
+	const closed = await s.post.tearDown(live, { force: true });
+	assert.equal(closed.torn_down, true, JSON.stringify(closed.failure));
 	assert.equal(ids(grant.id).length, 2, "the notices survive the job's teardown");
 
 	// USD crosses on its own, and its cap is always the operator's: one budget_exhausted ask.
@@ -1615,6 +1620,9 @@ test("authority: an expired, revoked, serial or job-capped grant stops fresh sta
 	// Revoked: a revocation that predates the dispatch never speaks; one after it refuses the repair.
 	const early = s.issue([before]);
 	s.post.mandates.revoke(early.id);
+	// revoked_at is whole seconds and a same-second dispatch stays fail closed: dispatch once that second has passed.
+	const revokedAt = s.post.mandates.require(early.id).revoked_at as string;
+	await waitFor(() => isoTimestamp(), (now) => now > revokedAt, { timeoutMs: 5_000, what: "the revocation's second to pass" });
 	assert.equal((await s.accepted(before)).mandate_id, undefined);
 	await repair(before);
 	const late = s.issue([after]);
