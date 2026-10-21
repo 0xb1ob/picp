@@ -323,4 +323,3 @@ test("an unreadable receipt is no receipt, never an exception out of a gate", as
 	assert.equal(readMergeReceipt(b.home, "cp-none"), undefined);
 	assert.equal(readMergeReceipt(b.home, "../escape"), undefined, "an unsafe id is not a path");
 });
-

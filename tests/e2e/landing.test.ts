@@ -535,7 +535,8 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 		rmSync(eventsFile, { recursive: true });
 		writeFileSync(eventsFile, journal);
 	}
-	const result = await s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false });
+	const result = await s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false })
+		.catch((error: Error) => assert.fail(`a valid held author must free room for dispatch: ${error.message}`));
 	assert.equal(result.receipt, "accepted", "the failed reservation does not block retry");
 	await waitFor(() => s.provider.requests("spawn-pressure"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "fresh worker actually runs" });
 	assert.deepEqual(releases(older.jobId).map((event) => event.payload), [{ for_job: job.id, reason: "spawn cap" }]);
@@ -558,7 +559,7 @@ test("landing: a deploy ledger failure preserves the merge receipt and retries t
 		assert.equal(result.recorded, true);
 		assert.ok(readMergeReceipt(s.home, job.jobId), "a deploy failure must preserve the observed merge");
 		assert.match(result.after_merge ?? "", /after-merge deploy NOT created: .*cp_merged .* retries/);
-		assert.match(formatMerge(result), /can now pass without force/);
+		assert.match(formatMerge(result), /can now pass without force\. after-merge deploy NOT created:/);
 		assert.equal(existsSync(join(s.home, paths.afterMergeFile(job.jobId))), false, "the failed deploy must remain retryable");
 	} finally {
 		writeFileSync(ledgerFile, original);
@@ -1635,7 +1636,8 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 		writeFileSync(file, JSON.stringify(memory));
 	};
 	state(pr(), [run(204, head, "in_progress", null)]);
-	assert.deepEqual((await s.post.foreignCiTick()).checked, [job.id], "only the open foreign PR in this project's repo is selected");
+	const selected = await s.post.foreignCiTick().catch((error: Error) => assert.fail(`corrupt memory must recover: ${error.message}`));
+	assert.deepEqual(selected.checked, [job.id], "only the open foreign PR in this project's repo is selected");
 	assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).jobs.map((row: { job_id: string }) => row.job_id), [job.id], "corrupt memory is replaced with valid selected jobs");
 	await s.post.ledger().update(job.id, { status: "deferred" });
 	due();
@@ -1713,6 +1715,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 		{ kind: "text", text: "Waiting for foreign CI." },
 	], async (events, stderr) => {
 		assert.ok(existsSync(join(s.home, LAYOUT.armedDispatchFile)), JSON.stringify({ events, job: await s.post.ledger().show(armed.id) }));
+		assert.deepEqual(JSON.parse(readFileSync(join(s.home, LAYOUT.armedDispatchFile), "utf8")).entries.map((entry: { job_id: string }) => entry.job_id), [armed.id]);
 		assert.equal(s.post.fleet.get(armed.id), undefined, "the public dispatch tool arms without spawning while CI runs");
 		assert.equal(s.provider.requests("foreign-armed").length, 0);
 		armState("success");

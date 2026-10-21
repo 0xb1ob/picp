@@ -189,10 +189,11 @@ after-merge deploy job it creates, and what cp_teardown accepts as git evidence 
 05-6 drive cp_merged on real held jobs and on seeded legacy fleet records (a bound PR, no PR receipt); 05-6 serves the
 GitLab REST API and the repository (`git http-backend`) from one local https server with a throwaway certificate, so the
 project's real GitLab observer, its token and git's fast-forward check all run. 05-7 tears down held local jobs whose
-branches were merged, squashed, rebased or never landed on the scratch remote. Six units are `retained`, moved
-verbatim: the landing proof's injected-failure, timeout and recheck units to `tests/forge-runtime-retained.test.ts` (relocated by S06), and the
-total receipt reader to `tests/forge-observers-retained.test.ts`; S06-2 subsequently replaces the throwing-port and ledger-refusal units through real ledger corruption. The retained
-files stay `convert` for P3c. The P2e review's three findings were already folded in by P3. P3b folds in the P3
+branches were merged, squashed, rebased or never landed on the scratch remote. Six units were retained at the
+P3b handoff. S06 preserves the three landing-proof boundaries in `tests/forge-runtime-retained.test.ts` and the
+receipt reader in `tests/forge-observers-retained.test.ts`; S06-2 replaces the throwing-port and ledger-refusal
+units through real ledger corruption. The current S06 dispositions supersede the original P3c handoff.
+The P2e review's three findings were already folded in by P3. P3b folds in the P3
 review's two lows: the seven units P3 retained in the P1 exception `tests/actions-ci-policy.test.ts` move verbatim
 to the convert-owned `tests/main-ci.test.ts`, and the two "run by hand" sub-asserts (the
 upper-case head, the missing-gh ENOENT) now name the exact patch, command and failing assertion.
@@ -721,6 +722,10 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | retained | tests/held-release-retained.test.ts preserves absent/spawned/released/revived marker matrix; S06-6 pins actual release/resume but does not replace every synthetic log sequence. |
 <!-- /manifest:assertions -->
+
+S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 20 mapped declarations to
+an executed production mutation and the failing consumer assertion. Nineteen controls cover those declarations;
+the shared deploy control breaks both original throwing-afterRecorded and ledger-refusal contracts.
 
 P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
 two retained and 128 pending. The five unfinished files are convert-owned by P3c-rest. Reachable gaps need
